@@ -3,6 +3,8 @@ defmodule RealtimeWeb.UserSocket do
 
   ## Channels
   # channel "room:*", RealtimeWeb.RoomChannel
+  channel "notify", RealtimeWeb.DbSubChannel
+  channel "realtime", RealtimeWeb.DbRealtimeChannel
 
   # Socket params are passed from the client and can
   # be used to verify and authenticate a user. After
