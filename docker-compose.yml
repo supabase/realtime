@@ -1,0 +1,9 @@
+# docker-compose.yml
+
+version: '3'
+services:
+  db:
+    build: ./postgres
+    ports:
+      - "6543:5432"
+  

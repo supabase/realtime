@@ -2,10 +2,11 @@ use Mix.Config
 
 # Configure your database
 config :realtime, Realtime.Repo,
-  username: "postgres",
-  password: "postgres",
-  database: "realtime_dev",
-  hostname: "localhost",
+  username: System.get_env("POSTGRES_USER") || "postgres",
+  password: System.get_env("POSTGRES_PASSWORD") || "postgres",
+  database: System.get_env("POSTGRES_DB") || "postgres",
+  hostname: System.get_env("POSTGRES_HOST") || "localhost",
+  port: System.get_env("POSTGRES_PORT") || 6543,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 
