@@ -11,7 +11,7 @@ defmodule Realtime.Application do
     # Use this var to convert to sigil at connection
     host = System.get_env("POSTGRES_HOST") || 'localhost'
     port = System.get_env("POSTGRES_PORT") || 6543
-    {port_number, _} = :string.to_integer(to_char_list(port))
+    {port_number, _} = :string.to_integer(to_charlist(port))
 
     # List all child processes to be supervised
     children = [
