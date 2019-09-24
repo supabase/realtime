@@ -19,6 +19,17 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
 ## Usage
 
+DB requirements:
+
+- Replication `wal_level` must be `logical`
+- Must be at least one free slot `max_replication_slots`
+- must create a publication called `supabase_realtime`
+  - `CREATE PUBLICATION supabase_realtime FOR ALL TABLES;`
+- This will set up a new slot called `supabase_realtime_slot` if it doesn't already exist
+  - `CREATE_REPLICATION_SLOT 'supabase_realtime_slot' LOGICAL pgoutput NOEXPORT_SNAPSHOT;`
+
+Works without `wal2json` :)
+
 ### Client
 
 See [https://github.com/supabase/realtime-js](https://github.com/supabase/realtime-js) for details.
@@ -99,6 +110,12 @@ Then run:
 ```sh
 docker-compose up   # start the database (on port 6543 to avoid PG conflicts)
 mix phx.server      # start the elixir app
+```
+
+**Format code**
+
+```sh
+mix format mix.exs “lib/**/*.{ex,exs}” “test/**/*.{ex,exs}”
 ```
 
 ### Releases
