@@ -6,6 +6,11 @@ defmodule Realtime.Application do
   use Application
 
   def start(_type, _args) do
+
+    # Hostname must be a char list for some reason
+    # Use this var to convert to sigil at connection
+    host = System.get_env("POSTGRES_HOST") || 'localhost'
+
     # List all child processes to be supervised
     children = [
       # Start the Ecto repository
@@ -23,11 +28,11 @@ defmodule Realtime.Application do
         Cainophile.Adapters.Postgres,
         register: Cainophile.RealtimeListener, # name this process will be registered globally as, for usage with Cainophile.Adapters.Postgres.subscribe/2
         epgsql: %{ # All epgsql options are supported here
-          host: System.get_env("POSTGRES_HOST") || 'localhost',
+          host: ~c(#{host}),
           username: System.get_env("POSTGRES_USER") || "postgres",
           database: System.get_env("POSTGRES_DB") || "postgres",
           password: System.get_env("POSTGRES_PASSWORD") || "postgres",
-          port: System.get_env("POSTGRES_PORT") || 6543,
+          port: System.get_env("POSTGRES_PO~c(T") || 6543,
         },
         slot: :temporary, # :temporary is also supported if you don't want Postgres keeping track of what you've acknowledged
         wal_position: {"0", "0"}, # You can provide a different WAL position if desired, or default to allowing Postgres to send you what it thinks you need
