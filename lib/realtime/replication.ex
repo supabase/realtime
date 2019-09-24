@@ -40,22 +40,18 @@ defmodule Realtime.Replication do
   end
 
   def handle_info(payload, _commit_timestamp) do
-    Logger.debug("GOT REPLICATION!!")
-    Logger.debug("#{inspect(payload)}")
+    # Logger.debug("GOT REPLICATION!!")
 
-    %Transaction{changes: changes, commit_timestamp: commit_timestamp} = payload
-    # [%UpdatedRecord{}, %DeletedRecord{}, %NewRecord{}] = changes
-    # payload = Jason.encode!(payload)
-    # Logger.debug("#{inspect(payload)}")
+    # We need to update the :relation tuple to a list so it can be Jason encoded
+    changes = Enum.map payload.changes, fn x ->
+      %{x | relation: Tuple.to_list(x.relation)}
+    end
 
-    # Enum.each changes, fn x ->
-    #   Logger.debug("changes!!")
-    #   Logger.debug("changes!!")
-    #   Logger.debug("#{inspect(changes)}")
-    #   Logger.debug("#{inspect(changes)}")
-    # end
+    # Send the whole transaction
+    transaction = %{payload | changes: changes}
+    RealtimeWeb.RealtimeChannel.handle_info(transaction)
 
-    RealtimeWeb.RealtimeChannel.handle_info(payload)
+    # Event handled
     {:noreply, :event_received}
   end
 
