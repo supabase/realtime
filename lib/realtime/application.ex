@@ -10,6 +10,8 @@ defmodule Realtime.Application do
     # Hostname must be a char list for some reason
     # Use this var to convert to sigil at connection
     host = System.get_env("POSTGRES_HOST") || 'localhost'
+    port = System.get_env("POSTGRES_PORT") || 6543
+    {port_number, _} = :string.to_integer(to_char_list(port))
 
     # List all child processes to be supervised
     children = [
@@ -32,7 +34,7 @@ defmodule Realtime.Application do
           username: System.get_env("POSTGRES_USER") || "postgres",
           database: System.get_env("POSTGRES_DB") || "postgres",
           password: System.get_env("POSTGRES_PASSWORD") || "postgres",
-          port: System.get_env("POSTGRES_PORT") || 6543,
+          port: port_number
         },
         slot: :temporary, # :temporary is also supported if you don't want Postgres keeping track of what you've acknowledged
         wal_position: {"0", "0"}, # You can provide a different WAL position if desired, or default to allowing Postgres to send you what it thinks you need
