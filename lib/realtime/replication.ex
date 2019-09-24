@@ -32,8 +32,7 @@ defmodule Realtime.Replication do
   """
   @spec init([String.t])  :: {:ok, []}
   def init(channel) do
-    Logger.debug("Starting REPLICATION #{channel}")
-    Logger.debug("Starting REPLICATION")
+    Logger.debug("Starting #{ __MODULE__ } with channel subscription: #{channel}")
 
     Cainophile.Adapters.Postgres.subscribe(Cainophile.RealtimeListener, self())
     {:ok, {}}
@@ -42,9 +41,21 @@ defmodule Realtime.Replication do
   def handle_info(payload, _commit_timestamp) do
     # Logger.debug("GOT REPLICATION!!")
 
-    # We need to update the :relation tuple to a list so it can be Jason encoded
+    # Enrich each change with additional details
     changes = Enum.map payload.changes, fn x ->
-      %{x | relation: Tuple.to_list(x.relation)}
+      # Convert the :relation tuple to a list so it can be Jason encoded
+      change = Map.from_struct(%{x | relation: Tuple.to_list(x.relation)})
+      # Extract the table info
+      {schema, table} = x.relation
+      # Enrich with the change type
+      type =
+        case x do
+          %NewRecord{} -> "INSERT"
+          %UpdatedRecord{} -> "UPDATE"
+          %DeletedRecord{} -> "DELETE"
+        end
+      # Return enrichments
+      %{change: change, type: type, schema: schema, table: table}
     end
 
     # Send the whole transaction
