@@ -57,22 +57,6 @@ defmodule Realtime.Replication do
     {:noreply, state}
   end
 
-  # TODO: Extract subscription logic into common module for other adapters
-
-  @impl true
-  def handle_call({:subscribe, receiver_pid}, _from, state) when is_pid(receiver_pid) do
-    subscribers = [receiver_pid | state.subscribers]
-
-    {:reply, {:ok, subscribers}, %{state | subscribers: subscribers}}
-  end
-
-  @impl true
-  def handle_call({:subscribe, receiver_fun}, _from, state) when is_function(receiver_fun) do
-    subscribers = [receiver_fun | state.subscribers]
-
-    {:reply, {:ok, subscribers}, %{state | subscribers: subscribers}}
-  end
-
   defp process_message(%Begin{} = msg, state) do
     %{
       state
@@ -81,12 +65,13 @@ defmodule Realtime.Replication do
     }
   end
 
+  # This will notify subscribers once the transaction has completed
   defp process_message(
         %Commit{lsn: commit_lsn, end_lsn: end_lsn},
-        %State{transaction: {current_txn_lsn, txn}} = state
+        %State{transaction: {current_txn_lsn, _txn}} = state
       )
       when commit_lsn == current_txn_lsn do
-    # notify_subscribers(txn, state.subscribers)
+
     notify_subscribers(state)
     :ok = adapter_impl(state.config).acknowledge_lsn(state.connection, end_lsn)
 
@@ -105,7 +90,14 @@ defmodule Realtime.Replication do
 
     data = data_tuple_to_map(relation.columns, msg.tuple_data)
 
-    new_record = %NewRecord{relation: {relation.namespace, relation.name}, record: data}
+    new_record = %NewRecord{
+      type: "INSERT",
+      relation: [relation.namespace, relation.name],
+      schema: relation.namespace,
+      table: relation.name, 
+      columns: relation.columns,
+      record: data
+    }
 
     {lsn, txn} = state.transaction
     %{state | transaction: {lsn, %{txn | changes: Enum.reverse([new_record | txn.changes])}}}
@@ -118,7 +110,11 @@ defmodule Realtime.Replication do
     data = data_tuple_to_map(relation.columns, msg.tuple_data)
 
     updated_record = %UpdatedRecord{
-      relation: {relation.namespace, relation.name},
+      type: "UPDATE",
+      relation: [relation.namespace, relation.name],
+      schema: relation.namespace,
+      table: relation.name,
+      columns: relation.columns,
       old_record: old_data,
       record: data
     }
@@ -137,7 +133,11 @@ defmodule Realtime.Replication do
       )
 
     deleted_record = %DeletedRecord{
-      relation: {relation.namespace, relation.name},
+      type: "DELETE",
+      relation: [relation.namespace, relation.name],
+      schema: relation.namespace,
+      table: relation.name,
+      columns: relation.columns,
       old_record: data
     }
 
@@ -151,7 +151,10 @@ defmodule Realtime.Replication do
         relation = Map.get(state.relations, truncated_relation)
 
         %TruncatedRelation{
-          relation: {relation.namespace, relation.name}
+          type: "TRUNCATE",
+          relation: [relation.namespace, relation.name],
+          schema: relation.namespace,
+          table: relation.name
         }
       end
 
@@ -172,23 +175,17 @@ defmodule Realtime.Replication do
         into: %{}
   end
 
-  defp notify_subscribers(%State{} = state) do
-
-    Logger.info("FULL STATE relations" <> inspect(state.relations))
-    Logger.info("FULL STATE txn" <> inspect(state.transaction))
-  end
-
   defp adapter_impl(config) do
     Keyword.get(config, :postgres_adapter, Realtime.Adapters.Postgres.EpgsqlImplementation)
   end
 
-  # Client
+  # Send an event via the Phoenix Channel
+  defp notify_subscribers(%State{transaction: {_current_txn_lsn, txn}} = state) do
+    # Logger.info("FULL STATE txn" <> inspect(txn))
+    RealtimeWeb.RealtimeChannel.handle_info(txn)
 
-  def subscribe(pid, receiver_pid) when is_pid(receiver_pid) do
-    GenServer.call(pid, {:subscribe, receiver_pid})
+    # Event handled
+    {:noreply, :event_received}
   end
 
-  def subscribe(pid, receiver_fun) when is_function(receiver_fun) do
-    GenServer.call(pid, {:subscribe, receiver_fun})
-  end
 end
