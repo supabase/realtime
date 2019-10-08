@@ -40,7 +40,7 @@ defmodule RealtimeWeb.Endpoint do
   plug Plug.Session,
     store: :cookie,
     key: "_realtime_key",
-    signing_salt: "kt2yzTMx"
+    signing_salt: "XJOJwjLt"
 
   plug RealtimeWeb.Router
 end

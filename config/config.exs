@@ -7,9 +7,6 @@
 # General application configuration
 use Mix.Config
 
-config :realtime,
-  ecto_repos: [Realtime.Repo]
-
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,
   url: [host: "localhost"],

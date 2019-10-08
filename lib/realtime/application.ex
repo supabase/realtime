@@ -15,17 +15,8 @@ defmodule Realtime.Application do
 
     # List all child processes to be supervised
     children = [
-      # Start the Ecto repository
-      Realtime.Repo,
       # Start the endpoint when the application starts
       RealtimeWeb.Endpoint,
-      # Starts a worker by calling: Realtime.Worker.start_link(arg)
-      # {Realtime.Worker, arg},
-      Supervisor.Spec.worker(
-        Realtime.Notify, 
-        ["db_changes", [name: Realtime.Notify]],
-        restart: :permanent
-      ),
       {
         Realtime.Replication,
         epgsql: %{ # All epgsql options are supported here
@@ -39,6 +30,13 @@ defmodule Realtime.Application do
         wal_position: {"0", "0"}, # You can provide a different WAL position if desired, or default to allowing Postgres to send you what it thinks you need
         publications: ["supabase_realtime"]
       },
+      # Starts a worker by calling: Realtime.Worker.start_link(arg)
+      # {Realtime.Worker, arg},
+      # Supervisor.Spec.worker(
+      #   Realtime.Notify, 
+      #   ["db_changes", [name: Realtime.Notify]],
+      #   restart: :permanent
+      # ),
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
