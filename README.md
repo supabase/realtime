@@ -15,6 +15,7 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 - [Development](#development)
   - [Prerequisites](#prerequisites)
   - [Releases](#releases)
+- [Credits](#credits)
 
 
 ## Usage
@@ -23,7 +24,7 @@ DB requirements:
 
 - Replication `wal_level` must be `logical`
 - Must be at least one free slot `max_replication_slots`
-- must create a publication called `supabase_realtime`
+- must create a publication called `supabase_realtime` @todo: auto create
   - `CREATE PUBLICATION supabase_realtime FOR ALL TABLES;`
 - This will set up a new slot called `supabase_realtime_slot` if it doesn't already exist
   - `CREATE_REPLICATION_SLOT 'supabase_realtime_slot' LOGICAL pgoutput NOEXPORT_SNAPSHOT;`
@@ -122,3 +123,8 @@ mix format mix.exs “lib/**/*.{ex,exs}” “test/**/*.{ex,exs}”
 ### Releases
 
 - **Docker** - Builds directly from Github
+
+
+## Credits
+
+- [https://github.com/cainophile/cainophile](https://github.com/cainophile/cainophile) - A lot of this implementation leveraged the work already done on Canophile.
