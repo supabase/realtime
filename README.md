@@ -28,7 +28,8 @@ DB requirements:
   - `CREATE PUBLICATION supabase_realtime FOR ALL TABLES;`
 - This will set up a new slot called `supabase_realtime_slot` if it doesn't already exist
   - `CREATE_REPLICATION_SLOT 'supabase_realtime_slot' LOGICAL pgoutput NOEXPORT_SNAPSHOT;`
-- At the moment this repo is only listening to NOTIFY changes sent to 'db_changes'
+- If you want to receive the "old" data on updates you need to set replica identity to "FULL". eg:
+  - `alter table YOUR_TABLE_NAME replica identity full;` 
 
 Works without `wal2json` :)
 
