@@ -31,7 +31,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   # We want to be able to send a message internally from the GenServer. 
   # With this we can just send it a payload and it will "shout" it on the channel
   def handle_info(payload) do
-    Logger.info'REALTIME! #{inspect(payload)}'
+    # Logger.info'REALTIME! #{inspect(payload)}'
     RealtimeWeb.Endpoint.broadcast_from! self(), "realtime", "shout", payload
   end
 

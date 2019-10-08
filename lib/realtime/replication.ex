@@ -180,7 +180,7 @@ defmodule Realtime.Replication do
   end
 
   # Send an event via the Phoenix Channel
-  defp notify_subscribers(%State{transaction: {_current_txn_lsn, txn}} = state) do
+  defp notify_subscribers(%State{transaction: {_current_txn_lsn, txn}}) do
     # Logger.info("FULL STATE txn" <> inspect(txn))
     RealtimeWeb.RealtimeChannel.handle_info(txn)
 
