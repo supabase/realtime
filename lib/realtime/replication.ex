@@ -34,13 +34,7 @@ defmodule Realtime.Replication do
   }
 
   def start_link(config) do
-    register = Keyword.get(config, :register)
-
-    if is_atom(register) do
-      GenServer.start_link(__MODULE__, config, name: register)
-    else
-      GenServer.start_link(__MODULE__, config)
-    end
+    GenServer.start_link(__MODULE__, config)
   end
 
   @impl true
@@ -88,11 +82,12 @@ defmodule Realtime.Replication do
   end
 
   defp process_message(
-         %Commit{lsn: commit_lsn, end_lsn: end_lsn},
-         %State{transaction: {current_txn_lsn, txn}} = state
-       )
-       when commit_lsn == current_txn_lsn do
-    notify_subscribers(txn, state.subscribers)
+        %Commit{lsn: commit_lsn, end_lsn: end_lsn},
+        %State{transaction: {current_txn_lsn, txn}} = state
+      )
+      when commit_lsn == current_txn_lsn do
+    # notify_subscribers(txn, state.subscribers)
+    notify_subscribers(state)
     :ok = adapter_impl(state.config).acknowledge_lsn(state.connection, end_lsn)
 
     %{state | transaction: nil}
@@ -102,8 +97,6 @@ defmodule Realtime.Replication do
   defp process_message(%Type{}, state), do: state
 
   defp process_message(%Relation{} = msg, state) do
-
-    notify_subscribers(msg, state.subscribers)
     %{state | relations: Map.put(state.relations, msg.id, msg)}
   end
 
@@ -179,22 +172,10 @@ defmodule Realtime.Replication do
         into: %{}
   end
 
-  defp notify_subscribers(%Transaction{} = txn, subscribers) do
-    Logger.debug(
-      "Notifying subscribers: #{inspect(subscribers)} about transaction: #{inspect(txn)}"
-    )
+  defp notify_subscribers(%State{} = state) do
 
-    for(sub <- subscribers, is_pid(sub), do: send(sub, txn)) ++
-      for sub <- subscribers, is_function(sub), do: sub.(txn)
-  end
-
-  defp notify_subscribers(%Relation{} = txn, subscribers) do
-    Logger.debug(
-      "Notifying subscribers: #{inspect(subscribers)} about transaction: #{inspect(txn)}"
-    )
-
-    for(sub <- subscribers, is_pid(sub), do: send(sub, txn)) ++
-      for sub <- subscribers, is_function(sub), do: sub.(txn)
+    Logger.info("FULL STATE relations" <> inspect(state.relations))
+    Logger.info("FULL STATE txn" <> inspect(state.transaction))
   end
 
   defp adapter_impl(config) do
