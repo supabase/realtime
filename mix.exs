@@ -43,7 +43,8 @@ defmodule Realtime.MixProject do
       {:gettext, "~> 0.11"},
       {:jason, "~> 1.0"},
       {:plug_cowboy, "~> 2.0"},
-      {:cainophile, "~> 0.1.0"}
+      {:pgoutput_decoder, "~> 0.1.0"},
+      {:epgsql, "~> 4.2"},
     ]
   end
 
