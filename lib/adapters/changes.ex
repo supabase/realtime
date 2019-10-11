@@ -1,3 +1,6 @@
+# This file draws heavily from https://github.com/cainophile/cainophile
+# License: https://github.com/cainophile/cainophile/blob/master/LICENSE
+
 import Protocol
 
 defmodule Realtime.Adapters.Changes do
