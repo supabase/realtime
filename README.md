@@ -1,10 +1,10 @@
 # Supabase Realtime
 
 > Status: Unfit for production
+
 > This repo hasn't yet implemented Socket Authentication so it is not recommended for use in production
 
-Listens to changes in a PostgreSQL Database and broadcasts them over websockets. This is the realtime server for usage with your development machine. To use in production we recommend using the hosted version found at [supabase.io](supabase.io)
-
+Listens to changes in a PostgreSQL Database and broadcasts them over websockets. This is the realtime server for usage with your development machine. 
 
 - [Usage](#usage)
   - [Client](#client)
