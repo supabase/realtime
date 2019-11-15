@@ -2,8 +2,13 @@
 
 version: '3'
 services:
+  realtime:
+      build: ./server
+      environment:
+        POSTGRES_HOST: db
+        POSTGRES_PORT: 5432
   db:
-    build: ./postgres
+    build: ./test/postgres
     ports:
       - "6543:5432"
   
