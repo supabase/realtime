@@ -34,7 +34,7 @@ CREATE FUNCTION public.broadcast_changes() RETURNS trigger
           OLD := NEW;
         END IF;
       PERFORM pg_notify(
-          'db_changes',
+          'test_notify',
           json_build_object(
             'table', TG_TABLE_NAME,
             'type', TG_OP,
