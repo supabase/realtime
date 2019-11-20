@@ -1,0 +1,12 @@
+# Overrides for local dev environment
+
+version: '3'
+services:
+  realtime:
+      environment:
+        POSTGRES_HOST: db
+        POSTGRES_PORT: 5432
+  db:
+    build: ./test/postgres
+    ports:
+      - "6543:5432"

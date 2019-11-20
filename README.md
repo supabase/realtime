@@ -1,17 +1,18 @@
 # Supabase Realtime
 
-> Status: ALPHA
->
-> This repo hasn't yet implemented Socket Authentication so it is not recommended for use in production
-
 Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
+
+## Status
+
+> Status: ALPHA
+
+This repo is still under heavy development and likely to change. You're welcome to try it, but expect some breaking changes.
 
 ## Docs 
 
 To see the full docs, go to [https://supabase.io/docs/realtime/getting-started](https://supabase.io/docs/realtime/getting-started)
 
 ## Getting started
-
 
 The easiest way to use this is to set up a docker compose:
 
@@ -23,8 +24,8 @@ services:
     image: supabase/realtime
     ports:
       - "4000:4000"
-    environment:
-    - POSTGRES_USER=postgres
+    environment: # Point the server to your own Postgres database
+    - POSTGRES_USER=postgres 
     - POSTGRES_PASSWORD=postgres
     - POSTGRES_DB=postgres
     - POSTGRES_HOST=localhost
@@ -41,7 +42,10 @@ docker-compose up     # Run in foreground on port 4000
 
 We welcome any issues, pull requests, and feedback. See [https://supabase.io/docs/-/contributing](https://supabase.io/docs/-/contributing) for more details.
 
+## License
 
-**Credits**
+This repo is liscenced under Apache 2.0.
+
+## Credits
 
 - [https://github.com/cainophile/cainophile](https://github.com/cainophile/cainophile) - A lot of this implementation leveraged the work already done on Canophile.
