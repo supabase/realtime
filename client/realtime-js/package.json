@@ -18,9 +18,11 @@
     "registry": "https://registry.npmjs.org/"
   },
   "dependencies": {
-    "@types/node": "^12.6.8",
+    "phoenix-channels": "^1.0.0"
+  },
+  "devDependencies": {
     "esm": "^3.2.25",
     "jsdoc-test": "0.0.10",
-    "phoenix-channels": "^1.0.0"
+    "mocha": "^6.2.2"
   }
 }
