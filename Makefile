@@ -2,14 +2,20 @@ REPO_DIR=$(shell pwd)
 
 help:
 	@echo "\nDOCKER\n"
-	@echo "make dev.{test}        # start docker in foreground"
-	@echo "make start.{test}      # start docker in background"
-	@echo "make stop.{test}       # stop docker"
-	@echo "make rebuild.{test}    # restart docker and force it to rebuild"
-	@echo "make pull.{test}       # pull all the latest docker images"
+	@echo "make dev.{dev}        # start docker in foreground"
+	@echo "make start.{dev}      # start docker in background"
+	@echo "make stop.{dev}       # stop docker"
+	@echo "make rebuild.{dev}    # restart docker and force it to rebuild"
+	@echo "make pull.{dev}       # pull all the latest docker images"
+
+	@echo "\TESTS\n"
+	@echo "make test.client.{js}            # run client library"
+	@echo "make test.server            		# run tests on server"
+	@echo "make e2e.{js}             		# run e2e tests with client library"
 
 	@echo "\nHELPERS\n"
-	@echo "clean            # remove all node_modules"
+	@echo "make clean            # remove all node_modules"
+	@echo "make tree             # output a directory tree"
 
 
 #########################
@@ -26,12 +32,25 @@ stop.%:
 	docker-compose -f docker-compose.yml -f docker-compose.$*.yml down  --remove-orphans
 
 rebuild.%:
-	docker-compose -f docker-compose.yml -f docker-compose.$*.yml down  --remove-orphans
+	make stop.$*
 	docker-compose -f docker-compose.yml -f docker-compose.$*.yml build
 	docker-compose -f docker-compose.yml -f docker-compose.$*.yml up --force-recreate --build
 
 pull.%:
 	docker-compose -f docker-compose.yml -f docker-compose.$*.yml pull
+
+#########################
+# TESTS 
+#########################
+
+test.client.%:
+	cd client/realtime-$* && npm run test:unit
+
+test.server:
+	cd server && mix test
+
+e2e.%:
+	cd client/realtime-$* && npm run test:e2e
 
 #########################
 # Helpers
@@ -42,4 +61,4 @@ clean:
 	rm -rf ./client/realtime-js/node_modules
 
 tree:
-	tree -L 2 -I 'README.md|node_modules|cucumber.js|package*|docker*'
+	tree -L 2 -I 'README.md|LICENSE|NOTICE|node_modules|Makefile|package*|docker*'

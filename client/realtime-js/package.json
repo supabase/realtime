@@ -6,7 +6,8 @@
   "main": "src/index.js",
   "scripts": {
     "deploy": "npm version patch; npm publish --access=public",
-    "test": "mocha --require esm \"test/**/*_spec.js\""
+    "test:e2e": "mocha --require esm \"test/e2e/**/*_spec.js\"",
+    "test:unit": "mocha --require esm \"test/unit/**/*_spec.js\""
   },
   "keywords": [
     "supabase",

@@ -5,10 +5,6 @@ services:
   realtime:
       build: ./server
       environment:
-        POSTGRES_HOST: db
+        POSTGRES_HOST: localhost
         POSTGRES_PORT: 5432
-  db:
-    build: ./test/postgres
-    ports:
-      - "6543:5432"
   
