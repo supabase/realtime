@@ -8,7 +8,7 @@
 # https://github.com/brianc/node-pg-types/blob/master/lib/builtins.js
 # MIT License (MIT)
 
-#  * Following query was used to generate this file:
+#  Following query was used to generate this file:
 #  SELECT json_object_agg(UPPER(PT.typname), PT.oid::int4 ORDER BY pt.oid)
 #  FROM pg_type PT
 #  WHERE typnamespace = (SELECT pgn.oid FROM pg_namespace pgn WHERE nspname = 'pg_catalog') -- Take only builting Postgres types with stable OID (extension types are not guaranted to be stable)
@@ -20,50 +20,84 @@
 
 defmodule Realtime.OidDatabase do
   require Logger
-
-  oid_db = [
-    {:bool, 16, 1000},
-    {:bpchar, 1042, 1014},
-    {:bytea, 17, 1001},
-    {:char, 18, 1002},
-    {:cidr, 650, 651},
-    {:date, 1082, 1182},
-    {:daterange, 3912, 3913},
-    {:float4, 700, 1021},
-    {:float8, 701, 1022},
-    {:geometry, 17063, 17071},
-    {:hstore, 16935, 16940},
-    {:inet, 869, 1041},
-    {:int2, 21, 1005},
-    {:int4, 23, 1007},
-    {:int4range, 3904, 3905},
-    {:int8, 20, 1016},
-    {:int8range, 3926, 3927},
-    {:interval, 1186, 1187},
-    {:json, 114, 199},
-    {:jsonb, 3802, 3807},
-    {:macaddr, 829, 1040},
-    {:macaddr8, 774, 775},
-    {:point, 600, 1017},
-    {:text, 25, 1009},
-    {:time, 1083, 1183},
-    {:timestamp, 1114, 1115},
-    {:timestamptz, 1184, 1185},
-    {:timetz, 1266, 1270},
-    {:tsrange, 3908, 3909},
-    {:tstzrange, 3910, 3911},
-    {:uuid, 2950, 2951},
-    {:varchar, 1043, 1015},
-    {:numeric, 1700, 1700}
-  ]
-
-  # TODO: Handle array oid type lookup
-  for {type_name, type_id, _array_oid} <- oid_db do
-    
-    # Logger.debug("OID: " <> unquote(type_name))
-    # Logger.debug("OID pt.2: " <> unquote(type_id))
-    def name_for_type_id(unquote(type_id)), do: unquote(type_name)
+  
+  defmodule(DataTypes,
+    do:
+      defstruct(
+          types: %{
+            16 => "bool",
+            17 => "bytea",
+            18 => "char",
+            20 => "int8",
+            21 => "int2",
+            23 => "int4",
+            24 => "regproc",
+            25 => "text",
+            26 => "oid",
+            27 => "tid",
+            28 => "xid",
+            29 => "cid",
+            114 => "json",
+            142 => "xml",
+            194 => "pg_node_tree",
+            210 => "smgr",
+            602 => "path",
+            604 => "polygon",
+            650 => "cidr",
+            700 => "float4",
+            701 => "float8",
+            702 => "abstime",
+            703 => "reltime",
+            704 => "tinterval",
+            718 => "circle",
+            774 => "macaddr8",
+            790 => "money",
+            829 => "macaddr",
+            869 => "inet",
+            1033 => "aclitem",
+            1042 => "bpchar",
+            1043 => "varchar",
+            1082 => "date",
+            1083 => "time",
+            1114 => "timestamp",
+            1184 => "timestamptz",
+            1186 => "interval",
+            1266 => "timetz",
+            1560 => "bit",
+            1562 => "varbit",
+            1700 => "numeric",
+            1790 => "refcursor",
+            2202 => "regprocedure",
+            2203 => "regoper",
+            2204 => "regoperator",
+            2205 => "regclass",
+            2206 => "regtype",
+            2950 => "uuid",
+            2970 => "txid_snapshot",
+            3220 => "pg_lsn",
+            3361 => "pg_ndistinct",
+            3402 => "pg_dependencies",
+            3614 => "tsvector",
+            3615 => "tsquery",
+            3642 => "gtsvector",
+            3734 => "regconfig",
+            3769 => "regdictionary",
+            3802 => "jsonb",
+            4089 => "regnamespace",
+            4096 => "regrole"
+          } 
+      )
+  )
+  
+# Utilises the above %DataTypes{}.types
+  def name_for_type_id(type_id) do
+    # if type_id is in the above list, get the corresponding name
+    if Map.has_key?(%DataTypes{}.types, type_id) do
+      %DataTypes{}.types[type_id]
+    # else, return the type_id
+    else
+      type_id
+    end
   end
 
-  def name_for_type_id(_), do: :unknown
 end

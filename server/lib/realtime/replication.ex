@@ -69,30 +69,51 @@ defmodule Realtime.Replication do
   end
 
   # This will notify subscribers once the transaction has completed
+  # FYI: this will be the last function called before returning to the client
   defp process_message(
         %Commit{lsn: commit_lsn, end_lsn: end_lsn},
         %State{transaction: {current_txn_lsn, _txn}} = state
       )
       when commit_lsn == current_txn_lsn do
 
+    # To show how the updated columns look like before being returned
+    # Feel free to delete after testing
+    Logger.debug("Final Update of Columns " <> inspect(state.relations, limit: :infinity))
+
     notify_subscribers(state)
     :ok = adapter_impl(state.config).acknowledge_lsn(state.connection, end_lsn)
 
-    %{state | transaction: nil}
+    # Clearing the state to keep things clean
+    %{state | transaction: nil, relations: %{}, types: %{}}
   end
 
-  # TODO: do something more intelligent here
-  defp process_message(%Type{}, state), do: state
+  # Any unknown types will now be populated into state.types
+  # This will be utilised later on when updating unidentified data types
+  defp process_message(%Type{} = msg, state)do
+    
+    %{state | types: Map.put(state.types, msg.id, msg.name)}
+  end
 
   defp process_message(%Relation{} = msg, state) do
-    %{state | relations: Map.put(state.relations, msg.id, msg)}
+    updated_columns = Enum.map(msg.columns, fn message ->
+      if Map.has_key?(state.types, message.type) do
+        %{message | type: state.types[message.type]} 
+      else
+        message
+      end
+
+    end)
+
+    updated_relations = %{msg | columns: updated_columns}
+    
+    %{state | relations: Map.put(state.relations, msg.id, updated_relations)}
   end
 
   defp process_message(%Insert{} = msg, state) do
     relation = Map.get(state.relations, msg.relation_id)
 
     data = data_tuple_to_map(relation.columns, msg.tuple_data)
-
+    
     new_record = %NewRecord{
       type: "INSERT",
       relation: [relation.namespace, relation.name],
