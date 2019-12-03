@@ -25,7 +25,7 @@ defmodule Realtime.Replication do
     TruncatedRelation
   }
 
-  alias PgoutputDecoder.Messages.{
+  alias Realtime.Decoder.Messages.{
     Begin,
     Commit,
     Relation,
@@ -47,7 +47,7 @@ defmodule Realtime.Replication do
 
   @impl true
   def handle_info({:epgsql, _pid, {:x_log_data, _start_lsn, _end_lsn, binary_msg}}, state) do
-    decoded = PgoutputDecoder.decode_message(binary_msg)
+    decoded = Realtime.Decoder.decode_message(binary_msg)
     Logger.debug("Received binary message: #{inspect(binary_msg, limit: :infinity)}")
     Logger.debug("Decoded message: " <> inspect(decoded, limit: :infinity))
 
