@@ -23,8 +23,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   # It is also common to receive messages from the client and
   # broadcast to everyone in the current topic (realtime:lobby).
-  def handle_in("shout", payload, socket) do
-    broadcast! socket, "shout", payload
+  def handle_in("*", payload, socket) do
+    broadcast! socket, "*", payload
     {:noreply, socket}
   end
 
@@ -32,7 +32,11 @@ defmodule RealtimeWeb.RealtimeChannel do
   # With this we can just send it a payload and it will "shout" it on the channel
   def handle_info(payload) do
     # Logger.info'REALTIME! #{inspect(payload)}'
-    RealtimeWeb.Endpoint.broadcast_from! self(), "realtime", "shout", payload
+    
+    # Optimally we would want subscriptions to be specific to the row || table name
+    # RealtimeWeb.Endpoint.broadcast_from! self(), "realtime", payload.event, payload
+
+    RealtimeWeb.Endpoint.broadcast_from! self(), "realtime", "*", payload
   end
 
 
