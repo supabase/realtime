@@ -15,8 +15,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   test "shout broadcasts to realtime", %{socket: socket} do
-    push socket, "shdout", %{"hello" => "all"}
-    assert_broadcast "shdout", %{"hello" => "all"}
+    push socket, "*", %{"hello" => "all"}
+    assert_broadcast "*", %{"hello" => "all"}
   end
 
   test "broadcasts are pushed to the client", %{socket: socket} do
