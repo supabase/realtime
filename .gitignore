@@ -38,3 +38,5 @@ npm-debug.log
 
 _build/
 deps/
+server/_build
+server/deps
