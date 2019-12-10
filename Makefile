@@ -8,7 +8,7 @@ help:
 	@echo "make rebuild.{dev}    # restart docker and force it to rebuild"
 	@echo "make pull.{dev}       # pull all the latest docker images"
 
-	@echo "\TESTS\n"
+	@echo "\nTESTS\n"
 	@echo "make test.client.{js}            # run client library"
 	@echo "make test.server            		# run tests on server"
 	@echo "make e2e.{js}             		# run e2e tests with client library"
