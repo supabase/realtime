@@ -47,7 +47,8 @@ test.client.%:
 	cd client/realtime-$* && npm run test:unit
 
 test.server:
-	cd server && mix test
+	docker-compose -f docker-compose.yml -f docker-compose.test.yml build
+	docker-compose -f docker-compose.yml -f docker-compose.test.yml run --rm realtime
 
 e2e.%:
 	cd client/realtime-$* && npm run test:e2e

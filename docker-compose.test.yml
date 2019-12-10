@@ -3,6 +3,7 @@
 version: '3'
 services:
   realtime:
+    command: mix test
     environment:
         POSTGRES_HOST: db
         POSTGRES_PORT: 5432
