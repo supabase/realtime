@@ -2,7 +2,7 @@ REPO_DIR=$(shell pwd)
 
 help:
 	@echo "\nDOCKER\n"
-	@echo "make dev.{dev}        # start docker in foreground"
+	@echo "make local.{dev}      # start docker in foreground"
 	@echo "make start.{dev}      # start docker in background"
 	@echo "make stop.{dev}       # stop docker"
 	@echo "make rebuild.{dev}    # restart docker and force it to rebuild"
