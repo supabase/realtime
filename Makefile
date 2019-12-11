@@ -2,13 +2,13 @@ REPO_DIR=$(shell pwd)
 
 help:
 	@echo "\nDOCKER\n"
-	@echo "make dev.{dev}        # start docker in foreground"
+	@echo "make local.{dev}      # start docker in foreground"
 	@echo "make start.{dev}      # start docker in background"
 	@echo "make stop.{dev}       # stop docker"
 	@echo "make rebuild.{dev}    # restart docker and force it to rebuild"
 	@echo "make pull.{dev}       # pull all the latest docker images"
 
-	@echo "\TESTS\n"
+	@echo "\nTESTS\n"
 	@echo "make test.client.{js}            # run client library"
 	@echo "make test.server            		# run tests on server"
 	@echo "make e2e.{js}             		# run e2e tests with client library"
@@ -22,7 +22,7 @@ help:
 # Docker 
 #########################
 
-dev.%:
+local.%:
 	docker-compose -f docker-compose.yml -f docker-compose.$*.yml up
 
 start.%:
@@ -47,7 +47,8 @@ test.client.%:
 	cd client/realtime-$* && npm run test:unit
 
 test.server:
-	cd server && mix test
+	docker-compose -f docker-compose.yml -f docker-compose.test.yml build
+	docker-compose -f docker-compose.yml -f docker-compose.test.yml run --rm realtime
 
 e2e.%:
 	cd client/realtime-$* && npm run test:e2e
