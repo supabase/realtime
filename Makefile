@@ -2,6 +2,7 @@ REPO_DIR=$(shell pwd)
 
 help:
 	@echo "\nDOCKER\n"
+	@echo "make local:db         # start a test database"
 	@echo "make local.{dev}      # start docker in foreground"
 	@echo "make start.{dev}      # start docker in background"
 	@echo "make stop.{dev}       # stop docker"
@@ -21,6 +22,10 @@ help:
 #########################
 # Docker 
 #########################
+
+local\:db:
+	docker-compose -f docker-compose.db.yml down 
+	docker-compose -f docker-compose.db.yml up --force-recreate
 
 local.%:
 	docker-compose -f docker-compose.yml -f docker-compose.$*.yml up
