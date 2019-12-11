@@ -9,11 +9,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     {:ok, socket: socket}
   end
 
-  test "ping replies with status ok", %{socket: socket} do
-    ref = push socket, "ping", %{"hello" => "there"}
-    assert_reply ref, :ok, %{"hello" => "there"}
-  end
-
   test "shout broadcasts to realtime", %{socket: socket} do
     push socket, "*", %{"hello" => "all"}
     assert_broadcast "*", %{"hello" => "all"}
