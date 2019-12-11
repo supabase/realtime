@@ -36,5 +36,7 @@ npm-debug.log
 # this depending on your deployment strategy.
 /priv/static/
 
+_build/
+deps/
 server/_build
 server/deps
