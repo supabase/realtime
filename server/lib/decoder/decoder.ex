@@ -52,15 +52,14 @@ defmodule Realtime.Decoder do
 
   alias Realtime.OidDatabase
 
-  @moduledoc """
-  Documentation for PgoutputDecoder.
-  """
-
   @doc """
-  Parses logical replication messages from Postgres pgoutput plugin
+  Parses logical replication messages from Postgres
+
   ## Examples
-      iex> PgoutputDecoder.decode_message(<<66, 0, 0, 0, 2, 167, 244, 168, 128, 0, 2, 48, 246, 88, 88, 213, 242, 0, 0, 2, 107>>)
-      %PgoutputDecoder.Messages.Begin{commit_timestamp: #DateTime<2019-07-18 17:02:35Z>, final_lsn: {2, 2817828992}, xid: 619}
+
+      iex> decode_message(<<73, 0, 0, 96, 0, 78, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 116, 0, 0, 0, 3, 53, 54, 48>>)
+      %Realtime.Decoder.Messages.Insert{relation_id: 24576, tuple_data: {"baz", "560"}}
+
   """
   def decode_message(message) when is_binary(message) do
     # Logger.debug("Message before conversion " <> message)
