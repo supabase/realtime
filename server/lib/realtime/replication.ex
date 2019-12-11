@@ -71,11 +71,10 @@ defmodule Realtime.Replication do
   # This will notify subscribers once the transaction has completed
   # FYI: this will be the last function called before returning to the client
   defp process_message(
-        %Commit{lsn: commit_lsn, end_lsn: end_lsn},
-        %State{transaction: {current_txn_lsn, _txn}} = state
-      )
-      when commit_lsn == current_txn_lsn do
-
+         %Commit{lsn: commit_lsn, end_lsn: end_lsn},
+         %State{transaction: {current_txn_lsn, _txn}} = state
+       )
+       when commit_lsn == current_txn_lsn do
     # To show how the updated columns look like before being returned
     # Feel free to delete after testing
     Logger.debug("Final Update of Columns " <> inspect(state.relations, limit: :infinity))
@@ -83,29 +82,27 @@ defmodule Realtime.Replication do
     notify_subscribers(state)
     :ok = adapter_impl(state.config).acknowledge_lsn(state.connection, end_lsn)
 
-    # Clearing the state to keep things clean
-    %{state | transaction: nil, relations: %{}, types: %{}}
+    %{state | transaction: nil}
   end
 
   # Any unknown types will now be populated into state.types
   # This will be utilised later on when updating unidentified data types
-  defp process_message(%Type{} = msg, state)do
-    
+  defp process_message(%Type{} = msg, state) do
     %{state | types: Map.put(state.types, msg.id, msg.name)}
   end
 
   defp process_message(%Relation{} = msg, state) do
-    updated_columns = Enum.map(msg.columns, fn message ->
-      if Map.has_key?(state.types, message.type) do
-        %{message | type: state.types[message.type]} 
-      else
-        message
-      end
-
-    end)
+    updated_columns =
+      Enum.map(msg.columns, fn message ->
+        if Map.has_key?(state.types, message.type) do
+          %{message | type: state.types[message.type]}
+        else
+          message
+        end
+      end)
 
     updated_relations = %{msg | columns: updated_columns}
-    
+
     %{state | relations: Map.put(state.relations, msg.id, updated_relations)}
   end
 
@@ -113,12 +110,11 @@ defmodule Realtime.Replication do
     relation = Map.get(state.relations, msg.relation_id)
 
     data = data_tuple_to_map(relation.columns, msg.tuple_data)
-    
+
     new_record = %NewRecord{
       type: "INSERT",
-      relation: [relation.namespace, relation.name],
       schema: relation.namespace,
-      table: relation.name, 
+      table: relation.name,
       columns: relation.columns,
       record: data
     }
@@ -135,7 +131,6 @@ defmodule Realtime.Replication do
 
     updated_record = %UpdatedRecord{
       type: "UPDATE",
-      relation: [relation.namespace, relation.name],
       schema: relation.namespace,
       table: relation.name,
       columns: relation.columns,
@@ -158,7 +153,6 @@ defmodule Realtime.Replication do
 
     deleted_record = %DeletedRecord{
       type: "DELETE",
-      relation: [relation.namespace, relation.name],
       schema: relation.namespace,
       table: relation.name,
       columns: relation.columns,
@@ -176,7 +170,6 @@ defmodule Realtime.Replication do
 
         %TruncatedRelation{
           type: "TRUNCATE",
-          relation: [relation.namespace, relation.name],
           schema: relation.namespace,
           table: relation.name
         }
@@ -203,13 +196,30 @@ defmodule Realtime.Replication do
     Keyword.get(config, :postgres_adapter, Realtime.Adapters.Postgres.EpgsqlImplementation)
   end
 
-  # Send an event via the Phoenix Channel
+  @doc """
+  Send events via Phoenix Channels
+  """
   defp notify_subscribers(%State{transaction: {_current_txn_lsn, txn}}) do
-    # Logger.info("FULL STATE txn" <> inspect(txn))
-    RealtimeWeb.RealtimeChannel.handle_info(txn)
+    # Logger.info("REALTIME: " <> inspect(txn, pretty: true))
+    # RealtimeWeb.RealtimeChannel.handle_realtime_transaction(txn)
+    # RealtimeWeb.Endpoint.broadcast_from!(self(), "realtime", "*", txn)
+
+    # For every change in the transaction, we want to broadcast it specific listeners
+    for change <- txn.changes do
+      namespace = "realtime:" <> change.schema
+      topic = "realtime:" <> change.schema <> ":" <> change.table
+      # Logger.debug('topic #{inspect(topic)}')
+      # Logger.info inspect(change, pretty: true)
+
+      # # Shout to anyone listening on the open realtime channel - e.g. "realtime:*"
+      RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", Map.put(change, :commit_timestamp, txn.commit_timestamp))
+      # # Shout to specific schema - e.g. "realtime:public"
+      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(namespace, Map.put(change, :commit_timestamp, txn.commit_timestamp))
+      # # Shout to specific topic - e.g. "realtime:public:users"
+      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(topic, Map.put(change, :commit_timestamp, txn.commit_timestamp))
+    end
 
     # Event handled
     {:noreply, :event_received}
   end
-
 end
