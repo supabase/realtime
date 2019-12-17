@@ -6,36 +6,45 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
 > Status: ALPHA
 
-This repo is still under heavy development and likely to change. You're welcome to try it, but expect some breaking changes.
+This repo is still under heavy development and the documentation is still evolving. You're welcome to try it, but expect some breaking changes.
 
 ## Docs 
 
-To see the full docs, go to [https://supabase.io/docs/realtime/getting-started](https://supabase.io/docs/realtime/getting-started)
+Docs are a work in progress. Start here: [https://supabase.io/docs/realtime/introduction]
 
-## Getting started
+## Example
 
-The easiest way to use this is to set up a docker compose:
+```js
+import { Socket } = '@supabase/realtime-js'
 
-```sh 
-# docker-compose.yml
-version: '3'
-services:
-  realtime:
-    image: supabase/realtime
-    ports:
-      - "4000:4000"
-    environment: # Point the server to your own Postgres database
-    - POSTGRES_USER=postgres 
-    - POSTGRES_PASSWORD=postgres
-    - POSTGRES_DB=postgres
-    - POSTGRES_HOST=localhost
-    - POSTGRES_PORT=5432
-```
+var API_SOCKET = process.env.SOCKET_URL
+var socket = new Socket(API_SOCKET)
+var realtimeChannel = this.socket.channel('realtime')
 
-Then run:
+socket.connect()
+if (realtimeChannel.state !== 'joined') {
+  realtimeChannel
+    .join()
+    .receive('ok', resp => console.log('Joined successfully', resp))
+    .receive('error', resp => console.log('Unable to join', resp))
+    .receive('timeout', () => console.log('Networking issue. Still waiting...'))
 
-```sh
-docker-compose up     # Run in foreground on port 4000
+  // Listen to all changes in the database
+  realtimeChannel.on('*', payload => {
+    console.log('Update received!', payload)
+  })
+  
+  // Listen to all changes from the 'public' schema
+  realtimeChannel.on('public', payload => {
+    console.log('Update received!', payload)
+  })
+  
+  // Listen to all changes from the 'users' table in the 'public' schema
+  realtimeChannel.on('public:users', payload => {
+    console.log('Update received!', payload)
+  })
+}
+
 ```
 
 ## Contributing
