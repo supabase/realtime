@@ -17,33 +17,23 @@ Docs are a work in progress. Start here: [https://supabase.io/docs/realtime/intr
 ```js
 import { Socket } = '@supabase/realtime-js'
 
-var API_SOCKET = process.env.SOCKET_URL
-var socket = new Socket(API_SOCKET)
-var realtimeChannel = this.socket.channel('realtime')
-
+var socket = new Socket(process.env.SOCKET_URL)
 socket.connect()
-if (realtimeChannel.state !== 'joined') {
-  realtimeChannel
-    .join()
-    .receive('ok', resp => console.log('Joined successfully', resp))
-    .receive('error', resp => console.log('Unable to join', resp))
-    .receive('timeout', () => console.log('Networking issue. Still waiting...'))
 
-  // Listen to all changes in the database
-  realtimeChannel.on('*', payload => {
-    console.log('Update received!', payload)
-  })
-  
-  // Listen to all changes from the 'public' schema
-  realtimeChannel.on('public', payload => {
-    console.log('Update received!', payload)
-  })
-  
-  // Listen to all changes from the 'users' table in the 'public' schema
-  realtimeChannel.on('public:users', payload => {
-    console.log('Update received!', payload)
-  })
-}
+// Listen to all changes in the database
+var allChanges = this.socket.channel('*')
+  .join()
+  .on('*', payload => { console.log('Update received!', payload) })
+
+// Listen to all changes from the 'public' schema
+var allChanges = this.socket.channel('public')
+  .join()
+  .on('*', payload => { console.log('Update received!', payload) })
+
+// Listen to all changes from the 'users' table in the 'public' schema
+var allChanges = this.socket.channel('public:users')
+  .join()
+  .on('*', payload => { console.log('Update received!', payload) })
 
 ```
 
