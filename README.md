@@ -6,36 +6,35 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
 > Status: ALPHA
 
-This repo is still under heavy development and likely to change. You're welcome to try it, but expect some breaking changes.
+This repo is still under heavy development and the documentation is still evolving. You're welcome to try it, but expect some breaking changes.
 
 ## Docs 
 
-To see the full docs, go to [https://supabase.io/docs/realtime/getting-started](https://supabase.io/docs/realtime/getting-started)
+Docs are a work in progress. Start here: [https://supabase.io/docs/realtime/introduction]
 
-## Getting started
+## Example
 
-The easiest way to use this is to set up a docker compose:
+```js
+import { Socket } = '@supabase/realtime-js'
 
-```sh 
-# docker-compose.yml
-version: '3'
-services:
-  realtime:
-    image: supabase/realtime
-    ports:
-      - "4000:4000"
-    environment: # Point the server to your own Postgres database
-    - POSTGRES_USER=postgres 
-    - POSTGRES_PASSWORD=postgres
-    - POSTGRES_DB=postgres
-    - POSTGRES_HOST=localhost
-    - POSTGRES_PORT=5432
-```
+var socket = new Socket(process.env.SOCKET_URL)
+socket.connect()
 
-Then run:
+// Listen to all changes in the database
+var allChanges = this.socket.channel('*')
+  .join()
+  .on('*', payload => { console.log('Update received!', payload) })
 
-```sh
-docker-compose up     # Run in foreground on port 4000
+// Listen to all changes from the 'public' schema
+var allChanges = this.socket.channel('public')
+  .join()
+  .on('*', payload => { console.log('Update received!', payload) })
+
+// Listen to all changes from the 'users' table in the 'public' schema
+var allChanges = this.socket.channel('public:users')
+  .join()
+  .on('*', payload => { console.log('Update received!', payload) })
+
 ```
 
 ## Contributing
