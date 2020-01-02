@@ -2,12 +2,11 @@ REPO_DIR=$(shell pwd)
 
 help:
 	@echo "\nDOCKER\n"
-	@echo "make local:db         # start a test database"
-	@echo "make local.{dev}      # start docker in foreground"
-	@echo "make start.{dev}      # start docker in background"
-	@echo "make stop.{dev}       # stop docker"
+	@echo "make start.{dev}      # start docker in foreground running Postgres and Realtime"
+	@echo "make stop.{dev}       # stop docker (if it is running in the background)"
 	@echo "make rebuild.{dev}    # restart docker and force it to rebuild"
 	@echo "make pull.{dev}       # pull all the latest docker images"
+	@echo "make local:db         # start a Postgres database on port 5432"
 
 	@echo "\nTESTS\n"
 	@echo "make test.client.{js}            # run client library"
@@ -28,11 +27,8 @@ local\:db:
 	docker-compose -f docker-compose.db.yml build 
 	docker-compose -f docker-compose.db.yml up --force-recreate
 
-local.%:
-	docker-compose -f docker-compose.yml -f docker-compose.$*.yml up
-
 start.%:
-	docker-compose -f docker-compose.yml -f docker-compose.$*.yml up -d
+	docker-compose -f docker-compose.yml -f docker-compose.$*.yml up 
 
 stop.%:
 	docker-compose -f docker-compose.yml -f docker-compose.$*.yml down  --remove-orphans
