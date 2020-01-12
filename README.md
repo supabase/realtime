@@ -39,7 +39,7 @@ var allChanges = this.socket.channel('public:users')
 
 ## Contributing
 
-We welcome any issues, pull requests, and feedback. See [https://supabase.io/docs/-/contributing](https://supabase.io/docs/-/contributing) for more details.
+We welcome any issues, pull requests, and feedback. 
 
 ## License
 
