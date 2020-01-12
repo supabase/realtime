@@ -1,4 +1,4 @@
-FROM elixir:1.8-alpine
+FROM elixir:1.9.4
 
 RUN apk update && apk add inotify-tools postgresql-dev
 

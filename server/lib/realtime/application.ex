@@ -4,19 +4,20 @@ defmodule Realtime.Application do
   @moduledoc false
 
   use Application
+  require Logger, warn: false
 
   def start(_type, _args) do
 
     # Hostname must be a char list for some reason
     # Use this var to convert to sigil at connection
-    host = System.get_env("POSTGRES_HOST") || 'localhost'
-    port = System.get_env("POSTGRES_PORT") || "5432"
+    host = System.get_env("DB_HOST") || 'localhost'
+    port = System.get_env("DB_PORT") || "5432"
     {port_number, _} = :string.to_integer(to_charlist(port))
     epgsql_params = %{
       host: ~c(#{host}),
-      username: System.get_env("POSTGRES_USER") || "postgres",
-      database: System.get_env("POSTGRES_DB") || "postgres",
-      password: System.get_env("POSTGRES_PASSWORD") || "postgres",
+      username: System.get_env("DB_USER") || "postgres",
+      database: System.get_env("DB_NAME") || "postgres",
+      password: System.get_env("DB_PASSWORD") || "postgres",
       port: port_number
     }
 

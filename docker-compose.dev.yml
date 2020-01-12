@@ -1,13 +1,6 @@
-# Overrides for local dev environment
-
 version: '3'
 services:
   realtime:
-    environment:
-        POSTGRES_HOST: db
-        POSTGRES_PORT: 5432
-    ports:
-      - "4000:4000"
     depends_on:
       - db
   db:

@@ -1,0 +1,4 @@
+*
+!server
+server/deps
+server/_build

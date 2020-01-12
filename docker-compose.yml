@@ -3,8 +3,14 @@
 version: '3'
 services:
   realtime:
-      build: ./server
-      environment:
-        POSTGRES_HOST: localhost
-        POSTGRES_PORT: 5432
+    build: ./
+    ports:
+      - "4000:4000"
+    environment:
+      DB_HOST: db
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_PORT: 5432
+  
   
