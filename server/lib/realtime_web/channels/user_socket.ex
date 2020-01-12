@@ -2,8 +2,6 @@ defmodule RealtimeWeb.UserSocket do
   use Phoenix.Socket
 
   ## Channels
-  # channel "room:*", RealtimeWeb.RoomChannel
-  # channel "notify", RealtimeWeb.NotifyChannel
   channel "realtime:*", RealtimeWeb.RealtimeChannel
 
   # Socket params are passed from the client and can

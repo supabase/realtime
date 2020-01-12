@@ -12,5 +12,8 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_PORT: 5432
+      APP_PORT: 4000
+      APP_HOSTNAME: localhost
+      SECRET_KEY_BASE: SOMETHING_SUPER_SECRET
   
   
