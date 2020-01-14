@@ -8,6 +8,9 @@ help:
 	@echo "make pull.{dev}       # pull all the latest docker images"
 	@echo "make local:db         # start a Postgres database on port 5432"
 
+	@echo "\nGOOGLE RUN\n"
+	@echo "make deploy"          # deploys Realtime docker image to Google Cloud Run
+
 	@echo "\nTESTS\n"
 	@echo "make test.client.{js}            # run client library"
 	@echo "make test.server            		# run tests on server"
@@ -40,6 +43,15 @@ rebuild.%:
 
 pull.%:
 	docker-compose -f docker-compose.yml -f docker-compose.$*.yml pull
+
+
+#########################
+# Google Run 
+#########################
+
+PROJECT_ID := $(shell gcloud config get-value project)
+deploy:
+	gcloud builds submit --tag gcr.io/$(PROJECT_ID)/realtime
 
 #########################
 # TESTS 
