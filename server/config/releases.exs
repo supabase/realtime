@@ -1,7 +1,7 @@
 import Config
 
-app_port = System.fetch_env!("APP_PORT")
-app_hostname = System.fetch_env!("APP_HOSTNAME")
+app_port = System.fetch_env!("PORT")
+app_hostname = System.fetch_env!("HOSTNAME")
 db_user = System.fetch_env!("DB_USER")
 db_password = System.fetch_env!("DB_PASSWORD")
 db_host = System.fetch_env!("DB_HOST")

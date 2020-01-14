@@ -12,8 +12,8 @@ Start the release:
 
 ```sh
 SECRET_KEY_BASE=SOMETHING_SECRET \
-APP_PORT=4000 \
-APP_HOSTNAME=localhost \
+PORT=4000 \
+HOSTNAME=localhost \
 DB_USER=postgres \
 DB_HOST=localhost \
 DB_PASSWORD=postgres \
