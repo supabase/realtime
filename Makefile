@@ -9,12 +9,12 @@ help:
 	@echo "make local:db         # start a Postgres database on port 5432"
 
 	@echo "\nGOOGLE RUN\n"
-	@echo "make deploy"          # deploys Realtime docker image to Google Cloud Run
+	@echo "make deploy           # deploys Realtime docker image to Google Cloud Run"
 
 	@echo "\nTESTS\n"
-	@echo "make test.client.{js}            # run client library"
-	@echo "make test.server            		# run tests on server"
-	@echo "make e2e.{js}             		# run e2e tests with client library"
+	@echo "make test.client.{js}    # run client library"
+	@echo "make test.server         # run tests on server"
+	@echo "make e2e.{js}            # run e2e tests with client library"
 
 	@echo "\nHELPERS\n"
 	@echo "make clean            # remove all node_modules"
