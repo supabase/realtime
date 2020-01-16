@@ -18,7 +18,8 @@ defmodule Realtime.Application do
       username: System.get_env("DB_USER") || "postgres",
       database: System.get_env("DB_NAME") || "postgres",
       password: System.get_env("DB_PASSWORD") || "postgres",
-      port: port_number
+      port: port_number,
+      ssl: System.get_env("DB_SSL") || true
     }
 
     # List all child processes to be supervised
