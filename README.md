@@ -8,6 +8,11 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
 This repo is still under heavy development and the documentation is still evolving. You're welcome to try it, but expect some breaking changes.
 
+Watch "releases" of this repo to get notified when we are ready for public Beta.
+
+![Watch this repo](https://gitcdn.xyz/repo/supabase/monorepo/master/web/static/watch-repo.gif "Watch this repo")
+
+
 ## Docs 
 
 Docs are a work in progress. Start here: [https://supabase.io/docs/realtime/introduction]
