@@ -56,7 +56,7 @@ class Socket {
 
     const endPointSplit = endPoint.split("?")
     const url = endPointSplit[0]
-    const queryParams = endPointSplit[1]
+    const queryParams = endPointSplit.length <= 1 ? '' : endPointSplit[1]
 
     
     this.stateChangeCallbacks = {open: [], close: [], error: [], message: []}
@@ -78,7 +78,7 @@ class Socket {
     this.logger               = opts.logger || function(){} // noop
     this.longpollerTimeout    = opts.longpollerTimeout || 20000
     this.params               = opts.params || {}
-    this.endPoint             = `${url}/${TRANSPORTS.websocket}/?${queryParams}`
+    this.endPoint             = `${url}/${TRANSPORTS.websocket}?${queryParams}`
     this.heartbeatTimer       = null
     this.pendingHeartbeatRef  = null
     this.reconnectTimer       = new Timer(() => {

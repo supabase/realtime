@@ -1,25 +1,23 @@
 {
-  "name": "phoenix-channels",
+  "name": "realtime-js",
   "version": "1.0.0",
-  "description": "Phoenix Channels Client",
+  "description": "Listen to realtime updates to your PostgreSQL database",
+  "repository": "https://github.com/supabase/realtime",
   "main": "src/index.js",
   "scripts": {
+    "deploy": "npm version patch; npm publish --access=public",
     "mocha": "mocha ./test/**/*.js --compilers js:babel-register -r jsdom-global/register",
     "lint": "eslint ./src",
     "test": "npm run lint && npm run mocha"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+ssh://git@github.com/mcampa/phoenix-client.git"
-  },
-  "author": "Chris McCord <chris@chrismccord.com> (http://www.phoenixframework.org)",
+  "author": "Supabase",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/mcampa/phoenix-client/issues"
+    "url": "https://github.com/supabase/realtime/issues"
   },
-  "homepage": "https://github.com/mcampa/phoenix-client#readme",
+  "homepage": "https://supabase.io",
   "dependencies": {
-    "websocket": "^1.0.24"
+    "websocket": "^1.0.31"
   },
   "devDependencies": {
     "babel-preset-env": "^1.7.0",
