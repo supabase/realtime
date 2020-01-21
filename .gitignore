@@ -40,3 +40,4 @@ _build/
 deps/
 server/_build
 server/deps
+.DS_Store
