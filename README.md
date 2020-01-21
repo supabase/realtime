@@ -168,12 +168,12 @@ There are a some requirements for your database
 
 ### Server set up
 
-The easiest way to get started is just to use our docker image:
+The easiest way to get started is just to use our docker image. We will add more deployment methods soon.
 
 ```sh
-
-docker run supabase/realtime \
-  -e DB_HOST='localhost' \ 
+# Update the environment variables to point to your own database
+docker run \
+  -e DB_HOST='docker.for.mac.host.internal' \
   -e DB_NAME='postgres' \
   -e DB_USER='postgres' \
   -e DB_PASSWORD='postgres' \
@@ -181,7 +181,8 @@ docker run supabase/realtime \
   -e PORT=4000 \
   -e HOSTNAME='localhost' \
   -e SECRET_KEY_BASE='SOMETHING_SUPER_SECRET' \
-  -p 4000:4000
+  -p 4000:4000 \
+  supabase/realtime
 ```
 
 ## Contributing

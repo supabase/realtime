@@ -1,5 +1,5 @@
 {
-  "name": "with-dotenv",
+  "name": "supabase-realtime-example",
   "version": "1.0.0",
   "scripts": {
     "dev": "next",
@@ -7,9 +7,14 @@
     "start": "next start"
   },
   "dependencies": {
+    "@supabase/realtime-js": "^0.1.6",
+    "axios": "^0.19.1",
     "dotenv": "^8.2.0",
+    "faker": "^4.1.0",
+    "install": "^0.13.0",
     "next": "latest",
-    "phoenix-channels": "^1.0.0",
+    "npm": "^6.13.6",
+    "pg": "^7.17.1",
     "react": "^16.7.0",
     "react-dom": "^16.7.0"
   },
