@@ -65,6 +65,3 @@ CREATE FUNCTION public.broadcast_changes() RETURNS trigger
 
 -- Create the Replication publication 
 CREATE PUBLICATION supabase_realtime FOR ALL TABLES;
-
--- Create a NOTIFY example
-CREATE TRIGGER users_changed_trigger AFTER INSERT OR UPDATE ON public.users FOR EACH ROW EXECUTE PROCEDURE public.broadcast_changes();

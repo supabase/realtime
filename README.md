@@ -2,44 +2,186 @@
 
 Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
+- [Status](#status)
+- [Example](#example)
+- [Introduction](#introduction)
+    - [What is this?](#what-is-this)
+    - [Cool, but why not just use Postgres' `NOTIFY`?](#cool-but-why-not-just-use-postgres-notify)
+    - [What are the benefits?](#what-are-the-benefits)
+    - [What can I build with this?](#what-can-i-build-with-this)
+- [Quick start](#quick-start)
+- [Getting Started](#getting-started)
+  - [Client](#client)
+  - [Server](#server)
+  - [Database set up](#database-set-up)
+  - [Server set up](#server-set-up)
+- [Contributing](#contributing)
+- [License](#license)
+- [Credits](#credits)
+
 ## Status
 
-> Status: ALPHA
+- [x] Alpha: Under heavy development
+- [ ] Beta: Ready for use. But go easy on us, there may be a few kinks.
+- [ ] 1.0: Use in production!
 
-This repo is still under heavy development and the documentation is still evolving. You're welcome to try it, but expect some breaking changes.
-
-Watch "releases" of this repo to get notified when we are ready for public Beta.
+This repo is still under heavy development and the documentation is evolving. You're welcome to try it, but expect some breaking changes. Watch "releases" of this repo to receive a notifification when we are ready for Beta. And give us a star if you like it!
 
 ![Watch this repo](https://gitcdn.xyz/repo/supabase/monorepo/master/web/static/watch-repo.gif "Watch this repo")
 
-
-## Docs 
-
-Docs are a work in progress. Start here: [https://supabase.io/docs/realtime/introduction]
 
 ## Example
 
 ```js
 import { Socket } = '@supabase/realtime-js'
 
-var socket = new Socket(process.env.SOCKET_URL)
+var socket = new Socket(process.env.REALTIME_URL)
 socket.connect()
 
-// Listen to all changes in the database
-var allChanges = this.socket.channel('*')
+// Listen to only INSERTS on the 'users' table in the 'public' schema
+var allChanges = this.socket.channel('realtime:public:users')
   .join()
-  .on('*', payload => { console.log('Update received!', payload) })
+  .on('INSERT', payload => { console.log('Update received!', payload) })
 
 // Listen to all changes from the 'public' schema
-var allChanges = this.socket.channel('public')
+var allChanges = this.socket.channel('realtime:public')
   .join()
   .on('*', payload => { console.log('Update received!', payload) })
 
-// Listen to all changes from the 'users' table in the 'public' schema
-var allChanges = this.socket.channel('public:users')
+// Listen to all changes in the database
+let allChanges = this.socket.channel('realtime:*')
   .join()
   .on('*', payload => { console.log('Update received!', payload) })
 
+```
+
+## Introduction
+
+#### What is this?
+
+This is an Elixir server (Phoenix) that allows you to listen to changes in your database via websockets.
+
+It works like this:
+
+1. the Phoenix server listens to PostgreSQL's replication functionality (streaming WAL)
+2. it converts the byte stream into JSON
+3. it then broadcasts over websockets. 
+  
+#### Cool, but why not just use Postgres' `NOTIFY`?
+
+A few reasons:
+
+1. You don't have to set up triggers on every table
+2. NOTIFY has a payload limit of 8000 bytes and will fail for anything larger. The usual solution is to send and ID then fetch the record, but that's heavy on the database
+3. This server consumes one connection to the database, then you can connect many clients to this server. Easier on your database, and to scale up you just add realtime servers
+
+#### What are the benefits?
+
+1. The beauty of listening to the replication functionality is that you can make changes to your database from anywhere - your API, directly in the DB, via a console etc - and you will still receive the changes via websockets. 
+2. Decoupling. For example, if you want to send a new slack message every time someone makes a new purchase
+3. This is built with Phoenix, an [extremely scalable Elixir framework](https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections)
+
+#### What can I build with this?
+
+1. Chat applications
+2. Games
+3. Live dashboards
+4. Connectors - sending events to queues etc
+5. Streaming analytics
+
+## Quick start
+
+If you just want to start it up and see it in action: 
+
+1. Run `docker-compose up`
+2. Visit `http://localhost:3000`
+
+## Getting Started
+
+### Client
+
+Install the client library
+
+```sh
+npm install --save @supabase/realtime-js
+```
+
+Set up the socket
+
+```js
+import { Socket } = '@supabase/realtime-js'
+
+const REALTIME_URL = process.env.REALTIME_URL || 'http://localhost:4000'
+var socket = new Socket(REALTIME_URL) 
+socket.connect()
+```
+
+You can listen to these events on each table:
+
+```js
+const EVENTS = {
+  EVERYTHING: '*',
+  INSERT: 'INSERT',
+  UPDATE: 'UPDATE',
+  DELETE: 'DELETE'
+}
+```
+
+Example 1: Listen to all INSERTS, on your `users` table
+
+```js
+var allChanges = this.socket.channel('realtime:public:users')
+  .join()
+  .on(EVENTS.INSERT, payload => { console.log('Record inserted!', payload) })
+```
+
+Example 2: Listen to all UPDATES in the `public` schema
+
+```js
+var allChanges = this.socket.channel('realtime:public')
+  .join()
+  .on(EVENTS.UDPATE, payload => { console.log('Update received!', payload) })
+
+```
+
+Example 3: Listen to all INSERTS, UPDATES, and DELETES, in all schemas
+
+```js
+let allChanges = this.socket.channel('realtime:*')
+  .join()
+  .on(EVENTS.EVERYTHING, payload => { console.log('Update received!', payload) })
+```
+
+### Server
+
+### Database set up
+
+There are a some requirements for your database
+
+1. It must be Postgres (I have only tested on 9.6+)
+2. Set up your DB for replication
+   1. it must have the `wal_level` set to logical. You can check this by running `SHOW wal_level;`. To set the `wal_level`, you can call `ALTER SYSTEM SET wal_level = logical;`
+   2. You must set `max_replication_slots` to at least 1: `ALTER SYSTEM SET max_replication_slots = 5;`
+3. Create a `PUBLICATION` for this server to listen to: `CREATE PUBLICATION supabase_realtime FOR ALL TABLES;`
+4. [OPTIONAL] If you want to recieve the old record (previous values) on UDPATE and DELETE, you can set the `REPLICA IDENTITY` to `FULL` like this: `ALTER TABLE your_table SET REPLICA IDENTITY = FULL;`. This has to be set for each table unfortunately.
+
+
+### Server set up
+
+The easiest way to get started is just to use our docker image:
+
+```sh
+
+docker run supabase/realtime \
+  -e DB_HOST='localhost' \ 
+  -e DB_NAME='postgres' \
+  -e DB_USER='postgres' \
+  -e DB_PASSWORD='postgres' \
+  -e DB_PORT=5432 \
+  -e APP_PORT=4000 \
+  -e APP_HOSTNAME='localhost' \
+  -e SECRET_KEY_BASE='SOMETHING_SUPER_SECRET' \
+  -p 4000:4000
 ```
 
 ## Contributing
@@ -52,4 +194,4 @@ This repo is liscenced under Apache 2.0.
 
 ## Credits
 
-- [https://github.com/cainophile/cainophile](https://github.com/cainophile/cainophile) - A lot of this implementation leveraged the work already done on Canophile.
+- [https://github.com/cainophile/cainophile](https://github.com/cainophile/cainophile) - A lot of this implementation leveraged the work already done on Cainophile.
