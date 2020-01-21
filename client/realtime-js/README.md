@@ -1,32 +1,42 @@
 # Realtime Client
-A simple wrapper over [phoenix-channels](github.com/mcampa/phoenix-client). This allows you to pass absolute URLs with query parameters appended to it.
 
-This is a skin of a Node.js client. If you need a client for the browser use [phoenix](https://www.npmjs.com/package/phoenix)
+Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
 # Usage
-This uses the same API as the original [phoenix](https://www.npmjs.com/package/phoenix) except that it needs an absolute url
-```javascript
-const { Socket } = require('phoenix-channels')
 
-let socket = new Socket("ws://example.com/socket")
+This is for usage with Supabase Realtime server.
 
+Basic usage:
+
+```js
+import { Socket } = '@supabase/realtime-js'
+
+var socket = new Socket(process.env.REALTIME_URL)
 socket.connect()
 
-// Now that you are connected, you can join channels with a topic:
-let channel = socket.channel("room:lobby", {})
-channel.join()
-  .receive("ok", resp => { console.log("Joined successfully", resp) })
-  .receive("error", resp => { console.log("Unable to join", resp) })
+// Listen to only INSERTS on the 'users' table in the 'public' schema
+var allChanges = this.socket.channel('realtime:public:users')
+  .join()
+  .on('INSERT', payload => { console.log('Update received!', payload) })
+
+// Listen to all changes from the 'public' schema
+var allChanges = this.socket.channel('realtime:public')
+  .join()
+  .on('*', payload => { console.log('Update received!', payload) })
+
+// Listen to all changes in the database
+let allChanges = this.socket.channel('realtime:*')
+  .join()
+  .on('*', payload => { console.log('Update received!', payload) })
 ```
 
-`Presence` is also available
+See full instructions this repository: [Supabase Realtime](https://github.com/supabase/realtime).
 
-# Authors
-Node.js client was made by Mario Campa of [phoenix-channels](github.com/mcampa/phoenix-client).
+# Credits
 
-API was made by authors of the [Phoenix Framework](http://www.phoenixframework.org/)
-- see their website for complete list of authors.
+- Basic Node.js client was made by Mario Campa of [phoenix-channels](github.com/mcampa/phoenix-client).
+- API was made by authors of the [Phoenix Framework](http://www.phoenixframework.org/). See their website for complete list of authors.
 
 # License
 
-License is the same as [phoenix-channels](github.com/mcampa/phoenix-client) and [Phoenix Framework](http://www.phoenixframework.org/) (MIT).
+MIT. License is the same as [phoenix-channels](https://github.com/mcampa/phoenix-client) and [Phoenix Framework](https://phoenixframework.org/).
