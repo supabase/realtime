@@ -78,7 +78,7 @@ A few reasons:
 #### What are the benefits?
 
 1. The beauty of listening to the replication functionality is that you can make changes to your database from anywhere - your API, directly in the DB, via a console etc - and you will still receive the changes via websockets. 
-2. Decoupling. For example, if you want to send a new slack message every time someone makes a new purchase
+2. Decoupling. For example, if you want to send a new slack message every time someone makes a new purchase you might build that funcitonality directly into your API. This allows you to decouple your async functionality from your API.
 3. This is built with Phoenix, an [extremely scalable Elixir framework](https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections)
 
 #### What can I build with this?
