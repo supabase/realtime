@@ -53,11 +53,6 @@ class Socket {
   constructor(endPoint, opts = {}){
     // we would want to check if the provided endPoint comes along with any
     // query parameters
-
-    const endPointSplit = endPoint.split("?")
-    const url = endPointSplit[0]
-    const queryParams = endPointSplit.length <= 1 ? '' : endPointSplit[1]
-
     
     this.stateChangeCallbacks = {open: [], close: [], error: [], message: []}
     this.channels             = []
@@ -78,7 +73,7 @@ class Socket {
     this.logger               = opts.logger || function(){} // noop
     this.longpollerTimeout    = opts.longpollerTimeout || 20000
     this.params               = opts.params || {}
-    this.endPoint             = `${url}/${TRANSPORTS.websocket}?${queryParams}`
+    this.endPoint             = `${endPoint}/${TRANSPORTS.websocket}`
     this.heartbeatTimer       = null
     this.pendingHeartbeatRef  = null
     this.reconnectTimer       = new Timer(() => {

@@ -5,7 +5,7 @@ import sinon from "sinon"
 import {WebSocket, Server as WebSocketServer} from "mock-socket"
 import {w3cwebsocket as W3CWebSocket} from "websocket"
 
-import {Socket, LongPoll} from "../src"
+import {Socket} from "../src"
 
 let socket
 
@@ -88,6 +88,11 @@ describe("endpointURL", () => {
   it("returns endpoint with parameters", () => {
     socket = new Socket("ws://example.org/chat", { params: {foo: "bar"} })
     assert.equal(socket.endPointURL(), "ws://example.org/chat/websocket?foo=bar&vsn=1.0.0")
+  })
+
+  it("returns endpoint with apikey", () => {
+    socket = new Socket("ws://example.org/chat", { params: {apikey: "123456789"} })
+    assert.equal(socket.endPointURL(), 'ws://example.org/chat/websocket?apikey=123456789&vsn=1.0.0')
   })
 })
 

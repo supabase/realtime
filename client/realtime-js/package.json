@@ -6,7 +6,7 @@
   "main": "src/index.js",
   "scripts": {
     "deploy": "npm version patch; npm publish --access=public",
-    "mocha": "mocha ./test/**/*.js --compilers js:babel-register -r jsdom-global/register",
+    "mocha": "node -r esm node_modules/.bin/mocha ./test/**/*.js -r jsdom-global/register",
     "lint": "eslint ./src",
     "test": "npm run lint && npm run mocha"
   },
@@ -23,10 +23,11 @@
     "babel-preset-env": "^1.7.0",
     "babel-register": "^6.26.0",
     "eslint": "^6.8.0",
+    "esm": "^3.2.25",
     "jsdom": "9.8.3",
     "jsdom-global": "2.1.0",
     "mocha": "^7.0.0",
     "mock-socket": "^6.0.1",
-    "sinon": "^8.1.0"
+    "sinon": "^4.1.3"
   }
 }

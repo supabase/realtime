@@ -1,27 +1,27 @@
-import assert from "assert"
+import assert from 'assert'
 
-import jsdom from "jsdom"
-import sinon from "sinon"
-import {WebSocket, Server as WebSocketServer} from "mock-socket"
+import jsdom from 'jsdom'
+import sinon from 'sinon'
+import { WebSocket, Server as WebSocketServer } from 'mock-socket'
 
-import {Channel, Socket} from "../src"
+import { Channel, Socket } from '../src'
 
 let channel, socket
 
 const defaultRef = 1
 const defaultTimeout = 10000
 
-describe("constructor", () => {
+describe('constructor', () => {
   beforeEach(() => {
     socket = { timeout: 1234 }
   })
 
-  it("sets defaults", () => {
-    channel = new Channel("topic", { one: "two" }, socket)
+  it('sets defaults', () => {
+    channel = new Channel('topic', { one: 'two' }, socket)
 
-    assert.equal(channel.state, "closed")
-    assert.equal(channel.topic, "topic")
-    assert.deepEqual(channel.params, { one: "two" })
+    assert.equal(channel.state, 'closed')
+    assert.equal(channel.topic, 'topic')
+    assert.deepEqual(channel.params, { one: 'two' })
     assert.deepEqual(channel.socket, socket)
     assert.equal(channel.timeout, 1234)
     assert.equal(channel.joinedOnce, false)
@@ -29,31 +29,31 @@ describe("constructor", () => {
     assert.deepEqual(channel.pushBuffer, [])
   })
 
-  it("sets up joinPush object", () => {
-    channel = new Channel("topic", { one: "two" }, socket)
+  it('sets up joinPush object', () => {
+    channel = new Channel('topic', { one: 'two' }, socket)
     const joinPush = channel.joinPush
 
     assert.deepEqual(joinPush.channel, channel)
-    assert.deepEqual(joinPush.payload, { one: "two" })
-    assert.equal(joinPush.event, "phx_join")
+    assert.deepEqual(joinPush.payload, { one: 'two' })
+    assert.equal(joinPush.event, 'phx_join')
     assert.equal(joinPush.timeout, 1234)
   })
 })
 
-describe("join", () => {
+describe('join', () => {
   beforeEach(() => {
-    socket = new Socket("wss://example.com/socket", { timeout: defaultTimeout })
+    socket = new Socket('wss://example.com/socket', { timeout: defaultTimeout })
 
-    channel = socket.channel("topic", { one: "two" })
+    channel = socket.channel('topic', { one: 'two' })
   })
 
-  it("sets state to joining", () => {
+  it('sets state to joining', () => {
     channel.join()
 
-    assert.equal(channel.state, "joining")
+    assert.equal(channel.state, 'joining')
   })
 
-  it("sets joinedOnce to true", () => {
+  it('sets joinedOnce to true', () => {
     assert.ok(!channel.joinedOnce)
 
     channel.join()
@@ -61,28 +61,30 @@ describe("join", () => {
     assert.ok(channel.joinedOnce)
   })
 
-  it("throws if attempting to join multiple times", () => {
+  it('throws if attempting to join multiple times', () => {
     channel.join()
 
     assert.throws(() => channel.join(), /tried to join multiple times/)
   })
 
-  it("triggers socket push with channel params", () => {
-    sinon.stub(socket, "makeRef", () => defaultRef)
-    const spy = sinon.spy(socket, "push")
+  it('triggers socket push with channel params', () => {
+    sinon.stub(socket, 'makeRef').callsFake(() => defaultRef)
+    const spy = sinon.spy(socket, 'push')
 
     channel.join()
 
     assert.ok(spy.calledOnce)
-    assert.ok(spy.calledWith({
-      topic: "topic",
-      event: "phx_join",
-      payload: { one: "two" },
-      ref: defaultRef,
-    }))
+    assert.ok(
+      spy.calledWith({
+        topic: 'topic',
+        event: 'phx_join',
+        payload: { one: 'two' },
+        ref: defaultRef,
+      })
+    )
   })
 
-  it("can set timeout on joinPush", () => {
+  it('can set timeout on joinPush', () => {
     const newTimeout = 2000
     const joinPush = channel.joinPush
 
@@ -93,14 +95,14 @@ describe("join", () => {
     assert.equal(joinPush.timeout, newTimeout)
   })
 
-  describe("timeout behavior", () => {
+  describe('timeout behavior', () => {
     let clock, joinPush
 
     const helpers = {
       receiveSocketOpen() {
-        sinon.stub(socket, "isConnected", () => true)
+        sinon.stub(socket, 'isConnected', () => true)
         socket.onConnOpen()
-      }
+      },
     }
 
     beforeEach(() => {
@@ -113,8 +115,8 @@ describe("join", () => {
     })
 
     // TODO: fix
-    it.skip("succeeds before timeout", () => {
-      const spy = sinon.spy(socket, "push")
+    it.skip('succeeds before timeout', () => {
+      const spy = sinon.spy(socket, 'push')
       const timeout = joinPush.timeout
 
       socket.connect()
@@ -125,9 +127,9 @@ describe("join", () => {
 
       clock.tick(timeout / 2)
 
-      joinPush.trigger("ok", {})
+      joinPush.trigger('ok', {})
 
-      assert.equal(channel.state, "joined")
+      assert.equal(channel.state, 'joined')
 
       clock.tick(timeout)
       assert.equal(spy.callCount, 1)
@@ -135,13 +137,13 @@ describe("join", () => {
   })
 })
 
-describe("joinPush", () => {
+describe('joinPush', () => {
   let joinPush, clock, response
 
   const helpers = {
     receiveOk() {
       clock.tick(joinPush.timeout / 2) // before timeout
-      return joinPush.trigger("ok", response)
+      return joinPush.trigger('ok', response)
     },
 
     receiveTimeout() {
@@ -150,20 +152,20 @@ describe("joinPush", () => {
 
     receiveError() {
       clock.tick(joinPush.timeout / 2) // before timeout
-      return joinPush.trigger("error", response)
+      return joinPush.trigger('error', response)
     },
 
     getBindings(event) {
-      return channel.bindings.filter(bind => bind.event === event )
-    }
+      return channel.bindings.filter(bind => bind.event === event)
+    },
   }
 
   beforeEach(() => {
     clock = sinon.useFakeTimers()
 
-    socket = new Socket("/socket", { timeout: defaultTimeout })
+    socket = new Socket('/socket', { timeout: defaultTimeout })
 
-    channel = socket.channel("topic", { one: "two" })
+    channel = socket.channel('topic', { one: 'two' })
     joinPush = channel.joinPush
 
     channel.join()
@@ -175,21 +177,21 @@ describe("joinPush", () => {
 
   describe("receives 'ok'", () => {
     beforeEach(() => {
-      response = { chan: "reply" }
+      response = { chan: 'reply' }
     })
 
-    it("sets channel state to joined", () => {
-      assert.notEqual(channel.state, "joined")
+    it('sets channel state to joined', () => {
+      assert.notEqual(channel.state, 'joined')
 
       helpers.receiveOk()
 
-      assert.equal(channel.state, "joined")
+      assert.equal(channel.state, 'joined')
     })
 
     it("triggers receive('ok') callback after ok response", () => {
       const spyOk = sinon.spy()
 
-      joinPush.receive("ok", spyOk)
+      joinPush.receive('ok', spyOk)
 
       helpers.receiveOk()
 
@@ -201,18 +203,16 @@ describe("joinPush", () => {
 
       helpers.receiveOk()
 
-      joinPush.receive("ok", spyOk)
+      joinPush.receive('ok', spyOk)
 
       assert.ok(spyOk.calledOnce)
     })
 
-    it("does not trigger other receive callbacks after ok response", () => {
+    it('does not trigger other receive callbacks after ok response', () => {
       const spyError = sinon.spy()
       const spyTimeout = sinon.spy()
 
-      joinPush
-        .receive("error", spyError)
-        .receive("timeout", spyTimeout)
+      joinPush.receive('error', spyError).receive('timeout', spyTimeout)
 
       helpers.receiveOk()
       clock.tick(channel.timeout * 2) // attempt timeout
@@ -221,7 +221,7 @@ describe("joinPush", () => {
       assert.ok(!spyTimeout.called)
     })
 
-    it("clears timeoutTimer", () => {
+    it('clears timeoutTimer', () => {
       assert.ok(joinPush.timeoutTimer)
 
       helpers.receiveOk()
@@ -229,34 +229,34 @@ describe("joinPush", () => {
       assert.equal(joinPush.timeoutTimer, null)
     })
 
-    it("sets receivedResp", () => {
+    it('sets receivedResp', () => {
       assert.equal(joinPush.receivedResp, null)
 
       helpers.receiveOk()
 
-      assert.deepEqual(joinPush.receivedResp, { status: "ok", response })
+      assert.deepEqual(joinPush.receivedResp, { status: 'ok', response })
     })
 
-    it("removes channel bindings", () => {
-      let bindings = helpers.getBindings("chan_reply_1")
+    it('removes channel bindings', () => {
+      let bindings = helpers.getBindings('chan_reply_1')
       assert.equal(bindings.length, 1)
 
       helpers.receiveOk()
 
-      bindings = helpers.getBindings("chan_reply_1")
+      bindings = helpers.getBindings('chan_reply_1')
       assert.equal(bindings.length, 0)
     })
 
-    it("sets channel state to joined", () => {
+    it('sets channel state to joined', () => {
       helpers.receiveOk()
 
-      assert.equal(channel.state, "joined")
+      assert.equal(channel.state, 'joined')
     })
 
-    it("resets channel rejoinTimer", () => {
+    it('resets channel rejoinTimer', () => {
       assert.ok(channel.rejoinTimer)
 
-      const spy = sinon.spy(channel.rejoinTimer, "reset")
+      const spy = sinon.spy(channel.rejoinTimer, 'reset')
 
       helpers.receiveOk()
 
@@ -265,7 +265,7 @@ describe("joinPush", () => {
 
     it("sends and empties channel's buffered pushEvents", () => {
       const pushEvent = { send() {} }
-      const spy = sinon.spy(pushEvent, "send")
+      const spy = sinon.spy(pushEvent, 'send')
 
       channel.pushBuffer.push(pushEvent)
 
@@ -277,16 +277,16 @@ describe("joinPush", () => {
   })
 
   describe("receives 'timeout'", () => {
-    it("sets channel state to errored", () => {
+    it('sets channel state to errored', () => {
       helpers.receiveTimeout()
 
-      assert.equal(channel.state, "errored")
+      assert.equal(channel.state, 'errored')
     })
 
     it("triggers receive('timeout') callback after ok response", () => {
       const spyTimeout = sinon.spy()
 
-      joinPush.receive("timeout", spyTimeout)
+      joinPush.receive('timeout', spyTimeout)
 
       helpers.receiveTimeout()
 
@@ -298,18 +298,16 @@ describe("joinPush", () => {
 
       helpers.receiveTimeout()
 
-      joinPush.receive("timeout", spyTimeout)
+      joinPush.receive('timeout', spyTimeout)
 
       assert.ok(spyTimeout.calledOnce)
     })
 
-    it("does not trigger other receive callbacks after timeout response", () => {
+    it('does not trigger other receive callbacks after timeout response', () => {
       const spyOk = sinon.spy()
       const spyError = sinon.spy()
 
-      joinPush
-        .receive("ok", spyOk)
-        .receive("error", spyError)
+      joinPush.receive('ok', spyOk).receive('error', spyError)
 
       helpers.receiveTimeout()
       helpers.receiveOk()
@@ -318,18 +316,18 @@ describe("joinPush", () => {
       assert.ok(!spyError.called)
     })
 
-    it("schedules rejoinTimer timeout", () => {
+    it('schedules rejoinTimer timeout', () => {
       assert.ok(channel.rejoinTimer)
 
-      const spy = sinon.spy(channel.rejoinTimer, "scheduleTimeout")
+      const spy = sinon.spy(channel.rejoinTimer, 'scheduleTimeout')
 
       helpers.receiveTimeout()
 
       assert.ok(spy.called) // TODO why called multiple times?
     })
 
-    it("cannot send after timeout", () => {
-      const spy = sinon.spy(socket, "push")
+    it('cannot send after timeout', () => {
+      const spy = sinon.spy(socket, 'push')
 
       helpers.receiveTimeout()
 
@@ -338,24 +336,24 @@ describe("joinPush", () => {
       assert.ok(!spy.called)
     })
 
-    it("sets receivedResp", () => {
+    it('sets receivedResp', () => {
       assert.equal(joinPush.receivedResp, null)
 
       helpers.receiveTimeout()
 
-      assert.deepEqual(joinPush.receivedResp, { status: "timeout", response: {} })
+      assert.deepEqual(joinPush.receivedResp, { status: 'timeout', response: {} })
     })
   })
 
   describe("receives 'error'", () => {
     beforeEach(() => {
-      response = { chan: "fail" }
+      response = { chan: 'fail' }
     })
 
     it("triggers receive('error') callback after error response", () => {
       const spyError = sinon.spy()
 
-      joinPush.receive("error", spyError)
+      joinPush.receive('error', spyError)
 
       helpers.receiveError()
 
@@ -367,18 +365,16 @@ describe("joinPush", () => {
 
       helpers.receiveError()
 
-      joinPush.receive("error", spyError)
+      joinPush.receive('error', spyError)
 
       assert.ok(spyError.calledOnce)
     })
 
-    it("does not trigger other receive callbacks after ok response", () => {
+    it('does not trigger other receive callbacks after ok response', () => {
       const spyOk = sinon.spy()
       const spyTimeout = sinon.spy()
 
-      joinPush
-        .receive("ok", spyOk)
-        .receive("timeout", spyTimeout)
+      joinPush.receive('ok', spyOk).receive('timeout', spyTimeout)
 
       helpers.receiveError()
       clock.tick(channel.timeout * 2) // attempt timeout
@@ -387,7 +383,7 @@ describe("joinPush", () => {
       assert.ok(!spyTimeout.called)
     })
 
-    it("clears timeoutTimer", () => {
+    it('clears timeoutTimer', () => {
       assert.ok(joinPush.timeoutTimer)
 
       helpers.receiveError()
@@ -395,33 +391,33 @@ describe("joinPush", () => {
       assert.equal(joinPush.timeoutTimer, null)
     })
 
-    it("sets receivedResp", () => {
+    it('sets receivedResp', () => {
       assert.equal(joinPush.receivedResp, null)
 
       helpers.receiveError()
 
-      assert.deepEqual(joinPush.receivedResp, { status: "error", response })
+      assert.deepEqual(joinPush.receivedResp, { status: 'error', response })
     })
 
-    it("removes channel bindings", () => {
-      let bindings = helpers.getBindings("chan_reply_1")
+    it('removes channel bindings', () => {
+      let bindings = helpers.getBindings('chan_reply_1')
       assert.equal(bindings.length, 1)
 
       helpers.receiveError()
 
-      bindings = helpers.getBindings("chan_reply_1")
+      bindings = helpers.getBindings('chan_reply_1')
       assert.equal(bindings.length, 0)
     })
 
-    it("does not set channel state to joined", () => {
+    it('does not set channel state to joined', () => {
       helpers.receiveError()
 
-      assert.equal(channel.state, "joining")
+      assert.equal(channel.state, 'joining')
     })
 
     it("does not trigger channel's buffered pushEvents", () => {
       const pushEvent = { send: () => {} }
-      const spy = sinon.spy(pushEvent, "send")
+      const spy = sinon.spy(pushEvent, 'send')
 
       channel.pushBuffer.push(pushEvent)
 
@@ -433,17 +429,17 @@ describe("joinPush", () => {
   })
 })
 
-describe("onError", () => {
+describe('onError', () => {
   let clock, joinPush
 
   beforeEach(() => {
     clock = sinon.useFakeTimers()
 
-    socket = new Socket("/socket", { timeout: defaultTimeout })
-    sinon.stub(socket, "isConnected", () => true)
-    sinon.stub(socket, "push", () => true)
+    socket = new Socket('/socket', { timeout: defaultTimeout })
+    sinon.stub(socket, 'isConnected').callsFake(() => true)
+    sinon.stub(socket, 'push').callsFake(() => true)
 
-    channel = socket.channel("topic", { one: "two" })
+    channel = socket.channel('topic', { one: 'two' })
 
     joinPush = channel.joinPush
 
@@ -455,19 +451,19 @@ describe("onError", () => {
   })
 
   it("sets state to 'errored'", () => {
-    assert.notEqual(channel.state, "errored")
+    assert.notEqual(channel.state, 'errored')
 
-    channel.trigger("phx_error")
+    channel.trigger('phx_error')
 
-    assert.equal(channel.state, "errored")
+    assert.equal(channel.state, 'errored')
   })
 
-  it("tries to rejoin with backoff", () => {
-    const spy = sinon.stub(joinPush, "send")
+  it('tries to rejoin with backoff', () => {
+    const spy = sinon.stub(joinPush, 'send')
 
     assert.equal(spy.callCount, 0)
 
-    channel.trigger("phx_error")
+    channel.trigger('phx_error')
 
     clock.tick(1000)
     assert.equal(spy.callCount, 1)
@@ -482,28 +478,12 @@ describe("onError", () => {
     assert.equal(spy.callCount, 4)
   })
 
-  it("does not rejoin if channel leaving", () => {
-    channel.state = "leaving"
+  it('does not rejoin if channel leaving', () => {
+    channel.state = 'leaving'
 
-    const spy = sinon.stub(joinPush, "send")
+    const spy = sinon.stub(joinPush, 'send')
 
-    channel.trigger("phx_error")
-
-    clock.tick(1000)
-    assert.equal(spy.callCount, 0)
-
-    clock.tick(2000)
-    assert.equal(spy.callCount, 0)
-
-    assert.equal(channel.state, "leaving")
-  })
-
-  it("does not rejoin if channel closed", () => {
-    channel.state = "closed"
-
-    const spy = sinon.stub(joinPush, "send")
-
-    channel.trigger("phx_error")
+    channel.trigger('phx_error')
 
     clock.tick(1000)
     assert.equal(spy.callCount, 0)
@@ -511,32 +491,48 @@ describe("onError", () => {
     clock.tick(2000)
     assert.equal(spy.callCount, 0)
 
-    assert.equal(channel.state, "closed")
+    assert.equal(channel.state, 'leaving')
   })
 
-  it("triggers additional callbacks", () => {
+  it('does not rejoin if channel closed', () => {
+    channel.state = 'closed'
+
+    const spy = sinon.stub(joinPush, 'send')
+
+    channel.trigger('phx_error')
+
+    clock.tick(1000)
+    assert.equal(spy.callCount, 0)
+
+    clock.tick(2000)
+    assert.equal(spy.callCount, 0)
+
+    assert.equal(channel.state, 'closed')
+  })
+
+  it('triggers additional callbacks', () => {
     const spy = sinon.spy()
     channel.onError(spy)
 
     assert.equal(spy.callCount, 0)
 
-    channel.trigger("phx_error")
+    channel.trigger('phx_error')
 
     assert.equal(spy.callCount, 1)
   })
 })
 
-describe("onClose", () => {
+describe('onClose', () => {
   let clock, joinPush
 
   beforeEach(() => {
     clock = sinon.useFakeTimers()
 
-    socket = new Socket("/socket", { timeout: defaultTimeout })
-    sinon.stub(socket, "isConnected", () => true)
-    sinon.stub(socket, "push", () => true)
+    socket = new Socket('/socket', { timeout: defaultTimeout })
+    sinon.stub(socket, 'isConnected').callsFake(() => true)
+    sinon.stub(socket, 'push').callsFake(() => true)
 
-    channel = socket.channel("topic", { one: "two" })
+    channel = socket.channel('topic', { one: 'two' })
 
     joinPush = channel.joinPush
 
@@ -548,17 +544,17 @@ describe("onClose", () => {
   })
 
   it("sets state to 'closed'", () => {
-    assert.notEqual(channel.state, "closed")
+    assert.notEqual(channel.state, 'closed')
 
-    channel.trigger("phx_close")
+    channel.trigger('phx_close')
 
-    assert.equal(channel.state, "closed")
+    assert.equal(channel.state, 'closed')
   })
 
-  it("does not rejoin", () => {
-    const spy = sinon.stub(joinPush, "send")
+  it('does not rejoin', () => {
+    const spy = sinon.stub(joinPush, 'send')
 
-    channel.trigger("phx_close")
+    channel.trigger('phx_close')
 
     clock.tick(1000)
     assert.equal(spy.callCount, 0)
@@ -567,134 +563,134 @@ describe("onClose", () => {
     assert.equal(spy.callCount, 0)
   })
 
-  it("triggers additional callbacks", () => {
+  it('triggers additional callbacks', () => {
     const spy = sinon.spy()
     channel.onClose(spy)
 
     assert.equal(spy.callCount, 0)
 
-    channel.trigger("phx_close")
+    channel.trigger('phx_close')
 
     assert.equal(spy.callCount, 1)
   })
 
-  it("removes channel from socket", () => {
+  it('removes channel from socket', () => {
     assert.equal(socket.channels.length, 1)
     assert.deepEqual(socket.channels[0], channel)
 
-    channel.trigger("phx_close")
+    channel.trigger('phx_close')
 
     assert.equal(socket.channels.length, 0)
   })
 })
 
-describe("onMessage", () => {
+describe('onMessage', () => {
   beforeEach(() => {
-    socket = new Socket("/socket")
+    socket = new Socket('/socket')
 
-    channel = socket.channel("topic", { one: "two" })
+    channel = socket.channel('topic', { one: 'two' })
   })
 
-  it("returns payload by default", () => {
-    sinon.stub(socket, "makeRef", () => defaultRef)
-    const payload = channel.onMessage("event", { one: "two" }, defaultRef)
+  it('returns payload by default', () => {
+    sinon.stub(socket, 'makeRef').callsFake(() => defaultRef)
+    const payload = channel.onMessage('event', { one: 'two' }, defaultRef)
 
-    assert.deepEqual(payload, { one: "two" })
+    assert.deepEqual(payload, { one: 'two' })
   })
 })
 
-describe("canPush", () => {
+describe('canPush', () => {
   beforeEach(() => {
-    socket = new Socket("/socket")
+    socket = new Socket('/socket')
 
-    channel = socket.channel("topic", { one: "two" })
+    channel = socket.channel('topic', { one: 'two' })
   })
 
-  it("returns true when socket connected and channel joined", () => {
-    sinon.stub(socket, "isConnected").returns(true)
-    channel.state = "joined"
+  it('returns true when socket connected and channel joined', () => {
+    sinon.stub(socket, 'isConnected').returns(true)
+    channel.state = 'joined'
 
     assert.ok(channel.canPush())
   })
 
-  it("otherwise returns false", () => {
-    const isConnectedStub = sinon.stub(socket, "isConnected")
+  it('otherwise returns false', () => {
+    const isConnectedStub = sinon.stub(socket, 'isConnected')
 
     isConnectedStub.returns(false)
-    channel.state = "joined"
+    channel.state = 'joined'
 
     assert.ok(!channel.canPush())
 
     isConnectedStub.returns(true)
-    channel.state = "joining"
+    channel.state = 'joining'
 
     assert.ok(!channel.canPush())
 
     isConnectedStub.returns(false)
-    channel.state = "joining"
+    channel.state = 'joining'
 
     assert.ok(!channel.canPush())
   })
 })
 
-describe("on", () => {
+describe('on', () => {
   beforeEach(() => {
-    socket = new Socket("/socket")
-    sinon.stub(socket, "makeRef", () => defaultRef)
+    socket = new Socket('/socket')
+    sinon.stub(socket, 'makeRef').callsFake(() => defaultRef)
 
-    channel = socket.channel("topic", { one: "two" })
+    channel = socket.channel('topic', { one: 'two' })
   })
 
-  it("sets up callback for event", () => {
+  it('sets up callback for event', () => {
     const spy = sinon.spy()
 
-    channel.trigger("event", {}, defaultRef)
+    channel.trigger('event', {}, defaultRef)
     assert.ok(!spy.called)
 
-    channel.on("event", spy)
+    channel.on('event', spy)
 
-    channel.trigger("event", {}, defaultRef)
+    channel.trigger('event', {}, defaultRef)
 
     assert.ok(spy.called)
   })
 
-  it("other event callbacks are ignored", () => {
+  it('other event callbacks are ignored', () => {
     const spy = sinon.spy()
     const ignoredSpy = sinon.spy()
 
-    channel.trigger("event", {}, defaultRef)
+    channel.trigger('event', {}, defaultRef)
 
     assert.ok(!ignoredSpy.called)
 
-    channel.on("event", spy)
+    channel.on('event', spy)
 
-    channel.trigger("event", {}, defaultRef)
+    channel.trigger('event', {}, defaultRef)
 
     assert.ok(!ignoredSpy.called)
   })
 })
 
-describe("off", () => {
+describe('off', () => {
   beforeEach(() => {
-    socket = new Socket("/socket")
-    sinon.stub(socket, "makeRef", () => defaultRef)
+    socket = new Socket('/socket')
+    sinon.stub(socket, 'makeRef').callsFake(() => defaultRef)
 
-    channel = socket.channel("topic", { one: "two" })
+    channel = socket.channel('topic', { one: 'two' })
   })
 
-  it("removes all callbacks for event", () => {
+  it('removes all callbacks for event', () => {
     const spy1 = sinon.spy()
     const spy2 = sinon.spy()
     const spy3 = sinon.spy()
 
-    channel.on("event", spy1)
-    channel.on("event", spy2)
-    channel.on("other", spy3)
+    channel.on('event', spy1)
+    channel.on('event', spy2)
+    channel.on('other', spy3)
 
-    channel.off("event")
+    channel.off('event')
 
-    channel.trigger("event", {}, defaultRef)
-    channel.trigger("other", {}, defaultRef)
+    channel.trigger('event', {}, defaultRef)
+    channel.trigger('other', {}, defaultRef)
 
     assert.ok(!spy1.called)
     assert.ok(!spy2.called)
@@ -702,69 +698,68 @@ describe("off", () => {
   })
 })
 
-describe("push", () => {
+describe('push', () => {
   let clock, joinPush
   let socketSpy
 
   const pushParams = {
-    topic: "topic",
-    event: "event",
-    payload: { foo: "bar" },
+    topic: 'topic',
+    event: 'event',
+    payload: { foo: 'bar' },
     ref: defaultRef,
   }
 
   beforeEach(() => {
     clock = sinon.useFakeTimers()
 
-    socket = new Socket("/socket", { timeout: defaultTimeout })
-    sinon.stub(socket, "makeRef", () => defaultRef)
-    sinon.stub(socket, "isConnected", () => true)
-    socketSpy = sinon.stub(socket, "push")
+    socket = new Socket('/socket', { timeout: defaultTimeout })
+    sinon.stub(socket, 'makeRef').callsFake(() => defaultRef)
+    sinon.stub(socket, 'isConnected').callsFake(() => true)
+    socketSpy = sinon.stub(socket, 'push')
 
-    channel = socket.channel("topic", { one: "two" })
+    channel = socket.channel('topic', { one: 'two' })
   })
 
   afterEach(() => {
     clock.restore()
   })
 
-  it("sends push event when successfully joined", () => {
-    channel.join().trigger("ok", {})
-    channel.push("event", { foo: "bar" })
+  it('sends push event when successfully joined', () => {
+    channel.join().trigger('ok', {})
+    channel.push('event', { foo: 'bar' })
 
     assert.ok(socketSpy.calledWith(pushParams))
   })
 
-  it("enqueues push event to be sent once join has succeeded", () => {
+  it('enqueues push event to be sent once join has succeeded', () => {
     joinPush = channel.join()
-    channel.push("event", { foo: "bar" })
+    channel.push('event', { foo: 'bar' })
 
     assert.ok(!socketSpy.calledWith(pushParams))
 
     clock.tick(channel.timeout / 2)
-    joinPush.trigger("ok", {})
+    joinPush.trigger('ok', {})
 
     assert.ok(socketSpy.calledWith(pushParams))
   })
 
-  it("does not push if channel join times out", () => {
+  it('does not push if channel join times out', () => {
     joinPush = channel.join()
-    channel.push("event", { foo: "bar" })
+    channel.push('event', { foo: 'bar' })
 
     assert.ok(!socketSpy.calledWith(pushParams))
 
     clock.tick(channel.timeout * 2)
-    joinPush.trigger("ok", {})
+    joinPush.trigger('ok', {})
 
     assert.ok(!socketSpy.calledWith(pushParams))
   })
 
-  it("uses channel timeout by default", () => {
+  it('uses channel timeout by default', () => {
     const timeoutSpy = sinon.spy()
-    channel.join().trigger("ok", {})
+    channel.join().trigger('ok', {})
 
-    channel.push("event", { foo: "bar" })
-      .receive("timeout", timeoutSpy)
+    channel.push('event', { foo: 'bar' }).receive('timeout', timeoutSpy)
 
     clock.tick(channel.timeout / 2)
     assert.ok(!timeoutSpy.called)
@@ -773,12 +768,11 @@ describe("push", () => {
     assert.ok(timeoutSpy.called)
   })
 
-  it("accepts timeout arg", () => {
+  it('accepts timeout arg', () => {
     const timeoutSpy = sinon.spy()
-    channel.join().trigger("ok", {})
+    channel.join().trigger('ok', {})
 
-    channel.push("event", { foo: "bar" }, channel.timeout * 2)
-      .receive("timeout", timeoutSpy)
+    channel.push('event', { foo: 'bar' }, channel.timeout * 2).receive('timeout', timeoutSpy)
 
     clock.tick(channel.timeout)
     assert.ok(!timeoutSpy.called)
@@ -788,85 +782,87 @@ describe("push", () => {
   })
 
   it("does not time out after receiving 'ok'", () => {
-    channel.join().trigger("ok", {})
+    channel.join().trigger('ok', {})
     const timeoutSpy = sinon.spy()
-    const push = channel.push("event", { foo: "bar" })
-    push.receive("timeout", timeoutSpy)
+    const push = channel.push('event', { foo: 'bar' })
+    push.receive('timeout', timeoutSpy)
 
     clock.tick(push.timeout / 2)
     assert.ok(!timeoutSpy.called)
 
-    push.trigger("ok", {})
+    push.trigger('ok', {})
 
     clock.tick(push.timeout)
     assert.ok(!timeoutSpy.called)
   })
 
-  it("throws if channel has not been joined", () => {
-    assert.throws(() => channel.push("event", {}), /tried to push.*before joining/)
+  it('throws if channel has not been joined', () => {
+    assert.throws(() => channel.push('event', {}), /tried to push.*before joining/)
   })
 })
 
-describe("leave", () => {
+describe('leave', () => {
   let clock, joinPush
   let socketSpy
 
   beforeEach(() => {
     clock = sinon.useFakeTimers()
 
-    socket = new Socket("/socket", { timeout: defaultTimeout })
-    sinon.stub(socket, "isConnected", () => true)
-    socketSpy = sinon.stub(socket, "push")
+    socket = new Socket('/socket', { timeout: defaultTimeout })
+    sinon.stub(socket, 'isConnected').callsFake(() => true)
+    socketSpy = sinon.stub(socket, 'push')
 
-    channel = socket.channel("topic", { one: "two" })
-    channel.join().trigger("ok", {})
+    channel = socket.channel('topic', { one: 'two' })
+    channel.join().trigger('ok', {})
   })
 
   afterEach(() => {
     clock.restore()
   })
 
-  it("unsubscribes from server events", () => {
-    sinon.stub(socket, "makeRef", () => defaultRef)
+  it('unsubscribes from server events', () => {
+    sinon.stub(socket, 'makeRef').callsFake(() => defaultRef)
 
     channel.leave()
 
-    assert.ok(socketSpy.calledWith({
-      topic: "topic",
-      event: "phx_leave",
-      payload: {},
-      ref: defaultRef
-    }))
+    assert.ok(
+      socketSpy.calledWith({
+        topic: 'topic',
+        event: 'phx_leave',
+        payload: {},
+        ref: defaultRef,
+      })
+    )
   })
 
   it("closes channel on 'ok' from server", () => {
-    const anotherChannel = socket.channel("another", { three: "four" })
+    const anotherChannel = socket.channel('another', { three: 'four' })
     assert.equal(socket.channels.length, 2)
 
-    channel.leave().trigger("ok", {})
+    channel.leave().trigger('ok', {})
 
     assert.equal(socket.channels.length, 1)
     assert.deepEqual(socket.channels[0], anotherChannel)
   })
 
   it("sets state to closed on 'ok' event", () => {
-    assert.notEqual(channel.state, "closed")
+    assert.notEqual(channel.state, 'closed')
 
-    channel.leave().trigger("ok", {})
+    channel.leave().trigger('ok', {})
 
-    assert.equal(channel.state, "closed")
+    assert.equal(channel.state, 'closed')
   })
 
   // TODO - the following tests are skipped until Channel.leave
   // behavior can be fixed; currently, 'ok' is triggered immediately
   // within Channel.leave so timeout callbacks are never reached
   //
-  it.skip("sets state to leaving initially", () => {
-    assert.notEqual(channel.state, "leaving")
+  it.skip('sets state to leaving initially', () => {
+    assert.notEqual(channel.state, 'leaving')
 
     channel.leave()
 
-    assert.equal(channel.state, "leaving")
+    assert.equal(channel.state, 'leaving')
   })
 
   it.skip("closes channel on 'timeout'", () => {
@@ -874,18 +870,18 @@ describe("leave", () => {
 
     clock.tick(channel.timeout)
 
-    assert.equal(channel.state, "closed")
+    assert.equal(channel.state, 'closed')
   })
 
-  it.skip("accepts timeout arg", () => {
+  it.skip('accepts timeout arg', () => {
     channel.leave(channel.timeout * 2)
 
     clock.tick(channel.timeout)
 
-    assert.equal(channel.state, "leaving")
+    assert.equal(channel.state, 'leaving')
 
     clock.tick(channel.timeout * 2)
 
-    assert.equal(channel.state, "closed")
+    assert.equal(channel.state, 'closed')
   })
 })
