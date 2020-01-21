@@ -178,8 +178,8 @@ docker run supabase/realtime \
   -e DB_USER='postgres' \
   -e DB_PASSWORD='postgres' \
   -e DB_PORT=5432 \
-  -e APP_PORT=4000 \
-  -e APP_HOSTNAME='localhost' \
+  -e PORT=4000 \
+  -e HOSTNAME='localhost' \
   -e SECRET_KEY_BASE='SOMETHING_SUPER_SECRET' \
   -p 4000:4000
 ```
