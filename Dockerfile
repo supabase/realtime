@@ -11,8 +11,8 @@ ENV MIX_ENV=prod \
     DB_PASSWORD=postgres \
     DB_PORT=5432 \
     MIX_ENV=prod \
-    APP_PORT=4000 \
-    APP_HOSTNAME=localhost \
+    PORT=4000 \
+    HOSTNAME=localhost \
     SECRET_KEY_BASE=SOMETHING_SUPER_SECRET
 
 RUN apt-get update
