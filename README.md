@@ -2,9 +2,14 @@
 
 Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
-![Demo](./examples/next-js/demo.gif "Demo")
 
+<div style="text-align:center;">
+<img src="./examples/next-js/demo.gif" style="border: 1px solid #484848;" alt="Demo"/>
+</div>
 
+---
+
+**Contents**
 - [Status](#status)
 - [Example](#example)
 - [Introduction](#introduction)
