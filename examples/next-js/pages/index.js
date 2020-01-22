@@ -34,10 +34,14 @@ export default class Index extends React.Component {
     this.channelList.push(channel)
   }
   messageReceived(channel, msg) {
-    console.log('channel', channel)
-    console.log('msg', msg)
     let received = [...this.state.received, { channel, msg }]
     this.setState({ received })
+    if (channel === 'realtime:public:users') {
+      this.setState({ users: [...this.state.users, msg.record] })
+    }
+    if (channel === 'realtime:public:todos') {
+      this.setState({ todos: [...this.state.todos, msg.record] })
+    }
   }
   async fetchData() {
     try {
@@ -50,12 +54,9 @@ export default class Index extends React.Component {
   }
   async insertUser() {
     let { data: user } = await axios.post('/api/new-user', {})
-    this.setState({ users: [...this.state.users, user]})
   }
   async insertTodo() {
     let { data: todo } = await axios.post('/api/new-todo', {})
-    console.log('todo', todo)
-    this.setState({ todos: [...this.state.todos, todo]})
   }
   render() {
     return (
