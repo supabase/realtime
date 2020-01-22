@@ -2,7 +2,7 @@
 
 Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
-<p align="center"><kbd><img src="./examples/next-js/demo.gif" alt="Demo"/><kbd></p>
+<p align="center"><kbd><img src="./examples/next-js/demo.gif" alt="Demo"/></kbd></p>
 
 
 **Contents**
