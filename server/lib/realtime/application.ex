@@ -11,7 +11,7 @@ defmodule Realtime.Application do
     # Hostname must be a char list for some reason
     # Use this var to convert to sigil at connection
     host = System.get_env("DB_HOST") || 'localhost'
-    port = System.get_env("DB_PORT") || "5432"
+    port = System.get_env("DB_PORT") || 5432
     {port_number, _} = :string.to_integer(to_charlist(port))
     epgsql_params = %{
       host: ~c(#{host}),
