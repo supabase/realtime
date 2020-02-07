@@ -200,23 +200,45 @@ defmodule Realtime.Replication do
   Send events via Phoenix Channels
   """
   defp notify_subscribers(%State{transaction: {_current_txn_lsn, txn}}) do
-    # Logger.info("REALTIME: " <> inspect(txn, pretty: true))
-    # RealtimeWeb.RealtimeChannel.handle_realtime_transaction(txn)
-    # RealtimeWeb.Endpoint.broadcast_from!(self(), "realtime", "*", txn)
+    # For every change in the txn.changes, we want to broadcast it specific listeners
+    # Example Change: 
+    # %Realtime.Adapters.Changes.UpdatedRecord{
+    #   columns: [
+    #     %Realtime.Decoder.Messages.Relation.Column{ flags: [:key], name: "id", type: "int8", type_modifier: 4294967295 },
+    #     %Realtime.Decoder.Messages.Relation.Column{ flags: [], name: "name", type: "text", type_modifier: 4294967295 }
+    #   ],
+    #   commit_timestamp: nil,
+    #   old_record: %{},
+    #   record: %{"id" => "2", "name" => "Jane Doe2"},
+    #   schema: "public",
+    #   table: "users",
+    #   type: "UPDATE"
+    # }
+    for raw_change <- txn.changes do
 
-    # For every change in the transaction, we want to broadcast it specific listeners
-    for change <- txn.changes do
-      namespace = "realtime:" <> change.schema
-      topic = "realtime:" <> change.schema <> ":" <> change.table
-      # Logger.debug('topic #{inspect(topic)}')
+      change = Map.put(raw_change, :commit_timestamp, txn.commit_timestamp)
       # Logger.info inspect(change, pretty: true)
 
-      # # Shout to anyone listening on the open realtime channel - e.g. "realtime:*"
-      RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", Map.put(change, :commit_timestamp, txn.commit_timestamp))
-      # # Shout to specific schema - e.g. "realtime:public"
-      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(namespace, Map.put(change, :commit_timestamp, txn.commit_timestamp))
-      # # Shout to specific topic - e.g. "realtime:public:users"
-      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(topic, Map.put(change, :commit_timestamp, txn.commit_timestamp))
+      # Shout to anyone listening on the open realtime channel - e.g. "realtime:*"
+      topic = "realtime"
+      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(topic <> ":*", change)
+
+      # Shout to specific schema - e.g. "realtime:public"
+      schema_topic = topic <> ":" <> change.schema
+      Logger.info inspect(schema_topic)
+      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(schema_topic, change)
+      
+      # Shout to specific table - e.g. "realtime:public:users"
+      table_topic = schema_topic <> ":" <> change.table
+      Logger.info inspect(table_topic)
+      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(table_topic, change)
+
+      # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
+      Enum.each change.record, fn {k, v} ->
+        eq = table_topic <> ":" <> k <> "=eq." <> v
+      Logger.info inspect(eq)
+        RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+      end
     end
 
     # Event handled
