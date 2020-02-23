@@ -144,7 +144,7 @@ Example 2: Listen to all UPDATES in the `public` schema
 ```js
 var allChanges = this.socket.channel('realtime:public')
   .join()
-  .on(EVENTS.UDPATE, payload => { console.log('Update received!', payload) })
+  .on(EVENTS.UPDATE, payload => { console.log('Update received!', payload) })
 
 ```
 
