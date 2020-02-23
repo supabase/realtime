@@ -162,7 +162,7 @@ let allChanges = this.socket.channel('realtime:*')
 
 There are a some requirements for your database
 
-1. It must be Postgres (I have only tested on 9.6+)
+1. It must be Postgres 10+ as it uses logical replication
 2. Set up your DB for replication
    1. it must have the `wal_level` set to logical. You can check this by running `SHOW wal_level;`. To set the `wal_level`, you can call `ALTER SYSTEM SET wal_level = logical;`
    2. You must set `max_replication_slots` to at least 1: `ALTER SYSTEM SET max_replication_slots = 5;`

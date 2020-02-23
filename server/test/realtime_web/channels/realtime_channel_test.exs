@@ -4,7 +4,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   setup do
     {:ok, _, socket} =
       socket(RealtimeWeb.UserSocket, "user_id", %{some: :assign})
-      |> subscribe_and_join(RealtimeWeb.RealtimeChannel, "realtime")
+      |> subscribe_and_join(RealtimeWeb.RealtimeChannel, "realtime:*")
 
     {:ok, socket: socket}
   end
