@@ -197,18 +197,6 @@ docker run \
 - Push your work back up to your fork
 - Submit a Pull request so that we can review your changes and merge
 
-**Releasing**
-
-```sh
-gren changelog --generate --changelog-filename ./CHANGELOG.md --override
-gren release --override
-# Bump and build ./server
-docker build . -t supabase/realtime:tagname
-docker push supabase/realtime:tagname
-```
-
-This will create the changelog in [releases](https://github.com/supabase/realtime/releases).
-
 ## License
 
 This repo is liscenced under Apache 2.0.

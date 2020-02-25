@@ -9,8 +9,9 @@ help:
 	@echo "make local:db         # start a Postgres database on port 5432"
 
 	@echo "\nHELPERS\n"
-	@echo "make clean            # remove all node_modules"
-	@echo "make tree             # output a directory tree"
+	@echo "make clean            		   # remove all node_modules"
+	@echo "make release.github             # create the changelog in https://github.com/supabase/realtime/releases"
+	@echo "make release.docker.{tag}       # builds and pushes docker"
 
 
 #########################
@@ -61,3 +62,16 @@ clean:
 
 tree:
 	tree -L 2 -I 'README.md|LICENSE|NOTICE|node_modules|Makefile|package*|docker*'
+
+release.github:
+	gren changelog --generate --changelog-filename ./CHANGELOG.md --override
+	gren release --override
+
+release.docker.%:
+	@echo "Did you bump the mix version in ./server first,"
+	@echo "and then run mix release?"
+	@echo "..."
+	@echo "..."
+	@echo "..."
+	docker build . -t supabase/realtime:$*
+	docker push supabase/realtime:$*
