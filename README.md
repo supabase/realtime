@@ -26,7 +26,7 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 ## Status
 
 - [x] Alpha: Under heavy development
-- [ ] Beta: Ready for use. But go easy on us, there may be a few kinks.
+- [x] Beta: Ready for use. But go easy on us, there may be a few kinks.
 - [ ] 1.0: Use in production!
 
 This repo is still under heavy development and the documentation is evolving. You're welcome to try it, but expect some breaking changes. Watch "releases" of this repo to receive a notifification when we are ready for Beta. And give us a star if you like it!
@@ -191,7 +191,19 @@ docker run \
 
 ## Contributing
 
-We welcome any issues, pull requests, and feedback. 
+- Fork the repo on GitHub
+- Clone the project to your own machine
+- Commit changes to your own branch
+- Push your work back up to your fork
+- Submit a Pull request so that we can review your changes and merge
+
+**Release Notes**
+
+```
+gren release --override
+```
+
+This will create the changelog in [releases](https://github.com/supabase/realtime/releases).
 
 ## License
 

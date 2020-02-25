@@ -1,0 +1,6 @@
+---
+  dataSource: "milestones"
+  prefix: ""
+  groupBy: "label"
+  milestoneMatch: "{{tag_name}}"
+  changelogFilename: "CHANGELOG.md"
