@@ -26,7 +26,11 @@ export default class Index extends React.Component {
   }
   addChannel(topic) {
     let channel = this.socket.channel(topic)
-    channel.on('*', msg => this.messageReceived(topic, msg))
+    channel.on('INSERT', msg => this.messageReceived(topic, msg))
+    // channel.on('*', msg => console.log('INSERT', msg))
+    // channel.on('INSERT', msg => console.log('INSERT', msg))
+    // channel.on('UPDATE', msg => console.log('UPDATE', msg))
+    // channel.on('DELETE', msg => console.log('DELETE', msg))
     channel
       .join()
       .receive('ok', () => console.log('Connecting'))
@@ -37,13 +41,11 @@ export default class Index extends React.Component {
   messageReceived(channel, msg) {
     let received = [...this.state.received, { channel, msg }]
     this.setState({ received })
-    if (msg.type == 'INSERT') {
-      if (channel === 'realtime:public:users') {
-        this.setState({ users: [...this.state.users, msg.record] })
-      }
-      if (channel === 'realtime:public:todos') {
-        this.setState({ todos: [...this.state.todos, msg.record] })
-      }
+    if (channel === 'realtime:public:users') {
+      this.setState({ users: [...this.state.users, msg.record] })
+    }
+    if (channel === 'realtime:public:todos') {
+      this.setState({ todos: [...this.state.todos, msg.record] })
     }
   }
   async fetchData() {
