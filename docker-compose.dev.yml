@@ -1,6 +1,18 @@
 version: '3'
 services:
   realtime:
+    image: supabase/realtime:0.7.0
+    ports:
+      - "4000:4000"
+    environment:
+      DB_HOST: db
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_PORT: 5432
+      PORT: 4000
+      HOSTNAME: localhost
+      SECRET_KEY_BASE: SOMETHING_SUPER_SECRET
     depends_on:
       - db
   db:
