@@ -236,7 +236,7 @@ defmodule Realtime.Replication do
       # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
       Enum.each change.record, fn {k, v} ->
         eq = table_topic <> ":" <> k <> "=eq." <> v
-      Logger.info inspect(eq)
+        Logger.info inspect(eq)
         RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
       end
     end

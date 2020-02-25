@@ -1,5 +1,6 @@
 defmodule RealtimeWeb.RealtimeChannelTest do
   use RealtimeWeb.ChannelCase
+  require Logger
 
   setup do
     {:ok, _, socket} =
@@ -9,13 +10,37 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     {:ok, socket: socket}
   end
 
-  test "shout broadcasts to realtime", %{socket: socket} do
-    push socket, "*", %{"hello" => "all"}
-    assert_broadcast "*", %{"hello" => "all"}
+  test "INSERTS are broadcasts to the client", %{socket: socket} do
+    change = %{
+      schema: "public",
+      table: "users",
+      type: "INSERT"
+    }
+    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
+    assert_push("*", change)
+    assert_push("INSERT", change)
+  end
+  
+  test "UPDATES are broadcasts to the client", %{socket: socket} do
+    change = %{
+      schema: "public",
+      table: "users",
+      type: "UPDATES"
+    }
+    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
+    assert_push("*", change)
+    assert_push("UPDATES", change)
   end
 
-  test "broadcasts are pushed to the client", %{socket: socket} do
-    broadcast_from! socket, "broadcast", %{"some" => "data"}
-    assert_push "broadcast", %{"some" => "data"}
+  test "DELETES are broadcasts to the client", %{socket: socket} do
+    change = %{
+      schema: "public",
+      table: "users",
+      type: "DELETE"
+    }
+    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
+    assert_push("*", change)
+    assert_push("DELETE", change)
   end
+
 end
