@@ -201,7 +201,7 @@ defmodule Realtime.Replication do
   """
   defp notify_subscribers(%State{transaction: {_current_txn_lsn, txn}}) do
     # For every change in the txn.changes, we want to broadcast it specific listeners
-    # Example Change: 
+    # Example Change:
     # %Realtime.Adapters.Changes.UpdatedRecord{
     #   columns: [
     #     %Realtime.Decoder.Messages.Relation.Column{ flags: [:key], name: "id", type: "int8", type_modifier: 4294967295 },
@@ -227,7 +227,7 @@ defmodule Realtime.Replication do
       schema_topic = topic <> ":" <> change.schema
       Logger.info inspect(schema_topic)
       RealtimeWeb.RealtimeChannel.handle_realtime_transaction(schema_topic, change)
-      
+
       # Shout to specific table - e.g. "realtime:public:users"
       table_topic = schema_topic <> ":" <> change.table
       Logger.info inspect(table_topic)
@@ -235,9 +235,11 @@ defmodule Realtime.Replication do
 
       # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
       Enum.each change.record, fn {k, v} ->
-        eq = table_topic <> ":" <> k <> "=eq." <> v
-        Logger.info inspect(eq)
-        RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+        if v != nil do
+          eq = table_topic <> ":" <> k <> "=eq." <> v
+          Logger.info inspect(eq)
+          RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+        end
       end
     end
 
