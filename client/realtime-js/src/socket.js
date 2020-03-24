@@ -53,7 +53,7 @@ class Socket {
   constructor(endPoint, opts = {}){
     // we would want to check if the provided endPoint comes along with any
     // query parameters
-    
+
     this.stateChangeCallbacks = {open: [], close: [], error: [], message: []}
     this.channels             = []
     this.sendBuffer           = []
@@ -73,6 +73,7 @@ class Socket {
     this.logger               = opts.logger || function(){} // noop
     this.longpollerTimeout    = opts.longpollerTimeout || 20000
     this.params               = opts.params || {}
+    this.headers              = opts.headers || {}
     this.endPoint             = `${endPoint}/${TRANSPORTS.websocket}`
     this.heartbeatTimer       = null
     this.pendingHeartbeatRef  = null
@@ -104,7 +105,7 @@ class Socket {
   connect(){
     if(this.conn){ return }
 
-    this.conn = new this.transport(this.endPointURL())
+    this.conn = new this.transport(this.endPointURL(), [], null, this.headers)
     this.conn.timeout   = this.longpollerTimeout
     this.conn.onopen    = () => this.onConnOpen()
     this.conn.onerror   = error => this.onConnError(error)
