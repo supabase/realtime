@@ -67,7 +67,7 @@ This is an Elixir server (Phoenix) that allows you to listen to changes in your 
 
 It works like this:
 
-1. the Phoenix server listens to PostgreSQL's replication functionality (streaming WAL)
+1. the Phoenix server listens to PostgreSQL's replication functionality (using Postgres' logical decoding)
 2. it converts the byte stream into JSON
 3. it then broadcasts over websockets. 
   
