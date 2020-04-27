@@ -1,6 +1,6 @@
 {
   "name": "@supabase/realtime-js",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Listen to realtime updates to your PostgreSQL database",
   "repository": "https://github.com/supabase/realtime",
   "main": "src/index.js",
@@ -17,6 +17,8 @@
   },
   "homepage": "https://supabase.io",
   "dependencies": {
+    "@babel/runtime": "^7.9.2",
+    "query-string": "^6.12.1",
     "websocket": "^1.0.31"
   },
   "devDependencies": {

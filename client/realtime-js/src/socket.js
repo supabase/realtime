@@ -7,7 +7,7 @@ const {
   WS_CLOSE_NORMAL ,
 } = require('./constants')
 
-const querystring = require('querystring')
+const querystring = require('query-string')
 const WebSocket = require('websocket').w3cwebsocket
 const Timer = require('./timer')
 const Channel = require('./channel')
