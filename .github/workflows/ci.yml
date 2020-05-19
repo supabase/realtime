@@ -1,0 +1,57 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  test:
+    name: OTP ${{ matrix.otp }} / Elixir ${{ matrix.elixir }}
+
+    defaults:
+      run:
+        working-directory: ./server
+
+    strategy:
+      matrix:
+        platform: [ubuntu-latest]
+        otp: [21.x, 22.x]
+        elixir: [1.9.x, 1.10.x]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Postgres
+        run: docker-compose -f ../docker-compose.db.yml up -d
+
+      - name: Set up Elixir
+        uses: actions/setup-elixir@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - name: Cache Mix
+        uses: actions/cache@v1
+        with:
+          path: deps
+          key: ${{ runner.os }}-mix-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      # - name: Compile with warnings
+      #   run: mix compile --warnings-as-errors
+
+      # - name: Run formatter
+      #   run: mix format --check-formatted
+
+      # - name: Run Credo
+      #   run: mix credo
+
+      - name: Run tests
+        run: mix test
