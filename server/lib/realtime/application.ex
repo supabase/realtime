@@ -33,6 +33,7 @@ defmodule Realtime.Application do
         wal_position: {"0", "0"}, # You can provide a different WAL position if desired, or default to allowing Postgres to send you what it thinks you need
         publications: ["supabase_realtime"]
       },
+      Realtime.SubscribersNotification,
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
