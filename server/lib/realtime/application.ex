@@ -12,6 +12,11 @@ defmodule Realtime.Application do
     # Use this var to convert to sigil at connection
     host = System.get_env("DB_HOST") || 'localhost'
     port = System.get_env("DB_PORT") || 5432
+    # Use a named replication slot if you want realtime to pickup from where
+    # it left after a restart because of, for example, a crash.
+    # You can get a list of active replication slots with
+    # `select * from pg_replication_slots`
+    slot_name = System.get_env("SLOT_NAME") || :temporary
     {port_number, _} = :string.to_integer(to_charlist(port))
     epgsql_params = %{
       host: ~c(#{host}),
@@ -29,7 +34,7 @@ defmodule Realtime.Application do
       {
         Realtime.Replication,
         epgsql: epgsql_params,
-        slot: :temporary, # :temporary is also supported if you don't want Postgres keeping track of what you've acknowledged
+        slot: slot_name,
         wal_position: {"0", "0"}, # You can provide a different WAL position if desired, or default to allowing Postgres to send you what it thinks you need
         publications: ["supabase_realtime"]
       },
