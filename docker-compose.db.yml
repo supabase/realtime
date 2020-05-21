@@ -3,7 +3,15 @@
 version: '3'
 services:
   db:
-    build: ./dev/postgres
+    image: supabase/postgres
     ports:
       - "5432:5432"
+    volumes:
+    - ./dev/postgres/mnt:/docker-entrypoint-initdb.d/
+    command:
+    - postgres
+    - -c
+    - wal_level=logical
+    environment: 
+      POSTGRES_PASSWORD: postgres
   
