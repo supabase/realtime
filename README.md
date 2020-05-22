@@ -197,6 +197,14 @@ docker run \
 - Push your work back up to your fork
 - Submit a Pull request so that we can review your changes and merge
 
+## Releases
+
+to trigger a release you must tag the commit, then push to origin
+```bash
+git tag -a 7.x.x -m "some stuff about the release"
+git push origin 7.x.x
+```
+
 ## License
 
 This repo is liscenced under Apache 2.0.
