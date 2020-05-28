@@ -1,0 +1,12 @@
+# DigitalOcean's ubuntu droplet isn't up to date with installed packages, and on
+# a fresh install I see 71 security upgrades available.
+- name: System - apt update and apt upgrade
+  apt: update_cache=yes upgrade=yes # SEE http://archive.vn/DKJjs#parameter-upgrade
+
+- name: System - Create services.slice
+  template:
+    src: files/services.slice.j2
+    dest: /etc/systemd/system/services.slice
+
+- name: System - systemd reload
+  systemd: daemon_reload=yes

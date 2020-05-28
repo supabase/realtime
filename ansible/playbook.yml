@@ -1,0 +1,17 @@
+---
+- hosts: all
+  become: true
+
+  vars:
+    supabase_commit: 951ef2350465d42eb6f741f4659ed5b6fda4cd7b
+    supabase_commit_checksum: sha1:eaf75edba248db39c881dc0dce5b129296afaecb
+
+    erlang_solutions_deb: erlang-solutions_2.0_all.deb
+    erlang_solutions_deb_checksum: sha1:1968ec2ae81a5e1f56d2f173144926ec90a5e7c7
+
+  tasks:
+    - include_tasks: tasks/setup-system.yml
+
+    - include_tasks: tasks/setup-elixir.yml
+
+    - include_tasks: tasks/setup-realtime.yml
