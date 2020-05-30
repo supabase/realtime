@@ -22,6 +22,7 @@ defmodule Realtime.SubscribersNotification do
   @impl true
   def handle_call({:notify, txn}, _from, nil) do
     notify_subscribers(txn)
+    notify_connectors(txn)
     {:reply, :ok, nil}
   end
 
@@ -68,4 +69,9 @@ defmodule Realtime.SubscribersNotification do
       end
     end
   end
+
+  defp notify_connectors(txn) do
+    Realtime.Connectors.notify(txn)
+  end
+
 end

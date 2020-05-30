@@ -27,6 +27,8 @@ defmodule Realtime.Application do
       ssl: System.get_env("DB_SSL") || true
     }
 
+    configuration_file = System.get_env("CONFIGURATION_FILE")
+
     # List all child processes to be supervised
     children = [
       # Start the endpoint when the application starts
@@ -38,7 +40,16 @@ defmodule Realtime.Application do
         wal_position: {"0", "0"}, # You can provide a different WAL position if desired, or default to allowing Postgres to send you what it thinks you need
         publications: ["supabase_realtime"]
       },
+      {
+        Realtime.ConfigurationManager,
+        filename: configuration_file,
+      },
       Realtime.SubscribersNotification,
+      {
+        Realtime.Connectors,
+        config: nil,
+      },
+      Realtime.WebhookConnector,
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
