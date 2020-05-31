@@ -1,0 +1,20 @@
+{
+    "webhooks": [{
+        "event": "*",
+	"config": {
+	    "endpoint": "https://webhook.site/44e4457a-77ae-4758-8d52-17efdf484853"
+	}
+    }, {
+	"event": "INSERT",
+	"relation": "public",
+	"config": {
+	    "endpoint": "https://webhook.site/44e4457a-77ae-4758-8d52-17efdf484853"
+	}
+    }, {
+	"event": "UPDATE",
+	"relation": "public:users.id=eq.2",
+	"config": {
+	    "endpoint": "https://webhook.site/44e4457a-77ae-4758-8d52-17efdf484853"
+	}
+    }]
+}
