@@ -3,6 +3,7 @@
     "aws_access_key": "{{env `AWS_ACCESS_KEY`}}",
     "aws_secret_key": "{{env `AWS_SECRET_KEY`}}",
     "region": "ap-southeast-1",
+    "source_ami": "ami-0e763a959ec839f5e",
     "instance_type": "t2.micro"
   },
   "builders": [
@@ -11,7 +12,7 @@
       "access_key": "{{user `aws_access_key`}}",
       "secret_key": "{{user `aws_secret_key`}}",
       "region": "{{user `region`}}",
-      "source_ami": "ami-0e763a959ec839f5e",
+      "source_ami": "{{user `source_ami`}}",
       "instance_type": "{{user `instance_type`}}",
       "ssh_username": "ubuntu",
       "ami_name": "supabase-realtime-0.7.4"
