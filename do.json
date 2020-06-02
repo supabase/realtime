@@ -1,14 +1,16 @@
 {
   "variables": {
-    "do_api_token": "{{env `DO_API_TOKEN`}}"
+    "do_api_token": "{{env `DO_API_TOKEN`}}",
+    "region": "sgp1",
+    "size": "512mb"
   },
   "builders": [
     {
       "type": "digitalocean",
       "api_token": "{{user `do_api_token`}}",
       "image": "ubuntu-18-04-x64",
-      "region": "sgp1",
-      "size": "512mb",
+      "region": "{{user `region`}}",
+      "size": "{{user `size`}}",
       "ssh_username": "root",
       "snapshot_name": "supabase-realtime-0.7.4"
     }
@@ -18,6 +20,15 @@
       "type": "ansible",
       "playbook_file": "ansible/playbook.yml",
       "ansible_env_vars": ["ANSIBLE_SSH_ARGS='-o IdentitiesOnly=yes'"]
+    },
+    {
+      "type": "shell",
+      "scripts": [
+        "scripts/01-test",
+        "scripts/90-cleanup.sh",
+        "scripts/91-log_cleanup.sh",
+        "scripts/99-img_check.sh"
+      ]
     }
   ]
 }
