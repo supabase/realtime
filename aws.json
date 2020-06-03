@@ -15,7 +15,7 @@
       "source_ami": "{{user `source_ami`}}",
       "instance_type": "{{user `instance_type`}}",
       "ssh_username": "ubuntu",
-      "ami_name": "supabase-realtime-0.7.4"
+      "ami_name": "supabase-realtime-0.7.5"
     }
   ],
   "provisioners": [

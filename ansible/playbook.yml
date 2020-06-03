@@ -3,8 +3,8 @@
   become: true
 
   vars:
-    realtime_version: 0.7.4
-    realtime_checksum: sha1:9971212a8d39ada4385b97b44486e30230223116
+    realtime_version: 0.7.5
+    realtime_checksum: sha1:64fec17e9c4ad27b0c9f0acb6a1e789e604ec56e
 
   tasks:
     - include_tasks: tasks/setup-system.yml
