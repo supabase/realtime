@@ -21,7 +21,9 @@
   "provisioners": [
     {
       "type": "ansible",
-      "playbook_file": "ansible/playbook.yml"
+      "playbook_file": "ansible/playbook.yml",
+      "ansible_env_vars": ["ANSIBLE_SSH_ARGS='-o IdentitiesOnly=yes'"],
+      "user": "ubuntu"
     },
     {
       "execute_command": "echo 'packer' | sudo -S sh -c '{{ .Vars }} {{ .Path }}'",

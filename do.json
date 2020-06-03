@@ -19,7 +19,8 @@
     {
       "type": "ansible",
       "playbook_file": "ansible/playbook.yml",
-      "ansible_env_vars": ["ANSIBLE_SSH_ARGS='-o IdentitiesOnly=yes'"]
+      "ansible_env_vars": ["ANSIBLE_SSH_ARGS='-o IdentitiesOnly=yes'"],
+      "user": "root"
     },
     {
       "type": "shell",

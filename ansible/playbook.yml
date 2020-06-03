@@ -11,5 +11,5 @@
 
     - include_tasks: tasks/setup-realtime.yml
 
-    - name: Remove temp dir at ~/\~<your local username>
-      shell: rm -rf /root/\~* /home/ubuntu/\~*
+    - name: Remove temp dir at $HOME
+      shell: rm -rf ~/.ansible
