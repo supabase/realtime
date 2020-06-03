@@ -9,8 +9,16 @@ db_port = System.get_env("DB_PORT") || 5432
 db_name = System.get_env("DB_NAME") || "postgres"
 db_ssl = System.get_env("DB_SSL") || true
 
+secret_key_base =
+  System.get_env("SECRET_KEY_BASE") ||
+    raise """
+    environment variable SECRET_KEY_BASE is missing.
+    You can generate one by calling: openssl rand -base64 48
+    """
+
 config :realtime, RealtimeWeb.Endpoint,
-  http: [:inet6, port: String.to_integer(app_port)]
+  http: [:inet6, port: String.to_integer(app_port)],
+  secret_key_base: secret_key_base
 
 config :realtime,
   app_port: app_port

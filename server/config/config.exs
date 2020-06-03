@@ -10,7 +10,6 @@ use Mix.Config
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,
   url: [host: "localhost"],
-  secret_key_base: "+Cu2K/kBuuKLyAidsgfktbQkBuuvXPHA1NxWWZz8yXM0n+2fyZ305QQ0AibOEagw",
   render_errors: [view: RealtimeWeb.ErrorView, accepts: ~w(html json)],
   pubsub: [name: Realtime.PubSub, adapter: Phoenix.PubSub.PG2]
 
