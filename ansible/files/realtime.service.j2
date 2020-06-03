@@ -3,13 +3,13 @@ Description=Supabase Realtime server
 
 [Service]
 Type=simple
-ExecStart=/opt/realtime/server/_build/prod/rel/realtime/bin/realtime start
+ExecStart=/opt/realtime/bin/realtime start
 Restart=always
 RestartSec=3
 
 # User for the build, and service
 User=realtime
-EnvironmentFile=/etc/realtime.env
+EnvironmentFile=/etc/realtime/realtime.env
 
 # Not specified in the supabase server docs but startup will fail if the HOME environmental
 # variable is not set.

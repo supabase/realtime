@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - '*'
+      - "[0-9]+.[0-9]+.[0-9]+*"
 
 jobs:
   release:
@@ -22,12 +22,16 @@ jobs:
           elixir-version: 1.10.x
           otp-version: 22.x
 
+      - name: Get the version
+        id: get_version
+        run: echo ::set-output name=version::${GITHUB_REF#refs/tags/}
+
       - name: Prepare release
         run: |
           mix deps.get
           mix compile
           mix release
-          tar -czvf realtime-ubuntu-latest.tar.gz -C ./_build/prod/rel/realtime/bin realtime
+          tar -czf realtime-${{ steps.get_version.outputs.version }}-x86_64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
         env:
           MIX_ENV: prod
 
@@ -39,8 +43,6 @@ jobs:
         with:
           tag_name: ${{ github.ref }}
           release_name: ${{ github.ref }}
-          draft: false
-          prerelease: false
 
       - name: Upload release assets
         id: upload-release-asset
@@ -49,8 +51,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./server/realtime-ubuntu-latest.tar.gz
-          asset_name: realtime-ubuntu-latest.tar.gz
+          asset_path: ./server/realtime-${{ steps.get_version.outputs.version }}-x86_64-linux-gnu.tar.gz
+          asset_name: realtime-${{ steps.get_version.outputs.version }}-x86_64-linux-gnu.tar.gz
           asset_content_type: application/gzip
 
       - name: Upload build to Docker Hub

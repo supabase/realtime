@@ -2,38 +2,29 @@
 - name: System user
   user: name=realtime
 
-- name: Install hex dependecy
-  shell: mix local.hex --force
-  become_user: realtime
-  args:
-    chdir: /opt/realtime/server
+- name: Download release
+  get_url:
+    url: "https://github.com/supabase/realtime/releases/download/{{ realtime_version }}/realtime-{{ realtime_version }}-x86_64-linux-gnu.tar.gz"
+    dest: /tmp/realtime.tar.gz
+    checksum: "{{ realtime_checksum }}"
 
-- name: Install rebar dependency
-  shell: mix local.rebar --force
-  become_user: realtime
-  args:
-    chdir: /opt/realtime/server
+- name: Unpack archive to /opt/realtime
+  unarchive:
+    remote_src: yes
+    src: /tmp/realtime.tar.gz
+    dest: /opt
+    owner: realtime
 
-- name: Install other dependencies
-  shell: mix deps.get
-  become_user: realtime
-  args:
-    chdir: /opt/realtime/server
+- name: Create /etc/realtime
+  file:
+    path: /etc/realtime
+    state: directory
+    owner: realtime
 
-- name: Build release
-  # IF A BUILD EXISTS the following message is shown
-  # Release realtime-0.7.1 already exists. Overwrite? [Yn]
-  #
-  # There is no flag to stop if an existing build is available, thus we pipe 'n' to stop
-  shell: echo n | MIX_ENV=prod mix release
-  become_user: realtime
-  args:
-    chdir: /opt/realtime/server
-
-- name: Create /etc/realtime.env
+- name: Dump /etc/realtime/realtime.env
   copy:
     src: files/realtime.env
-    dest: /etc/realtime.env
+    dest: /etc/realtime/realtime.env
     owner: realtime
 
 - name: Create service file
@@ -46,6 +37,3 @@
     daemon_reload: yes
     name: realtime
     enabled: yes
-
-- name: Restart service
-  service: name=realtime state=restarted
