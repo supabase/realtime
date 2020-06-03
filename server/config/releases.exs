@@ -13,7 +13,8 @@ secret_key_base =
   System.get_env("SECRET_KEY_BASE") ||
     raise """
     environment variable SECRET_KEY_BASE is missing.
-    You can generate one by calling: openssl rand -base64 48
+    You can generate one by calling:
+    export SECRET_KEY_BASE=`openssl rand -base64 48`
     """
 
 config :realtime, RealtimeWeb.Endpoint,
