@@ -7,27 +7,27 @@ defmodule Realtime.Application do
   require Logger, warn: false
 
   def start(_type, _args) do
-
     # Hostname must be a char list for some reason
     # Use this var to convert to sigil at connection
-    host = System.get_env("DB_HOST") || 'localhost'
-    port = System.get_env("DB_PORT") || 5432
+    host = Application.fetch_env!(:realtime, :db_host)
+    port = Application.fetch_env!(:realtime, :db_port)
     # Use a named replication slot if you want realtime to pickup from where
     # it left after a restart because of, for example, a crash.
     # You can get a list of active replication slots with
     # `select * from pg_replication_slots`
-    slot_name = System.get_env("SLOT_NAME") || :temporary
+    slot_name = Application.fetch_env!(:realtime, :slot_name)
     {port_number, _} = :string.to_integer(to_charlist(port))
+
     epgsql_params = %{
       host: ~c(#{host}),
-      username: System.get_env("DB_USER") || "postgres",
-      database: System.get_env("DB_NAME") || "postgres",
-      password: System.get_env("DB_PASSWORD") || "postgres",
+      username: Application.fetch_env!(:realtime, :db_user),
+      database: Application.fetch_env!(:realtime, :db_name),
+      password: Application.fetch_env!(:realtime, :db_password),
       port: port_number,
-      ssl: System.get_env("DB_SSL") || true
+      ssl: Application.fetch_env!(:realtime, :db_ssl)
     }
 
-    configuration_file = System.get_env("CONFIGURATION_FILE")
+    configuration_file = Application.fetch_env!(:realtime, :configuration_file)
 
     # List all child processes to be supervised
     children = [
@@ -35,21 +35,22 @@ defmodule Realtime.Application do
       RealtimeWeb.Endpoint,
       {
         Realtime.Replication,
+        # You can provide a different WAL position if desired, or default to allowing Postgres to send you what it thinks you need
         epgsql: epgsql_params,
         slot: slot_name,
-        wal_position: {"0", "0"}, # You can provide a different WAL position if desired, or default to allowing Postgres to send you what it thinks you need
+        wal_position: {"0", "0"},
         publications: ["supabase_realtime"]
       },
       {
         Realtime.ConfigurationManager,
-        filename: configuration_file,
+        filename: configuration_file
       },
       Realtime.SubscribersNotification,
       {
         Realtime.Connectors,
-        config: nil,
+        config: nil
       },
-      Realtime.WebhookConnector,
+      Realtime.WebhookConnector
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
