@@ -60,11 +60,13 @@ defmodule Realtime.SubscribersNotification do
       RealtimeWeb.RealtimeChannel.handle_realtime_transaction(table_topic, change)
 
       # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
-      Enum.each change.record, fn {k, v} ->
-        if v != nil do
-          eq = table_topic <> ":" <> k <> "=eq." <> v
-          Logger.info inspect(eq)
-          RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+      if Map.has_key?(change, :record) do
+        Enum.each change.record, fn {k, v} ->
+          if v != nil do
+            eq = table_topic <> ":" <> k <> "=eq." <> v
+            Logger.info inspect(eq)
+            RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+          end
         end
       end
     end
