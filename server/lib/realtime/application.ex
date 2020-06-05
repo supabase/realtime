@@ -9,25 +9,25 @@ defmodule Realtime.Application do
   def start(_type, _args) do
     # Hostname must be a char list for some reason
     # Use this var to convert to sigil at connection
-    host = Application.fetch_env!(:realtime, :db_host)
-    port = Application.fetch_env!(:realtime, :db_port)
+    host = Application.get_env(:realtime, :db_host, "localhost")
+    port = Application.get_env(:realtime, :db_port, "5432")
     # Use a named replication slot if you want realtime to pickup from where
     # it left after a restart because of, for example, a crash.
     # You can get a list of active replication slots with
     # `select * from pg_replication_slots`
-    slot_name = Application.fetch_env!(:realtime, :slot_name)
+    slot_name = Application.get_env(:realtime, :slot_name, :temporary)
     {port_number, _} = :string.to_integer(to_charlist(port))
 
     epgsql_params = %{
       host: ~c(#{host}),
-      username: Application.fetch_env!(:realtime, :db_user),
-      database: Application.fetch_env!(:realtime, :db_name),
-      password: Application.fetch_env!(:realtime, :db_password),
+      username: Application.get_env(:realtime, :db_user, "postgres"),
+      database: Application.get_env(:realtime, :db_name, "postgres"),
+      password: Application.get_env(:realtime, :db_password, "postgres"),
       port: port_number,
-      ssl: Application.fetch_env!(:realtime, :db_ssl)
+      ssl: Application.get_env(:realtime, :db_ssl, true)
     }
 
-    configuration_file = Application.fetch_env!(:realtime, :configuration_file)
+    configuration_file = Application.get_env(:realtime, :configuration_file)
 
     # List all child processes to be supervised
     children = [

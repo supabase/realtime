@@ -1,14 +1,14 @@
 import Config
 
-app_hostname = System.get_env("HOSTNAME") || "localhost"
-app_port = System.get_env("PORT") || "4000"
-db_host = System.get_env("DB_HOST") || "localhost"
-db_port = System.get_env("DB_PORT") || "5432"
-db_name = System.get_env("DB_NAME") || "postgres"
-db_user = System.get_env("DB_USER") || "postgres"
-db_password = System.get_env("DB_PASSWORD") || "postgres"
-db_ssl = System.get_env("DB_SSL") || true
-slot_name = System.get_env("SLOT_NAME") || :temporary
+app_hostname = System.get_env("HOSTNAME")
+app_port = System.get_env("PORT")
+db_host = System.get_env("DB_HOST")
+db_port = System.get_env("DB_PORT")
+db_name = System.get_env("DB_NAME")
+db_user = System.get_env("DB_USER")
+db_password = System.get_env("DB_PASSWORD")
+db_ssl = System.get_env("DB_SSL")
+slot_name = System.get_env("SLOT_NAME")
 configuration_file = System.get_env("CONFIGURATION_FILE")
 
 config :realtime,
