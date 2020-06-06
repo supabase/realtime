@@ -71,4 +71,12 @@ defmodule Realtime.ReplicationTest do
                 types: %{}
               }}
   end
+  test "Integration Test: 0.7.1" do
+    assert Realtime.Replication.handle_info(
+             {:epgsql, 0,
+              {:x_log_data, 110555416, 110555416, <<67, 0, 0, 0, 0, 0, 6, 150, 240, 232, 0, 0, 0, 0, 6, 150, 241, 24, 0, 2, 74, 12, 113, 75, 65, 82>>}},
+             %Realtime.Replication.State{}
+           ) ==
+             {}
+  end
 end
