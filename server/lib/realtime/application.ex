@@ -9,25 +9,23 @@ defmodule Realtime.Application do
   def start(_type, _args) do
     # Hostname must be a char list for some reason
     # Use this var to convert to sigil at connection
-    host = Application.get_env(:realtime, :db_host, "localhost")
-    port = Application.get_env(:realtime, :db_port, "5432")
+    host = Application.fetch_env!(:realtime, :db_host)
     # Use a named replication slot if you want realtime to pickup from where
     # it left after a restart because of, for example, a crash.
     # You can get a list of active replication slots with
     # `select * from pg_replication_slots`
-    slot_name = Application.get_env(:realtime, :slot_name, :temporary)
-    {port_number, _} = :string.to_integer(to_charlist(port))
+    slot_name = Application.get_env(:realtime, :slot_name)
 
     epgsql_params = %{
       host: ~c(#{host}),
-      username: Application.get_env(:realtime, :db_user, "postgres"),
-      database: Application.get_env(:realtime, :db_name, "postgres"),
-      password: Application.get_env(:realtime, :db_password, "postgres"),
-      port: port_number,
-      ssl: Application.get_env(:realtime, :db_ssl, true)
+      username: Application.fetch_env!(:realtime, :db_user),
+      database: Application.fetch_env!(:realtime, :db_name),
+      password: Application.fetch_env!(:realtime, :db_password),
+      port: Application.fetch_env!(:realtime, :db_port),
+      ssl: Application.fetch_env!(:realtime, :db_ssl)
     }
 
-    configuration_file = Application.get_env(:realtime, :configuration_file)
+    configuration_file = Application.fetch_env!(:realtime, :configuration_file)
 
     # List all child processes to be supervised
     children = [
@@ -35,7 +33,8 @@ defmodule Realtime.Application do
       RealtimeWeb.Endpoint,
       {
         Realtime.Replication,
-        # You can provide a different WAL position if desired, or default to allowing Postgres to send you what it thinks you need
+        # You can provide a different WAL position if desired, or default to
+        # allowing Postgres to send you what it thinks you need
         epgsql: epgsql_params,
         slot: slot_name,
         wal_position: {"0", "0"},
