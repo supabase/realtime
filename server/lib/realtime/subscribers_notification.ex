@@ -43,7 +43,7 @@ defmodule Realtime.SubscribersNotification do
     # }
     for raw_change <- txn.changes do
       change = Map.put(raw_change, :commit_timestamp, txn.commit_timestamp)
-      # Logger.info inspect(change, pretty: true)
+      # Logger.debug inspect(change, pretty: true)
 
       # Shout to anyone listening on the open realtime channel - e.g. "realtime:*"
       topic = "realtime"
@@ -51,20 +51,20 @@ defmodule Realtime.SubscribersNotification do
 
       # Shout to specific schema - e.g. "realtime:public"
       schema_topic = topic <> ":" <> change.schema
-      Logger.info inspect(schema_topic)
+      Logger.debug inspect(schema_topic)
       RealtimeWeb.RealtimeChannel.handle_realtime_transaction(schema_topic, change)
 
       # Shout to specific table - e.g. "realtime:public:users"
       table_topic = schema_topic <> ":" <> change.table
-      Logger.info inspect(table_topic)
+      Logger.debug inspect(table_topic)
       RealtimeWeb.RealtimeChannel.handle_realtime_transaction(table_topic, change)
 
       # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
       if Map.has_key?(change, :record) do
         Enum.each change.record, fn {k, v} ->
-          if v != nil do
+          if v != nil and v != :unchanged_toast do
             eq = table_topic <> ":" <> k <> "=eq." <> v
-            Logger.info inspect(eq)
+            Logger.debug inspect(eq)
             RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
           end
         end
