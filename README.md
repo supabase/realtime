@@ -12,7 +12,6 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
     - [What is this?](#what-is-this)
     - [Cool, but why not just use Postgres' `NOTIFY`?](#cool-but-why-not-just-use-postgres-notify)
     - [What are the benefits?](#what-are-the-benefits)
-    - [What can I build with this?](#what-can-i-build-with-this)
 - [Quick start](#quick-start)
 - [Getting Started](#getting-started)
   - [Client](#client)
@@ -20,6 +19,7 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
   - [Database set up](#database-set-up)
   - [Server set up](#server-set-up)
 - [Contributing](#contributing)
+- [Releases](#releases)
 - [License](#license)
 - [Credits](#credits)
 
@@ -85,13 +85,6 @@ A few reasons:
 2. Decoupling. For example, if you want to send a new slack message every time someone makes a new purchase you might build that funcitonality directly into your API. This allows you to decouple your async functionality from your API.
 3. This is built with Phoenix, an [extremely scalable Elixir framework](https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections)
 
-#### What can I build with this?
-
-1. Chat applications
-2. Games
-3. Live dashboards
-4. Connectors - sending events to queues etc
-5. Streaming analytics
 
 ## Quick start
 
@@ -199,15 +192,16 @@ docker run \
 
 ## Releases
 
-to trigger a release you must tag the commit, then push to origin
+To trigger a release you must tag the commit, then push to origin.
+
 ```bash
-git tag -a 7.x.x -m "some stuff about the release"
-git push origin 7.x.x
+git tag -a 0.x.x -m "Some release details / link to release notes"
+git push origin 0.x.x
 ```
 
 ## License
 
-This repo is liscenced under Apache 2.0.
+This repo is licensed under Apache 2.0.
 
 ## Credits
 
