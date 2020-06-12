@@ -4,8 +4,8 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
 <p align="center"><kbd><img src="./examples/next-js/demo.gif" alt="Demo"/></kbd></p>
 
-
 **Contents**
+
 - [Status](#status)
 - [Example](#example)
 - [Introduction](#introduction)
@@ -13,11 +13,12 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
     - [Cool, but why not just use Postgres' `NOTIFY`?](#cool-but-why-not-just-use-postgres-notify)
     - [What are the benefits?](#what-are-the-benefits)
 - [Quick start](#quick-start)
+- [Client libraries](#client-libraries)
   - [Server](#server)
   - [Database set up](#database-set-up)
   - [Server set up](#server-set-up)
 - [Contributing](#contributing)
-- [Releases](#releases)
+- [Releasing](#releasing)
 - [License](#license)
 - [Credits](#credits)
 
@@ -30,7 +31,6 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 This repo is still under heavy development and the documentation is evolving. You're welcome to try it, but expect some breaking changes. Watch "releases" of this repo to receive a notifification when we are ready for Beta. And give us a star if you like it!
 
 ![Watch this repo](https://gitcdn.xyz/repo/supabase/monorepo/master/web/static/watch-repo.gif "Watch this repo")
-
 
 ## Example
 
@@ -72,8 +72,8 @@ It works like this:
 
 1. the Phoenix server listens to PostgreSQL's replication functionality (using Postgres' logical decoding)
 2. it converts the byte stream into JSON
-3. it then broadcasts over websockets. 
-  
+3. it then broadcasts over websockets.
+
 #### Cool, but why not just use Postgres' `NOTIFY`?
 
 A few reasons:
@@ -84,7 +84,7 @@ A few reasons:
 
 #### What are the benefits?
 
-1. The beauty of listening to the replication functionality is that you can make changes to your database from anywhere - your API, directly in the DB, via a console etc - and you will still receive the changes via websockets. 
+1. The beauty of listening to the replication functionality is that you can make changes to your database from anywhere - your API, directly in the DB, via a console etc - and you will still receive the changes via websockets.
 2. Decoupling. For example, if you want to send a new slack message every time someone makes a new purchase you might build that funcitonality directly into your API. This allows you to decouple your async functionality from your API.
 3. This is built with Phoenix, an [extremely scalable Elixir framework](https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections)
 
@@ -95,6 +95,12 @@ We have set up some simple examples that show how to use this server:
 
 - [Next.js example](https://github.com/supabase/realtime/tree/master/examples/next-js)
 - [NodeJS example](https://github.com/supabase/realtime/tree/master/examples/node-js)
+
+
+## Client libraries
+
+- Javascript: [@supabase/realtime-js](https://github.com/supabase/realtime-js)
+
 
 ### Server
 
@@ -108,7 +114,6 @@ There are a some requirements for your database
    2. You must set `max_replication_slots` to at least 1: `ALTER SYSTEM SET max_replication_slots = 5;`
 3. Create a `PUBLICATION` for this server to listen to: `CREATE PUBLICATION supabase_realtime FOR ALL TABLES;`
 4. [OPTIONAL] If you want to recieve the old record (previous values) on UDPATE and DELETE, you can set the `REPLICA IDENTITY` to `FULL` like this: `ALTER TABLE your_table REPLICA IDENTITY FULL;`. This has to be set for each table unfortunately.
-
 
 ### Server set up
 
@@ -137,7 +142,10 @@ docker run \
 - Push your work back up to your fork
 - Submit a Pull request so that we can review your changes and merge
 
-## Releases
+## Releasing
+
+- Make a commit to bump the version in `mix.exs`
+- Tag the commit
 
 To trigger a release you must tag the commit, then push to origin.
 
@@ -154,4 +162,4 @@ This repo is licensed under Apache 2.0.
 
 - [https://github.com/phoenixframework/phoenix](https://github.com/phoenixframework/phoenix) - The server is built with the amazing elixir framework.
 - [https://github.com/cainophile/cainophile](https://github.com/cainophile/cainophile) - A lot of this implementation leveraged the work already done on Cainophile.
-- [https://github.com/mcampa/phoenix-channels](https://github.com/mcampa/phoenix-channels) - The client library is ported from this library. 
+- [https://github.com/mcampa/phoenix-channels](https://github.com/mcampa/phoenix-channels) - The client library is ported from this library.
