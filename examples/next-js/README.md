@@ -1,55 +1,18 @@
-# With Dotenv example
+# Realtime Next.js example
 
-## Deploy your own
+A simple Next.js example which listens to database changes.
 
-Deploy the example using [ZEIT Now](https://zeit.co/now):
+## Getting started
 
-[![Deploy with ZEIT Now](https://zeit.co/button)](https://zeit.co/new/project?template=https://github.com/zeit/next.js/tree/canary/examples/with-dotenv)
+1. Install dependencies with `npm install`
+2. Start the example database and realtime server with `docker-compose up`
+3. Start the NodeJs server using `npm start`
+4. Visit `http://localhost:3000` and you will see the following:
 
-## How to use
 
-### Using `create-next-app`
+<p align="center"><kbd><img src="./demo.gif" alt="Demo"/></kbd></p>
 
-Execute [`create-next-app`](https://github.com/zeit/next.js/tree/canary/packages/create-next-app) with [Yarn](https://yarnpkg.com/lang/en/docs/cli/create/) or [npx](https://github.com/zkat/npx#readme) to bootstrap the example:
 
-```bash
-npx create-next-app --example with-dotenv with-dotenv-app
-# or
-yarn create next-app --example with-dotenv with-dotenv-app
-```
+## Note
 
-### Download manually
-
-Download the example:
-
-```bash
-curl https://codeload.github.com/zeit/next.js/tar.gz/canary | tar -xz --strip=2 next.js-canary/examples/with-dotenv
-cd with-dotenv
-```
-
-Install it and run:
-
-```bash
-npm install
-npm run dev
-# or
-yarn
-yarn dev
-```
-
-Deploy it to the cloud with [now](https://zeit.co/now) ([download](https://zeit.co/download)):
-
-```bash
-now
-```
-
-## The idea behind the example
-
-This example shows how to inline env vars.
-
-**Please note**:
-
-- It is a bad practice to commit env vars to a repository. Thats why you should normally [gitignore](https://git-scm.com/docs/gitignore) your `.env` file.
-- In this example, as soon as you reference an env var in your code, it will automatically be made publicly available and exposed to the client.
-- If you want to have more centralized control of what is exposed to the client check out the example [with-universal-configuration-build-time](../with-universal-configuration-build-time).
-- Env vars are set (inlined) at build time. If you need to configure your app at runtime, check out [examples/with-universal-configuration-runtime](../with-universal-configuration-runtime).
+This is an example for demo purposes only. There is no auth built into realtime as it is assumed that you will use this behind your own proxy or a internal network.
