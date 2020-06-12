@@ -14,7 +14,7 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
     - [What are the benefits?](#what-are-the-benefits)
 - [Quick start](#quick-start)
 - [Client libraries](#client-libraries)
-  - [Server](#server)
+- [Server](#server)
   - [Database set up](#database-set-up)
   - [Server set up](#server-set-up)
 - [Contributing](#contributing)
@@ -102,7 +102,7 @@ We have set up some simple examples that show how to use this server:
 - Javascript: [@supabase/realtime-js](https://github.com/supabase/realtime-js)
 
 
-### Server
+## Server
 
 ### Database set up
 
