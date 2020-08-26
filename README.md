@@ -79,7 +79,7 @@ It works like this:
 A few reasons:
 
 1. You don't have to set up triggers on every table
-2. NOTIFY has a payload limit of 8000 bytes and will fail for anything larger. The usual solution is to send and ID then fetch the record, but that's heavy on the database
+2. NOTIFY has a payload limit of 8000 bytes and will fail for anything larger. The usual solution is to send an ID then fetch the record, but that's heavy on the database
 3. This server consumes one connection to the database, then you can connect many clients to this server. Easier on your database, and to scale up you just add realtime servers
 
 #### What are the benefits?
