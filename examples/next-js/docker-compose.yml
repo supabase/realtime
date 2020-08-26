@@ -2,25 +2,8 @@
 
 version: '3'
 services:
-  web: 
-    image: node:11
-    command: bash -c "npm install && npm run dev"
-    volumes:
-      - ./examples/next-js:/usr/src/service
-    working_dir: /usr/src/service
-    ports:
-      - "3000:3000"
-    depends_on:
-      - db
-    environment:
-      REALTIME_URL: ws://localhost:4000/socket
-      DB_HOST: db
-      DB_NAME: postgres
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_PORT: 5432
   realtime:
-    build: ./
+    image: supabase/realtime
     ports:
       - "4000:4000"
     environment:
@@ -37,7 +20,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-    - ./dev/postgres/mnt:/docker-entrypoint-initdb.d/
+    - ./db:/docker-entrypoint-initdb.d/
     command:
     - postgres
     - -c

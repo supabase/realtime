@@ -9,17 +9,16 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 - [Status](#status)
 - [Example](#example)
 - [Introduction](#introduction)
-  - [What is this?](#what-is-this)
-  - [Cool, but why not just use Postgres' `NOTIFY`?](#cool-but-why-not-just-use-postgres-notify)
-  - [What are the benefits?](#what-are-the-benefits)
+    - [What is this?](#what-is-this)
+    - [Cool, but why not just use Postgres' `NOTIFY`?](#cool-but-why-not-just-use-postgres-notify)
+    - [What are the benefits?](#what-are-the-benefits)
 - [Quick start](#quick-start)
-- [Getting Started](#getting-started)
-  - [Client](#client)
-  - [Server](#server)
+- [Client libraries](#client-libraries)
+- [Server](#server)
   - [Database set up](#database-set-up)
   - [Server set up](#server-set-up)
 - [Contributing](#contributing)
-- [Releases](#releases)
+- [Releasing](#releasing)
 - [License](#license)
 - [Credits](#credits)
 
@@ -41,15 +40,20 @@ import { Socket } = '@supabase/realtime-js'
 var socket = new Socket(process.env.REALTIME_URL)
 socket.connect()
 
+// Listen to all changes to user ID 99
+var allChanges = this.socket.channel('realtime:public:users:id.eq.99')
+  .join()
+  .on('*', payload => { console.log('Update received!', payload) })
+
 // Listen to only INSERTS on the 'users' table in the 'public' schema
 var allChanges = this.socket.channel('realtime:public:users')
   .join()
   .on('INSERT', payload => { console.log('Update received!', payload) })
 
-// Listen to all changes from the 'public' schema
+// Listen to all updates from the 'public' schema
 var allChanges = this.socket.channel('realtime:public')
   .join()
-  .on('*', payload => { console.log('Update received!', payload) })
+  .on('UPDATE', payload => { console.log('Update received!', payload) })
 
 // Listen to all changes in the database
 let allChanges = this.socket.channel('realtime:*')
@@ -87,76 +91,18 @@ A few reasons:
 
 ## Quick start
 
-If you just want to start it up and see it in action:
+We have set up some simple examples that show how to use this server:
 
-1. Run `docker-compose up`
-2. Visit `http://localhost:3000` (be patient, node_modules will need to install)
+- [Next.js example](https://github.com/supabase/realtime/tree/master/examples/next-js)
+- [NodeJS example](https://github.com/supabase/realtime/tree/master/examples/node-js)
 
-## Getting Started
 
-### Client
+## Client libraries
 
-Install the client library
+- Javascript: [@supabase/realtime-js](https://github.com/supabase/realtime-js)
 
-```sh
-npm install --save @supabase/realtime-js
-```
 
-Set up the socket
-
-```js
-import { Socket } = '@supabase/realtime-js'
-
-const REALTIME_URL = process.env.REALTIME_URL || 'http://localhost:4000'
-var socket = new Socket(REALTIME_URL)
-socket.connect()
-```
-
-You can listen to these events on each table:
-
-```js
-const EVENTS = {
-  EVERYTHING: "*",
-  INSERT: "INSERT",
-  UPDATE: "UPDATE",
-  DELETE: "DELETE",
-};
-```
-
-Example 1: Listen to all INSERTS, on your `users` table
-
-```js
-var allChanges = this.socket
-  .channel("realtime:public:users")
-  .join()
-  .on(EVENTS.INSERT, (payload) => {
-    console.log("Record inserted!", payload);
-  });
-```
-
-Example 2: Listen to all UPDATES in the `public` schema
-
-```js
-var allChanges = this.socket
-  .channel("realtime:public")
-  .join()
-  .on(EVENTS.UPDATE, (payload) => {
-    console.log("Update received!", payload);
-  });
-```
-
-Example 3: Listen to all INSERTS, UPDATES, and DELETES, in all schemas
-
-```js
-let allChanges = this.socket
-  .channel("realtime:*")
-  .join()
-  .on(EVENTS.EVERYTHING, (payload) => {
-    console.log("Update received!", payload);
-  });
-```
-
-### Server
+## Server
 
 ### Database set up
 
@@ -217,3 +163,12 @@ This repo is licensed under Apache 2.0.
 - [https://github.com/phoenixframework/phoenix](https://github.com/phoenixframework/phoenix) - The server is built with the amazing elixir framework.
 - [https://github.com/cainophile/cainophile](https://github.com/cainophile/cainophile) - A lot of this implementation leveraged the work already done on Cainophile.
 - [https://github.com/mcampa/phoenix-channels](https://github.com/mcampa/phoenix-channels) - The client library is ported from this library.
+
+
+## Sponsors
+
+We are building the features of Firebase using enterprise-grade, open source products. We support existing communities wherever possible, and if the products don’t exist we build them and open source them ourselves. Thanks to these sponsors who are making the OSS ecosystem better for everyone.
+
+[![Worklife VC](https://user-images.githubusercontent.com/10214025/90451355-34d71200-e11e-11ea-81f9-1592fd1e9146.png)](https://www.worklife.vc)
+[![New Sponsor](https://user-images.githubusercontent.com/10214025/90518111-e74bbb00-e198-11ea-8f88-c9e3c1aa4b5b.png)](https://github.com/sponsors/supabase)
+

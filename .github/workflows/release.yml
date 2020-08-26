@@ -2,63 +2,120 @@ name: Release
 
 on:
   push:
-    tags:
-      - "[0-9]+.[0-9]+.[0-9]+*"
+    branches:
+      - master
 
 jobs:
   release:
-    defaults:
-      run:
-        working-directory: ./server
+    name: Release
 
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v2
 
+      - name: Get version before
+        run: echo ::set-env name=VERSION_BEFORE::$(curl -s https://api.github.com/repos/supabase/realtime/releases/latest | jq .name -r)
+
+      - name: Release on GitHub
+        run: npx semantic-release -p        \
+          @semantic-release/commit-analyzer \
+          @semantic-release/github          \
+          @semantic-release/release-notes-generator
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version after
+        run: echo ::set-env name=VERSION_AFTER::$(curl -s https://api.github.com/repos/supabase/realtime/releases/latest | jq .name -r)
+
+      - name: Check version difference
+        run: |
+          if [ ${{ env.VERSION_BEFORE }} = ${{ env.VERSION_AFTER }} ]; then
+            echo 0 > has-new-release
+          else
+            echo 1 > has-new-release
+          fi
+
+      - uses: actions/upload-artifact@v1
+        with:
+          name: has-new-release
+          path: has-new-release
+
+  upload:
+    name: Upload / Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }}
+
+    needs:
+      - release
+
+    strategy:
+      matrix:
+        elixir: ["1.10.x"]
+        otp: ["22.x"]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v1
+        with:
+          name: has-new-release
+
+      - name: Check for new release
+        run: echo ::set-env name=HAS_NEW_RELEASE::$(cat has-new-release/has-new-release)
+
+      - uses: actions/checkout@v2
+        if: env.HAS_NEW_RELEASE == 1
+
+      - name: Cache Mix
+        if: env.HAS_NEW_RELEASE == 1
+        uses: actions/cache@v1
+        with:
+          path: deps
+          key: ${{ runner.os }}-mix-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
       - name: Set up Elixir
+        if: env.HAS_NEW_RELEASE == 1
         uses: actions/setup-elixir@v1
         with:
-          elixir-version: 1.10.x
-          otp-version: 22.x
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
 
-      - name: Get the version
-        id: get_version
-        run: echo ::set-output name=version::${GITHUB_REF#refs/tags/}
+      - name: Get version
+        if: env.HAS_NEW_RELEASE == 1
+        run: echo ::set-env name=VERSION::$(curl -s https://api.github.com/repos/supabase/realtime/releases/latest | jq .name -r)
 
       - name: Prepare release
+        if: env.HAS_NEW_RELEASE == 1
         run: |
+          cd server
           mix deps.get
           mix compile
           mix release
-          tar -czf realtime-${{ steps.get_version.outputs.version }}-x86_64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
+          tar -czf ../realtime-${{ env.VERSION }}-x86_64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
         env:
           MIX_ENV: prod
 
-      - name: Create release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: ${{ github.ref }}
+      - name: Get upload url
+        if: env.HAS_NEW_RELEASE == 1
+        run: echo ::set-env name=UPLOAD_URL::$(curl -s https://api.github.com/repos/supabase/realtime/releases/latest | jq .upload_url -r)
 
-      - name: Upload release assets
-        id: upload-release-asset
+      - name: Upload release asset
+        if: env.HAS_NEW_RELEASE == 1
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./server/realtime-${{ steps.get_version.outputs.version }}-x86_64-linux-gnu.tar.gz
-          asset_name: realtime-${{ steps.get_version.outputs.version }}-x86_64-linux-gnu.tar.gz
+          upload_url: ${{ env.UPLOAD_URL }}
+          asset_path: ./realtime-${{ env.VERSION }}-x86_64-linux-gnu.tar.gz
+          asset_name: realtime-${{ env.VERSION }}-x86_64-linux-gnu.tar.gz
           asset_content_type: application/gzip
 
       - name: Upload build to Docker Hub
+        if: env.HAS_NEW_RELEASE == 1
         uses: docker/build-push-action@v1
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: supabase/realtime
-          tag_with_ref: true
+          tags: latest,${{ env.VERSION }}
