@@ -25,7 +25,7 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 ## Status
 
 - [x] Alpha: Under heavy development
-- [x] Beta: Ready for use. But go easy on us, there may be a few kinks.
+- [ ] Beta: Ready for use. But go easy on us, there may be a few kinks.
 - [ ] 1.0: Use in production!
 
 This repo is still under heavy development and the documentation is evolving. You're welcome to try it, but expect some breaking changes. Watch "releases" of this repo to receive a notifification when we are ready for Beta. And give us a star if you like it!
