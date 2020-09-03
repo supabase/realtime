@@ -21,6 +21,7 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 - [Releasing](#releasing)
 - [License](#license)
 - [Credits](#credits)
+- [Sponsors](#sponsors)
 
 ## Status
 
@@ -132,6 +133,18 @@ docker run \
   -e SECRET_KEY_BASE='SOMETHING_SUPER_SECRET' \
   -p 4000:4000 \
   supabase/realtime
+```
+
+**OPTIONS**
+
+```sh
+DB_HOST       # {string} Database host URL
+DB_NAME       # {string} Postgres database name
+DB_USER       # {string} Database user
+DB_PASSWORD   # {string} Database password
+DB_PORT       # {number} Database port
+SLOT_NAME     # {string} A unique name for Postgres to track where this server has "listened until". If the server dies, it can pick up from the last position.
+PORT          # {number} Port which you can connect your client/listeners
 ```
 
 ## Contributing
