@@ -7,19 +7,31 @@
 # General application configuration
 import Config
 
-# These configs mirror the defaults in releases.exs, remember not to change one
+# These defaults mirror the ones in config.exs, remember not to change one
 # without changing the other.
+app_hostname = System.get_env("HOSTNAME", "localhost")
+app_port = String.to_integer(System.get_env("PORT", "4000"))
+db_host = System.get_env("DB_HOST", "localhost")
+db_port = String.to_integer(System.get_env("DB_PORT", "5432"))
+db_name = System.get_env("DB_NAME", "postgres")
+db_user = System.get_env("DB_USER", "postgres")
+db_password = System.get_env("DB_PASSWORD", "postgres")
+# HACK: There's probably a better way to set boolean from env
+db_ssl = System.get_env("DB_SSL", "true") === "true"
+slot_name = System.get_env("SLOT_NAME") || :temporary
+configuration_file = System.get_env("CONFIGURATION_FILE") || nil
+
 config :realtime,
-  app_hostname: "localhost",
-  app_port: 4000,
-  db_host: "localhost",
-  db_port: 5432,
-  db_name: "postgres",
-  db_user: "postgres",
-  db_password: "postgres",
-  db_ssl: true,
-  slot_name: :temporary,
-  configuration_file: nil
+  app_hostname: app_hostname,
+  app_port: app_port,
+  db_host: db_host,
+  db_port: db_port,
+  db_name: db_name,
+  db_user: db_user,
+  db_password: db_password,
+  db_ssl: db_ssl,
+  slot_name: slot_name,
+  configuration_file: configuration_file
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,

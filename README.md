@@ -143,7 +143,7 @@ DB_NAME       # {string} Postgres database name
 DB_USER       # {string} Database user
 DB_PASSWORD   # {string} Database password
 DB_PORT       # {number} Database port
-SLOT_NAME     # {string} A unique name for Postgres to track where this server has "listened until". If the server dies, it can pick up from the last position.
+SLOT_NAME     # {string} A unique name for Postgres to track where this server has "listened until". If the server dies, it can pick up from the last position. This should be lowercase.
 PORT          # {number} Port which you can connect your client/listeners
 ```
 
