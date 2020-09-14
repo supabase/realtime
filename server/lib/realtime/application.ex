@@ -10,8 +10,10 @@ defmodule Realtime.Application do
     # Hostname must be a char list for some reason
     # Use this var to convert to sigil at connection
     host = Application.fetch_env!(:realtime, :db_host)
+
     # Use a named replication slot if you want realtime to pickup from where
     # it left after a restart because of, for example, a crash.
+    # This will always be converted to lower-case.
     # You can get a list of active replication slots with
     # `select * from pg_replication_slots`
     slot_name = Application.get_env(:realtime, :slot_name)
