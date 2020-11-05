@@ -13,7 +13,6 @@ defmodule Realtime.SubscribersNotification do
     GenServer.call(__MODULE__, {:notify, txn})
   end
 
-
   @impl true
   def init(nil) do
     {:ok, nil}
@@ -41,54 +40,65 @@ defmodule Realtime.SubscribersNotification do
     #   table: "users",
     #   type: "UPDATE"
     # }
+
+    {:ok, realtime_config} = Realtime.ConfigurationManager.get_config(:realtime)
+
     for raw_change <- txn.changes do
       change = Map.put(raw_change, :commit_timestamp, txn.commit_timestamp)
       # Logger.debug inspect(change, pretty: true)
 
-      # Shout to anyone listening on the open realtime channel - e.g. "realtime:*"
+      filtered_realtime_config =
+        Enum.filter(realtime_config, fn config ->
+          config.event === "*" or config.event === change.type
+        end)
+
       topic = "realtime"
-      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(topic <> ":*", change)
+
+      # Shout to anyone listening on the open realtime channel - e.g. "realtime:*"
+      if Enum.any?(filtered_realtime_config, fn config -> config.relation === "*" end),
+        do: RealtimeWeb.RealtimeChannel.handle_realtime_transaction("#{topic}:*", change)
+
+      schema_topic = "#{topic}:#{change.schema}"
+      Logger.debug(inspect(schema_topic))
 
       # Shout to specific schema - e.g. "realtime:public"
-      schema_topic = topic <> ":" <> change.schema
-      Logger.debug inspect(schema_topic)
-      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(schema_topic, change)
+      if Enum.any?(filtered_realtime_config, fn config ->
+           config.relation in ["*", change.schema]
+         end),
+         do: RealtimeWeb.RealtimeChannel.handle_realtime_transaction(schema_topic, change)
+
+      table_topic = "#{schema_topic}:#{change.table}"
+      Logger.debug(inspect(table_topic))
 
       # Shout to specific table - e.g. "realtime:public:users"
-      table_topic = schema_topic <> ":" <> change.table
-      Logger.debug inspect(table_topic)
-      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(table_topic, change)
+      if Enum.any?(filtered_realtime_config, fn config ->
+           config.relation in for schema <- ["*", change.schema],
+                                  table <- ["*", change.table],
+                                  do: "#{schema}:#{table}"
+         end),
+         do: RealtimeWeb.RealtimeChannel.handle_realtime_transaction(table_topic, change)
 
       # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
-      case change.type do
-        type when type in ["INSERT", "UPDATE"] ->
-          if Map.has_key?(change, :record) do
-            Enum.each change.record, fn {k, v} ->
-              if v != nil and v != :unchanged_toast do
-                eq = table_topic <> ":" <> k <> "=eq." <> v
-                Logger.debug inspect(eq)
-                RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
-              end
-            end
+      if Map.has_key?(change, :record) do
+        Enum.each(change.record, fn {k, v} ->
+          if v != nil and v != :unchanged_toast do
+            eq = "#{table_topic}:#{k}=eq.#{v}"
+            Logger.debug(inspect(eq))
+
+            if Enum.any?(filtered_realtime_config, fn config ->
+                 config.relation in for schema <- ["*", change.schema],
+                                        table <- ["*", change.table],
+                                        column <- ["*", k],
+                                        do: "#{schema}:#{table}:#{column}"
+               end),
+               do: RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
           end
-        "DELETE" -> 
-          if Map.has_key?(change, :old_record) do
-            Logger.debug inspect(change, pretty: true)
-            Enum.each change.old_record, fn {k, v} ->
-              if v != nil and v != :unchanged_toast do
-                eq = table_topic <> ":" <> k <> "=eq." <> v
-                Logger.debug inspect(eq)
-                RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
-              end
-            end
-          end
-      end 
-      
+        end)
+      end
     end
   end
 
   defp notify_connectors(txn) do
     Realtime.Connectors.notify(txn)
   end
-
 end

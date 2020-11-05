@@ -1,15 +1,34 @@
 defmodule Realtime.Configuration do
   defmodule(WebhookEndpoint, do: defstruct([:endpoint]))
   defmodule(Webhook, do: defstruct([:event, :relation, :config]))
+  defmodule(Realtime, do: defstruct([:event, :relation]))
 
-  defmodule(Configuration, do: defstruct([:webhooks]))
+  defmodule(Configuration, do: defstruct([:webhooks, :realtime]))
 
   @doc """
   Load Configuration from a json file.
   """
   def from_json_file(nil) do
-    {:ok, %Configuration{webhooks: []}}
+    {:ok,
+     %Configuration{
+       webhooks: [],
+       realtime: [
+         %Realtime{
+           event: "*",
+           relation: "*"
+         },
+         %Realtime{
+           event: "*",
+           relation: "*:*"
+         },
+         %Realtime{
+           event: "*",
+           relation: "*:*:*"
+         }
+       ]
+     }}
   end
+
   def from_json_file(filename) do
     with {:ok, body} <- File.read(filename), do: from_json(body)
   end
