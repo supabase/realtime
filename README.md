@@ -6,6 +6,7 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
 **Contents**
 
+- [Hiring](#hiring)
 - [Status](#status)
 - [Example](#example)
 - [Introduction](#introduction)
@@ -22,6 +23,10 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 - [License](#license)
 - [Credits](#credits)
 - [Sponsors](#sponsors)
+
+## Hiring
+
+Supabase is hiring an Elixir expert to work full-time on this repo. If you have the experience, get in touch.
 
 ## Status
 
