@@ -12,9 +12,10 @@ defmodule Multiplayer.Application do
       # Start the PubSub system
       {Phoenix.PubSub, name: Multiplayer.PubSub},
       # Start the Endpoint (http/https)
-      MultiplayerWeb.Endpoint
+      MultiplayerWeb.Endpoint,
       # Start a worker by calling: Multiplayer.Worker.start_link(arg)
       # {Multiplayer.Worker, arg}
+      MultiplayerWeb.Presence
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
