@@ -6,10 +6,11 @@ Presence and ephemeral state.
 
 Software is becoming more collaborative. Often the data that we need to share is ephemeral, meaning that it doesn't need to be stored in a database. The goals for ephemeral data are different from stored data:
 
+- Highly Available, Eventually Consistent
 - Changing frequently, not persisted
 - Accessible to other users
-- High throughput
-- Usually requires presence information - knowing who is online.
+- High number of connections at one time
+- Usually requires presence information - knowing who is online
 
 
 ## Usage
