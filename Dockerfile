@@ -38,11 +38,11 @@ RUN apk add --no-cache openssl ncurses-libs
 
 WORKDIR /app
 
-RUN chown nobody:nobody /app
+RUN chown nobody /app
 
-USER nobody:nobody
+USER nobody
 
-COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/multiplayer ./
+COPY --from=build --chown=nobody /app/_build/prod/rel/multiplayer ./
 
 ENV HOME=/app
 
