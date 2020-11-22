@@ -60,15 +60,30 @@ defmodule Realtime.SubscribersNotification do
       RealtimeWeb.RealtimeChannel.handle_realtime_transaction(table_topic, change)
 
       # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
-      if Map.has_key?(change, :record) do
-        Enum.each change.record, fn {k, v} ->
-          if v != nil and v != :unchanged_toast do
-            eq = table_topic <> ":" <> k <> "=eq." <> v
-            Logger.debug inspect(eq)
-            RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+      case change.type do
+        type when type in ["INSERT", "UPDATE"] ->
+          if Map.has_key?(change, :record) do
+            Enum.each change.record, fn {k, v} ->
+              if v != nil and v != :unchanged_toast do
+                eq = table_topic <> ":" <> k <> "=eq." <> v
+                Logger.debug inspect(eq)
+                RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+              end
+            end
           end
-        end
-      end
+        "DELETE" -> 
+          if Map.has_key?(change, :old_record) do
+            Logger.debug inspect(change, pretty: true)
+            Enum.each change.old_record, fn {k, v} ->
+              if v != nil and v != :unchanged_toast do
+                eq = table_topic <> ":" <> k <> "=eq." <> v
+                Logger.debug inspect(eq)
+                RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+              end
+            end
+          end
+      end 
+      
     end
   end
 
