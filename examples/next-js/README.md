@@ -6,9 +6,15 @@ A simple Next.js example which listens to database changes.
 
 1. Install dependencies with `npm install`
 2. Start the example database and realtime server with `docker-compose up`
-3. Start the NodeJs server using `npm start`
-4. Visit `http://localhost:3000` and you will see the following:
-
+3. Add .env file in root directory with the following env vars:
+    * DB_HOST=localhost
+    * DB_PORT=5432
+    * DB_NAME=postgres
+    * DB_USER=postgres
+    * DB_PASSWORD=postgres
+4. Create a Next.js build with `npm run build`
+5. Start the NodeJs server using `npm start`
+6. Visit `http://localhost:3000` and you will see the following:
 
 <p align="center"><kbd><img src="./demo.gif" alt="Demo"/></kbd></p>
 
