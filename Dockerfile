@@ -1,5 +1,8 @@
 FROM elixir:1.9.0-alpine AS build
 
+## TODO: remove this and pass it in as a build var
+ENV SECRET_KEY_BASE=dumb
+
 # install build dependencies
 RUN apk add --no-cache build-base npm git python
 
@@ -18,6 +21,11 @@ COPY mix.exs mix.lock ./
 COPY config config
 RUN mix do deps.get, deps.compile
 
+# build assets
+
+COPY priv priv
+RUN mix phx.digest
+
 # compile and build release
 COPY lib lib
 # uncomment COPY if rel/ exists
@@ -34,8 +42,8 @@ RUN chown nobody:nobody /app
 
 USER nobody:nobody
 
-COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/my_app ./
+COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/multiplayer ./
 
 ENV HOME=/app
 
-CMD ["bin/my_app", "start"]
+CMD ["bin/multiplayer", "start"]
