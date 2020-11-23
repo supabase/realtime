@@ -7,13 +7,16 @@
 # General application configuration
 use Mix.Config
 
+config :multiplayer,
+  ecto_repos: [Multiplayer.Repo]
+
 # Configures the endpoint
 config :multiplayer, MultiplayerWeb.Endpoint,
   url: [host: "localhost"],
-  secret_key_base: "WLR5NW21B1GUmCpVG+tv/kAOmlAUTlkZFpNmSAWxXKfMINaTAiZuUkKKl2RtrVmS",
+  secret_key_base: "ktyW57usZxrivYdvLo9os7UGcUUZYKchOMHT3tzndmnHuxD09k+fQnPUmxlPMUI3",
   render_errors: [view: MultiplayerWeb.ErrorView, accepts: ~w(html json), layout: false],
   pubsub_server: Multiplayer.PubSub,
-  live_view: [signing_salt: "glpT0e9a"]
+  live_view: [signing_salt: "wUMBeR8j"]
 
 # Configures Elixir's Logger
 config :logger, :console,

@@ -7,6 +7,8 @@ defmodule Multiplayer.Application do
 
   def start(_type, _args) do
     children = [
+      # Start the Ecto repository
+      Multiplayer.Repo,
       # Start the Telemetry supervisor
       MultiplayerWeb.Telemetry,
       # Start the PubSub system

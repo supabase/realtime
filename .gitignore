@@ -28,3 +28,5 @@ multiplayer-*.tar
 /priv/static/
 
 node_modules
+
+.supabase
