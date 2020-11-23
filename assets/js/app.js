@@ -24,7 +24,7 @@ function uuidv4() {
   });
 }
 
-  console.log("uuidv4()", uuidv4());
+console.log("uuidv4()", uuidv4());
 
 let socket = new Socket("/socket", {
   params: { user_id: uuidv4() },
@@ -33,15 +33,23 @@ let socket = new Socket("/socket", {
 let channel = socket.channel("room:lobby", {});
 let presence = new Presence(channel);
 
+
+const totalUsersDom = document.querySelector("#total-users");
+const typingDom = document.querySelector("div[role=presence]");
 function renderOnlineUsers(presence) {
   let response = "";
+  let totalUsers = 0;
 
   presence.list((userId, { metas: [first, ...rest] }) => {
+    totalUsers++;
     let thisUserOnline = rest.length + 1;
     response += `<br>User: <code>${userId}</code> , (typing: ${first.typing})</br>`;
+    if (first.mouse && first.mouse.x)
+      draw(first.color, first.mouse.x, first.mouse.y);
   });
 
-  document.querySelector("div[role=presence]").innerHTML = response;
+  typingDom.innerHTML = response;
+  totalUsersDom.innerHTML = `<code>${totalUsers}</code>`;
 }
 presence.onSync(() => renderOnlineUsers(presence));
 
@@ -50,6 +58,11 @@ channel.join();
 
 let state = {
   typing: false,
+  color: "#" + Math.floor(Math.random() * 16777215).toString(16),
+  mouse: {
+    x: 0,
+    y: 0,
+  },
 };
 channel.push("broadcast", state);
 
@@ -59,7 +72,7 @@ var typingTimer;
 
 const userStartsTyping = function () {
   if (state.typing) return;
-  state = {...state, typing: true}
+  state = { ...state, typing: true };
   channel.push("broadcast", state);
 };
 
@@ -79,10 +92,34 @@ textbox.addEventListener("keyup", () => {
   typingTimer = setTimeout(userStopsTyping, TYPING_TIMEOUT);
 });
 
+/**
+ * Drawing example
+ */
+var canvas = document.getElementById("imgCanvas");
+var context = canvas.getContext("2d");
 
-// channel.push('shout', {
-//     mouse: {
-//         x: 0,
-//         y: 0,
-//     }
-// })
+window.addEventListener(
+  "mousemove",
+  (e) => {
+    var pos = getMousePosOffset(canvas, e);
+    let x = pos.x;
+    let y = pos.y;
+    if (x > 0 && x < canvas.width && y > 0 && y < canvas.height) {
+      state = { ...state, mouse: { x, y } };
+      channel.push("broadcast", state);
+    }
+  },
+  false
+);
+
+function draw(color, x, y) {
+  context.fillStyle = color;
+  context.fillRect(x, y, 4, 4);
+}
+function getMousePosOffset(canvas, evt) {
+  var rect = canvas.getBoundingClientRect();
+  return {
+    x: ((evt.clientX - rect.left) / (rect.right - rect.left)) * canvas.width,
+    y: ((evt.clientY - rect.top) / (rect.bottom - rect.top)) * canvas.height,
+  };
+}

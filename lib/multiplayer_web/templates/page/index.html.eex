@@ -1,6 +1,27 @@
 
 <div>
+<h3>Online users: <span id="total-users"><span></h3>
+</div>
 
+
+<br />
+<br />
+<br />
+
+<div>
+<h3>Drawing</h3>
+<canvas style="border:1px solid #000000;margin:0;padding:0;position:relative;left:0px;top:0px;width:700px;height:300px" id="imgCanvas" width="700" height="300"></canvas>
+</div>
+
+
+<br />
+<br />
+<br />
+
+
+
+<div>
+<h3>Typing</h3>
 <input type="text" id="typingInput">
 </div>
 
