@@ -6,7 +6,6 @@
 
 <br />
 <br />
-<br />
 
 <div>
 <h3>Drawing</h3>
@@ -14,7 +13,6 @@
 </div>
 
 
-<br />
 <br />
 <br />
 
@@ -26,3 +24,76 @@
 </div>
 
 <div role="presence"></div>
+
+
+
+<br />
+<br />
+
+
+
+<div>
+<h3>Usage</h3>
+
+</div>
+
+<div>
+    <h4>Install</h4>
+    <pre>npm install phoenix</pre>
+</div>
+
+<div>
+<h4>In your app </h4>
+<pre>
+import { Socket, Presence } from "phoenix";
+
+const user_id = "Jenny"
+const room = "room:lobby" // Unique room name
+
+let socket = new Socket("/socket", {
+  params: { user_id },
+});
+let channel = socket.channel(room, {});
+let presence = new Presence(channel);
+
+// Mock up this user's state
+let state = {
+  mouse: {
+    x: 0,
+    y: 0,
+  },
+};
+
+presence.onSync(() => {
+
+  // Loop through online users
+  presence.list((userId, { metas: [user, ...sessions] }) => {
+    let thisUserOnline = rest.length + 1;
+    if (user.mouse && user.mouse.x) {
+      console.log(userId, user.mouse)
+    }
+  });
+
+});
+
+// Add some user events
+window.addEventListener(
+  "mousemove",
+  (e) => {
+        let x = evt.clientX;
+        let y = evt.clientY;
+        state = { ...state, mouse: { x, y } };
+        channel.push("broadcast", state);
+    }
+  },
+  false
+);
+
+// Connect
+socket.connect();
+channel.join();
+
+</pre>
+</div>
+
+
