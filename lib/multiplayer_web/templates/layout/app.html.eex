@@ -16,6 +16,7 @@
             <%= if function_exported?(Routes, :live_dashboard_path, 2) do %>
               <li><%= link "LiveDashboard", to: Routes.live_dashboard_path(@conn, :home) %></li>
             <% end %>
+            <li><a href="https://github.com/kiwicopple/multiplayer">GitHub</a></li>
           </ul>
         </nav>
         <a href="/" class="">
