@@ -37,10 +37,8 @@ function renderOnlineUsers(presence) {
   let response = "";
 
   presence.list((userId, { metas: [first, ...rest] }) => {
-    let count = rest.length + 1;
-    console.log("first", first);
-    console.log("rest", rest);
-    response += `<br>${userId} (count: ${count}), (typing: ${first.typing})</br>`;
+    let thisUserOnline = rest.length + 1;
+    response += `<br>User: <code>${userId}</code> , (typing: ${first.typing})</br>`;
   });
 
   document.querySelector("div[role=presence]").innerHTML = response;
@@ -56,7 +54,7 @@ let state = {
 channel.push("broadcast", state);
 
 // TYPING EXAMPLE
-const TYPING_TIMEOUT = 1000;
+const TYPING_TIMEOUT = 600;
 var typingTimer;
 
 const userStartsTyping = function () {
@@ -73,12 +71,10 @@ const userStopsTyping = function () {
 
 let textbox = document.querySelector("#typingInput");
 textbox.addEventListener("keydown", () => {
-  console.log('keydown')
   userStartsTyping();
   clearTimeout(typingTimer);
 });
 textbox.addEventListener("keyup", () => {
-  console.log("keyup");
   clearTimeout(typingTimer);
   typingTimer = setTimeout(userStopsTyping, TYPING_TIMEOUT);
 });
