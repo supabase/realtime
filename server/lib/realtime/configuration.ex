@@ -1,7 +1,7 @@
 defmodule Realtime.Configuration do
   defmodule(WebhookEndpoint, do: defstruct([:endpoint]))
   defmodule(Webhook, do: defstruct([:event, :relation, :config]))
-  defmodule(Realtime, do: defstruct([:event, :relation]))
+  defmodule(Realtime, do: defstruct([:events, :relation]))
 
   defmodule(Configuration, do: defstruct([:webhooks, :realtime]))
 
@@ -14,16 +14,16 @@ defmodule Realtime.Configuration do
        webhooks: [],
        realtime: [
          %Realtime{
-           event: "*",
-           relation: "*"
+           relation: "*",
+           events: ["INSERT", "UPDATE", "DELETE"]
          },
          %Realtime{
-           event: "*",
-           relation: "*:*"
+           relation: "*:*",
+           events: ["INSERT", "UPDATE", "DELETE"]
          },
          %Realtime{
-           event: "*",
-           relation: "*:*:*"
+           relation: "*:*:*",
+           events: ["INSERT", "UPDATE", "DELETE"]
          }
        ]
      }}
@@ -64,7 +64,7 @@ defmodule Realtime.Configuration do
     with {:ok, raw_endpoint} <- Map.fetch(config, "config"),
          {:ok, endpoint} <- to_webhook_endpoint_configuration(raw_endpoint)
     do
-      event = Map.get(config, "event", "*") # default to all events
+      event = Map.get(config, "events", "*") # default to all events
       relation = Map.get(config, "relation", "*") # default to all relations
       {:ok, %Webhook{event: event, relation: relation, config: endpoint}}
     end
