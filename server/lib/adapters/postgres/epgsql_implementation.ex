@@ -6,6 +6,7 @@ defmodule Realtime.Adapters.Postgres.EpgsqlImplementation do
   require Logger
 
   alias Realtime.Replication.State
+  alias Realtime.DatabaseRetryMonitor
 
   @impl true
   def init(config) do
@@ -20,25 +21,23 @@ defmodule Realtime.Adapters.Postgres.EpgsqlImplementation do
       |> Enum.map(fn pub -> ~s("#{pub}") end)
       |> Enum.join(",")
 
-    case :epgsql.connect(epgsql_config) do
-      {:ok, epgsql_pid} ->
-        {:ok, slot_name} =
-          create_replication_slot(epgsql_pid, Keyword.get(config, :slot, :temporary))
-
-        :ok =
-          :epgsql.start_replication(
-            epgsql_pid,
-            slot_name,
-            self(),
-            [],
-            '#{xlog}/#{offset}',
-            'proto_version \'1\', publication_names \'#{publication_names}\''
-          )
-
-        {:ok, %State{config: config, connection: epgsql_pid}}
-
-      {:error, reason} ->
-        {:stop, reason}
+    with :ok <- :timer.sleep(DatabaseRetryMonitor.get_delay()),
+         {:ok, epgsql_pid} <- :epgsql.connect(epgsql_config),
+         :ok <- DatabaseRetryMonitor.reset_delay(),
+         {:ok, slot_name} <-
+           create_replication_slot(epgsql_pid, Keyword.get(config, :slot, :temporary)),
+         :ok <-
+           :epgsql.start_replication(
+             epgsql_pid,
+             slot_name,
+             self(),
+             [],
+             '#{xlog}/#{offset}',
+             'proto_version \'1\', publication_names \'#{publication_names}\''
+           ) do
+      {:ok, %State{config: config, connection: epgsql_pid}}
+    else
+      reason -> {:stop, reason}
     end
   end
 

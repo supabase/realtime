@@ -44,6 +44,7 @@ defmodule Realtime.MixProject do
       {:jason, "~> 1.0"},
       {:plug_cowboy, "~> 2.0"},
       {:epgsql, "~> 4.2"},
+      {:retry, "~> 0.14"}
     ]
   end
 end
