@@ -5,9 +5,6 @@ defmodule Realtime.Adapters.Postgres.EpgsqlImplementation do
   @behaviour Realtime.Adapters.Postgres.AdapterBehaviour
   require Logger
 
-  alias Realtime.Replication.State
-  alias Realtime.DatabaseRetryMonitor
-
   @impl true
   def init(config) do
     epgsql_config =
@@ -21,9 +18,7 @@ defmodule Realtime.Adapters.Postgres.EpgsqlImplementation do
       |> Enum.map(fn pub -> ~s("#{pub}") end)
       |> Enum.join(",")
 
-    with :ok <- :timer.sleep(DatabaseRetryMonitor.get_delay()),
-         {:ok, epgsql_pid} <- :epgsql.connect(epgsql_config),
-         :ok <- DatabaseRetryMonitor.reset_delay(),
+    with {:ok, epgsql_pid} <- :epgsql.connect(epgsql_config),
          {:ok, slot_name} <-
            create_replication_slot(epgsql_pid, Keyword.get(config, :slot, :temporary)),
          :ok <-
@@ -35,9 +30,10 @@ defmodule Realtime.Adapters.Postgres.EpgsqlImplementation do
              '#{xlog}/#{offset}',
              'proto_version \'1\', publication_names \'#{publication_names}\''
            ) do
-      {:ok, %State{config: config, connection: epgsql_pid}}
+      {:ok, epgsql_pid}
     else
-      reason -> {:stop, reason}
+      reason ->
+        {:error, reason}
     end
   end
 

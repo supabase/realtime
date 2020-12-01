@@ -29,19 +29,25 @@ defmodule Realtime.Application do
 
     configuration_file = Application.fetch_env!(:realtime, :configuration_file)
 
+    db_retry_initial_delay = Application.fetch_env!(:realtime, :db_retry_initial_delay)
+    db_retry_maximum_delay = Application.fetch_env!(:realtime, :db_retry_maximum_delay)
+    db_retry_jitter = Application.fetch_env!(:realtime, :db_retry_jitter)
+
     # List all child processes to be supervised
     children = [
       # Start the endpoint when the application starts
       RealtimeWeb.Endpoint,
-      {Realtime.DatabaseRetryMonitor, []},
       {
-        Realtime.ReplicationSupervisor,
+        Realtime.Replication,
         # You can provide a different WAL position if desired, or default to
         # allowing Postgres to send you what it thinks you need
         epgsql: epgsql_params,
         slot: slot_name,
         wal_position: {"0", "0"},
-        publications: ["supabase_realtime"]
+        publications: ["supabase_realtime"],
+        conn_retry_initial_delay: db_retry_initial_delay,
+        conn_retry_maximum_delay: db_retry_maximum_delay,
+        conn_retry_jitter: db_retry_jitter
       },
       {
         Realtime.ConfigurationManager,
