@@ -31,10 +31,11 @@ Supabase is hiring an Elixir expert to work full-time on this repo. If you have 
 ## Status
 
 - [x] Alpha: Under heavy development
-- [ ] Beta: Ready for use. But go easy on us, there may be a few kinks.
-- [ ] 1.0: Use in production!
+- [x] Public Alpha: Ready for use. But go easy on us, there may be a few kinks.
+- [x] Public Beta: Stable enough for most non-enterprise use-cases
+- [ ] Public: Production-ready
 
-This repo is still under heavy development and the documentation is evolving. You're welcome to try it, but expect some breaking changes. Watch "releases" of this repo to receive a notifification when we are ready for Beta. And give us a star if you like it!
+This repo is still under heavy development and the documentation is evolving. You're welcome to try it, but expect some breaking changes. Watch "releases" of this repo to get notified of major updates. And give us a star if you like it!
 
 ![Watch this repo](https://gitcdn.xyz/repo/supabase/monorepo/master/web/static/watch-repo.gif "Watch this repo")
 
