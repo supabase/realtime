@@ -72,14 +72,30 @@ defmodule Realtime.SubscribersNotification do
       end
 
       # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
-      if Map.has_key?(change, :record) do
-        Enum.each(change.record, fn {k, v} ->
-          should_notify_column = has_column(event_config, change.schema, change.table, k)
-          if is_valid_notification_key(v) and should_notify_column do
-            eq = "#{table_topic}:#{k}=eq.#{v}"
-            RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+      case change.type do
+        type when type in ["INSERT", "UPDATE"] ->
+          if Map.has_key?(change, :record) do
+            Enum.each(change.record, fn {k, v} ->
+              should_notify_column = has_column(event_config, change.schema, change.table, k)
+
+              if is_valid_notification_key(v) and should_notify_column do
+                eq = "#{table_topic}:#{k}=eq.#{v}"
+                RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+              end
+            end)
           end
-        end)
+
+        "DELETE" ->
+          if Map.has_key?(change, :old_record) do
+            Enum.each(change.old_record, fn {k, v} ->
+              should_notify_column = has_column(event_config, change.schema, change.table, k)
+
+              if is_valid_notification_key(v) and should_notify_column do
+                eq = "#{table_topic}:#{k}=eq.#{v}"
+                RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
+              end
+            end)
+          end
       end
     end
   end
