@@ -13,7 +13,6 @@ defmodule Realtime.SubscribersNotification do
     GenServer.call(__MODULE__, {:notify, txn})
   end
 
-
   @impl true
   def init(nil) do
     {:ok, nil}
@@ -41,54 +40,106 @@ defmodule Realtime.SubscribersNotification do
     #   table: "users",
     #   type: "UPDATE"
     # }
+
+    {:ok, realtime_config} = Realtime.ConfigurationManager.get_config(:realtime)
+
     for raw_change <- txn.changes do
       change = Map.put(raw_change, :commit_timestamp, txn.commit_timestamp)
+      topic = "realtime"
+      schema_topic = "#{topic}:#{change.schema}"
+      table_topic = "#{schema_topic}:#{change.table}"
       # Logger.debug inspect(change, pretty: true)
 
-      # Shout to anyone listening on the open realtime channel - e.g. "realtime:*"
-      topic = "realtime"
-      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(topic <> ":*", change)
+      # Get only the config which includes this event type (INSERT | UPDATE | DELETE)
+      event_config =
+        Enum.filter(realtime_config, fn config ->
+          change.type in config.events
+        end)
 
       # Shout to specific schema - e.g. "realtime:public"
-      schema_topic = topic <> ":" <> change.schema
-      Logger.debug inspect(schema_topic)
-      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(schema_topic, change)
+      if has_schema(event_config, change.schema) do
+        RealtimeWeb.RealtimeChannel.handle_realtime_transaction(schema_topic, change)
+      end
+
+      # Special case for notifiying "*"
+      if has_schema(event_config, "*") do
+        RealtimeWeb.RealtimeChannel.handle_realtime_transaction("#{topic}:*", change)
+      end
 
       # Shout to specific table - e.g. "realtime:public:users"
-      table_topic = schema_topic <> ":" <> change.table
-      Logger.debug inspect(table_topic)
-      RealtimeWeb.RealtimeChannel.handle_realtime_transaction(table_topic, change)
+      if has_table(event_config, change.schema, change.table) do
+        RealtimeWeb.RealtimeChannel.handle_realtime_transaction(table_topic, change)
+      end
 
       # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
       case change.type do
         type when type in ["INSERT", "UPDATE"] ->
           if Map.has_key?(change, :record) do
-            Enum.each change.record, fn {k, v} ->
-              if v != nil and v != :unchanged_toast do
-                eq = table_topic <> ":" <> k <> "=eq." <> v
-                Logger.debug inspect(eq)
+            Enum.each(change.record, fn {k, v} ->
+              should_notify_column = has_column(event_config, change.schema, change.table, k)
+
+              if is_valid_notification_key(v) and should_notify_column do
+                eq = "#{table_topic}:#{k}=eq.#{v}"
                 RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
               end
-            end
+            end)
           end
-        "DELETE" -> 
+
+        "DELETE" ->
           if Map.has_key?(change, :old_record) do
-            Logger.debug inspect(change, pretty: true)
-            Enum.each change.old_record, fn {k, v} ->
-              if v != nil and v != :unchanged_toast do
-                eq = table_topic <> ":" <> k <> "=eq." <> v
-                Logger.debug inspect(eq)
+            Enum.each(change.old_record, fn {k, v} ->
+              should_notify_column = has_column(event_config, change.schema, change.table, k)
+
+              if is_valid_notification_key(v) and should_notify_column do
+                eq = "#{table_topic}:#{k}=eq.#{v}"
                 RealtimeWeb.RealtimeChannel.handle_realtime_transaction(eq, change)
               end
-            end
+            end)
           end
-      end 
-      
+      end
     end
+  end
+
+  @doc """
+  Determines whether the Realtime config has a specific schema relation
+  """
+  defp has_schema(config, schema) do
+    valid_patterns = ["*", schema]
+    Enum.any?(config, fn c -> c.relation in valid_patterns end)
+  end
+
+  @doc """
+  Determines whether the Realtime config has a specific table relation
+  """
+  defp has_table(config, schema, table) do
+    # Construct an array of valid patterns: "*:*", "public:todos", etc
+    valid_patterns =
+      for schema_keys <- ["*", schema],
+          table_keys <- ["*", table],
+          do: "#{schema_keys}:#{table_keys}"
+
+    Enum.any?(config, fn c -> c.relation in valid_patterns end)
+  end
+
+  @doc """
+  Determines whether the Realtime config has a specific column relation
+  """
+  defp has_column(config, schema, table, column) do
+    # Construct an array of valid patterns: "*:*:*", "public:todos", etc
+    valid_patterns =
+      for schema_keys <- ["*", schema],
+          table_keys <- ["*", table],
+          column_keys <- ["*", column],
+          do: "#{schema_keys}:#{table_keys}:#{column_keys}"
+
+    Enum.any?(config, fn c -> c.relation in valid_patterns end)
+  end
+
+  defp is_valid_notification_key(v) do
+    v != nil and v != :unchanged_toast and String.length(v) < 100
   end
 
   defp notify_connectors(txn) do
     Realtime.Connectors.notify(txn)
   end
-
 end

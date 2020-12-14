@@ -19,18 +19,21 @@ export default class Index extends React.Component {
   componentDidMount() {
     this.socket.connect()
     this.addChannel('realtime:*')
+    this.addChannel('realtime:public')
     this.addChannel('realtime:public:todos')
     this.addChannel('realtime:public:users')
-    this.addChannel('realtime:public:users:id=eq.2')
+    this.addChannel('realtime:public:users:id=eq.16')
+    this.addChannel('realtime:public:users:id=eq.17')
+    this.addChannel('realtime:public:users:id=eq.18')
     this.fetchData()
   }
   addChannel(topic) {
     let channel = this.socket.channel(topic)
     channel.on('INSERT', msg => this.messageReceived(topic, msg))
-    // channel.on('*', msg => console.log('INSERT', msg))
-    // channel.on('INSERT', msg => console.log('INSERT', msg))
-    // channel.on('UPDATE', msg => console.log('UPDATE', msg))
-    // channel.on('DELETE', msg => console.log('DELETE', msg))
+    channel.on('*', msg => console.log('*', msg))
+    channel.on('INSERT', msg => console.log('INSERT', msg))
+    channel.on('UPDATE', msg => console.log('UPDATE', msg))
+    channel.on('DELETE', msg => console.log('DELETE', msg))
     channel
       .join()
       .receive('ok', () => console.log('Connecting'))
