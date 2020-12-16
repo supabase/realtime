@@ -296,6 +296,23 @@ defmodule Realtime.Replication do
   end
 
   defp notify_subscribers(%State{transaction: {_current_txn_lsn, txn}}) do
-    SubscribersNotification.notify(txn)
+    txn
+    |> set_change_records_commit_timestamps()
+    |> SubscribersNotification.notify()
+  end
+
+  defp set_change_records_commit_timestamps(
+         %Transaction{changes: changes, commit_timestamp: commit_timestamp} = txn
+       ) do
+    # Set every change record's (e.g. %Realtime.Adapters.Changes.NewRecord) commit_timestamp value
+    # to transaction's (i.e. %Realtime.Adapters.Changes.Transaction) commit_timestamp value
+    %Transaction{
+      txn
+      | changes:
+          Enum.map(
+            changes,
+            fn record -> %{record | commit_timestamp: commit_timestamp} end
+          )
+    }
   end
 end

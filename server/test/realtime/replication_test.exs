@@ -191,7 +191,7 @@ defmodule Realtime.ReplicationTest do
     end
   end
 
-  test "Realtime.DatabaseRetryMonitor.get_retry_delay/1 when conn_retry_delays is empty" do
+  test "Realtime.Replication.get_retry_delay/1 when conn_retry_delays is empty" do
     state = %State{
       conn_retry_delays: [],
       config: [
@@ -209,7 +209,7 @@ defmodule Realtime.ReplicationTest do
     assert Enum.all?(delays, &(is_integer(&1) and &1 > 0))
   end
 
-  test "Realtime.DatabaseRetryMonitor.get_retry_delay/1 when conn_retry_delays is not empty" do
+  test "Realtime.Replication.get_retry_delay/1 when conn_retry_delays is not empty" do
     state = %State{
       conn_retry_delays: [489, 1011, 1996, 4023]
     }
@@ -220,7 +220,7 @@ defmodule Realtime.ReplicationTest do
     assert delays == [1011, 1996, 4023]
   end
 
-  test "Realtime.DatabaseRetryMonitor.reset_retry_delay/1" do
+  test "Realtime.Replication.reset_retry_delay/1" do
     state = %State{
       conn_retry_delays: [198, 403, 781]
     }

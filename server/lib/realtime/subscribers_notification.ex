@@ -43,8 +43,7 @@ defmodule Realtime.SubscribersNotification do
 
     {:ok, realtime_config} = Realtime.ConfigurationManager.get_config(:realtime)
 
-    for raw_change <- txn.changes do
-      change = Map.put(raw_change, :commit_timestamp, txn.commit_timestamp)
+    for change <- txn.changes do
       topic = "realtime"
       schema_topic = "#{topic}:#{change.schema}"
       table_topic = "#{schema_topic}:#{change.table}"
