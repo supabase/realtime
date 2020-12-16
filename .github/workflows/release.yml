@@ -150,10 +150,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/download-artifact@v1
+        with:
+          name: has-new-release
 
       - name: Check for new release
         run: echo HAS_NEW_RELEASE=$(cat has-new-release/has-new-release) >> $GITHUB_ENV
+
+      - uses: actions/checkout@v2
+        if: env.HAS_NEW_RELEASE == 1
 
       - name: Get version
         if: env.HAS_NEW_RELEASE == 1
