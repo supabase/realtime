@@ -52,7 +52,7 @@ jobs:
         elixir: ["1.10.x"]
         otp: ["22.x"]
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
 
     steps:
       - uses: actions/download-artifact@v1
@@ -111,6 +111,29 @@ jobs:
           asset_name: realtime-${{ env.VERSION }}-x86_64-linux-gnu.tar.gz
           asset_content_type: application/gzip
 
+  upload-docker-image:
+    name: Upload Docker image
+
+    needs:
+      - release
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v1
+        with:
+          name: has-new-release
+
+      - name: Check for new release
+        run: echo HAS_NEW_RELEASE=$(cat has-new-release/has-new-release) >> $GITHUB_ENV
+
+      - uses: actions/checkout@v2
+        if: env.HAS_NEW_RELEASE == 1
+
+      - name: Get version
+        if: env.HAS_NEW_RELEASE == 1
+        run: echo VERSION=$(curl -s https://api.github.com/repos/supabase/realtime/releases/latest | jq .name -r) >> $GITHUB_ENV
+
       - name: Upload build to Docker Hub
         if: env.HAS_NEW_RELEASE == 1
         uses: docker/build-push-action@v1
@@ -119,3 +142,62 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: supabase/realtime
           tags: latest,${{ env.VERSION }}
+
+  build-arm64-binary:
+    name: Build and upload arm64 binaries
+    needs:
+      - release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Check for new release
+        run: echo HAS_NEW_RELEASE=$(cat has-new-release/has-new-release) >> $GITHUB_ENV
+
+      - name: Get version
+        if: env.HAS_NEW_RELEASE == 1
+        run: echo VERSION=$(curl -s https://api.github.com/repos/supabase/realtime/releases/latest | jq .name -r) >> $GITHUB_ENV
+
+      - uses: uraimo/run-on-arch-action@v2.0.5
+        if: env.HAS_NEW_RELEASE == 1
+        name: Build realtime for aarch64
+        id: runcmd
+        with:
+          arch: aarch64
+          distro: ubuntu18.04
+
+          run: |
+            export DEBIAN_FRONTEND=noninteractive
+            export MIX_ENV=prod
+            export LANG=C.UTF-8
+
+            apt-get update
+            apt-get -y install --no-install-recommends wget gnupg ca-certificates
+            wget https://packages.erlang-solutions.com/erlang-solutions_2.0_all.deb
+            dpkg -i erlang-solutions_2.0_all.deb
+            apt-get update
+            apt-get -y install --no-install-recommends esl-erlang=1:22.3.4.9-1 elixir=1.10.4-1
+
+            cd server
+            mix local.hex --force
+            mix local.rebar --force
+            mix deps.get
+            mix deps.compile
+            mix release
+            tar -czf ../realtime-${{ env.VERSION }}-aarch64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
+
+      - name: Get upload url
+        if: env.HAS_NEW_RELEASE == 1
+        run: echo UPLOAD_URL=$(curl -s https://api.github.com/repos/supabase/realtime/releases/latest | jq .upload_url -r) >> $GITHUB_ENV
+
+      - name: Upload release asset
+        if: env.HAS_NEW_RELEASE == 1
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ env.UPLOAD_URL }}
+          asset_path: ./realtime-${{ env.VERSION }}-aarch64-linux-gnu.tar.gz
+          asset_name: realtime-${{ env.VERSION }}-aarch64-linux-gnu.tar.gz
+          asset_content_type: application/gzip
