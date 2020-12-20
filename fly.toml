@@ -3,7 +3,7 @@
 app = "multiplayer"
 
 [experimental]
-private_network = true
+  private_network = true
 
 [[services]]
   internal_port = 4000
