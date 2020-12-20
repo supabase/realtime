@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full">
   <head>
     <meta charset="utf-8"/>
     <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
@@ -24,10 +24,16 @@
         </a>
       </section>
     </header>
-    <main role="main" class="container">
-      <p class="alert alert-info" role="alert"><%= get_flash(@conn, :info) %></p>
-      <p class="alert alert-danger" role="alert"><%= get_flash(@conn, :error) %></p>
+    <main role="main" class="">
       <%= @inner_content %>
     </main>
+
+    <footer class="bg-gray-700 mt-auto py-3">
+      <div class="container pb-4 max-w-4xl mx-auto text-center text-gray-300 text-sm">
+        &copy; <%= DateTime.utc_now.year %> Phoenix Tutorials
+      </div>
+    </footer>
+
+
   </body>
 </html>
