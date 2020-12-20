@@ -6,4 +6,9 @@ module.exports = {
       whitelist: [/phx/, /nprogress/],
     },
   },
+  theme: {
+    fontFamily: {
+      sans: ["Inter", "system-ui"],
+    },
+  },
 };

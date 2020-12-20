@@ -9,28 +9,14 @@
     <script defer type="text/javascript" src="<%= Routes.static_path(@conn, "/js/app.js") %>"></script>
   </head>
   <body>
-    <header>
-      <section class="container">
-        <nav role="navigation">
-          <ul>
-            <%= if function_exported?(Routes, :live_dashboard_path, 2) do %>
-              <li><%= link "LiveDashboard", to: Routes.live_dashboard_path(@conn, :home) %></li>
-            <% end %>
-            <li><a href="https://github.com/kiwicopple/multiplayer">GitHub</a></li>
-          </ul>
-        </nav>
-        <a href="/" class="">
-          <h1>Multiplayer</h1>
-        </a>
-      </section>
-    </header>
+
     <main role="main" class="">
       <%= @inner_content %>
     </main>
 
     <footer class="bg-gray-700 mt-auto py-3">
       <div class="container pb-4 max-w-4xl mx-auto text-center text-gray-300 text-sm">
-        &copy; <%= DateTime.utc_now.year %> Phoenix Tutorials
+        &copy; <%= DateTime.utc_now.year %> Supabase
       </div>
     </footer>
 

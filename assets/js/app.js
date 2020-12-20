@@ -35,14 +35,21 @@ let presence = new Presence(channel);
 
 
 const totalUsersDom = document.querySelector("#total-users");
+const totalRedDom = document.querySelector("#total-red");
+const totalBlueDom = document.querySelector("#total-blue");
+const currentTeamDom = document.querySelector("#current-team");
 const typingDom = document.querySelector("div[role=presence]");
 function renderOnlineUsers(presence) {
   let response = "";
   let totalUsers = 0;
+  let totalRed = 0;
+  let totalBlue = 0;
 
   presence.list((userId, { metas: [first, ...rest] }) => {
     totalUsers++;
-    let thisUserOnline = rest.length + 1;
+    if (first.team == 'red') totalRed++;
+    else totalBlue++;
+    
     response += `<br>User: <code>${userId}</code> , (typing: ${first.typing})</br>`;
     if (first.mouse && first.mouse.x)
       draw(first.color, first.mouse.x, first.mouse.y);
@@ -50,21 +57,29 @@ function renderOnlineUsers(presence) {
 
   typingDom.innerHTML = response;
   totalUsersDom.innerHTML = `<code>${totalUsers}</code>`;
+  totalRedDom.innerHTML = `${totalRed}`;
+  totalBlueDom.innerHTML = `${totalBlue}`;
 }
 presence.onSync(() => renderOnlineUsers(presence));
 
 socket.connect();
 channel.join();
 
+const red = '#EF4444';
+const blue = "#3B82F6";
+const team = Math.random() < 0.5 ? 'red' : 'blue'
+
 let state = {
   typing: false,
-  color: "#" + Math.floor(Math.random() * 16777215).toString(16),
+  color: team == 'red' ? red : blue,
+  team: team,
   mouse: {
     x: 0,
     y: 0,
   },
 };
 channel.push("broadcast", state);
+currentTeamDom.innerHTML = `${team}`;
 
 // TYPING EXAMPLE
 const TYPING_TIMEOUT = 600;
