@@ -1,7 +1,7 @@
 defmodule Realtime.MixProject do
   use Mix.Project
 
-  @version "0.7.7"
+  @version "0.0.0-automated"
   @elixir "~> 1.5"
 
   def project do
