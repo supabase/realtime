@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
 
 jobs:
   release:
@@ -14,6 +15,14 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      # Needed for npm i -g
+      # https://github.com/actions/virtual-environments/issues/599#issuecomment-605558600
+      - uses: actions/setup-node@v2
+        with:
+          node-version: "14"
+
+      # No easy way to check whether or not semantic-release released a new
+      # version, so we use envars as a workaround
       - name: Get version before
         run: echo VERSION_BEFORE=$(curl -s https://api.github.com/repos/supabase/realtime/releases/latest | jq .name -r) >> $GITHUB_ENV
 
@@ -24,6 +33,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # TODO: Race condition: GitHub may not update releases just in time before
+      # this step is invoked. Very unlikely to happen.
       - name: Get version after
         run: echo VERSION_AFTER=$(curl -s https://api.github.com/repos/supabase/realtime/releases/latest | jq .name -r) >> $GITHUB_ENV
 
@@ -35,6 +46,7 @@ jobs:
             echo 1 > has-new-release
           fi
 
+      # No easy way to pass envars between jobs, so we use artifacts as a workaround
       - uses: actions/upload-artifact@v1
         with:
           name: has-new-release
@@ -61,6 +73,7 @@ jobs:
       - name: Check for new release
         run: echo HAS_NEW_RELEASE=$(cat has-new-release/has-new-release) >> $GITHUB_ENV
 
+      # No easy way to conditionally skip steps, so we use `if` as a workaround
       - uses: actions/checkout@v2
         if: env.HAS_NEW_RELEASE == 1
 
