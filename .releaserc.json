@@ -8,8 +8,8 @@
         "replacements": [
           {
             "files": ["server/mix.exs"],
-            "from": "@version = \".*\"",
-            "to": "@version = \"${nextRelease.version}\"",
+            "from": "@version \".*\"",
+            "to": "@version \"${nextRelease.version}\"",
             "results": [
               {
                 "file": "server/mix.exs",
