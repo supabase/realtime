@@ -1,79 +1,119 @@
 defmodule Realtime.Configuration do
+  defmodule(ConfigurationFileError,
+    do: defexception(message: "configuration file is missing required attribute(s)")
+  )
+
   defmodule(WebhookEndpoint, do: defstruct([:endpoint]))
   defmodule(Webhook, do: defstruct([:event, :relation, :config]))
   defmodule(Realtime, do: defstruct([:events, :relation]))
 
-  defmodule(Configuration, do: defstruct([:webhooks, :realtime]))
+  defmodule(Configuration, do: defstruct(webhooks: [], realtime: []))
+
+  @events ["INSERT", "UPDATE", "DELETE"]
 
   @doc """
-  Load Configuration from a json file.
+
+  Load and convert configuration settings from a json file.
+
   """
-  def from_json_file(nil) do
+  def from_json_file(filename) when is_binary(filename) and filename != "" do
     {:ok,
-     %Configuration{
-       webhooks: [],
-       realtime: [
+     filename
+     |> File.read!()
+     |> Jason.decode!()
+     |> convert_raw_config!()}
+  end
+
+  def from_json_file(_) do
+    {:ok,
+     Map.put(
+       %Configuration{},
+       :realtime,
+       [
          %Realtime{
            relation: "*",
-           events: ["INSERT", "UPDATE", "DELETE"]
+           events: @events
          },
          %Realtime{
            relation: "*:*",
-           events: ["INSERT", "UPDATE", "DELETE"]
+           events: @events
          },
          %Realtime{
            relation: "*:*:*",
-           events: ["INSERT", "UPDATE", "DELETE"]
+           events: @events
          }
        ]
-     }}
+     )}
   end
 
-  def from_json_file(filename) do
-    with {:ok, body} <- File.read(filename), do: from_json(body)
+  defp convert_raw_config!(raw_config) do
+    default_config = %Configuration{}
+
+    default_config
+    |> Map.keys()
+    |> Enum.reduce(default_config, fn connector_type, acc_config ->
+      convert_connector_config!(acc_config, raw_config, connector_type)
+    end)
   end
 
-  @doc """
-  Load Configuration from a json string.
-  """
-  def from_json(body) do
-    with {:ok, raw_config} <- Jason.decode(body), do: to_configuration(raw_config)
+  defp convert_connector_config!(%Configuration{} = config, %{"webhooks" => webhooks}, :webhooks)
+       when is_list(webhooks) do
+    webhooks =
+      Enum.map(webhooks, fn webhook ->
+        case Kernel.get_in(webhook, ["config", "endpoint"]) do
+          endpoint when is_binary(endpoint) and endpoint != "" ->
+            config_endpoint = %WebhookEndpoint{endpoint: endpoint}
+            # default to all events
+            event = Map.get(webhook, "event", "*")
+            # default to all relations
+            relation = Map.get(webhook, "relation", "*")
+
+            %Webhook{event: event, relation: relation, config: config_endpoint}
+
+          _ ->
+            raise ConfigurationFileError
+        end
+      end)
+
+    %Configuration{config | webhooks: webhooks}
   end
 
-  defp to_configuration(config) do
-    with {:ok, raw_webhooks} <- Map.fetch(config, "webhooks"),
-         {:ok, webhooks} <- to_webhooks_configuration(raw_webhooks)
-    do
-      {:ok, %Configuration{webhooks: webhooks}}
-    end
+  defp convert_connector_config!(%Configuration{}, %{"webhooks" => _}, :webhooks) do
+    raise ConfigurationFileError
   end
 
-  defp to_webhooks_configuration(config) do
-    to_webhooks_configuration(config, [])
-  end
-  defp to_webhooks_configuration([], acc), do: {:ok, Enum.reverse(acc)}
-  defp to_webhooks_configuration([config | rest], acc) do
-    case to_webhook_configuration(config) do
-      {:ok, config} -> to_webhooks_configuration(rest, [config | acc])
-      _ ->  :error
-    end
+  defp convert_connector_config!(%Configuration{} = config, _, :webhooks) do
+    config
   end
 
+  defp convert_connector_config!(
+         %Configuration{} = config,
+         %{"realtime" => subscribers},
+         :realtime
+       )
+       when is_list(subscribers) do
+    subscribers =
+      Enum.map(subscribers, fn subscriber ->
+        with {:ok, relation} <- Map.fetch(subscriber, "relation"),
+             {:ok, events} <- Map.fetch(subscriber, "events") do
+          %Realtime{relation: relation, events: events}
+        else
+          _ -> raise ConfigurationFileError
+        end
+      end)
 
-  defp to_webhook_configuration(config) do
-    with {:ok, raw_endpoint} <- Map.fetch(config, "config"),
-         {:ok, endpoint} <- to_webhook_endpoint_configuration(raw_endpoint)
-    do
-      event = Map.get(config, "events", "*") # default to all events
-      relation = Map.get(config, "relation", "*") # default to all relations
-      {:ok, %Webhook{event: event, relation: relation, config: endpoint}}
-    end
+    %Configuration{config | realtime: subscribers}
   end
 
-  defp to_webhook_endpoint_configuration(config) do
-    with {:ok,  endpoint} <- Map.fetch(config, "endpoint")
-    do
-      {:ok, %WebhookEndpoint{endpoint: endpoint}}
-    end
+  defp convert_connector_config!(%Configuration{}, %{"realtime" => _}, :realtime) do
+    raise ConfigurationFileError
+  end
+
+  defp convert_connector_config!(%Configuration{} = config, _, :realtime) do
+    config
+  end
+
+  defp convert_connector_config!(%Configuration{} = config, _, :__struct__) do
+    config
   end
 end
