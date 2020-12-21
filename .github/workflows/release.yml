@@ -18,10 +18,9 @@ jobs:
         run: echo VERSION_BEFORE=$(curl -s https://api.github.com/repos/supabase/realtime/releases/latest | jq .name -r) >> $GITHUB_ENV
 
       - name: Release on GitHub
-        run: npx semantic-release -p        \
-          @semantic-release/commit-analyzer \
-          @semantic-release/github          \
-          @semantic-release/release-notes-generator
+        run: |
+          npm i -g semantic-release @google/semantic-release-replace-plugin
+          npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
