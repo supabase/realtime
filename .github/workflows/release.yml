@@ -152,6 +152,7 @@ jobs:
             apt-get -y install --no-install-recommends esl-erlang=1:22.3.4.9-1 elixir=1.10.4-1
 
             cd server
+            sed -i "s/@version \".*\"/@version \"${{ env.VERSION_AFTER }}\"/" mix.exs
             mix local.hex --force
             mix local.rebar --force
             mix deps.get
@@ -200,4 +201,4 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: supabase/realtime
-          tags: latest,${{ env.VERSION_AFTER }}
+          tags: latest,v${{ env.VERSION_AFTER }}
