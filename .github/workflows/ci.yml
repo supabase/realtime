@@ -16,7 +16,7 @@ jobs:
 
     strategy:
       matrix:
-        platform: [ubuntu-latest]
+        platform: [ubuntu-18.04]
         otp: [21.x, 22.x]
         elixir: [1.9.x, 1.10.x]
 
