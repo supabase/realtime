@@ -9,7 +9,7 @@ defmodule Realtime.Configuration do
 
   defmodule(Configuration, do: defstruct(webhooks: [], realtime: []))
 
-  @events ["INSERT", "UPDATE", "DELETE"]
+  @events ["INSERT", "UPDATE", "DELETE", "TRUNCATE"]
 
   @doc """
 

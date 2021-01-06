@@ -43,4 +43,15 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     assert_push("DELETE", change)
   end
 
+  test "TRUNCATEs are broadcasted to the client", %{socket: socket} do
+    change = %{
+      schema: "public",
+      table: "users",
+      type: "TRUNCATE"
+    }
+
+    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
+    assert_push("*", change)
+    assert_push("TRUNCATE", change)
+  end
 end

@@ -49,7 +49,7 @@ defmodule Realtime.SubscribersNotification do
       table_topic = "#{schema_topic}:#{change.table}"
       # Logger.debug inspect(change, pretty: true)
 
-      # Get only the config which includes this event type (INSERT | UPDATE | DELETE)
+      # Get only the config which includes this event type (INSERT | UPDATE | DELETE | TRUNCATE)
       event_config =
         Enum.filter(realtime_config, fn config ->
           change.type in config.events
@@ -95,6 +95,9 @@ defmodule Realtime.SubscribersNotification do
               end
             end)
           end
+
+        "TRUNCATE" ->
+          nil
       end
     end
   end
