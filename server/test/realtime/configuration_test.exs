@@ -12,15 +12,15 @@ defmodule Realtime.ConfigurationTest do
              realtime: [
                %Realtime{
                  relation: "*",
-                 events: ["INSERT", "UPDATE", "DELETE"]
+                 events: ["INSERT", "UPDATE", "DELETE", "TRUNCATE"]
                },
                %Realtime{
                  relation: "*:*",
-                 events: ["INSERT", "UPDATE", "DELETE"]
+                 events: ["INSERT", "UPDATE", "DELETE", "TRUNCATE"]
                },
                %Realtime{
                  relation: "*:*:*",
-                 events: ["INSERT", "UPDATE", "DELETE"]
+                 events: ["INSERT", "UPDATE", "DELETE", "TRUNCATE"]
                }
              ]
            }
