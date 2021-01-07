@@ -66,7 +66,7 @@ defmodule Realtime.Replication do
         {:noreply, %State{state | connection: epgsql_pid}}
 
       {:error, reason} ->
-        {:stop, reason}
+        retry(state)
     end
   end
 
@@ -88,7 +88,17 @@ defmodule Realtime.Replication do
 
   """
   @impl true
-  def handle_info({:EXIT, _, _}, %State{config: config} = state) do
+  def handle_info({:EXIT, _, _}, state) do
+    retry(state)
+  end
+
+  @impl true
+  def handle_info(msg, state) do
+    IO.inspect(msg)
+    {:noreply, state}
+  end
+
+  defp retry(%State{config: config} = state) do
     {retry_delay, new_state} = get_retry_delay(state)
 
     :timer.sleep(retry_delay)
@@ -105,12 +115,6 @@ defmodule Realtime.Replication do
       end
 
     {:noreply, new_state}
-  end
-
-  @impl true
-  def handle_info(msg, state) do
-    IO.inspect(msg)
-    {:noreply, state}
   end
 
   def get_retry_delay(%State{conn_retry_delays: [delay | delays]} = state) do
