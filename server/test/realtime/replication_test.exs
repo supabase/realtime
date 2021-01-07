@@ -77,8 +77,18 @@ defmodule Realtime.ReplicationTest do
       init: fn _ ->
         {:error, {:error, :econnrefused}}
       end do
-      assert {:stop, {:error, :econnrefused}} =
-               Realtime.Replication.handle_continue(:init_db_conn, @test_state)
+      assert {
+               :noreply,
+               %State{
+                 config: @test_config,
+                 conn_retry_delays: [_ | _],
+                 connection: nil,
+                 relations: %{},
+                 subscribers: [],
+                 transaction: nil,
+                 types: %{}
+               }
+             } = Realtime.Replication.handle_continue(:init_db_conn, @test_state)
     end
   end
 
