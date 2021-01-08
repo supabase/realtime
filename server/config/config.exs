@@ -18,14 +18,31 @@ db_user = System.get_env("DB_USER", "postgres")
 db_password = System.get_env("DB_PASSWORD", "postgres")
 # HACK: There's probably a better way to set boolean from env
 db_ssl = System.get_env("DB_SSL", "true") === "true"
+slot_name = System.get_env("SLOT_NAME") || :temporary
+configuration_file = System.get_env("CONFIGURATION_FILE") || nil
+
 # Initial delay defaults to half a second
 db_retry_initial_delay = System.get_env("DB_RETRY_INITIAL_DELAY", "500")
 # Maximum delay defaults to five minutes
 db_retry_maximum_delay = System.get_env("DB_RETRY_MAXIMUM_DELAY", "300000")
 # Jitter will randomly adjust each delay within 10% of its value
 db_retry_jitter = System.get_env("DB_RETRY_JITTER", "10")
-slot_name = System.get_env("SLOT_NAME") || :temporary
-configuration_file = System.get_env("CONFIGURATION_FILE") || nil
+
+# Channels are not secured by default in development and
+# are secured by default in production.
+secure_channels = System.get_env("SECURE_CHANNELS", "true") != "false"
+
+# Supports HS algorithm octet keys
+# e.g. "95x0oR8jq9unl9pOIx"
+jwt_secret = System.get_env("JWT_SECRET", "")
+
+# Every JWT's claims will be compared (equality checks) to the expected
+# claims set in the JSON object.
+# e.g.
+# Set JWT_CLAIM_VALIDATORS="{'iss': 'Issuer', 'nbf': 1610078130}"
+# Then JWT's "iss" value must equal "Issuer" and "nbf" value
+# must equal 1610078130.
+jwt_claim_validators = System.get_env("JWT_CLAIM_VALIDATORS", "{}")
 
 config :realtime,
   app_hostname: app_hostname,
@@ -40,7 +57,10 @@ config :realtime,
   db_retry_maximum_delay: db_retry_maximum_delay,
   db_retry_jitter: db_retry_jitter,
   slot_name: slot_name,
-  configuration_file: configuration_file
+  configuration_file: configuration_file,
+  secure_channels: secure_channels,
+  jwt_secret: jwt_secret,
+  jwt_claim_validators: jwt_claim_validators
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,
