@@ -1,5 +1,8 @@
 # Supabase Realtime
 
+> **⚠ WARNING: v0.9.8 Breaking Change **  
+> Channels connections are secured by default in production. See [Channels Authorization](#channels-authorization) for more info.
+
 Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
 <p align="center"><kbd><img src="./examples/next-js/demo.gif" alt="Demo"/></kbd></p>
@@ -18,6 +21,7 @@ Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 - [Server](#server)
   - [Database set up](#database-set-up)
   - [Server set up](#server-set-up)
+  - [Channels Authorization](#channels-authorization)
 - [Contributing](#contributing)
 - [Releasing](#releasing)
 - [License](#license)
@@ -144,14 +148,41 @@ docker run \
 **OPTIONS**
 
 ```sh
-DB_HOST       # {string} Database host URL
-DB_NAME       # {string} Postgres database name
-DB_USER       # {string} Database user
-DB_PASSWORD   # {string} Database password
-DB_PORT       # {number} Database port
-SLOT_NAME     # {string} A unique name for Postgres to track where this server has "listened until". If the server dies, it can pick up from the last position. This should be lowercase.
-PORT          # {number} Port which you can connect your client/listeners
+DB_HOST                 # {string}      Database host URL
+DB_NAME                 # {string}      Postgres database name
+DB_USER                 # {string}      Database user
+DB_PASSWORD             # {string}      Database password
+DB_PORT                 # {number}      Database port
+SLOT_NAME               # {string}      A unique name for Postgres to track where this server has "listened until". If the server dies, it can pick up from the last position. This should be lowercase.
+PORT                    # {number}      Port which you can connect your client/listeners
+
+DB_RETRY_INITIAL_DELAY  # {number}      Database connection retry initial delay in milliseconds. Default is 500.
+DB_RETRY_MAXIMUM_DELAY  # {number}      Database connection retry maximum delay in milliseconds. Default is 300000 (5 minutes).
+DB_RETRY_JITTER         # {number}      Database connection retry jitter in milliseconds. Default is 10 (10%).
+
+SECURE_CHANNELS         # {boolean}     (true/false) Enable/Disable channels authorization via JWT verification.
+JWT_SECRET              # {string}      HS algorithm octet key (e.g. "95x0oR8jq9unl9pOIx"). Only required if SECURE_CHANNELS is set to true.
+JWT_CLAIM_VALIDATORS    # {JSON object} Claim key and expected claim value pairs compared (equality checks) to JWT claims in order to validate JWT. e.g. {'iss': 'Issuer', 'nbf': 1610078130}. This is optional but encouraged.
 ```
+
+### Channels Authorization
+
+Channels connections are authorized via JWT verification. Only supports JWTs signed with the following algorithms:
+  - HS256
+  - HS384
+  - HS512
+
+Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
+
+  > e.g. {'iss': 'Issuer', 'nbf': 1610078130}
+  >
+  > Then JWT's "iss" value must equal "Issuer" and "nbf" value must equal 1610078130.
+
+**NOTE:** JWT expiration is checked automatically. 
+
+**Development**: Channels are not secure by default. Set SECURE_CHANNELS to `true` to test JWT verification locally.
+
+**Production**: Channels are secure by default and you must set JWT_SECRET. Set SECURE_CHANNELS to `false` to proceed without checking authorization.
 
 ## Contributing
 

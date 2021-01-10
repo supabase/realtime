@@ -6,6 +6,9 @@ defmodule Realtime.Application do
   use Application
   require Logger, warn: false
 
+  defmodule JwtSecretError, do: defexception([:message])
+  defmodule JwtClaimValidatorsError, do: defexception([:message])
+
   def start(_type, _args) do
     # Hostname must be a char list for some reason
     # Use this var to convert to sigil at connection
@@ -32,6 +35,21 @@ defmodule Realtime.Application do
     db_retry_initial_delay = Application.fetch_env!(:realtime, :db_retry_initial_delay)
     db_retry_maximum_delay = Application.fetch_env!(:realtime, :db_retry_maximum_delay)
     db_retry_jitter = Application.fetch_env!(:realtime, :db_retry_jitter)
+
+    if Application.fetch_env!(:realtime, :secure_channels) do
+      if Application.fetch_env!(:realtime, :jwt_secret) == "" do
+        raise JwtSecretError, message: "JWT secret is missing"
+      end
+
+      case Application.fetch_env!(:realtime, :jwt_claim_validators) |> Jason.decode() do
+        {:ok, claims} when is_map(claims) ->
+          Application.put_env(:realtime, :jwt_claim_validators, claims)
+
+        _ ->
+          raise JwtClaimValidatorsError,
+            message: "JWT claim validators is not a valid JSON object"
+      end
+    end
 
     # List all child processes to be supervised
     children = [
