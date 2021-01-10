@@ -1,6 +1,6 @@
 # Supabase Realtime
 
-> **⚠ WARNING: v0.9.8 Breaking Change **  
+> **⚠ WARNING: v0.10.0 Breaking Change **  
 > Channels connections are secured by default in production. See [Channels Authorization](#channels-authorization) for more info.
 
 Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
