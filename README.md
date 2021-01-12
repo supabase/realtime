@@ -111,6 +111,9 @@ We have set up some simple examples that show how to use this server:
 ## Client libraries
 
 - Javascript: [@supabase/realtime-js](https://github.com/supabase/realtime-js)
+- Python: [@supabase/realtime-py](https://github.com/supabase/realtime-py)
+- Dart: [@supabase/realtime-dart](https://github.com/supabase/realtime-dart)
+- C#: [@supabase/realtime-csharp](https://github.com/supabase/realtime-csharp) [WIP]
 
 
 ## Server
