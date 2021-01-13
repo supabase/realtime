@@ -65,7 +65,7 @@ defmodule Realtime.Replication do
       {:ok, epgsql_pid} ->
         {:noreply, %State{state | connection: epgsql_pid}}
 
-      {:error, reason} ->
+      {:error, _reason} ->
         retry(state)
     end
   end
@@ -175,14 +175,14 @@ defmodule Realtime.Replication do
   # FYI: this will be the last function called before returning to the client
   defp process_message(
          %Commit{lsn: commit_lsn, end_lsn: end_lsn},
-         %State{transaction: {current_txn_lsn, _txn}} = state
+         %State{transaction: {current_txn_lsn, %Transaction{changes: changes} = txn}} = state
        )
        when commit_lsn == current_txn_lsn do
     # To show how the updated columns look like before being returned
     # Feel free to delete after testing
     Logger.debug("Final Update of Columns " <> inspect(state.relations, limit: :infinity))
 
-    notify_subscribers(state)
+    notify_subscribers(%{state | transaction: {current_txn_lsn, %{txn | changes: Enum.reverse(changes)}}})
     :ok = adapter_impl(state.config).acknowledge_lsn(state.connection, end_lsn)
 
     %{state | transaction: nil}
@@ -223,7 +223,7 @@ defmodule Realtime.Replication do
     }
 
     {lsn, txn} = state.transaction
-    %{state | transaction: {lsn, %{txn | changes: Enum.reverse([new_record | txn.changes])}}}
+    %{state | transaction: {lsn, %{txn | changes: [new_record | txn.changes]}}}
   end
 
   defp process_message(%Update{} = msg, state) do
@@ -242,7 +242,7 @@ defmodule Realtime.Replication do
     }
 
     {lsn, txn} = state.transaction
-    %{state | transaction: {lsn, %{txn | changes: Enum.reverse([updated_record | txn.changes])}}}
+    %{state | transaction: {lsn, %{txn | changes: [updated_record | txn.changes]}}}
   end
 
   defp process_message(%Delete{} = msg, state) do
@@ -263,7 +263,7 @@ defmodule Realtime.Replication do
     }
 
     {lsn, txn} = state.transaction
-    %{state | transaction: {lsn, %{txn | changes: Enum.reverse([deleted_record | txn.changes])}}}
+    %{state | transaction: {lsn, %{txn | changes: [deleted_record | txn.changes]}}}
   end
 
   defp process_message(%Truncate{} = msg, state) do
@@ -282,7 +282,7 @@ defmodule Realtime.Replication do
 
     %{
       state
-      | transaction: {lsn, %{txn | changes: Enum.reverse(truncated_relations ++ txn.changes)}}
+      | transaction: {lsn, %{txn | changes: Enum.reverse(truncated_relations) ++ txn.changes}}
     }
   end
 
