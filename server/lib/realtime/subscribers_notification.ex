@@ -10,7 +10,7 @@ defmodule Realtime.SubscribersNotification do
   Send notification events via Phoenix Channels to subscribers
   """
   def notify(txn) do
-    GenServer.call(__MODULE__, {:notify, txn})
+    GenServer.call(__MODULE__, {:notify, txn}, :infinity)
   end
 
   @impl true
