@@ -282,7 +282,7 @@ defmodule Realtime.Replication do
 
     %{
       state
-      | transaction: {lsn, %{txn | changes: Enum.reverse(truncated_relations) ++ txn.changes}}
+      | transaction: {lsn, %{txn | changes: Enum.reverse(truncated_relations, txn.changes)}}
     }
   end
 
