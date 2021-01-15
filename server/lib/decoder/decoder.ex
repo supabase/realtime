@@ -94,7 +94,6 @@ defmodule Realtime.Decoder do
   end
 
   defp decode_message_impl(<<"R", id::integer-32, rest::binary>>) do
-    
     [
       namespace
       | [name | [<<replica_identity::binary-1, _number_of_columns::integer-16, columns::binary>>]]
@@ -190,6 +189,7 @@ defmodule Realtime.Decoder do
         0 -> []
         1 -> [:cascade]
         2 -> [:restart_identity]
+        3 -> [:cascade, :restart_identity]
       end
 
     %Truncate{
