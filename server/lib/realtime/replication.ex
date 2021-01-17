@@ -163,11 +163,10 @@ defmodule Realtime.Replication do
     %State{state | conn_retry_delays: []}
   end
 
-  defp process_message(%Begin{} = msg, state) do
-    %{
+  defp process_message(%Begin{final_lsn: final_lsn, commit_timestamp: commit_timestamp}, state) do
+    %State{
       state
-      | transaction:
-          {msg.final_lsn, %Transaction{changes: [], commit_timestamp: msg.commit_timestamp}}
+      | transaction: {final_lsn, %Transaction{changes: [], commit_timestamp: commit_timestamp}}
     }
   end
 
@@ -209,81 +208,138 @@ defmodule Realtime.Replication do
     %{state | relations: Map.put(state.relations, msg.id, updated_relations)}
   end
 
-  defp process_message(%Insert{} = msg, state) do
-    relation = Map.get(state.relations, msg.relation_id)
+  defp process_message(
+         %Insert{relation_id: relation_id, tuple_data: tuple_data},
+         %State{
+           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn},
+           relations: relations
+         } = state
+       )
+       when is_map(relations) do
+    case Map.fetch(relations, relation_id) do
+      {:ok, %{columns: columns, namespace: namespace, name: name}} when is_list(columns) ->
+        data = data_tuple_to_map(columns, tuple_data)
 
-    data = data_tuple_to_map(relation.columns, msg.tuple_data)
-
-    new_record = %NewRecord{
-      type: "INSERT",
-      schema: relation.namespace,
-      table: relation.name,
-      columns: relation.columns,
-      record: data
-    }
-
-    {lsn, txn} = state.transaction
-    %{state | transaction: {lsn, %{txn | changes: [new_record | txn.changes]}}}
-  end
-
-  defp process_message(%Update{} = msg, state) do
-    relation = Map.get(state.relations, msg.relation_id)
-
-    old_data = data_tuple_to_map(relation.columns, msg.old_tuple_data)
-    data = data_tuple_to_map(relation.columns, msg.tuple_data)
-
-    updated_record = %UpdatedRecord{
-      type: "UPDATE",
-      schema: relation.namespace,
-      table: relation.name,
-      columns: relation.columns,
-      old_record: old_data,
-      record: data
-    }
-
-    {lsn, txn} = state.transaction
-    %{state | transaction: {lsn, %{txn | changes: [updated_record | txn.changes]}}}
-  end
-
-  defp process_message(%Delete{} = msg, state) do
-    relation = Map.get(state.relations, msg.relation_id)
-
-    data =
-      data_tuple_to_map(
-        relation.columns,
-        msg.old_tuple_data || msg.changed_key_tuple_data
-      )
-
-    deleted_record = %DeletedRecord{
-      type: "DELETE",
-      schema: relation.namespace,
-      table: relation.name,
-      columns: relation.columns,
-      old_record: data
-    }
-
-    {lsn, txn} = state.transaction
-    %{state | transaction: {lsn, %{txn | changes: [deleted_record | txn.changes]}}}
-  end
-
-  defp process_message(%Truncate{} = msg, state) do
-    truncated_relations =
-      for truncated_relation <- msg.truncated_relations do
-        relation = Map.get(state.relations, truncated_relation)
-
-        %TruncatedRelation{
-          type: "TRUNCATE",
-          schema: relation.namespace,
-          table: relation.name
+        new_record = %NewRecord{
+          type: "INSERT",
+          schema: namespace,
+          table: name,
+          columns: columns,
+          record: data,
+          commit_timestamp: commit_timestamp
         }
-      end
 
-    {lsn, txn} = state.transaction
+        %State{state | transaction: {lsn, %{txn | changes: [new_record | changes]}}}
 
-    %{
+      _ ->
+        state
+    end
+  end
+
+  defp process_message(
+         %Update{
+           relation_id: relation_id,
+           old_tuple_data: old_tuple_data,
+           tuple_data: tuple_data
+         },
+         %State{
+           relations: relations,
+           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn}
+         } = state
+       )
+       when is_map(relations) do
+    case Map.fetch(relations, relation_id) do
+      {:ok, %{columns: columns, namespace: namespace, name: name}} when is_list(columns) ->
+        old_data = data_tuple_to_map(columns, old_tuple_data)
+        data = data_tuple_to_map(columns, tuple_data)
+
+        updated_record = %UpdatedRecord{
+          type: "UPDATE",
+          schema: namespace,
+          table: name,
+          columns: columns,
+          old_record: old_data,
+          record: data,
+          commit_timestamp: commit_timestamp
+        }
+
+        %State{
+          state
+          | transaction: {lsn, %{txn | changes: [updated_record | changes]}}
+        }
+
+      _ ->
+        state
+    end
+  end
+
+  defp process_message(
+         %Delete{
+           relation_id: relation_id,
+           old_tuple_data: old_tuple_data,
+           changed_key_tuple_data: changed_key_tuple_data
+         },
+         %State{
+           relations: relations,
+           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn}
+         } = state
+       )
+       when is_map(relations) do
+    case Map.fetch(relations, relation_id) do
+      {:ok, %{columns: columns, namespace: namespace, name: name}} when is_list(columns) ->
+        data = data_tuple_to_map(columns, old_tuple_data || changed_key_tuple_data)
+
+        deleted_record = %DeletedRecord{
+          type: "DELETE",
+          schema: namespace,
+          table: name,
+          columns: columns,
+          old_record: data,
+          commit_timestamp: commit_timestamp
+        }
+
+        %State{state | transaction: {lsn, %{txn | changes: [deleted_record | changes]}}}
+
+      _ ->
+        state
+    end
+  end
+
+  defp process_message(
+         %Truncate{truncated_relations: truncated_relations},
+         %State{
+           relations: relations,
+           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn}
+         } = state
+       )
+       when is_list(truncated_relations) and is_list(changes) and is_map(relations) do
+    new_changes =
+      Enum.reduce(truncated_relations, changes, fn truncated_relation, acc ->
+        case Map.fetch(relations, truncated_relation) do
+          {:ok, %{namespace: namespace, name: name}} ->
+            [
+              %TruncatedRelation{
+                type: "TRUNCATE",
+                schema: namespace,
+                table: name,
+                commit_timestamp: commit_timestamp
+              }
+              | acc
+            ]
+
+          _ ->
+            acc
+        end
+      end)
+
+    %State{
       state
-      | transaction: {lsn, %{txn | changes: Enum.reverse(truncated_relations, txn.changes)}}
+      | transaction: {lsn, %{txn | changes: new_changes}}
     }
+  end
+
+  defp process_message(_msg, state) do
+    state
   end
 
   # TODO: Typecast to meaningful Elixir types here later
@@ -300,23 +356,6 @@ defmodule Realtime.Replication do
   end
 
   defp notify_subscribers(%State{transaction: {_current_txn_lsn, txn}}) do
-    txn
-    |> set_change_records_commit_timestamps()
-    |> SubscribersNotification.notify()
-  end
-
-  defp set_change_records_commit_timestamps(
-         %Transaction{changes: changes, commit_timestamp: commit_timestamp} = txn
-       ) do
-    # Set every change record's (e.g. %Realtime.Adapters.Changes.NewRecord) commit_timestamp value
-    # to transaction's (i.e. %Realtime.Adapters.Changes.Transaction) commit_timestamp value
-    %Transaction{
-      txn
-      | changes:
-          Enum.map(
-            changes,
-            fn record -> %{record | commit_timestamp: commit_timestamp} end
-          )
-    }
+    SubscribersNotification.notify(txn)
   end
 end

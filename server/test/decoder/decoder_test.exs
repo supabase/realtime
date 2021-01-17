@@ -91,7 +91,7 @@ defmodule Realtime.DecoderTest do
                    type: "numeric",
                    type_modifier: 4_294_967_295
                  }
-               ],
+               ]
              }
   end
 
@@ -131,6 +131,15 @@ defmodule Realtime.DecoderTest do
                %Truncate{
                  number_of_relations: 1,
                  options: [:restart_identity],
+                 truncated_relations: [24576]
+               }
+    end
+
+    test "decodes messages with cascade and restart identity options" do
+      assert Realtime.Decoder.decode_message(<<84, 0, 0, 0, 1, 3, 0, 0, 96, 0>>) ==
+               %Truncate{
+                 number_of_relations: 1,
+                 options: [:cascade, :restart_identity],
                  truncated_relations: [24576]
                }
     end
