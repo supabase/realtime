@@ -2,7 +2,7 @@
   "name": "supabase-realtime-example",
   "version": "1.0.0",
   "scripts": {
-    "dev": "next",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start"
   },
