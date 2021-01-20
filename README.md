@@ -143,7 +143,7 @@ docker run \
   -e DB_PORT=5432 \
   -e PORT=4000 \
   -e HOSTNAME='localhost' \
-  -e SECRET_KEY_BASE='SOMETHING_SUPER_SECRET' \
+  -e JWT_SECRET='SOMETHING_SUPER_SECRET' \
   -p 4000:4000 \
   supabase/realtime
 ```
