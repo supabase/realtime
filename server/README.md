@@ -3,7 +3,6 @@
 ## Run locally
 
 ```sh
-SECRET_KEY_BASE=SOMETHING_SECRET \
 PORT=4000 \
 HOSTNAME=localhost \
 DB_USER=postgres \
@@ -30,7 +29,6 @@ DB_PASSWORD=postgres
 DB_PORT=5432
 APP_PORT=4000
 APP_HOSTNAME=localhost
-SECRET_KEY_BASE=SOMETHING_SECRET
 
 MIX_ENV=prod mix release
 ```
@@ -38,7 +36,7 @@ MIX_ENV=prod mix release
 Start the release:
 
 ```sh
-SECRET_KEY_BASE=SOMETHING_SECRET \
+JWT_SECRET=SOMETHING_SECRET \
 PORT=4000 \
 HOSTNAME=localhost \
 DB_USER=postgres \
