@@ -163,9 +163,32 @@ DB_RETRY_INITIAL_DELAY  # {number}      Database connection retry initial delay 
 DB_RETRY_MAXIMUM_DELAY  # {number}      Database connection retry maximum delay in milliseconds. Default is 300000 (5 minutes).
 DB_RETRY_JITTER         # {number}      Database connection retry jitter in milliseconds. Default is 10 (10%).
 
-SECURE_CHANNELS         # {boolean}     (true/false) Enable/Disable channels authorization via JWT verification.
+SECURE_CHANNELS         # {string}     (options: 'true' or 'false') Enable/Disable channels authorization via JWT verification.
 JWT_SECRET              # {string}      HS algorithm octet key (e.g. "95x0oR8jq9unl9pOIx"). Only required if SECURE_CHANNELS is set to true.
-JWT_CLAIM_VALIDATORS    # {JSON object} Claim key and expected claim value pairs compared (equality checks) to JWT claims in order to validate JWT. e.g. {'iss': 'Issuer', 'nbf': 1610078130}. This is optional but encouraged.
+JWT_CLAIM_VALIDATORS    # {string}      Expected claim key/value pairs compared to JWT claims via equality checks in order to validate JWT. e.g. '{"iss": "Issuer", "nbf": 1610078130}'. This is optional but encouraged.
+```
+
+**EXAMPLE: RUNNING SERVER WITH ALL OPTIONS**
+
+```sh
+# Update the environment variables to point to your own database
+docker run \
+  -e DB_HOST='docker.for.mac.host.internal' \
+  -e DB_NAME='postgres' \
+  -e DB_USER='postgres' \
+  -e DB_PASSWORD='postgres' \
+  -e DB_PORT=5432 \
+  -e PORT=4000 \
+  -e HOSTNAME='localhost' \
+  -e JWT_SECRET='SOMETHING_SUPER_SECRET' \
+  -p 4000:4000 \
+  -e DB_RETRY_INITIAL_DELAY=500 \
+  -e DB_RETRY_MAXIMUM_DELAY=300000 \
+  -e DB_RETRY_JITTER=10 \
+  -e SECURE_CHANNELS='true' \
+  -e JWT_SECRET='jwt-secret' \
+  -e JWT_CLAIM_VALIDATORS='{"iss": "Issuer", "nbf": 1610078130}' \
+  supabase/realtime
 ```
 
 ### Channels Authorization
