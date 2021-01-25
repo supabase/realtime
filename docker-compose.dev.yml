@@ -13,6 +13,7 @@ services:
       PORT: 4000
       HOSTNAME: localhost
       JWT_SECRET: SOMETHING_SUPER_SECRET
+      SECURE_CHANNELS: 'true'
     depends_on:
       - db
   db:

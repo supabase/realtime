@@ -13,7 +13,8 @@ ENV MIX_ENV=prod \
     MIX_ENV=prod \
     PORT=4000 \
     HOSTNAME=localhost \
-    JWT_SECRET=SOMETHING_SUPER_SECRET
+    JWT_SECRET=SOMETHING_SUPER_SECRET \
+    SECURE_CHANNELS=true
 
 RUN apt-get update
 
