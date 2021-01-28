@@ -1,4 +1,4 @@
-import { Socket } from '@supabase/realtime-js'
+import { RealtimeClient } from '@supabase/realtime-js'
 import axios from 'axios'
 const REALTIME_URL = process.env.REALTIME_URL || 'ws://localhost:4000/socket'
 
@@ -13,7 +13,7 @@ export default class Index extends React.Component {
     }
     this.messageReceived = this.messageReceived.bind(this)
 
-    this.socket = new Socket(REALTIME_URL)
+    this.socket = new RealtimeClient(REALTIME_URL)
     this.channelList = []
   }
   componentDidMount() {
@@ -35,7 +35,7 @@ export default class Index extends React.Component {
     channel.on('UPDATE', msg => console.log('UPDATE', msg))
     channel.on('DELETE', msg => console.log('DELETE', msg))
     channel
-      .join()
+      .subscribe()
       .receive('ok', () => console.log('Connecting'))
       .receive('error', () => console.log('Failed'))
       .receive('timeout', () => console.log('Waiting...'))
