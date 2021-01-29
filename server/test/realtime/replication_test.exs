@@ -18,16 +18,12 @@ defmodule Realtime.ReplicationTest do
     },
     slot: :temporary,
     wal_position: {"0", "0"},
-    publications: ["pub_test"],
-    conn_retry_initial_delay: 300,
-    conn_retry_maximum_delay: 180_000,
-    conn_retry_jitter: 0.2
+    publications: ["pub_test"]
   ]
 
   @test_state %State{
     config: @test_config,
     connection: nil,
-    conn_retry_delays: [],
     subscribers: [],
     transaction: nil,
     relations: %{},
@@ -47,10 +43,7 @@ defmodule Realtime.ReplicationTest do
                },
                slot: :temporary,
                wal_position: {"0", "0"},
-               publications: ["pub_test"],
-               conn_retry_initial_delay: "300",
-               conn_retry_maximum_delay: "180000",
-               conn_retry_jitter: "20"
+               publications: ["pub_test"]
              )
   end
 
@@ -63,7 +56,6 @@ defmodule Realtime.ReplicationTest do
               %State{
                 config: @test_config,
                 connection: "epgsqpl_pid",
-                conn_retry_delays: [],
                 subscribers: [],
                 transaction: nil,
                 relations: %{},
@@ -77,18 +69,7 @@ defmodule Realtime.ReplicationTest do
       init: fn _ ->
         {:error, {:error, :econnrefused}}
       end do
-      assert {
-               :noreply,
-               %State{
-                 config: @test_config,
-                 conn_retry_delays: [_ | _],
-                 connection: nil,
-                 relations: %{},
-                 subscribers: [],
-                 transaction: nil,
-                 types: %{}
-               }
-             } = Realtime.Replication.handle_continue(:init_db_conn, @test_state)
+      assert {:stop, {:error, :econnrefused}} = Realtime.Replication.handle_continue(:init_db_conn, @test_state)
     end
   end
 
@@ -157,86 +138,8 @@ defmodule Realtime.ReplicationTest do
                 },
                 subscribers: [],
                 transaction: nil,
-                types: %{}
+                types: %{},
+                should_reset_retry: false
               }}
-  end
-
-  test "Realtime.Replication.handle_info/2 :: :EXIT when adapter conn successful" do
-    with_mock Realtime.Adapters.Postgres.EpgsqlImplementation,
-      init: fn _ ->
-        {:ok, "epgsqpl_pid"}
-      end do
-      state = %{@test_state | conn_retry_delays: [0, 1023, 1999]}
-
-      assert {:noreply,
-              %State{
-                config: @test_config,
-                connection: "epgsqpl_pid",
-                conn_retry_delays: [],
-                subscribers: [],
-                transaction: nil,
-                relations: %{},
-                types: %{}
-              }} = Realtime.Replication.handle_info({:EXIT, nil, nil}, state)
-    end
-  end
-
-  test "Realtime.Replication.handle_info/2 :: :EXIT when adapter conn fails" do
-    with_mock Realtime.Adapters.Postgres.EpgsqlImplementation,
-      init: fn _ ->
-        {:error, {:error, :econnrefused}}
-      end do
-      state = %{@test_state | conn_retry_delays: [0, 1023, 1999]}
-
-      assert {:noreply,
-              %State{
-                config: @test_config,
-                connection: nil,
-                conn_retry_delays: [1023, 1999],
-                subscribers: [],
-                transaction: nil,
-                relations: %{},
-                types: %{}
-              }} = Realtime.Replication.handle_info({:EXIT, nil, nil}, state)
-    end
-  end
-
-  test "Realtime.Replication.get_retry_delay/1 when conn_retry_delays is empty" do
-    state = %State{
-      conn_retry_delays: [],
-      config: [
-        conn_retry_initial_delay: 300,
-        conn_retry_maximum_delay: 180_000,
-        conn_retry_jitter: 0.2
-      ]
-    }
-
-    {delay, %State{conn_retry_delays: delays}} = Realtime.Replication.get_retry_delay(state)
-
-    assert delay == 0
-    assert is_list(delays)
-    refute Enum.empty?(delays)
-    assert Enum.all?(delays, &(is_integer(&1) and &1 > 0))
-  end
-
-  test "Realtime.Replication.get_retry_delay/1 when conn_retry_delays is not empty" do
-    state = %State{
-      conn_retry_delays: [489, 1011, 1996, 4023]
-    }
-
-    {delay, %State{conn_retry_delays: delays}} = Realtime.Replication.get_retry_delay(state)
-
-    assert delay == 489
-    assert delays == [1011, 1996, 4023]
-  end
-
-  test "Realtime.Replication.reset_retry_delay/1" do
-    state = %State{
-      conn_retry_delays: [198, 403, 781]
-    }
-
-    %State{conn_retry_delays: delays} = Realtime.Replication.reset_retry_delay(state)
-
-    assert delays == []
   end
 end
