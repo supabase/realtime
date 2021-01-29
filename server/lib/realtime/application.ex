@@ -56,16 +56,19 @@ defmodule Realtime.Application do
       # Start the endpoint when the application starts
       RealtimeWeb.Endpoint,
       {
-        Realtime.Replication,
+        Realtime.Adapters.ConnRetry,
+        conn_retry_initial_delay: db_retry_initial_delay,
+        conn_retry_maximum_delay: db_retry_maximum_delay,
+        conn_retry_jitter: db_retry_jitter
+      },
+      {
+        Realtime.ReplicationSupervisor,
         # You can provide a different WAL position if desired, or default to
         # allowing Postgres to send you what it thinks you need
         epgsql: epgsql_params,
         slot: slot_name,
         wal_position: {"0", "0"},
-        publications: ["supabase_realtime"],
-        conn_retry_initial_delay: db_retry_initial_delay,
-        conn_retry_maximum_delay: db_retry_maximum_delay,
-        conn_retry_jitter: db_retry_jitter
+        publications: ["supabase_realtime"]
       },
       {
         Realtime.ConfigurationManager,

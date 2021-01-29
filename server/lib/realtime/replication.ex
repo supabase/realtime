@@ -7,11 +7,11 @@ defmodule Realtime.Replication do
       defstruct(
         config: [],
         connection: nil,
-        conn_retry_delays: [],
         subscribers: [],
         transaction: nil,
         relations: %{},
-        types: %{}
+        types: %{},
+        should_reset_retry: true
       )
   )
 
@@ -38,7 +38,7 @@ defmodule Realtime.Replication do
   }
 
   alias Realtime.SubscribersNotification
-  alias Retry.DelayStreams
+  alias Realtime.Adapters.ConnRetry
 
   def start_link(config) do
     GenServer.start_link(__MODULE__, config)
@@ -46,50 +46,33 @@ defmodule Realtime.Replication do
 
   @impl true
   def init(config) do
-    config =
-      config
-      |> Keyword.update!(:conn_retry_initial_delay, &String.to_integer(&1))
-      |> Keyword.update!(:conn_retry_maximum_delay, &String.to_integer(&1))
-      |> Keyword.update!(:conn_retry_jitter, &(String.to_integer(&1) / 100))
-
     {:ok, %State{config: config}, {:continue, :init_db_conn}}
   end
 
   @impl true
   def handle_continue(:init_db_conn, %State{config: config} = state) do
-    # Database adapter's exit signal will be converted to {:EXIT, From, Reason}
-    # message when, for example, there's a database connection error.
-    Process.flag(:trap_exit, true)
+    :timer.sleep(Realtime.Adapters.ConnRetry.get_retry_delay())
 
     case adapter_impl(config).init(config) do
       {:ok, epgsql_pid} ->
         {:noreply, %State{state | connection: epgsql_pid}}
 
-      {:error, _reason} ->
-        retry(state)
+      {:error, reason} ->
+        {:stop, reason}
     end
   end
 
   @impl true
-  def handle_info({:epgsql, _pid, {:x_log_data, _start_lsn, _end_lsn, binary_msg}}, state) do
+  def handle_info(
+        {:epgsql, _pid, {:x_log_data, _start_lsn, _end_lsn, binary_msg}},
+        %State{should_reset_retry: should_reset_retry} = state
+      ) do
+    reset_retry_delays(should_reset_retry)
     decoded = Realtime.Decoder.decode_message(binary_msg)
     Logger.debug("Received binary message: #{inspect(binary_msg, limit: :infinity)}")
     Logger.debug("Decoded message: " <> inspect(decoded, limit: :infinity))
 
-    {:noreply, process_message(decoded, state)}
-  end
-
-  @doc """
-
-  Receives {:EXIT, From, Reason} message created by Process.flag(:trap_exit, true)
-  when database adapter's process shuts down.
-
-  Database connection retries happen here.
-
-  """
-  @impl true
-  def handle_info({:EXIT, _, _}, state) do
-    retry(state)
+    {:noreply, process_message(decoded, Map.put(state, :should_reset_retry, false))}
   end
 
   @impl true
@@ -98,69 +81,12 @@ defmodule Realtime.Replication do
     {:noreply, state}
   end
 
-  defp retry(%State{config: config} = state) do
-    {retry_delay, new_state} = get_retry_delay(state)
-
-    :timer.sleep(retry_delay)
-
-    new_state =
-      case adapter_impl(config).init(config) do
-        {:ok, epgsql_pid} ->
-          new_state
-          |> reset_retry_delay()
-          |> Map.put(:connection, epgsql_pid)
-
-        _ ->
-          new_state
-      end
-
-    {:noreply, new_state}
+  defp reset_retry_delays(false) do
+    :ok
   end
 
-  def get_retry_delay(%State{conn_retry_delays: [delay | delays]} = state) do
-    {delay, %State{state | conn_retry_delays: delays}}
-  end
-
-  @doc """
-
-  Initial delay is 0 milliseconds for immediate connection attempt.
-
-  Future delays are generated and saved to state.
-
-    * Begin with initial_delay and increase by a factor of 2
-    * Each is randomly adjusted with jitter's value
-    * Capped at maximum_delay
-
-    Example
-
-      initial_delay: 500     # Half a second
-      maximum_delay: 300_000 # Five minutes
-      jitter: 0.1            # Within 10% of a delay's value
-
-      [486, 918, 1931, 4067, 7673, 15699, 31783, 64566, 125929, 251911, 300000]
-
-  """
-  def get_retry_delay(
-        %State{
-          conn_retry_delays: [],
-          config: config
-        } = state
-      ) do
-    initial_delay = Keyword.get(config, :conn_retry_initial_delay)
-    maximum_delay = Keyword.get(config, :conn_retry_maximum_delay)
-    jitter = Keyword.get(config, :conn_retry_jitter)
-
-    delays =
-      DelayStreams.exponential_backoff(initial_delay)
-      |> DelayStreams.randomize(jitter)
-      |> DelayStreams.expiry(maximum_delay)
-      |> Enum.to_list()
-
-    {0, %State{state | conn_retry_delays: delays}}
-  end
-
-  def reset_retry_delay(state) do
-    %State{state | conn_retry_delays: []}
+  defp reset_retry_delays(true) do
+    :ok = ConnRetry.reset_retry_delay()
   end
 
   defp process_message(%Begin{final_lsn: final_lsn, commit_timestamp: commit_timestamp}, state) do
@@ -181,7 +107,11 @@ defmodule Realtime.Replication do
     # Feel free to delete after testing
     Logger.debug("Final Update of Columns " <> inspect(state.relations, limit: :infinity))
 
-    notify_subscribers(%{state | transaction: {current_txn_lsn, %{txn | changes: Enum.reverse(changes)}}})
+    notify_subscribers(%{
+      state
+      | transaction: {current_txn_lsn, %{txn | changes: Enum.reverse(changes)}}
+    })
+
     :ok = adapter_impl(state.config).acknowledge_lsn(state.connection, end_lsn)
 
     %{state | transaction: nil}
