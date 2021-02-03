@@ -56,6 +56,11 @@ defmodule Realtime.Application do
       # Start the endpoint when the application starts
       RealtimeWeb.Endpoint,
       {
+        Phoenix.PubSub,
+        name: Realtime.PubSub,
+        adapter: Phoenix.PubSub.PG2
+      },
+      {
         Realtime.Adapters.ConnRetry,
         conn_retry_initial_delay: db_retry_initial_delay,
         conn_retry_maximum_delay: db_retry_maximum_delay,
