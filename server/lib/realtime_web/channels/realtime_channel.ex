@@ -6,9 +6,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:ok, %{}, socket}
   end
 
-  @doc """
-  Disabling inward messages from the websocket.
-  """
+  # @doc """
+  # Disabling inward messages from the websocket.
+  # """
   # def handle_in(event_type, payload, socket) do
   #   Logger.info event_type
   #   broadcast!(socket, event_type, payload)

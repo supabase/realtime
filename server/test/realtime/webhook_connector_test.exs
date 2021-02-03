@@ -3,7 +3,6 @@ defmodule Realtime.WebhookConnectorTest do
 
   alias Realtime.Adapters.Changes.Transaction
   alias Realtime.Configuration
-  alias Realtime.TransactionFilter.Filter
   alias Realtime.WebhookConnector
 
   test "notify calls notification function after filtering the handlers" do

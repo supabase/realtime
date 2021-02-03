@@ -11,7 +11,7 @@ defmodule Realtime.Connectors do
   end
 
   @impl true
-  def init(config) do
+  def init(_config) do
     {:ok, nil}
   end
 
