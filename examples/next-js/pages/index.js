@@ -1,6 +1,7 @@
 import { RealtimeClient } from '@supabase/realtime-js'
 import axios from 'axios'
 const REALTIME_URL = process.env.REALTIME_URL || 'ws://localhost:4000/socket'
+import Link from 'next/link'
 
 export default class Index extends React.Component {
   constructor() {
@@ -26,6 +27,9 @@ export default class Index extends React.Component {
     this.addChannel('realtime:public:users:id=eq.17')
     this.addChannel('realtime:public:users:id=eq.18')
     this.fetchData()
+  }
+  componentWillUnmount() {
+    this.socket.disconnect()
   }
   addChannel(topic) {
     let channel = this.socket.channel(topic)
@@ -69,6 +73,7 @@ export default class Index extends React.Component {
   render() {
     return (
       <div style={styles.main}>
+        <a>index</a> | <Link href="/stress">stress chart</Link>
         <div style={styles.row}>
           <div style={styles.col}>
             <h3>Changes</h3>
