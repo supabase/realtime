@@ -5,6 +5,8 @@ defmodule Realtime.Adapters.Postgres.EpgsqlImplementation do
   @behaviour Realtime.Adapters.Postgres.AdapterBehaviour
   require Logger
 
+  alias Realtime.Adapters.ConnRetry
+
   @impl true
   def init(config) do
     epgsql_config =
@@ -19,8 +21,10 @@ defmodule Realtime.Adapters.Postgres.EpgsqlImplementation do
       |> Enum.join(",")
 
     with {:ok, epgsql_pid} <- :epgsql.connect(epgsql_config),
+         :ok <- maybe_drop_replication_slots(epgsql_pid),
+         true <- does_publication_exist(epgsql_pid, publication_names),
          {:ok, slot_name} <-
-           create_replication_slot(epgsql_pid, Keyword.get(config, :slot, :temporary)),
+           maybe_create_replication_slot(epgsql_pid, Keyword.get(config, :slot, :temporary)),
          :ok <-
            :epgsql.start_replication(
              epgsql_pid,
@@ -49,7 +53,44 @@ defmodule Realtime.Adapters.Postgres.EpgsqlImplementation do
     decimal_lsn
   end
 
-  defp create_replication_slot(epgsql_pid, slot) do
+  defp maybe_drop_replication_slots(epgsql_pid) do
+    if ConnRetry.get_drop_replication_slots() do
+      case :epgsql.squery(epgsql_pid, "SELECT slot_name FROM pg_replication_slots") do
+        {:ok, _, slot_names} ->
+          :ok =
+            Enum.each(slot_names, fn {slot_name} ->
+              :epgsql.squery(epgsql_pid, "DROP_REPLICATION_SLOT " <> slot_name)
+            end)
+
+          :ok = ConnRetry.set_drop_replication_slots(false)
+
+        {:error, reason} ->
+          reason
+      end
+    else
+      :ok
+    end
+  end
+
+  defp does_publication_exist(epgsql_pid, publication_names) do
+    case :epgsql.squery(
+           epgsql_pid,
+           "SELECT COUNT(*) = 1 FROM pg_publication WHERE pubname = '#{
+             String.replace(publication_names, "\"", "")
+           }'"
+         ) do
+      {:ok, _, [{existing_slot}]} ->
+        case existing_slot do
+          "t" -> true
+          "f" -> "publication #{publication_names} does not exist"
+        end
+
+      {:error, reason} ->
+        reason
+    end
+  end
+
+  defp maybe_create_replication_slot(epgsql_pid, slot) do
     {slot_name, start_replication_command} =
       case slot do
         name when is_binary(name) ->

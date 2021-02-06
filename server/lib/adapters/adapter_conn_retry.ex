@@ -15,6 +15,14 @@ defmodule Realtime.Adapters.ConnRetry do
     GenServer.call(__MODULE__, :reset_delay)
   end
 
+  def set_drop_replication_slots(should_drop) when is_boolean(should_drop) do
+    GenServer.call(__MODULE__, {:set_drop_replication_slots, should_drop})
+  end
+
+  def get_drop_replication_slots() do
+    GenServer.call(__MODULE__, :get_drop_replication_slots)
+  end
+
   @impl true
   def init(config) do
     config =
@@ -23,7 +31,12 @@ defmodule Realtime.Adapters.ConnRetry do
       |> Keyword.update!(:conn_retry_maximum_delay, &String.to_integer(&1))
       |> Keyword.update!(:conn_retry_jitter, &(String.to_integer(&1) / 100))
 
-    {:ok, %{config: config, delays: [0]}}
+    {:ok,
+     %{
+       config: config,
+       delays: [0],
+       should_drop_replication_slots: false
+     }}
   end
 
   @impl true
@@ -49,5 +62,20 @@ defmodule Realtime.Adapters.ConnRetry do
   @impl true
   def handle_call(:reset_delay, _from, state) do
     {:reply, :ok, %{state | delays: [0]}}
+  end
+
+  @impl true
+  def handle_call({:set_drop_replication_slots, should_drop}, _from, state)
+      when is_boolean(should_drop) do
+    {:reply, :ok, %{state | should_drop_replication_slots: should_drop}}
+  end
+
+  @impl true
+  def handle_call(
+        :get_drop_replication_slots,
+        _from,
+        %{should_drop_replication_slots: should_drop} = state
+      ) do
+    {:reply, should_drop, state}
   end
 end

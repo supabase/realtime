@@ -46,19 +46,21 @@ defmodule Realtime.Replication do
 
   @impl true
   def init(config) do
+    Process.flag(:trap_exit, true)
+
     {:ok, %State{config: config}, {:continue, :init_db_conn}}
   end
 
   @impl true
   def handle_continue(:init_db_conn, %State{config: config} = state) do
-    :timer.sleep(Realtime.Adapters.ConnRetry.get_retry_delay())
+    :timer.sleep(ConnRetry.get_retry_delay())
 
     case adapter_impl(config).init(config) do
       {:ok, epgsql_pid} ->
         {:noreply, %State{state | connection: epgsql_pid}}
 
       {:error, reason} ->
-        {:stop, reason}
+        {:stop, reason, state}
     end
   end
 
@@ -76,9 +78,31 @@ defmodule Realtime.Replication do
   end
 
   @impl true
+  def handle_info(
+        {:EXIT, _pid,
+         {:error, {:error, :error, "42704", :undefined_object, "publication" <> _pub_error, _}} =
+           reason},
+        state
+      ) do
+    log_error(reason)
+    ConnRetry.set_drop_replication_slots(true)
+    {:stop, reason, state}
+  end
+
+  @impl true
+  def handle_info({:EXIT, _pid, reason}, state) do
+    log_error(reason)
+    {:stop, reason, state}
+  end
+
+  @impl true
   def handle_info(msg, state) do
-    IO.inspect(msg)
-    {:noreply, state}
+    log_error(msg)
+    {:stop, msg, state}
+  end
+
+  defp log_error(reason) do
+    Logger.error(process: "Realtime.Replication", reason: reason)
   end
 
   defp reset_retry_delays(false) do
