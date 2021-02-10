@@ -7,11 +7,11 @@ defmodule Realtime.Replication do
       defstruct(
         config: [],
         connection: nil,
+        conn_retry_delays: [],
         subscribers: [],
         transaction: nil,
         relations: %{},
-        types: %{},
-        should_reset_retry: true
+        types: %{}
       )
   )
 
@@ -49,17 +49,12 @@ defmodule Realtime.Replication do
   end
 
   @impl true
-  def handle_info(
-        {:epgsql, _pid, {:x_log_data, _start_lsn, _end_lsn, binary_msg}},
-        %State{should_reset_retry: should_reset_retry} = state
-      ) do
-    reset_retry_delays(should_reset_retry)
+  def handle_info({:epgsql, _pid, {:x_log_data, _start_lsn, _end_lsn, binary_msg}}, state) do
     decoded = Realtime.Decoder.decode_message(binary_msg)
     Logger.debug("Received binary message: #{inspect(binary_msg, limit: :infinity)}")
     Logger.debug("Decoded message: " <> inspect(decoded, limit: :infinity))
 
     {:noreply, process_message(decoded, state)}
-
   end
 
   @impl true
@@ -86,11 +81,7 @@ defmodule Realtime.Replication do
     # Feel free to delete after testing
     Logger.debug("Final Update of Columns " <> inspect(state.relations, limit: :infinity))
 
-    notify_subscribers(%{
-      state
-      | transaction: {current_txn_lsn, %{txn | changes: Enum.reverse(changes)}}
-    })
-
+    notify_subscribers(%{state | transaction: {current_txn_lsn, %{txn | changes: Enum.reverse(changes)}}})
     :ok = adapter_impl(state.config).acknowledge_lsn(state.connection, end_lsn)
 
     %{state | transaction: nil}

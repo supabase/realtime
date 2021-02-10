@@ -52,10 +52,7 @@ defmodule Realtime.Application do
       # Start the endpoint when the application starts
       RealtimeWeb.Endpoint,
       {
-        Realtime.Adapters.ConnRetry
-      },
-      {
-        Realtime.ReplicationSupervisor,
+        Realtime.Replication,
         # You can provide a different WAL position if desired, or default to
         # allowing Postgres to send you what it thinks you need
         epgsql: epgsql_params,
