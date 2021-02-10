@@ -7,7 +7,6 @@ defmodule Realtime.Replication do
       defstruct(
         config: [],
         connection: nil,
-        conn_retry_delays: [],
         subscribers: [],
         transaction: nil,
         relations: %{},
