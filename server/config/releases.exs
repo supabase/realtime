@@ -14,13 +14,6 @@ db_ssl = System.get_env("DB_SSL", "true") === "true"
 slot_name = System.get_env("SLOT_NAME") || :temporary
 configuration_file = System.get_env("CONFIGURATION_FILE")
 
-# Initial delay defaults to half a second
-db_retry_initial_delay = System.get_env("DB_RETRY_INITIAL_DELAY", "500")
-# Maximum delay defaults to five minutes
-db_retry_maximum_delay = System.get_env("DB_RETRY_MAXIMUM_DELAY", "300000")
-# Jitter will randomly adjust each delay within 10% of its value
-db_retry_jitter = System.get_env("DB_RETRY_JITTER", "10")
-
 # Channels are not secured by default in development and
 # are secured by default in production.
 secure_channels = System.get_env("SECURE_CHANNELS", "true") != "false"
@@ -46,9 +39,6 @@ config :realtime,
   db_user: db_user,
   db_password: db_password,
   db_ssl: db_ssl,
-  db_retry_initial_delay: db_retry_initial_delay,
-  db_retry_maximum_delay: db_retry_maximum_delay,
-  db_retry_jitter: db_retry_jitter,
   slot_name: slot_name,
   configuration_file: configuration_file,
   secure_channels: secure_channels,
