@@ -38,7 +38,6 @@ defmodule Realtime.Replication do
   }
 
   alias Realtime.SubscribersNotification
-  alias Realtime.Adapters.ConnRetry
 
   def start_link(config) do
     GenServer.start_link(__MODULE__, config)
@@ -46,20 +45,7 @@ defmodule Realtime.Replication do
 
   @impl true
   def init(config) do
-    {:ok, %State{config: config}, {:continue, :init_db_conn}}
-  end
-
-  @impl true
-  def handle_continue(:init_db_conn, %State{config: config} = state) do
-    :timer.sleep(Realtime.Adapters.ConnRetry.get_retry_delay())
-
-    case adapter_impl(config).init(config) do
-      {:ok, epgsql_pid} ->
-        {:noreply, %State{state | connection: epgsql_pid}}
-
-      {:error, reason} ->
-        {:stop, reason}
-    end
+    adapter_impl(config).init(config)
   end
 
   @impl true
@@ -72,21 +58,14 @@ defmodule Realtime.Replication do
     Logger.debug("Received binary message: #{inspect(binary_msg, limit: :infinity)}")
     Logger.debug("Decoded message: " <> inspect(decoded, limit: :infinity))
 
-    {:noreply, process_message(decoded, Map.put(state, :should_reset_retry, false))}
+    {:noreply, process_message(decoded, state)}
+
   end
 
   @impl true
   def handle_info(msg, state) do
     IO.inspect(msg)
     {:noreply, state}
-  end
-
-  defp reset_retry_delays(false) do
-    :ok
-  end
-
-  defp reset_retry_delays(true) do
-    :ok = ConnRetry.reset_retry_delay()
   end
 
   defp process_message(%Begin{final_lsn: final_lsn, commit_timestamp: commit_timestamp}, state) do
