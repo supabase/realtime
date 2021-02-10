@@ -13,8 +13,8 @@
     "faker": "^4.1.0",
     "next": "latest",
     "pg": "^8.5.1",
-    "react": "^16.7.0",
-    "react-dom": "^16.7.0"
+    "react": "^17.0.1",
+    "react-dom": "^17.0.1"
   },
   "license": "ISC"
 }
