@@ -45,7 +45,6 @@ defmodule Realtime.MixProject do
       {:joken, "~> 2.3.0"},
       {:plug_cowboy, "~> 2.4"},
       {:epgsql, "~> 4.5"},
-      {:retry, "~> 0.14"},
       {:mock, "~> 0.3.0", only: :test}
     ]
   end
