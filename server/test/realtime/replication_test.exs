@@ -1,77 +1,7 @@
 defmodule Realtime.ReplicationTest do
   use ExUnit.Case
 
-  import Mock
-
-  alias Realtime.Replication.State
-
   doctest Realtime.Replication, import: true
-
-  @test_config [
-    epgsql: %{
-      database: "test",
-      host: "localhost",
-      password: "postgres",
-      port: 5432,
-      ssl: true,
-      username: "postgres"
-    },
-    slot: :temporary,
-    wal_position: {"0", "0"},
-    publications: ["pub_test"]
-  ]
-
-  @test_state %State{
-    config: @test_config,
-    connection: nil,
-    subscribers: [],
-    transaction: nil,
-    relations: %{},
-    types: %{}
-  }
-
-  test "Realtime.Replication.init/1 returns correct state" do
-    assert {:ok, @test_state, {:continue, :init_db_conn}} =
-             Realtime.Replication.init(
-               epgsql: %{
-                 database: "test",
-                 host: "localhost",
-                 password: "postgres",
-                 port: 5432,
-                 ssl: true,
-                 username: "postgres"
-               },
-               slot: :temporary,
-               wal_position: {"0", "0"},
-               publications: ["pub_test"]
-             )
-  end
-
-  test "Realtime.Replication.handle_continue/2 :: :init_db_conn when adapter conn successful" do
-    with_mock Realtime.Adapters.Postgres.EpgsqlImplementation,
-      init: fn _ ->
-        {:ok, "epgsqpl_pid"}
-      end do
-      assert {:noreply,
-              %State{
-                config: @test_config,
-                connection: "epgsqpl_pid",
-                subscribers: [],
-                transaction: nil,
-                relations: %{},
-                types: %{}
-              }} = Realtime.Replication.handle_continue(:init_db_conn, @test_state)
-    end
-  end
-
-  test "Realtime.Replication.handle_continue/2 :: :init_db_conn when adapter conn fails" do
-    with_mock Realtime.Adapters.Postgres.EpgsqlImplementation,
-      init: fn _ ->
-        {:error, {:error, :econnrefused}}
-      end do
-      assert {:stop, {:error, :econnrefused}} = Realtime.Replication.handle_continue(:init_db_conn, @test_state)
-    end
-  end
 
   test "Integration Test: 0.2.0" do
     assert Realtime.Replication.handle_info(
@@ -138,8 +68,7 @@ defmodule Realtime.ReplicationTest do
                 },
                 subscribers: [],
                 transaction: nil,
-                types: %{},
-                should_reset_retry: false
+                types: %{}
               }}
   end
 end

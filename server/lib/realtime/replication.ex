@@ -10,8 +10,7 @@ defmodule Realtime.Replication do
         subscribers: [],
         transaction: nil,
         relations: %{},
-        types: %{},
-        should_reset_retry: true
+        types: %{}
       )
   )
 
@@ -38,7 +37,6 @@ defmodule Realtime.Replication do
   }
 
   alias Realtime.SubscribersNotification
-  alias Realtime.Adapters.ConnRetry
 
   def start_link(config) do
     GenServer.start_link(__MODULE__, config)
@@ -46,47 +44,22 @@ defmodule Realtime.Replication do
 
   @impl true
   def init(config) do
-    {:ok, %State{config: config}, {:continue, :init_db_conn}}
+    adapter_impl(config).init(config)
   end
 
   @impl true
-  def handle_continue(:init_db_conn, %State{config: config} = state) do
-    :timer.sleep(Realtime.Adapters.ConnRetry.get_retry_delay())
-
-    case adapter_impl(config).init(config) do
-      {:ok, epgsql_pid} ->
-        {:noreply, %State{state | connection: epgsql_pid}}
-
-      {:error, reason} ->
-        {:stop, reason}
-    end
-  end
-
-  @impl true
-  def handle_info(
-        {:epgsql, _pid, {:x_log_data, _start_lsn, _end_lsn, binary_msg}},
-        %State{should_reset_retry: should_reset_retry} = state
-      ) do
-    reset_retry_delays(should_reset_retry)
+  def handle_info({:epgsql, _pid, {:x_log_data, _start_lsn, _end_lsn, binary_msg}}, state) do
     decoded = Realtime.Decoder.decode_message(binary_msg)
     Logger.debug("Received binary message: #{inspect(binary_msg, limit: :infinity)}")
     Logger.debug("Decoded message: " <> inspect(decoded, limit: :infinity))
 
-    {:noreply, process_message(decoded, Map.put(state, :should_reset_retry, false))}
+    {:noreply, process_message(decoded, state)}
   end
 
   @impl true
   def handle_info(msg, state) do
     IO.inspect(msg)
     {:noreply, state}
-  end
-
-  defp reset_retry_delays(false) do
-    :ok
-  end
-
-  defp reset_retry_delays(true) do
-    :ok = ConnRetry.reset_retry_delay()
   end
 
   defp process_message(%Begin{final_lsn: final_lsn, commit_timestamp: commit_timestamp}, state) do
@@ -107,11 +80,7 @@ defmodule Realtime.Replication do
     # Feel free to delete after testing
     Logger.debug("Final Update of Columns " <> inspect(state.relations, limit: :infinity))
 
-    notify_subscribers(%{
-      state
-      | transaction: {current_txn_lsn, %{txn | changes: Enum.reverse(changes)}}
-    })
-
+    notify_subscribers(%{state | transaction: {current_txn_lsn, %{txn | changes: Enum.reverse(changes)}}})
     :ok = adapter_impl(state.config).acknowledge_lsn(state.connection, end_lsn)
 
     %{state | transaction: nil}

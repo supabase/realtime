@@ -32,10 +32,6 @@ defmodule Realtime.Application do
 
     configuration_file = Application.fetch_env!(:realtime, :configuration_file)
 
-    db_retry_initial_delay = Application.fetch_env!(:realtime, :db_retry_initial_delay)
-    db_retry_maximum_delay = Application.fetch_env!(:realtime, :db_retry_maximum_delay)
-    db_retry_jitter = Application.fetch_env!(:realtime, :db_retry_jitter)
-
     if Application.fetch_env!(:realtime, :secure_channels) do
       if Application.fetch_env!(:realtime, :jwt_secret) == "" do
         raise JwtSecretError, message: "JWT secret is missing"
@@ -56,13 +52,7 @@ defmodule Realtime.Application do
       # Start the endpoint when the application starts
       RealtimeWeb.Endpoint,
       {
-        Realtime.Adapters.ConnRetry,
-        conn_retry_initial_delay: db_retry_initial_delay,
-        conn_retry_maximum_delay: db_retry_maximum_delay,
-        conn_retry_jitter: db_retry_jitter
-      },
-      {
-        Realtime.ReplicationSupervisor,
+        Realtime.Replication,
         # You can provide a different WAL position if desired, or default to
         # allowing Postgres to send you what it thinks you need
         epgsql: epgsql_params,

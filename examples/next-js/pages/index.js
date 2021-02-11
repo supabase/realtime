@@ -1,5 +1,7 @@
-import { RealtimeClient } from '@supabase/realtime-js'
+import React from 'react'
 import axios from 'axios'
+import { RealtimeClient } from '@supabase/realtime-js'
+
 const REALTIME_URL = process.env.REALTIME_URL || 'ws://localhost:4000/socket'
 import Link from 'next/link'
 
