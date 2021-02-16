@@ -38,6 +38,15 @@ defmodule RealtimeWeb.UserSocket do
   def id(_socket), do: nil
 
   defp authorize_conn(true, %{"token" => token}) do
+    # WARNING: "token" param key will be deprecated.
+    # Please use "apikey" param key to pass in auth token.
+    case ChannelsAuthorization.authorize(token) do
+      {:ok, _} -> :ok
+      _ -> :error
+    end
+  end
+
+  defp authorize_conn(true, %{"apikey" => token}) do
     case ChannelsAuthorization.authorize(token) do
       {:ok, _} -> :ok
       _ -> :error

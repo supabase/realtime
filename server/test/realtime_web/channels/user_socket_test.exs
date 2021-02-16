@@ -16,8 +16,12 @@ defmodule RealtimeWeb.UserSocketTest do
     with_mock ChannelsAuthorization, authorize: fn _token -> {:ok, %{}} end do
       Application.put_env(:realtime, :secure_channels, true)
 
+      # WARNING: "token" param key will be deprecated.
       assert {:ok, %Socket{}} =
                UserSocket.connect(%{"token" => "auth_token123"}, socket(UserSocket))
+
+      assert {:ok, %Socket{}} =
+               UserSocket.connect(%{"apikey" => "auth_token123"}, socket(UserSocket))
     end
   end
 
