@@ -35,16 +35,17 @@ defmodule Realtime.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:phoenix, "~> 1.4.10"},
-      {:phoenix_pubsub, "~> 1.1"},
-      {:phoenix_html, "~> 2.11"},
-      {:phoenix_live_reload, "~> 1.2", only: :dev},
-      {:gettext, "~> 0.11"},
-      {:httpoison, "~> 1.6"},
+      {:phoenix, "~> 1.5"},
+      {:phoenix_pubsub, "~> 2.0"},
+      {:phoenix_html, "~> 2.14"},
+      {:phoenix_live_reload, "~> 1.3", only: :dev},
+      {:gettext, "~> 0.18"},
+      {:httpoison, "~> 1.8"},
       {:jason, "~> 1.2.2"},
       {:joken, "~> 2.3.0"},
-      {:plug_cowboy, "~> 2.0"},
-      {:epgsql, "~> 4.2"},
+      {:plug_cowboy, "~> 2.4"},
+      {:epgsql, "~> 4.5"},
+      {:timex, "~> 3.0"},
       {:mock, "~> 0.3.0", only: :test}
     ]
   end

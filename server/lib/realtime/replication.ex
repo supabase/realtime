@@ -80,7 +80,11 @@ defmodule Realtime.Replication do
     # Feel free to delete after testing
     Logger.debug("Final Update of Columns " <> inspect(state.relations, limit: :infinity))
 
-    notify_subscribers(%{state | transaction: {current_txn_lsn, %{txn | changes: Enum.reverse(changes)}}})
+    notify_subscribers(%{
+      state
+      | transaction: {current_txn_lsn, %{txn | changes: Enum.reverse(changes)}}
+    })
+
     :ok = adapter_impl(state.config).acknowledge_lsn(state.connection, end_lsn)
 
     %{state | transaction: nil}
@@ -241,13 +245,52 @@ defmodule Realtime.Replication do
     state
   end
 
-  # TODO: Typecast to meaningful Elixir types here later
-  defp data_tuple_to_map(_columns, nil), do: %{}
+  defp data_tuple_to_map(columns, tuple_data) when is_list(columns) and is_tuple(tuple_data) do
+    columns
+    |> Enum.with_index()
+    |> Enum.reduce_while(%{}, fn {column_map, index}, acc ->
+      case column_map do
+        %Relation.Column{name: column_name, type: column_type}
+        when is_binary(column_name) and is_binary(column_type) ->
+          try do
+            {:ok, Kernel.elem(tuple_data, index)}
+          rescue
+            ArgumentError -> :error
+          end
+          |> case do
+            {:ok, record} ->
+              {:cont, Map.put(acc, column_name, convert_column_record(record, column_type))}
 
-  defp data_tuple_to_map(columns, tuple_data) do
-    for {column, index} <- Enum.with_index(columns, 1),
-        do: {column.name, :erlang.element(index, tuple_data)},
-        into: %{}
+            :error ->
+              {:halt, acc}
+          end
+
+        _ ->
+          {:cont, acc}
+      end
+    end)
+  end
+
+  defp data_tuple_to_map(_columns, _tuple_data), do: %{}
+
+  defp convert_column_record(record, "timestamp") when is_binary(record) do
+    with {:ok, %NaiveDateTime{} = naive_date_time} <- Timex.parse(record, "{RFC3339}"),
+         %DateTime{} = date_time <- Timex.to_datetime(naive_date_time) do
+      DateTime.to_iso8601(date_time)
+    else
+      _ -> record
+    end
+  end
+
+  defp convert_column_record(record, "timestamptz") when is_binary(record) do
+    case Timex.parse(record, "{RFC3339}") do
+      {:ok, %DateTime{} = date_time} -> DateTime.to_iso8601(date_time)
+      _ -> record
+    end
+  end
+
+  defp convert_column_record(record, _column_type) do
+    record
   end
 
   defp adapter_impl(config) do
