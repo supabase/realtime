@@ -10,7 +10,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     {:ok, socket: socket}
   end
 
-  test "INSERTS are broadcasts to the client" do
+  test "INSERT message is pushed to the client" do
     change = %{
       schema: "public",
       table: "users",
@@ -18,23 +18,23 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     }
 
     RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
-    assert_push("*", change)
+
     assert_push("INSERT", change)
   end
 
-  test "UPDATES are broadcasts to the client" do
+  test "UPDATE message is pushed to the client" do
     change = %{
       schema: "public",
       table: "users",
-      type: "UPDATES"
+      type: "UPDATE"
     }
 
     RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
-    assert_push("*", change)
-    assert_push("UPDATES", change)
+
+    assert_push("UPDATE", change)
   end
 
-  test "DELETES are broadcasts to the client" do
+  test "DELETE message is pushed to the client" do
     change = %{
       schema: "public",
       table: "users",
@@ -42,19 +42,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     }
 
     RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
-    assert_push("*", change)
+
     assert_push("DELETE", change)
-  end
-
-  test "TRUNCATEs are broadcasted to the client" do
-    change = %{
-      schema: "public",
-      table: "users",
-      type: "TRUNCATE"
-    }
-
-    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
-    assert_push("*", change)
-    assert_push("TRUNCATE", change)
   end
 end
