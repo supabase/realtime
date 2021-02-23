@@ -73,19 +73,21 @@ defmodule Realtime.Replication do
   # FYI: this will be the last function called before returning to the client
   defp process_message(
          %Commit{lsn: commit_lsn, end_lsn: end_lsn},
-         %State{transaction: {current_txn_lsn, %Transaction{changes: changes} = txn}} = state
+         %State{
+           transaction: {current_txn_lsn, %Transaction{changes: changes} = txn},
+           relations: relations,
+           config: config,
+           connection: connection
+         } = state
        )
        when commit_lsn == current_txn_lsn do
     # To show how the updated columns look like before being returned
     # Feel free to delete after testing
-    Logger.debug("Final Update of Columns " <> inspect(state.relations, limit: :infinity))
+    Logger.debug("Final Update of Columns " <> inspect(relations, limit: :infinity))
 
-    notify_subscribers(%{
-      state
-      | transaction: {current_txn_lsn, %{txn | changes: Enum.reverse(changes)}}
-    })
+    :ok = %{txn | changes: Enum.reverse(changes)} |> SubscribersNotification.notify()
 
-    :ok = adapter_impl(state.config).acknowledge_lsn(state.connection, end_lsn)
+    :ok = adapter_impl(config).acknowledge_lsn(connection, end_lsn)
 
     %{state | transaction: nil}
   end
@@ -295,9 +297,5 @@ defmodule Realtime.Replication do
 
   defp adapter_impl(config) do
     Keyword.get(config, :postgres_adapter, Realtime.Adapters.Postgres.EpgsqlImplementation)
-  end
-
-  defp notify_subscribers(%State{transaction: {_current_txn_lsn, txn}}) do
-    SubscribersNotification.notify(txn)
   end
 end
