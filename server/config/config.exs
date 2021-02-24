@@ -7,7 +7,7 @@
 # General application configuration
 import Config
 
-# These defaults mirror the ones in config.exs, remember not to change one
+# These defaults mirror the ones in releases.exs, remember not to change one
 # without changing the other.
 app_hostname = System.get_env("HOSTNAME", "localhost")
 app_port = String.to_integer(System.get_env("PORT", "4000"))
