@@ -1,62 +1,149 @@
 defmodule Realtime.WebhookConnectorTest do
   use ExUnit.Case
 
+  import Mock
+
   alias Realtime.Adapters.Changes.Transaction
-  alias Realtime.Configuration
-  alias Realtime.TransactionFilter.Filter
+  alias Realtime.Configuration.{Webhook, WebhookEndpoint}
+  alias Realtime.Decoder.Messages.Relation.Column
   alias Realtime.WebhookConnector
 
-  test "notify calls notification function after filtering the handlers" do
-    {:ok, call_counter} = Agent.start_link fn -> 0 end
-    notify = fn (_, _) ->
-      Agent.update(call_counter, fn c -> c + 1 end)
-      Task.async(fn ->
-	{:ok, %{status_code: 200}}
-      end)
-    end
-
-    txn = %Transaction{
-      changes: [
-	%Realtime.Adapters.Changes.NewRecord{
-	  columns: [
-	    %Realtime.Decoder.Messages.Relation.Column{flags: [:key], name: "id", type: "int8", type_modifier: 4294967295},
-	    %Realtime.Decoder.Messages.Relation.Column{flags: [], name: "details", type: "text", type_modifier: 4294967295},
-	    %Realtime.Decoder.Messages.Relation.Column{flags: [], name: "user_id", type: "int8", type_modifier: 4294967295}
-	  ],
-	  commit_timestamp: nil,
-	  record: %{"details" => "The SCSI system is down, program the haptic microchip so we can back up the SAS circuit!", "id" => "14", "user_id" => "1"},
-	  schema: "public",
-	  table: "todos",
-	  type: "INSERT",
-        }
-      ]
-    }
-
-    get_config = fn _ ->
-      config = [
-	%Configuration.Webhook{ # will match
-	  event: "*",
-	  relation: "*",
-        }, %Configuration.Webhook { # will match
-	  event: "INSERT",
-	  relation: "public:todos",
-        }, %Configuration.Webhook { # won't match
-	  event: "UPDATE",
-	  relation: "public:todos",
+  @test_endpoint "https://webhooktest.site"
+  @type_modifier 4_294_967_295
+  @txn %Transaction{
+    changes: [
+      %Realtime.Adapters.Changes.NewRecord{
+        columns: [
+          %Column{
+            flags: [:key],
+            name: "id",
+            type: "int8",
+            type_modifier: @type_modifier
+          },
+          %Column{
+            flags: [],
+            name: "details",
+            type: "text",
+            type_modifier: @type_modifier
+          },
+          %Column{
+            flags: [],
+            name: "user_id",
+            type: "int8",
+            type_modifier: @type_modifier
+          }
+        ],
+        commit_timestamp: %DateTime{
+          calendar: Calendar.ISO,
+          day: 22,
+          hour: 05,
+          microsecond: {0, 0},
+          minute: 22,
+          month: 2,
+          second: 19,
+          std_offset: 0,
+          time_zone: "Etc/UTC",
+          utc_offset: 0,
+          year: 2021,
+          zone_abbr: "UTC"
         },
-      ]
-      {:ok, config}
-    end
-
-    state = %WebhookConnector.State{
-      notify: notify,
-      get_config: get_config
+        record: %{
+          "details" =>
+            "The SCSI system is down, program the haptic microchip so we can back up the SAS circuit!",
+          "id" => "14",
+          "user_id" => "1"
+        },
+        schema: "public",
+        table: "todos",
+        type: "INSERT"
+      }
+    ]
+  }
+  @serialized_txn Jason.encode!(@txn)
+  @webhooks_config [
+    # will match
+    %Webhook{
+      event: "*",
+      relation: "*",
+      config: %WebhookEndpoint{endpoint: @test_endpoint}
+    },
+    # will match
+    %Webhook{
+      event: "INSERT",
+      relation: "public:todos",
+      config: %WebhookEndpoint{endpoint: @test_endpoint}
+    },
+    # won't match
+    %Webhook{
+      event: "UPDATE",
+      relation: "public:todos",
+      config: %WebhookEndpoint{endpoint: @test_endpoint}
+    },
+    # bad endpoint
+    %Webhook{
+      event: "UPDATE",
+      relation: "public:todos",
+      config: %WebhookEndpoint{}
     }
+  ]
+  @request_headers [{"Content-Type", "application/json"}]
 
-    WebhookConnector.handle_call({:notify, txn}, nil, state)
+  test "notify/1 when webhook POST requests are successful" do
+    with_mock HTTPoison,
+      post: fn @test_endpoint, @serialized_txn, @request_headers ->
+        {:ok, %{status_code: 200}}
+      end do
+      assert :ok = WebhookConnector.notify(@txn, @webhooks_config)
 
-    call_count = Agent.get(call_counter, & &1)
-    assert call_count == 2
-    Agent.stop(call_counter)
+      assert_called_exactly(
+        HTTPoison.post(@test_endpoint, @serialized_txn, @request_headers),
+        2
+      )
+    end
+  end
+
+  test "notify/1 when webhook POST requests return non success status codes" do
+    with_mock HTTPoison,
+      post: fn @test_endpoint, @serialized_txn, @request_headers ->
+        {:ok, %{status_code: 500}}
+      end do
+      assert :ok = WebhookConnector.notify(@txn, @webhooks_config)
+
+      assert_called_exactly(
+        HTTPoison.post(@test_endpoint, @serialized_txn, @request_headers),
+        2
+      )
+    end
+  end
+
+  test "notify/1 when webhook POST requests fail" do
+    with_mock HTTPoison,
+      post: fn @test_endpoint, @serialized_txn, @request_headers ->
+        {:error, %HTTPoison.Error{id: nil, reason: :econnrefused}}
+      end do
+      assert :ok = WebhookConnector.notify(@txn, @webhooks_config)
+
+      assert_called_exactly(
+        HTTPoison.post(@test_endpoint, @serialized_txn, @request_headers),
+        2
+      )
+    end
+  end
+
+  test "notify/1 when webhook POST requests take longer than Task.yield_many/2 timeout" do
+    with_mock HTTPoison,
+      post: fn @test_endpoint, @serialized_txn, @request_headers ->
+        # Task.yield_many/2 timeout set to default 5_000 (@timestamp) in Realtime.WebhookConnector
+        :timer.sleep(6_000)
+        {:ok, %{status_code: 200}}
+      end do
+      assert :ok = WebhookConnector.notify(@txn, @webhooks_config)
+
+      assert_not_called(HTTPoison.post(@test_endpoint, @serialized_txn, @request_headers))
+    end
+  end
+
+  test "notify/1 when webhook POST request Tasks return exit" do
+    # find a good way to test this
   end
 end
