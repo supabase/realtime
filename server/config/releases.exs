@@ -50,4 +50,5 @@ config :realtime,
 
 config :realtime, RealtimeWeb.Endpoint,
   http: [:inet6, port: app_port],
+  pubsub_server: Realtime.PubSub,
   secret_key_base: session_secret_key_base
