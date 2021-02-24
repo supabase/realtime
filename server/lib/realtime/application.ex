@@ -53,8 +53,7 @@ defmodule Realtime.Application do
       RealtimeWeb.Endpoint,
       {
         Phoenix.PubSub,
-        name: Realtime.PubSub,
-        adapter: Phoenix.PubSub.PG2
+        name: Realtime.PubSub, adapter: Phoenix.PubSub.PG2
       },
       {
         Realtime.ConfigurationManager,
