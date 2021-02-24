@@ -43,13 +43,14 @@ defmodule Realtime.TransactionFilter do
   def matches?(%{event: event, relation: relation}, %Transaction{changes: changes}) do
     case parse_relation_filter(relation) do
       {:ok, filter} ->
-	Enum.any?(changes, fn change -> change_matches(event, filter, change) end)
-      {:error, msg} ->
-	Logger.warn("Could not parse relation filter: #{inspect msg}")
-	false
-    end
+        Enum.any?(changes, fn change -> change_matches(event, filter, change) end)
 
+      {:error, msg} ->
+        Logger.warn("Could not parse relation filter: #{inspect(msg)}")
+        false
+    end
   end
+
   # malformed filter or txn. Should not match.
   def matches?(_filter, _txn), do: false
 
@@ -94,6 +95,7 @@ defmodule Realtime.TransactionFilter do
   end
 
   defp name_matches(nil, _change_name), do: true
+
   defp name_matches(filter_name, change_name) do
     filter_name == change_name
   end
