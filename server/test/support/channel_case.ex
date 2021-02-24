@@ -18,7 +18,7 @@ defmodule RealtimeWeb.ChannelCase do
   using do
     quote do
       # Import conveniences for testing with channels
-      use Phoenix.ChannelTest
+      import Phoenix.ChannelTest
 
       # The default endpoint for testing
       @endpoint RealtimeWeb.Endpoint

@@ -60,6 +60,7 @@ defmodule Realtime.Adapters.Postgres.EpgsqlImplementation do
         name when is_binary(name) ->
           # Simple query for replication mode so no prepared statements are supported
           escaped_name = String.downcase(String.replace(name, "'", "\\'"))
+
           query =
             "SELECT COUNT(*) >= 1 FROM pg_replication_slots WHERE slot_name = '#{escaped_name}'"
 

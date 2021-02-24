@@ -30,6 +30,9 @@ jwt_secret = System.get_env("JWT_SECRET", "")
 # must equal 1610078130.
 jwt_claim_validators = System.get_env("JWT_CLAIM_VALIDATORS", "{}")
 
+# The secret key base to built the cookie signing/encryption key.
+session_secret_key_base = System.get_env("SESSION_SECRET_KEY_BASE", "Kyvjr42ZvLcY6yzZ7vmRUniE7Bta9tpknEAvpxtaYOa/marmeI1jsqxhIKeu6V51")
+
 config :realtime,
   app_hostname: app_hostname,
   app_port: app_port,
@@ -45,4 +48,7 @@ config :realtime,
   jwt_secret: jwt_secret,
   jwt_claim_validators: jwt_claim_validators
 
-config :realtime, RealtimeWeb.Endpoint, http: [:inet6, port: app_port]
+config :realtime, RealtimeWeb.Endpoint,
+  http: [:inet6, port: app_port],
+  pubsub_server: Realtime.PubSub,
+  secret_key_base: session_secret_key_base

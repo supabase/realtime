@@ -7,7 +7,7 @@
 # General application configuration
 import Config
 
-# These defaults mirror the ones in config.exs, remember not to change one
+# These defaults mirror the ones in releases.exs, remember not to change one
 # without changing the other.
 app_hostname = System.get_env("HOSTNAME", "localhost")
 app_port = String.to_integer(System.get_env("PORT", "4000"))
@@ -37,6 +37,9 @@ jwt_secret = System.get_env("JWT_SECRET", "")
 # must equal 1610078130.
 jwt_claim_validators = System.get_env("JWT_CLAIM_VALIDATORS", "{}")
 
+# The secret key base to built the cookie signing/encryption key.
+session_secret_key_base = System.get_env("SESSION_SECRET_KEY_BASE", "Kyvjr42ZvLcY6yzZ7vmRUniE7Bta9tpknEAvpxtaYOa/marmeI1jsqxhIKeu6V51")
+
 config :realtime,
   app_hostname: app_hostname,
   app_port: app_port,
@@ -56,7 +59,8 @@ config :realtime,
 config :realtime, RealtimeWeb.Endpoint,
   url: [host: "localhost"],
   render_errors: [view: RealtimeWeb.ErrorView, accepts: ~w(html json)],
-  pubsub: [name: Realtime.PubSub, adapter: Phoenix.PubSub.PG2]
+  pubsub_server: Realtime.PubSub,
+  secret_key_base: session_secret_key_base
 
 # Configures Elixir's Logger
 config :logger, :console,

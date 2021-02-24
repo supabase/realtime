@@ -52,6 +52,10 @@ defmodule Realtime.Application do
       # Start the endpoint when the application starts
       RealtimeWeb.Endpoint,
       {
+        Phoenix.PubSub,
+        name: Realtime.PubSub, adapter: Phoenix.PubSub.PG2
+      },
+      {
         Realtime.ConfigurationManager,
         filename: configuration_file
       },
