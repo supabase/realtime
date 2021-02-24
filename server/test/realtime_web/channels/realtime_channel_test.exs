@@ -16,6 +16,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       table: "users",
       type: "INSERT"
     }
+
     RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
     assert_push("*", change)
     assert_push("INSERT", change)
@@ -27,6 +28,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       table: "users",
       type: "UPDATES"
     }
+
     RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
     assert_push("*", change)
     assert_push("UPDATES", change)
@@ -38,6 +40,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       table: "users",
       type: "DELETE"
     }
+
     RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
     assert_push("*", change)
     assert_push("DELETE", change)
