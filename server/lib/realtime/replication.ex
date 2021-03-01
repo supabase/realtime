@@ -10,11 +10,13 @@ defmodule Realtime.Replication do
         subscribers: [],
         transaction: nil,
         relations: %{},
-        types: %{}
+        types: %{},
+        changes: []
       )
   )
 
   use GenServer
+  import Realtime.Adapters.Changes.ChangeRecord
   require Logger
 
   alias Realtime.Adapters.Changes.{
@@ -50,10 +52,13 @@ defmodule Realtime.Replication do
   @impl true
   def handle_info({:epgsql, _pid, {:x_log_data, _start_lsn, _end_lsn, binary_msg}}, state) do
     decoded = Realtime.Decoder.decode_message(binary_msg)
-    Logger.debug("Received binary message: #{inspect(binary_msg, limit: :infinity)}")
-    Logger.debug("Decoded message: " <> inspect(decoded, limit: :infinity))
+    # Logger.debug("Received binary message: #{inspect(binary_msg, limit: :infinity)}")
+    # Logger.debug("Decoded message: " <> inspect(decoded, limit: :infinity))
 
-    {:noreply, process_message(decoded, state)}
+    case process_message(decoded, state) do
+      {new_state, :hibernate} -> {:noreply, new_state, :hibernate}
+      new_state -> {:noreply, new_state}
+    end
   end
 
   @impl true
@@ -63,9 +68,10 @@ defmodule Realtime.Replication do
   end
 
   defp process_message(%Begin{final_lsn: final_lsn, commit_timestamp: commit_timestamp}, state) do
-    %State{
+    %{
       state
-      | transaction: {final_lsn, %Transaction{changes: [], commit_timestamp: commit_timestamp}}
+      | changes: [],
+        transaction: {final_lsn, %Transaction{commit_timestamp: commit_timestamp}}
     }
   end
 
@@ -74,7 +80,8 @@ defmodule Realtime.Replication do
   defp process_message(
          %Commit{lsn: commit_lsn, end_lsn: end_lsn},
          %State{
-           transaction: {current_txn_lsn, %Transaction{changes: changes} = txn},
+           changes: changes,
+           transaction: {current_txn_lsn, _txn_struct},
            relations: relations,
            config: config,
            connection: connection
@@ -83,13 +90,14 @@ defmodule Realtime.Replication do
        when commit_lsn == current_txn_lsn do
     # To show how the updated columns look like before being returned
     # Feel free to delete after testing
-    Logger.debug("Final Update of Columns " <> inspect(relations, limit: :infinity))
+    # Logger.debug("Final Update of Columns " <> inspect(relations, limit: :infinity))
 
-    :ok = %{txn | changes: Enum.reverse(changes)} |> SubscribersNotification.notify()
+    %{state | changes: Enum.reverse(changes)}
+    |> SubscribersNotification.notify()
 
     :ok = adapter_impl(config).acknowledge_lsn(connection, end_lsn)
 
-    %{state | transaction: nil}
+    {%{state | changes: [], transaction: nil}, :hibernate}
   end
 
   # Any unknown types will now be populated into state.types
@@ -116,25 +124,18 @@ defmodule Realtime.Replication do
   defp process_message(
          %Insert{relation_id: relation_id, tuple_data: tuple_data},
          %State{
-           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn},
+           changes: changes,
            relations: relations
          } = state
        )
        when is_map(relations) do
     case Map.fetch(relations, relation_id) do
-      {:ok, %{columns: columns, namespace: namespace, name: name}} when is_list(columns) ->
-        data = data_tuple_to_map(columns, tuple_data)
+      {:ok, _} ->
+        new_record = {relation_id, "INSERT", tuple_data}
 
-        new_record = %NewRecord{
-          type: "INSERT",
-          schema: namespace,
-          table: name,
-          columns: columns,
-          record: data,
-          commit_timestamp: commit_timestamp
-        }
+        # new_record = change_record(relation_id: relation_id, type: "INSERT", tuple_data: tuple_data)
 
-        %State{state | transaction: {lsn, %{txn | changes: [new_record | changes]}}}
+        %{state | changes: [new_record | changes]}
 
       _ ->
         state
@@ -168,7 +169,7 @@ defmodule Realtime.Replication do
           commit_timestamp: commit_timestamp
         }
 
-        %State{
+        %{
           state
           | transaction: {lsn, %{txn | changes: [updated_record | changes]}}
         }
@@ -203,7 +204,7 @@ defmodule Realtime.Replication do
           commit_timestamp: commit_timestamp
         }
 
-        %State{state | transaction: {lsn, %{txn | changes: [deleted_record | changes]}}}
+        %{state | transaction: {lsn, %{txn | changes: [deleted_record | changes]}}}
 
       _ ->
         state
@@ -237,17 +238,19 @@ defmodule Realtime.Replication do
         end
       end)
 
-    %State{
+    %{
       state
       | transaction: {lsn, %{txn | changes: new_changes}}
     }
   end
 
-  defp process_message(_msg, state) do
-    state
+  defp process_message(_msg, %State{transaction: nil} = state) do
+    {state, :hibernate}
   end
 
-  defp data_tuple_to_map(columns, tuple_data) when is_list(columns) and is_tuple(tuple_data) do
+  defp process_message(_msg, state), do: state
+
+  def data_tuple_to_map(columns, tuple_data) when is_list(columns) and is_tuple(tuple_data) do
     columns
     |> Enum.with_index()
     |> Enum.reduce_while(%{}, fn {column_map, index}, acc ->
@@ -273,7 +276,7 @@ defmodule Realtime.Replication do
     end)
   end
 
-  defp data_tuple_to_map(_columns, _tuple_data), do: %{}
+  def data_tuple_to_map(_columns, _tuple_data), do: %{}
 
   defp convert_column_record(record, "timestamp") when is_binary(record) do
     with {:ok, %NaiveDateTime{} = naive_date_time} <- Timex.parse(record, "{RFC3339}"),

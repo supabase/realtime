@@ -2,9 +2,14 @@
 # License: https://github.com/cainophile/cainophile/blob/master/LICENSE
 
 require Protocol
+require Record
 
 defmodule Realtime.Adapters.Changes do
   defmodule(Transaction, do: defstruct([:changes, :commit_timestamp]))
+
+  defmodule ChangeRecord do
+    Record.defrecord(:change_record, relation_id: nil, type: nil, tuple_data: nil)
+  end
 
   defmodule(NewRecord,
     do: defstruct([:type, :record, :schema, :table, :columns, :commit_timestamp])
