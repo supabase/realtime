@@ -60,13 +60,13 @@ defmodule Realtime.Application do
         filename: configuration_file
       },
       {
-        Realtime.Replication,
+        Realtime.DatabaseReplicationSupervisor,
         # You can provide a different WAL position if desired, or default to
         # allowing Postgres to send you what it thinks you need
-        epgsql: epgsql_params,
-        slot: slot_name,
-        wal_position: {"0", "0"},
-        publications: ["supabase_realtime"]
+        epgsql_params: epgsql_params,
+        publications: ["supabase_realtime"],
+        slot_name: slot_name,
+        wal_position: {"0", "0"}
       }
     ]
 

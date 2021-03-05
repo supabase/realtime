@@ -15,7 +15,7 @@
 #  AND typtype = 'b' -- Only basic types
 #  AND typisdefined -- Ignore undefined types
 
-defmodule Realtime.OidDatabase do
+defmodule Realtime.Adapters.Postgres.OidDatabase do
   @doc """
   Maps a numeric PostgreSQL type ID to a descriptive string.
 

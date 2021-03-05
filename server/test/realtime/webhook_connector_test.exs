@@ -5,7 +5,7 @@ defmodule Realtime.WebhookConnectorTest do
 
   alias Realtime.Adapters.Changes.Transaction
   alias Realtime.Configuration.{Webhook, WebhookEndpoint}
-  alias Realtime.Decoder.Messages.Relation.Column
+  alias Realtime.Adapters.Postgres.Decoder.Messages.Relation.Column
   alias Realtime.WebhookConnector
 
   @test_endpoint "https://webhooktest.site"
