@@ -11,6 +11,7 @@ db_user = System.get_env("DB_USER", "postgres")
 db_password = System.get_env("DB_PASSWORD", "postgres")
 # HACK: There's probably a better way to set boolean from env
 db_ssl = System.get_env("DB_SSL", "true") === "true"
+publications = System.get_env("PUBLICATIONS", "[\"supabase_realtime\"]")
 slot_name = System.get_env("SLOT_NAME") || :temporary
 configuration_file = System.get_env("CONFIGURATION_FILE")
 
@@ -42,6 +43,7 @@ config :realtime,
   db_user: db_user,
   db_password: db_password,
   db_ssl: db_ssl,
+  publications: publications,
   slot_name: slot_name,
   configuration_file: configuration_file,
   secure_channels: secure_channels,
