@@ -13,9 +13,9 @@ defmodule Realtime.TransactionFilter do
       iex> txn = %Transaction{changes: [
       ...>   %Realtime.Adapters.Changes.NewRecord{
       ...>     columns: [
-      ...>       %Realtime.Decoder.Messages.Relation.Column{flags: [:key], name: "id", type: "int8", type_modifier: 4294967295},
-      ...>       %Realtime.Decoder.Messages.Relation.Column{flags: [], name: "details", type: "text", type_modifier: 4294967295},
-      ...>       %Realtime.Decoder.Messages.Relation.Column{flags: [], name: "user_id", type: "int8", type_modifier: 4294967295}
+      ...>       %Realtime.Adapters.Postgres.Decoder.Messages.Relation.Column{flags: [:key], name: "id", type: "int8", type_modifier: 4294967295},
+      ...>       %Realtime.Adapters.Postgres.Decoder.Messages.Relation.Column{flags: [], name: "details", type: "text", type_modifier: 4294967295},
+      ...>       %Realtime.Adapters.Postgres.Decoder.Messages.Relation.Column{flags: [], name: "user_id", type: "int8", type_modifier: 4294967295}
       ...>     ],
       ...>     commit_timestamp: nil,
       ...>     record: %{"details" => "The SCSI system is down, program the haptic microchip so we can back up the SAS circuit!", "id" => "14", "user_id" => "1"},

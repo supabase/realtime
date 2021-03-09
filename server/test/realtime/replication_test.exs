@@ -5,8 +5,8 @@ defmodule Realtime.ReplicationTest do
 
   alias Realtime.Replication
   alias Realtime.Adapters.Changes.{Transaction, NewRecord, UpdatedRecord, DeletedRecord}
-  alias Realtime.Decoder.Messages.Relation
-  alias Realtime.Adapters.Postgres.EpgsqlImplementation
+  alias Realtime.Adapters.Postgres.Decoder.Messages.Relation
+  alias Realtime.Adapters.Postgres.EpgsqlServer
   alias Realtime.SubscribersNotification
 
   @test_columns [
@@ -44,8 +44,6 @@ defmodule Realtime.ReplicationTest do
 
   setup do
     test_state = %Replication.State{
-      config: [],
-      connection: "pid",
       relations: %{
         26725 => %Relation{
           columns: @test_columns,
@@ -55,7 +53,6 @@ defmodule Realtime.ReplicationTest do
           replica_identity: :default
         }
       },
-      subscribers: [],
       transaction: nil,
       types: %{}
     }
@@ -66,8 +63,6 @@ defmodule Realtime.ReplicationTest do
   test "Integration Test: 0.2.0" do
     assert {:noreply,
             %Replication.State{
-              config: [],
-              connection: nil,
               relations: %{
                 16386 => %Relation{
                   columns: [
@@ -114,7 +109,6 @@ defmodule Realtime.ReplicationTest do
                   replica_identity: :default
                 }
               },
-              subscribers: [],
               transaction: nil,
               types: %{}
             }} =
@@ -380,10 +374,10 @@ defmodule Realtime.ReplicationTest do
         ]
       },
       {
-        EpgsqlImplementation,
+        EpgsqlServer,
         [],
         [
-          acknowledge_lsn: fn _connection, _end_lsn -> :ok end
+          acknowledge_lsn: fn _lsn -> :ok end
         ]
       }
     ]) do
@@ -432,7 +426,7 @@ defmodule Realtime.ReplicationTest do
                })
              )
 
-      assert called(EpgsqlImplementation.acknowledge_lsn("pid", {0, 2_097_482_992}))
+      assert called(EpgsqlServer.acknowledge_lsn({0, 2_097_482_992}))
 
       assert %Replication.State{transaction: nil} = commit_state
     end

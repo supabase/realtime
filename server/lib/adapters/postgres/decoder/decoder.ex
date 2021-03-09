@@ -1,7 +1,7 @@
 # This file draws heavily from https://github.com/cainophile/pgoutput_decoder
 # License: https://github.com/cainophile/pgoutput_decoder/blob/master/LICENSE
 
-defmodule Realtime.Decoder do
+defmodule Realtime.Adapters.Postgres.Decoder do
   defmodule Messages do
     defmodule(Begin, do: defstruct([:final_lsn, :commit_timestamp, :xid]))
     defmodule(Commit, do: defstruct([:flags, :lsn, :end_lsn, :commit_timestamp]))
@@ -50,7 +50,7 @@ defmodule Realtime.Decoder do
     Unsupported
   }
 
-  alias Realtime.OidDatabase
+  alias Realtime.Adapters.Postgres.OidDatabase
 
   @doc """
   Parses logical replication messages from Postgres
@@ -58,7 +58,7 @@ defmodule Realtime.Decoder do
   ## Examples
 
       iex> decode_message(<<73, 0, 0, 96, 0, 78, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 116, 0, 0, 0, 3, 53, 54, 48>>)
-      %Realtime.Decoder.Messages.Insert{relation_id: 24576, tuple_data: {"baz", "560"}}
+      %Realtime.Adapters.Postgres.Decoder.Messages.Insert{relation_id: 24576, tuple_data: {"baz", "560"}}
 
   """
   def decode_message(message) when is_binary(message) do

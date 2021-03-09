@@ -5,16 +5,14 @@ defmodule Realtime.Replication do
   defmodule(State,
     do:
       defstruct(
-        config: [],
-        connection: nil,
-        subscribers: [],
-        transaction: nil,
         relations: %{},
+        transaction: nil,
         types: %{}
       )
   )
 
   use GenServer
+
   require Logger
 
   alias Realtime.Adapters.Changes.{
@@ -25,7 +23,7 @@ defmodule Realtime.Replication do
     TruncatedRelation
   }
 
-  alias Realtime.Decoder.Messages.{
+  alias Realtime.Adapters.Postgres.Decoder.Messages.{
     Begin,
     Commit,
     Relation,
@@ -36,20 +34,21 @@ defmodule Realtime.Replication do
     Type
   }
 
+  alias Realtime.Adapters.Postgres.EpgsqlServer
   alias Realtime.SubscribersNotification
 
   def start_link(config) do
-    GenServer.start_link(__MODULE__, config)
+    GenServer.start_link(__MODULE__, config, name: __MODULE__)
   end
 
   @impl true
-  def init(config) do
-    adapter_impl(config).init(config)
+  def init(_) do
+    {:ok, %State{}}
   end
 
   @impl true
   def handle_info({:epgsql, _pid, {:x_log_data, _start_lsn, _end_lsn, binary_msg}}, state) do
-    decoded = Realtime.Decoder.decode_message(binary_msg)
+    decoded = Realtime.Adapters.Postgres.Decoder.decode_message(binary_msg)
     Logger.debug("Received binary message: #{inspect(binary_msg, limit: :infinity)}")
     Logger.debug("Decoded message: " <> inspect(decoded, limit: :infinity))
 
@@ -75,9 +74,7 @@ defmodule Realtime.Replication do
          %Commit{lsn: commit_lsn, end_lsn: end_lsn},
          %State{
            transaction: {current_txn_lsn, %Transaction{changes: changes} = txn},
-           relations: relations,
-           config: config,
-           connection: connection
+           relations: relations
          } = state
        )
        when commit_lsn == current_txn_lsn do
@@ -87,7 +84,7 @@ defmodule Realtime.Replication do
 
     :ok = %{txn | changes: Enum.reverse(changes)} |> SubscribersNotification.notify()
 
-    :ok = adapter_impl(config).acknowledge_lsn(connection, end_lsn)
+    :ok = EpgsqlServer.acknowledge_lsn(end_lsn)
 
     %{state | transaction: nil}
   end
@@ -293,9 +290,5 @@ defmodule Realtime.Replication do
 
   defp convert_column_record(record, _column_type) do
     record
-  end
-
-  defp adapter_impl(config) do
-    Keyword.get(config, :postgres_adapter, Realtime.Adapters.Postgres.EpgsqlImplementation)
   end
 end

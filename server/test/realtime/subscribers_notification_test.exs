@@ -13,7 +13,7 @@ defmodule Realtime.SubscribersNotificationTest do
 
   alias Realtime.Configuration.{Configuration, Webhook, WebhookEndpoint}
   alias Realtime.{ConfigurationManager, SubscribersNotification, WebhookConnector}
-  alias Realtime.Decoder.Messages.Relation
+  alias Realtime.Adapters.Postgres.Decoder.Messages.Relation
   alias RealtimeWeb.RealtimeChannel
 
   @commit_timestamp %DateTime{

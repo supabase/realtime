@@ -21,6 +21,8 @@ defmodule Realtime.Application do
     # `select * from pg_replication_slots`
     slot_name = Application.get_env(:realtime, :slot_name)
 
+    publications = Application.get_env(:realtime, :publications) |> Jason.decode!()
+
     epgsql_params = %{
       host: ~c(#{host}),
       username: Application.fetch_env!(:realtime, :db_user),
@@ -60,13 +62,13 @@ defmodule Realtime.Application do
         filename: configuration_file
       },
       {
-        Realtime.Replication,
+        Realtime.DatabaseReplicationSupervisor,
         # You can provide a different WAL position if desired, or default to
         # allowing Postgres to send you what it thinks you need
-        epgsql: epgsql_params,
-        slot: slot_name,
-        wal_position: {"0", "0"},
-        publications: ["supabase_realtime"]
+        epgsql_params: epgsql_params,
+        publications: publications,
+        slot_name: slot_name,
+        wal_position: {"0", "0"}
       }
     ]
 

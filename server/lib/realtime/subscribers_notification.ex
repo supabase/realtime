@@ -25,8 +25,8 @@ defmodule Realtime.SubscribersNotification do
     # Example Change:
     # %Realtime.Adapters.Changes.UpdatedRecord{
     #   columns: [
-    #     %Realtime.Decoder.Messages.Relation.Column{ flags: [:key], name: "id", type: "int8", type_modifier: 4294967295 },
-    #     %Realtime.Decoder.Messages.Relation.Column{ flags: [], name: "name", type: "text", type_modifier: 4294967295 }
+    #     %Realtime.Adapters.Postgres.Decoder.Messages.Relation.Column{ flags: [:key], name: "id", type: "int8", type_modifier: 4294967295 },
+    #     %Realtime.Adapters.Postgres.Decoder.Messages.Relation.Column{ flags: [], name: "name", type: "text", type_modifier: 4294967295 }
     #   ],
     #   commit_timestamp: nil,
     #   old_record: %{},

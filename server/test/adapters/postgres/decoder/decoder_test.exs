@@ -1,9 +1,9 @@
 defmodule Realtime.DecoderTest do
   use ExUnit.Case
 
-  doctest Realtime.Decoder, import: true
+  doctest Realtime.Adapters.Postgres.Decoder, import: true
 
-  alias Realtime.Decoder.Messages.{
+  alias Realtime.Adapters.Postgres.Decoder.Messages.{
     Begin,
     Commit,
     Origin,
@@ -20,7 +20,7 @@ defmodule Realtime.DecoderTest do
     {:ok, expected_dt_no_microseconds, 0} = DateTime.from_iso8601("2019-07-18T17:02:35Z")
     expected_dt = DateTime.add(expected_dt_no_microseconds, 726_322, :microsecond)
 
-    assert Realtime.Decoder.decode_message(
+    assert Realtime.Adapters.Postgres.Decoder.decode_message(
              <<66, 0, 0, 0, 2, 167, 244, 168, 128, 0, 2, 48, 246, 88, 88, 213, 242, 0, 0, 2, 107>>
            ) == %Begin{commit_timestamp: expected_dt, final_lsn: {2, 2_817_828_992}, xid: 619}
   end
@@ -29,7 +29,7 @@ defmodule Realtime.DecoderTest do
     {:ok, expected_dt_no_microseconds, 0} = DateTime.from_iso8601("2019-07-18T17:02:35Z")
     expected_dt = DateTime.add(expected_dt_no_microseconds, 726_322, :microsecond)
 
-    assert Realtime.Decoder.decode_message(
+    assert Realtime.Adapters.Postgres.Decoder.decode_message(
              <<67, 0, 0, 0, 0, 2, 167, 244, 168, 128, 0, 0, 0, 2, 167, 244, 168, 176, 0, 2, 48,
                246, 88, 88, 213, 242>>
            ) == %Commit{
@@ -41,7 +41,9 @@ defmodule Realtime.DecoderTest do
   end
 
   test "decodes origin messages" do
-    assert Realtime.Decoder.decode_message(<<79, 0, 0, 0, 2, 167, 244, 168, 128>> <> "Elmer Fud") ==
+    assert Realtime.Adapters.Postgres.Decoder.decode_message(
+             <<79, 0, 0, 0, 2, 167, 244, 168, 128>> <> "Elmer Fud"
+           ) ==
              %Origin{
                origin_commit_lsn: {2, 2_817_828_992},
                name: "Elmer Fud"
@@ -49,7 +51,7 @@ defmodule Realtime.DecoderTest do
   end
 
   test "decodes relation messages" do
-    assert Realtime.Decoder.decode_message(
+    assert Realtime.Adapters.Postgres.Decoder.decode_message(
              <<82, 0, 0, 96, 0, 112, 117, 98, 108, 105, 99, 0, 102, 111, 111, 0, 100, 0, 2, 0, 98,
                97, 114, 0, 0, 0, 0, 25, 255, 255, 255, 255, 1, 105, 100, 0, 0, 0, 0, 23, 255, 255,
                255, 255>>
@@ -75,17 +77,17 @@ defmodule Realtime.DecoderTest do
            }
 
     #  Adding assertion for "numeric" types, which was missing from the original implementation
-    assert Realtime.Decoder.decode_message(
+    assert Realtime.Adapters.Postgres.Decoder.decode_message(
              <<82, 0, 0, 71, 92, 112, 117, 98, 108, 105, 99, 0, 116, 101, 109, 112, 0, 100, 0, 1,
                0, 116, 101, 115, 116, 0, 0, 0, 6, 164, 255, 255, 255, 255>>
            ) ==
-             %Realtime.Decoder.Messages.Relation{
+             %Realtime.Adapters.Postgres.Decoder.Messages.Relation{
                id: 18268,
                name: "temp",
                namespace: "public",
                replica_identity: :default,
                columns: [
-                 %Realtime.Decoder.Messages.Relation.Column{
+                 %Realtime.Adapters.Postgres.Decoder.Messages.Relation.Column{
                    flags: [],
                    name: "test",
                    type: "numeric",
@@ -96,7 +98,7 @@ defmodule Realtime.DecoderTest do
   end
 
   test "decodes type messages" do
-    assert Realtime.Decoder.decode_message(
+    assert Realtime.Adapters.Postgres.Decoder.decode_message(
              <<89, 0, 0, 128, 52, 112, 117, 98, 108, 105, 99, 0, 101, 120, 97, 109, 112, 108, 101,
                95, 116, 121, 112, 101, 0>>
            ) ==
@@ -109,7 +111,7 @@ defmodule Realtime.DecoderTest do
 
   describe "truncate messages" do
     test "decodes messages" do
-      assert Realtime.Decoder.decode_message(<<84, 0, 0, 0, 1, 0, 0, 0, 96, 0>>) ==
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(<<84, 0, 0, 0, 1, 0, 0, 0, 96, 0>>) ==
                %Truncate{
                  number_of_relations: 1,
                  options: [],
@@ -118,7 +120,7 @@ defmodule Realtime.DecoderTest do
     end
 
     test "decodes messages with cascade option" do
-      assert Realtime.Decoder.decode_message(<<84, 0, 0, 0, 1, 1, 0, 0, 96, 0>>) ==
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(<<84, 0, 0, 0, 1, 1, 0, 0, 96, 0>>) ==
                %Truncate{
                  number_of_relations: 1,
                  options: [:cascade],
@@ -127,7 +129,7 @@ defmodule Realtime.DecoderTest do
     end
 
     test "decodes messages with restart identity option" do
-      assert Realtime.Decoder.decode_message(<<84, 0, 0, 0, 1, 2, 0, 0, 96, 0>>) ==
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(<<84, 0, 0, 0, 1, 2, 0, 0, 96, 0>>) ==
                %Truncate{
                  number_of_relations: 1,
                  options: [:restart_identity],
@@ -136,7 +138,7 @@ defmodule Realtime.DecoderTest do
     end
 
     test "decodes messages with cascade and restart identity options" do
-      assert Realtime.Decoder.decode_message(<<84, 0, 0, 0, 1, 3, 0, 0, 96, 0>>) ==
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(<<84, 0, 0, 0, 1, 3, 0, 0, 96, 0>>) ==
                %Truncate{
                  number_of_relations: 1,
                  options: [:cascade, :restart_identity],
@@ -147,7 +149,7 @@ defmodule Realtime.DecoderTest do
 
   describe "data message (TupleData) decoder" do
     test "decodes insert messages" do
-      assert Realtime.Decoder.decode_message(
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(
                <<73, 0, 0, 96, 0, 78, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 116, 0, 0, 0, 3, 53, 54,
                  48>>
              ) == %Insert{
@@ -157,7 +159,7 @@ defmodule Realtime.DecoderTest do
     end
 
     test "decodes insert messages with null values" do
-      assert Realtime.Decoder.decode_message(
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(
                <<73, 0, 0, 96, 0, 78, 0, 2, 110, 116, 0, 0, 0, 3, 53, 54, 48>>
              ) == %Insert{
                relation_id: 24576,
@@ -166,7 +168,7 @@ defmodule Realtime.DecoderTest do
     end
 
     test "decodes insert messages with unchanged toasted values" do
-      assert Realtime.Decoder.decode_message(
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(
                <<73, 0, 0, 96, 0, 78, 0, 2, 117, 116, 0, 0, 0, 3, 53, 54, 48>>
              ) == %Insert{
                relation_id: 24576,
@@ -175,7 +177,7 @@ defmodule Realtime.DecoderTest do
     end
 
     test "decodes update messages with default replica identity setting" do
-      assert Realtime.Decoder.decode_message(
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(
                <<85, 0, 0, 96, 0, 78, 0, 2, 116, 0, 0, 0, 7, 101, 120, 97, 109, 112, 108, 101,
                  116, 0, 0, 0, 3, 53, 54, 48>>
              ) == %Update{
@@ -187,7 +189,7 @@ defmodule Realtime.DecoderTest do
     end
 
     test "decodes update messages with FULL replica identity setting" do
-      assert Realtime.Decoder.decode_message(
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(
                <<85, 0, 0, 96, 0, 79, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 116, 0, 0, 0, 3, 53, 54,
                  48, 78, 0, 2, 116, 0, 0, 0, 7, 101, 120, 97, 109, 112, 108, 101, 116, 0, 0, 0, 3,
                  53, 54, 48>>
@@ -200,7 +202,7 @@ defmodule Realtime.DecoderTest do
     end
 
     test "decodes update messages with USING INDEX replica identity setting" do
-      assert Realtime.Decoder.decode_message(
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(
                <<85, 0, 0, 96, 0, 75, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 110, 78, 0, 2, 116, 0,
                  0, 0, 7, 101, 120, 97, 109, 112, 108, 101, 116, 0, 0, 0, 3, 53, 54, 48>>
              ) == %Update{
@@ -212,7 +214,7 @@ defmodule Realtime.DecoderTest do
     end
 
     test "decodes DELETE messages with USING INDEX replica identity setting" do
-      assert Realtime.Decoder.decode_message(
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(
                <<68, 0, 0, 96, 0, 75, 0, 2, 116, 0, 0, 0, 7, 101, 120, 97, 109, 112, 108, 101,
                  110>>
              ) == %Delete{
@@ -222,7 +224,7 @@ defmodule Realtime.DecoderTest do
     end
 
     test "decodes DELETE messages with FULL replica identity setting" do
-      assert Realtime.Decoder.decode_message(
+      assert Realtime.Adapters.Postgres.Decoder.decode_message(
                <<68, 0, 0, 96, 0, 79, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 116, 0, 0, 0, 3, 53, 54,
                  48>>
              ) == %Delete{
