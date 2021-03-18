@@ -59,7 +59,7 @@ room.join()
 let textbox = document.querySelector("input");
 textbox.oninput = function () {
   console.log(textbox.value);
-  room.push("broadcast", { typing: true,  });
+  room.push("broadcast", { typing: true });
 };
 
 ```
@@ -74,3 +74,8 @@ To start your Phoenix server:
 Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
 
 Ready to run in production? Please [check our deployment guides](https://hexdocs.pm/phoenix/deployment.html).
+
+
+### Deploy
+
+fly deploy
