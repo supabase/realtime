@@ -49,6 +49,8 @@ defmodule Realtime.SubscribersNotification do
       commit_timestamp: commit_timestamp,
       changes:
         Enum.each(changes, fn change ->
+          Realtime.ChannelProcessTracker.check_memory()
+
           {relation_id, type, tuple_data} = change
           # {:change_record, relation_id, type, tuple_data} = change
 

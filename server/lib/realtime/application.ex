@@ -49,16 +49,17 @@ defmodule Realtime.Application do
 
     # List all child processes to be supervised
     children = [
-      # Start the endpoint when the application starts
-      RealtimeWeb.Endpoint,
       {
         Phoenix.PubSub,
         name: Realtime.PubSub, adapter: Phoenix.PubSub.PG2
       },
+      # Start the endpoint when the application starts
+      RealtimeWeb.Endpoint,
       {
         Realtime.ConfigurationManager,
         filename: configuration_file
       },
+      {Realtime.ChannelProcessTracker, []},
       {
         Realtime.Replication,
         # You can provide a different WAL position if desired, or default to

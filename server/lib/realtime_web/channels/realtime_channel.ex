@@ -2,7 +2,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
   require Logger, warn: false
 
-  def join("realtime:" <> _topic, _payload, socket) do
+  def join("realtime:" <> _topic, _payload, %{transport_pid: transport_pid} = socket) do
+    Realtime.ChannelProcessTracker.track_transport_pid(transport_pid)
     {:ok, %{}, socket}
   end
 

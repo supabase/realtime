@@ -62,6 +62,12 @@ config :realtime, RealtimeWeb.Endpoint,
   pubsub_server: Realtime.PubSub,
   secret_key_base: session_secret_key_base
 
+config :os_mon,
+  start_memsup: true,
+  start_cpu_sup: false,
+  start_disksup: false,
+  start_os_sup: false
+
 # Configures Elixir's Logger
 config :logger, :console,
   format: "$date $time $metadata[$level] $message\n",
