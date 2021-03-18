@@ -68,7 +68,8 @@ defmodule Realtime.ChannelProcessTracker do
 
     if total_channel_mem >= threshold do
       Logger.info("channel total channel mem: #{inspect(total_channel_mem)}")
-      Enum.each(pids, &:erlang.garbage_collect/1)
+      # Enum.each(pids, &:erlang.garbage_collect/1)
+      :timer.sleep(2)
     end
 
     {:reply, :ok, state}
