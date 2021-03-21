@@ -70,6 +70,8 @@ defmodule Realtime.SubscribersNotification do
           case change do
             %{schema: schema, table: table, type: type}
             when is_binary(schema) and is_binary(table) and is_binary(type) ->
+              change_encoded = Jason.encode!(change)
+
               schema_topic = [@topic, ":", schema] |> IO.iodata_to_binary()
               table_topic = [schema_topic, ":", table] |> IO.iodata_to_binary()
 
@@ -84,19 +86,27 @@ defmodule Realtime.SubscribersNotification do
 
               # Shout to specific schema - e.g. "realtime:public"
               if has_schema(event_config, schema) do
-                RealtimeChannel.handle_realtime_transaction(schema_topic, change)
+                RealtimeChannel.handle_realtime_transaction(
+                  schema_topic,
+                  change.type,
+                  change_encoded
+                )
               end
 
               # Special case for notifiying "*"
               if has_schema(event_config, "*") do
                 [@topic, ":*"]
                 |> IO.iodata_to_binary()
-                |> RealtimeChannel.handle_realtime_transaction(change)
+                |> RealtimeChannel.handle_realtime_transaction(change.type, change_encoded)
               end
 
               # Shout to specific table - e.g. "realtime:public:users"
               if has_table(event_config, schema, table) do
-                RealtimeChannel.handle_realtime_transaction(table_topic, change)
+                RealtimeChannel.handle_realtime_transaction(
+                  table_topic,
+                  change.type,
+                  change_encoded
+                )
               end
 
               # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
@@ -111,7 +121,10 @@ defmodule Realtime.SubscribersNotification do
                       if is_valid_notification_key(v) and should_notify_column do
                         [table_topic, ":", k, "=eq.", v]
                         |> IO.iodata_to_binary()
-                        |> RealtimeChannel.handle_realtime_transaction(change)
+                        |> RealtimeChannel.handle_realtime_transaction(
+                          change.type,
+                          change_encoded
+                        )
                       end
                     end)
 
@@ -125,7 +138,10 @@ defmodule Realtime.SubscribersNotification do
                       if is_valid_notification_key(v) and should_notify_column do
                         [table_topic, ":", k, "=eq.", v]
                         |> IO.iodata_to_binary()
-                        |> RealtimeChannel.handle_realtime_transaction(change)
+                        |> RealtimeChannel.handle_realtime_transaction(
+                          change.type,
+                          change_encoded
+                        )
                       end
                     end)
 

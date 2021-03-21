@@ -2,7 +2,9 @@ defmodule RealtimeWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :realtime
 
   socket "/socket", RealtimeWeb.UserSocket,
-    websocket: true,
+    websocket: [
+      serializer: [{Realtime.Socket.V1.JSONSerializer, "1.0.0"}]
+    ],
     longpoll: false
 
   # Serve at "/" the static files from "priv/static" directory.
