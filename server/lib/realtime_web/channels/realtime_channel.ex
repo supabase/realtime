@@ -20,7 +20,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   Handles a full, decoded transation.
   """
   def handle_realtime_transaction(topic, event, txn) do
-    RealtimeWeb.Endpoint.broadcast_from!(self(), topic, "*", txn)
-    RealtimeWeb.Endpoint.broadcast_from!(self(), topic, event, txn)
+    RealtimeWeb.Endpoint.broadcast_from!(self(), topic, "*", {:binary, txn})
+    RealtimeWeb.Endpoint.broadcast_from!(self(), topic, event, {:binary, txn})
   end
 end

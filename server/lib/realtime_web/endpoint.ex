@@ -3,7 +3,7 @@ defmodule RealtimeWeb.Endpoint do
 
   socket "/socket", RealtimeWeb.UserSocket,
     websocket: [
-      serializer: [{Realtime.Socket.V1.JSONSerializer, "1.0.0"}]
+      serializer: [{Phoenix.Socket.V2.JSONSerializer, "2.0.0"}]
     ],
     longpoll: false
 
