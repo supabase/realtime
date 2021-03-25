@@ -27,7 +27,7 @@ defmodule Realtime.ChannelProcessTracker do
 
     threshold = @channel_mem_threshold * Keyword.fetch!(system_mem, :total_memory)
 
-    Logger.info("channel max total memory before gc: #{inspect(threshold)}")
+    # Logger.info("channel max total memory before gc: #{inspect(threshold)}")
 
     {:ok, %{threshold: threshold, pids: []}, {:continue, :get_channel_process_pids}}
   end
@@ -51,7 +51,7 @@ defmodule Realtime.ChannelProcessTracker do
       end)
       |> MapSet.to_list()
 
-    Logger.info("channel pids handle_continue: #{inspect(new_pids)}")
+    # Logger.info("channel pids handle_continue: #{inspect(new_pids)}")
 
     {:noreply, %{state | pids: new_pids}}
   end
@@ -67,7 +67,7 @@ defmodule Realtime.ChannelProcessTracker do
       end)
 
     if total_channel_mem >= threshold do
-      Logger.info("channel total channel mem: #{inspect(total_channel_mem)}")
+      # Logger.info("channel total channel mem: #{inspect(total_channel_mem)}")
       # Enum.each(pids, &:erlang.garbage_collect/1)
       :timer.sleep(2)
     end
@@ -79,14 +79,14 @@ defmodule Realtime.ChannelProcessTracker do
   def handle_call({:add_transport_pid, pid}, _from, %{pids: pids} = state) do
     Process.monitor(pid)
     new_pids = MapSet.new(pids) |> MapSet.put(pid) |> MapSet.to_list()
-    Logger.info("newly joined pids: #{inspect(new_pids)}")
+    # Logger.info("newly joined pids: #{inspect(new_pids)}")
     {:reply, :ok, %{state | pids: new_pids}}
   end
 
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{pids: pids} = state) do
     new_pids = MapSet.new(pids) |> MapSet.delete(pid) |> MapSet.to_list()
-    Logger.info("newly left pids: #{inspect(new_pids)}")
+    # Logger.info("newly left pids: #{inspect(new_pids)}")
     {:noreply, %{state | pids: new_pids}}
   end
 
