@@ -8,7 +8,7 @@ defmodule Realtime.WebhookConnector do
   # Task.yield_many/2 timeout default
   @timeout 5_000
 
-  def notify(%Transaction{changes: _} = txn, [_ | _] = config) do
+  def notify(%Transaction{changes: [_ | _]} = txn, [_ | _] = config) do
     with [_ | _] = webhooks <- webhooks_for_txn(config, txn),
          {:ok, serialized_txn} <- Jason.encode(txn) do
       Enum.reduce(webhooks, [], fn webhook, acc ->

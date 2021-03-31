@@ -151,16 +151,17 @@ docker run \
 **OPTIONS**
 
 ```sh
-DB_HOST                 # {string}      Database host URL
-DB_NAME                 # {string}      Postgres database name
-DB_USER                 # {string}      Database user
-DB_PASSWORD             # {string}      Database password
-DB_PORT                 # {number}      Database port
-SLOT_NAME               # {string}      A unique name for Postgres to track where this server has "listened until". If the server dies, it can pick up from the last position. This should be lowercase.
-PORT                    # {number}      Port which you can connect your client/listeners
-SECURE_CHANNELS         # {string}     (options: 'true' or 'false') Enable/Disable channels authorization via JWT verification.
-JWT_SECRET              # {string}      HS algorithm octet key (e.g. "95x0oR8jq9unl9pOIx"). Only required if SECURE_CHANNELS is set to true.
-JWT_CLAIM_VALIDATORS    # {string}      Expected claim key/value pairs compared to JWT claims via equality checks in order to validate JWT. e.g. '{"iss": "Issuer", "nbf": 1610078130}'. This is optional but encouraged.
+DB_HOST                 # {string}           Database host URL
+DB_NAME                 # {string}           Postgres database name
+DB_USER                 # {string}           Database user
+DB_PASSWORD             # {string}           Database password
+DB_PORT                 # {number}           Database port
+SLOT_NAME               # {string}           A unique name for Postgres to track where this server has "listened until". If the server dies, it can pick up from the last position. This should be lowercase.
+PORT                    # {number}           Port which you can connect your client/listeners
+SECURE_CHANNELS         # {string}           (options: 'true' or 'false') Enable/Disable channels authorization via JWT verification.
+JWT_SECRET              # {string}           HS algorithm octet key (e.g. "95x0oR8jq9unl9pOIx"). Only required if SECURE_CHANNELS is set to true.
+JWT_CLAIM_VALIDATORS    # {string}           Expected claim key/value pairs compared to JWT claims via equality checks in order to validate JWT. e.g. '{"iss": "Issuer", "nbf": 1610078130}'. This is optional but encouraged.
+SOCKET_TIMEOUT          # {number/string}    Set websocket timeout value to a larger number, in milliseconds, or "infinity" when consistently processing large transactions and/or high volume of transactions. Defaults to 60000 (milliseconds).
 ```
 
 **EXAMPLE: RUNNING SERVER WITH ALL OPTIONS**
