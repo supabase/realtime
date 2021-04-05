@@ -99,6 +99,9 @@ A few reasons:
 2. Decoupling. For example, if you want to send a new slack message every time someone makes a new purchase you might build that functionality directly into your API. This allows you to decouple your async functionality from your API.
 3. This is built with Phoenix, an [extremely scalable Elixir framework](https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections)
 
+#### What are the limitations?
+
+1. A client cannot subscribe to arbitrary queries – only updates to a given db, table, or to rows in which one column exactly matches one value (eg; `id=123` or `type=dog`).
 
 ## Quick start
 
