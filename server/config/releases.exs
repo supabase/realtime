@@ -15,6 +15,15 @@ publications = System.get_env("PUBLICATIONS", "[\"supabase_realtime\"]")
 slot_name = System.get_env("SLOT_NAME") || :temporary
 configuration_file = System.get_env("CONFIGURATION_FILE")
 
+# Workflows database connection settings
+workflows_db_host = System.get_env("WORKFLOWS_DB_HOST", db_host)
+workflows_db_port = String.to_integer(System.get_env("WORKFLOWS_DB_PORT", inspect db_port))
+workflows_db_name = System.get_env("WORKFLOWS_DB_NAME", db_name)
+workflows_db_user = System.get_env("WORKFLOWS_DB_USER", db_user)
+workflows_db_password = System.get_env("WORKFLOWS_DB_PASSWORD", db_password)
+workflows_db_schema = System.get_env("WORKFLOWS_DB_SCHEMA", "public")
+workflows_db_ssl = System.get_env("WORKFLOWS_DB_SSL", inspect db_ssl) === "true"
+
 # Channels are not secured by default in development and
 # are secured by default in production.
 secure_channels = System.get_env("SECURE_CHANNELS", "true") != "false"
@@ -56,6 +65,13 @@ config :realtime,
   publications: publications,
   slot_name: slot_name,
   configuration_file: configuration_file,
+  workflows_db_host: workflows_db_host,
+  workflows_db_port: workflows_db_port,
+  workflows_db_name: workflows_db_name,
+  workflows_db_user: workflows_db_user,
+  workflows_db_password: workflows_db_password,
+  workflows_db_schema: workflows_db_schema,
+  workflows_db_ssl: workflows_db_ssl,
   secure_channels: secure_channels,
   jwt_secret: jwt_secret,
   jwt_claim_validators: jwt_claim_validators,

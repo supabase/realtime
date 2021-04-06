@@ -51,6 +51,7 @@ defmodule Realtime.Application do
 
     # List all child processes to be supervised
     children = [
+      Realtime.Repo,
       # Start the endpoint when the application starts
       RealtimeWeb.Endpoint,
       {

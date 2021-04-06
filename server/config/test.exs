@@ -9,6 +9,13 @@ config :realtime, RealtimeWeb.Endpoint,
   http: [port: 4002],
   server: false
 
+config :realtime, Realtime.Repo,
+       username: "postgres",
+       password: "postgres",
+       database: "realtime_test",
+       hostname: "localhost",
+       pool: Ecto.Adapters.SQL.Sandbox
+
 config :joken,
   current_time_adapter: RealtimeWeb.Joken.CurrentTime.Mock
 
