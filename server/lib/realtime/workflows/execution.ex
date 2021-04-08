@@ -48,16 +48,9 @@ defmodule Realtime.Workflows.Execution do
   end
 
   @doc false
-  def changeset(execution, params \\ %{}) do
-    execution
-    |> Changeset.cast(params, @required_fields ++ @optional_fields)
-    |> Changeset.validate_required(@required_fields)
-  end
-
-  @doc false
-  def put_revision(changeset, revision) do
-    changeset
-    |> Changeset.change(%{revision_id: revision.id})
+  def create_changeset(execution, revision, params \\ %{}) do
+    changeset(execution, params)
+    |> put_revision(revision)
   end
 
   @doc """
@@ -65,5 +58,18 @@ defmodule Realtime.Workflows.Execution do
   """
   def transaction_filter do
     "#{%__MODULE__{}.__meta__.prefix}:#{%__MODULE__{}.__meta__.source}"
+  end
+
+  ## Private
+
+  defp changeset(execution, params \\ %{}) do
+    execution
+    |> Changeset.cast(params, @required_fields ++ @optional_fields)
+    |> Changeset.validate_required(@required_fields)
+  end
+
+  defp put_revision(changeset, revision) do
+    changeset
+    |> Changeset.change(%{revision_id: revision.id})
   end
 end

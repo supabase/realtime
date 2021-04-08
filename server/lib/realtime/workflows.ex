@@ -24,8 +24,9 @@ defmodule Realtime.Workflows do
   Returns the list of workflows.
   """
   def list_workflows do
+    revisions = latest_revision_query()
     Repo.all from w in Workflow, preload: [
-      revisions: ^latest_revision_query
+      revisions: ^revisions
     ]
   end
 
@@ -56,27 +57,35 @@ defmodule Realtime.Workflows do
   Updates a workflow, adding a new revision if the definition changes.
   """
   def update_workflow(workflow, attrs \\ %{}) do
-    case get_latest_workflow_revision(workflow.id) do
-      nil -> {:error, :not_found}
-      revision ->
-        multi =
-          Multi.new()
-          |> Multi.update(:workflow, Workflow.update_changeset(workflow, attrs))
-        new_definition = Map.get(attrs, :definition)
-        multi =
-          if new_definition == nil or Map.equal?(new_definition, revision.definition) do
-            multi
-            |> Multi.put(:revision, revision)
-          else
-            multi
-            |> Multi.insert(
-                 :revision,
-                 fn %{workflow: workflow} ->
-                   Revision.create_changeset(%Revision{}, workflow, revision.version + 1, attrs)
-                 end
-               )
-          end
-        Repo.transaction(multi)
+    with {:ok, revision} <- get_latest_workflow_revision(workflow.id) do
+      multi =
+        Multi.new()
+        |> Multi.update(:workflow, Workflow.update_changeset(workflow, attrs))
+      new_definition = Map.get(attrs, :definition)
+      multi =
+        if new_definition == nil or Map.equal?(new_definition, revision.definition) do
+          multi
+          |> Multi.put(:revision, revision)
+        else
+          multi
+          |> Multi.insert(
+               :revision,
+               fn %{workflow: workflow} ->
+                 Revision.create_changeset(%Revision{}, workflow, revision.version + 1, attrs)
+               end
+             )
+        end
+      Repo.transaction(multi)
+    end
+  end
+
+  @doc """
+  Creates a new workflow execution, using the most recent workflow revision.
+  """
+  def create_workflow_execution(workflow_id, attrs \\ %{}) do
+    with {:ok, revision} <- get_latest_workflow_revision(workflow_id),
+         {:ok, execution} <- insert_execution_with_revision(revision, attrs) do
+      {:ok, %{execution: execution, revision: revision}}
     end
   end
 
@@ -89,7 +98,10 @@ defmodule Realtime.Workflows do
                    desc: :version
                  ],
                  limit: 1
-    Repo.one(query)
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      revision -> {:ok, revision}
+    end
   end
 
   defp latest_revision_query do
@@ -98,5 +110,11 @@ defmodule Realtime.Workflows do
            desc: :version
          ],
          limit: 1
+  end
+
+  defp insert_execution_with_revision(revision, attrs) do
+    %Execution{}
+    |> Execution.create_changeset(revision, attrs)
+    |> Repo.insert()
   end
 end

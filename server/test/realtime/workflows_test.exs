@@ -47,6 +47,15 @@ defmodule Realtime.WorkflowsTest do
         }
       }
     end
+
+    def execution_attrs do
+      %{
+        arguments: %{
+          "Number" => 123,
+          "String" => "A string"
+        }
+      }
+    end
   end
 
   describe "list_workflows" do
@@ -116,6 +125,30 @@ defmodule Realtime.WorkflowsTest do
       workflow = Workflows.get_workflow(workflow.id)
       [revision] = workflow.revisions
       assert 1 == revision.version
+    end
+  end
+
+  describe "create_workflow_execution" do
+    test "returns the execution with its workflow revision" do
+      # Create workflow and updated revision
+      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs)
+      {:ok, _} = Workflows.update_workflow(workflow, %{definition: Fixtures.alternative_definition})
+
+      {:ok, %{execution: execution, revision: revision}} = Workflows.create_workflow_execution(
+        workflow.id,
+        Fixtures.execution_attrs
+      )
+
+      assert 1 == revision.version
+      assert not(Enum.empty?(execution.arguments))
+    end
+
+    test "returns an error if the workflow does not exist" do
+      bad_id = Ecto.UUID.generate()
+      {:error, :not_found} = Workflows.create_workflow_execution(
+        bad_id,
+        Fixtures.execution_attrs
+      )
     end
   end
 end
