@@ -16,7 +16,7 @@ defmodule Realtime.Interpreter do
   def start_transient(workflow, execution, revision, opts \\ []) do
     with {:ok, asl_workflow} <- Workflows.parse(revision.definition) do
       ctx = Context.create(workflow, execution, revision)
-      Supervisor.start_transient(asl_workflow, ctx, execution.arguments)
+      Supervisor.start_transient(asl_workflow, ctx, execution.arguments, opts)
     end
   end
 end

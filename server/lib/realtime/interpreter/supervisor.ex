@@ -3,8 +3,8 @@ defmodule Realtime.Interpreter.Supervisor do
 
   alias Realtime.Interpreter.Transient
 
-  def start_transient(workflow, ctx, args) do
-    DynamicSupervisor.start_child(__MODULE__, {Transient, {workflow, ctx, args}})
+  def start_transient(workflow, ctx, args, opts) do
+    DynamicSupervisor.start_child(__MODULE__, {Transient, {workflow, ctx, args, opts}})
   end
 
   ## Callbacks

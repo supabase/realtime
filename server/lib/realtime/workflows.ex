@@ -15,10 +15,13 @@ defmodule Realtime.Workflows do
 
   alias Ecto.Multi
   alias Realtime.Repo
+  alias Realtime.Interpreter
   alias Realtime.Workflows.Execution
   alias Realtime.Workflows.Event
   alias Realtime.Workflows.Revision
   alias Realtime.Workflows.Workflow
+
+  ## Workflow
 
   @doc """
   Returns the list of workflows.
@@ -89,6 +92,8 @@ defmodule Realtime.Workflows do
     Repo.delete(workflow)
   end
 
+  ## Execution
+
   @doc """
   Creates a new workflow execution, using the most recent workflow revision.
   """
@@ -99,7 +104,57 @@ defmodule Realtime.Workflows do
     end
   end
 
-  ## Private
+  @doc """
+  Returns the workflow execution with the given id.
+  """
+  def get_workflow_execution(id) do
+    Execution
+    |> Repo.get(id)
+    |> Repo.preload([:revision])
+    |> value_or_not_found(id)
+  end
+
+  @doc """
+  Returns a list of executions for the given workflow.
+  """
+  def list_workflow_executions(workflow_id) do
+    from(rev in Revision, where: [workflow_id: ^workflow_id], preload: :executions)
+    |> Repo.all
+    |> Enum.flat_map(fn rev ->
+      # Return a list of %{execution, revision} maps like other functions so it's convenient to render
+      Enum.map(rev.executions, fn exec -> %{execution: exec, revision: rev} end)
+    end)
+  end
+
+  @doc """
+  Deletes the given workflow execution.
+  """
+  def delete_workflow_execution(execution) do
+    Repo.delete(execution)
+  end
+
+  def invoke_workflow_and_wait_for_reply(workflow, attrs, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, 10_000)
+    with {:ok, %{execution: execution, revision: revision}} <- create_workflow_execution(workflow.id, attrs) do
+      # Start and await a Task so the original self() can wait for other messages.
+      # In practice this is needed to test the ExecutionController.
+      task = Task.async(fn ->
+        with {:ok, _pid} <- Interpreter.start_transient(workflow, execution, revision, reply_to: self()) do
+          receive do
+            {:succeed, msg} -> {:ok, msg, execution, revision}
+            {:fail, msg} -> {:error, msg, execution, revision}
+            err -> {:error, err, execution, revision}
+          after
+            timeout -> {:timeout, execution, revision}
+          end
+        end
+      end)
+
+      Task.await(task, timeout)
+    end
+  end
+
+    ## Private
 
   defp get_latest_workflow_revision(workflow_id) do
     query = from r in Revision,

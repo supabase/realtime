@@ -17,7 +17,7 @@ defmodule Realtime.Interpreter.Transient do
   alias Workflows.{Command, Event}
 
   defmodule State do
-    defstruct [:workflow, :execution, :events]
+    defstruct [:workflow, :execution, :events, :reply_to]
   end
 
   def start_link(config) do
@@ -27,11 +27,13 @@ defmodule Realtime.Interpreter.Transient do
   ## Callbacks
 
   @impl true
-  def init({workflow, ctx, args}) do
+  def init({workflow, ctx, args, opts}) do
+    reply_to = Keyword.get(opts, :reply_to, nil)
     state = %State{
       workflow: workflow,
       execution: nil,
-      events: []
+      events: [],
+      reply_to: reply_to,
     }
 
     {:ok, state, {:continue, {:start, ctx, args}}}
@@ -71,12 +73,6 @@ defmodule Realtime.Interpreter.Transient do
     command = Command.complete_task(event, result)
     Workflows.resume(execution, command)
     |> continue_with_result(state)
-  end
-
-  @impl true
-  def terminate(reason, state) do
-    # TODO: send result to reply_to if set?
-    reason
   end
 
   ## Private
@@ -123,6 +119,9 @@ defmodule Realtime.Interpreter.Transient do
   end
 
   defp continue_with_result({:succeed, result, events}, state) do
-    {:stop, result, state}
+    if is_pid(state.reply_to) do
+      send state.reply_to, {:succeed, result}
+    end
+    {:stop, :normal, state}
   end
 end
