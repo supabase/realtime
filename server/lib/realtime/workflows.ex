@@ -36,6 +36,7 @@ defmodule Realtime.Workflows do
   def get_workflow(id) do
     Repo.get(Workflow, id)
     |> Repo.preload(revisions: latest_revision_query())
+    |> value_or_not_found(id)
   end
 
   @doc """
@@ -51,6 +52,7 @@ defmodule Realtime.Workflows do
          end
        )
     |> Repo.transaction()
+    |> multi_error_to_changeset_error
   end
 
   @doc """
@@ -76,7 +78,15 @@ defmodule Realtime.Workflows do
              )
         end
       Repo.transaction(multi)
+      |> multi_error_to_changeset_error
     end
+  end
+
+  @doc """
+  Deletes the given workflow.
+  """
+  def delete_workflow(workflow) do
+    Repo.delete(workflow)
   end
 
   @doc """
@@ -117,4 +127,10 @@ defmodule Realtime.Workflows do
     |> Execution.create_changeset(revision, attrs)
     |> Repo.insert()
   end
+
+  defp value_or_not_found(nil, id), do: {:not_found, id}
+  defp value_or_not_found(value, _id), do: {:ok, value}
+
+  defp multi_error_to_changeset_error({:error, _, changeset, _}), do: {:error, changeset}
+  defp multi_error_to_changeset_error(value), do: value
 end

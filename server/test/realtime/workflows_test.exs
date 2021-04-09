@@ -122,7 +122,7 @@ defmodule Realtime.WorkflowsTest do
       {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs)
       {:ok, _} = Workflows.update_workflow(workflow, %{definition: Fixtures.alternative_definition})
 
-      workflow = Workflows.get_workflow(workflow.id)
+      {:ok, workflow} = Workflows.get_workflow(workflow.id)
       [revision] = workflow.revisions
       assert 1 == revision.version
     end

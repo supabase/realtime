@@ -50,6 +50,7 @@ defmodule Realtime.MixProject do
       {:postgrex, "~> 0.15.8"},
       {:timex, "~> 3.0"},
       {:retry, "~> 0.14.1"},
+      {:workflows, "~> 0.2.0"},
       {:mock, "~> 0.3.0", only: :test}
     ]
   end

@@ -30,7 +30,20 @@ defmodule Realtime.Workflows.Revision do
   def create_changeset(revision, workflow, version, params \\ %{}) do
     revision
     |> Changeset.cast(params, @required_fields)
+    |> Changeset.validate_required(@required_fields)
+    |> Changeset.validate_change(:definition, &validate_definition/2)
     |> Changeset.put_change(:version, version)
     |> Changeset.put_change(:workflow_id, workflow.id)
+  end
+
+  ## Private
+
+  defp validate_definition(field, definition) do
+    case Workflows.parse(definition) do
+      {:ok, _} -> []
+      {:error, _} ->
+        # TODO(fra): should display a nice error explaining exactly what went wrong
+        [{field, "is an invalid state machine"}]
+    end
   end
 end
