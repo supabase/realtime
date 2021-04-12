@@ -19,9 +19,10 @@ defmodule Realtime.SubscribersNotification do
   def notify(%Replication.State{transaction: {_lsn, %Transaction{changes: [_ | _]}}} = state) do
     {:ok, %Configuration{webhooks: webhooks_config} = config} = ConfigurationManager.get_config()
 
-    :ok =
-      notify_subscribers(state, config)
-      |> Realtime.WebhookConnector.notify(webhooks_config)
+    txn = notify_subscribers(state, config)
+    :ok = Realtime.WebhookConnector.notify(txn, webhooks_config)
+    :ok = Realtime.Workflows.Manager.notify(txn)
+    :ok = Realtime.Workflows.invoke_transaction_workflows(txn)
   end
 
   def notify(_txn) do
@@ -60,112 +61,101 @@ defmodule Realtime.SubscribersNotification do
     %{
       txn_struct
       | changes:
-          apply(Enum, enum_strategy(webhooks_config), [
-            changes,
-            fn change_record ->
-              {relation_id, _type, _tuple_data, _old_tuple_data} = change_record
-              relation = Map.fetch!(relations, relation_id)
+          Enum.map(changes, fn change_record ->
+            {relation_id, _type, _tuple_data, _old_tuple_data} = change_record
+            relation = Map.fetch!(relations, relation_id)
 
-              transformed_record = transform_record(change_record, relation, commit_timestamp)
-              encoded_record = Jason.encode!(transformed_record)
+            transformed_record = transform_record(change_record, relation, commit_timestamp)
+            encoded_record = Jason.encode!(transformed_record)
 
-              %{schema: schema, table: table, type: record_type} = transformed_record
+            %{schema: schema, table: table, type: record_type} = transformed_record
 
-              schema_topic = [@topic, ":", schema] |> IO.iodata_to_binary()
-              table_topic = [schema_topic, ":", table] |> IO.iodata_to_binary()
+            schema_topic = [@topic, ":", schema] |> IO.iodata_to_binary()
+            table_topic = [schema_topic, ":", table] |> IO.iodata_to_binary()
 
-              # Get only the config which includes this event type (INSERT | UPDATE | DELETE | TRUNCATE)
-              event_config =
-                Enum.filter(realtime_config, fn config ->
-                  case config do
-                    %Realtime.Configuration.Realtime{events: [_ | _] = events} ->
-                      record_type in events
+            # Get only the config which includes this event type (INSERT | UPDATE | DELETE | TRUNCATE)
+            event_config =
+              Enum.filter(realtime_config, fn config ->
+                case config do
+                  %Realtime.Configuration.Realtime{events: [_ | _] = events} ->
+                    record_type in events
 
-                    _ ->
-                      false
-                  end
-                end)
+                  _ ->
+                    false
+                end
+              end)
 
-              # Shout to specific schema - e.g. "realtime:public"
-              if has_schema(event_config, schema) do
-                RealtimeChannel.handle_realtime_transaction(
-                  schema_topic,
-                  record_type,
-                  encoded_record
-                )
-              end
-
-              # Special case for notifiying "*"
-              if has_schema(event_config, "*") do
-                [@topic, ":*"]
-                |> IO.iodata_to_binary()
-                |> RealtimeChannel.handle_realtime_transaction(record_type, encoded_record)
-              end
-
-              # Shout to specific table - e.g. "realtime:public:users"
-              if has_table(event_config, schema, table) do
-                RealtimeChannel.handle_realtime_transaction(
-                  table_topic,
-                  record_type,
-                  encoded_record
-                )
-              end
-
-              # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
-              case record_type do
-                type when type in ["INSERT", "UPDATE"] ->
-                  record = Map.get(transformed_record, :record)
-
-                  is_map(record) &&
-                    Enum.each(record, fn {k, v} ->
-                      should_notify_column = has_column(event_config, schema, table, k)
-
-                      if is_valid_notification_key(v) and should_notify_column do
-                        [table_topic, ":", k, "=eq.", v]
-                        |> IO.iodata_to_binary()
-                        |> RealtimeChannel.handle_realtime_transaction(
-                          record_type,
-                          encoded_record
-                        )
-                      end
-                    end)
-
-                "DELETE" ->
-                  old_record = Map.get(transformed_record, :old_record)
-
-                  is_map(old_record) &&
-                    Enum.each(old_record, fn {k, v} ->
-                      should_notify_column = has_column(event_config, schema, table, k)
-
-                      if is_valid_notification_key(v) and should_notify_column do
-                        [table_topic, ":", k, "=eq.", v]
-                        |> IO.iodata_to_binary()
-                        |> RealtimeChannel.handle_realtime_transaction(
-                          record_type,
-                          encoded_record
-                        )
-                      end
-                    end)
-
-                "TRUNCATE" ->
-                  nil
-              end
-
-              transformed_record
+            # Shout to specific schema - e.g. "realtime:public"
+            if has_schema(event_config, schema) do
+              RealtimeChannel.handle_realtime_transaction(
+                schema_topic,
+                record_type,
+                encoded_record
+              )
             end
-          ])
+
+            # Special case for notifiying "*"
+            if has_schema(event_config, "*") do
+              [@topic, ":*"]
+              |> IO.iodata_to_binary()
+              |> RealtimeChannel.handle_realtime_transaction(record_type, encoded_record)
+            end
+
+            # Shout to specific table - e.g. "realtime:public:users"
+            if has_table(event_config, schema, table) do
+              RealtimeChannel.handle_realtime_transaction(
+                table_topic,
+                record_type,
+                encoded_record
+              )
+            end
+
+            # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
+            case record_type do
+              type when type in ["INSERT", "UPDATE"] ->
+                record = Map.get(transformed_record, :record)
+
+                is_map(record) &&
+                  Enum.each(record, fn {k, v} ->
+                    should_notify_column = has_column(event_config, schema, table, k)
+
+                    if is_valid_notification_key(v) and should_notify_column do
+                      [table_topic, ":", k, "=eq.", v]
+                      |> IO.iodata_to_binary()
+                      |> RealtimeChannel.handle_realtime_transaction(
+                        record_type,
+                        encoded_record
+                      )
+                    end
+                  end)
+
+              "DELETE" ->
+                old_record = Map.get(transformed_record, :old_record)
+
+                is_map(old_record) &&
+                  Enum.each(old_record, fn {k, v} ->
+                    should_notify_column = has_column(event_config, schema, table, k)
+
+                    if is_valid_notification_key(v) and should_notify_column do
+                      [table_topic, ":", k, "=eq.", v]
+                      |> IO.iodata_to_binary()
+                      |> RealtimeChannel.handle_realtime_transaction(
+                        record_type,
+                        encoded_record
+                      )
+                    end
+                  end)
+
+              "TRUNCATE" ->
+                nil
+            end
+
+            transformed_record
+          end)
     }
   end
 
   defp notify_subscribers(_txn, _config), do: :ok
-
-  defp enum_strategy([_ | _]) do
-    :map
-  end
-
-  defp enum_strategy(_) do
-    :each
-  end
 
   defp transform_record(
          {_relation_id, "INSERT" = insert, tuple_data, nil},

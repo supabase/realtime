@@ -71,6 +71,7 @@ defmodule Realtime.Application do
         slot_name: slot_name,
         wal_position: {"0", "0"}
       },
+      Realtime.Workflows.Manager,
       Realtime.Interpreter.Supervisor,
     ]
 

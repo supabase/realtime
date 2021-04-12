@@ -64,12 +64,12 @@ defmodule Realtime.WorkflowsTest do
     end
 
     test "returns the workflows with their definition" do
-      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs)
-      {:ok, _} = Workflows.create_workflow(Fixtures.alt_workflow_attrs)
-
+      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs())
+      {:ok, _} = Workflows.create_workflow(Fixtures.alt_workflow_attrs())
 
       # Create new revision
-      {:ok, _} = Workflows.update_workflow(workflow, %{definition: Fixtures.alternative_definition})
+      {:ok, _} =
+        Workflows.update_workflow(workflow, %{definition: Fixtures.alternative_definition()})
 
       [workflow_1, _workflow_2] = Workflows.list_workflows()
       [revision_1] = workflow_1.revisions
@@ -79,7 +79,8 @@ defmodule Realtime.WorkflowsTest do
 
   describe "create_workflow" do
     test "creates a new workflow and its first revision" do
-      {:ok, %{workflow: _workflow, revision: revision}} = Workflows.create_workflow(Fixtures.workflow_attrs)
+      {:ok, %{workflow: _workflow, revision: revision}} =
+        Workflows.create_workflow(Fixtures.workflow_attrs())
 
       assert 0 == revision.version
     end
@@ -87,31 +88,36 @@ defmodule Realtime.WorkflowsTest do
 
   describe "update_workflow" do
     test "doesn't increase revision number if the definition doesn't change" do
-      {:ok, %{workflow: workflow, revision: revision}} = Workflows.create_workflow(Fixtures.workflow_attrs)
+      {:ok, %{workflow: workflow, revision: revision}} =
+        Workflows.create_workflow(Fixtures.workflow_attrs())
 
       params = %{
         name: "A new name",
         definition: revision.definition
       }
 
-      {:ok, %{workflow: new_workflow, revision: revision}} = Workflows.update_workflow(workflow, params)
+      {:ok, %{workflow: new_workflow, revision: revision}} =
+        Workflows.update_workflow(workflow, params)
 
       assert 0 == revision.version
       assert "A new name" == new_workflow.name
     end
 
     test "doesn't increase revision number if it doesn't include a new definition" do
-      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs)
-      {:ok, %{workflow: new_workflow, revision: revision}} = Workflows.update_workflow(workflow, %{name: "A new name"})
+      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs())
+
+      {:ok, %{workflow: new_workflow, revision: revision}} =
+        Workflows.update_workflow(workflow, %{name: "A new name"})
 
       assert 0 == revision.version
       assert "A new name" == new_workflow.name
     end
 
     test "creates a new revision if the definition changes" do
-      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs)
+      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs())
 
-      {:ok, %{revision: revision}} = Workflows.update_workflow(workflow, %{definition: Fixtures.alternative_definition})
+      {:ok, %{revision: revision}} =
+        Workflows.update_workflow(workflow, %{definition: Fixtures.alternative_definition()})
 
       assert 1 == revision.version
     end
@@ -119,8 +125,10 @@ defmodule Realtime.WorkflowsTest do
 
   describe "get_workflow" do
     test "returns the workflow with its most recent revision" do
-      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs)
-      {:ok, _} = Workflows.update_workflow(workflow, %{definition: Fixtures.alternative_definition})
+      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs())
+
+      {:ok, _} =
+        Workflows.update_workflow(workflow, %{definition: Fixtures.alternative_definition()})
 
       {:ok, workflow} = Workflows.get_workflow(workflow.id)
       [revision] = workflow.revisions
@@ -131,24 +139,29 @@ defmodule Realtime.WorkflowsTest do
   describe "create_workflow_execution" do
     test "returns the execution with its workflow revision" do
       # Create workflow and updated revision
-      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs)
-      {:ok, _} = Workflows.update_workflow(workflow, %{definition: Fixtures.alternative_definition})
+      {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs())
 
-      {:ok, %{execution: execution, revision: revision}} = Workflows.create_workflow_execution(
-        workflow.id,
-        Fixtures.execution_attrs
-      )
+      {:ok, _} =
+        Workflows.update_workflow(workflow, %{definition: Fixtures.alternative_definition()})
+
+      {:ok, %{execution: execution, revision: revision}} =
+        Workflows.create_workflow_execution(
+          workflow.id,
+          Fixtures.execution_attrs()
+        )
 
       assert 1 == revision.version
-      assert not(Enum.empty?(execution.arguments))
+      assert not Enum.empty?(execution.arguments)
     end
 
     test "returns an error if the workflow does not exist" do
       bad_id = Ecto.UUID.generate()
-      {:error, :not_found} = Workflows.create_workflow_execution(
-        bad_id,
-        Fixtures.execution_attrs
-      )
+
+      {:error, :not_found} =
+        Workflows.create_workflow_execution(
+          bad_id,
+          Fixtures.execution_attrs()
+        )
     end
   end
 end

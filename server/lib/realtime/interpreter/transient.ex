@@ -29,11 +29,12 @@ defmodule Realtime.Interpreter.Transient do
   @impl true
   def init({workflow, ctx, args, opts}) do
     reply_to = Keyword.get(opts, :reply_to, nil)
+
     state = %State{
       workflow: workflow,
       execution: nil,
       events: [],
-      reply_to: reply_to,
+      reply_to: reply_to
     }
 
     {:ok, state, {:continue, {:start, ctx, args}}}
@@ -56,6 +57,7 @@ defmodule Realtime.Interpreter.Transient do
       [] ->
         # Finished processing all events, wait for side effects to complete
         {:noreply, state}
+
       [event | events] ->
         :ok = execute_event_side_effect(event)
         {:noreply, %State{state | events: events}, {:continue, :continue_process_events}}
@@ -65,12 +67,14 @@ defmodule Realtime.Interpreter.Transient do
   @impl true
   def handle_info({:finish_waiting, event}, %State{execution: execution} = state) do
     command = Command.finish_waiting(event)
+
     Workflows.resume(execution, command)
     |> continue_with_result(state)
   end
 
   def handle_info({:complete_task, event, result}, %State{execution: execution} = state) do
     command = Command.complete_task(event, result)
+
     Workflows.resume(execution, command)
     |> continue_with_result(state)
   end
@@ -86,21 +90,26 @@ defmodule Realtime.Interpreter.Transient do
       case event.wait do
         {:seconds, seconds} when is_integer(seconds) and seconds > 0 ->
           trunc(seconds * 1000)
+
         {:timestamp, target} ->
           DateTime.diff(target, DateTime.utc_now(), :millisecond)
+
         _ ->
           {:error, "Invalid wait duration"}
       end
+
     Process.send_after(self(), {:finish_waiting, event}, duration)
     :ok
   end
 
   defp execute_event_side_effect(%Event.TaskStarted{} = event) do
     server_pid = self()
-    Task.start(fn () ->
+
+    Task.start(fn ->
       # TODO: execute task
       send(server_pid, {:complete_task, event, %{}})
     end)
+
     :ok
   end
 
@@ -111,17 +120,18 @@ defmodule Realtime.Interpreter.Transient do
   defp continue_with_result({:continue, execution, events}, state) do
     new_state = %State{
       state
-    |
-      execution: execution,
-      events: state.events ++ events
+      | execution: execution,
+        events: state.events ++ events
     }
+
     {:noreply, new_state, {:continue, :continue_process_events}}
   end
 
   defp continue_with_result({:succeed, result, events}, state) do
     if is_pid(state.reply_to) do
-      send state.reply_to, {:succeed, result}
+      send(state.reply_to, {:succeed, result})
     end
+
     {:stop, :normal, state}
   end
 end

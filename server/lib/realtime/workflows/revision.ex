@@ -7,6 +7,8 @@ defmodule Realtime.Workflows.Revision do
   """
   use Ecto.Schema
 
+  require Logger
+
   alias Ecto.Changeset
 
   @schema_prefix Application.get_env(:realtime, :workflows_db_schema)
@@ -36,12 +38,20 @@ defmodule Realtime.Workflows.Revision do
     |> Changeset.put_change(:workflow_id, workflow.id)
   end
 
+  @doc """
+  Returns a transaction filter that matches this table.
+  """
+  def transaction_filter do
+    "#{%__MODULE__{}.__meta__.prefix}:#{%__MODULE__{}.__meta__.source}"
+  end
+
   ## Private
 
   defp validate_definition(field, definition) do
     case Workflows.parse(definition) do
       {:ok, _} -> []
-      {:error, _} ->
+      {:error, error} ->
+	Logger.debug("Error validating Amazon States Language: #{inspect error}")
         # TODO(fra): should display a nice error explaining exactly what went wrong
         [{field, "is an invalid state machine"}]
     end

@@ -1,4 +1,4 @@
-defmodule Realtime.Workflows.Events do
+defmodule Realtime.Workflows.Event do
   @moduledoc """
   Events generated during the execution of a workflow.
 
@@ -22,5 +22,12 @@ defmodule Realtime.Workflows.Events do
     timestamps()
 
     belongs_to :execution, Realtime.Workflows.Execution, type: Ecto.UUID
+  end
+
+  @doc """
+  Returns a transaction filter that matches this table.
+  """
+  def transaction_filter do
+    "#{%__MODULE__{}.__meta__.prefix}:#{%__MODULE__{}.__meta__.source}"
   end
 end

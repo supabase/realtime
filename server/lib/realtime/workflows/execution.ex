@@ -38,6 +38,10 @@ defmodule Realtime.Workflows.Execution do
   @required_fields ~w(arguments)a
   @optional_fields ~w(execution_type)a
 
+  @type t :: %__MODULE__{
+    id: Ecto.UUID.t()
+  }
+
   schema "executions" do
     field :arguments, :map
     field :execution_type, Ecto.Enum, values: [:persistent, :transient]

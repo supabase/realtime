@@ -15,11 +15,9 @@ defmodule Realtime.Workflows do
 
   alias Ecto.Multi
   alias Realtime.Repo
+  alias Realtime.Adapters.Changes.Transaction
   alias Realtime.Interpreter
-  alias Realtime.Workflows.Execution
-  alias Realtime.Workflows.Event
-  alias Realtime.Workflows.Revision
-  alias Realtime.Workflows.Workflow
+  alias Realtime.Workflows.{Execution, Event, Manager, Revision, Workflow}
 
   ## Workflow
 
@@ -28,9 +26,14 @@ defmodule Realtime.Workflows do
   """
   def list_workflows do
     revisions = latest_revision_query()
-    Repo.all from w in Workflow, preload: [
-      revisions: ^revisions
-    ]
+
+    Repo.all(
+      from(w in Workflow,
+        preload: [
+          revisions: ^revisions
+        ]
+      )
+    )
   end
 
   @doc """
@@ -49,11 +52,11 @@ defmodule Realtime.Workflows do
     Multi.new()
     |> Multi.insert(:workflow, Workflow.create_changeset(%Workflow{}, attrs))
     |> Multi.insert(
-         :revision,
-         fn %{workflow: workflow} ->
-           Revision.create_changeset(%Revision{}, workflow, 0, attrs)
-         end
-       )
+      :revision,
+      fn %{workflow: workflow} ->
+        Revision.create_changeset(%Revision{}, workflow, 0, attrs)
+      end
+    )
     |> Repo.transaction()
     |> multi_error_to_changeset_error
   end
@@ -66,7 +69,9 @@ defmodule Realtime.Workflows do
       multi =
         Multi.new()
         |> Multi.update(:workflow, Workflow.update_changeset(workflow, attrs))
+
       new_definition = Map.get(attrs, :definition)
+
       multi =
         if new_definition == nil or Map.equal?(new_definition, revision.definition) do
           multi
@@ -74,12 +79,13 @@ defmodule Realtime.Workflows do
         else
           multi
           |> Multi.insert(
-               :revision,
-               fn %{workflow: workflow} ->
-                 Revision.create_changeset(%Revision{}, workflow, revision.version + 1, attrs)
-               end
-             )
+            :revision,
+            fn %{workflow: workflow} ->
+              Revision.create_changeset(%Revision{}, workflow, revision.version + 1, attrs)
+            end
+          )
         end
+
       Repo.transaction(multi)
       |> multi_error_to_changeset_error
     end
@@ -119,7 +125,7 @@ defmodule Realtime.Workflows do
   """
   def list_workflow_executions(workflow_id) do
     from(rev in Revision, where: [workflow_id: ^workflow_id], preload: :executions)
-    |> Repo.all
+    |> Repo.all()
     |> Enum.flat_map(fn rev ->
       # Return a list of %{execution, revision} maps like other functions so it's convenient to render
       Enum.map(rev.executions, fn exec -> %{execution: exec, revision: rev} end)
@@ -133,36 +139,74 @@ defmodule Realtime.Workflows do
     Repo.delete(execution)
   end
 
+  @doc """
+  Creates a new workflow execution and waits for the workflow to finish.
+
+  ## Options
+
+  * `:timeout` - How long to wait for the workflow to finish.
+  """
   def invoke_workflow_and_wait_for_reply(workflow, attrs, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, 10_000)
-    with {:ok, %{execution: execution, revision: revision}} <- create_workflow_execution(workflow.id, attrs) do
+
+    with {:ok, %{execution: execution, revision: revision}} <-
+           create_workflow_execution(workflow.id, attrs) do
       # Start and await a Task so the original self() can wait for other messages.
       # In practice this is needed to test the ExecutionController.
-      task = Task.async(fn ->
-        with {:ok, _pid} <- Interpreter.start_transient(workflow, execution, revision, reply_to: self()) do
-          receive do
-            {:succeed, msg} -> {:ok, msg, execution, revision}
-            {:fail, msg} -> {:error, msg, execution, revision}
-            err -> {:error, err, execution, revision}
-          after
-            timeout -> {:timeout, execution, revision}
+      task =
+        Task.async(fn ->
+          with {:ok, _pid} <-
+                 Interpreter.start_transient(workflow, execution, revision, reply_to: self()) do
+            receive do
+              {:succeed, msg} -> {:ok, msg, execution, revision}
+              {:fail, msg} -> {:error, msg, execution, revision}
+              err -> {:error, err, execution, revision}
+            after
+              timeout -> {:timeout, execution, revision}
+            end
           end
-        end
-      end)
+        end)
 
       Task.await(task, timeout)
     end
   end
 
-    ## Private
+
+  def invoke_transaction_workflows(%Transaction{changes: [_ | _]} = txn) do
+    workflows = Manager.workflows_for_change(txn)
+
+    # TODO: convert to map in a proper way
+    txn_as_map = Jason.decode!(Jason.encode!(txn))
+
+    attrs = %{
+      arguments: txn_as_map,
+    }
+
+    Enum.each(workflows, fn workflow ->
+      with {:ok, %{execution: execution, revision: revision}} <- create_workflow_execution(workflow.id, attrs) do
+	IO.puts("Starting workflow #{inspect execution}")
+      end
+    end)
+    :ok
+  end
+
+  def invoke_transaction_workflows(txn) do
+    IO.inspect txn
+    :ok
+  end
+
+  ## Private
 
   defp get_latest_workflow_revision(workflow_id) do
-    query = from r in Revision,
-                 where: r.workflow_id == ^workflow_id,
-                 order_by: [
-                   desc: :version
-                 ],
-                 limit: 1
+    query =
+      from(r in Revision,
+        where: r.workflow_id == ^workflow_id,
+        order_by: [
+          desc: :version
+        ],
+        limit: 1
+      )
+
     case Repo.one(query) do
       nil -> {:error, :not_found}
       revision -> {:ok, revision}
@@ -170,11 +214,12 @@ defmodule Realtime.Workflows do
   end
 
   defp latest_revision_query do
-    from r in Revision,
-         order_by: [
-           desc: :version
-         ],
-         limit: 1
+    from(r in Revision,
+      order_by: [
+        desc: :version
+      ],
+      limit: 1
+    )
   end
 
   defp insert_execution_with_revision(revision, attrs) do

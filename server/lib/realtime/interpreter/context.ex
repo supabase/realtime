@@ -2,7 +2,7 @@ defmodule Realtime.Interpreter.Context do
   @moduledoc """
   Context is the state shared across all states.
   """
-  defstruct [:workflow_name, :workflow_version]
+  defstruct [:workflow_name, :workflow_version, :execution_id]
 
   @doc """
   Creates a new Context.
@@ -10,7 +10,8 @@ defmodule Realtime.Interpreter.Context do
   def create(workflow, execution, revision) do
     %__MODULE__{
       workflow_name: workflow.name,
-      workflow_version: revision.version
+      workflow_version: revision.version,
+      execution_id: execution.id
     }
   end
 end
