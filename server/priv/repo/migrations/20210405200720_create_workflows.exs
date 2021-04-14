@@ -34,17 +34,5 @@ defmodule Realtime.Repo.Migrations.CreateWorkflows do
 
       timestamps()
     end
-
-    create table(:events, primary_key: false) do
-      add :id, :uuid, primary_key: true
-      add :execution_id, references(:executions, type: :uuid, on_delete: :delete_all)
-
-      add :position, :integer
-      add :event, :map
-
-      timestamps()
-    end
-
-    create unique_index(:events, [:execution_id, :position])
   end
 end

@@ -12,7 +12,7 @@ defmodule Realtime.Workflows.Manager do
   alias Realtime.Adapters.Changes.{NewRecord, UpdatedRecord, DeletedRecord, Transaction}
   alias Realtime.TransactionFilter
   alias Realtime.Workflows
-  alias Realtime.Workflows.{Execution, Event, Revision, Workflow}
+  alias Realtime.Workflows.{Execution, Revision, Workflow}
 
   @table_name :workflows_manager
 
@@ -39,7 +39,6 @@ defmodule Realtime.Workflows.Manager do
   def workflows_for_change(txn) do
     strict = [
       Execution.transaction_filter(),
-      Event.transaction_filter(),
       Revision.transaction_filter(),
       Workflow.transaction_filter(),
     ]

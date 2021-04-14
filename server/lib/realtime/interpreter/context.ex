@@ -2,6 +2,8 @@ defmodule Realtime.Interpreter.Context do
   @moduledoc """
   Context is the state shared across all states.
   """
+
+  @derive Jason.Encoder
   defstruct [:workflow_name, :workflow_version, :execution_id]
 
   @doc """

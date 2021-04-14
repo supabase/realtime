@@ -172,6 +172,9 @@ defmodule Realtime.Workflows do
   end
 
 
+  @doc """
+  Create and start the execution of all workflows that are triggered by `txn`.
+  """
   def invoke_transaction_workflows(%Transaction{changes: [_ | _]} = txn) do
     workflows = Manager.workflows_for_change(txn)
 
@@ -184,14 +187,13 @@ defmodule Realtime.Workflows do
 
     Enum.each(workflows, fn workflow ->
       with {:ok, %{execution: execution, revision: revision}} <- create_workflow_execution(workflow.id, attrs) do
-	IO.puts("Starting workflow #{inspect execution}")
+	{:ok, _pid} = Interpreter.start_persistent(workflow, execution, revision)
       end
     end)
     :ok
   end
 
   def invoke_transaction_workflows(txn) do
-    IO.inspect txn
     :ok
   end
 

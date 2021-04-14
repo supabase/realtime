@@ -51,6 +51,8 @@ defmodule Realtime.MixProject do
       {:timex, "~> 3.0"},
       {:retry, "~> 0.14.1"},
       {:workflows, "~> 0.2.0"},
+      {:oban, "~> 2.6"},
+      {:eventstore, "~> 1.2"},
       {:mock, "~> 0.3.0", only: :test}
     ]
   end

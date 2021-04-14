@@ -93,11 +93,35 @@ config :realtime, RealtimeWeb.Endpoint,
   secret_key_base: session_secret_key_base
 
 config :realtime, Realtime.Repo,
-       hostname: workflows_db_host,
-       port: workflows_db_port,
-       database: workflows_db_name,
-       username: workflows_db_user,
-       password: workflows_db_password
+  hostname: workflows_db_host,
+  port: workflows_db_port,
+  database: workflows_db_name,
+  username: workflows_db_user,
+  password: workflows_db_password
+
+config :realtime, Oban,
+  repo: Realtime.Repo,
+  plugins: [Oban.Plugins.Pruner],
+  queues: [interpreter: 10]
+
+config :realtime, Realtime.EventStore.Store,
+  # column_data_type: "jsonb",
+  # serializer: EventStore.JsonbSerializer,
+  # Needed to serialize erlang tuples used in event scope
+  # types: EventStore.PostgresTypes,
+  # TODO: use term serializer for now. Switch to JsonbSerializer before release.
+  serializer: EventStore.TermSerializer,
+  hostname: workflows_db_host,
+  port: workflows_db_port,
+  database: workflows_db_name,
+  username: workflows_db_user,
+  password: workflows_db_password,
+  # TODO: since event_store uses the same name as ecto for the migration table,
+  # we need to use a separate schema. Either make this one available or solve
+  # the problem at the root (rename migration tables not to clash).
+  schema: "event_store"
+
+config :realtime, event_stores: [Realtime.EventStore.Store]
 
 # Configures Elixir's Logger
 config :logger, :console,

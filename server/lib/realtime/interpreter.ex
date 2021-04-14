@@ -3,8 +3,7 @@ defmodule Realtime.Interpreter do
   Workflows interpreter. Start transient and persistent workflows.
   """
 
-  alias Realtime.Interpreter.Context
-  alias Realtime.Interpreter.Supervisor
+  alias Realtime.Interpreter.{Context, PersistentManager, Supervisor}
 
   @doc """
   Starts a transient workflow.
@@ -27,6 +26,10 @@ defmodule Realtime.Interpreter do
   Use `resume_persistent` to resume the execution of a persistent workflow.
   """
   def start_persistent(workflow, execution, revision) do
+    with {:ok, asl_workflow} <- Workflows.parse(revision.definition) do
+      ctx = Context.create(workflow, execution, revision)
+      PersistentManager.start_persistent(asl_workflow, ctx, execution.arguments)
+    end
   end
 
   @doc """
@@ -34,5 +37,6 @@ defmodule Realtime.Interpreter do
   waiting for  `command`.
   """
   def resume_persistent(execution_id, command) do
+    PersistentManager.resume_persistent(execution_id, command)
   end
 end
