@@ -178,8 +178,7 @@ defmodule Realtime.Workflows do
   def invoke_transaction_workflows(%Transaction{changes: [_ | _]} = txn) do
     workflows = Manager.workflows_for_change(txn)
 
-    # TODO: convert to map in a proper way
-    txn_as_map = Jason.decode!(Jason.encode!(txn))
+    txn_as_map = Map.from_struct(txn)
 
     attrs = %{
       arguments: txn_as_map,
@@ -187,6 +186,7 @@ defmodule Realtime.Workflows do
 
     Enum.each(workflows, fn workflow ->
       with {:ok, %{execution: execution, revision: revision}} <- create_workflow_execution(workflow.id, attrs) do
+	# TODO: should be based on default execution type
 	{:ok, _pid} = Interpreter.start_persistent(workflow, execution, revision)
       end
     end)
