@@ -123,6 +123,9 @@ config :realtime, Realtime.EventStore.Store,
 
 config :realtime, event_stores: [Realtime.EventStore.Store]
 
+config :realtime, :workflows,
+  resource_handlers: [Realtime.Resource.Http]
+
 # Configures Elixir's Logger
 config :logger, :console,
   format: "$date $time $metadata[$level] $message\n",

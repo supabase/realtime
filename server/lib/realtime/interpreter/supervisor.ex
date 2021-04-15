@@ -7,12 +7,13 @@ defmodule Realtime.Interpreter.Supervisor do
     DynamicSupervisor.start_child(__MODULE__, {Transient, {workflow, ctx, args, opts}})
   end
 
-  def start_persistent(workflow, ctx, args) do
-    DynamicSupervisor.start_child(__MODULE__, {Persistent, {workflow, {:start, ctx, args}}})
+  def start_persistent(workflow, execution_id, ctx, args) do
+    IO.puts "Start persistent"
+    DynamicSupervisor.start_child(__MODULE__, {Persistent, {workflow, execution_id, {:start, ctx, args}}})
   end
 
-  def recover_persistent(workflow, events) do
-    DynamicSupervisor.start_child(__MODULE__, {Persistent, {workflow, {:recover, events}}})
+  def recover_persistent(workflow, execution_id) do
+    DynamicSupervisor.start_child(__MODULE__, {Persistent, {workflow, execution_id, :recover}})
   end
 
   ## Callbacks

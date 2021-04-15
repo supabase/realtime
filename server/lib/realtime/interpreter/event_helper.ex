@@ -3,7 +3,7 @@ defmodule Realtime.Interpreter.EventHelper do
   Convert `Workflows.Event` structs to and from values that can be serialized to JSON.
   """
 
-  alias Workflows.Event.WaitStarted
+  alias Workflows.Event.{TaskStarted, WaitStarted}
 
   # TODO: need to encode scope as well
 
@@ -19,6 +19,10 @@ defmodule Realtime.Interpreter.EventHelper do
       seconds: seconds,
       timestamp: timestamp
     }
+  end
+
+  def task_started_to_map(event) do
+    Map.from_struct(event)
   end
 
   def wait_started_from_map(map) do
@@ -37,5 +41,15 @@ defmodule Realtime.Interpreter.EventHelper do
       }
       {:ok, event}
     end
+  end
+
+  def task_started_from_map(map) do
+    event = %TaskStarted{
+      activity: map["activity"],
+      scope: map["scope"],
+      resource: map["resource"],
+      args: map["args"]
+    }
+    {:ok, event}
   end
 end

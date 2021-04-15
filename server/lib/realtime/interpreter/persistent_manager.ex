@@ -15,7 +15,6 @@ defmodule Realtime.Interpreter.PersistentManager do
 
   require Logger
 
-  alias Realtime.EventStore
   alias Realtime.Interpreter.Supervisor
 
 
@@ -27,8 +26,8 @@ defmodule Realtime.Interpreter.PersistentManager do
     GenServer.start_link(__MODULE__, config, name: __MODULE__)
   end
 
-  def start_persistent(workflow, ctx, args) do
-    GenServer.call(__MODULE__, {:start_execution, workflow, ctx, args})
+  def start_persistent(workflow, execution_id, ctx, args) do
+    GenServer.call(__MODULE__, {:start_execution, workflow, execution_id, ctx, args})
   end
 
   def resume_persistent(execution_id, command) do
@@ -48,8 +47,9 @@ defmodule Realtime.Interpreter.PersistentManager do
   end
 
   @impl true
-  def handle_call({:start_execution, workflow, ctx, args}, _from, state) do
-    {:ok, pid} = Supervisor.start_persistent(workflow, ctx, args)
+  def handle_call({:start_execution, workflow, execution_id, ctx, args}, _from, state) do
+    IO.puts "PM: Start execution"
+    {:ok, pid} = Supervisor.start_persistent(workflow, execution_id, ctx, args)
     new_executions = Map.put(state.executions, ctx.execution_id, pid)
     new_state = %State{state | executions: new_executions}
     {:reply, {:ok, pid}, new_state}
@@ -60,7 +60,7 @@ defmodule Realtime.Interpreter.PersistentManager do
     Logger.info("Resume execution #{inspect execution_id} #{inspect command}")
     # TODO: how to handle error?
     {:ok, new_state} = do_resume_execution(execution_id, command, state)
-    {:reply, :ok, state}
+    {:reply, :ok, new_state}
   end
 
   ## Private
@@ -75,10 +75,9 @@ defmodule Realtime.Interpreter.PersistentManager do
     case Map.fetch(state.executions, execution_id) do
       {:ok, pid} -> {:ok, pid}
       :error ->
-	{:ok, events} = EventStore.Store.read_stream_forward(execution_id)
 	{:ok, execution} = Realtime.Workflows.get_workflow_execution(execution_id)
 	with {:ok, asl_workflow} <- Workflows.parse(execution.revision.definition) do
-	  Supervisor.recover_persistent(asl_workflow, events)
+	  Supervisor.recover_persistent(asl_workflow, execution_id)
 	end
     end
   end

@@ -10,7 +10,7 @@ defmodule Realtime.Interpreter.Transient do
    * Wait - Send a delayed message to the gen server to continue.
    * Task - Start a Task that handles the task, then sends a message to the supervisor with the task result.
   """
-  use GenServer
+  use GenServer, restart: :transient
 
   require Logger
 
