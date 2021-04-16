@@ -28,7 +28,6 @@ defmodule Realtime.Interpreter do
   def start_persistent(workflow, execution, revision) do
     with {:ok, asl_workflow} <- Workflows.parse(revision.definition) do
       ctx = Context.create(workflow, execution, revision)
-      IO.puts "Interpreter.start_persistent"
       PersistentManager.start_persistent(asl_workflow, execution.id, ctx, execution.arguments)
     end
   end

@@ -43,7 +43,6 @@ defmodule Realtime.Interpreter.Persistent do
 
   @impl true
   def handle_continue({:start, ctx, args}, %State{workflow: workflow} = state) do
-    Logger.info("Handle continue: start")
     Workflows.start(workflow, ctx, args)
     |> continue_with_result(state)
   end
@@ -68,7 +67,6 @@ defmodule Realtime.Interpreter.Persistent do
 
   @impl true
   def handle_cast({:resume_execution, command}, %State{execution: execution} = state) do
-    Logger.info("Handle cast: resume")
     Workflows.resume(execution, command)
     |> continue_with_result(state)
   end
@@ -86,8 +84,6 @@ defmodule Realtime.Interpreter.Persistent do
   ## Private
 
   defp continue_with_result({:continue, execution, events}, state) do
-    Logger.info("CWR: continue #{inspect self()}")
-    Logger.info("CWR: #{inspect events}")
     new_state = %State{
       state
       | execution: execution,
@@ -100,8 +96,7 @@ defmodule Realtime.Interpreter.Persistent do
   end
 
   defp continue_with_result({:succeed, result, events}, state) do
-    Logger.info("CWR: succeed")
-    Logger.info("Execution terminated with result #{inspect result} #{inspect self()}")
+    Logger.debug("Execution terminated with result #{inspect result} #{inspect self()}")
 
     new_state = %State{
       state
@@ -122,7 +117,6 @@ defmodule Realtime.Interpreter.Persistent do
   defp store_events(events, stream_version, execution_id) do
     store_events = Enum.map(events, &create_event_store_event/1)
 
-    Logger.info("Store events: #{inspect(execution_id)} #{inspect(stream_version)}")
     EventStore.Store.append_to_stream(execution_id, stream_version, store_events)
   end
 
@@ -153,7 +147,7 @@ defmodule Realtime.Interpreter.Persistent do
       {:ok, schedule_opts} ->
         event_map = EventHelper.wait_started_to_map(event)
 
-        Logger.info("Schedule wait event at #{inspect(schedule_opts)}")
+        Logger.debug("Schedule wait event at #{inspect(schedule_opts)}")
 
         oban_result =
           %{execution_id: execution_id, event: event_map}
