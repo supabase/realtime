@@ -17,10 +17,10 @@ jobs:
     strategy:
       matrix:
         platform: [ubuntu-18.04]
-        otp: [21.x, 22.x]
-        elixir: [1.9.x, 1.10.x]
+        otp: [23.x]
+        elixir: [1.11.x]
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
 
     steps:
       - uses: actions/checkout@v2
@@ -29,7 +29,7 @@ jobs:
         run: docker-compose -f ../docker-compose.db.yml up -d
 
       - name: Set up Elixir
-        uses: actions/setup-elixir@v1
+        uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}

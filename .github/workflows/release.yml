@@ -52,8 +52,8 @@ jobs:
 
     strategy:
       matrix:
-        elixir: ["1.11.x"]
-        otp: ["23.x"]
+        elixir: [1.11.x]
+        otp: [23.x]
 
     runs-on: ubuntu-18.04
 
@@ -80,7 +80,7 @@ jobs:
 
       - name: Set up Elixir
         if: env.VERSION_BEFORE != env.VERSION_AFTER
-        uses: actions/setup-elixir@v1
+        uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
