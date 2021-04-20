@@ -194,6 +194,15 @@ jobs:
       - uses: actions/checkout@v2
         if: env.VERSION_BEFORE != env.VERSION_AFTER
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@master
+        with:
+          platforms: arm64,amd64
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@master
+
       - name: Upload build to Docker Hub
         if: env.VERSION_BEFORE != env.VERSION_AFTER
         uses: docker/build-push-action@v1
@@ -202,3 +211,5 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: supabase/realtime
           tags: latest,v${{ env.VERSION_AFTER }}
+          builder: ${{ steps.buildx.outputs.name }}
+          platforms: linux/amd64,linux/arm64
