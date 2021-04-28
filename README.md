@@ -1,36 +1,12 @@
 # Supabase Realtime
 
-> **⚠ WARNING: v0.10.0 Breaking Change **  
-> Channels connections are secured by default in production. See [Channels Authorization](#channels-authorization) for more info.
-
 Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
 
 <p align="center"><kbd><img src="./examples/next-js/demo.gif" alt="Demo"/></kbd></p>
 
-**Contents**
-
-- [Hiring](#hiring)
-- [Status](#status)
-- [Example](#example)
-- [Introduction](#introduction)
-    - [What is this?](#what-is-this)
-    - [Cool, but why not just use Postgres' `NOTIFY`?](#cool-but-why-not-just-use-postgres-notify)
-    - [What are the benefits?](#what-are-the-benefits)
-- [Quick start](#quick-start)
-- [Client libraries](#client-libraries)
-- [Server](#server)
-  - [Database set up](#database-set-up)
-  - [Server set up](#server-set-up)
-  - [Channels Authorization](#channels-authorization)
-- [Contributing](#contributing)
-- [Releasing](#releasing)
-- [License](#license)
-- [Credits](#credits)
-- [Sponsors](#sponsors)
-
 ## Hiring
 
-Supabase is hiring an Elixir expert to work full-time on this repo. If you have the experience, get in touch.
+Supabase is hiring Elixir experts to work full-time on this repo. If you have the experience, [apply online](https://supabase.io/docs/careers).
 
 ## Status
 
@@ -42,6 +18,33 @@ Supabase is hiring an Elixir expert to work full-time on this repo. If you have 
 This repo is still under heavy development and the documentation is evolving. You're welcome to try it, but expect some breaking changes. Watch "releases" of this repo to get notified of major updates. And give us a star if you like it!
 
 ![Watch this repo](https://gitcdn.xyz/repo/supabase/monorepo/master/web/static/watch-repo.gif "Watch this repo")
+
+## Introduction
+
+#### What is this?
+
+This is an Elixir server (Phoenix) that allows you to listen to changes in your database via websockets.
+
+It works like this:
+
+1. the Phoenix server listens to PostgreSQL's replication functionality (using Postgres' logical decoding)
+2. it converts the byte stream into JSON
+3. it then broadcasts over websockets.
+
+#### Why not just use PostgreSQL's `NOTIFY`?
+
+A few reasons:
+
+1. You don't have to set up triggers on every table
+2. NOTIFY has a payload limit of 8000 bytes and will fail for anything larger. The usual solution is to send an ID then fetch the record, but that's heavy on the database
+3. This server consumes one connection to the database, then you can connect many clients to this server. Easier on your database, and to scale up you just add realtime servers
+
+#### What are the benefits?
+
+1. The beauty of listening to the replication functionality is that you can make changes to your database from anywhere - your API, directly in the DB, via a console etc - and you will still receive the changes via websockets.
+2. Decoupling. For example, if you want to send a new slack message every time someone makes a new purchase you might build that functionality directly into your API. This allows you to decouple your async functionality from your API.
+3. This is built with Phoenix, an [extremely scalable Elixir framework](https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections)
+
 
 ## Example
 
@@ -72,33 +75,6 @@ let allChanges = this.socket.channel('realtime:*')
   .on('*', payload => { console.log('Update received!', payload) })
 
 ```
-
-## Introduction
-
-#### What is this?
-
-This is an Elixir server (Phoenix) that allows you to listen to changes in your database via websockets.
-
-It works like this:
-
-1. the Phoenix server listens to PostgreSQL's replication functionality (using Postgres' logical decoding)
-2. it converts the byte stream into JSON
-3. it then broadcasts over websockets.
-
-#### Cool, but why not just use Postgres' `NOTIFY`?
-
-A few reasons:
-
-1. You don't have to set up triggers on every table
-2. NOTIFY has a payload limit of 8000 bytes and will fail for anything larger. The usual solution is to send an ID then fetch the record, but that's heavy on the database
-3. This server consumes one connection to the database, then you can connect many clients to this server. Easier on your database, and to scale up you just add realtime servers
-
-#### What are the benefits?
-
-1. The beauty of listening to the replication functionality is that you can make changes to your database from anywhere - your API, directly in the DB, via a console etc - and you will still receive the changes via websockets.
-2. Decoupling. For example, if you want to send a new slack message every time someone makes a new purchase you might build that functionality directly into your API. This allows you to decouple your async functionality from your API.
-3. This is built with Phoenix, an [extremely scalable Elixir framework](https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections)
-
 
 ## Quick start
 
@@ -201,26 +177,6 @@ Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
 **Development**: Channels are not secure by default. Set SECURE_CHANNELS to `true` to test JWT verification locally.
 
 **Production**: Channels are secure by default and you must set JWT_SECRET. Set SECURE_CHANNELS to `false` to proceed without checking authorization.
-
-## Contributing
-
-- Fork the repo on GitHub
-- Clone the project to your own machine
-- Commit changes to your own branch
-- Push your work back up to your fork
-- Submit a Pull request so that we can review your changes and merge
-
-## Releasing
-
-- Make a commit to bump the version in `mix.exs`
-- Tag the commit
-
-To trigger a release you must tag the commit, then push to origin.
-
-```bash
-git tag -a 0.x.x -m "Some release details / link to release notes"
-git push origin 0.x.x
-```
 
 ## License
 
