@@ -132,9 +132,10 @@ DB_NAME                 # {string}      Postgres database name
 DB_USER                 # {string}      Database user
 DB_PASSWORD             # {string}      Database password
 DB_PORT                 # {number}      Database port
+DB_IP_VERSION           # {string}      (options: 'IPv4'/'IPv6') Connect to database via either IPv4 or IPv6. Disregarded if database host is an IP address (e.g. '127.0.0.1') and recommended if database host is a name (e.g. 'db.abcd.supabase.co') to prevent potential non-existent domain (NXDOMAIN) errors.
 SLOT_NAME               # {string}      A unique name for Postgres to track where this server has "listened until". If the server dies, it can pick up from the last position. This should be lowercase.
 PORT                    # {number}      Port which you can connect your client/listeners
-SECURE_CHANNELS         # {string}     (options: 'true' or 'false') Enable/Disable channels authorization via JWT verification.
+SECURE_CHANNELS         # {string}      (options: 'true'/'false') Enable/Disable channels authorization via JWT verification.
 JWT_SECRET              # {string}      HS algorithm octet key (e.g. "95x0oR8jq9unl9pOIx"). Only required if SECURE_CHANNELS is set to true.
 JWT_CLAIM_VALIDATORS    # {string}      Expected claim key/value pairs compared to JWT claims via equality checks in order to validate JWT. e.g. '{"iss": "Issuer", "nbf": 1610078130}'. This is optional but encouraged.
 ```
