@@ -3,17 +3,11 @@ defmodule Realtime.SubscribersNotificationTest do
 
   import Mock
 
-  alias Realtime.Adapters.Changes.{
-    NewRecord,
-    DeletedRecord,
-    Transaction,
-    TruncatedRelation,
-    UpdatedRecord
-  }
-
+  alias Realtime.Adapters.Changes.{NewRecord, Transaction}
+  alias Realtime.Adapters.Postgres.Decoder.Messages.Relation
   alias Realtime.Configuration.{Configuration, Webhook, WebhookEndpoint}
   alias Realtime.{ConfigurationManager, SubscribersNotification, WebhookConnector}
-  alias Realtime.Adapters.Postgres.Decoder.Messages.Relation
+  alias Realtime.Replication.State
   alias RealtimeWeb.RealtimeChannel
 
   @commit_timestamp %DateTime{
@@ -44,21 +38,34 @@ defmodule Realtime.SubscribersNotificationTest do
       type_modifier: 4_294_967_295
     }
   ]
-  @new_record_public %NewRecord{
-    columns: @columns,
-    commit_timestamp: @commit_timestamp,
-    record: %{"id" => "1", "name" => "Thomas Shelby"},
-    schema: "public",
-    table: "users",
-    type: "INSERT"
+  @relations %{
+    123 => %Relation{
+      columns: @columns,
+      id: 123,
+      name: "users",
+      namespace: "public",
+      replica_identity: :default
+    },
+    456 => %Relation{
+      columns: @columns,
+      id: 456,
+      name: "auth_users",
+      namespace: "auth",
+      replica_identity: :default
+    }
   }
-  @new_record_auth %NewRecord{
-    columns: @columns,
-    commit_timestamp: @commit_timestamp,
-    record: %{"id" => "2", "name" => "Arthur Shelby"},
-    schema: "auth",
-    table: "auth_users",
-    type: "INSERT"
+  @new_record_public {123, "INSERT", {"1", "Thomas Shelby"}, nil}
+  @new_record_public_json "{\"columns\":[{\"flags\":[\"key\"],\"name\":\"id\",\"type\":\"int8\",\"type_modifier\":4294967295},{\"flags\":[],\"name\":\"name\",\"type\":\"text\",\"type_modifier\":4294967295}],\"commit_timestamp\":\"2021-02-22T05:22:19Z\",\"record\":{\"id\":\"1\",\"name\":\"Thomas Shelby\"},\"schema\":\"public\",\"table\":\"users\",\"type\":\"INSERT\"}"
+  @new_record_auth {456, "INSERT", {"2", "Arthur Shelby"}, nil}
+  @new_record_auth_json "{\"columns\":[{\"flags\":[\"key\"],\"name\":\"id\",\"type\":\"int8\",\"type_modifier\":4294967295},{\"flags\":[],\"name\":\"name\",\"type\":\"text\",\"type_modifier\":4294967295}],\"commit_timestamp\":\"2021-02-22T05:22:19Z\",\"record\":{\"id\":\"2\",\"name\":\"Arthur Shelby\"},\"schema\":\"auth\",\"table\":\"auth_users\",\"type\":\"INSERT\"}"
+  @default_test_state %State{
+    relations: @relations,
+    transaction:
+      {{0, 0},
+       %Transaction{
+         changes: [@new_record_public, @new_record_auth],
+         commit_timestamp: @commit_timestamp
+       }}
   }
 
   setup do
@@ -77,7 +84,7 @@ defmodule Realtime.SubscribersNotificationTest do
           RealtimeChannel,
           [],
           [
-            handle_realtime_transaction: fn _topic, _change -> :ok end
+            handle_realtime_transaction: fn _topic, _type, _change -> :ok end
           ]
         },
         {
@@ -95,13 +102,13 @@ defmodule Realtime.SubscribersNotificationTest do
 
   test "notify/1 when transaction changes is nil" do
     assert :ok =
-             %Transaction{changes: nil}
+             %State{transaction: {{0, 0}, %Transaction{changes: nil}}}
              |> SubscribersNotification.notify()
   end
 
   test "notify/1 when transaction changes is an empty list" do
     assert :ok =
-             %Transaction{changes: []}
+             %State{transaction: {{0, 0}, %Transaction{changes: []}}}
              |> SubscribersNotification.notify()
   end
 
@@ -109,11 +116,14 @@ defmodule Realtime.SubscribersNotificationTest do
     with_mock ConfigurationManager,
       get_config: fn -> {:ok, %Configuration{realtime: []}} end do
       assert :ok =
-               %Transaction{changes: []}
+               %State{transaction: {{0, 0}, %Transaction{changes: []}}}
                |> SubscribersNotification.notify()
 
       assert :ok =
-               %Transaction{changes: [%NewRecord{}]}
+               %State{
+                 relations: @relations,
+                 transaction: {{0, 0}, %Transaction{changes: [@new_record_public]}}
+               }
                |> SubscribersNotification.notify()
     end
   end
@@ -129,11 +139,48 @@ defmodule Realtime.SubscribersNotificationTest do
 
     get_mocks.([], webhooks_config)
     |> with_mocks do
-      txn = %Transaction{changes: [%NewRecord{}]}
+      txn = %Transaction{
+        changes: [@new_record_public],
+        commit_timestamp: @commit_timestamp
+      }
 
-      SubscribersNotification.notify(txn)
+      %State{
+        relations: @relations,
+        transaction: {{0, 0}, txn}
+      }
+      |> SubscribersNotification.notify()
 
-      assert called(WebhookConnector.notify(txn, webhooks_config))
+      assert called(
+               WebhookConnector.notify(
+                 %Transaction{
+                   changes: [
+                     %NewRecord{
+                       columns: [
+                         %Relation.Column{
+                           flags: [:key],
+                           name: "id",
+                           type: "int8",
+                           type_modifier: 4_294_967_295
+                         },
+                         %Relation.Column{
+                           flags: [],
+                           name: "name",
+                           type: "text",
+                           type_modifier: 4_294_967_295
+                         }
+                       ],
+                       commit_timestamp: @commit_timestamp,
+                       record: %{"id" => "1", "name" => "Thomas Shelby"},
+                       schema: "public",
+                       table: "users",
+                       type: "INSERT"
+                     }
+                   ],
+                   commit_timestamp: @commit_timestamp
+                 },
+                 webhooks_config
+               )
+             )
     end
   end
 
@@ -158,19 +205,25 @@ defmodule Realtime.SubscribersNotificationTest do
     ]
     |> get_mocks.([])
     |> with_mocks do
-      txn = %Transaction{changes: [@new_record_public, @new_record_auth]}
-
-      SubscribersNotification.notify(txn)
+      SubscribersNotification.notify(@default_test_state)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:public", @new_record_public)
+        RealtimeChannel.handle_realtime_transaction(
+          "realtime:public",
+          "INSERT",
+          @new_record_public_json
+        )
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:auth", @new_record_auth)
+        RealtimeChannel.handle_realtime_transaction(
+          "realtime:auth",
+          "INSERT",
+          @new_record_auth_json
+        )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 2)
+      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_, :_), 2)
     end
   end
 
@@ -187,23 +240,37 @@ defmodule Realtime.SubscribersNotificationTest do
     ]
     |> get_mocks.([])
     |> with_mocks do
-      txn = %Transaction{changes: [@new_record_public, @new_record_auth]}
-
-      SubscribersNotification.notify(txn)
-
-      assert_called(RealtimeChannel.handle_realtime_transaction("realtime:*", @new_record_public))
-
-      assert_called(RealtimeChannel.handle_realtime_transaction("realtime:*", @new_record_auth))
+      SubscribersNotification.notify(@default_test_state)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:public", @new_record_public)
+        RealtimeChannel.handle_realtime_transaction(
+          "realtime:*",
+          "INSERT",
+          @new_record_public_json
+        )
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:auth", @new_record_auth)
+        RealtimeChannel.handle_realtime_transaction("realtime:*", "INSERT", @new_record_auth_json)
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 4)
+      assert_called(
+        RealtimeChannel.handle_realtime_transaction(
+          "realtime:public",
+          "INSERT",
+          @new_record_public_json
+        )
+      )
+
+      assert_called(
+        RealtimeChannel.handle_realtime_transaction(
+          "realtime:auth",
+          "INSERT",
+          @new_record_auth_json
+        )
+      )
+
+      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_, :_), 4)
     end
   end
 
@@ -228,19 +295,25 @@ defmodule Realtime.SubscribersNotificationTest do
     ]
     |> get_mocks.([])
     |> with_mocks do
-      txn = %Transaction{changes: [@new_record_public, @new_record_auth]}
-
-      SubscribersNotification.notify(txn)
+      SubscribersNotification.notify(@default_test_state)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:public:users", @new_record_public)
+        RealtimeChannel.handle_realtime_transaction(
+          "realtime:public:users",
+          "INSERT",
+          @new_record_public_json
+        )
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:auth:auth_users", @new_record_auth)
+        RealtimeChannel.handle_realtime_transaction(
+          "realtime:auth:auth_users",
+          "INSERT",
+          @new_record_auth_json
+        )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 2)
+      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_, :_), 2)
     end
   end
 
@@ -275,19 +348,25 @@ defmodule Realtime.SubscribersNotificationTest do
     ]
     |> get_mocks.([])
     |> with_mocks do
-      txn = %Transaction{changes: [@new_record_public, @new_record_auth]}
-
-      SubscribersNotification.notify(txn)
+      SubscribersNotification.notify(@default_test_state)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:public:users", @new_record_public)
+        RealtimeChannel.handle_realtime_transaction(
+          "realtime:public:users",
+          "INSERT",
+          @new_record_public_json
+        )
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:auth:auth_users", @new_record_auth)
+        RealtimeChannel.handle_realtime_transaction(
+          "realtime:auth:auth_users",
+          "INSERT",
+          @new_record_auth_json
+        )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 2)
+      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_, :_), 2)
     end
   end
 
@@ -320,25 +399,25 @@ defmodule Realtime.SubscribersNotificationTest do
     ]
     |> get_mocks.([])
     |> with_mocks do
-      txn = %Transaction{changes: [@new_record_public, @new_record_auth]}
-
-      SubscribersNotification.notify(txn)
+      SubscribersNotification.notify(@default_test_state)
 
       assert_called(
         RealtimeChannel.handle_realtime_transaction(
           "realtime:public:users:name=eq.Thomas Shelby",
-          @new_record_public
+          "INSERT",
+          @new_record_public_json
         )
       )
 
       assert_called(
         RealtimeChannel.handle_realtime_transaction(
           "realtime:auth:auth_users:name=eq.Arthur Shelby",
-          @new_record_auth
+          "INSERT",
+          @new_record_auth_json
         )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 2)
+      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_, :_), 2)
     end
   end
 
@@ -357,39 +436,41 @@ defmodule Realtime.SubscribersNotificationTest do
     ]
     |> get_mocks.([])
     |> with_mocks do
-      txn = %Transaction{changes: [@new_record_public, @new_record_auth]}
-
-      SubscribersNotification.notify(txn)
+      SubscribersNotification.notify(@default_test_state)
 
       assert_called(
         RealtimeChannel.handle_realtime_transaction(
           "realtime:public:users:name=eq.Thomas Shelby",
-          @new_record_public
+          "INSERT",
+          @new_record_public_json
         )
       )
 
       assert_called(
         RealtimeChannel.handle_realtime_transaction(
           "realtime:public:users:id=eq.1",
-          @new_record_public
+          "INSERT",
+          @new_record_public_json
         )
       )
 
       assert_called(
         RealtimeChannel.handle_realtime_transaction(
           "realtime:auth:auth_users:name=eq.Arthur Shelby",
-          @new_record_auth
+          "INSERT",
+          @new_record_auth_json
         )
       )
 
       assert_called(
         RealtimeChannel.handle_realtime_transaction(
           "realtime:auth:auth_users:id=eq.2",
-          @new_record_auth
+          "INSERT",
+          @new_record_auth_json
         )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 4)
+      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_, :_), 4)
     end
   end
 
@@ -402,27 +483,26 @@ defmodule Realtime.SubscribersNotificationTest do
     ]
     |> get_mocks.([])
     |> with_mocks do
-      record = %UpdatedRecord{
-        columns: @columns,
-        commit_timestamp: @commit_timestamp,
-        record: %{"id" => "1", "name" => "Thomas Shelby"},
-        schema: "public",
-        table: "users",
-        type: "UPDATE"
+      %State{
+        relations: @relations,
+        transaction:
+          {{0, 0},
+           %Transaction{
+             changes: [{123, "UPDATE", {"1", "Thomas Shelby"}, nil}],
+             commit_timestamp: @commit_timestamp
+           }}
       }
-
-      txn = %Transaction{changes: [record]}
-
-      SubscribersNotification.notify(txn)
+      |> SubscribersNotification.notify()
 
       assert_called(
         RealtimeChannel.handle_realtime_transaction(
           "realtime:public:users:name=eq.Thomas Shelby",
-          record
+          "UPDATE",
+          "{\"columns\":[{\"flags\":[\"key\"],\"name\":\"id\",\"type\":\"int8\",\"type_modifier\":4294967295},{\"flags\":[],\"name\":\"name\",\"type\":\"text\",\"type_modifier\":4294967295}],\"commit_timestamp\":\"2021-02-22T05:22:19Z\",\"old_record\":{},\"record\":{\"id\":\"1\",\"name\":\"Thomas Shelby\"},\"schema\":\"public\",\"table\":\"users\",\"type\":\"UPDATE\"}"
         )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 1)
+      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_, :_), 1)
     end
   end
 
@@ -435,27 +515,26 @@ defmodule Realtime.SubscribersNotificationTest do
     ]
     |> get_mocks.([])
     |> with_mocks do
-      old_record = %DeletedRecord{
-        columns: @columns,
-        commit_timestamp: @commit_timestamp,
-        old_record: %{"id" => "1", "name" => "Thomas Shelby"},
-        schema: "public",
-        table: "users",
-        type: "DELETE"
+      %State{
+        relations: @relations,
+        transaction:
+          {{0, 0},
+           %Transaction{
+             changes: [{123, "DELETE", nil, {"1", "Thomas Shelby"}}],
+             commit_timestamp: @commit_timestamp
+           }}
       }
-
-      txn = %Transaction{changes: [old_record]}
-
-      SubscribersNotification.notify(txn)
+      |> SubscribersNotification.notify()
 
       assert_called(
         RealtimeChannel.handle_realtime_transaction(
           "realtime:public:users:name=eq.Thomas Shelby",
-          old_record
+          "DELETE",
+          "{\"columns\":[{\"flags\":[\"key\"],\"name\":\"id\",\"type\":\"int8\",\"type_modifier\":4294967295},{\"flags\":[],\"name\":\"name\",\"type\":\"text\",\"type_modifier\":4294967295}],\"commit_timestamp\":\"2021-02-22T05:22:19Z\",\"old_record\":{\"id\":\"1\",\"name\":\"Thomas Shelby\"},\"schema\":\"public\",\"table\":\"users\",\"type\":\"DELETE\"}"
         )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 1)
+      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_, :_), 1)
     end
   end
 
@@ -468,18 +547,18 @@ defmodule Realtime.SubscribersNotificationTest do
     ]
     |> get_mocks.([])
     |> with_mocks do
-      truncated_relation = %TruncatedRelation{
-        commit_timestamp: @commit_timestamp,
-        schema: "public",
-        table: "users",
-        type: "TRUNCATE"
+      %State{
+        relations: @relations,
+        transaction:
+          {{0, 0},
+           %Transaction{
+             changes: [{123, "TRUNCATE", nil, nil}],
+             commit_timestamp: @commit_timestamp
+           }}
       }
+      |> SubscribersNotification.notify()
 
-      txn = %Transaction{changes: [truncated_relation]}
-
-      SubscribersNotification.notify(txn)
-
-      assert_not_called(RealtimeChannel.handle_realtime_transaction(:_, :_))
+      assert_not_called(RealtimeChannel.handle_realtime_transaction(:_, :_, :_))
     end
   end
 
@@ -496,53 +575,33 @@ defmodule Realtime.SubscribersNotificationTest do
     |> with_mocks do
       valid_notification_key = String.duplicate("W", 99)
 
-      valid_notification_record = %NewRecord{
-        columns: @columns,
-        commit_timestamp: @commit_timestamp,
-        record: %{"id" => "1", "name" => valid_notification_key},
-        schema: "public",
-        table: "users",
-        type: "INSERT"
+      %State{
+        relations: @relations,
+        transaction:
+          {{0, 0},
+           %Transaction{
+             changes: [
+               {123, "INSERT", {"1", valid_notification_key}, nil},
+               {123, "INSERT", {"2", String.duplicate("W", 100)}, nil},
+               {123, "INSERT", {"3", nil}, nil},
+               {123, "INSERT", {"4", :unchanged_toast}, nil}
+             ],
+             commit_timestamp: @commit_timestamp
+           }}
       }
-
-      txn = %Transaction{
-        changes: [
-          valid_notification_record,
-          %NewRecord{
-            columns: @columns,
-            commit_timestamp: @commit_timestamp,
-            record: %{"id" => "2", "name" => String.duplicate("W", 100)},
-            schema: "public",
-            table: "users",
-            type: "INSERT"
-          },
-          %NewRecord{
-            columns: @columns,
-            commit_timestamp: @commit_timestamp,
-            record: %{"id" => "3", "name" => nil},
-            schema: "public",
-            table: "users",
-            type: "INSERT"
-          },
-          %NewRecord{
-            columns: @columns,
-            commit_timestamp: @commit_timestamp,
-            record: %{"id" => "4", "name" => :unchanged_toast},
-            schema: "public",
-            table: "users",
-            type: "INSERT"
-          }
-        ]
-      }
-
-      SubscribersNotification.notify(txn)
+      |> SubscribersNotification.notify()
 
       ["realtime:public:users:name=eq.", valid_notification_key]
       |> IO.iodata_to_binary()
-      |> RealtimeChannel.handle_realtime_transaction(valid_notification_record)
+      |> RealtimeChannel.handle_realtime_transaction(
+        "INSERT",
+        "{\"columns\":[{\"flags\":[\"key\"],\"name\":\"id\",\"type\":\"int8\",\"type_modifier\":4294967295},{\"flags\":[],\"name\":\"name\",\"type\":\"text\",\"type_modifier\":4294967295}],\"commit_timestamp\":\"2021-02-22T05:22:19Z\",\"record\":{\"id\":\"1\",\"name\":\"#{
+          valid_notification_key
+        }\"},\"schema\":\"public\",\"table\":\"users\",\"type\":\"INSERT\"}"
+      )
       |> assert_called()
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 1)
+      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_, :_), 1)
     end
   end
 end
