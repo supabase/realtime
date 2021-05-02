@@ -6,6 +6,14 @@ use Mix.Config
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we use it
 # with webpack to recompile .js and .css sources.
+
+# Channels are not secured by default in development and
+# are secured by default in production.
+secure_channels = System.get_env("SECURE_CHANNELS", "false") == "true"
+
+config :realtime,
+  secure_channels: secure_channels
+
 config :realtime, RealtimeWeb.Endpoint,
   http: [port: 4000],
   debug_errors: true,

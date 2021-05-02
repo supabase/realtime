@@ -2,28 +2,18 @@ defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
   require Logger, warn: false
 
-  # Add authorization logic here as required.
-  defp authorized?(_payload) do
-    true
+  def join("realtime:" <> _topic, _payload, socket) do
+    {:ok, %{}, socket}
   end
 
-  def join("realtime:" <> topic, payload, socket) do
-    if authorized?(payload) do
-      {:ok, %{}, socket}
-    else
-      {:error, %{reason: "unauthorized"}}
-    end
-  end
-
-  @doc """
-  Disabling inward messages from the websocket.
-  """
+  # @doc """
+  # Disabling inward messages from the websocket.
+  # """
   # def handle_in(event_type, payload, socket) do
   #   Logger.info event_type
   #   broadcast!(socket, event_type, payload)
   #   {:noreply, socket}
   # end
-
 
   @doc """
   Handles a full, decoded transation.
