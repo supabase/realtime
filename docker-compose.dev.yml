@@ -12,7 +12,8 @@ services:
       DB_PORT: 5432
       PORT: 4000
       HOSTNAME: localhost
-      SECRET_KEY_BASE: SOMETHING_SUPER_SECRET
+      JWT_SECRET: SOMETHING_SUPER_SECRET
+      SECURE_CHANNELS: 'true'
     depends_on:
       - db
   db:

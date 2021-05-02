@@ -1,6 +1,8 @@
 defmodule RealtimeWeb.UserSocket do
   use Phoenix.Socket
 
+  alias RealtimeWeb.ChannelsAuthorization
+
   ## Channels
   channel "realtime:*", RealtimeWeb.RealtimeChannel
 
@@ -15,8 +17,12 @@ defmodule RealtimeWeb.UserSocket do
   #
   # See `Phoenix.Token` documentation for examples in
   # performing token verification on connect.
-  def connect(_params, socket, _connect_info) do
-    {:ok, socket}
+  def connect(params, socket) do
+    case Application.fetch_env!(:realtime, :secure_channels)
+         |> authorize_conn(params) do
+      :ok -> {:ok, socket}
+      _ -> :error
+    end
   end
 
   # Socket id's are topics that allow you to identify all sockets for a given user:
@@ -30,4 +36,23 @@ defmodule RealtimeWeb.UserSocket do
   #
   # Returning `nil` makes this socket anonymous.
   def id(_socket), do: nil
+
+  defp authorize_conn(true, %{"token" => token}) do
+    # WARNING: "token" param key will be deprecated.
+    # Please use "apikey" param key to pass in auth token.
+    case ChannelsAuthorization.authorize(token) do
+      {:ok, _} -> :ok
+      _ -> :error
+    end
+  end
+
+  defp authorize_conn(true, %{"apikey" => token}) do
+    case ChannelsAuthorization.authorize(token) do
+      {:ok, _} -> :ok
+      _ -> :error
+    end
+  end
+
+  defp authorize_conn(true, _params), do: :error
+  defp authorize_conn(false, _params), do: :ok
 end

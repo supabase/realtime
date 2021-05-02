@@ -1,4 +1,22 @@
-# Realtime Elixir Instructions
+# Realtime server
+
+## Run locally
+
+```sh
+PORT=4000 \
+HOSTNAME=localhost \
+DB_USER=postgres \
+DB_HOST=localhost \
+DB_PASSWORD=postgres \
+DB_NAME=postgres \
+DB_PORT=5432 \
+DB_PORT=5432 \
+SLOT_NAME=TEST_SLOT \
+mix phx.server
+```
+
+
+## Realtime Elixir Instructions
 
 Create the release:
 
@@ -11,7 +29,6 @@ DB_PASSWORD=postgres
 DB_PORT=5432
 APP_PORT=4000
 APP_HOSTNAME=localhost
-SECRET_KEY_BASE=SOMETHING_SECRET
 
 MIX_ENV=prod mix release
 ```
@@ -19,13 +36,14 @@ MIX_ENV=prod mix release
 Start the release:
 
 ```sh
-SECRET_KEY_BASE=SOMETHING_SECRET \
+JWT_SECRET=SOMETHING_SECRET \
 PORT=4000 \
 HOSTNAME=localhost \
 DB_USER=postgres \
 DB_HOST=localhost \
 DB_PASSWORD=postgres \
 DB_NAME=postgres \
+DB_PORT=5432 \
 DB_PORT=5432 \
 _build/prod/rel/realtime/bin/realtime start
 ```

@@ -43,8 +43,5 @@ TableListener.on('UPDATE', (change) => {
   console.log('UPDATE on TableListener', change)
 })
 TableListener.on('DELETE', (change) => {
-  console.log('UPDATE on TableListener', change)
+  console.log('DELETE on TableListener', change)
 })
-
-// Keep script alive
-setInterval(function () {}, 10000)
