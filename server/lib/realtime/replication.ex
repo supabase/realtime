@@ -7,7 +7,8 @@ defmodule Realtime.Replication do
       defstruct(
         relations: %{},
         transaction: nil,
-        types: %{}
+        types: %{},
+        io_ref: nil
       )
   )
 
@@ -36,6 +37,7 @@ defmodule Realtime.Replication do
 
   alias Realtime.Adapters.Postgres.EpgsqlServer
   alias Realtime.SubscribersNotification
+  alias Realtime.RecordLog
 
   def start_link(config) do
     GenServer.start_link(__MODULE__, config, name: __MODULE__)
@@ -62,9 +64,13 @@ defmodule Realtime.Replication do
   end
 
   defp process_message(%Begin{final_lsn: final_lsn, commit_timestamp: commit_timestamp}, state) do
+    {file, offset} = final_lsn
+    file_name = "#{file}_#{offset}.tmp"
+    Logger.info("Begin: #{file_name}")
+    {:ok, io} = RecordLog.open(file_name)
     %State{
       state
-      | transaction: {final_lsn, %Transaction{changes: [], commit_timestamp: commit_timestamp}}
+      | transaction: {final_lsn, %Transaction{changes: [], commit_timestamp: commit_timestamp}}, io_ref: io
     }
   end
 
@@ -114,7 +120,8 @@ defmodule Realtime.Replication do
          %Insert{relation_id: relation_id, tuple_data: tuple_data},
          %State{
            transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn},
-           relations: relations
+           relations: relations,
+           io_ref: io
          } = state
        )
        when is_map(relations) do
@@ -130,7 +137,7 @@ defmodule Realtime.Replication do
           record: data,
           commit_timestamp: commit_timestamp
         }
-
+        :ok = RecordLog.insert(io, new_record)
         %State{state | transaction: {lsn, %{txn | changes: [new_record | changes]}}}
 
       _ ->
@@ -146,7 +153,8 @@ defmodule Realtime.Replication do
          },
          %State{
            relations: relations,
-           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn}
+           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn},
+           io_ref: io
          } = state
        )
        when is_map(relations) do
@@ -164,7 +172,7 @@ defmodule Realtime.Replication do
           record: data,
           commit_timestamp: commit_timestamp
         }
-
+        :ok = RecordLog.insert(io, updated_record)
         %State{
           state
           | transaction: {lsn, %{txn | changes: [updated_record | changes]}}
@@ -183,7 +191,8 @@ defmodule Realtime.Replication do
          },
          %State{
            relations: relations,
-           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn}
+           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn},
+           io_ref: io
          } = state
        )
        when is_map(relations) do
@@ -199,7 +208,7 @@ defmodule Realtime.Replication do
           old_record: data,
           commit_timestamp: commit_timestamp
         }
-
+        :ok = RecordLog.insert(io, deleted_record)
         %State{state | transaction: {lsn, %{txn | changes: [deleted_record | changes]}}}
 
       _ ->

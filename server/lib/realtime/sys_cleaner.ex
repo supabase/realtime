@@ -3,7 +3,7 @@ defmodule Realtime.SysCleaner do
 
   require Logger
 
-  @timeout 1000
+  @timeout 10_000
   @threshold 75
 
   def start_link(opts \\ []) do
@@ -18,7 +18,7 @@ defmodule Realtime.SysCleaner do
   @impl true
   def handle_info(:timeout, state) do
     if ram_usage() > @threshold do
-      Logger.warning("try clean VM")
+      Logger.warning("Try clean VM")
       clean_all_mem()
     end
     {:noreply, state, @timeout}
@@ -41,9 +41,15 @@ defmodule Realtime.SysCleaner do
         {res, _} = System.cmd("sysctl", ["-n", "hw.memsize"])
         {mem, _} = Integer.parse(res)
         mem
-      _ -> mem[:total_memory] + mem[:cached_memory]
+      _ -> mem[:total_memory]
     end
-    free = mem[:free_memory]
+
+    cached = case mem[:cached_memory] do
+      nil -> 0
+      val -> val
+    end
+
+    free = mem[:free_memory] + cached
     100 - free / total * 100
   end
 
