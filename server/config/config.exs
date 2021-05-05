@@ -9,7 +9,6 @@ import Config
 
 # These defaults mirror the ones in releases.exs, remember not to change one
 # without changing the other.
-app_hostname = System.get_env("HOSTNAME", "localhost")
 app_port = String.to_integer(System.get_env("PORT", "4000"))
 db_host = System.get_env("DB_HOST", "localhost")
 db_port = String.to_integer(System.get_env("DB_PORT", "5432"))
@@ -55,7 +54,6 @@ db_ip_version =
   |> Map.fetch(System.get_env("DB_IP_VERSION", "") |> String.downcase())
 
 config :realtime,
-  app_hostname: app_hostname,
   app_port: app_port,
   db_host: db_host,
   db_port: db_port,
