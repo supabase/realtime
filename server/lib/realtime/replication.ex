@@ -8,7 +8,8 @@ defmodule Realtime.Replication do
         relations: %{},
         transaction: nil,
         types: %{},
-        io_ref: nil
+        io_ref: nil,
+        log_path: nil
       )
   )
 
@@ -39,6 +40,8 @@ defmodule Realtime.Replication do
   alias Realtime.SubscribersNotification
   alias Realtime.RecordLog
 
+  @event_storage "disc"
+
   def start_link(config) do
     GenServer.start_link(__MODULE__, config, name: __MODULE__)
   end
@@ -64,14 +67,23 @@ defmodule Realtime.Replication do
   end
 
   defp process_message(%Begin{final_lsn: final_lsn, commit_timestamp: commit_timestamp}, state) do
-    {file, offset} = final_lsn
-    file_name = "#{file}_#{offset}.tmp"
-    Logger.info("Begin: #{file_name}")
-    {:ok, io} = RecordLog.open(file_name)
-    %State{
-      state
-      | transaction: {final_lsn, %Transaction{changes: [], commit_timestamp: commit_timestamp}}, io_ref: io
-    }
+    if @event_storage == "disc" do
+      {file, offset} = final_lsn
+      path = "./backlogs/#{file}_#{offset}.tmp"
+      Logger.info("Begin: #{path}")
+      {:ok, io} = RecordLog.open(path)
+      %State{
+        state
+      | transaction: {final_lsn, %Transaction{changes: [], commit_timestamp: commit_timestamp}},
+        io_ref: io,
+        log_path: path
+      }
+    else
+      %State{
+        state
+      | transaction: {final_lsn, %Transaction{changes: [], commit_timestamp: commit_timestamp}}
+      }
+    end
   end
 
   # This will notify subscribers once the transaction has completed
@@ -80,7 +92,9 @@ defmodule Realtime.Replication do
          %Commit{lsn: commit_lsn, end_lsn: end_lsn},
          %State{
            transaction: {current_txn_lsn, %Transaction{changes: changes} = txn},
-           relations: relations
+           relations: relations,
+           io_ref: io,
+           log_path: path
          } = state
        )
        when commit_lsn == current_txn_lsn do
@@ -88,7 +102,18 @@ defmodule Realtime.Replication do
     # Feel free to delete after testing
     Logger.debug("Final Update of Columns " <> inspect(relations, limit: :infinity))
 
-    :ok = %{txn | changes: Enum.reverse(changes)} |> SubscribersNotification.notify()
+    if @event_storage === "disc" do
+      RecordLog.close(io)
+      {:ok, changes_stream} = RecordLog.stream(path)
+      case RecordLog.stream(path) do
+        {:ok, changes_stream} -> RecordLog.stream(path)
+          :ok = %{txn | changes: changes_stream} |> SubscribersNotification.notify()
+        {:error, reason} ->
+          Logger.error(path <> " #{reason}}")
+      end
+    else
+      :ok = %{txn | changes: Enum.reverse(changes)} |> SubscribersNotification.notify()
+    end
 
     :ok = EpgsqlServer.acknowledge_lsn(end_lsn)
 
@@ -137,9 +162,12 @@ defmodule Realtime.Replication do
           record: data,
           commit_timestamp: commit_timestamp
         }
-        :ok = RecordLog.insert(io, new_record)
-        %State{state | transaction: {lsn, %{txn | changes: [new_record | changes]}}}
-
+        if @event_storage === "disc" do
+          :ok = RecordLog.insert(io, new_record)
+          state
+        else
+          %State{state | transaction: {lsn, %{txn | changes: [new_record | changes]}}}
+        end
       _ ->
         state
     end
@@ -172,12 +200,16 @@ defmodule Realtime.Replication do
           record: data,
           commit_timestamp: commit_timestamp
         }
-        :ok = RecordLog.insert(io, updated_record)
-        %State{
-          state
-          | transaction: {lsn, %{txn | changes: [updated_record | changes]}}
-        }
 
+        if @event_storage === "disc" do
+          :ok = RecordLog.insert(io, updated_record)
+          %State{state | transaction: {lsn, txn}}
+        else
+          %State{
+            state
+          | transaction: {lsn, %{txn | changes: [updated_record | changes]}}
+          }
+        end
       _ ->
         state
     end
@@ -208,8 +240,13 @@ defmodule Realtime.Replication do
           old_record: data,
           commit_timestamp: commit_timestamp
         }
-        :ok = RecordLog.insert(io, deleted_record)
-        %State{state | transaction: {lsn, %{txn | changes: [deleted_record | changes]}}}
+
+        if @event_storage === "disc" do
+          :ok = RecordLog.insert(io, deleted_record)
+          %State{state | transaction: {lsn, txn}}
+        else
+          %State{state | transaction: {lsn, %{txn | changes: [deleted_record | changes]}}}
+        end
 
       _ ->
         state
@@ -224,28 +261,28 @@ defmodule Realtime.Replication do
          } = state
        )
        when is_list(truncated_relations) and is_list(changes) and is_map(relations) do
-    new_changes =
-      Enum.reduce(truncated_relations, changes, fn truncated_relation, acc ->
-        case Map.fetch(relations, truncated_relation) do
-          {:ok, %{namespace: namespace, name: name}} ->
-            [
-              %TruncatedRelation{
-                type: "TRUNCATE",
-                schema: namespace,
-                table: name,
-                commit_timestamp: commit_timestamp
-              }
-              | acc
-            ]
-
-          _ ->
-            acc
-        end
-      end)
+#    new_changes =
+#      Enum.reduce(truncated_relations, changes, fn truncated_relation, acc ->
+#        case Map.fetch(relations, truncated_relation) do
+#          {:ok, %{namespace: namespace, name: name}} ->
+#            [
+#              %TruncatedRelation{
+#                type: "TRUNCATE",
+#                schema: namespace,
+#                table: name,
+#                commit_timestamp: commit_timestamp
+#              }
+#              | acc
+#            ]
+#
+#          _ ->
+#            acc
+#        end
+#      end)
 
     %State{
       state
-      | transaction: {lsn, %{txn | changes: new_changes}}
+      | transaction: {lsn, %{txn | changes: []}}
     }
   end
 

@@ -79,8 +79,7 @@ defmodule Realtime.Application do
         publications: publications,
         slot_name: slot_name,
         wal_position: {"0", "0"}
-      },
-      Realtime.SysCleaner
+      }
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

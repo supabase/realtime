@@ -8,7 +8,7 @@ defmodule Realtime.SubscribersNotification do
 
   @topic "realtime"
 
-  def notify(%Transaction{changes: changes} = txn) when is_list(changes) do
+  def notify(%Transaction{changes: changes} = txn) when is_list(changes) or is_function(changes) do
     {:ok, %Configuration{realtime: realtime_config, webhooks: webhooks_config}} =
       ConfigurationManager.get_config()
 
@@ -20,7 +20,7 @@ defmodule Realtime.SubscribersNotification do
     :ok
   end
 
-  defp notify_subscribers([_ | _] = changes, [_ | _] = realtime_config) do
+  defp notify_subscribers(changes, [_ | _] = realtime_config) when is_list(changes) or is_function(changes) do
     # For every change in the txn.changes, we want to broadcast it specific listeners
     # Example Change:
     # %Realtime.Adapters.Changes.UpdatedRecord{
