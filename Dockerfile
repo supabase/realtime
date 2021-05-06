@@ -12,7 +12,6 @@ ENV MIX_ENV=prod \
     DB_PORT=5432 \
     MIX_ENV=prod \
     PORT=4000 \
-    HOSTNAME=localhost \
     JWT_SECRET=SOMETHING_SUPER_SECRET \
     SECURE_CHANNELS=true
 

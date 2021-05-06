@@ -13,7 +13,6 @@ services:
       DB_PASSWORD: postgres
       DB_PORT: 5432
       PORT: 4000
-      HOSTNAME: localhost
       JWT_SECRET: SOMETHING_SUPER_SECRET
       SECURE_CHANNELS: 'true'
   db:

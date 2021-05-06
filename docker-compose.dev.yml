@@ -1,7 +1,7 @@
 version: '3'
 services:
   realtime:
-    image: supabase/realtime:0.7.1
+    image: supabase/realtime:latest
     ports:
       - "4000:4000"
     environment:
@@ -11,7 +11,6 @@ services:
       DB_PASSWORD: postgres
       DB_PORT: 5432
       PORT: 4000
-      HOSTNAME: localhost
       JWT_SECRET: SOMETHING_SUPER_SECRET
       SECURE_CHANNELS: 'true'
     depends_on:
