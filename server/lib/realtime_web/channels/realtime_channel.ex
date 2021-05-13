@@ -3,6 +3,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   require Logger, warn: false
 
   def join("realtime:" <> _topic, _payload, socket) do
+    Map.get(socket, :transport_pid)
+      |> Realtime.SubscribersNotification.register
     {:ok, %{}, socket}
   end
 

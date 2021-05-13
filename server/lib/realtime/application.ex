@@ -59,6 +59,9 @@ defmodule Realtime.Application do
       end
     end
 
+    :ok = :pg2.create(:realtime_transport_pids)
+    :ok = :pg2.create(:realtime_producers_pids)
+
     # List all child processes to be supervised
     children = [
       # Start the endpoint when the application starts
@@ -79,7 +82,9 @@ defmodule Realtime.Application do
         publications: publications,
         slot_name: slot_name,
         wal_position: {"0", "0"}
-      }
+      },
+      Realtime.WebhookProducer,
+      Realtime.WebsocketProducer
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

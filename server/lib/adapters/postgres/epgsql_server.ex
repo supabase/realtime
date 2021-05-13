@@ -20,6 +20,7 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
   require Logger
 
   alias Realtime.Replication
+  alias Realtime.BacklogReplication
   alias Retry.DelayStreams
 
   # 500 milliseconds
@@ -225,11 +226,17 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
            wal_position: {xlog, offset}
          } = state
        ) do
+    
+    module = case Application.get_env(:realtime, :replication_module) do
+      "backlog" -> BacklogReplication
+      _ -> Replication
+    end
+
     case does_publication_exist(state) do
       true ->
         with :ok <- maybe_create_replication_slot(state),
              replication_server_pid when is_pid(replication_server_pid) <-
-               Process.whereis(Replication),
+               Process.whereis(module),
              :ok <-
                :epgsql.start_replication(
                  replication_epgsql_pid,

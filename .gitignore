@@ -40,4 +40,5 @@ _build/
 deps/
 server/_build
 server/deps
+server/backlogs/tmp*
 .DS_Store

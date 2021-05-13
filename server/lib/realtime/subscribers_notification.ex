@@ -1,12 +1,17 @@
 defmodule Realtime.SubscribersNotification do
   require Logger
 
-  alias Realtime.Adapters.Changes.Transaction
+  alias Realtime.Adapters.Changes.{
+    Transaction,
+    BacklogTransaction
+  }
   alias Realtime.Configuration.Configuration
   alias Realtime.ConfigurationManager
   alias RealtimeWeb.RealtimeChannel
 
   @topic "realtime"
+  @subscribes_group :realtime_producers_pids
+  @register_group   :realtime_transport_pids
 
   def notify(%Transaction{changes: changes} = txn) when is_list(changes) do
     {:ok, %Configuration{realtime: realtime_config, webhooks: webhooks_config}} =
@@ -20,7 +25,21 @@ defmodule Realtime.SubscribersNotification do
     :ok
   end
 
-  defp notify_subscribers([_ | _] = changes, [_ | _] = realtime_config) do
+  def subscribe(pid) do
+    :pg2.join(@subscribes_group, pid)
+  end
+
+  def register(pid) do
+    :pg2.join(@register_group, pid)
+  end
+
+  def async_notify(%BacklogTransaction{} = txn) do
+    for pid <- :pg2.get_members(@subscribes_group) do
+      send(pid, {:transaction, txn})
+    end
+  end
+
+  def notify_subscribers([_ | _] = changes, [_ | _] = realtime_config) do
     # For every change in the txn.changes, we want to broadcast it specific listeners
     # Example Change:
     # %Realtime.Adapters.Changes.UpdatedRecord{
@@ -109,7 +128,7 @@ defmodule Realtime.SubscribersNotification do
     end)
   end
 
-  defp notify_subscribers(_txn, _config), do: :ok
+  def notify_subscribers(_txn, _config), do: :ok
 
   defp has_schema(config, schema) do
     # Determines whether the Realtime config has a specific schema relation
