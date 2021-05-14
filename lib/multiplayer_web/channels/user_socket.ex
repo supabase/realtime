@@ -3,6 +3,7 @@ defmodule MultiplayerWeb.UserSocket do
 
   ## Channels
   channel "room:*", MultiplayerWeb.RoomChannel
+  channel "slack_clone:*", MultiplayerWeb.SlackCloneChannel
 
   # Socket params are passed from the client and can
   # be used to verify and authenticate a user. After
