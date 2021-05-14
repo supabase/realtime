@@ -2,6 +2,7 @@ defmodule Realtime.WebsocketProducer do
   use GenServer
   require Logger
 
+  alias Realtime.Adapters.Changes.BacklogTransaction
   alias Realtime.SubscribersNotification
   alias Realtime.ConfigurationManager
   alias Realtime.RecordLog
@@ -12,7 +13,8 @@ defmodule Realtime.WebsocketProducer do
         mq: [],
         rec_cursor: nil,
         config: nil,
-        timer: nil
+        timer: nil,
+        transport_status: {0, nil}
       )
   )
 
@@ -31,7 +33,7 @@ defmodule Realtime.WebsocketProducer do
   end
 
   @impl true
-  def handle_info({:transaction, txn}, %{mq: mq} = state) do
+  def handle_info({:transaction, %BacklogTransaction{} = txn}, %{mq: mq} = state) do
     send(self(), :check_mq)
     {:noreply, %{state | mq: mq ++ [txn]}}
   end
@@ -55,46 +57,59 @@ defmodule Realtime.WebsocketProducer do
     {:noreply, %{state | rec_cursor: nil}}
   end
 
-  def handle_info(:notification, %{rec_cursor: cursor, config: config, timer: ref} = state) do
+  def handle_info(:notification,
+                  %{rec_cursor: cursor, config: config, timer: ref,
+                    transport_status: {prev_check, prev_status}} = state) do
     clear_timer(ref)
-    case transport_status() do
-      :continue -> 
+    # check once per sec
+    status = if now() != prev_check do
+      transport_status()
+    else
+      {prev_check, prev_status}
+    end
+    new_state = case status do
+      {_, :continue} = stat ->
         {changes, next_cursor} = RecordLog.pop_first(cursor, @batch_size)
         SubscribersNotification.notify_subscribers(changes, config)
         send(self(), :notification)
-        {:noreply, %{state | rec_cursor: next_cursor}}
-      :wait -> 
+        %{state | rec_cursor: next_cursor, timer: ref, transport_status: stat}
+      {_, :wait} = stat ->
         Logger.debug("Transaction wait")
         ref = Process.send_after(self(), :notification, @wait_time)
-        {:noreply, %{state | timer: ref}}
-      _ -> 
+        %{state | timer: ref, transport_status: stat}
+      _ ->
         send(self(), :check_mq)
-        {:noreply, %{state | rec_cursor: nil}}
+        %{state | rec_cursor: nil}
     end
+    {:noreply, new_state}
   end
 
   def handle_info(_, state) do
     {:noreply, state}
   end
 
-  @spec transport_status() :: :no_members | :continue | :wait
+  @spec transport_status() :: {pos_integer(), :no_members | :continue | :wait}
   defp transport_status() do
-    case :pg2.get_members(:realtime_transport_pids) do
+    status = case :pg2.get_members(:realtime_transport_pids) do
       [] -> :no_members
       {:error, _} = err -> err
-      pids -> 
-        if max_mbox_len(pids) < @mb_limit do
-          :continue
-        else 
+      pids ->
+        if is_transports_busy?(pids, @mbox_limit) do
           :wait
+        else 
+          :continue
         end
     end
+    {now(), status}
   end
 
-  defp max_mbox_len(pids) do
-    Enum.map(pids, fn pid -> 
-      {_, len} = Process.info(pid, :message_queue_len); len
-    end) |> Enum.max    
+  defp is_transports_busy?(pids, mbox_limit) do
+    Enum.reduce_while(pids, false, fn pid, _ ->
+      case Process.info(pid, :message_queue_len) do
+        {_, len} when len < mbox_limit -> {:cont, false}
+        _ -> {:halt, true}
+      end
+    end)
   end
 
   defp clear_timer(timer) when is_reference(timer) do
@@ -102,5 +117,7 @@ defmodule Realtime.WebsocketProducer do
   end
 
   defp clear_timer(_), do: nil
+
+  defp now(), do: System.system_time(:second)
 
 end

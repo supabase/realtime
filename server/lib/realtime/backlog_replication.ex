@@ -48,6 +48,7 @@ defmodule Realtime.BacklogReplication do
 
   # Begin message
   defp handle_message(<<"B", _::binary-8, _::integer-64, _::integer-32>> = msg, %{transaction: nil} = state) do
+    Logger.debug("Begin message")
     %Begin{
       final_lsn: lsn,
       commit_timestamp: ts
@@ -67,9 +68,9 @@ defmodule Realtime.BacklogReplication do
       curr_rels: rels,
       bin_position: pos
     } = state
-    {:ok, size} = RecordLog.insert(io, msg)
+    {:ok, bin_size} = RecordLog.insert(io, msg)
     new_rels = update_rels(msg, rels)
-    new_pos = calc_position(pos, size)
+    new_pos = calc_position(pos, bin_size)
     %State{state | curr_rels: new_rels, bin_position: new_pos, size: size + 1}
   end
 
@@ -83,6 +84,7 @@ defmodule Realtime.BacklogReplication do
       rotated_num: num,
       log_path: path
     } = state
+    Logger.debug("Commit message")
     decoded = Decoder.decode_message(msg)
     if decoded.lsn != state.transaction.final_lsn do
       Logger.error("Foreign Commit message #{inspect(decoded)}")
@@ -116,8 +118,8 @@ defmodule Realtime.BacklogReplication do
       size: size,
       bin_position: pos
     } = state
-    {:ok, size} = RecordLog.insert(io, msg)
-    new_pos = calc_position(pos, size)
+    {:ok, bin_size} = RecordLog.insert(io, msg)
+    new_pos = calc_position(pos, bin_size)
     %State{state | bin_position: new_pos, size: size + 1}
   end
 

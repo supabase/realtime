@@ -2,6 +2,7 @@ defmodule Realtime.WebhookProducer do
   use GenServer
   require Logger
 
+  alias Realtime.Adapters.Changes.BacklogTransaction
   alias Realtime.SubscribersNotification
   alias Realtime.ConfigurationManager
   alias Realtime.WebhookConnector
@@ -18,11 +19,15 @@ defmodule Realtime.WebhookProducer do
   end
 
   @impl true
-  def handle_info({:transaction, txn}, state) do
-    {:ok, %{webhooks: config}} =
-      ConfigurationManager.get_config()
-    transaction = RecordLog.backlog_to_simple(:list, txn)
-    :ok = WebhookConnector.notify(transaction, config)
+  def handle_info({:transaction, %BacklogTransaction{size: size} = txn}, state) do
+    if size < 10_000 do
+      {:ok, %{webhooks: config}} =
+        ConfigurationManager.get_config()
+      transaction = RecordLog.backlog_to_simple(:list, txn)
+      :ok = WebhookConnector.notify(transaction, config)
+    else
+      Logger.error("Too big transaction for Webhook, size: #{size}")
+    end
     {:noreply, state}
   end
 
