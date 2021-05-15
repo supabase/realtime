@@ -77,7 +77,7 @@ config :realtime,
   backlog_max_files: 5,
   ws_producer_batch_size: 500,
   ws_producer_wait_time: 1000,
-  ws_producer_mbox_limit: 1000
+  ws_producer_mbox_limit: 500
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,
