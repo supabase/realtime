@@ -9,6 +9,11 @@ defmodule MultiplayerWeb.SlackCloneChannel do
   end
 
   @impl true
+  def join("slack_clone:typing_indicator:" <> _slack_channel_id, _params, socket) do
+    {:ok, socket}
+  end
+
+  @impl true
   def handle_info(:after_join, socket) do
     {:ok, _} = Presence.track(socket, socket.assigns.user_id, %{
       user_id: socket.assigns.user_id
@@ -16,6 +21,12 @@ defmodule MultiplayerWeb.SlackCloneChannel do
 
     push(socket, "presence_state", Presence.list(socket))
 
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_in("typing_indicator" = event, payload, socket) do
+    broadcast_from(socket, event, payload)
     {:noreply, socket}
   end
 end
