@@ -22,13 +22,7 @@ defmodule MultiplayerWeb.RoomChannel do
   @impl true
   def handle_in("broadcast" = event, payload, socket) do
     broadcast(socket, event, payload)
-    Presence.update(socket, socket.assigns[:user_id], payload)
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_in("typing_indicator" = event, payload, socket) do
-    broadcast_from(socket, event, payload)
+    Presence.update(socket, socket.assigns.user_id, payload)
     {:noreply, socket}
   end
 end
