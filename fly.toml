@@ -1,6 +1,6 @@
-# fly.toml file generated for long-waterfall-7996 on 2021-05-19T00:27:00-04:00
+# fly.toml file generated for multiplayer-dev on 2021-05-19T00:27:00-04:00
 
-app = "long-waterfall-7996"
+app = "multiplayer-dev"
 
 kill_signal = "SIGTERM"
 kill_timeout = 5

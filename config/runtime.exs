@@ -22,4 +22,17 @@ if config_env() == :prod do
     ],
     check_origin: false,
     secret_key_base: secret_key_base
+
+  config :libcluster,
+    debug: true,
+    topologies: [
+      fly6pn: [
+        strategy: Cluster.Strategy.DNSPoll,
+        config: [
+          polling_interval: 5_000,
+          query: "#{app_name}.internal",
+          node_basename: app_name
+        ]
+      ]
+    ]
 end
