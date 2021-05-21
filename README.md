@@ -62,6 +62,13 @@ A few reasons:
 2. Decoupling. For example, if you want to send a new slack message every time someone makes a new purchase you might build that functionality directly into your API. This allows you to decouple your async functionality from your API.
 3. This is built with Phoenix, an [extremely scalable Elixir framework](https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections).
 
+### Does this server guarentee delivery of every data change?
+
+Not yet! Due to the following limitations:
+
+1. Postgres database runs out of disk space due to Write-Ahead Logging (WAL) buildup, which can crash the database and prevent Realtime server from streaming replication and broadcasting changes.
+2. Realtime server can crash due to a larger replication lag than available memory, forcing the creation of a new replication slot and resetting streaming replication to read from the latest WAL data.
+3. When Realtime server falls too far behind for any reason, for example disconnecting from database as WAL continues to build up, then database can delete WAL segments the server still needs to read from, for example after reconnecting.
 
 ## Quick start
 
