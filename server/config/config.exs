@@ -73,11 +73,9 @@ config :realtime,
   jwt_secret: jwt_secret,
   jwt_claim_validators: jwt_claim_validators,
   replication_module: replication_module,
-  backlog_file_size: 100 * :math.pow(10, 6), # MB
+  backlog_file_size: 1_000_000 * 100, # 100 MB
   backlog_max_files: 5,
-  ws_producer_batch_size: 500,
-  ws_producer_wait_time: 1000,
-  ws_producer_mbox_limit: 500
+  ws_producer_batch_size: 500
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,

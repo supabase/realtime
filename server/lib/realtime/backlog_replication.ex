@@ -37,7 +37,7 @@ defmodule Realtime.BacklogReplication do
   def init(_) do
     num = 1
     {io, path} = rotated_log_file(num)
-    {:ok, %State{io_ref: io, log_path: path, rotated_num: num}}    
+    {:ok, %State{io_ref: io, log_path: path, rotated_num: num}}
   end
 
   @impl true
@@ -96,7 +96,7 @@ defmodule Realtime.BacklogReplication do
         backlog: {path, start, stop},
         init_rels: rels
       }
-      SubscribersNotification.async_notify(txn)
+      SubscribersNotification.notify_async(txn)
       {{new_io, new_path}, new_num} = update_rotated_file(io, path, num)
       %State{
         state |
@@ -129,14 +129,14 @@ defmodule Realtime.BacklogReplication do
   defp update_rels(binary_msg, relations) do
     msg = Decoder.decode_message(binary_msg)
     Map.put(relations, msg.id, msg)
-  end  
+  end
 
   @spec rotated_log_file(pos_integer()) :: {io_device(), Path.t()}
   defp rotated_log_file(rotated_num) do
     {:ok, cwd} = File.cwd()
     path = "#{cwd}/backlogs/tmp.#{rotated_num}"
     {:ok, io} = RecordLog.recreate(path)
-    {io, path}  
+    {io, path}
   end
 
   @spec update_rotated_file(io_device(), Path.t(), pos_integer()) :: {{io_device(), Path.t()}, pos_integer()}
@@ -150,7 +150,7 @@ defmodule Realtime.BacklogReplication do
         else
           {{io, path}, num}
         end
-      {:error, reason} -> 
+      {:error, reason} ->
         Logger.error("File.stat in update_rotated_file: #{inspect(reason)}")
         {{io, path}, num}
     end

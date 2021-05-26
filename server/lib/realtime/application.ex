@@ -59,9 +59,6 @@ defmodule Realtime.Application do
       end
     end
 
-    :ok = :pg2.create(:realtime_transport_pids)
-    :ok = :pg2.create(:realtime_producers_pids)
-
     # List all child processes to be supervised
     children = [
       # Start the endpoint when the application starts

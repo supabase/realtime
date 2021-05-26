@@ -3,9 +3,15 @@ defmodule RealtimeWeb.RealtimeChannel do
   require Logger, warn: false
 
   def join("realtime:" <> _topic, _payload, socket) do
-    Map.get(socket, :transport_pid)
-      |> Realtime.SubscribersNotification.register
     {:ok, %{}, socket}
+  end
+
+  @impl true
+  def handle_call({:txn, txn}, _, socket) do
+    # TODO: should to remove https://github.com/supabase/realtime-js/pull/75
+    push(socket, "*", txn)
+    push(socket, txn.type, txn)
+    {:reply, :ok, socket}
   end
 
   # @doc """
@@ -24,4 +30,19 @@ defmodule RealtimeWeb.RealtimeChannel do
     RealtimeWeb.Endpoint.broadcast_from!(self(), topic, "*", txn)
     RealtimeWeb.Endpoint.broadcast_from!(self(), topic, txn.type, txn)
   end
+
+  def handle_realtime_transaction_sync(topic, txn) do
+    Registry.dispatch(
+      Realtime.PubSub,
+      topic,
+      {__MODULE__, :dispatch_sync, [txn]}
+    )
+  end
+
+  def dispatch_sync(entries, txn) do
+    for {pid, _} <- entries do
+      GenServer.call(pid, {:txn, txn})
+    end
+  end
+
 end
