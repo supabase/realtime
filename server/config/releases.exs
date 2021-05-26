@@ -46,6 +46,16 @@ db_ip_version =
   %{"ipv4" => :inet, "ipv6" => :inet6}
   |> Map.fetch(System.get_env("DB_IP_VERSION", "") |> String.downcase())
 
+# Set Cowboy server idle_timeout value. Set to a larger number, in milliseconds, or "infinity". Default is 60000 (1 minute).
+socket_timeout = case System.get_env("SOCKET_TIMEOUT") do
+  "infinity" -> :infinity
+  timeout -> try do
+    String.to_integer(timeout)
+  rescue
+    ArgumentError -> 60_000
+  end
+end
+
 config :realtime,
   app_port: app_port,
   db_host: db_host,
@@ -60,7 +70,8 @@ config :realtime,
   configuration_file: configuration_file,
   secure_channels: secure_channels,
   jwt_secret: jwt_secret,
-  jwt_claim_validators: jwt_claim_validators
+  jwt_claim_validators: jwt_claim_validators,
+  socket_timeout: socket_timeout
 
 config :realtime, RealtimeWeb.Endpoint,
   http: [:inet6, port: app_port],

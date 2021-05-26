@@ -10,51 +10,60 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     {:ok, socket: socket}
   end
 
-  test "INSERTS are broadcasts to the client" do
-    change = %{
-      schema: "public",
-      table: "users",
-      type: "INSERT"
-    }
+  test "INSERTs are broadcasts to the client" do
+    RealtimeWeb.RealtimeChannel.handle_realtime_transaction(
+      "realtime:*",
+      "INSERT",
+      Jason.encode!(%{
+        schema: "public",
+        table: "users",
+        type: "INSERT"
+      })
+    )
 
-    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
-    assert_push("*", change)
-    assert_push("INSERT", change)
+    assert_push("*", {:binary, "{\"schema\":\"public\",\"table\":\"users\",\"type\":\"INSERT\"}"})
+
+    assert_push(
+      "INSERT",
+      {:binary, "{\"schema\":\"public\",\"table\":\"users\",\"type\":\"INSERT\"}"}
+    )
   end
 
-  test "UPDATES are broadcasts to the client" do
-    change = %{
-      schema: "public",
-      table: "users",
-      type: "UPDATES"
-    }
+  test "UPDATEs are broadcasts to the client" do
+    RealtimeWeb.RealtimeChannel.handle_realtime_transaction(
+      "realtime:*",
+      "UPDATE",
+      Jason.encode!(%{
+        schema: "public",
+        table: "users",
+        type: "UPDATE"
+      })
+    )
 
-    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
-    assert_push("*", change)
-    assert_push("UPDATES", change)
+    assert_push("*", {:binary, "{\"schema\":\"public\",\"table\":\"users\",\"type\":\"UPDATE\"}"})
+
+    assert_push(
+      "UPDATE",
+      {:binary, "{\"schema\":\"public\",\"table\":\"users\",\"type\":\"UPDATE\"}"}
+    )
   end
 
-  test "DELETES are broadcasts to the client" do
-    change = %{
-      schema: "public",
-      table: "users",
-      type: "DELETE"
-    }
+  test "DELETEs are broadcasts to the client" do
+    RealtimeWeb.RealtimeChannel.handle_realtime_transaction(
+      "realtime:*",
+      "DELETE",
+      Jason.encode!(%{
+        schema: "public",
+        table: "users",
+        type: "DELETE"
+      })
+    )
 
-    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
-    assert_push("*", change)
-    assert_push("DELETE", change)
-  end
+    assert_push("*", {:binary, "{\"schema\":\"public\",\"table\":\"users\",\"type\":\"DELETE\"}"})
 
-  test "TRUNCATEs are broadcasted to the client" do
-    change = %{
-      schema: "public",
-      table: "users",
-      type: "TRUNCATE"
-    }
-
-    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
-    assert_push("*", change)
-    assert_push("TRUNCATE", change)
+    assert_push(
+      "DELETE",
+      {:binary, "{\"schema\":\"public\",\"table\":\"users\",\"type\":\"DELETE\"}"}
+    )
   end
 end

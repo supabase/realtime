@@ -1,26 +1,47 @@
 defmodule Realtime.SubscribersNotification do
   require Logger
 
-  alias Realtime.Adapters.Changes.Transaction
+  alias Realtime.Adapters.Changes.{
+    DeletedRecord,
+    NewRecord,
+    Transaction,
+    TruncatedRelation,
+    UpdatedRecord
+  }
+
+  alias Realtime.Replication
   alias Realtime.Configuration.Configuration
   alias Realtime.ConfigurationManager
   alias RealtimeWeb.RealtimeChannel
 
   @topic "realtime"
 
-  def notify(%Transaction{changes: changes} = txn) when is_list(changes) do
-    {:ok, %Configuration{realtime: realtime_config, webhooks: webhooks_config}} =
-      ConfigurationManager.get_config()
+  def notify(%Replication.State{transaction: {_lsn, %Transaction{changes: [_ | _]}}} = state) do
+    {:ok, %Configuration{webhooks: webhooks_config} = config} = ConfigurationManager.get_config()
 
-    :ok = notify_subscribers(changes, realtime_config)
-    :ok = Realtime.WebhookConnector.notify(txn, webhooks_config)
+    :ok =
+      notify_subscribers(state, config)
+      |> Realtime.WebhookConnector.notify(webhooks_config)
   end
 
   def notify(_txn) do
     :ok
   end
 
-  defp notify_subscribers([_ | _] = changes, [_ | _] = realtime_config) do
+  defp notify_subscribers(
+         %Replication.State{
+           relations: relations,
+           transaction:
+             {_lsn,
+              %Transaction{changes: [_ | _] = changes, commit_timestamp: commit_timestamp} =
+                txn_struct}
+         },
+         %Configuration{
+           realtime: realtime_config,
+           webhooks: webhooks_config
+         }
+       )
+       when is_map(relations) and is_list(realtime_config) and is_list(webhooks_config) do
     # For every change in the txn.changes, we want to broadcast it specific listeners
     # Example Change:
     # %Realtime.Adapters.Changes.UpdatedRecord{
@@ -36,80 +57,176 @@ defmodule Realtime.SubscribersNotification do
     #   type: "UPDATE"
     # }
 
-    Enum.each(changes, fn change ->
-      case change do
-        %{schema: schema, table: table, type: type}
-        when is_binary(schema) and is_binary(table) and is_binary(type) ->
-          schema_topic = [@topic, ":", schema] |> IO.iodata_to_binary()
-          table_topic = [schema_topic, ":", table] |> IO.iodata_to_binary()
+    %{
+      txn_struct
+      | changes:
+          apply(Enum, enum_strategy(webhooks_config), [
+            changes,
+            fn change_record ->
+              {relation_id, _type, _tuple_data, _old_tuple_data} = change_record
+              relation = Map.fetch!(relations, relation_id)
 
-          # Get only the config which includes this event type (INSERT | UPDATE | DELETE | TRUNCATE)
-          event_config =
-            Enum.filter(realtime_config, fn config ->
-              case config do
-                %Realtime.Configuration.Realtime{events: [_ | _] = events} -> type in events
-                _ -> false
+              transformed_record = transform_record(change_record, relation, commit_timestamp)
+              encoded_record = Jason.encode!(transformed_record)
+
+              %{schema: schema, table: table, type: record_type} = transformed_record
+
+              schema_topic = [@topic, ":", schema] |> IO.iodata_to_binary()
+              table_topic = [schema_topic, ":", table] |> IO.iodata_to_binary()
+
+              # Get only the config which includes this event type (INSERT | UPDATE | DELETE | TRUNCATE)
+              event_config =
+                Enum.filter(realtime_config, fn config ->
+                  case config do
+                    %Realtime.Configuration.Realtime{events: [_ | _] = events} ->
+                      record_type in events
+
+                    _ ->
+                      false
+                  end
+                end)
+
+              # Shout to specific schema - e.g. "realtime:public"
+              if has_schema(event_config, schema) do
+                RealtimeChannel.handle_realtime_transaction(
+                  schema_topic,
+                  record_type,
+                  encoded_record
+                )
               end
-            end)
 
-          # Shout to specific schema - e.g. "realtime:public"
-          if has_schema(event_config, schema) do
-            RealtimeChannel.handle_realtime_transaction(schema_topic, change)
-          end
+              # Special case for notifiying "*"
+              if has_schema(event_config, "*") do
+                [@topic, ":*"]
+                |> IO.iodata_to_binary()
+                |> RealtimeChannel.handle_realtime_transaction(record_type, encoded_record)
+              end
 
-          # Special case for notifiying "*"
-          if has_schema(event_config, "*") do
-            [@topic, ":*"]
-            |> IO.iodata_to_binary()
-            |> RealtimeChannel.handle_realtime_transaction(change)
-          end
+              # Shout to specific table - e.g. "realtime:public:users"
+              if has_table(event_config, schema, table) do
+                RealtimeChannel.handle_realtime_transaction(
+                  table_topic,
+                  record_type,
+                  encoded_record
+                )
+              end
 
-          # Shout to specific table - e.g. "realtime:public:users"
-          if has_table(event_config, schema, table) do
-            RealtimeChannel.handle_realtime_transaction(table_topic, change)
-          end
+              # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
+              case record_type do
+                type when type in ["INSERT", "UPDATE"] ->
+                  record = Map.get(transformed_record, :record)
 
-          # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
-          case type do
-            type when type in ["INSERT", "UPDATE"] ->
-              record = Map.get(change, :record)
+                  is_map(record) &&
+                    Enum.each(record, fn {k, v} ->
+                      should_notify_column = has_column(event_config, schema, table, k)
 
-              is_map(record) &&
-                Enum.each(record, fn {k, v} ->
-                  should_notify_column = has_column(event_config, schema, table, k)
+                      if is_valid_notification_key(v) and should_notify_column do
+                        [table_topic, ":", k, "=eq.", v]
+                        |> IO.iodata_to_binary()
+                        |> RealtimeChannel.handle_realtime_transaction(
+                          record_type,
+                          encoded_record
+                        )
+                      end
+                    end)
 
-                  if is_valid_notification_key(v) and should_notify_column do
-                    [table_topic, ":", k, "=eq.", v]
-                    |> IO.iodata_to_binary()
-                    |> RealtimeChannel.handle_realtime_transaction(change)
-                  end
-                end)
+                "DELETE" ->
+                  old_record = Map.get(transformed_record, :old_record)
 
-            "DELETE" ->
-              old_record = Map.get(change, :old_record)
+                  is_map(old_record) &&
+                    Enum.each(old_record, fn {k, v} ->
+                      should_notify_column = has_column(event_config, schema, table, k)
 
-              is_map(old_record) &&
-                Enum.each(old_record, fn {k, v} ->
-                  should_notify_column = has_column(event_config, schema, table, k)
+                      if is_valid_notification_key(v) and should_notify_column do
+                        [table_topic, ":", k, "=eq.", v]
+                        |> IO.iodata_to_binary()
+                        |> RealtimeChannel.handle_realtime_transaction(
+                          record_type,
+                          encoded_record
+                        )
+                      end
+                    end)
 
-                  if is_valid_notification_key(v) and should_notify_column do
-                    [table_topic, ":", k, "=eq.", v]
-                    |> IO.iodata_to_binary()
-                    |> RealtimeChannel.handle_realtime_transaction(change)
-                  end
-                end)
+                "TRUNCATE" ->
+                  nil
+              end
 
-            "TRUNCATE" ->
-              nil
-          end
-
-        _ ->
-          nil
-      end
-    end)
+              transformed_record
+            end
+          ])
+    }
   end
 
   defp notify_subscribers(_txn, _config), do: :ok
+
+  defp enum_strategy([_ | _]) do
+    :map
+  end
+
+  defp enum_strategy(_) do
+    :each
+  end
+
+  defp transform_record(
+         {_relation_id, "INSERT" = insert, tuple_data, nil},
+         %{columns: columns, namespace: namespace, name: name},
+         commit_timestamp
+       ) do
+    %NewRecord{
+      type: insert,
+      schema: namespace,
+      table: name,
+      columns: columns,
+      record: Replication.data_tuple_to_map(columns, tuple_data),
+      commit_timestamp: commit_timestamp
+    }
+  end
+
+  defp transform_record(
+         {_relation_id, "UPDATE" = update, tuple_data, old_tuple_data},
+         %{columns: columns, namespace: namespace, name: name},
+         commit_timestamp
+       ) do
+    %UpdatedRecord{
+      type: update,
+      schema: namespace,
+      table: name,
+      columns: columns,
+      old_record: Replication.data_tuple_to_map(columns, old_tuple_data),
+      record: Replication.data_tuple_to_map(columns, tuple_data),
+      commit_timestamp: commit_timestamp
+    }
+  end
+
+  defp transform_record(
+         {_relation_id, "DELETE" = delete, nil, old_tuple_data},
+         %{columns: columns, namespace: namespace, name: name},
+         commit_timestamp
+       ) do
+    %DeletedRecord{
+      type: delete,
+      schema: namespace,
+      table: name,
+      columns: columns,
+      old_record: Realtime.Replication.data_tuple_to_map(columns, old_tuple_data),
+      commit_timestamp: commit_timestamp
+    }
+  end
+
+  defp transform_record(
+         {_relation_id, "TRUNCATE" = truncate, nil, nil},
+         %{namespace: namespace, name: name},
+         commit_timestamp
+       ) do
+    %TruncatedRelation{
+      type: truncate,
+      schema: namespace,
+      table: name,
+      commit_timestamp: commit_timestamp
+    }
+  end
+
+  defp transform_record(change_record, _relation, _commit_timestamp), do: change_record
 
   defp has_schema(config, schema) do
     # Determines whether the Realtime config has a specific schema relation
