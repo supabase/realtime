@@ -75,7 +75,9 @@ config :realtime,
   replication_module: replication_module,
   backlog_file_size: 1_000_000 * 100, # 100 MB
   backlog_max_files: 5,
-  ws_producer_batch_size: 500
+  ws_producer_batch_size: 500,
+  ws_wait_time: 100,
+  ws_mbox_limit: 100
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,

@@ -55,7 +55,12 @@ defmodule Realtime.WebsocketProducer do
 
   def handle_info(:notification, %{rec_cursor: cursor, config: config} = state) do
     {changes, next_cursor} = RecordLog.pop_first(cursor, @batch_size)
-    SubscribersNotification.notify_subscribers(changes, config)
+    try do
+      SubscribersNotification.notify_subscribers(changes, config)
+    catch
+      error, reason ->
+        Logger.error("Failed notify_subscribers: #{inspect(error)}, #{inspect(reason)}")
+    end
     send(self(), :notification)
     {:noreply, %{state | rec_cursor: next_cursor}}
   end
