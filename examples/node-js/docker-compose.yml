@@ -13,8 +13,9 @@ services:
       DB_PASSWORD: postgres
       DB_PORT: 5432
       PORT: 4000
-      JWT_SECRET: SOMETHING_SUPER_SECRET
       SECURE_CHANNELS: 'false'
+    depends_on:
+      - db
   db:
     image: supabase/postgres
     ports:
@@ -27,4 +28,3 @@ services:
     - wal_level=logical
     environment: 
       POSTGRES_PASSWORD: postgres
-  
