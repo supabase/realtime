@@ -53,6 +53,8 @@ db_ip_version =
   %{"ipv4" => :inet, "ipv6" => :inet6}
   |> Map.fetch(System.get_env("DB_IP_VERSION", "") |> String.downcase())
 
+replication_module = System.get_env("REPLICATION", "backlog")
+
 config :realtime,
   app_port: app_port,
   db_host: db_host,
@@ -67,7 +69,13 @@ config :realtime,
   configuration_file: configuration_file,
   secure_channels: secure_channels,
   jwt_secret: jwt_secret,
-  jwt_claim_validators: jwt_claim_validators
+  jwt_claim_validators: jwt_claim_validators,
+  replication_module: replication_module,
+  backlog_file_size: 1_000_000 * 100, # 100 MB
+  backlog_max_files: 5,
+  ws_producer_batch_size: 500,
+  ws_wait_time: 100,
+  ws_mbox_limit: 100
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,

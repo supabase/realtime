@@ -22,7 +22,7 @@ defmodule Realtime.MixProject do
   def application do
     [
       mod: {Realtime.Application, []},
-      extra_applications: [:logger, :runtime_tools, :httpoison]
+      extra_applications: [:logger, :runtime_tools, :httpoison, :syn]
     ]
   end
 
@@ -47,6 +47,7 @@ defmodule Realtime.MixProject do
       {:epgsql, "~> 4.5"},
       {:timex, "~> 3.0"},
       {:retry, "~> 0.14.1"},
+      {:syn, "~> 2.1"},
       {:mock, "~> 0.3.0", only: :test}
     ]
   end

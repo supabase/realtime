@@ -6,6 +6,15 @@ require Protocol
 defmodule Realtime.Adapters.Changes do
   defmodule(Transaction, do: defstruct([:changes, :commit_timestamp]))
 
+  defmodule(BacklogTransaction, do: defstruct([
+    :changes,
+    :commit_timestamp,
+    :final_lsn,
+    :backlog,
+    :init_rels,
+    :size
+  ]))
+
   defmodule(NewRecord,
     do: defstruct([:type, :record, :schema, :table, :columns, :commit_timestamp])
   )

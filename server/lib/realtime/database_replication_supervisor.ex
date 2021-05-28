@@ -3,6 +3,7 @@ defmodule Realtime.DatabaseReplicationSupervisor do
 
   alias Realtime.Adapters.Postgres.EpgsqlServer
   alias Realtime.Replication
+  alias Realtime.BacklogReplication
 
   def start_link(config) do
     Supervisor.start_link(__MODULE__, config, name: __MODULE__)
@@ -12,6 +13,7 @@ defmodule Realtime.DatabaseReplicationSupervisor do
   def init(config) do
     children = [
       Replication,
+      BacklogReplication,
       {EpgsqlServer, config}
     ]
 
