@@ -21,6 +21,8 @@ defmodule Realtime.Application do
     # `select * from pg_replication_slots`
     slot_name = Application.get_env(:realtime, :slot_name)
 
+    max_replication_lag_in_mb = Application.fetch_env!(:realtime, :max_replication_lag_in_mb)
+
     publications = Application.get_env(:realtime, :publications) |> Jason.decode!()
 
     epgsql_params = %{
@@ -78,7 +80,8 @@ defmodule Realtime.Application do
         epgsql_params: epgsql_params,
         publications: publications,
         slot_name: slot_name,
-        wal_position: {"0", "0"}
+        wal_position: {"0", "0"},
+        max_replication_lag_in_mb: max_replication_lag_in_mb
       }
     ]
 
