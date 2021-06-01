@@ -7,6 +7,7 @@ defmodule Realtime.BacklogReplication do
   alias Realtime.Adapters.Postgres.Decoder
   alias Realtime.SubscribersNotification
   alias Realtime.RecordLog
+  alias Realtime.Adapters.Postgres.EpgsqlServer
 
   @type io_device() :: :file.io_device()
 
@@ -86,6 +87,7 @@ defmodule Realtime.BacklogReplication do
     } = state
     Logger.debug("Commit message")
     decoded = Decoder.decode_message(msg)
+    :ok = EpgsqlServer.acknowledge_lsn(decoded.end_lsn)
     if decoded.lsn != state.transaction.final_lsn do
       Logger.error("Foreign Commit message #{inspect(decoded)}")
       state
