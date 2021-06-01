@@ -8,10 +8,11 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
         epgsql_params: nil,
         delays: [0],
         publication_name: nil,
-        replication_epgsql_pid: nil,
-        select_epgsql_pid: nil,
+        epgsql_replication_pid: nil,
+        epgsql_select_pid: nil,
         slot_config: nil,
-        wal_position: nil
+        wal_position: nil,
+        max_replication_lag_in_mb: 0
       )
   )
 
@@ -42,16 +43,18 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
         epgsql_params: epgsql_params,
         publications: publications,
         slot_name: slot_name,
-        wal_position: {xlog, offset} = wal_position
+        wal_position: {xlog, offset} = wal_position,
+        max_replication_lag_in_mb: max_replication_lag_in_mb
       )
       when is_map(epgsql_params) and is_list(publications) and
              (is_binary(slot_name) or is_atom(slot_name)) and is_binary(xlog) and
-             is_binary(offset) do
+             is_binary(offset) and is_number(max_replication_lag_in_mb) do
     Process.flag(:trap_exit, true)
 
     state = %State{
       epgsql_params: epgsql_params,
-      wal_position: wal_position
+      wal_position: wal_position,
+      max_replication_lag_in_mb: max_replication_lag_in_mb
     }
 
     with publication_name when is_binary(publication_name) <-
@@ -82,25 +85,35 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
       Enum.map([epgsql_replication_config, epgsql_select_config], fn epgsql_config ->
         case :epgsql.connect(epgsql_config) do
           {:ok, epgsql_pid} -> epgsql_pid
-          {:error, error} -> error
+          {:error, _} -> nil
         end
       end)
 
-    [replication_epgsql_pid, select_epgsql_pid] = epgsql_pids
-
-    updated_state = %{
-      state
-      | replication_epgsql_pid: replication_epgsql_pid,
-        select_epgsql_pid: select_epgsql_pid
-    }
+    [epgsql_replication_pid, epgsql_select_pid] = epgsql_pids
 
     with true <- Enum.all?(epgsql_pids, &is_pid(&1)),
+         updated_state <- %{
+           state
+           | epgsql_replication_pid: epgsql_replication_pid,
+             epgsql_select_pid: epgsql_select_pid
+         },
+         :ok <- check_replication_lag_size(updated_state),
          {:ok, updated_state} <- start_replication(updated_state) do
       {:noreply, updated_state}
     else
+      {:error, :replication_lag_exceeds_set_limit} = error ->
+        is_pid(epgsql_replication_pid) && :epgsql.close(epgsql_replication_pid)
+
+        is_pid(epgsql_select_pid) &&
+          maybe_drop_replication_slot(%{state | epgsql_select_pid: epgsql_select_pid}) &&
+          :epgsql.close(epgsql_select_pid)
+
+        {:stop, error, state}
+
       error ->
-        :ok = Enum.each(epgsql_pids, &(is_pid(&1) && :epgsql.close(&1)))
-        {:stop, error, updated_state}
+        Enum.each(epgsql_pids, &(is_pid(&1) && :epgsql.close(&1)))
+
+        {:stop, error, state}
     end
   end
 
@@ -108,13 +121,13 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
   def handle_call(
         {:ack_lsn, {xlog, offset}},
         _from,
-        %{replication_epgsql_pid: replication_epgsql_pid} = state
+        %{epgsql_replication_pid: epgsql_replication_pid} = state
       )
       when is_integer(xlog) and is_integer(offset) do
     with <<last_processed_lsn::integer-64>> <- <<xlog::integer-32, offset::integer-32>>,
          :ok <-
            :epgsql.standby_status_update(
-             replication_epgsql_pid,
+             epgsql_replication_pid,
              last_processed_lsn,
              last_processed_lsn
            ) do
@@ -131,8 +144,8 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
   def handle_info(
         :start_replication,
         %State{
-          replication_epgsql_pid: replication_epgsql_pid,
-          select_epgsql_pid: select_epgsql_pid
+          epgsql_replication_pid: epgsql_replication_pid,
+          epgsql_select_pid: epgsql_select_pid
         } = state
       ) do
     case start_replication(state) do
@@ -140,8 +153,8 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
         {:noreply, updated_state}
 
       {:error, error} ->
-        :ok = :epgsql.close(replication_epgsql_pid)
-        :ok = :epgsql.close(select_epgsql_pid)
+        :epgsql.close(epgsql_replication_pid)
+        :epgsql.close(epgsql_select_pid)
         {:stop, error, state}
     end
   end
@@ -159,13 +172,13 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
              where: _where_msg
            ]}}} = msg,
         %{
-          replication_epgsql_pid: replication_epgsql_pid,
-          select_epgsql_pid: select_epgsql_pid
+          epgsql_replication_pid: epgsql_replication_pid,
+          epgsql_select_pid: epgsql_select_pid
         } = state
       ) do
-    :ok = :epgsql.close(replication_epgsql_pid)
-    :ok = maybe_drop_replication_slot(state)
-    :ok = :epgsql.close(select_epgsql_pid)
+    :epgsql.close(epgsql_replication_pid)
+    maybe_drop_replication_slot(state)
+    :epgsql.close(epgsql_select_pid)
 
     {:stop, msg, state}
   end
@@ -191,24 +204,24 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
           {:error, :error, "58P01", :undefined_file, error_msg,
            [file: "walsender.c", line: _line, routine: "XLogRead", severity: "ERROR"]}}} = msg,
         %{
-          replication_epgsql_pid: replication_epgsql_pid,
-          select_epgsql_pid: select_epgsql_pid
+          epgsql_replication_pid: epgsql_replication_pid,
+          epgsql_select_pid: epgsql_select_pid
         } = state
       )
       when is_binary(error_msg) do
-    :ok = :epgsql.close(replication_epgsql_pid)
+    :epgsql.close(epgsql_replication_pid)
 
     stop_msg =
       case String.split(error_msg) do
         ["requested", "WAL", "segment", _, "has", "already", "been", "removed"] ->
-          :ok = maybe_drop_replication_slot(state)
+          maybe_drop_replication_slot(state)
           {:error, {error_msg, :replication_slot_dropped}}
 
         _ ->
           msg
       end
 
-    :ok = :epgsql.close(select_epgsql_pid)
+    :epgsql.close(epgsql_select_pid)
 
     {:stop, stop_msg, state}
   end
@@ -217,14 +230,48 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
   def handle_info(
         msg,
         %{
-          replication_epgsql_pid: replication_epgsql_pid,
-          select_epgsql_pid: select_epgsql_pid
+          epgsql_replication_pid: epgsql_replication_pid,
+          epgsql_select_pid: epgsql_select_pid
         } = state
       ) do
-    :ok = :epgsql.close(replication_epgsql_pid)
-    :ok = :epgsql.close(select_epgsql_pid)
+    :epgsql.close(epgsql_replication_pid)
+    :epgsql.close(epgsql_select_pid)
     {:stop, msg, state}
   end
+
+  defp check_replication_lag_size(%State{
+         epgsql_select_pid: epgsql_select_pid,
+         max_replication_lag_in_mb: max_replication_lag_in_mb,
+         slot_config: {expected_slot_name, _}
+       })
+       when is_pid(epgsql_select_pid) and max_replication_lag_in_mb > 0 do
+    case :epgsql.squery(
+           epgsql_select_pid,
+           "SELECT slot_name, pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) FROM pg_replication_slots"
+         ) do
+      {:ok, _, results} ->
+        case Enum.find(results, fn {slot_name, _} -> slot_name == expected_slot_name end) do
+          nil ->
+            :ok
+
+          {_, lag_in_bytes} ->
+            if String.to_integer(lag_in_bytes) / 1_000_000 <= max_replication_lag_in_mb do
+              :ok
+            else
+              {:error, :replication_lag_exceeds_set_limit}
+            end
+        end
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  defp check_replication_lag_size(%State{max_replication_lag_in_mb: max_replication_lag_in_mb})
+       when max_replication_lag_in_mb == 0,
+       do: :ok
+
+  defp check_replication_lag_size(_), do: {:error, :check_replication_lag_size_error}
 
   defp generate_publication_name(publications) when is_list(publications) do
     with true <- Enum.all?(publications, fn pub -> is_binary(pub) end),
@@ -263,7 +310,7 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
   defp start_replication(
          %State{
            publication_name: publication_name,
-           replication_epgsql_pid: replication_epgsql_pid,
+           epgsql_replication_pid: epgsql_replication_pid,
            slot_config: {slot_name, _command},
            wal_position: {xlog, offset}
          } = state
@@ -275,7 +322,7 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
                Process.whereis(Replication),
              :ok <-
                :epgsql.start_replication(
-                 replication_epgsql_pid,
+                 epgsql_replication_pid,
                  slot_name,
                  replication_server_pid,
                  [],
@@ -288,7 +335,7 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
         end
 
       false ->
-        :ok = maybe_drop_replication_slot(state)
+        maybe_drop_replication_slot(state)
         {delay, updated_state} = get_delay(state)
         Process.send_after(__MODULE__, :start_replication, delay)
         {:ok, updated_state}
@@ -318,7 +365,7 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
 
   defp maybe_create_replication_slot(
          %State{
-           replication_epgsql_pid: replication_epgsql_pid,
+           epgsql_replication_pid: epgsql_replication_pid,
            slot_config: {_slot_name, create_replication_command}
          } = state
        ) do
@@ -327,7 +374,7 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
         :ok
 
       false ->
-        case :epgsql.squery(replication_epgsql_pid, create_replication_command) do
+        case :epgsql.squery(epgsql_replication_pid, create_replication_command) do
           {:ok, _, _} -> :ok
           {:error, error} -> {:error, error}
         end
@@ -338,13 +385,13 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
   end
 
   defp maybe_drop_replication_slot(%State{
-         select_epgsql_pid: select_epgsql_pid,
+         epgsql_select_pid: epgsql_select_pid,
          slot_config: {slot_name, _command}
        }) do
     drop_replication_slot_command =
       ["SELECT pg_drop_replication_slot('", slot_name, "')"] |> IO.iodata_to_binary()
 
-    case :epgsql.squery(select_epgsql_pid, drop_replication_slot_command) do
+    case :epgsql.squery(epgsql_select_pid, drop_replication_slot_command) do
       {:ok, _, _} -> :ok
       {:error, _error} -> :ok
     end
@@ -352,13 +399,13 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
 
   defp does_publication_exist(%State{
          publication_name: publication_name,
-         select_epgsql_pid: select_epgsql_pid
+         epgsql_select_pid: epgsql_select_pid
        }) do
     publication_query =
       ["SELECT COUNT(*) = 1 FROM pg_publication WHERE pubname = '", publication_name, "'"]
       |> IO.iodata_to_binary()
 
-    case :epgsql.squery(select_epgsql_pid, publication_query) do
+    case :epgsql.squery(epgsql_select_pid, publication_query) do
       {:ok, _, [{"t"}]} -> true
       {:ok, _, [{"f"}]} -> false
       {:error, error} -> {:error, error}
@@ -366,14 +413,14 @@ defmodule Realtime.Adapters.Postgres.EpgsqlServer do
   end
 
   defp does_replication_slot_exist(%State{
-         select_epgsql_pid: select_epgsql_pid,
+         epgsql_select_pid: epgsql_select_pid,
          slot_config: {slot_name, _command}
        }) do
     replication_slot_query =
       ["SELECT COUNT(*) >= 1 FROM pg_replication_slots WHERE slot_name = '", slot_name, "'"]
       |> IO.iodata_to_binary()
 
-    case :epgsql.squery(select_epgsql_pid, replication_slot_query) do
+    case :epgsql.squery(epgsql_select_pid, replication_slot_query) do
       {:ok, _, [{"t"}]} -> true
       {:ok, _, [{"f"}]} -> false
       {:error, error} -> {:error, error}
