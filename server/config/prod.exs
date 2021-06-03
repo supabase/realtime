@@ -10,6 +10,7 @@ use Mix.Config
 # which you should run after static files are built and
 # before starting your production server.
 config :realtime, RealtimeWeb.Endpoint,
+  check_origin: false,
   load_from_system_env: true,
   server: true
 
