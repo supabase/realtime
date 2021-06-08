@@ -242,6 +242,7 @@ Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
 
 **Production**: Channels are secure by default and you must set JWT_SECRET. Set SECURE_CHANNELS to `false` to proceed without checking authorization.
 
+**Authorizing Client Connection**: You can pass in the JWT by following the instructions under **Usage** in the [@supabase/realtime-js](https://github.com/supabase/realtime-js) client library or as query param in the WebSocket URL (e.g. `wss://abc.supabase.co/realtime/v1/websocket?vsn=1.0.0&apikey=jwt`).
 
 ## License
 
