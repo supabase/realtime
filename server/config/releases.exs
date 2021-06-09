@@ -18,6 +18,14 @@ configuration_file = System.get_env("CONFIGURATION_FILE")
 # then replication slot named SLOT_NAME (e.g. "realtime") will be dropped and Realtime will
 # restart with a new slot.
 max_replication_lag_in_mb = String.to_integer(System.get_env("MAX_REPLICATION_LAG_MB", "0"))
+# Workflows database connection settings
+workflows_db_host = System.get_env("WORKFLOWS_DB_HOST", db_host)
+workflows_db_port = String.to_integer(System.get_env("WORKFLOWS_DB_PORT", inspect db_port))
+workflows_db_name = System.get_env("WORKFLOWS_DB_NAME", db_name)
+workflows_db_user = System.get_env("WORKFLOWS_DB_USER", db_user)
+workflows_db_password = System.get_env("WORKFLOWS_DB_PASSWORD", db_password)
+workflows_db_schema = System.get_env("WORKFLOWS_DB_SCHEMA", "public")
+workflows_db_ssl = System.get_env("WORKFLOWS_DB_SSL", inspect db_ssl) === "true"
 
 # Channels are not secured by default in development and
 # are secured by default in production.
@@ -51,6 +59,16 @@ db_ip_version =
   %{"ipv4" => :inet, "ipv6" => :inet6}
   |> Map.fetch(System.get_env("DB_IP_VERSION", "") |> String.downcase())
 
+# Set Cowboy server idle_timeout value. Set to a larger number, in milliseconds, or "infinity". Default is 60000 (1 minute).
+socket_timeout = case System.get_env("SOCKET_TIMEOUT") do
+  "infinity" -> :infinity
+  timeout -> try do
+    String.to_integer(timeout)
+  rescue
+    ArgumentError -> 60_000
+  end
+end
+
 config :realtime,
   app_port: app_port,
   db_host: db_host,
@@ -63,10 +81,18 @@ config :realtime,
   publications: publications,
   slot_name: slot_name,
   configuration_file: configuration_file,
+  workflows_db_host: workflows_db_host,
+  workflows_db_port: workflows_db_port,
+  workflows_db_name: workflows_db_name,
+  workflows_db_user: workflows_db_user,
+  workflows_db_password: workflows_db_password,
+  workflows_db_schema: workflows_db_schema,
+  workflows_db_ssl: workflows_db_ssl,
   secure_channels: secure_channels,
   jwt_secret: jwt_secret,
   jwt_claim_validators: jwt_claim_validators,
-  max_replication_lag_in_mb: max_replication_lag_in_mb
+  max_replication_lag_in_mb: max_replication_lag_in_mb,
+  socket_timeout: socket_timeout
 
 config :realtime, RealtimeWeb.Endpoint,
   http: [:inet6, port: app_port],

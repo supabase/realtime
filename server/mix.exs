@@ -12,7 +12,8 @@ defmodule Realtime.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix, :gettext] ++ Mix.compilers(),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      aliases: aliases()
     ]
   end
 
@@ -45,9 +46,20 @@ defmodule Realtime.MixProject do
       {:joken, "~> 2.3.0"},
       {:plug_cowboy, "~> 2.4"},
       {:epgsql, "~> 4.5"},
+      {:ecto_sql, "~> 3.4"},
+      {:postgrex, "~> 0.15.8"},
       {:timex, "~> 3.0"},
       {:retry, "~> 0.14.1"},
+      {:workflows, "~> 0.2.0"},
+      {:oban, "~> 2.6"},
+      {:eventstore, "~> 1.2"},
       {:mock, "~> 0.3.0", only: :test}
+    ]
+  end
+
+  defp aliases do
+    [
+      test: ["ecto.create --quiet", "ecto.migrate", "test"]
     ]
   end
 end
