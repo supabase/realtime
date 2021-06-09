@@ -85,7 +85,7 @@ defmodule Realtime.Application do
         slot_name: slot_name,
         wal_position: {"0", "0"},
         max_replication_lag_in_mb: max_replication_lag_in_mb
-      }
+      },
       Realtime.Workflows.Manager,
       Realtime.Interpreter.PersistentManager,
       Realtime.Interpreter.Supervisor,
