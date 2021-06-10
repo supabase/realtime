@@ -16,8 +16,15 @@ defmodule Realtime.Interpreter.Transient do
 
   alias Workflows.{Command, Event}
 
+  alias Realtime.Interpreter.{
+    EventHelper,
+    HandleWaitStartedWorker,
+    HandleTaskStartedWorker,
+    ResourceHandler
+  }
+
   defmodule State do
-    defstruct [:workflow, :execution, :events, :reply_to]
+    defstruct [:workflow, :execution, :execution_id, :events, :reply_to]
   end
 
   def start_link(config) do
@@ -33,6 +40,7 @@ defmodule Realtime.Interpreter.Transient do
     state = %State{
       workflow: workflow,
       execution: nil,
+      execution_id: ctx.execution_id,
       events: [],
       reply_to: reply_to
     }
@@ -52,14 +60,17 @@ defmodule Realtime.Interpreter.Transient do
   end
 
   @impl true
-  def handle_cast(:process_next_event, %State{execution: execution, events: events} = state) do
+  def handle_cast(
+        :process_next_event,
+        %State{execution_id: execution_id, events: events} = state
+      ) do
     case events do
       [] ->
         # Finished processing all events, wait for side effects to complete
         {:noreply, state}
 
       [event | events] ->
-        :ok = execute_event_side_effect(event)
+        :ok = execute_event_side_effect(event, execution_id)
         {:noreply, %State{state | events: events}, {:continue, :continue_process_events}}
     end
   end
@@ -85,7 +96,7 @@ defmodule Realtime.Interpreter.Transient do
     GenServer.cast(self(), :process_next_event)
   end
 
-  defp execute_event_side_effect(%Event.WaitStarted{} = event) do
+  defp execute_event_side_effect(%Event.WaitStarted{} = event, execution_id) do
     duration =
       case event.wait do
         {:seconds, seconds} when is_integer(seconds) and seconds > 0 ->
@@ -102,18 +113,19 @@ defmodule Realtime.Interpreter.Transient do
     :ok
   end
 
-  defp execute_event_side_effect(%Event.TaskStarted{} = event) do
+  defp execute_event_side_effect(%Event.TaskStarted{} = event, execution_id) do
     server_pid = self()
 
     Task.start(fn ->
-      # TODO: execute task
+      # TODO: what to do in case of error?
+      res = handle_event(event, execution_id)
       send(server_pid, {:complete_task, event, %{}})
     end)
 
     :ok
   end
 
-  defp execute_event_side_effect(_event) do
+  defp execute_event_side_effect(_event, _execution_id) do
     :ok
   end
 
@@ -124,14 +136,37 @@ defmodule Realtime.Interpreter.Transient do
         events: state.events ++ events
     }
 
+    Logger.info("continue HERE")
+
     {:noreply, new_state, {:continue, :continue_process_events}}
   end
 
   defp continue_with_result({:succeed, result, events}, state) do
+    Logger.info("Execution terminated with result #{inspect(result)} #{inspect(self())}")
+
     if is_pid(state.reply_to) do
       send(state.reply_to, {:succeed, result})
     end
 
     {:stop, :normal, state}
+  end
+
+  defp handle_event(%Event.TaskStarted{} = event, execution_id) do
+    # TODO: Do we need Oban backing for transient workflows? Might be good for tracking failures
+
+    ctx = %{}
+
+    case ResourceHandler.handle_resource(event.resource, ctx, event.args) do
+      {:ok, result} ->
+        Command.complete_task(event, result)
+
+      {:error, err} ->
+        Logger.error("Error while handling resource: #{inspect(event)} #{inspect(err)}")
+        :ok
+    end
+  end
+
+  defp handle_event(_event, _execution_id) do
+    :ok
   end
 end

@@ -25,9 +25,12 @@ defmodule Realtime.Resource.Http do
     resource == "http"
   end
 
-  def handle(resource, _ctx, args) do
-    Logger.info("Calling http resource #{inspect resource} with args #{inspect args}")
-    # TODO: implement http call
-    {:ok, %{}}
+  # TODO: make this better
+  def handle(resource, ctx, args) do
+    Logger.info("Calling http resource #{inspect(resource)} with args #{inspect(args)}")
+
+    headers = [{"Content-Type", "application/json"}]
+    %{"method" => _method, "url" => url} = args
+    HTTPoison.get(url, headers)
   end
 end
