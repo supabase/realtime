@@ -171,7 +171,6 @@ defmodule Realtime.Workflows do
     end
   end
 
-
   @doc """
   Create and start the execution of all workflows that are triggered by `txn`.
   """
@@ -181,15 +180,21 @@ defmodule Realtime.Workflows do
     txn_as_map = Map.from_struct(txn)
 
     attrs = %{
-      arguments: txn_as_map,
+      arguments: txn_as_map
     }
 
     Enum.each(workflows, fn workflow ->
-      with {:ok, %{execution: execution, revision: revision}} <- create_workflow_execution(workflow.id, attrs) do
-	# TODO: should be based on default execution type
-	{:ok, _pid} = Interpreter.start_persistent(workflow, execution, revision)
+      with {:ok, %{execution: execution, revision: revision}} <-
+             create_workflow_execution(workflow.id, attrs) do
+        # Start either the transient or persistent workflow
+        {:ok, _pid} =
+          case workflow.default_execution_type do
+            :transient -> Interpreter.start_transient(workflow, execution, revision)
+            :persistent -> Interpreter.start_persistent(workflow, execution, revision)
+          end
       end
     end)
+
     :ok
   end
 
