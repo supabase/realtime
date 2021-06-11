@@ -19,13 +19,13 @@ defmodule Realtime.Workflows.Revision do
   @required_fields ~w(definition)a
 
   schema "revisions" do
-    field :version, :integer
-    field :definition, :map
+    field(:version, :integer)
+    field(:definition, :map)
 
     timestamps()
 
-    belongs_to :workflow, Realtime.Workflows.Workflow, type: Ecto.UUID
-    has_many :executions, Realtime.Workflows.Execution
+    belongs_to(:workflow, Realtime.Workflows.Workflow, type: Ecto.UUID)
+    has_many(:executions, Realtime.Workflows.Execution)
   end
 
   @doc false
@@ -49,9 +49,11 @@ defmodule Realtime.Workflows.Revision do
 
   defp validate_definition(field, definition) do
     case Workflows.parse(definition) do
-      {:ok, _} -> []
+      {:ok, _} ->
+        []
+
       {:error, error} ->
-	Logger.debug("Error validating Amazon States Language: #{inspect error}")
+        Logger.debug("Error validating Amazon States Language: #{inspect(error)}")
         # TODO(fra): should display a nice error explaining exactly what went wrong
         [{field, "is an invalid state machine"}]
     end

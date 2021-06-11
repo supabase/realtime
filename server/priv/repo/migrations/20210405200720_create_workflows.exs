@@ -34,5 +34,14 @@ defmodule Realtime.Repo.Migrations.CreateWorkflows do
 
       timestamps()
     end
+
+    # Selects the latest revision for each workflow
+    execute """
+    create view latest_revisions as
+    select distinct on (workflow_id) *
+    from revisions
+    order by workflow_id, version desc;
+    """
+
   end
 end

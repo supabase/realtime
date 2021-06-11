@@ -17,7 +17,7 @@ defmodule Realtime.Workflows do
   alias Realtime.Repo
   alias Realtime.Adapters.Changes.Transaction
   alias Realtime.Interpreter
-  alias Realtime.Workflows.{Execution, Event, Manager, Revision, Workflow}
+  alias Realtime.Workflows.{Execution, Event, Manager, Revision, Workflow, LatestRevision}
 
   ## Workflow
 
@@ -221,12 +221,7 @@ defmodule Realtime.Workflows do
   end
 
   defp latest_revision_query do
-    from(r in Revision,
-      order_by: [
-        desc: :version
-      ],
-      limit: 1
-    )
+    from(r in LatestRevision)
   end
 
   defp insert_execution_with_revision(revision, attrs) do
