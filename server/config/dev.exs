@@ -21,7 +21,7 @@ config :realtime, RealtimeWeb.Endpoint,
   check_origin: false,
   watchers: []
 
-config :logger, level: :info
+# config :logger, level: :info
 
 # ## SSL Support
 #

@@ -53,7 +53,8 @@ defmodule Realtime.MixProject do
       {:workflows, "~> 0.2.0"},
       {:oban, "~> 2.6"},
       {:eventstore, "~> 1.2"},
-      {:mock, "~> 0.3.0", only: :test}
+      {:mock, "~> 0.3.0", only: :test},
+      {:cors_plug, "~> 2.0"},
     ]
   end
 

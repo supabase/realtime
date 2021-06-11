@@ -10,6 +10,7 @@ defmodule RealtimeWeb.Router do
   end
 
   pipeline :api do
+    plug CORSPlug
     plug :accepts, ["json"]
   end
 

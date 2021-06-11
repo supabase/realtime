@@ -1,0 +1,26 @@
+{
+  "name": "workflows-demo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^1.14.0",
+    "@supabase/ui": "^0.27.2",
+    "axios": "^0.21.1",
+    "next": "10.2.3",
+    "react": "17.0.2",
+    "react-dom": "17.0.2",
+    "react-flow-renderer": "^9.6.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.2.6",
+    "install": "^0.13.0",
+    "npm": "^7.17.0",
+    "postcss": "^8.3.2",
+    "tailwindcss": "^2.1.4"
+  }
+}

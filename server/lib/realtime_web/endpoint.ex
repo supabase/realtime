@@ -1,6 +1,8 @@
 defmodule RealtimeWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :realtime
 
+  plug CORSPlug
+
   socket "/socket", RealtimeWeb.UserSocket,
     websocket: [
       serializer: [{Realtime.Socket.V1.JSONSerializer, "1.0.0"}],
