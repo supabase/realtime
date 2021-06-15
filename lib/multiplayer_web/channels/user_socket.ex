@@ -17,7 +17,9 @@ defmodule MultiplayerWeb.UserSocket do
   # performing token verification on connect.
   @impl true
   def connect(params, socket, _connect_info) do
-    {:ok, assign(socket, :user_id, params["user_id"])}
+    {_, params} = Map.pop(params, "vsn")
+    params = for {key, val} <- params, into: %{}, do: {String.to_atom(key), val}
+    {:ok, assign(socket, :params, params)}
   end
 
   # Socket id's are topics that allow you to identify all sockets for a given user:

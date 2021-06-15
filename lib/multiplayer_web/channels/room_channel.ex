@@ -10,9 +10,8 @@ defmodule MultiplayerWeb.RoomChannel do
 
   @impl true
   def handle_info(:after_join, socket) do
-    {:ok, _} = Presence.track(socket, socket.assigns.user_id, %{
-      user_id: socket.assigns.user_id
-    })
+    params = socket.assigns.params
+    {:ok, _} = Presence.track(socket, params.user_id, params)
 
     push(socket, "presence_state", Presence.list(socket))
 
@@ -22,7 +21,7 @@ defmodule MultiplayerWeb.RoomChannel do
   @impl true
   def handle_in("broadcast" = event, payload, socket) do
     broadcast(socket, event, payload)
-    Presence.update(socket, socket.assigns.user_id, payload)
+    Presence.update(socket, socket.assigns.params.user_id, payload)
     {:noreply, socket}
   end
 end
