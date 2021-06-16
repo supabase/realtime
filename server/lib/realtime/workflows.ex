@@ -177,7 +177,11 @@ defmodule Realtime.Workflows do
   def invoke_transaction_workflows(%Transaction{changes: [_ | _]} = txn) do
     workflows = Manager.workflows_for_change(txn)
 
-    txn_as_map = Map.from_struct(txn)
+    # TODO: improve encode!/decode! hack
+    txn_as_map =
+      txn
+      |> Jason.encode!()
+      |> Jason.decode!()
 
     attrs = %{
       arguments: txn_as_map

@@ -26,11 +26,11 @@ defmodule Realtime.Resource.Http do
   end
 
   # TODO: make this better
-  def handle(resource, ctx, args) do
+  def handle(resource, _ctx, args) do
     Logger.info("Calling http resource #{inspect(resource)} with args #{inspect(args)}")
 
     headers = [{"Content-Type", "application/json"}]
     %{"method" => _method, "url" => url} = args
-    HTTPoison.get(url, headers)
+    HTTPoison.post(url, Jason.encode!(args["payload"] || %{}), headers)
   end
 end
