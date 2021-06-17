@@ -17,13 +17,20 @@ const nodeWidth = 172
 const nodeHeight = 36
 
 export default function Flow({ id }) {
-  const [workflow, setWorkflow] = useState(null)
-  const [definition, setDefinition] = useState({})
-  const [states, setWorkflowStates] = useState({})
+  const [workflow, setWorkflow] = useState()
+  const [definition, setDefinition] = useState()
+  const [states, setWorkflowStates] = useState()
+  const [elements, setElements] = useState()
 
   useEffect(() => {
     fetchWorkflow()
   }, [id])
+
+  useEffect(() => {
+    const startAt = definition?.StartAt
+
+    startAt && states && setElements(getFlowElements(startAt))
+  }, [definition, states])
 
   const fetchWorkflow = async () => {
     const { data, error } = await getWorkflow(id)
@@ -36,29 +43,29 @@ export default function Flow({ id }) {
     }
   }
 
-  const renderFlows = () => {
-    const spacing = 75
-    const statesArray = Object.entries(states).map(([id, v]) => ({ id, ...v }))
-      // Turn the states into an array
-    let nodes = statesArray.map((x, i) => ({
-      id: x.id,
-      data: { label: <div>{x.id}</div> },
-      position: { x: 400, y: i * spacing },
-    }))
+  const getFlowElements = (nodeId, elements=[], i=1) => {
+    if (!nodeId) return elements
 
-    let edges = statesArray
-      .filter((x) => !!x.Next)
-      .map((x, i) => ({
-        id: `${x.id}-${x.Next}`,
+    const node = states[nodeId]
+    const nextNodeId = node?.Next
+
+    if (node) {
+      elements.push({ 
+        id: nodeId,
+        data: { label: <div>{nodeId}</div> },
+        position: { x: 400, y: i * 100 },
+      })
+
+      nextNodeId && elements.push({
+        id: `${nodeId}-${nextNodeId}`,
         type: 'straight',
-        source: x.id,
-        target: x.Next,
+        source: nodeId,
+        target: nextNodeId,
         animated: true
-      }))
-      console.log('statesArray', statesArray)
+      })
+    }
 
-        console.log('edges', edges)
-    return [...nodes, ...edges]
+    return getFlowElements(nextNodeId, elements, i + 1)
   }
 
   if (!workflow) return <div></div>
@@ -67,7 +74,7 @@ export default function Flow({ id }) {
       <div className="flex w-full h-full">
         <div className="flex-grow">
           <div className="h-full">
-            <ReactFlow elements={renderFlows()}>
+            <ReactFlow elements={elements}>
               <Background variant="dots" />
               <Controls />
             </ReactFlow>

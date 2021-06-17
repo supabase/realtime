@@ -10,17 +10,34 @@ export default function NewWorkflowModal({ visible, onCancel, onConfirm }) {
   const [name, setName] = useState('')
   const [trigger, setDefaultTrigger] = useState('public:users')
   const [default_execution_type, setDefaultExecutionType] = useState('transient')
-  const [definition, setDefinition] = useState({
-    StartAt: 'Hello World',
-    States: {
-      'Hello World': {
-        Type: 'Task',
-        Resource: 'arn:aws:lambda:us-east-1:123456789012:function:HelloWorld',
-        End: true,
-      },
-    },
-  })
+  const [definition, setDefinition] = useState({})
 
+  useEffect(() => {
+    setDefinition({
+      "StartAt": trigger,
+      "States": {
+        [trigger]: {
+          "Type": "Pass",
+          "Next": "TriggerWebhook"
+        },
+        "TriggerWebhook": {
+          "Type": "Task",
+          "Resource": "http",
+          "Parameters": {
+              "url": "https://webhook.site/421b6551-c0df-4302-9967-24150fb224a1",
+              "method": "POST",
+              "payload": {
+                "changes.$": "$.changes"
+              }
+          },
+          "Next": "Complete"
+        },
+        "Complete": {
+          "Type": "Succeed"
+        }
+      }
+    })
+  }, [trigger])
 
   return (
     <Modal
