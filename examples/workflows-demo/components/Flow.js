@@ -23,6 +23,7 @@ export default function Flow({ id }) {
   const [states, setWorkflowStates] = useState()
   const [sortedNodes, setSortedNodes] = useState()
   const [elements, setElements] = useState()
+  const [selectedStateMenu, setSelectedStateMenu] = useState()
 
   useEffect(() => {
     fetchWorkflow()
@@ -85,7 +86,11 @@ export default function Flow({ id }) {
     <div className="flex w-full h-full">
       <div className="flex-grow">
         <div className="h-full">
-          <ReactFlow elements={elements}>
+          <ReactFlow
+            elements={elements}
+            onElementClick={(_, { id }) => setSelectedStateMenu(id)}
+            onPaneClick={() => setSelectedStateMenu()}
+          >
             <Background variant="dots" />
             <Controls />
           </ReactFlow>
@@ -98,12 +103,18 @@ export default function Flow({ id }) {
           <h4 className="uppercase text-xs underline">Name</h4>
           <h3>{workflow.name}</h3>
         </div>
-        <div className="m-1">
-          <h4 className="uppercase text-xs underline">States</h4>
-          <div className="divide-y">
-            {sortedNodes.map(node => <StateDisplayWrapper key={node.id} {...node} />)}
+        {selectedStateMenu ?
+          <div className="m-1">
+            <h4 className="uppercase text-xs underline">State</h4>
+              <StateDisplayWrapper {...{ id: selectedStateMenu, ...states[selectedStateMenu] }} />
+          </div> :
+          <div className="m-1">
+            <h4 className="uppercase text-xs underline">States</h4>
+            <div className="divide-y">
+              {sortedNodes.map(node => <StateDisplayWrapper key={node.id} {...node} />)}
+            </div>
           </div>
-        </div>
+        }
       </div>
     </div>
   )
