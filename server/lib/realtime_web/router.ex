@@ -27,4 +27,8 @@ defmodule RealtimeWeb.Router do
       resources "/executions", ExecutionController, only: [:index, :create, :show, :delete]
     end
   end
+
+  if Mix.env == :dev do
+    forward "/sent_emails", Bamboo.SentEmailViewerPlug
+  end
 end

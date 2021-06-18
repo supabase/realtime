@@ -55,6 +55,7 @@ defmodule Realtime.MixProject do
       {:eventstore, "~> 1.2"},
       {:mock, "~> 0.3.0", only: :test},
       {:cors_plug, "~> 2.0"},
+      {:bamboo, "~> 2.2.0"}
     ]
   end
 

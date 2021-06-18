@@ -141,7 +141,10 @@ config :realtime, Realtime.EventStore.Store,
 config :realtime, event_stores: [Realtime.EventStore.Store]
 
 config :realtime, :workflows,
-  resource_handlers: [Realtime.Resource.Http]
+  resource_handlers: [
+    Realtime.Resource.Http,
+    Realtime.Resource.Email
+  ]
 
 # Configures Elixir's Logger
 config :logger, :console,
