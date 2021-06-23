@@ -6,12 +6,10 @@ defmodule Multiplayer.Application do
   use Application
 
   def start(_type, _args) do
-    # topologies = Application.get_env(:libcluster, :topologies) || []
+    topologies = Application.get_env(:libcluster, :topologies) || []
 
     children = [
-      # {Cluster.Supervisor, [topologies, [name: MultiplayerWeb.ClusterSupervisor]]},
-      # Start the Ecto repository
-      Multiplayer.Repo,
+      {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
       # Start the Telemetry supervisor
       MultiplayerWeb.Telemetry,
       # Start the PubSub system

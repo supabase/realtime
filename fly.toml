@@ -1,9 +1,11 @@
-# fly.toml file generated for multiplayer on 2020-11-22T21:30:26+08:00
+# fly.toml file generated for multiplayer-dev on 2021-05-19T00:27:00-04:00
 
-app = "multiplayer"
+app = "multiplayer-dev"
 
-[experimental]
-  private_network = true
+kill_signal = "SIGTERM"
+kill_timeout = 5
+
+[env]
 
 [[services]]
   internal_port = 4000
@@ -15,12 +17,14 @@ app = "multiplayer"
 
   [[services.ports]]
     handlers = ["http"]
-    port = "80"
+    port = 80
 
   [[services.ports]]
     handlers = ["tls", "http"]
-    port = "443"
+    port = 443
 
   [[services.tcp_checks]]
-    interval = 10000
-    timeout = 2000
+    grace_period = "30s" # allow some time for startup
+    interval = "15s"
+    restart_limit = 6
+    timeout = "2s"
