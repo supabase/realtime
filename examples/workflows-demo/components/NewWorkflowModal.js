@@ -15,23 +15,13 @@ export default function NewWorkflowModal({ visible, onCancel, onConfirm }) {
   // TODO: take out trigger Pass State
   useEffect(() => {
     setDefinition({
-      "StartAt": trigger,
+      "StartAt": "TriggerEmail",
       "States": {
-        [trigger]: {
-          "Type": "Pass",
-          "Next": "TriggerEmail"
-        },
         "TriggerEmail": {
           "Type": "Task",
           "Resource": "email",
           "Parameters": {
-              "payload": {
-                "to": ["to@test.com", "to2@test.com"],
-                "from": "from@test.com",
-                "subject": "Test Test",
-                "text_body.$": "$.changes",
-                "html_body": "<strong>Hey there!</strong>"
-              }
+              "payload": {}
           },
           "Next": "Complete"
         },

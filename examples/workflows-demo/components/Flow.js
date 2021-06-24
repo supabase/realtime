@@ -1,10 +1,9 @@
 import 'react-flow-renderer/dist/style.css'
 import 'react-flow-renderer/dist/theme-default.css'
-import React from 'react'
-import ReactFlow, { Background, MiniMap, Controls } from 'react-flow-renderer'
-import { getBezierPath, getMarkerEnd } from 'react-flow-renderer'
-import { useState, useEffect } from 'react'
-import { getWorkflow } from '../lib/api'
+import React, { useState, useEffect } from 'react'
+import ReactFlow, { Background, Controls } from 'react-flow-renderer'
+import cloneDeep from "lodash/cloneDeep";
+import { getWorkflow, updateWorkflow } from '../lib/api'
 import { StateDisplayWrapper } from './StateDisplayWrapper'
 
 const elements = [
@@ -70,6 +69,20 @@ export default function Flow({ id }) {
     }
   }
 
+  const updateWorkflowDefinition = async (stateId, params) => {
+    const definitionClone = cloneDeep(definition)
+    definitionClone.States[stateId].Parameters.payload = params
+
+    const { data, error } = await updateWorkflow({ id, definition: definitionClone })
+    console.log('data', data)
+
+    if (data) {
+      setWorkflow(data.workflow)
+      setDefinition(data.workflow.definition)
+      setWorkflowStates(data.workflow.definition.States)
+    }
+  }
+
   const getFlowElements = (nextNodeId, nodes=[], i=1) => {
     if (!nextNodeId) return nodes
 
@@ -103,15 +116,19 @@ export default function Flow({ id }) {
           <h4 className="uppercase text-xs underline">Name</h4>
           <h3>{workflow.name}</h3>
         </div>
+        <div className="m-1">
+          <h4 className="uppercase text-xs underline">Start</h4>
+          <h3>{workflow.trigger}</h3>
+        </div>
         {selectedStateMenu ?
           <div className="m-1">
             <h4 className="uppercase text-xs underline">State</h4>
-              <StateDisplayWrapper {...{ id: selectedStateMenu, ...states[selectedStateMenu] }} />
+              <StateDisplayWrapper {...{ id: selectedStateMenu, viewOnly: false, onSave: (stateId, params) => updateWorkflowDefinition(stateId, params), ...states[selectedStateMenu] }} />
           </div> :
           <div className="m-1">
             <h4 className="uppercase text-xs underline">States</h4>
             <div className="divide-y">
-              {sortedNodes.map(node => <StateDisplayWrapper key={node.id} {...node} />)}
+              {sortedNodes.map(node => <StateDisplayWrapper key={node.id} {...{...node, ...{ viewOnly: !selectedStateMenu }} } />)}
             </div>
           </div>
         }

@@ -70,7 +70,7 @@ defmodule Realtime.Workflows do
         Multi.new()
         |> Multi.update(:workflow, Workflow.update_changeset(workflow, attrs))
 
-      new_definition = Map.get(attrs, :definition)
+      new_definition = Map.get(attrs, "definition")
 
       multi =
         if new_definition == nil or Map.equal?(new_definition, revision.definition) do
