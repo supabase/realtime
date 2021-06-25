@@ -4,10 +4,7 @@ defmodule RealtimeWeb.Endpoint do
   plug CORSPlug
 
   socket "/socket", RealtimeWeb.UserSocket,
-    websocket: [
-      serializer: [{Realtime.Socket.V1.JSONSerializer, "1.0.0"}],
-      timeout: Application.get_env(:realtime, :socket_timeout)
-    ],
+    websocket: true,
     longpoll: false
 
   # Serve at "/" the static files from "priv/static" directory.

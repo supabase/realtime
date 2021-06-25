@@ -199,7 +199,6 @@ SECURE_CHANNELS         # {string}      (options: 'true'/'false') Enable/Disable
 JWT_SECRET              # {string}      HS algorithm octet key (e.g. "95x0oR8jq9unl9pOIx"). Only required if SECURE_CHANNELS is set to true.
 JWT_CLAIM_VALIDATORS    # {string}      Expected claim key/value pairs compared to JWT claims via equality checks in order to validate JWT. e.g. '{"iss": "Issuer", "nbf": 1610078130}'. This is optional but encouraged.
 MAX_REPLICATION_LAG_MB  # {number}      If set, when the replication lag exceeds MAX_REPLICATION_LAG_MB (value must be a positive integer in megabytes), then replication slot is dropped, Realtime is restarted, and a new slot is created. Warning: setting MAX_REPLICATION_SLOT_MB could cause database changes to be lost when the replication slot is dropped.
-SOCKET_TIMEOUT          # {number/string}    Set websocket timeout value to a larger number, in milliseconds, or "infinity" when consistently processing large transactions and/or high volume of transactions. Defaults to 60000 (milliseconds).
 ```
 
 **EXAMPLE: RUNNING SERVER WITH ALL OPTIONS**

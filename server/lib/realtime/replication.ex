@@ -6,7 +6,6 @@ defmodule Realtime.Replication do
     do:
       defstruct(
         relations: %{},
-        reverse_changes: [],
         transaction: nil,
         types: %{}
       )
@@ -16,7 +15,13 @@ defmodule Realtime.Replication do
 
   require Logger
 
-  alias Realtime.Adapters.Changes.Transaction
+  alias Realtime.Adapters.Changes.{
+    Transaction,
+    NewRecord,
+    UpdatedRecord,
+    DeletedRecord,
+    TruncatedRelation
+  }
 
   alias Realtime.Adapters.Postgres.Decoder.Messages.{
     Begin,
@@ -47,10 +52,7 @@ defmodule Realtime.Replication do
     Logger.debug("Received binary message: #{inspect(binary_msg, limit: :infinity)}")
     Logger.debug("Decoded message: " <> inspect(decoded, limit: :infinity))
 
-    case process_message(decoded, state) do
-      {new_state, :hibernate} -> {:noreply, new_state, :hibernate}
-      new_state -> {:noreply, new_state}
-    end
+    {:noreply, process_message(decoded, state)}
   end
 
   @impl true
@@ -59,39 +61,10 @@ defmodule Realtime.Replication do
     {:noreply, state}
   end
 
-  def data_tuple_to_map(columns, tuple_data) when is_list(columns) and is_tuple(tuple_data) do
-    columns
-    |> Enum.with_index()
-    |> Enum.reduce_while(%{}, fn {column_map, index}, acc ->
-      case column_map do
-        %Relation.Column{name: column_name, type: column_type}
-        when is_binary(column_name) and is_binary(column_type) ->
-          try do
-            {:ok, Kernel.elem(tuple_data, index)}
-          rescue
-            ArgumentError -> :error
-          end
-          |> case do
-            {:ok, record} ->
-              {:cont, Map.put(acc, column_name, convert_column_record(record, column_type))}
-
-            :error ->
-              {:halt, acc}
-          end
-
-        _ ->
-          {:cont, acc}
-      end
-    end)
-  end
-
-  def data_tuple_to_map(_columns, _tuple_data), do: %{}
-
   defp process_message(%Begin{final_lsn: final_lsn, commit_timestamp: commit_timestamp}, state) do
-    %{
+    %State{
       state
-      | reverse_changes: [],
-        transaction: {final_lsn, %Transaction{commit_timestamp: commit_timestamp}}
+      | transaction: {final_lsn, %Transaction{changes: [], commit_timestamp: commit_timestamp}}
     }
   end
 
@@ -100,9 +73,8 @@ defmodule Realtime.Replication do
   defp process_message(
          %Commit{lsn: commit_lsn, end_lsn: end_lsn},
          %State{
-           reverse_changes: reverse_changes,
-           relations: relations,
-           transaction: {current_txn_lsn, %Transaction{} = txn_struct} = transaction
+           transaction: {current_txn_lsn, %Transaction{changes: changes} = txn},
+           relations: relations
          } = state
        )
        when commit_lsn == current_txn_lsn do
@@ -110,18 +82,11 @@ defmodule Realtime.Replication do
     # Feel free to delete after testing
     Logger.debug("Final Update of Columns " <> inspect(relations, limit: :infinity))
 
-    :ok =
-      %{
-        state
-        | reverse_changes: [],
-          transaction:
-            put_elem(transaction, 1, %{txn_struct | changes: Enum.reverse(reverse_changes)})
-      }
-      |> SubscribersNotification.notify()
+    :ok = %{txn | changes: Enum.reverse(changes)} |> SubscribersNotification.notify()
 
     :ok = EpgsqlServer.acknowledge_lsn(end_lsn)
 
-    {%{state | reverse_changes: [], transaction: nil}, :hibernate}
+    %{state | transaction: nil}
   end
 
   # Any unknown types will now be populated into state.types
@@ -148,16 +113,25 @@ defmodule Realtime.Replication do
   defp process_message(
          %Insert{relation_id: relation_id, tuple_data: tuple_data},
          %State{
-           reverse_changes: reverse_changes,
+           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn},
            relations: relations
          } = state
        )
        when is_map(relations) do
     case Map.fetch(relations, relation_id) do
-      {:ok, _} ->
-        new_record = change_record(relation_id, "INSERT", tuple_data)
+      {:ok, %{columns: columns, namespace: namespace, name: name}} when is_list(columns) ->
+        data = data_tuple_to_map(columns, tuple_data)
 
-        %{state | reverse_changes: [new_record | reverse_changes]}
+        new_record = %NewRecord{
+          type: "INSERT",
+          schema: namespace,
+          table: name,
+          columns: columns,
+          record: data,
+          commit_timestamp: commit_timestamp
+        }
+
+        %State{state | transaction: {lsn, %{txn | changes: [new_record | changes]}}}
 
       _ ->
         state
@@ -171,16 +145,30 @@ defmodule Realtime.Replication do
            tuple_data: tuple_data
          },
          %State{
-           reverse_changes: reverse_changes,
-           relations: relations
+           relations: relations,
+           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn}
          } = state
        )
        when is_map(relations) do
     case Map.fetch(relations, relation_id) do
-      {:ok, _} ->
-        update_record = change_record(relation_id, "UPDATE", tuple_data, old_tuple_data)
+      {:ok, %{columns: columns, namespace: namespace, name: name}} when is_list(columns) ->
+        old_data = data_tuple_to_map(columns, old_tuple_data)
+        data = data_tuple_to_map(columns, tuple_data)
 
-        %{state | reverse_changes: [update_record | reverse_changes]}
+        updated_record = %UpdatedRecord{
+          type: "UPDATE",
+          schema: namespace,
+          table: name,
+          columns: columns,
+          old_record: old_data,
+          record: data,
+          commit_timestamp: commit_timestamp
+        }
+
+        %State{
+          state
+          | transaction: {lsn, %{txn | changes: [updated_record | changes]}}
+        }
 
       _ ->
         state
@@ -194,17 +182,25 @@ defmodule Realtime.Replication do
            changed_key_tuple_data: changed_key_tuple_data
          },
          %State{
-           reverse_changes: reverse_changes,
-           relations: relations
+           relations: relations,
+           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn}
          } = state
        )
        when is_map(relations) do
     case Map.fetch(relations, relation_id) do
-      {:ok, _} ->
-        delete_record =
-          change_record(relation_id, "DELETE", nil, old_tuple_data || changed_key_tuple_data)
+      {:ok, %{columns: columns, namespace: namespace, name: name}} when is_list(columns) ->
+        data = data_tuple_to_map(columns, old_tuple_data || changed_key_tuple_data)
 
-        %{state | reverse_changes: [delete_record | reverse_changes]}
+        deleted_record = %DeletedRecord{
+          type: "DELETE",
+          schema: namespace,
+          table: name,
+          columns: columns,
+          old_record: data,
+          commit_timestamp: commit_timestamp
+        }
+
+        %State{state | transaction: {lsn, %{txn | changes: [deleted_record | changes]}}}
 
       _ ->
         state
@@ -214,17 +210,22 @@ defmodule Realtime.Replication do
   defp process_message(
          %Truncate{truncated_relations: truncated_relations},
          %State{
-           reverse_changes: reverse_changes,
-           relations: relations
+           relations: relations,
+           transaction: {lsn, %{commit_timestamp: commit_timestamp, changes: changes} = txn}
          } = state
        )
-       when is_list(truncated_relations) and is_map(relations) do
-    new_reverse_changes =
-      Enum.reduce(truncated_relations, reverse_changes, fn relation_id, acc ->
-        case Map.fetch(relations, relation_id) do
-          {:ok, _} ->
+       when is_list(truncated_relations) and is_list(changes) and is_map(relations) do
+    new_changes =
+      Enum.reduce(truncated_relations, changes, fn truncated_relation, acc ->
+        case Map.fetch(relations, truncated_relation) do
+          {:ok, %{namespace: namespace, name: name}} ->
             [
-              change_record(relation_id, "TRUNCATE")
+              %TruncatedRelation{
+                type: "TRUNCATE",
+                schema: namespace,
+                table: name,
+                commit_timestamp: commit_timestamp
+              }
               | acc
             ]
 
@@ -233,12 +234,43 @@ defmodule Realtime.Replication do
         end
       end)
 
-    %{state | reverse_changes: new_reverse_changes}
+    %State{
+      state
+      | transaction: {lsn, %{txn | changes: new_changes}}
+    }
   end
 
   defp process_message(_msg, state) do
     state
   end
+
+  defp data_tuple_to_map(columns, tuple_data) when is_list(columns) and is_tuple(tuple_data) do
+    columns
+    |> Enum.with_index()
+    |> Enum.reduce_while(%{}, fn {column_map, index}, acc ->
+      case column_map do
+        %Relation.Column{name: column_name, type: column_type}
+        when is_binary(column_name) and is_binary(column_type) ->
+          try do
+            {:ok, Kernel.elem(tuple_data, index)}
+          rescue
+            ArgumentError -> :error
+          end
+          |> case do
+            {:ok, record} ->
+              {:cont, Map.put(acc, column_name, convert_column_record(record, column_type))}
+
+            :error ->
+              {:halt, acc}
+          end
+
+        _ ->
+          {:cont, acc}
+      end
+    end)
+  end
+
+  defp data_tuple_to_map(_columns, _tuple_data), do: %{}
 
   defp convert_column_record(record, "timestamp") when is_binary(record) do
     with {:ok, %NaiveDateTime{} = naive_date_time} <- Timex.parse(record, "{RFC3339}"),
@@ -258,9 +290,5 @@ defmodule Realtime.Replication do
 
   defp convert_column_record(record, _column_type) do
     record
-  end
-
-  defp change_record(relation_id, record_type, tuple_data \\ nil, old_tuple_data \\ nil) do
-    {relation_id, record_type, tuple_data, old_tuple_data}
   end
 end
