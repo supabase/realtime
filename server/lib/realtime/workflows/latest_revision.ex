@@ -9,12 +9,10 @@ defmodule Realtime.Workflows.LatestRevision do
 
   require Logger
 
-
   @schema_prefix Application.get_env(:realtime, :workflows_db_schema)
 
   @primary_key {:id, Ecto.UUID, autogenerate: true}
   @derive {Phoenix.Param, key: :id}
-
 
   schema "latest_revisions" do
     field(:version, :integer)
@@ -25,5 +23,4 @@ defmodule Realtime.Workflows.LatestRevision do
     belongs_to(:workflow, Realtime.Workflows.Workflow, type: Ecto.UUID)
     has_many(:executions, Realtime.Workflows.Execution)
   end
-
 end

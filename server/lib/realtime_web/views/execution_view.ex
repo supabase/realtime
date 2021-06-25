@@ -3,7 +3,8 @@ defmodule RealtimeWeb.ExecutionView do
 
   def render("index.json", %{executions: executions}) do
     %{
-      executions: Enum.map(executions, fn %{execution: ex, revision: rev} -> render_execution(ex, rev) end)
+      executions:
+        Enum.map(executions, fn %{execution: ex, revision: rev} -> render_execution(ex, rev) end)
     }
   end
 
@@ -16,7 +17,7 @@ defmodule RealtimeWeb.ExecutionView do
   def render("result.json", %{execution: execution, revision: revision, result: result}) do
     %{
       execution: render_execution(execution, revision),
-      result: result,
+      result: result
     }
   end
 

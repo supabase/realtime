@@ -4,7 +4,8 @@ defmodule Realtime.Resource do
   """
 
   @callback can_handle(resource :: String.t()) :: boolean()
-  @callback handle(resource :: String.ct(), ctx :: any(), args :: any()) :: {:ok, result :: any()} | {:error, reason :: term()}
+  @callback handle(resource :: String.ct(), ctx :: any(), args :: any()) ::
+              {:ok, result :: any()} | {:error, reason :: term()}
 
   @doc """
   Returns the first resource handler that can handle `resource`.
@@ -13,6 +14,7 @@ defmodule Realtime.Resource do
     handler =
       resource_handlers()
       |> Enum.find(fn r -> r.can_handle(resource) end)
+
     case handler do
       nil -> :not_found
       handler -> {:ok, handler}

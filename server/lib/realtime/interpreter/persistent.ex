@@ -14,7 +14,13 @@ defmodule Realtime.Interpreter.Persistent do
   alias Realtime.EventStore
   alias Workflows.{Command, Event}
   alias Realtime.EventStore
-  alias Realtime.Interpreter.{EventHelper, HandleWaitStartedWorker, HandleTaskStartedWorker, ResourceHandler}
+
+  alias Realtime.Interpreter.{
+    EventHelper,
+    HandleWaitStartedWorker,
+    HandleTaskStartedWorker,
+    ResourceHandler
+  }
 
   defmodule State do
     defstruct [:workflow, :execution, :execution_id, :stream_version, :subscription]
@@ -96,7 +102,7 @@ defmodule Realtime.Interpreter.Persistent do
   end
 
   defp continue_with_result({:succeed, result, events}, state) do
-    Logger.debug("Execution terminated with result #{inspect result} #{inspect self()}")
+    Logger.debug("Execution terminated with result #{inspect(result)} #{inspect(self())}")
 
     new_state = %State{
       state

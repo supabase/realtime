@@ -5,13 +5,22 @@ defmodule Realtime.Interpreter.Supervisor do
   alias Realtime.Interpreter.{Transient, Persistent}
 
   def start_transient(workflow, ctx, args, opts) do
-    Logger.debug("Starting transient workflow #{inspect(workflow, pretty: true)} with args #{inspect(args, pretty: true)} and context #{inspect(ctx, pretty: true)}")
+    Logger.debug(
+      "Starting transient workflow #{inspect(workflow, pretty: true)} with args #{inspect(args, pretty: true)} and context #{inspect(ctx, pretty: true)}"
+    )
+
     DynamicSupervisor.start_child(__MODULE__, {Transient, {workflow, ctx, args, opts}})
   end
 
   def start_persistent(workflow, execution_id, ctx, args) do
-    Logger.debug("Starting persistent workflow #{inspect(workflow, pretty: true)} with args #{inspect(args, pretty: true)} and context #{inspect(ctx, pretty: true)}")
-    DynamicSupervisor.start_child(__MODULE__, {Persistent, {workflow, execution_id, {:start, ctx, args}}})
+    Logger.debug(
+      "Starting persistent workflow #{inspect(workflow, pretty: true)} with args #{inspect(args, pretty: true)} and context #{inspect(ctx, pretty: true)}"
+    )
+
+    DynamicSupervisor.start_child(
+      __MODULE__,
+      {Persistent, {workflow, execution_id, {:start, ctx, args}}}
+    )
   end
 
   def recover_persistent(workflow, execution_id) do

@@ -7,18 +7,18 @@ defmodule RealtimeWeb.Fixtures do
   def workflow do
     quote do
       @state_machine_definition %{
-        "Comment": "A simple minimal example of the States language",
-        "StartAt": "StartHere",
-        "States": %{
-          "StartHere": %{
-            "Type": "Wait",
-            "Seconds": 1,
-            "Next": "EndHere"
+        Comment: "A simple minimal example of the States language",
+        StartAt: "StartHere",
+        States: %{
+          StartHere: %{
+            Type: "Wait",
+            Seconds: 1,
+            Next: "EndHere"
           },
-          "EndHere": %{
-            "Type": "Task",
-            "Resource": "https://www.example.org",
-            "End": true
+          EndHere: %{
+            Type: "Task",
+            Resource: "https://www.example.org",
+            End: true
           }
         }
       }
@@ -59,7 +59,6 @@ defmodule RealtimeWeb.Fixtures do
   end
 
   defmacro __using__(fixtures) when is_list(fixtures) do
-    for fixture <- fixtures, is_atom(fixture),
-        do: apply(__MODULE__, fixture, [])
+    for fixture <- fixtures, is_atom(fixture), do: apply(__MODULE__, fixture, [])
   end
 end

@@ -47,11 +47,13 @@ defmodule Realtime.TransientInterpreterTest do
   end
 
   test "starts the interpreter as task" do
-    {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs)
-    {:ok, %{execution: execution, revision: revision}} = Workflows.create_workflow_execution(
-      workflow.id,
-      Fixtures.execution_attrs()
-    )
+    {:ok, %{workflow: workflow}} = Workflows.create_workflow(Fixtures.workflow_attrs())
+
+    {:ok, %{execution: execution, revision: revision}} =
+      Workflows.create_workflow_execution(
+        workflow.id,
+        Fixtures.execution_attrs()
+      )
 
     {:ok, pid} = Interpreter.start_transient(workflow, execution, revision)
     assert is_pid(pid)

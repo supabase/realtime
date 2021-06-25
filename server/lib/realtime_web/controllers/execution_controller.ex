@@ -27,16 +27,24 @@ defmodule RealtimeWeb.ExecutionController do
           conn
           |> put_status(:created)
           |> render("result.json", execution: execution, revision: revision, result: response)
+
         {:timeout, execution, revision} ->
           conn
           |> put_status(:bad_request)
           |> render("error.json", execution: execution, revision: revision, error: "timeout")
+
         {:error, err, execution, revision} ->
           # Error during execution
-          Logger.warn("ExecutionController.create: fail #{inspect err}")
+          Logger.warn("ExecutionController.create: fail #{inspect(err)}")
+
           conn
           |> put_status(:bad_request)
-          |> render("error.json", execution: execution, revision: revision, error: "execution error")
+          |> render("error.json",
+            execution: execution,
+            revision: revision,
+            error: "execution error"
+          )
+
         {:error, changeset} ->
           # Changeset error, delegate to error controller
           RealtimeWeb.ErrorController.call(conn, {:error, changeset})

@@ -88,7 +88,7 @@ defmodule Realtime.Application do
       },
       Realtime.Workflows.Manager,
       Realtime.Interpreter.PersistentManager,
-      Realtime.Interpreter.Supervisor,
+      Realtime.Interpreter.Supervisor
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

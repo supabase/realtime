@@ -15,6 +15,7 @@ defmodule RealtimeWeb.WorkflowView do
 
   def render("workflow.json", %{workflow: workflow}) do
     %{workflow: workflow, revision: revision} = workflow
+
     %{
       id: workflow.id,
       name: workflow.name,

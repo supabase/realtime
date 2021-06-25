@@ -9,6 +9,7 @@ defmodule RealtimeWeb.WorkflowController do
 
   def index(conn, _params) do
     workflows = Workflows.list_workflows()
+
     with {:ok, workflows} <- workflows_with_revision(workflows, []) do
       render(conn, "index.json", workflows: workflows)
     end
@@ -44,7 +45,7 @@ defmodule RealtimeWeb.WorkflowController do
     with {:ok, workflow} <- Workflows.get_workflow(workflow_id),
          {:ok, _} <- Workflows.delete_workflow(workflow),
          {:ok, workflow} <- workflow_with_revision(workflow) do
-        conn
+      conn
       |> put_status(:ok)
       |> render("show.json", workflow: workflow)
     end
@@ -66,6 +67,7 @@ defmodule RealtimeWeb.WorkflowController do
     case workflow.revisions do
       [revision | _] ->
         {:ok, %{workflow: workflow, revision: revision}}
+
       [] ->
         {:error, "missing revision"}
     end

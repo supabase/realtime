@@ -40,12 +40,14 @@ defmodule Realtime.Workflows.Manager do
     strict = [
       Execution.transaction_filter(),
       Revision.transaction_filter(),
-      Workflow.transaction_filter(),
+      Workflow.transaction_filter()
     ]
+
     # No need to call GenServer, we can lookup the table directly
     :ets.foldl(
-      fn ({_, workflow}, acc) ->
+      fn {_, workflow}, acc ->
         event = %{event: "*", relation: workflow.trigger}
+
         if TransactionFilter.matches?(event, txn, strict: strict) do
           [workflow | acc]
         else
@@ -80,6 +82,7 @@ defmodule Realtime.Workflows.Manager do
   def handle_continue(:load_workflows, state) do
     Workflows.list_workflows()
     |> Enum.each(fn workflow -> do_insert_workflow(@table_name, workflow) end)
+
     {:noreply, state}
   end
 
@@ -109,17 +112,25 @@ defmodule Realtime.Workflows.Manager do
 
   defp insert_workflow(table, %NewRecord{record: record} = change) do
     case Workflows.get_workflow(record["id"]) do
-      {:ok, workflow} -> do_insert_workflow(table, workflow)
+      {:ok, workflow} ->
+        do_insert_workflow(table, workflow)
+
       {:not_found, _} ->
-        Logger.error("Received notification of workflow INSERT, but workflow does not exist. #{inspect change}")
+        Logger.error(
+          "Received notification of workflow INSERT, but workflow does not exist. #{inspect(change)}"
+        )
     end
   end
 
   defp update_workflow(table, %UpdatedRecord{record: record} = change) do
     case Workflows.get_workflow(record["id"]) do
-      {:ok, workflow} -> do_insert_workflow(table, workflow)
+      {:ok, workflow} ->
+        do_insert_workflow(table, workflow)
+
       {:not_found, _} ->
-        Logger.error("Received notification of workflow UPDATE, but workflow does not exist. #{inspect change}")
+        Logger.error(
+          "Received notification of workflow UPDATE, but workflow does not exist. #{inspect(change)}"
+        )
     end
   end
 
@@ -140,7 +151,7 @@ defmodule Realtime.Workflows.Manager do
         _ -> :other
       end
     else
-        :other
+      :other
     end
   end
 end

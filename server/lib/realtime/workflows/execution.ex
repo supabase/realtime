@@ -39,16 +39,16 @@ defmodule Realtime.Workflows.Execution do
   @optional_fields ~w(execution_type)a
 
   @type t :: %__MODULE__{
-    id: Ecto.UUID.t()
-  }
+          id: Ecto.UUID.t()
+        }
 
   schema "executions" do
-    field :arguments, :map
-    field :execution_type, Ecto.Enum, values: [:persistent, :transient]
+    field(:arguments, :map)
+    field(:execution_type, Ecto.Enum, values: [:persistent, :transient])
 
     timestamps()
 
-    belongs_to :revision, Realtime.Workflows.Revision, type: Ecto.UUID
+    belongs_to(:revision, Realtime.Workflows.Revision, type: Ecto.UUID)
   end
 
   @doc false

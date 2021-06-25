@@ -62,12 +62,13 @@ defmodule Realtime.TransactionFilter do
     case parse_relation_filter(relation) do
       {:ok, filter} ->
         Enum.any?(changes, fn change -> change_matches(event, filter, change, opts) end)
+
       {:error, msg} ->
-        Logger.warn("Could not parse relation filter: #{inspect msg}")
+        Logger.warn("Could not parse relation filter: #{inspect(msg)}")
         false
     end
-
   end
+
   # malformed filter or txn. Should not match.
   defp do_matches?(_filter, _txn, _opts), do: false
 
@@ -77,25 +78,27 @@ defmodule Realtime.TransactionFilter do
 
   defp change_matches(_event, filter, change, opts) do
     strict_changes = Keyword.get(opts, :strict, [])
+
     strict_changes =
       for strict_filter <- strict_changes,
           {:ok, strict_filter} = parse_relation_filter(strict_filter) do
         strict_filter
       end
+
     strict? =
       strict_changes
       |> Enum.any?(fn strict_filter -> filter_matches_change(strict_filter, change) end)
+
     filter_matches_change(filter, change, strict?)
   end
 
   defp filter_matches_change(filter, change),
-       do: filter_matches_change(filter, change, false)
+    do: filter_matches_change(filter, change, false)
 
   defp filter_matches_change(filter, change, strict?) do
     name_matches(filter.schema, change.schema, strict?) and
-    name_matches(filter.table, change.table, strict?)
+      name_matches(filter.table, change.table, strict?)
   end
-
 
   @doc """
   Parse a string representing a relation filter to a `Filter` struct.
@@ -129,8 +132,10 @@ defmodule Realtime.TransactionFilter do
     end
   end
 
-  defp name_matches(nil, _change_name, true), do: false # in strict mode, catch-all should not match
+  # in strict mode, catch-all should not match
+  defp name_matches(nil, _change_name, true), do: false
   defp name_matches(nil, _change_name, false), do: true
+
   defp name_matches(filter_name, change_name, _strict) do
     filter_name == change_name
   end

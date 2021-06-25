@@ -7,18 +7,18 @@ defmodule RealtimeWeb.WorkflowControllerTest do
     trigger: "public:users",
     default_execution_type: "transient",
     definition: %{
-      "Comment": "A simple minimal example of the States language",
-      "StartAt": "StartHere",
-      "States": %{
-        "StartHere": %{
-          "Type": "Wait",
-          "Seconds": 1,
-          "Next": "EndHere"
+      Comment: "A simple minimal example of the States language",
+      StartAt: "StartHere",
+      States: %{
+        StartHere: %{
+          Type: "Wait",
+          Seconds: 1,
+          Next: "EndHere"
         },
-        "EndHere": %{
-          "Type": "Task",
-          "Resource": "https://www.example.org",
-          "End": true
+        EndHere: %{
+          Type: "Task",
+          Resource: "https://www.example.org",
+          End: true
         }
       }
     }
@@ -44,8 +44,9 @@ defmodule RealtimeWeb.WorkflowControllerTest do
       assert %{"id" => workflow_id} = json_response(conn, 201)["workflow"]
 
       conn = get(conn, Routes.workflow_path(conn, :show, workflow_id))
+
       assert %{
-               "id" => workflow_id,
+               "id" => workflow_id
              } = json_response(conn, 200)["workflow"]
     end
 
@@ -60,7 +61,9 @@ defmodule RealtimeWeb.WorkflowControllerTest do
 
       missing_default_execution_type = %{@create_attrs | default_execution_type: nil}
       conn = post(conn, Routes.workflow_path(conn, :create), missing_default_execution_type)
-      assert %{"errors" => %{"default_execution_type" => ["can't be blank"]}} = json_response(conn, 400)
+
+      assert %{"errors" => %{"default_execution_type" => ["can't be blank"]}} =
+               json_response(conn, 400)
 
       missing_definition = %{@create_attrs | definition: nil}
       conn = post(conn, Routes.workflow_path(conn, :create), missing_definition)
@@ -69,26 +72,36 @@ defmodule RealtimeWeb.WorkflowControllerTest do
 
     test "returns an error if the default_execution_type is invalid", %{conn: conn} do
       # First check create returns new workflow with correct default_execution_type values
-      default_execution_type_transient =
-        %{@create_attrs | default_execution_type: "transient", name: "Execution Type 1"}
+      default_execution_type_transient = %{
+        @create_attrs
+        | default_execution_type: "transient",
+          name: "Execution Type 1"
+      }
+
       conn = post(conn, Routes.workflow_path(conn, :create), default_execution_type_transient)
       assert %{"workflow" => _} = json_response(conn, 201)
 
-      default_execution_type_persistent =
-        %{@create_attrs | default_execution_type: "persistent", name: "Execution Type 2"}
+      default_execution_type_persistent = %{
+        @create_attrs
+        | default_execution_type: "persistent",
+          name: "Execution Type 2"
+      }
+
       conn = post(conn, Routes.workflow_path(conn, :create), default_execution_type_persistent)
       assert %{"workflow" => _} = json_response(conn, 201)
 
       default_execution_type_invalid = %{@create_attrs | default_execution_type: "magic"}
       conn = post(conn, Routes.workflow_path(conn, :create), default_execution_type_invalid)
-      assert %{"errors" => %{"default_execution_type" => ["is invalid"]}} = json_response(conn, 400)
+
+      assert %{"errors" => %{"default_execution_type" => ["is invalid"]}} =
+               json_response(conn, 400)
     end
 
     @tag :skip
     # TODO: need to validate workflows definition in package
     test "returns an error if the definition is invalid", %{conn: conn} do
       # The StartAt field is required by the spec
-      invalid_definition = %{@create_attrs[:definition] | "StartAt": nil}
+      invalid_definition = %{@create_attrs[:definition] | StartAt: nil}
       invalid_attrs = %{@create_attrs | definition: invalid_definition}
       conn = post(conn, Routes.workflow_path(conn, :create), invalid_attrs)
       assert %{"errors" => %{"definition" => ["is invalid"]}} = json_response(conn, 400)
@@ -115,6 +128,7 @@ defmodule RealtimeWeb.WorkflowControllerTest do
 
       update_attrs = %{@create_attrs | name: "The new name"}
       conn = put(conn, Routes.workflow_path(conn, :update, workflow_id), update_attrs)
+
       assert %{
                "id" => workflow_id,
                "name" => "The new name"
@@ -130,13 +144,20 @@ defmodule RealtimeWeb.WorkflowControllerTest do
       assert %{"errors" => %{"name" => [_]}} = json_response(conn, 400)
 
       conn = get(conn, Routes.workflow_path(conn, :show, workflow_id))
+
       assert %{
                "name" => "Test workflow"
              } = json_response(conn, 200)["workflow"]
     end
 
     test "returns 404 if the workflow does not exist", %{conn: conn} do
-      conn = put(conn, Routes.workflow_path(conn, :update, "da56c89b-f811-4bdc-b009-ee62e23712b4"), @create_attrs)
+      conn =
+        put(
+          conn,
+          Routes.workflow_path(conn, :update, "da56c89b-f811-4bdc-b009-ee62e23712b4"),
+          @create_attrs
+        )
+
       json_response(conn, 404)
     end
   end
@@ -147,6 +168,7 @@ defmodule RealtimeWeb.WorkflowControllerTest do
       assert %{"id" => workflow_id} = json_response(conn, 201)["workflow"]
 
       conn = delete(conn, Routes.workflow_path(conn, :delete, workflow_id))
+
       assert %{
                "name" => "Test workflow"
              } = json_response(conn, 200)["workflow"]
@@ -156,7 +178,9 @@ defmodule RealtimeWeb.WorkflowControllerTest do
     end
 
     test "returns 404 if the workflow does not exist", %{conn: conn} do
-      conn = delete(conn, Routes.workflow_path(conn, :delete, "da56c89b-f811-4bdc-b009-ee62e23712b4"))
+      conn =
+        delete(conn, Routes.workflow_path(conn, :delete, "da56c89b-f811-4bdc-b009-ee62e23712b4"))
+
       json_response(conn, 404)
     end
   end

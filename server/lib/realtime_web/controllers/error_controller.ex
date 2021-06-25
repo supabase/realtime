@@ -4,7 +4,8 @@ defmodule RealtimeWeb.ErrorController do
   require Logger
 
   def call(conn, {:error, %Ecto.Changeset{} = changeset}) do
-    Logger.debug("ErrorController.call(Changeset): #{inspect changeset}")
+    Logger.debug("ErrorController.call(Changeset): #{inspect(changeset)}")
+
     conn
     |> put_status(:bad_request)
     |> json(changeset_errors_json(changeset))
@@ -17,7 +18,8 @@ defmodule RealtimeWeb.ErrorController do
   end
 
   def call(conn, error) do
-    Logger.debug("ErrorController.call: #{inspect error}")
+    Logger.debug("ErrorController.call: #{inspect(error)}")
+
     conn
     |> put_status(:internal_server_error)
     |> json(%{message: "internal server error"})
@@ -30,12 +32,15 @@ defmodule RealtimeWeb.ErrorController do
         Enum.reduce(opts, msg, fn {key, value}, acc ->
           value =
             case value do
-              {:parameterized, _, _} -> "" # Ecto.Enum fail to produce an error message
+              # Ecto.Enum fail to produce an error message
+              {:parameterized, _, _} -> ""
               _ -> to_string(value)
             end
+
           String.replace(acc, "%{#{key}}", value)
         end)
       end)
+
     %{message: "invalid fields values", errors: errors_json}
   end
 end

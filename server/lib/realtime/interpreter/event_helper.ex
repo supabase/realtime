@@ -10,9 +10,10 @@ defmodule Realtime.Interpreter.EventHelper do
   def wait_started_to_map(event) do
     {seconds, timestamp} =
       case event.wait do
-	{:seconds, seconds} -> {seconds, nil}
-	{:timestamp, timestamp} -> {nil, timestamp}
+        {:seconds, seconds} -> {seconds, nil}
+        {:timestamp, timestamp} -> {nil, timestamp}
       end
+
     %{
       activity: event.activity,
       scope: event.scope,
@@ -28,17 +29,18 @@ defmodule Realtime.Interpreter.EventHelper do
   def wait_started_from_map(map) do
     wait =
       case {map["seconds"], map["timestamp"]} do
-	{seconds, nil} -> {:ok, {:seconds, seconds}}
-	{nil, timestamp} -> {:ok, {:timestamp, timestamp}}
-	_ -> {:error, :invalid_wait_started_map}
+        {seconds, nil} -> {:ok, {:seconds, seconds}}
+        {nil, timestamp} -> {:ok, {:timestamp, timestamp}}
+        _ -> {:error, :invalid_wait_started_map}
       end
 
     with {:ok, wait} <- wait do
       event = %WaitStarted{
-	activity: map["activity"],
-	scope: map["scope"],
-	wait: wait
+        activity: map["activity"],
+        scope: map["scope"],
+        wait: wait
       }
+
       {:ok, event}
     end
   end
@@ -50,6 +52,7 @@ defmodule Realtime.Interpreter.EventHelper do
       resource: map["resource"],
       args: map["args"]
     }
+
     {:ok, event}
   end
 end

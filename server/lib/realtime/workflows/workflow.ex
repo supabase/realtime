@@ -27,13 +27,13 @@ defmodule Realtime.Workflows.Workflow do
   @required_fields ~w(name trigger default_execution_type)a
 
   schema "workflows" do
-    field :name, :string
-    field :trigger, :string
-    field :default_execution_type, Ecto.Enum, values: [:persistent, :transient]
+    field(:name, :string)
+    field(:trigger, :string)
+    field(:default_execution_type, Ecto.Enum, values: [:persistent, :transient])
 
     timestamps()
 
-    has_many :revisions, Realtime.Workflows.Revision
+    has_many(:revisions, Realtime.Workflows.Revision)
   end
 
   @doc false

@@ -17,7 +17,6 @@ defmodule Realtime.Interpreter.PersistentManager do
 
   alias Realtime.Interpreter.Supervisor
 
-
   defmodule State do
     defstruct [:executions]
   end
@@ -48,7 +47,7 @@ defmodule Realtime.Interpreter.PersistentManager do
 
   @impl true
   def handle_call({:start_execution, workflow, execution_id, ctx, args}, _from, state) do
-    IO.puts "PM: Start execution"
+    IO.puts("PM: Start execution")
     {:ok, pid} = Supervisor.start_persistent(workflow, execution_id, ctx, args)
     new_executions = Map.put(state.executions, ctx.execution_id, pid)
     new_state = %State{state | executions: new_executions}
@@ -57,7 +56,7 @@ defmodule Realtime.Interpreter.PersistentManager do
 
   @impl true
   def handle_call({:resume_execution, execution_id, command}, _from, state) do
-    Logger.info("Resume execution #{inspect execution_id} #{inspect command}")
+    Logger.info("Resume execution #{inspect(execution_id)} #{inspect(command)}")
     # TODO: how to handle error?
     {:ok, new_state} = do_resume_execution(execution_id, command, state)
     {:reply, :ok, new_state}
@@ -73,12 +72,15 @@ defmodule Realtime.Interpreter.PersistentManager do
 
   defp get_or_recover_execution(execution_id, state) do
     case Map.fetch(state.executions, execution_id) do
-      {:ok, pid} -> {:ok, pid}
+      {:ok, pid} ->
+        {:ok, pid}
+
       :error ->
-	{:ok, execution} = Realtime.Workflows.get_workflow_execution(execution_id)
-	with {:ok, asl_workflow} <- Workflows.parse(execution.revision.definition) do
-	  Supervisor.recover_persistent(asl_workflow, execution_id)
-	end
+        {:ok, execution} = Realtime.Workflows.get_workflow_execution(execution_id)
+
+        with {:ok, asl_workflow} <- Workflows.parse(execution.revision.definition) do
+          Supervisor.recover_persistent(asl_workflow, execution_id)
+        end
     end
   end
 end
