@@ -17,7 +17,7 @@ defmodule Realtime.Workflows do
   alias Realtime.Repo
   alias Realtime.Adapters.Changes.Transaction
   alias Realtime.Interpreter
-  alias Realtime.Workflows.{Execution, Event, Manager, Revision, Workflow, LatestRevision}
+  alias Realtime.Workflows.{Execution, Manager, Revision, Workflow, LatestRevision}
 
   ## Workflow
 
@@ -105,7 +105,8 @@ defmodule Realtime.Workflows do
   """
   def create_workflow_execution(workflow_id, attrs \\ %{}) do
     with {:ok, revision} <- get_latest_workflow_revision(workflow_id),
-         {:ok, execution} <- insert_execution_with_revision(revision, attrs) do
+         # TODO: resume execution insertion into executions table
+         {:ok, execution} <- maybe_insert_execution_with_revision(revision, attrs, false) do
       {:ok, %{execution: execution, revision: revision}}
     end
   end
@@ -202,7 +203,7 @@ defmodule Realtime.Workflows do
     :ok
   end
 
-  def invoke_transaction_workflows(txn) do
+  def invoke_transaction_workflows(_txn) do
     :ok
   end
 
@@ -228,7 +229,21 @@ defmodule Realtime.Workflows do
     from(r in LatestRevision)
   end
 
-  defp insert_execution_with_revision(revision, attrs) do
+  defp maybe_insert_execution_with_revision(revision, attrs, should_insert \\ true)
+
+  defp maybe_insert_execution_with_revision(revision, attrs, false) do
+    %Execution{}
+    |> Execution.create_changeset(revision, attrs)
+    |> case do
+      %Ecto.Changeset{valid?: true} ->
+        {:ok, Repo.load(Execution, attrs)}
+
+      invalid_changeset ->
+        {:error, invalid_changeset}
+    end
+  end
+
+  defp maybe_insert_execution_with_revision(revision, attrs, true) do
     %Execution{}
     |> Execution.create_changeset(revision, attrs)
     |> Repo.insert()
