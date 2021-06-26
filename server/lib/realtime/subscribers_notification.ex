@@ -14,6 +14,8 @@ defmodule Realtime.SubscribersNotification do
 
     :ok = notify_subscribers(changes, realtime_config)
     :ok = Realtime.WebhookConnector.notify(txn, webhooks_config)
+    :ok = Realtime.Workflows.Manager.notify(txn)
+    :ok = Realtime.Workflows.invoke_transaction_workflows(txn)
   end
 
   def notify(_txn) do

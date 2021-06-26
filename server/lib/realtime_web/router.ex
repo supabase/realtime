@@ -10,6 +10,7 @@ defmodule RealtimeWeb.Router do
   end
 
   pipeline :api do
+    plug CORSPlug
     plug :accepts, ["json"]
   end
 
@@ -19,8 +20,15 @@ defmodule RealtimeWeb.Router do
     get "/", PageController, :index
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", RealtimeWeb do
-  #   pipe_through :api
-  # end
+  scope "/api", RealtimeWeb do
+    pipe_through :api
+
+    resources "/workflows", WorkflowController do
+      resources "/executions", ExecutionController, only: [:index, :create, :show, :delete]
+    end
+  end
+
+  if Mix.env() == :dev do
+    forward "/sent_emails", Bamboo.SentEmailViewerPlug
+  end
 end

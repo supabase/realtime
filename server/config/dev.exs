@@ -21,6 +21,11 @@ config :realtime, RealtimeWeb.Endpoint,
   check_origin: false,
   watchers: []
 
+config :realtime, Realtime.Resource.Email.Mailer,
+  adapter: Bamboo.LocalAdapter
+
+# config :logger, level: :info
+
 # ## SSL Support
 #
 # In order to use HTTPS in development, a self-signed
