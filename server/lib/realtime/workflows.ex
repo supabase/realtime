@@ -17,7 +17,7 @@ defmodule Realtime.Workflows do
   alias Realtime.Repo
   alias Realtime.Adapters.Changes.Transaction
   alias Realtime.Interpreter
-  alias Realtime.Workflows.{Execution, Manager, Revision, Workflow, LatestRevision}
+  alias Realtime.Workflows.{Execution, Manager, Revision, Workflow}
 
   ## Workflow
 
@@ -25,13 +25,23 @@ defmodule Realtime.Workflows do
   Returns the list of workflows.
   """
   def list_workflows do
-    revisions = latest_revision_query()
-
     Repo.all(
       from(w in Workflow,
-        preload: [
-          revisions: ^revisions
-        ]
+        as: :workflow,
+        join: r in assoc(w, :revisions),
+        inner_lateral_join:
+          latest_revision in subquery(
+            from(Revision,
+              where: [workflow_id: parent_as(:workflow).id],
+              order_by: [
+                desc: :version
+              ],
+              limit: 1,
+              select: [:id]
+            )
+          ),
+        on: latest_revision.id == r.id,
+        preload: [revisions: r]
       )
     )
   end
@@ -40,8 +50,10 @@ defmodule Realtime.Workflows do
   Returns the workflow with the given id.
   """
   def get_workflow(id) do
+    latest_revision_query = from(r in Revision, order_by: [desc: :version], limit: 1)
+
     Repo.get(Workflow, id)
-    |> Repo.preload(revisions: latest_revision_query())
+    |> Repo.preload(revisions: latest_revision_query)
     |> value_or_not_found(id)
   end
 
@@ -223,10 +235,6 @@ defmodule Realtime.Workflows do
       nil -> {:error, :not_found}
       revision -> {:ok, revision}
     end
-  end
-
-  defp latest_revision_query do
-    from(r in LatestRevision)
   end
 
   defp maybe_insert_execution_with_revision(revision, attrs, should_insert \\ true)
