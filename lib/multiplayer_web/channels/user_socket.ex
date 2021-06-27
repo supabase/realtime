@@ -2,7 +2,7 @@ defmodule MultiplayerWeb.UserSocket do
   use Phoenix.Socket
 
   ## Channels
-  channel "room:*", MultiplayerWeb.RoomChannel
+  channel "realtime:*", MultiplayerWeb.RoomChannel
 
   # Socket params are passed from the client and can
   # be used to verify and authenticate a user. After

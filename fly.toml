@@ -1,6 +1,6 @@
 # fly.toml file generated for multiplayer-dev on 2021-05-19T00:27:00-04:00
 
-app = "multiplayer-dev"
+app = "multiplayer-dev-post2ws"
 
 kill_signal = "SIGTERM"
 kill_timeout = 5

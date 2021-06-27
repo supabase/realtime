@@ -19,10 +19,10 @@ defmodule MultiplayerWeb.Router do
     get "/", PageController, :index
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", MultiplayerWeb do
-  #   pipe_through :api
-  # end
+  scope "/api", MultiplayerWeb do
+    pipe_through :api
+    post "/broadcast", BroadcastController, :post
+  end
 
   # Enables LiveDashboard only for development
   #

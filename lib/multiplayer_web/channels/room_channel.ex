@@ -3,8 +3,8 @@ defmodule MultiplayerWeb.RoomChannel do
   alias MultiplayerWeb.Presence
 
   @impl true
-  def join("room:" <> _, _params, socket) do
-    send(self(), :after_join)
+  def join("realtime:" <> _, _params, socket) do
+    # send(self(), :after_join)
     {:ok, socket}
   end
 
