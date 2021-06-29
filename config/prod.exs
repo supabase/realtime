@@ -13,7 +13,7 @@ use Mix.Config
 #   url: [host: "multiplayer.dev", port: 80]
 
 # Do not print debug messages in production
-config :logger, level: :info
+config :logger, level: :warning
 
 # ## SSL Support
 #

@@ -1,13 +1,12 @@
 defmodule MultiplayerWeb.BroadcastController do
   use MultiplayerWeb, :controller
 
-  def post(conn, %{"changes" => changes}) do
+  def post(conn, %{"changes" => changes, "scope" => scope, "topic" => topic}) do
     Enum.each(changes, fn event ->
-      MultiplayerWeb.Endpoint.broadcast_from!(
-        self(),
-        "realtime:*",
-        Map.get(event, "type"),
-        event
+      Phoenix.PubSub.broadcast(
+        Multiplayer.PubSub,
+        scope <> ":" <> topic,
+        {:event, event}
       )
     end)
     # empty response
