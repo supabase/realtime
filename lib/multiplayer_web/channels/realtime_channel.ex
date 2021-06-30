@@ -10,7 +10,8 @@ defmodule MultiplayerWeb.RealtimeChannel do
     fastlane = {:fastlane, socket.transport_pid, socket.serializer, []}
     MultiplayerWeb.Endpoint.subscribe(scope_topic, metadata: fastlane)
     send(self(), :after_join)
-    {:ok, %{socket | topic: scope_topic}}
+    {:ok, update_topic(socket, scope_topic)
+            |> assign(topic: topic)}
   end
 
   @impl true
@@ -24,14 +25,17 @@ defmodule MultiplayerWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_info({:event, %{"type" => type} = event}, %{assigns: %{scope: scope}} = socket) do
-    topic = String.slice(scope, String.length("topic")..-1)
-    push(%{socket | topic: topic}, type, event)
+  def handle_info({:event, %{"type" => type} = event}, %{assigns: %{topic: topic}} = socket) do
+    update_topic(socket, topic) |> push(type, event)
     {:noreply, socket}
   end
 
   def handle_info(_, socket) do
     {:noreply, socket}
+  end
+
+  defp update_topic(socket, topic) do
+    Map.put(socket, :topic, topic)
   end
 
 end
