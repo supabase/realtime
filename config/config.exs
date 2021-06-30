@@ -7,8 +7,26 @@
 # General application configuration
 use Mix.Config
 
+# Channels are not secured by default in development and
+# are secured by default in production.
+secure_channels = System.get_env("SECURE_CHANNELS", "true") != "false"
+
+# Supports HS algorithm octet keys
+# e.g. "95x0oR8jq9unl9pOIx"
+jwt_secret = System.get_env("JWT_SECRET", "")
+
+# Every JWT's claims will be compared (equality checks) to the expected
+# claims set in the JSON object.
+# e.g.
+# Set JWT_CLAIM_VALIDATORS="{'iss': 'Issuer', 'nbf': 1610078130}"
+# Then JWT's "iss" value must equal "Issuer" and "nbf" value
+# must equal 1610078130.
+jwt_claim_validators = System.get_env("JWT_CLAIM_VALIDATORS", "{}")
+
 config :multiplayer,
-  ecto_repos: [Multiplayer.Repo]
+  secure_channels: secure_channels,
+  jwt_secret: jwt_secret,
+  jwt_claim_validators: jwt_claim_validators
 
 # Configures the endpoint
 config :multiplayer, MultiplayerWeb.Endpoint,

@@ -2,6 +2,7 @@ defmodule MultiplayerWeb.UserSocket do
   use Phoenix.Socket
 
   ## Channels
+  channel "room:*", MultiplayerWeb.RoomChannel
   channel "realtime:*", MultiplayerWeb.RealtimeChannel
 
   # Socket params are passed from the client and can
@@ -16,11 +17,20 @@ defmodule MultiplayerWeb.UserSocket do
   # See `Phoenix.Token` documentation for examples in
   # performing token verification on connect.
   @impl true
-  def connect(_params, socket, _connect_info) do
-    params = %{user_id: UUID.uuid4()}
-    {:ok, socket
-            |> assign(:scope, "test_scope")
-            |> assign(:params, params)}
+  def connect(%{"scope" => scope} = params, socket, _connect_info) do
+    user_id =
+      case Map.get(params, "user_id", nil) do
+        nil -> UUID.uuid4()
+        user_id -> user_id
+      end
+    assigns = %{scope: scope, params: %{user_id: user_id}}
+    {:ok, assign(socket, assigns)}
+  end
+
+  def connect(params, socket, _connect_info) do
+    {_, params} = Map.pop(params, "vsn")
+    params = for {key, val} <- params, into: %{}, do: {String.to_atom(key), val}
+    {:ok, assign(socket, :params, params)}
   end
 
   # Socket id's are topics that allow you to identify all sockets for a given user:

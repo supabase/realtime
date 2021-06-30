@@ -24,17 +24,14 @@ defmodule MultiplayerWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_info({:event, %{"type" => type} = event}, socket) do
-    push(%{socket | topic: "realtime:*"}, type, event)
+  def handle_info({:event, %{"type" => type} = event}, %{assigns: %{scope: scope}} = socket) do
+    topic = String.slice(scope, String.length("topic")..-1)
+    push(%{socket | topic: topic}, type, event)
     {:noreply, socket}
   end
 
   def handle_info(_, socket) do
     {:noreply, socket}
-  end
-
-  defp no_scope(scope, topic) do
-    String.slice(topic, String.length("topic")..-1)
   end
 
 end
