@@ -30,6 +30,17 @@ config :multiplayer, MultiplayerWeb.Endpoint,
     ]
   ]
 
+config :multiplayer, Multiplayer.PromEx,
+  manual_metrics_start_delay: :no_delay,
+  drop_metrics_groups: [],
+  grafana: :disabled,
+  metrics_server: [
+    port: 4021,
+    path: "/metrics",
+    protocol: :http,
+    pool_size: 5,
+    cowboy_opts: []
+  ]
 # ## SSL Support
 #
 # In order to use HTTPS in development, a self-signed

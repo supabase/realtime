@@ -20,7 +20,7 @@ defmodule Multiplayer.MixProject do
   def application do
     [
       mod: {Multiplayer.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools, :prom_ex]
     ]
   end
 
@@ -43,7 +43,8 @@ defmodule Multiplayer.MixProject do
       {:jason, "~> 1.0"},
       {:plug_cowboy, "~> 2.0"},
       {:libcluster, "~> 3.3"},
-      {:uuid, "~> 1.1"}
+      {:uuid, "~> 1.1"},
+      {:prom_ex, "~> 1.2.2"}
     ]
   end
 
