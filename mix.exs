@@ -44,7 +44,9 @@ defmodule Multiplayer.MixProject do
       {:plug_cowboy, "~> 2.0"},
       {:libcluster, "~> 3.3"},
       {:uuid, "~> 1.1"},
-      {:prom_ex, "~> 1.2.2"}
+      {:prom_ex, "~> 1.2.2"},
+      {:mock, "~> 0.3.0", only: :test},
+      {:joken, "~> 2.3.0"}
     ]
   end
 

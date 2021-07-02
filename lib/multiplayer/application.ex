@@ -4,9 +4,28 @@ defmodule Multiplayer.Application do
   @moduledoc false
 
   use Application
+  require Logger, warn: false
+
+  defmodule JwtSecretError, do: defexception([:message])
+  defmodule JwtClaimValidatorsError, do: defexception([:message])
 
   def start(_type, _args) do
     topologies = Application.get_env(:libcluster, :topologies) || []
+
+    if Application.fetch_env!(:multiplayer, :secure_channels) do
+      if Application.fetch_env!(:multiplayer, :jwt_secret) == "" do
+        raise JwtSecretError, message: "JWT secret is missing"
+      end
+
+      case Application.fetch_env!(:multiplayer, :jwt_claim_validators) |> Jason.decode() do
+        {:ok, claims} when is_map(claims) ->
+          Application.put_env(:multiplayer, :jwt_claim_validators, claims)
+
+        _ ->
+          raise JwtClaimValidatorsError,
+            message: "JWT claim validators is not a valid JSON object"
+      end
+    end
 
     children = [
       {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},

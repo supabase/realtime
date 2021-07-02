@@ -18,7 +18,7 @@ jwt_secret = System.get_env("JWT_SECRET", "")
 # Every JWT's claims will be compared (equality checks) to the expected
 # claims set in the JSON object.
 # e.g.
-# Set JWT_CLAIM_VALIDATORS="{'iss': 'Issuer', 'nbf': 1610078130}"
+# Set JWT_CLAIM_VALIDATORS="{\"iss\": \"Issuer\", \"nbf\": 1610078130}"
 # Then JWT's "iss" value must equal "Issuer" and "nbf" value
 # must equal 1610078130.
 jwt_claim_validators = System.get_env("JWT_CLAIM_VALIDATORS", "{}")

@@ -7,5 +7,11 @@ config :multiplayer, MultiplayerWeb.Endpoint,
   http: [port: 4002],
   server: false
 
+config :multiplayer,
+  secure_channels: false
+
+config :joken,
+  current_time_adapter: MultiplayerWeb.Joken.CurrentTime.Mock
+
 # Print only warnings and errors during test
 config :logger, level: :warn

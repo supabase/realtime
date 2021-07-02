@@ -1,5 +1,6 @@
 defmodule MultiplayerWeb.UserSocket do
   use Phoenix.Socket
+  alias MultiplayerWeb.ChannelsAuthorization
 
   ## Channels
   channel "room:*", MultiplayerWeb.RoomChannel
@@ -18,13 +19,18 @@ defmodule MultiplayerWeb.UserSocket do
   # performing token verification on connect.
   @impl true
   def connect(%{"scope" => scope} = params, socket, _connect_info) do
-    user_id =
-      case Map.get(params, "user_id", nil) do
-        nil -> UUID.uuid4()
-        user_id -> user_id
-      end
-    assigns = %{scope: scope, params: %{user_id: user_id}}
-    {:ok, assign(socket, assigns)}
+    case Application.fetch_env!(:multiplayer, :secure_channels)
+         |> authorize_conn(params) do
+      :ok ->
+        user_id =
+          case Map.get(params, "user_id", nil) do
+            nil -> UUID.uuid4()
+            user_id -> user_id
+          end
+        assigns = %{scope: scope, params: %{user_id: user_id}}
+        {:ok, assign(socket, assigns)}
+      _ -> :error
+    end
   end
 
   def connect(params, socket, _connect_info) do
@@ -45,4 +51,14 @@ defmodule MultiplayerWeb.UserSocket do
   # Returning `nil` makes this socket anonymous.
   @impl true
   def id(_socket), do: nil
+
+  defp authorize_conn(true, %{"apikey" => token}) do
+    case ChannelsAuthorization.authorize(token) do
+      {:ok, _} -> :ok
+      _ -> :error
+    end
+  end
+
+  defp authorize_conn(true, _params), do: :error
+  defp authorize_conn(false, _params), do: :ok
 end
