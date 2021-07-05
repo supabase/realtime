@@ -29,6 +29,8 @@ defmodule Multiplayer.Application do
 
     children = [
       {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
+      # Start the Ecto repository
+      Multiplayer.Repo,
       # Start the Telemetry supervisor
       MultiplayerWeb.Telemetry,
       # Start the PubSub system

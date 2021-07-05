@@ -24,6 +24,7 @@ jwt_secret = System.get_env("JWT_SECRET", "")
 jwt_claim_validators = System.get_env("JWT_CLAIM_VALIDATORS", "{}")
 
 config :multiplayer,
+  ecto_repos: [Multiplayer.Repo],
   secure_channels: secure_channels,
   jwt_secret: jwt_secret,
   jwt_claim_validators: jwt_claim_validators

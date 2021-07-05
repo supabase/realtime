@@ -22,6 +22,7 @@ defmodule MultiplayerWeb.ConnCase do
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest
+      import MultiplayerWeb.ConnCase
       alias MultiplayerWeb.Router.Helpers, as: Routes
 
       # The default endpoint for testing
@@ -30,6 +31,12 @@ defmodule MultiplayerWeb.ConnCase do
   end
 
   setup tags do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Multiplayer.Repo)
+
+    unless tags[:async] do
+      Ecto.Adapters.SQL.Sandbox.mode(Multiplayer.Repo, {:shared, self()})
+    end
+
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

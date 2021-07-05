@@ -29,6 +29,12 @@ defmodule MultiplayerWeb.ChannelCase do
   end
 
   setup tags do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Multiplayer.Repo)
+
+    unless tags[:async] do
+      Ecto.Adapters.SQL.Sandbox.mode(Multiplayer.Repo, {:shared, self()})
+    end
+
     :ok
   end
 end
