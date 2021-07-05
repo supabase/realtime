@@ -22,10 +22,10 @@ defmodule MultiplayerWeb.JwtVerification do
 
   @hs_algorithms ["HS256", "HS384", "HS512"]
 
-  def verify(token) when is_binary(token) do
+  def verify(token, secret) when is_binary(token) do
     with :ok <- check_claims_format(token),
          {:ok, header} <- check_header_format(token),
-         {:ok, signer} <- generate_signer(header) do
+         {:ok, signer} <- generate_signer(header, secret) do
       JwtAuthToken.verify_and_validate(token, signer)
     else
       _ -> :error
@@ -48,12 +48,9 @@ defmodule MultiplayerWeb.JwtVerification do
     end
   end
 
-  defp generate_signer(%{"typ" => "JWT", "alg" => alg}) when alg in @hs_algorithms do
+  defp generate_signer(%{"typ" => "JWT", "alg" => alg}, jwt_secret) when alg in @hs_algorithms do
     {:ok,
-     Joken.Signer.create(
-       alg,
-       Application.fetch_env!(:multiplayer, :jwt_secret)
-     )}
+     Joken.Signer.create(alg, jwt_secret)}
   end
 
   defp generate_signer(_header), do: :error

@@ -52,8 +52,9 @@ defmodule MultiplayerWeb.UserSocket do
   @impl true
   def id(_socket), do: nil
 
-  defp authorize_conn(true, %{"apikey" => token}) do
-    case ChannelsAuthorization.authorize(token) do
+  defp authorize_conn(true, %{"apikey" => token, "scope" => _scope}) do
+    secret = Application.fetch_env!(:multiplayer, :jwt_secret)
+    case ChannelsAuthorization.authorize(token, secret) do
       {:ok, _} -> :ok
       _ -> :error
     end
