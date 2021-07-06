@@ -2,15 +2,13 @@ defmodule MultiplayerWeb.RealtimeChannel do
   use MultiplayerWeb, :channel
   require Logger
   alias MultiplayerWeb.Presence
-  alias Phoenix.PubSub
 
   @impl true
   def join(topic, _, %{assigns: %{scope: scope}} = socket) do
-    scope_topic = scope <> ":" <> topic
-    fastlane = {:fastlane, socket.transport_pid, socket.serializer, []}
-    MultiplayerWeb.Endpoint.subscribe(scope_topic, metadata: fastlane)
+    scope_topic_name = scope <> ":" <> topic
+    scope_topic(socket, scope_topic_name)
     send(self(), :after_join)
-    {:ok, update_topic(socket, scope_topic)
+    {:ok, update_topic(socket, scope_topic_name)
             |> assign(topic: topic)}
   end
 
@@ -32,6 +30,11 @@ defmodule MultiplayerWeb.RealtimeChannel do
 
   def handle_info(_, socket) do
     {:noreply, socket}
+  end
+
+  defp scope_topic(socket, topic) do
+    fastlane = {:fastlane, socket.transport_pid, socket.serializer, []}
+    MultiplayerWeb.Endpoint.subscribe(topic, metadata: fastlane)
   end
 
   defp update_topic(socket, topic) do

@@ -1,5 +1,6 @@
 defmodule MultiplayerWeb.UserSocket do
   use Phoenix.Socket
+  require Logger
   alias MultiplayerWeb.ChannelsAuthorization
 
   ## Channels
@@ -18,18 +19,21 @@ defmodule MultiplayerWeb.UserSocket do
   # See `Phoenix.Token` documentation for examples in
   # performing token verification on connect.
   @impl true
-  def connect(%{"scope" => scope} = params, socket, _connect_info) do
-    case Application.fetch_env!(:multiplayer, :secure_channels)
-         |> authorize_conn(params) do
-      :ok ->
-        user_id =
-          case Map.get(params, "user_id", nil) do
-            nil -> UUID.uuid4()
-            user_id -> user_id
-          end
-        assigns = %{scope: scope, params: %{user_id: user_id}}
-        {:ok, assign(socket, assigns)}
-      _ -> :error
+  def connect(params, socket, %{uri: %{host: host}}) do
+    case Multiplayer.Api.get_project_by_host(host) do
+      nil ->
+        Logger.error("Undefined host " <> host)
+        :error
+      project ->
+        token = Map.get(params, "apikey")
+        case Application.fetch_env!(:multiplayer, :secure_channels)
+            |> authorize_conn(token, project.jwt_secret) do
+          :ok ->
+            user_id = Map.get(params, "user_id", UUID.uuid4())
+            assigns = %{scope: project.id, params: %{user_id: user_id}}
+            {:ok, assign(socket, assigns)}
+          _ -> :error
+        end
     end
   end
 
@@ -52,14 +56,12 @@ defmodule MultiplayerWeb.UserSocket do
   @impl true
   def id(_socket), do: nil
 
-  defp authorize_conn(true, %{"apikey" => token, "scope" => _scope}) do
-    secret = Application.fetch_env!(:multiplayer, :jwt_secret)
+  defp authorize_conn(true, token, secret) do
     case ChannelsAuthorization.authorize(token, secret) do
       {:ok, _} -> :ok
       _ -> :error
     end
   end
 
-  defp authorize_conn(true, _params), do: :error
-  defp authorize_conn(false, _params), do: :ok
+  defp authorize_conn(false, _, _), do: :ok
 end

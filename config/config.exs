@@ -11,10 +11,6 @@ use Mix.Config
 # are secured by default in production.
 secure_channels = System.get_env("SECURE_CHANNELS", "true") != "false"
 
-# Supports HS algorithm octet keys
-# e.g. "95x0oR8jq9unl9pOIx"
-jwt_secret = System.get_env("JWT_SECRET", "")
-
 # Every JWT's claims will be compared (equality checks) to the expected
 # claims set in the JSON object.
 # e.g.
@@ -23,10 +19,23 @@ jwt_secret = System.get_env("JWT_SECRET", "")
 # must equal 1610078130.
 jwt_claim_validators = System.get_env("JWT_CLAIM_VALIDATORS", "{}")
 
+db_host = System.get_env("DB_HOST", "localhost")
+db_name = System.get_env("DB_NAME", "postgres")
+db_user = System.get_env("DB_USER", "postgres")
+db_password = System.get_env("DB_PASSWORD", "postgres")
+
+# Configure your database
+config :multiplayer, Multiplayer.Repo,
+  username: db_user,
+  password: db_password,
+  database: db_name,
+  hostname: db_host,
+  show_sensitive_data_on_connection_error: true,
+  pool_size: 10
+
 config :multiplayer,
   ecto_repos: [Multiplayer.Repo],
   secure_channels: secure_channels,
-  jwt_secret: jwt_secret,
   jwt_claim_validators: jwt_claim_validators
 
 # Configures the endpoint
