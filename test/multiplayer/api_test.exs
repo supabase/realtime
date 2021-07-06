@@ -124,4 +124,63 @@ defmodule Multiplayer.ApiTest do
       assert %Ecto.Changeset{} = Api.change_project_scope(project_scope)
     end
   end
+
+  describe "scopes" do
+    alias Multiplayer.Api.Scope
+
+    @valid_attrs %{host: "some host"}
+    @update_attrs %{host: "some updated host"}
+    @invalid_attrs %{host: nil}
+
+    def scope_fixture(attrs \\ %{}) do
+      {:ok, scope} =
+        attrs
+        |> Enum.into(@valid_attrs)
+        |> Api.create_scope()
+
+      scope
+    end
+
+    test "list_scopes/0 returns all scopes" do
+      scope = scope_fixture()
+      assert Api.list_scopes() == [scope]
+    end
+
+    test "get_scope!/1 returns the scope with given id" do
+      scope = scope_fixture()
+      assert Api.get_scope!(scope.id) == scope
+    end
+
+    test "create_scope/1 with valid data creates a scope" do
+      assert {:ok, %Scope{} = scope} = Api.create_scope(@valid_attrs)
+      assert scope.host == "some host"
+    end
+
+    test "create_scope/1 with invalid data returns error changeset" do
+      assert {:error, %Ecto.Changeset{}} = Api.create_scope(@invalid_attrs)
+    end
+
+    test "update_scope/2 with valid data updates the scope" do
+      scope = scope_fixture()
+      assert {:ok, %Scope{} = scope} = Api.update_scope(scope, @update_attrs)
+      assert scope.host == "some updated host"
+    end
+
+    test "update_scope/2 with invalid data returns error changeset" do
+      scope = scope_fixture()
+      assert {:error, %Ecto.Changeset{}} = Api.update_scope(scope, @invalid_attrs)
+      assert scope == Api.get_scope!(scope.id)
+    end
+
+    test "delete_scope/1 deletes the scope" do
+      scope = scope_fixture()
+      assert {:ok, %Scope{}} = Api.delete_scope(scope)
+      assert_raise Ecto.NoResultsError, fn -> Api.get_scope!(scope.id) end
+    end
+
+    test "change_scope/1 returns a scope changeset" do
+      scope = scope_fixture()
+      assert %Ecto.Changeset{} = Api.change_scope(scope)
+    end
+  end
 end

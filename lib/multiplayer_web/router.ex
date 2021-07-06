@@ -23,7 +23,7 @@ defmodule MultiplayerWeb.Router do
     pipe_through :api
     post "/broadcast", BroadcastController, :post
     resources "/projects", ProjectController
-    resources "/project_scopes", ProjectScopeController
+    resources "/scopes", ScopeController
   end
 
   # Enables LiveDashboard only for development

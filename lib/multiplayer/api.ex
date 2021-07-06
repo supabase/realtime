@@ -28,7 +28,10 @@ defmodule Multiplayer.Api do
 
   ## Examples
 
-      iex> get_project!(123)
+      iex> _by_host!(123) do
+
+      end
+
       %Project{}
 
       iex> get_project!(456)
@@ -102,99 +105,109 @@ defmodule Multiplayer.Api do
     Project.changeset(project, attrs)
   end
 
-  alias Multiplayer.Api.ProjectScope
+  alias Multiplayer.Api.Scope
 
   @doc """
-  Returns the list of project_scopes.
+  Returns the list of scopes.
 
   ## Examples
 
-      iex> list_project_scopes()
-      [%ProjectScope{}, ...]
+      iex> list_scopes()
+      [%Scope{}, ...]
 
   """
-  def list_project_scopes do
-    Repo.all(ProjectScope)
+  def list_scopes do
+    Repo.all(Scope)
   end
 
   @doc """
-  Gets a single project_scope.
+  Gets a single scope.
 
-  Raises `Ecto.NoResultsError` if the Project scope does not exist.
+  Raises `Ecto.NoResultsError` if the Scope does not exist.
 
   ## Examples
 
-      iex> get_project_scope!(123)
-      %ProjectScope{}
+      iex> get_scope!(123)
+      %Scope{}
 
-      iex> get_project_scope!(456)
+      iex> get_scope!(456)
       ** (Ecto.NoResultsError)
 
   """
-  def get_project_scope!(id), do: Repo.get!(ProjectScope, id)
+  def get_scope!(id), do: Repo.get!(Scope, id)
 
   @doc """
-  Creates a project_scope.
+  Creates a scope.
 
   ## Examples
 
-      iex> create_project_scope(%{field: value})
-      {:ok, %ProjectScope{}}
+      iex> create_scope(%{field: value})
+      {:ok, %Scope{}}
 
-      iex> create_project_scope(%{field: bad_value})
+      iex> create_scope(%{field: bad_value})
       {:error, %Ecto.Changeset{}}
 
   """
-  def create_project_scope(attrs \\ %{}) do
-    %ProjectScope{}
-    |> ProjectScope.changeset(attrs)
+  def create_scope(attrs \\ %{}) do
+    %Scope{}
+    |> Scope.changeset(attrs)
     |> Repo.insert()
   end
 
   @doc """
-  Updates a project_scope.
+  Updates a scope.
 
   ## Examples
 
-      iex> update_project_scope(project_scope, %{field: new_value})
-      {:ok, %ProjectScope{}}
+      iex> update_scope(scope, %{field: new_value})
+      {:ok, %Scope{}}
 
-      iex> update_project_scope(project_scope, %{field: bad_value})
+      iex> update_scope(scope, %{field: bad_value})
       {:error, %Ecto.Changeset{}}
 
   """
-  def update_project_scope(%ProjectScope{} = project_scope, attrs) do
-    project_scope
-    |> ProjectScope.changeset(attrs)
+  def update_scope(%Scope{} = scope, attrs) do
+    scope
+    |> Scope.changeset(attrs)
     |> Repo.update()
   end
 
   @doc """
-  Deletes a project_scope.
+  Deletes a scope.
 
   ## Examples
 
-      iex> delete_project_scope(project_scope)
-      {:ok, %ProjectScope{}}
+      iex> delete_scope(scope)
+      {:ok, %Scope{}}
 
-      iex> delete_project_scope(project_scope)
+      iex> delete_scope(scope)
       {:error, %Ecto.Changeset{}}
 
   """
-  def delete_project_scope(%ProjectScope{} = project_scope) do
-    Repo.delete(project_scope)
+  def delete_scope(%Scope{} = scope) do
+    Repo.delete(scope)
   end
 
   @doc """
-  Returns an `%Ecto.Changeset{}` for tracking project_scope changes.
+  Returns an `%Ecto.Changeset{}` for tracking scope changes.
 
   ## Examples
 
-      iex> change_project_scope(project_scope)
-      %Ecto.Changeset{data: %ProjectScope{}}
+      iex> change_scope(scope)
+      %Ecto.Changeset{data: %Scope{}}
 
   """
-  def change_project_scope(%ProjectScope{} = project_scope, attrs \\ %{}) do
-    ProjectScope.changeset(project_scope, attrs)
+  def change_scope(%Scope{} = scope, attrs \\ %{}) do
+    Scope.changeset(scope, attrs)
   end
+
+  def get_project_by_host(host) do
+    query = from s in Scope,
+              join: p in Project,
+              on: s.project_id == p.id,
+              where: s.host == ^host,
+              select: p
+    Repo.one(query)
+  end
+
 end
