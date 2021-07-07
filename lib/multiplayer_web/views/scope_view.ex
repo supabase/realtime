@@ -11,7 +11,10 @@ defmodule MultiplayerWeb.ScopeView do
   end
 
   def render("scope.json", %{scope: scope}) do
-    %{id: scope.id,
-      host: scope.host}
+    %{
+      id: scope.id,
+      host: scope.host,
+      project_id: scope.project_id
+    }
   end
 end

@@ -32,7 +32,7 @@ defmodule MultiplayerWeb.JwtVerification do
     end
   end
 
-  def verify(_token), do: :error
+  def verify(_token, _secret), do: :error
 
   defp check_header_format(token) do
     case Joken.peek_header(token) do
@@ -53,5 +53,5 @@ defmodule MultiplayerWeb.JwtVerification do
      Joken.Signer.create(alg, jwt_secret)}
   end
 
-  defp generate_signer(_header), do: :error
+  defp generate_signer(_header, _secret), do: :error
 end

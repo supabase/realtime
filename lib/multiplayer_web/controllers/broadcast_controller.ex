@@ -1,11 +1,11 @@
 defmodule MultiplayerWeb.BroadcastController do
   use MultiplayerWeb, :controller
 
-  def post(conn, %{"changes" => changes, "scope" => scope, "topic" => topic}) do
+  def post(conn, %{"changes" => changes, "project_id" => project_id, "topic" => topic}) do
     Enum.each(changes, fn event ->
       Phoenix.PubSub.broadcast(
         Multiplayer.PubSub,
-        scope <> ":" <> topic,
+        project_id <> ":" <> topic,
         {:event, event}
       )
     end)

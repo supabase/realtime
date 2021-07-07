@@ -6,7 +6,7 @@ defmodule MultiplayerWeb.ChannelsAuthorization do
     |> MultiplayerWeb.JwtVerification.verify(secret)
   end
 
-  def authorize(_token), do: :error
+  def authorize(_token, _secret), do: :error
 
   defp clean_token(token) do
     Regex.replace(~r/\s|\n/, URI.decode(token), "")

@@ -1,6 +1,7 @@
 defmodule MultiplayerWeb.BroadcastControllerTest do
   use MultiplayerWeb.ConnCase
   use MultiplayerWeb.ChannelCase
+  alias Multiplayer.Api
 
   @event %{
     "columns" => [
@@ -16,7 +17,7 @@ defmodule MultiplayerWeb.BroadcastControllerTest do
   }
   @req_json %{
     "changes" => [@event],
-    "scope" => "test_scope",
+    "project_id" => "",
     "topic" => "realtime:*",
     "commit_timestamp" => "2021-06-25T16:50:09Z"
   }
@@ -32,11 +33,13 @@ defmodule MultiplayerWeb.BroadcastControllerTest do
   end
 
   test "send changes to the channel", %{conn: conn} do
+    {:ok, project} = Api.create_project(%{name: "project1", secret: "secret"})
+    {:ok, scope} = Api.create_scope(%{host: "localhost", project_id: project.id})
     MultiplayerWeb.UserSocket
-      |> socket("user_id", %{scope: "test_scope", params: %{user_id: "user1"}})
+      |> socket("user_id", %{scope: project.id, params: %{user_id: "user1"}})
       |> subscribe_and_join(MultiplayerWeb.RealtimeChannel, "realtime:*")
 
-    post(conn, "/api/broadcast",  @req_json)
+    post(conn, "/api/broadcast",  %{@req_json | "project_id" => project.id})
     assert_push "INSERT", @event
   end
 

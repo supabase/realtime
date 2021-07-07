@@ -8,7 +8,7 @@ use Mix.Config
 config :multiplayer, Multiplayer.Repo,
   username: "postgres",
   password: "postgres",
-  database: "postgres",
+  database: "postgres_test",
   hostname: "localhost",
   pool: Ecto.Adapters.SQL.Sandbox
 

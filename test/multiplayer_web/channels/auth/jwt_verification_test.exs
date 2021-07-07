@@ -18,27 +18,27 @@ defmodule MultiplayerWeb.JwtVerificationTest do
   end
 
   test "verify/1 when token is not a string" do
-    assert :error = JwtVerification.verify([])
+    assert :error = JwtVerification.verify([], @jwt_secret)
   end
 
   test "verify/1 when token has invalid format" do
     invalid_token = Base.encode64("{}")
 
-    assert :error = JwtVerification.verify(invalid_token)
+    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token header is not a map" do
     invalid_token =
       Base.encode64("[]") <> "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
 
-    assert :error = JwtVerification.verify(invalid_token)
+    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token claims is not a map" do
     invalid_token =
       Base.encode64("{}") <> "." <> Base.encode64("[]") <> "." <> Base.encode64("<<\"sig\">>")
 
-    assert :error = JwtVerification.verify(invalid_token)
+    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token header does not have typ or alg" do
@@ -46,13 +46,13 @@ defmodule MultiplayerWeb.JwtVerificationTest do
       Base.encode64("{\"typ\": \"JWT\"}") <>
         "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
 
-    assert :error = JwtVerification.verify(invalid_token)
+    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
 
     invalid_token =
       Base.encode64("{\"alg\": \"HS256\"}") <>
         "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
 
-    assert :error = JwtVerification.verify(invalid_token)
+    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token header alg is not allowed" do
@@ -60,7 +60,7 @@ defmodule MultiplayerWeb.JwtVerificationTest do
       Base.encode64("{\"typ\": \"JWT\", \"alg\": \"ZZ999\"}") <>
         "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
 
-    assert :error = JwtVerification.verify(invalid_token)
+    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token is valid and alg is HS256" do
@@ -68,7 +68,7 @@ defmodule MultiplayerWeb.JwtVerificationTest do
 
     token = Joken.generate_and_sign!(%{}, %{}, signer)
 
-    assert {:ok, _claims} = JwtVerification.verify(token)
+    assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret)
   end
 
   test "verify/1 when token is valid and alg is HS384" do
@@ -76,7 +76,7 @@ defmodule MultiplayerWeb.JwtVerificationTest do
 
     token = Joken.generate_and_sign!(%{}, %{}, signer)
 
-    assert {:ok, _claims} = JwtVerification.verify(token)
+    assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret)
   end
 
   test "verify/1 when token is valid and alg is HS512" do
@@ -84,7 +84,7 @@ defmodule MultiplayerWeb.JwtVerificationTest do
 
     token = Joken.generate_and_sign!(%{}, %{}, signer)
 
-    assert {:ok, _claims} = JwtVerification.verify(token)
+    assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret)
   end
 
   test "verify/1 when token has expired" do
@@ -103,7 +103,7 @@ defmodule MultiplayerWeb.JwtVerificationTest do
       )
 
     assert {:error, [message: "Invalid token", claim: "exp", claim_val: 1_610_086_801]} =
-             JwtVerification.verify(token)
+             JwtVerification.verify(token, @jwt_secret)
 
     token =
       Joken.generate_and_sign!(
@@ -115,7 +115,7 @@ defmodule MultiplayerWeb.JwtVerificationTest do
       )
 
     assert {:error, [message: "Invalid token", claim: "exp", claim_val: 1_610_086_800]} =
-             JwtVerification.verify(token)
+             JwtVerification.verify(token, @jwt_secret)
   end
 
   test "verify/1 when token has not expired" do
@@ -133,7 +133,7 @@ defmodule MultiplayerWeb.JwtVerificationTest do
         signer
       )
 
-    assert {:ok, _claims} = JwtVerification.verify(token)
+    assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret)
   end
 
   test "verify/1 when token claims match expected claims from :jwt_claim_validators config" do
@@ -159,7 +159,7 @@ defmodule MultiplayerWeb.JwtVerificationTest do
         signer
       )
 
-    assert {:ok, _claims} = JwtVerification.verify(token)
+    assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret)
   end
 
   test "verify/1 when token claims do not match expected claims from :jwt_claim_validators config" do
@@ -186,6 +186,6 @@ defmodule MultiplayerWeb.JwtVerificationTest do
       )
 
     assert {:error, [message: "Invalid token", claim: "iss", claim_val: "Tester"]} =
-             JwtVerification.verify(token)
+             JwtVerification.verify(token, @jwt_secret)
   end
 end
