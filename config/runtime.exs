@@ -23,6 +23,20 @@ if config_env() == :prod do
     check_origin: false,
     secret_key_base: secret_key_base
 
+  config :multiplayer, Multiplayer.Repo,
+    username: System.get_env("DB_USER"),
+    password: System.get_env("DB_PASSWORD"),
+    database: System.get_env("DB_NAME"),
+    hostname: System.get_env("DB_HOST"),
+    show_sensitive_data_on_connection_error: true,
+    pool_size: 10,
+    socket_options: [:inet6]
+
+  config :multiplayer,
+    ecto_repos: [Multiplayer.Repo],
+    secure_channels: System.get_env("SECURE_CHANNELS", "true") != "false",
+    jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}")
+
   config :libcluster,
     debug: true,
     topologies: [

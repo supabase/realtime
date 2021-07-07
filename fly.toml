@@ -6,6 +6,16 @@ kill_signal = "SIGTERM"
 kill_timeout = 5
 
 [env]
+  DB_HOST = "multiplayer-postgres-dev.internal"
+  DB_NAME = "postgres"
+  DB_USER = "postgres"
+  DB_PASSWORD = "470fa633eb98963d4b96be868a9d663ba9c34977976bd39f"
+
+[deploy]
+  release_command = "/app/bin/multiplayer eval Multiplayer.Release.migrate"
+
+[experimental]
+  private_network = true
 
 [[services]]
   internal_port = 4000
