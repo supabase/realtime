@@ -26,6 +26,39 @@ defmodule MultiplayerWeb.Router do
     resources "/scopes", ScopeController
   end
 
+  scope "/api/swagger" do
+    forward "/", PhoenixSwagger.Plug.SwaggerUI,
+      otp_app: :multiplayer,
+      swagger_file: "swagger.json"
+  end
+
+  def swagger_info do
+    %{
+      schemes: ["http", "https"],
+      info: %{
+        version: "1.0",
+        title: "Multiplayer",
+        description: "API Documentation for Multiplayer v1",
+        termsOfService: "Open for public"
+      },
+      securityDefinitions: %{
+        Bearer: %{
+          type: "apiKey",
+          name: "Authorization",
+          description:
+          "API Token must be provided via `Authorization: Bearer ` header",
+      in: "header"
+        }
+      },
+      consumes: ["application/json"],
+      produces: ["application/json"],
+      tags: [
+        %{name: "Projects"},
+        %{name: "Broadcast"}
+      ]
+    }
+  end
+
   # Enables LiveDashboard only for development
   #
   # If you want to use the LiveDashboard in production, you should put

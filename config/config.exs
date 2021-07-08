@@ -46,6 +46,16 @@ config :multiplayer, MultiplayerWeb.Endpoint,
   pubsub_server: Multiplayer.PubSub,
   live_view: [signing_salt: "wUMBeR8j"]
 
+config :multiplayer, :phoenix_swagger,
+  swagger_files: %{
+    "priv/static/swagger.json" => [
+      router: MultiplayerWeb.Router,
+      endpoint: MultiplayerWeb.Endpoint
+    ]
+  }
+
+config :phoenix_swagger, json_library: Jason
+
 # Configures Elixir's Logger
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
