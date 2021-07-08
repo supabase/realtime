@@ -63,6 +63,7 @@ defmodule Realtime.Application do
 
     # List all child processes to be supervised
     children = [
+      Realtime.PromEx,
       # Start the endpoint when the application starts
       RealtimeWeb.Endpoint,
       {

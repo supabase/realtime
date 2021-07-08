@@ -23,6 +23,8 @@ defmodule RealtimeWeb.Endpoint do
     plug Phoenix.CodeReloader
   end
 
+  plug PromEx.Plug, prom_ex_module: Realtime.PromEx
+
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
