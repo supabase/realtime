@@ -54,7 +54,8 @@ defmodule MultiplayerWeb.Router do
       produces: ["application/json"],
       tags: [
         %{name: "Projects"},
-        %{name: "Broadcast"}
+        %{name: "Scopes"},
+        %{name: "Broadcast"},
       ]
     }
   end
