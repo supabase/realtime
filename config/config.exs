@@ -11,6 +11,7 @@ use Mix.Config
 # are secured by default in production.
 secure_channels = System.get_env("SECURE_CHANNELS", "true") != "false"
 
+api_key = System.get_env("API_KEY")
 # Every JWT's claims will be compared (equality checks) to the expected
 # claims set in the JSON object.
 # e.g.
@@ -36,7 +37,8 @@ config :multiplayer, Multiplayer.Repo,
 config :multiplayer,
   ecto_repos: [Multiplayer.Repo],
   secure_channels: secure_channels,
-  jwt_claim_validators: jwt_claim_validators
+  jwt_claim_validators: jwt_claim_validators,
+  api_key: api_key
 
 # Configures the endpoint
 config :multiplayer, MultiplayerWeb.Endpoint,

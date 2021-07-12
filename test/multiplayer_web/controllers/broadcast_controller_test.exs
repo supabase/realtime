@@ -16,10 +16,12 @@ defmodule MultiplayerWeb.BroadcastControllerTest do
     "type" => "INSERT"
   }
   @req_json %{
-    "changes" => [@event],
-    "project_id" => "",
-    "topic" => "realtime:*",
-    "commit_timestamp" => "2021-06-25T16:50:09Z"
+    "broadcast" => %{
+      "changes" => [@event],
+      "project_id" => "",
+      "topic" => "realtime:*",
+      "commit_timestamp" => "2021-06-25T16:50:09Z"
+    }
   }
 
   test "POST /api/broadcast with params", %{conn: conn} do
@@ -39,7 +41,9 @@ defmodule MultiplayerWeb.BroadcastControllerTest do
       |> socket("user_id", %{scope: project.id, params: %{user_id: "user1"}})
       |> subscribe_and_join(MultiplayerWeb.RealtimeChannel, "realtime:*")
 
-    post(conn, "/api/broadcast",  %{@req_json | "project_id" => project.id})
+    %{"broadcast" => broadcast} = @req_json
+    updated = %{"broadcast" => %{broadcast | "project_id" => project.id}}
+    post(conn, "/api/broadcast",  updated)
     assert_push "INSERT", @event
   end
 

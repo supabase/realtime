@@ -11,6 +11,7 @@ defmodule MultiplayerWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug :check_api_key
   end
 
   scope "/", MultiplayerWeb do
@@ -32,6 +33,20 @@ defmodule MultiplayerWeb.Router do
       swagger_file: "swagger.json"
   end
 
+  defp check_api_key(conn, _) do
+    case Application.fetch_env!(:multiplayer, :api_key) do
+      nil -> conn
+      api_key ->
+        case get_req_header(conn, "x-api-key") do
+          [^api_key] -> conn
+          _ ->
+            conn
+            |> send_resp(403, "")
+            |> halt()
+        end
+    end
+  end
+
   def swagger_info do
     %{
       schemes: ["http", "https"],
@@ -42,11 +57,11 @@ defmodule MultiplayerWeb.Router do
         termsOfService: "Open for public"
       },
       securityDefinitions: %{
-        Bearer: %{
+        ApiKeyAuth: %{
           type: "apiKey",
-          name: "Authorization",
+          name: "X-API-Key",
           description:
-          "API Token must be provided via `Authorization: Bearer ` header",
+          "API Token must be provided via `X-API-Key: Token ` header",
       in: "header"
         }
       },
