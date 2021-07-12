@@ -29,6 +29,11 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   end
 
   def execute_channel_metrics do
-    :telemetry.execute(@channel_event, %{online: 1000, topics: 200, scopes: 12}, %{})
+    :telemetry.execute(@channel_event, %{online: online(), topics: 200, scopes: 12}, %{})
   end
+
+  def online() do
+    Registry.count_match(Multiplayer.Registry, "channels", {:_, :_, :_})
+  end
+
 end

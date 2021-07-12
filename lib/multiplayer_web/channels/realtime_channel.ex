@@ -5,6 +5,12 @@ defmodule MultiplayerWeb.RealtimeChannel do
 
   @impl true
   def join(topic, _, %{assigns: %{scope: scope}} = socket) do
+    # used for monitoring
+    Registry.register(
+      Multiplayer.Registry,
+      "channels",
+      {scope, topic, System.system_time(:second)}
+    )
     scope_topic_name = scope <> ":" <> topic
     make_scope_topic(socket, scope_topic_name)
     send(self(), :after_join)
@@ -39,6 +45,16 @@ defmodule MultiplayerWeb.RealtimeChannel do
 
   defp update_topic(socket, topic) do
     Map.put(socket, :topic, topic)
+  end
+
+  def fetch(topic, entries) do
+    IO.inspect {:fetch, topic, entries}
+  end
+
+  @impl true
+  def terminate(reason, socket) do
+    # IO.inspect {111111, reason, socket}
+    :ok
   end
 
 end

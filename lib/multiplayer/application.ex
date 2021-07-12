@@ -22,6 +22,8 @@ defmodule Multiplayer.Application do
       end
     end
 
+    Registry.start_link(keys: :unique, name: Multiplayer.Registry)
+
     children = [
       {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
       # Start the Ecto repository
