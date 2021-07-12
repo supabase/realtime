@@ -47,14 +47,4 @@ defmodule MultiplayerWeb.RealtimeChannel do
     Map.put(socket, :topic, topic)
   end
 
-  def fetch(topic, entries) do
-    IO.inspect {:fetch, topic, entries}
-  end
-
-  @impl true
-  def terminate(reason, socket) do
-    # IO.inspect {111111, reason, socket}
-    :ok
-  end
-
 end
