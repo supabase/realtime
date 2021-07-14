@@ -22,7 +22,8 @@ defmodule Multiplayer.Application do
       end
     end
 
-    Registry.start_link(keys: :unique, name: Multiplayer.Registry)
+    :ets.new(:host_cache, [:set, :named_table, :public])
+    Registry.start_link(keys: :duplicate, name: Multiplayer.Registry)
 
     children = [
       {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
@@ -37,7 +38,8 @@ defmodule Multiplayer.Application do
       # Start a worker by calling: Multiplayer.Worker.start_link(arg)
       # {Multiplayer.Worker, arg}
       MultiplayerWeb.Presence,
-      Multiplayer.PromEx
+      Multiplayer.PromEx,
+      Multiplayer.PresenceNotify
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
