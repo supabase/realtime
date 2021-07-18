@@ -33,7 +33,7 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   end
 
   def online() do
-    Registry.count_match(Multiplayer.Registry, "channels", {:_, :_, :_})
+    :syn.get_members("channels") |> length
   end
 
 end

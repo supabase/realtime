@@ -11,8 +11,11 @@ use Mix.Config
 # are secured by default in production.
 secure_channels = System.get_env("SECURE_CHANNELS", "false") == "true"
 
+presence = System.get_env("PRESENCE", "false") == "true"
+
 config :multiplayer,
-  secure_channels: secure_channels
+  secure_channels: secure_channels,
+  presence: presence
 
 config :multiplayer, MultiplayerWeb.Endpoint,
   http: [port: 4000],
