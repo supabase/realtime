@@ -1,5 +1,6 @@
 defmodule Multiplayer.PromEx.Plugins.Channels do
   use PromEx.Plugin
+  require Logger
 
   @channel_event [:prom_ex, :plugin, :multiplayer, :channels]
 
@@ -33,7 +34,19 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   end
 
   def online() do
-    :syn.get_members("channels") |> length
+    remote_online = Enum.reduce(Node.list(), 0, fn remote_node, acc ->
+      case :rpc.call(remote_node, __MODULE__, :local_online, []) do
+        {:badrpc, Reason} ->
+          Logger.error("Node down, node: " <> inspect(remote_node))
+          0
+        online -> acc + online
+      end
+    end)
+    local_online() + remote_online
+  end
+
+  def local_online() do
+    Registry.count_match(Multiplayer.Registry, "channels", {:_, :_, :_})
   end
 
 end
