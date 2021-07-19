@@ -52,7 +52,6 @@ defmodule Multiplayer.MixProject do
       {:joken, "~> 2.3.0"},
       {:phoenix_swagger, "~> 0.8"},
       {:ex_json_schema, "~> 0.5"},
-      {:syn, "~> 2.1"},
       {:recon, "~> 2.5"}
     ]
   end
