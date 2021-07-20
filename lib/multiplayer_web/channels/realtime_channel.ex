@@ -91,6 +91,13 @@ defmodule MultiplayerWeb.RealtimeChannel do
     {:noreply, assign(socket, presence_diff: new_diff)}
   end
 
+  @impl true
+  def terminate(reason, _socket) do
+    Logger.debug(%{terminate: reason})
+    :telemetry.execute([:multiplayer, :ws, :channels, :disconnected], %{})
+    :ok
+  end
+
   def handle_out(_, _, socket) do
     {:noreply, socket}
   end

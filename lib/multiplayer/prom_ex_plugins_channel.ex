@@ -13,6 +13,20 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
     ]
   end
 
+  @impl true
+  def event_metrics(opts) do
+    Event.build(
+      :multiplayer_event_metrics,
+      [
+        counter(
+          [:multiplayer, :ws, :channels, :disconnected],
+          event_name: [:multiplayer, :ws, :channels, :disconnected],
+          description: "WS disconnected total"
+        )
+      ]
+    )
+  end
+
   defp channel_metrics(poll_rate) do
     Polling.build(
       :multiplayer_channel_polling_events,
