@@ -179,6 +179,7 @@ docker run                                  \
   -e DB_PASSWORD='postgres'                 \
   -e DB_PORT=5432                           \
   -e PORT=4000                              \
+  -e SECURE_CHANNELS='false'                \
   -e JWT_SECRET='SOMETHING_SUPER_SECRET'    \
   -p 4000:4000                              \
   supabase/realtime
@@ -214,7 +215,7 @@ docker run                                                       \
   -e DB_IP_VERSION='IPv4'                                        \
   -e SLOT_NAME='supabase_realtime'                               \
   -e PORT=4000                                                   \
-  -e SECURE_CHANNELS='true'                                      \
+  -e SECURE_CHANNELS='false'                                     \
   -e JWT_SECRET='SOMETHING_SUPER_SECRET'                         \
   -e JWT_CLAIM_VALIDATORS='{"iss": "Issuer", "nbf": 1610078130}' \
   -e MAX_REPLICATION_LAG_MB=1000                                 \
