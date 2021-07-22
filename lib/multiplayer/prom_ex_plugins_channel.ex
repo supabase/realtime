@@ -101,9 +101,9 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
     end
   end
 
-  def remote_acc(nodes, func_name) do
+  def remote_acc(nodes, func_name) when is_atom(func_name) do
     Enum.reduce(nodes, 0, fn remote_node, acc ->
-      case :rpc.call(remote_node, __MODULE__, :func_name, []) do
+      case :rpc.call(remote_node, __MODULE__, func_name, []) do
         {:badrpc, Reason} ->
           Logger.error("Node down, node: " <> inspect(remote_node))
           0
