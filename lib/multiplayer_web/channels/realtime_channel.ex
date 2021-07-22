@@ -94,7 +94,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
   @impl true
   def terminate(reason, _socket) do
     Logger.debug(%{terminate: reason})
-    :telemetry.execute([:multiplayer, :ws, :channels, :disconnected], %{})
+    :telemetry.execute([:prom_ex, :plugin, :multiplayer, :disconnected], %{})
     :ok
   end
 
