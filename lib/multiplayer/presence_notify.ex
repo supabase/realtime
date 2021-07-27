@@ -29,8 +29,7 @@ defmodule Multiplayer.PresenceNotify do
   end
 
   def handle_info(:check_mq, %{mq: []} = state) do
-    Logger.debug("PresenceNotify MQ is empty")
-    {:noreply, state}
+    {:noreply, state, :hibernate}
   end
 
   def handle_info(:check_mq, %{mq: [{pid, socket} | mq]} = state) do

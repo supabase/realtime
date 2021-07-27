@@ -7,6 +7,8 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   @disconnected_cluster_event [:prom_ex, :plugin, :multiplayer, :disconnected_cluster]
   @joined_cluster_event [:prom_ex, :plugin, :multiplayer, :joined_cluster]
   @disconnected_event [:prom_ex, :plugin, :multiplayer, :disconnected]
+  @msg_sent_event [:prom_ex, :plugin, :multiplayer, :msg_sent]
+  @msg_sent_cluster_event [:prom_ex, :plugin, :multiplayer, :msg_sent_cluster]
 
   @impl true
   def polling_metrics(opts) do
@@ -25,6 +27,11 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
           [:multiplayer, :realtime_channel, :disconnected],
           event_name: @disconnected_event,
           description: "Total realtime_channel disconnected"
+        ),
+        counter(
+          [:multiplayer, :realtime_channel, :msg_sent],
+          event_name: @msg_sent_event,
+          description: "Total realtime_channel messages sent"
         )
       ]
     )
@@ -53,6 +60,12 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
           event_name: @joined_cluster_event,
           description: "Total realtime_channel joined in all cluster",
           measurement: :joined
+        ),
+        last_value(
+          [:multiplayer, :realtime_channel, :msg_sent_cluster],
+          event_name: @joined_cluster_event,
+          description: "Total realtime_channel messages sent in all cluster",
+          measurement: :joined
         )
       ]
     )
@@ -62,6 +75,7 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
     :telemetry.execute(@sessions_event, %{online: online()}, %{})
     :telemetry.execute(@disconnected_cluster_event, %{disconnected: disconnected()}, %{})
     :telemetry.execute(@joined_cluster_event, %{joined: joined()}, %{})
+    :telemetry.execute(@msg_sent_cluster_event, %{msg_sent: msg_sent()}, %{})
   end
 
   def online() do
@@ -71,6 +85,20 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
 
   def local_online() do
     Registry.count_match(Multiplayer.Registry, "channels", {:_, :_, :_})
+  end
+
+   def msg_sent() do
+    remote_msg_sent = remote_acc(Node.list(), :local_msg_sent)
+    local_msg_sent() + remote_msg_sent
+  end
+
+  def local_msg_sent() do
+    config = Core.Registry.config(Multiplayer.PromEx.Metrics)
+    ts = Core.Aggregator.get_time_series(config.aggregates_table_id)
+    case ts[[:multiplayer, :realtime_channel, :msg_sent]] do
+      [{_, count}] when is_integer(count) -> count
+      _ -> 0
+    end
   end
 
   def joined() do

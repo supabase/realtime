@@ -59,6 +59,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
       {:noreply, socket |> assign(mq: [{msg, event} | mq])}
     else
       update_topic(socket, topic) |> push(event, msg)
+      :telemetry.execute([:prom_ex, :plugin, :multiplayer, :msg_sent], %{})
       send(self(), :check_mq)
       {:noreply, socket |> assign(mq: mq)}
     end
