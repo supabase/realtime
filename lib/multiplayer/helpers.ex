@@ -15,7 +15,7 @@ defmodule Multiplayer.Helpers do
   end
 
   def csv2cahce() do
-    path = "./priv/static/db.csv"
+    path = Application.app_dir(:multiplayer) <> "/priv/db.csv"
     |> File.stream!
     |> Stream.map(&String.trim(&1, "\n"))
     |> Stream.map(&String.replace(&1, ~s(\"), ""))

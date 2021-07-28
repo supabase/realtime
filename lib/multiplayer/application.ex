@@ -23,12 +23,14 @@ defmodule Multiplayer.Application do
     end
 
     :ets.new(:host_cache, [:set, :named_table, :public])
+    Multiplayer.Helpers.csv2cahce()
     Registry.start_link(keys: :duplicate, name: Multiplayer.Registry)
+    Registry.start_link(keys: :unique, name: Multiplayer.Registry.Unique)
 
     children = [
       {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
       # Start the Ecto repository
-      Multiplayer.Repo,
+      # Multiplayer.Repo,
       # Start the Telemetry supervisor
       MultiplayerWeb.Telemetry,
       # Start the PubSub system

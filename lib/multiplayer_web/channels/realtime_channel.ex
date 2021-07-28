@@ -10,12 +10,17 @@ defmodule MultiplayerWeb.RealtimeChannel do
   @wait_time 500
 
   @impl true
-  def join(topic, _, %{assigns: %{scope: scope}} = socket) do
+  def join(topic, _, %{assigns: %{scope: scope}, transport_pid: pid} = socket) do
     # used for monitoring
     Registry.register(
       Multiplayer.Registry,
-      "channels",
+      "topics",
       {scope, topic, System.system_time(:second)}
+    )
+    Registry.register(
+      Multiplayer.Registry.Unique,
+      "sessions",
+      {pid, System.system_time(:second)}
     )
     scope_topic_name = scope <> ":" <> topic
     make_scope_topic(socket, scope_topic_name)

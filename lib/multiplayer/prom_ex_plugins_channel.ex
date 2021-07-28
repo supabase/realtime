@@ -3,7 +3,8 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   require Logger
   alias TelemetryMetricsPrometheus.Core
 
-  @sessions_event [:prom_ex, :plugin, :multiplayer, :realtime_channel]
+  @sessions_event_cluster [:prom_ex, :plugin, :multiplayer, :sessions_cluster]
+  @topics_event_cluster [:prom_ex, :plugin, :multiplayer, :topics_cluster]
   @disconnected_cluster_event [:prom_ex, :plugin, :multiplayer, :disconnected_cluster]
   @joined_cluster_event [:prom_ex, :plugin, :multiplayer, :joined_cluster]
   @disconnected_event [:prom_ex, :plugin, :multiplayer, :disconnected]
@@ -45,9 +46,15 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
       [
         last_value(
           [:multiplayer, :realtime_channel, :sessions],
-          event_name: @sessions_event,
+          event_name: @sessions_event_cluster,
           description: "Total realtime_channel sessions",
           measurement: :online
+        ),
+        last_value(
+          [:multiplayer, :realtime_channel, :topics],
+          event_name: @topics_event_cluster,
+          description: "Total realtime_channel topics in all cluster",
+          measurement: :topics
         ),
         last_value(
           [:multiplayer, :realtime_channel, :disconnected_cluster],
@@ -63,16 +70,17 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
         ),
         last_value(
           [:multiplayer, :realtime_channel, :msg_sent_cluster],
-          event_name: @joined_cluster_event,
+          event_name: @msg_sent_cluster_event,
           description: "Total realtime_channel messages sent in all cluster",
-          measurement: :joined
+          measurement: :msg_sent
         )
       ]
     )
   end
 
   def execute_channel_metrics() do
-    :telemetry.execute(@sessions_event, %{online: online()}, %{})
+    :telemetry.execute(@sessions_event_cluster, %{online: online()}, %{})
+    :telemetry.execute(@topics_event_cluster, %{topics: topics()}, %{})
     :telemetry.execute(@disconnected_cluster_event, %{disconnected: disconnected()}, %{})
     :telemetry.execute(@joined_cluster_event, %{joined: joined()}, %{})
     :telemetry.execute(@msg_sent_cluster_event, %{msg_sent: msg_sent()}, %{})
@@ -84,7 +92,16 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   end
 
   def local_online() do
-    Registry.count_match(Multiplayer.Registry, "channels", {:_, :_, :_})
+    Registry.count_match(Multiplayer.Registry, "sessions", {:_, :_, :_})
+  end
+
+  def topics() do
+    remote_topics = remote_acc(Node.list(), :local_topics)
+    local_topics() + remote_topics
+  end
+
+  def local_topics() do
+    Registry.count_match(Multiplayer.Registry.Unique, "topics", {:_, :_})
   end
 
    def msg_sent() do
