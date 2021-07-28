@@ -3,6 +3,14 @@ defmodule RealtimeWeb.UserSocket do
 
   alias RealtimeWeb.ChannelsAuthorization
 
+  defoverridable init: 1
+
+  def init(state) do
+    res = {:ok, {_, socket}} = super(state)
+    Realtime.Metrics.SocketMonitor.track_socket(socket)
+    res
+  end
+
   ## Channels
   channel "realtime:*", RealtimeWeb.RealtimeChannel
 

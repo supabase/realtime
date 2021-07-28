@@ -3,6 +3,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   require Logger, warn: false
 
   def join("realtime:" <> _topic, _payload, socket) do
+    send(self(), :after_join)
     {:ok, %{}, socket}
   end
 
@@ -20,5 +21,10 @@ defmodule RealtimeWeb.RealtimeChannel do
   """
   def handle_realtime_transaction(topic, txn) do
     RealtimeWeb.Endpoint.broadcast_from!(self(), topic, txn.type, txn)
+  end
+
+  def handle_info(:after_join, socket) do
+    Realtime.Metrics.SocketMonitor.track_channel(socket)
+    {:noreply, socket}
   end
 end
