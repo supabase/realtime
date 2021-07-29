@@ -45,13 +45,13 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
       {__MODULE__, :execute_channel_metrics, []},
       [
         last_value(
-          [:multiplayer, :realtime_channel, :sessions],
+          [:multiplayer, :realtime_channel, :sessions_cluster],
           event_name: @sessions_event_cluster,
           description: "Total realtime_channel sessions",
           measurement: :online
         ),
         last_value(
-          [:multiplayer, :realtime_channel, :topics],
+          [:multiplayer, :realtime_channel, :topics_cluster],
           event_name: @topics_event_cluster,
           description: "Total realtime_channel topics in all cluster",
           measurement: :topics
@@ -92,7 +92,7 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   end
 
   def local_online() do
-    Registry.count_match(Multiplayer.Registry, "sessions", {:_, :_, :_})
+    Registry.count_match(Multiplayer.Registry.Unique, "sessions", {:_, :_})
   end
 
   def topics() do
@@ -101,7 +101,7 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   end
 
   def local_topics() do
-    Registry.count_match(Multiplayer.Registry.Unique, "topics", {:_, :_})
+    Registry.count_match(Multiplayer.Registry, "topics", {:_, :_, :_})
   end
 
    def msg_sent() do
