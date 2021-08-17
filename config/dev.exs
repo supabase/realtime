@@ -11,7 +11,7 @@ use Mix.Config
 # are secured by default in production.
 secure_channels = System.get_env("SECURE_CHANNELS", "false") == "true"
 
-presence = System.get_env("PRESENCE", "false") == "true"
+presence = System.get_env("PRESENCE", "false") == "false"
 
 config :multiplayer,
   secure_channels: secure_channels,

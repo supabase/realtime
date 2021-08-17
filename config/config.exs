@@ -10,6 +10,7 @@ use Mix.Config
 # Channels are not secured by default in development and
 # are secured by default in production.
 secure_channels = System.get_env("SECURE_CHANNELS", "true") != "false"
+presence = System.get_env("PRESENCE", "true") != "false"
 
 api_key = System.get_env("API_KEY")
 # Every JWT's claims will be compared (equality checks) to the expected
@@ -32,13 +33,15 @@ config :multiplayer, Multiplayer.Repo,
   database: db_name,
   hostname: db_host,
   show_sensitive_data_on_connection_error: true,
-  pool_size: 10
+  pool_size: 3,
+  queue_target: 5000
 
 config :multiplayer,
   ecto_repos: [Multiplayer.Repo],
   secure_channels: secure_channels,
   jwt_claim_validators: jwt_claim_validators,
-  api_key: api_key
+  api_key: api_key,
+  presence: presence
 
 # Configures the endpoint
 config :multiplayer, MultiplayerWeb.Endpoint,
@@ -81,7 +84,7 @@ config :libcluster,
       disconnect: {:erlang, :disconnect_node, []},
       # The function to use for listing nodes.
       # This function must return a list of node names. Optional
-      list_nodes: {:erlang, :nodes, [:connected]},
+      list_nodes: {:erlang, :nodes, [:connected]}
     ]
   ]
 

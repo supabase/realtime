@@ -29,12 +29,11 @@ if config_env() == :prod do
     database: System.get_env("DB_NAME"),
     hostname: System.get_env("DB_HOST"),
     show_sensitive_data_on_connection_error: true,
-    pool_size: 10,
-    socket_options: [:inet6]
+    pool_size: 3
 
   config :multiplayer,
     ecto_repos: [Multiplayer.Repo],
-    secure_channels: System.get_env("SECURE_CHANNELS", "true") != "false",
+    secure_channels: System.get_env("SECURE_CHANNELS", "true") == "false",
     jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}")
 
   config :libcluster,
@@ -44,7 +43,7 @@ if config_env() == :prod do
         strategy: Cluster.Strategy.DNSPoll,
         config: [
           polling_interval: 5_000,
-          query: "#{app_name}.internal",
+          query: System.get_env("DNS_NODES"),
           node_basename: app_name
         ]
       ]
