@@ -14,6 +14,7 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   @impl true
   def polling_metrics(opts) do
     poll_rate = Keyword.get(opts, :poll_rate, 5_000)
+
     [
       channel_metrics(poll_rate)
     ]
@@ -92,7 +93,7 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   end
 
   def local_online() do
-    Registry.count_match(Multiplayer.Registry.Unique, "sessions", {:_, :_})
+    Registry.count(Multiplayer.Registry.Unique)
   end
 
   def topics() do
@@ -104,7 +105,7 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
     Registry.count_match(Multiplayer.Registry, "topics", {:_, :_, :_})
   end
 
-   def msg_sent() do
+  def msg_sent() do
     remote_msg_sent = remote_acc(Node.list(), :local_msg_sent)
     local_msg_sent() + remote_msg_sent
   end
@@ -112,6 +113,7 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   def local_msg_sent() do
     config = Core.Registry.config(Multiplayer.PromEx.Metrics)
     ts = Core.Aggregator.get_time_series(config.aggregates_table_id)
+
     case ts[[:multiplayer, :realtime_channel, :msg_sent]] do
       [{_, count}] when is_integer(count) -> count
       _ -> 0
@@ -126,6 +128,7 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   def local_joined() do
     config = Core.Registry.config(Multiplayer.PromEx.Metrics)
     ts = Core.Aggregator.get_time_series(config.aggregates_table_id)
+
     case ts[[:multiplayer, :prom_ex, :phoenix, :channel, :joined, :total]] do
       [{_, count}] when is_integer(count) -> count
       _ -> 0
@@ -140,6 +143,7 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
   def local_disconnected() do
     config = Core.Registry.config(Multiplayer.PromEx.Metrics)
     ts = Core.Aggregator.get_time_series(config.aggregates_table_id)
+
     case ts[[:multiplayer, :realtime_channel, :disconnected]] do
       [{_, count}] when is_integer(count) -> count
       _ -> 0
@@ -152,9 +156,10 @@ defmodule Multiplayer.PromEx.Plugins.Channels do
         {:badrpc, Reason} ->
           Logger.error("Node down, node: " <> inspect(remote_node))
           0
-        val -> acc + val
+
+        val ->
+          acc + val
       end
     end)
   end
-
 end
