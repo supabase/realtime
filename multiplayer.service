@@ -1,0 +1,21 @@
+[Unit]
+Description=Multiplayer
+After=network.target
+Requires=network.target
+StartLimitIntervalSec=5
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=root
+EnvironmentFile=/opt/multiplayer/service_vars.ini
+WorkingDirectory=/opt/multiplayer
+ExecStart=/opt/multiplayer/bin/multiplayer start
+ExecStop=/opt/multiplayer/bin/multiplayer stop
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+TasksMax=infinity
