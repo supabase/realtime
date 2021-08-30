@@ -1,6 +1,7 @@
 defmodule MultiplayerWeb.BroadcastController do
   use MultiplayerWeb, :controller
   use PhoenixSwagger
+  alias Multiplayer.Api
 
   swagger_path :post do
     PhoenixSwagger.Path.post "/api/broadcast"
@@ -13,15 +14,22 @@ defmodule MultiplayerWeb.BroadcastController do
     response 400, "When not all required fields"
   end
 
-  def post(conn, %{"broadcast" => %{"changes" => changes, "project_id" => project_id, "topic" => topic}}) do
-    Enum.each(changes, fn event ->
-      Phoenix.PubSub.broadcast(
-        Multiplayer.PubSub,
-        project_id <> ":" <> topic,
-        {:event, event}
-      )
-    end)
-    send_resp(conn, 200, "")
+  @spec post(Plug.Conn.t(), any) :: Plug.Conn.t()
+  def post(conn, %{"changes" => changes}) do
+    [name] = get_req_header(conn, "multiplayer_project_name")
+    case Api.get_project_by_name(name) do
+      nil ->
+        send_resp(conn, 400, "")
+      project ->
+        Enum.each(changes, fn event ->
+          Phoenix.PubSub.broadcast(
+            Multiplayer.PubSub,
+            project.id <> ":" <> "realtime:*", #topic,
+            {:event, event}
+          )
+        end)
+        send_resp(conn, 200, "")
+    end
   end
 
   def post(conn, _), do: send_resp(conn, 400, "")

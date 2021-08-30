@@ -210,4 +210,11 @@ defmodule Multiplayer.Api do
     Repo.one(query)
   end
 
+  def get_project_by_name(name) do
+    query = from p in Project,
+              where: p.name == ^name,
+              select: p
+    Repo.one(query)
+  end
+
 end
