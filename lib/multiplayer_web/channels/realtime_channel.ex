@@ -61,7 +61,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
     end
     if proc_len > @mbox_limit or proc_len == nil  do
       Process.send_after(self(), :check_mq, @wait_time)
-      {:noreply, socket |> assign(mq: [{msg, event} | mq])}
+      {:noreply, socket}
     else
       update_topic(socket, topic) |> push(event, msg)
       :telemetry.execute([:prom_ex, :plugin, :multiplayer, :msg_sent], %{})
