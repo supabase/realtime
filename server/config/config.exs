@@ -76,7 +76,7 @@ config :realtime,
   jwt_secret: jwt_secret,
   jwt_claim_validators: jwt_claim_validators,
   max_replication_lag_in_mb: max_replication_lag_in_mb,
-  webhook_default_headers: [{"Content-Type", "application/json"}],
+  webhook_default_headers: %{"content-type" => "application/json"},
   webhook_headers: webhook_headers
 
 # Configures the endpoint
