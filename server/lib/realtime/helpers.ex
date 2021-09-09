@@ -1,10 +1,10 @@
 defmodule Realtime.Helpers do
   # key1=value1:key2=value2 to %{"key1" => "value1", "key2" => "value2"}
-  @spec env_kv_to_list(String.t() | nil, map() | %{}) :: {:ok, [{binary(), binary()}]} | :error
+  @spec env_kv_to_list(String.t() | nil, list() | []) :: {:ok, [{binary(), binary()}]} | :error
   def env_kv_to_list("", _), do: :error
 
   def env_kv_to_list(env_val, def_list) when is_binary(env_val) do
-    parsed = parse_kv(env_val, def_list)
+    parsed = parse_kv(env_val, :maps.from_list(def_list))
 
     if is_map(parsed) do
       {:ok, Map.to_list(parsed)}
