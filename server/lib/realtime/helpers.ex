@@ -1,5 +1,5 @@
 defmodule Realtime.Helpers do
-  # key1=value1:key2=value2 to %{"key1" => "value1", "key2" => "value2"}
+  # key1=value1:key2=value2 to [{"key1", "value1"}, {"key2", "value2"}]}
   @spec env_kv_to_list(String.t() | nil, list() | []) :: {:ok, [{binary(), binary()}]} | :error
   def env_kv_to_list("", _), do: :error
 
