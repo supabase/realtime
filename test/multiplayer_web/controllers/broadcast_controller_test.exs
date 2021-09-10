@@ -21,11 +21,16 @@ defmodule MultiplayerWeb.BroadcastControllerTest do
   }
 
   test "POST /api/broadcast with params", %{conn: conn} do
-    {:ok, _project} = Api.create_project(%{name: "test_name", secret: "test_secret"})
+    {:ok, _project} =
+      Api.create_project(%{
+        name: "test_name",
+        external_id: "test_external_id",
+        secret: "test_secret"
+      })
 
     conn =
       conn
-      |> put_req_header("multiplayer-project-name", "test_name")
+      |> put_req_header("multiplayer-project-external-id", "test_external_id")
 
     conn = post(conn, "/api/broadcast", @req_json)
     assert conn.status == 200
@@ -37,8 +42,18 @@ defmodule MultiplayerWeb.BroadcastControllerTest do
   end
 
   test "send changes to the channel", %{conn: conn} do
-    {:ok, project} = Api.create_project(%{name: "test_name", secret: "test_secret"})
-    {:ok, scope} = Api.create_scope(%{host: "localhost", project_id: project.id})
+    {:ok, project} =
+      Api.create_project(%{
+        name: "test_name",
+        external_id: "test_external_id",
+        secret: "test_secret"
+      })
+
+    {:ok, scope} =
+      Api.create_scope(%{
+        host: "localhost",
+        project_id: project.id
+      })
 
     MultiplayerWeb.UserSocket
     |> socket("user_id", %{scope: project.id, params: %{user_id: "user1"}})
@@ -46,7 +61,7 @@ defmodule MultiplayerWeb.BroadcastControllerTest do
 
     conn =
       conn
-      |> put_req_header("multiplayer-project-name", "test_name")
+      |> put_req_header("multiplayer-project-external-id", "test_external_id")
 
     post(conn, "/api/broadcast", @req_json)
     assert_push "INSERT", @event

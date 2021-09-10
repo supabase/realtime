@@ -217,4 +217,11 @@ defmodule Multiplayer.Api do
     Repo.one(query)
   end
 
+  def get_project_by_external_id(external_id) do
+    query = from p in Project,
+              where: p.external_id == ^external_id,
+              select: p
+    Repo.one(query)
+  end
+
 end
