@@ -40,11 +40,13 @@ defmodule MultiplayerWeb.RealtimeChannel do
   end
 
   @impl true
+  # send presence state to client
   def handle_info(:presence_state, socket) do
     add_message("presence_state", Presence.list(socket) |> :maps.size)
     {:noreply, socket}
   end
 
+  # accumulate messages to the queue
   def handle_info({:message, msg, event}, %{assigns: %{mq: mq}} = socket) do
     send(self(), :check_mq)
     {:noreply, socket |> assign(mq: mq ++ [{msg, event}])}
@@ -54,6 +56,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  # send messages to the transport pid
   def handle_info(:check_mq, %{transport_pid: pid, assigns: %{mq: [{msg, event} | mq], topic: topic}} = socket) do
     proc_len = case Process.info(pid, :message_queue_len) do
       nil -> nil
@@ -70,6 +73,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
     end
   end
 
+  # handle the presence diff
   def handle_info(:presence_agg, %{assigns: %{presence_timer: ref, presence_diff: diff}} = socket) do
     Process.cancel_timer(ref)
     info = %{joins: diff.joins |> :maps.size, leaves: diff.leaves |> :maps.size}
@@ -82,7 +86,8 @@ defmodule MultiplayerWeb.RealtimeChannel do
                |> assign(presence_diff: @empty_presence_diff)}
   end
 
-  def handle_info({:event, %{"type" => type} = event}, %{assigns: %{topic: topic}} = socket) do
+  # handle the broadcast from BroadcastController
+  def handle_info({:event, %{"type" => type} = event}, %{assigns: %{topic: _topic}} = socket) do
     add_message(type, event)
     {:noreply, socket}
   end
@@ -104,10 +109,6 @@ defmodule MultiplayerWeb.RealtimeChannel do
     :ok
   end
 
-  def handle_out(_, _, socket) do
-    {:noreply, socket}
-  end
-
   def merge_presence_diff(old, new) do
     {same, updated_old} = Map.split(old.joins, Map.keys(new.leaves))
     clean_leaves = Map.drop(new.leaves, Map.keys(same))
@@ -117,7 +118,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
     }
   end
 
-  defp make_scope_topic(socket, topic) do
+  defp make_scope_topic(_socket, topic) do
     # Allow sending directly to the transport
     # fastlane = {:fastlane, socket.transport_pid, socket.serializer, ["presence_diff"]}
     # MultiplayerWeb.Endpoint.subscribe(topic, metadata: fastlane)
