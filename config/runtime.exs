@@ -9,12 +9,11 @@ if config_env() == :prod do
       """
 
   app_name =
-    System.get_env("FLY_APP_NAME") ||
-      raise "FLY_APP_NAME not available"
+    System.get_env("APP_NAME") ||
+      raise "APP_NAME not available"
 
   config :multiplayer, MultiplayerWeb.Endpoint,
     server: true,
-    url: [host: "#{app_name}.fly.dev", port: 80],
     http: [
       port: String.to_integer(System.get_env("PORT") || "4000"),
       # IMPORTANT: support IPv6 addresses
@@ -39,7 +38,7 @@ if config_env() == :prod do
   config :libcluster,
     debug: true,
     topologies: [
-      fly6pn: [
+      dns_poll: [
         strategy: Cluster.Strategy.DNSPoll,
         config: [
           polling_interval: 5_000,
