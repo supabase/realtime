@@ -23,7 +23,6 @@ defmodule MultiplayerWeb.ConnCase do
       import Plug.Conn
       import Phoenix.ConnTest
       import MultiplayerWeb.ConnCase
-
       alias MultiplayerWeb.Router.Helpers, as: Routes
 
       # The default endpoint for testing

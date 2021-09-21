@@ -4,12 +4,31 @@ defmodule Multiplayer.Application do
   @moduledoc false
 
   use Application
+  require Logger, warn: false
+
+  defmodule JwtSecretError, do: defexception([:message])
+  defmodule JwtClaimValidatorsError, do: defexception([:message])
 
   def start(_type, _args) do
     topologies = Application.get_env(:libcluster, :topologies) || []
 
+    if Application.fetch_env!(:multiplayer, :secure_channels) do
+      case Application.fetch_env!(:multiplayer, :jwt_claim_validators) |> Jason.decode() do
+        {:ok, claims} when is_map(claims) ->
+          Application.put_env(:multiplayer, :jwt_claim_validators, claims)
+        _ ->
+          raise JwtClaimValidatorsError,
+            message: "JWT claim validators is not a valid JSON object"
+      end
+    end
+
+    Registry.start_link(keys: :duplicate, name: Multiplayer.Registry)
+    Registry.start_link(keys: :unique, name: Multiplayer.Registry.Unique)
+
     children = [
       {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
+      # Start the Ecto repository
+      Multiplayer.Repo,
       # Start the Telemetry supervisor
       MultiplayerWeb.Telemetry,
       # Start the PubSub system
@@ -18,7 +37,9 @@ defmodule Multiplayer.Application do
       MultiplayerWeb.Endpoint,
       # Start a worker by calling: Multiplayer.Worker.start_link(arg)
       # {Multiplayer.Worker, arg}
-      MultiplayerWeb.Presence
+      MultiplayerWeb.Presence,
+      Multiplayer.PromEx,
+      Multiplayer.PresenceNotify
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

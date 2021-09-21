@@ -1,20 +1,22 @@
 use Mix.Config
 
-# Configure your database
-config :multiplayer, Multiplayer.Repo,
-  username: "postgres",
-  password: "postgres",
-  database: "postgres",
-  hostname: "localhost",
-  show_sensitive_data_on_connection_error: true,
-  pool_size: 10
-
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we use it
 # with webpack to recompile .js and .css sources.
+
+# Channels are not secured by default in development and
+# are secured by default in production.
+secure_channels = System.get_env("SECURE_CHANNELS", "false") == "true"
+
+presence = System.get_env("PRESENCE", "false") == "false"
+
+config :multiplayer,
+  secure_channels: secure_channels,
+  presence: presence
+
 config :multiplayer, MultiplayerWeb.Endpoint,
   http: [port: 4000],
   debug_errors: true,
@@ -30,6 +32,17 @@ config :multiplayer, MultiplayerWeb.Endpoint,
     ]
   ]
 
+config :multiplayer, Multiplayer.PromEx,
+  manual_metrics_start_delay: :no_delay,
+  drop_metrics_groups: [],
+  grafana: :disabled,
+  metrics_server: [
+    port: 4021,
+    path: "/metrics",
+    protocol: :http,
+    pool_size: 5,
+    cowboy_opts: []
+  ]
 # ## SSL Support
 #
 # In order to use HTTPS in development, a self-signed

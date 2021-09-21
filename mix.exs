@@ -20,7 +20,7 @@ defmodule Multiplayer.MixProject do
   def application do
     [
       mod: {Multiplayer.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools, :prom_ex]
     ]
   end
 
@@ -34,6 +34,9 @@ defmodule Multiplayer.MixProject do
   defp deps do
     [
       {:phoenix, "~> 1.5.7"},
+      {:phoenix_ecto, "~> 4.1"},
+      {:ecto_sql, "~> 3.4"},
+      {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 2.11"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_dashboard, "~> 0.4"},
@@ -42,7 +45,14 @@ defmodule Multiplayer.MixProject do
       {:gettext, "~> 0.11"},
       {:jason, "~> 1.0"},
       {:plug_cowboy, "~> 2.0"},
-      {:libcluster, "~> 3.3"}
+      {:libcluster, "~> 3.3"},
+      {:uuid, "~> 1.1"},
+      {:prom_ex, "~> 1.2.2"},
+      {:mock, "~> 0.3.0", only: :test},
+      {:joken, "~> 2.3.0"},
+      {:phoenix_swagger, "~> 0.8"},
+      {:ex_json_schema, "~> 0.5"},
+      {:recon, "~> 2.5"}
     ]
   end
 

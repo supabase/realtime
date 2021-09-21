@@ -1,0 +1,16 @@
+defmodule Multiplayer.Repo.Migrations.CreateScopes do
+  use Ecto.Migration
+
+  def change do
+    create table(:scopes, primary_key: false) do
+      add :id, :binary_id, primary_key: true
+      add :host, :string
+      add :project_id, references(:projects, on_delete: :nothing, type: :binary_id)
+
+      timestamps()
+    end
+
+    create index(:scopes, [:host])
+    create unique_index(:scopes, [:project_id, :host])
+  end
+end

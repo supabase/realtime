@@ -6,5 +6,6 @@ defmodule MultiplayerWeb.Presence do
   docs for more details.
   """
   use Phoenix.Presence, otp_app: :multiplayer,
-                        pubsub_server: Multiplayer.PubSub
+                        pubsub_server: Multiplayer.PubSub,
+                        pool_size: 10
 end

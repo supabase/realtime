@@ -1,19 +1,30 @@
 # fly.toml file generated for multiplayer-dev on 2021-05-19T00:27:00-04:00
 
-app = "multiplayer-dev"
+app = "multiplayer-dev-post2ws"
 
 kill_signal = "SIGTERM"
 kill_timeout = 5
 
 [env]
+  DB_HOST = "multiplayer-postgres-dev.internal"
+  DB_NAME = "postgres"
+  DB_USER = "postgres"
+  DB_PASSWORD = "470fa633eb98963d4b96be868a9d663ba9c34977976bd39f"
+  DNS_NODES = "multiplayer-dev-post2ws.internal"
+
+[deploy]
+ # release_command = "/app/bin/multiplayer eval Multiplayer.Release.migrate"
+
+[experimental]
+  private_network = true
 
 [[services]]
   internal_port = 4000
   protocol = "tcp"
 
   [services.concurrency]
-    hard_limit = 25
-    soft_limit = 20
+    hard_limit = 100000
+    soft_limit = 100000
 
   [[services.ports]]
     handlers = ["http"]

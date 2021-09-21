@@ -11,7 +11,9 @@ defmodule MultiplayerWeb.Endpoint do
   ]
 
   socket "/socket", MultiplayerWeb.UserSocket,
-    websocket: true,
+    websocket: [
+      connect_info: [:peer_data, :uri]
+    ],
     longpoll: false
 
   socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
@@ -25,6 +27,8 @@ defmodule MultiplayerWeb.Endpoint do
     from: :multiplayer,
     gzip: false,
     only: ~w(css fonts images js favicon.ico robots.txt)
+
+  plug PromEx.Plug, path: "/metrics", prom_ex_module: Multiplayer.PromEx
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.

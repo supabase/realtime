@@ -11,6 +11,7 @@ defmodule MultiplayerWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug :check_api_key
   end
 
   scope "/", MultiplayerWeb do
@@ -19,10 +20,60 @@ defmodule MultiplayerWeb.Router do
     get "/", PageController, :index
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", MultiplayerWeb do
-  #   pipe_through :api
-  # end
+  scope "/api", MultiplayerWeb do
+    pipe_through :api
+    post "/broadcast", BroadcastController, :post
+    resources "/projects", ProjectController
+    resources "/scopes", ScopeController
+  end
+
+  scope "/api/swagger" do
+    forward "/", PhoenixSwagger.Plug.SwaggerUI,
+      otp_app: :multiplayer,
+      swagger_file: "swagger.json"
+  end
+
+  defp check_api_key(conn, _) do
+    case Application.fetch_env!(:multiplayer, :api_key) do
+      nil -> conn
+      api_key ->
+        case get_req_header(conn, "x-api-key") do
+          [^api_key] -> conn
+          _ ->
+            conn
+            |> send_resp(403, "")
+            |> halt()
+        end
+    end
+  end
+
+  def swagger_info do
+    %{
+      schemes: ["http", "https"],
+      info: %{
+        version: "1.0",
+        title: "Multiplayer",
+        description: "API Documentation for Multiplayer v1",
+        termsOfService: "Open for public"
+      },
+      securityDefinitions: %{
+        ApiKeyAuth: %{
+          type: "apiKey",
+          name: "X-API-Key",
+          description:
+          "API Token must be provided via `X-API-Key: Token ` header",
+      in: "header"
+        }
+      },
+      consumes: ["application/json"],
+      produces: ["application/json"],
+      tags: [
+        %{name: "Projects"},
+        %{name: "Scopes"},
+        %{name: "Broadcast"},
+      ]
+    }
+  end
 
   # Enables LiveDashboard only for development
   #
