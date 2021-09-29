@@ -31,7 +31,8 @@ defmodule Realtime.Application do
       database: Application.fetch_env!(:realtime, :db_name),
       password: Application.fetch_env!(:realtime, :db_password),
       port: Application.fetch_env!(:realtime, :db_port),
-      ssl: Application.fetch_env!(:realtime, :db_ssl)
+      ssl: Application.fetch_env!(:realtime, :db_ssl),
+      application_name: "realtime",
     }
 
     epgsql_params =
