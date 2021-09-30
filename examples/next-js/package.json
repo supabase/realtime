@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@supabase/realtime-js": "^1.0.6",
-    "axios": "^0.21.1",
+    "axios": "^0.21.2",
     "chart.js": "^2.9.4",
     "dotenv": "^8.2.0",
     "faker": "^4.1.0",
