@@ -86,7 +86,7 @@ defmodule Realtime.WebhookConnectorTest do
       config: %WebhookEndpoint{}
     }
   ]
-  @request_headers [{"Content-Type", "application/json"}]
+  @request_headers [{"content-type", "application/json"}]
 
   test "notify/1 when webhook POST requests are successful" do
     with_mock HTTPoison,

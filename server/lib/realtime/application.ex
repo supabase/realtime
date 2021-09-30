@@ -62,6 +62,18 @@ defmodule Realtime.Application do
       end
     end
 
+    def_headers = Application.fetch_env!(:realtime, :webhook_default_headers)
+
+    headers =
+      with {:ok, env_val} <- Application.fetch_env(:realtime, :webhook_headers),
+           {:ok, decoded_headers} <- Realtime.Helpers.env_kv_to_list(env_val, def_headers) do
+        decoded_headers
+      else
+        _ -> def_headers
+      end
+
+    Application.put_env(:realtime, :webhook_headers, headers)
+
     # List all child processes to be supervised
     children = [
       # Start the endpoint when the application starts
