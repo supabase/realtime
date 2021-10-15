@@ -128,4 +128,67 @@ defmodule Multiplayer.ApiTest do
       assert %Ecto.Changeset{} = Api.change_scope(scope)
     end
   end
+
+  describe "hooks" do
+    alias Multiplayer.Api.Hooks
+
+    @valid_attrs %{event: "some event", type: "some type", url: "some url"}
+    @update_attrs %{event: "some updated event", type: "some updated type", url: "some updated url"}
+    @invalid_attrs %{event: nil, type: nil, url: nil}
+
+    def hooks_fixture(attrs \\ %{}) do
+      {:ok, hooks} =
+        attrs
+        |> Enum.into(@valid_attrs)
+        |> Api.create_hooks()
+
+      hooks
+    end
+
+    test "list_hooks/0 returns all hooks" do
+      hooks = hooks_fixture()
+      assert Api.list_hooks() == [hooks]
+    end
+
+    test "get_hooks!/1 returns the hooks with given id" do
+      hooks = hooks_fixture()
+      assert Api.get_hooks!(hooks.id) == hooks
+    end
+
+    test "create_hooks/1 with valid data creates a hooks" do
+      assert {:ok, %Hooks{} = hooks} = Api.create_hooks(@valid_attrs)
+      assert hooks.event == "some event"
+      assert hooks.type == "some type"
+      assert hooks.url == "some url"
+    end
+
+    test "create_hooks/1 with invalid data returns error changeset" do
+      assert {:error, %Ecto.Changeset{}} = Api.create_hooks(@invalid_attrs)
+    end
+
+    test "update_hooks/2 with valid data updates the hooks" do
+      hooks = hooks_fixture()
+      assert {:ok, %Hooks{} = hooks} = Api.update_hooks(hooks, @update_attrs)
+      assert hooks.event == "some updated event"
+      assert hooks.type == "some updated type"
+      assert hooks.url == "some updated url"
+    end
+
+    test "update_hooks/2 with invalid data returns error changeset" do
+      hooks = hooks_fixture()
+      assert {:error, %Ecto.Changeset{}} = Api.update_hooks(hooks, @invalid_attrs)
+      assert hooks == Api.get_hooks!(hooks.id)
+    end
+
+    test "delete_hooks/1 deletes the hooks" do
+      hooks = hooks_fixture()
+      assert {:ok, %Hooks{}} = Api.delete_hooks(hooks)
+      assert_raise Ecto.NoResultsError, fn -> Api.get_hooks!(hooks.id) end
+    end
+
+    test "change_hooks/1 returns a hooks changeset" do
+      hooks = hooks_fixture()
+      assert %Ecto.Changeset{} = Api.change_hooks(hooks)
+    end
+  end
 end
