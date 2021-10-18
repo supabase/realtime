@@ -11,6 +11,6 @@ defmodule Multiplayer.Repo.Migrations.CreateHooks do
       timestamps()
     end
 
-    create unique_index(:hooks, [:project_id, :tyep, :event])
+    create unique_index(:hooks, [:project_id, :type, :event])
   end
 end
