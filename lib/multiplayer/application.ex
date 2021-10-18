@@ -16,6 +16,7 @@ defmodule Multiplayer.Application do
       case Application.fetch_env!(:multiplayer, :jwt_claim_validators) |> Jason.decode() do
         {:ok, claims} when is_map(claims) ->
           Application.put_env(:multiplayer, :jwt_claim_validators, claims)
+
         _ ->
           raise JwtClaimValidatorsError,
             message: "JWT claim validators is not a valid JSON object"
@@ -24,6 +25,12 @@ defmodule Multiplayer.Application do
 
     Registry.start_link(keys: :duplicate, name: Multiplayer.Registry)
     Registry.start_link(keys: :unique, name: Multiplayer.Registry.Unique)
+
+    :ets.new(:multiplayer_hooks, [
+      :named_table,
+      :public,
+      {:write_concurrency, true}
+    ])
 
     children = [
       {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
@@ -39,7 +46,8 @@ defmodule Multiplayer.Application do
       # {Multiplayer.Worker, arg}
       MultiplayerWeb.Presence,
       Multiplayer.PromEx,
-      Multiplayer.PresenceNotify
+      Multiplayer.PresenceNotify,
+      Multiplayer.Broadway
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
