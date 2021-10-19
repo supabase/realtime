@@ -26,11 +26,7 @@ defmodule Multiplayer.Application do
     Registry.start_link(keys: :duplicate, name: Multiplayer.Registry)
     Registry.start_link(keys: :unique, name: Multiplayer.Registry.Unique)
 
-    :ets.new(:multiplayer_hooks, [
-      :named_table,
-      :public,
-      {:write_concurrency, true}
-    ])
+    Multiplayer.SessionsHooks.init_table()
 
     children = [
       {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
@@ -47,7 +43,7 @@ defmodule Multiplayer.Application do
       MultiplayerWeb.Presence,
       Multiplayer.PromEx,
       Multiplayer.PresenceNotify,
-      Multiplayer.Broadway
+      Multiplayer.SessionsHooksBroadway
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
