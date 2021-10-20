@@ -10,6 +10,7 @@ defmodule Multiplayer.SessionsHooksBroadway do
       producer: [
         module: {Multiplayer.SessionsHooksProducer, []},
         transformer: {__MODULE__, :transform, []},
+        concurrency: 1 # the producer does not support concurrency
       ],
       processors: [
         default: [concurrency: 10, max_demand: 1]
@@ -31,7 +32,7 @@ defmodule Multiplayer.SessionsHooksBroadway do
   end
 
   def handle_batch(name, _messages, _batch_info, _state) do
-    Logger.error("Undefined handle_batch", name)
+    Logger.error("Undefined handle_batch: #{inspect(name)}")
   end
 
   def transform(event, _opts) do

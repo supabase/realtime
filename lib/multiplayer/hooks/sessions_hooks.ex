@@ -28,6 +28,10 @@ defmodule Multiplayer.SessionsHooks do
     :ets.delete(@table)
   end
 
+  def emtpy_table?() do
+    :ets.info(@table, :size) == 0
+  end
+
   def flush_data() do
     :ets.delete_all_objects(@table)
   end
@@ -45,21 +49,32 @@ defmodule Multiplayer.SessionsHooks do
     })
   end
 
-  def take(num) do
-    Enum.reduce(1..num, [], fn _, acc ->
-      case take_one(@table) do
-        [] -> acc
-        [record] -> [record | acc]
+  @spec take(pos_integer, any) :: {any, list}
+  def take(num, last_key \\ nil) do
+    first_key =
+      if !last_key or last_key == :"$end_of_table" do
+        :ets.first(@table)
+      else
+        last_key
       end
-    end)
+
+    case first_key do
+      :"$end_of_table" -> {first_key, []}
+      _ ->
+        {last_key, keys} = Enum.reduce(1..num, {first_key, [first_key]}, fn
+          _, {:"$end_of_table", _} = final -> final
+          _, {key, acc} ->
+            {:ets.next(@table, key), [key | acc]}
+        end)
+        records = :ets.select(@table, match_spec(:"$_", keys))
+        :ets.select_delete(@table, match_spec(true, keys))
+        {last_key, records}
+    end
   end
 
-  def take_one(@table) do
-    case :ets.first(@table) do
-      :"$end_of_table" ->
-        []
-      key ->
-        :ets.take(@table, key)
+  def match_spec(match, keys) do
+    for key <- keys do
+      {{key, :_,:_,:_,:_,:_,:_}, [], [match]}
     end
   end
 
