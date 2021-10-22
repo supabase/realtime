@@ -6,10 +6,14 @@
 
 # General application configuration
 use Mix.Config
+require Logger
 
 # Channels are not secured by default in development and
 # are secured by default in production.
-secure_channels = System.get_env("SECURE_CHANNELS", "true") != "false"
+rls = System.get_env("RLS") == "true"
+Logger.debug("RLS: #{inspect(rls)}")
+secure_channels = System.get_env("SECURE_CHANNELS") == "true"
+Logger.debug("SECURE_CHANNELS: #{inspect(secure_channels)}")
 presence = System.get_env("PRESENCE", "true") != "false"
 
 api_key = System.get_env("API_KEY")
@@ -39,6 +43,7 @@ config :multiplayer, Multiplayer.Repo,
 config :multiplayer,
   ecto_repos: [Multiplayer.Repo],
   secure_channels: secure_channels,
+  rls: rls,
   jwt_claim_validators: jwt_claim_validators,
   api_key: api_key,
   presence: presence

@@ -256,6 +256,18 @@ defmodule Multiplayer.Api do
   """
   def get_hooks!(id), do: Repo.get!(Hooks, id)
 
+  def get_hooks_by_project_id(id) do
+    query = from h in Hooks,
+              where: h.project_id == ^id,
+              select: h
+    Enum.reduce(Repo.all(query), %{}, fn e, acc ->
+      hook = %{
+        type: e.type,
+        url: e.url
+      }
+      Map.put(acc, e.event, hook)
+    end)
+  end
   @doc """
   Creates a hooks.
 
