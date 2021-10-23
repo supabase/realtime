@@ -3,6 +3,7 @@ defmodule Multiplayer.SessionsHooksBroadway do
   require Logger
 
   alias Broadway.Message
+  @headers [{"content-type", "application/json"}]
 
   def start_link(_opts) do
     Broadway.start_link(__MODULE__,
@@ -14,25 +15,25 @@ defmodule Multiplayer.SessionsHooksBroadway do
       ],
       processors: [
         default: [concurrency: 10, max_demand: 1]
-      ],
-      batchers: [
-        webhooks: [batch_size: 1]
       ]
     )
   end
 
   @impl true
-  def handle_message(_, %Message{} = message, _state) do
-    message |> Message.put_batcher(:webhooks)
-  end
+  def handle_message(_, %Message{data: data} = message, _state) do
+    case data.event do
+      "session.connected" ->
+        payload = Jason.encode!(%{"user_id" => data.user_id})
+        #TODO: handle a response
+        _ = HTTPoison.post(data.url, payload, @headers)
+        send(data.pid, {:rls, :accepted})
+        message
+      undef ->
+        Logger.error("Undefined event: #{inspect(undef)}")
+        message
+    end
 
-  @impl true
-  def handle_batch(:webhooks, messages, _batch_info, _state) do
-    messages
-  end
-
-  def handle_batch(name, _messages, _batch_info, _state) do
-    Logger.error("Undefined handle_batch: #{inspect(name)}")
+    message
   end
 
   def transform(event, _opts) do

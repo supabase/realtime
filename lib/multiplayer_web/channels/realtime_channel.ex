@@ -2,47 +2,71 @@ defmodule MultiplayerWeb.RealtimeChannel do
   use MultiplayerWeb, :channel
   require Logger
   alias MultiplayerWeb.Presence
+  alias Multiplayer.SessionsHooks
 
   intercept ["presence_diff"]
   @empty_presence_diff %{joins: %{}, leaves: %{}}
   @timeout_presence_diff 1000
   @mbox_limit 100
   @wait_time 500
+  @kickout_time 5000
 
   @impl true
-  def join(topic, _, %{assigns: %{scope: scope}, transport_pid: pid} = socket) do
+  def join(
+        topic,
+        _,
+        %{
+          assigns: %{
+            scope: scope,
+            params: %{
+              user_id: user_id,
+              hooks: hooks
+            }
+          },
+          transport_pid: pid
+        } = socket
+      ) do
     # used for monitoring
     Registry.register(
       Multiplayer.Registry,
       "topics",
       {scope, topic, System.system_time(:second)}
     )
+
     Registry.register(
       Multiplayer.Registry.Unique,
       "sessions",
       {pid, System.system_time(:second)}
     )
+
     scope_topic_name = scope <> ":" <> topic
     make_scope_topic(socket, scope_topic_name)
     presence_timer = Process.send_after(self(), :presence_agg, @timeout_presence_diff)
+
+    Logger.debug("Hooks #{inspect(hooks)}")
+    hook = hooks["session.connected"]
+    SessionsHooks.connected(self(), user_id, hook.type, hook.url)
+    kick_ref = Process.send_after(self(), :kickout_time, @kickout_time)
+
     new_socket =
       update_topic(socket, scope_topic_name)
       |> assign(presence_timer: presence_timer)
+      |> assign(kickout_ref: kick_ref)
       |> assign(mq: [])
       |> assign(presence_diff: @empty_presence_diff)
       |> assign(topic: topic)
 
-
     if Application.fetch_env!(:multiplayer, :presence) do
       Multiplayer.PresenceNotify.track_me(self(), new_socket)
     end
+
     {:ok, new_socket}
   end
 
   @impl true
   # send presence state to client
   def handle_info(:presence_state, socket) do
-    add_message("presence_state", Presence.list(socket) |> :maps.size)
+    add_message("presence_state", Presence.list(socket) |> :maps.size())
     {:noreply, socket}
   end
 
@@ -57,12 +81,17 @@ defmodule MultiplayerWeb.RealtimeChannel do
   end
 
   # send messages to the transport pid
-  def handle_info(:check_mq, %{transport_pid: pid, assigns: %{mq: [{msg, event} | mq], topic: topic}} = socket) do
-    proc_len = case Process.info(pid, :message_queue_len) do
-      nil -> nil
-      {_, len} -> len
-    end
-    if proc_len > @mbox_limit or proc_len == nil  do
+  def handle_info(
+        :check_mq,
+        %{transport_pid: pid, assigns: %{mq: [{msg, event} | mq], topic: topic}} = socket
+      ) do
+    proc_len =
+      case Process.info(pid, :message_queue_len) do
+        nil -> nil
+        {_, len} -> len
+      end
+
+    if proc_len > @mbox_limit or proc_len == nil do
       Process.send_after(self(), :check_mq, @wait_time)
       {:noreply, socket}
     else
@@ -76,19 +105,33 @@ defmodule MultiplayerWeb.RealtimeChannel do
   # handle the presence diff
   def handle_info(:presence_agg, %{assigns: %{presence_timer: ref, presence_diff: diff}} = socket) do
     Process.cancel_timer(ref)
-    info = %{joins: diff.joins |> :maps.size, leaves: diff.leaves |> :maps.size}
+    info = %{joins: diff.joins |> :maps.size(), leaves: diff.leaves |> :maps.size()}
+
     if !Map.equal?(diff, @empty_presence_diff) do
       add_message("presence_diff", info)
     end
+
     presence_timer = Process.send_after(self(), :presence_agg, @timeout_presence_diff)
-    {:noreply, socket
-               |> assign(presence_timer: presence_timer)
-               |> assign(presence_diff: @empty_presence_diff)}
+
+    {:noreply,
+     socket
+     |> assign(presence_timer: presence_timer)
+     |> assign(presence_diff: @empty_presence_diff)}
   end
 
   # handle the broadcast from BroadcastController
   def handle_info({:event, %{"type" => type} = event}, %{assigns: %{topic: _topic}} = socket) do
     add_message(type, event)
+    {:noreply, socket}
+  end
+
+  def handle_info(:kickout_time, socket) do
+    Logger.error("kickout_time")
+    {:stop, :normal, socket}
+  end
+
+  def handle_info({:rls, :accepted}, %{assigns: %{kickout_ref: ref}} = socket) do
+    Process.cancel_timer(ref)
     {:noreply, socket}
   end
 
@@ -112,6 +155,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
   def merge_presence_diff(old, new) do
     {same, updated_old} = Map.split(old.joins, Map.keys(new.leaves))
     clean_leaves = Map.drop(new.leaves, Map.keys(same))
+
     %{
       joins: Map.merge(updated_old, new.joins),
       leaves: Map.merge(old.leaves, clean_leaves)
@@ -132,5 +176,4 @@ defmodule MultiplayerWeb.RealtimeChannel do
   defp add_message(event, messsage) do
     send(self(), {:message, messsage, event})
   end
-
 end

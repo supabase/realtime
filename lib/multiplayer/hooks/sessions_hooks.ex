@@ -3,16 +3,16 @@ defmodule Multiplayer.SessionsHooks do
 
   @table __MODULE__
 
-  def session_connected(user_id, type, url) do
-    insert_event(:session, :connected, user_id, type, url)
+  def connected(pid, user_id, type, url) do
+    insert_event(:session, :connected, user_id, type, url, pid)
   end
 
-  def session_disconnected(user_id, type, url) do
-    insert_event(:session, :disconnected, user_id, type, url)
+  def disconnected(pid, user_id, type, url) do
+    insert_event(:session, :disconnected, user_id, type, url, pid)
   end
 
-  def session_update(user_id, type, url) do
-    insert_event(:session, :update, user_id, type, url)
+  def update(pid, user_id, type, url) do
+    insert_event(:session, :update, user_id, type, url, pid)
   end
 
   def init_table() do
@@ -36,10 +36,11 @@ defmodule Multiplayer.SessionsHooks do
     :ets.delete_all_objects(@table)
   end
 
-  @spec insert_event(atom, atom, String.t(), String.t(), String.t()) :: true
-  def insert_event(event, sub_event, user_id, type, url) do
+  @spec insert_event(pid, atom, atom, String.t(), String.t(), String.t()) :: true
+  def insert_event(event, sub_event, user_id, type, url, pid) do
     :ets.insert(@table, {
       make_ref(),
+      pid,
       event,
       sub_event,
       user_id,
@@ -51,36 +52,46 @@ defmodule Multiplayer.SessionsHooks do
 
   @spec take(pos_integer, any) :: {any, list}
   def take(num, last_key \\ nil) do
-    first_key =
+    start_key =
       if !last_key or last_key == :"$end_of_table" do
         :ets.first(@table)
       else
         last_key
       end
 
-    case first_key do
-      :"$end_of_table" -> {first_key, []}
+    case start_key do
+      :"$end_of_table" -> {start_key, []}
       _ ->
-        {last_key, keys} = Enum.reduce(1..num, {first_key, [first_key]}, fn
+        {last_key, keys} = Enum.reduce(1..num, {start_key, [start_key]}, fn
           _, {:"$end_of_table", _} = final -> final
           _, {key, acc} ->
             {:ets.next(@table, key), [key | acc]}
         end)
         records = :ets.select(@table, match_spec(:"$_", keys))
         :ets.select_delete(@table, match_spec(true, keys))
-        {last_key, records}
+        {last_key, Enum.map(records, &msg_transform/1)}
     end
+  end
+
+  def msg_transform({_, pid, event, sub_event, user_id, _, url, _}) do
+    %{
+      pid: pid,
+      event: "#{event}.#{sub_event}",
+      user_id: user_id,
+      url: url
+    }
   end
 
   def match_spec(match, keys) do
     for key <- keys do
-      {{key, :_,:_,:_,:_,:_,:_}, [], [match]}
+      {{key, :_,:_,:_,:_,:_,:_,:_}, [], [match]}
     end
   end
 
   def insert_dummy_sess_conn(num) do
     Enum.each(1..num, fn n ->
       insert_event(
+        self(),
         :session,
         :connected,
         make_ref(),

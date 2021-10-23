@@ -53,7 +53,8 @@ defmodule Multiplayer.MixProject do
       {:phoenix_swagger, "~> 0.8"},
       {:ex_json_schema, "~> 0.5"},
       {:recon, "~> 2.5"},
-      {:broadway, "~> 1.0"}
+      {:broadway, "~> 1.0"},
+      {:httpoison, "~> 1.8"}
     ]
   end
 
