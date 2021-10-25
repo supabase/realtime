@@ -11,7 +11,8 @@ defmodule Multiplayer.SessionsHooksBroadway do
       producer: [
         module: {Multiplayer.SessionsHooksProducer, []},
         transformer: {__MODULE__, :transform, []},
-        concurrency: 1 # the producer does not support concurrency
+        # the producer does not support concurrency
+        concurrency: 1
       ],
       processors: [
         default: [concurrency: 10, max_demand: 1]
@@ -21,16 +22,26 @@ defmodule Multiplayer.SessionsHooksBroadway do
 
   @impl true
   def handle_message(_, %Message{data: data} = message, _state) do
+    payload = Jason.encode!(%{"user_id" => data.user_id})
+
     case data.event do
       "session.connected" ->
-        payload = Jason.encode!(%{"user_id" => data.user_id})
-        #TODO: handle a response
-        _ = HTTPoison.post(data.url, payload, @headers)
-        send(data.pid, {:rls, :accepted})
-        message
+        response = HTTPoison.post(data.url, payload, @headers)
+
+        with {:ok, %{status_code: 200, body: body_data}} <- response,
+             {:ok, %{"status" => "accepted"}} <- Jason.decode(body_data) do
+          send(data.pid, {:rls, :accepted})
+        else
+          error ->
+            Logger.debug("SessionsHooksBroadway post error response: #{error}")
+            :ok
+        end
+
+      "session.disconnected" ->
+        HTTPoison.post(data.url, payload, @headers)
+
       undef ->
         Logger.error("Undefined event: #{inspect(undef)}")
-        message
     end
 
     message
