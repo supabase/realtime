@@ -29,7 +29,7 @@ defmodule Multiplayer.SessionsHooksBroadway do
         response = HTTPoison.post(data.url, payload, @headers)
 
         with {:ok, %{status_code: 200, body: body_data}} <- response,
-             {:ok, %{"status" => "accepted"}} <- Jason.decode(body_data) do
+             {:ok, %{"data" => "accepted"}} <- Jason.decode(body_data) do
           send(data.pid, {:rls, :accepted})
         else
           error ->
