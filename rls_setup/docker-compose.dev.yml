@@ -1,0 +1,32 @@
+version: '3'
+services:
+  realtime:
+    image: realtime/walrus
+    build: .
+    ports:
+      - 4000:4000
+    environment:
+      DB_HOST: db
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_PORT: 5432
+      PORT: 4000
+      JWT_SECRET: SOMETHING_SUPER_SECRET
+      SECURE_CHANNELS: 'true'
+    depends_on:
+      - db
+  db:
+    image: supabase/postgres
+    ports:
+      - 5432:5432
+    volumes:
+      - ./sql/setup.sql:/docker-entrypoint-initdb.d/setup.sql
+      - ./sql/walrus--0.1.sql:/docker-entrypoint-initdb.d/walrus--0.1.sql
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
