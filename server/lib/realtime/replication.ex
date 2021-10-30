@@ -128,7 +128,8 @@ defmodule Realtime.Replication do
           table: name,
           columns: columns,
           record: data,
-          commit_timestamp: commit_timestamp
+          commit_timestamp: commit_timestamp,
+          is_rls_enabled: false
         }
 
         %State{state | transaction: {lsn, %{txn | changes: [new_record | changes]}}}
@@ -162,7 +163,8 @@ defmodule Realtime.Replication do
           columns: columns,
           old_record: old_data,
           record: data,
-          commit_timestamp: commit_timestamp
+          commit_timestamp: commit_timestamp,
+          is_rls_enabled: false
         }
 
         %State{
@@ -197,7 +199,8 @@ defmodule Realtime.Replication do
           table: name,
           columns: columns,
           old_record: data,
-          commit_timestamp: commit_timestamp
+          commit_timestamp: commit_timestamp,
+          is_rls_enabled: false
         }
 
         %State{state | transaction: {lsn, %{txn | changes: [deleted_record | changes]}}}
