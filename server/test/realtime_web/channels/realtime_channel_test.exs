@@ -1,6 +1,7 @@
 defmodule RealtimeWeb.RealtimeChannelTest do
   use RealtimeWeb.ChannelCase
   require Logger
+  import Realtime.SubscribersNotification, only: [broadcast_change: 2]
 
   setup do
     {:ok, _, socket} =
@@ -17,7 +18,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       type: "INSERT"
     }
 
-    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
+    broadcast_change("realtime:*", change)
 
     assert_push("INSERT", change)
   end
@@ -29,7 +30,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       type: "UPDATE"
     }
 
-    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
+    broadcast_change("realtime:*", change)
 
     assert_push("UPDATE", change)
   end
@@ -41,7 +42,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       type: "DELETE"
     }
 
-    RealtimeWeb.RealtimeChannel.handle_realtime_transaction("realtime:*", change)
+    broadcast_change("realtime:*", change)
 
     assert_push("DELETE", change)
   end

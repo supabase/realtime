@@ -136,7 +136,7 @@ defmodule Realtime.SubscribersNotification do
 
   defp is_valid_notification_key(_v), do: false
 
-  defp broadcast_change(topic, %{type: event} = change) do
+  def broadcast_change(topic, %{type: event} = change) do
     broadcast = %Broadcast{
       topic: topic,
       event: event,

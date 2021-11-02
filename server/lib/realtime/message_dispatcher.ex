@@ -26,6 +26,9 @@ defmodule Realtime.MessageDispatcher do
         else
           cache
         end
+
+      {_pid, nil}, cache ->
+        cache
     end)
 
     :ok
