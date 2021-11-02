@@ -12,7 +12,7 @@ defmodule Realtime.SubscribersNotificationTest do
   }
 
   alias Realtime.Configuration.{Configuration, Webhook, WebhookEndpoint}
-  alias Realtime.{ConfigurationManager, SubscribersNotification, WebhookConnector}
+  alias Realtime.{ConfigurationManager, SubscribersNotification, WebhookConnector, Helpers}
   alias Realtime.Adapters.Postgres.Decoder.Messages.Relation
   alias RealtimeWeb.RealtimeChannel
 
@@ -74,10 +74,10 @@ defmodule Realtime.SubscribersNotificationTest do
           ]
         },
         {
-          RealtimeChannel,
+          Helpers,
           [],
           [
-            handle_realtime_transaction: fn _topic, _change -> :ok end
+            broadcast_change: fn _topic, _change -> :ok end
           ]
         },
         {
@@ -163,14 +163,14 @@ defmodule Realtime.SubscribersNotificationTest do
       SubscribersNotification.notify(txn)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:public", @new_record_public)
+        Helpers.broadcast_change("realtime:public", @new_record_public)
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:auth", @new_record_auth)
+        Helpers.broadcast_change("realtime:auth", @new_record_auth)
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 2)
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 2)
     end
   end
 
@@ -191,19 +191,19 @@ defmodule Realtime.SubscribersNotificationTest do
 
       SubscribersNotification.notify(txn)
 
-      assert_called(RealtimeChannel.handle_realtime_transaction("realtime:*", @new_record_public))
+      assert_called(Helpers.broadcast_change("realtime:*", @new_record_public))
 
-      assert_called(RealtimeChannel.handle_realtime_transaction("realtime:*", @new_record_auth))
+      assert_called(Helpers.broadcast_change("realtime:*", @new_record_auth))
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:public", @new_record_public)
+        Helpers.broadcast_change("realtime:public", @new_record_public)
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:auth", @new_record_auth)
+        Helpers.broadcast_change("realtime:auth", @new_record_auth)
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 4)
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 4)
     end
   end
 
@@ -233,14 +233,14 @@ defmodule Realtime.SubscribersNotificationTest do
       SubscribersNotification.notify(txn)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:public:users", @new_record_public)
+        Helpers.broadcast_change("realtime:public:users", @new_record_public)
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:auth:auth_users", @new_record_auth)
+        Helpers.broadcast_change("realtime:auth:auth_users", @new_record_auth)
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 2)
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 2)
     end
   end
 
@@ -280,14 +280,14 @@ defmodule Realtime.SubscribersNotificationTest do
       SubscribersNotification.notify(txn)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:public:users", @new_record_public)
+        Helpers.broadcast_change("realtime:public:users", @new_record_public)
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction("realtime:auth:auth_users", @new_record_auth)
+        Helpers.broadcast_change("realtime:auth:auth_users", @new_record_auth)
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 2)
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 2)
     end
   end
 
@@ -325,20 +325,20 @@ defmodule Realtime.SubscribersNotificationTest do
       SubscribersNotification.notify(txn)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction(
+        Helpers.broadcast_change(
           "realtime:public:users:name=eq.Thomas Shelby",
           @new_record_public
         )
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction(
+        Helpers.broadcast_change(
           "realtime:auth:auth_users:name=eq.Arthur Shelby",
           @new_record_auth
         )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 2)
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 2)
     end
   end
 
@@ -362,34 +362,34 @@ defmodule Realtime.SubscribersNotificationTest do
       SubscribersNotification.notify(txn)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction(
+        Helpers.broadcast_change(
           "realtime:public:users:name=eq.Thomas Shelby",
           @new_record_public
         )
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction(
+        Helpers.broadcast_change(
           "realtime:public:users:id=eq.1",
           @new_record_public
         )
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction(
+        Helpers.broadcast_change(
           "realtime:auth:auth_users:name=eq.Arthur Shelby",
           @new_record_auth
         )
       )
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction(
+        Helpers.broadcast_change(
           "realtime:auth:auth_users:id=eq.2",
           @new_record_auth
         )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 4)
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 4)
     end
   end
 
@@ -416,13 +416,13 @@ defmodule Realtime.SubscribersNotificationTest do
       SubscribersNotification.notify(txn)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction(
+        Helpers.broadcast_change(
           "realtime:public:users:name=eq.Thomas Shelby",
           record
         )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 1)
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 1)
     end
   end
 
@@ -449,13 +449,13 @@ defmodule Realtime.SubscribersNotificationTest do
       SubscribersNotification.notify(txn)
 
       assert_called(
-        RealtimeChannel.handle_realtime_transaction(
+        Helpers.broadcast_change(
           "realtime:public:users:name=eq.Thomas Shelby",
           old_record
         )
       )
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 1)
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 1)
     end
   end
 
@@ -479,7 +479,7 @@ defmodule Realtime.SubscribersNotificationTest do
 
       SubscribersNotification.notify(txn)
 
-      assert_not_called(RealtimeChannel.handle_realtime_transaction(:_, :_))
+      assert_not_called(Helpers.broadcast_change(:_, :_))
     end
   end
 
@@ -502,7 +502,8 @@ defmodule Realtime.SubscribersNotificationTest do
         record: %{"id" => "1", "name" => valid_notification_key},
         schema: "public",
         table: "users",
-        type: "INSERT"
+        type: "INSERT",
+        is_rls_enabled: false
       }
 
       txn = %Transaction{
@@ -539,10 +540,10 @@ defmodule Realtime.SubscribersNotificationTest do
 
       ["realtime:public:users:name=eq.", valid_notification_key]
       |> IO.iodata_to_binary()
-      |> RealtimeChannel.handle_realtime_transaction(valid_notification_record)
+      |> Helpers.broadcast_change(valid_notification_record)
       |> assert_called()
 
-      assert_called_exactly(RealtimeChannel.handle_realtime_transaction(:_, :_), 1)
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 1)
     end
   end
 end

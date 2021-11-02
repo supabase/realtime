@@ -1,10 +1,10 @@
 defmodule Realtime.SubscribersNotification do
   require Logger
 
-  alias Phoenix.Socket.Broadcast
   alias Realtime.Adapters.Changes.Transaction
   alias Realtime.Configuration.Configuration
-  alias Realtime.{ConfigurationManager, MessageDispatcher, PubSub}
+  alias Realtime.{ConfigurationManager}
+  import Realtime.Helpers, only: [broadcast_change: 2]
 
   @topic "realtime"
 
@@ -136,13 +136,4 @@ defmodule Realtime.SubscribersNotification do
 
   defp is_valid_notification_key(_v), do: false
 
-  def broadcast_change(topic, %{type: event} = change) do
-    broadcast = %Broadcast{
-      topic: topic,
-      event: event,
-      payload: change
-    }
-
-    Phoenix.PubSub.broadcast_from(PubSub, self(), topic, broadcast, MessageDispatcher)
-  end
 end

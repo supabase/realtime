@@ -1,4 +1,7 @@
 defmodule Realtime.Helpers do
+  alias Phoenix.Socket.Broadcast
+  alias Realtime.{MessageDispatcher, PubSub}
+
   # key1=value1:key2=value2 to [{"key1", "value1"}, {"key2", "value2"}]}
   @spec env_kv_to_list(String.t() | nil, list() | []) :: {:ok, [{binary(), binary()}]} | :error
   def env_kv_to_list("", _), do: :error
@@ -31,5 +34,15 @@ defmodule Realtime.Helpers do
             nil
         end
     end)
+  end
+
+  def broadcast_change(topic, %{type: event} = change) do
+    broadcast = %Broadcast{
+      topic: topic,
+      event: event,
+      payload: change
+    }
+
+    Phoenix.PubSub.broadcast_from(PubSub, self(), topic, broadcast, MessageDispatcher)
   end
 end
