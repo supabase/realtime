@@ -1,7 +1,7 @@
 defmodule RealtimeWeb.RealtimeChannelTest do
   use RealtimeWeb.ChannelCase
   require Logger
-  import Realtime.SubscribersNotification, only: [broadcast_change: 2]
+  import Realtime.Helpers, only: [broadcast_change: 2]
 
   setup do
     {:ok, _, socket} =
