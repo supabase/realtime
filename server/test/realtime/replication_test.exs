@@ -394,7 +394,7 @@ defmodule Realtime.ReplicationTest do
                SubscribersNotification.notify(%Transaction{
                  commit_timestamp: expected_commit_timestamp,
                  changes: [
-                   %Realtime.Adapters.Changes.NewRecord{
+                   %NewRecord{
                      columns: @test_columns,
                      commit_timestamp: expected_commit_timestamp,
                      record: %{
@@ -406,9 +406,10 @@ defmodule Realtime.ReplicationTest do
                      },
                      schema: "public",
                      table: "todos",
-                     type: "INSERT"
+                     type: "INSERT",
+                     is_rls_enabled: false
                    },
-                   %Realtime.Adapters.Changes.NewRecord{
+                   %NewRecord{
                      columns: @test_columns,
                      commit_timestamp: expected_commit_timestamp,
                      record: %{
@@ -420,7 +421,8 @@ defmodule Realtime.ReplicationTest do
                      },
                      schema: "public",
                      table: "todos",
-                     type: "INSERT"
+                     type: "INSERT",
+                     is_rls_enabled: false
                    }
                  ]
                })
