@@ -27,6 +27,8 @@ defmodule Realtime.Application do
     # This will always be converted to lower-case.
     # You can get a list of active replication slots with
     # `select * from pg_replication_slots`
+    # and delete with
+    # `select pg_drop_replication_slot('some_slot_name')`
     slot_name = Application.get_env(:realtime, :slot_name)
     publications = Application.get_env(:realtime, :publications) |> Jason.decode!()
     configuration_file = Application.fetch_env!(:realtime, :configuration_file)
