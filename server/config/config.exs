@@ -62,6 +62,8 @@ db_ip_version =
 # Defaults to true in development and false in production
 expose_metrics = System.get_env("EXPOSE_METRICS", "true") == "true"
 
+webhook_headers = System.get_env("WEBHOOK_HEADERS")
+
 config :realtime,
   app_port: app_port,
   db_host: db_host,
@@ -78,7 +80,9 @@ config :realtime,
   jwt_secret: jwt_secret,
   jwt_claim_validators: jwt_claim_validators,
   max_replication_lag_in_mb: max_replication_lag_in_mb,
-  expose_metrics: expose_metrics
+  expose_metrics: expose_metrics,
+  webhook_default_headers: [{"content-type", "application/json"}],
+  webhook_headers: webhook_headers
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,

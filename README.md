@@ -94,9 +94,9 @@ We have set up some simple examples that show how to use this server:
 - [@supabase/realtime-js](https://github.com/supabase/realtime-js) installed locally
 
 ```js
-import { Socket } = '@supabase/realtime-js'
+import { RealtimeClient } = '@supabase/realtime-js'
 
-var socket = new Socket(process.env.REALTIME_URL || 'ws://localhost:4000/socket')
+var socket = new RealtimeClient(process.env.REALTIME_URL || 'ws://localhost:4000/socket')
 socket.connect()
 ```
 
