@@ -23,6 +23,10 @@ defmodule RealtimeWeb.Endpoint do
     plug Phoenix.CodeReloader
   end
 
+  if Application.fetch_env!(:realtime, :expose_metrics) do
+    plug PromEx.Plug, prom_ex_module: Realtime.Metrics.PromEx
+  end
+
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
