@@ -7,6 +7,7 @@ defmodule Realtime.MessageDispatcher do
   @doc """
   Hook invoked by Phoenix.PubSub dispatch.
   """
+  @spec dispatch([{pid, nil | {:fastlane | :user_fastlane, pid, atom, binary}}], pid, Phoenix.Socket.Broadcast.t()) :: :ok
   def dispatch(subscribers, _from, %Broadcast{payload: payload} = msg) do
     {is_rls_enabled, new_payload} = Map.pop(payload, :is_rls_enabled)
     {users, new_payload} = Map.pop(new_payload, :users)

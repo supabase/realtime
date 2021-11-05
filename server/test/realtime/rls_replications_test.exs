@@ -28,7 +28,6 @@ defmodule Realtime.RlsReplicationsTest do
     assert res
   end
 
-  @tag :qwe
   test "list_changes/2, empty response" do
     {:ok, res} = list_changes(@slot_name, @publication_time)
     assert res.rows == []

@@ -123,7 +123,7 @@ defmodule Realtime.RLS.ReplicationPoller do
     end
   end
 
-  defp generate_record([
+  def generate_record([
          {"wal",
           %{
             "type" => "INSERT" = type,
@@ -150,7 +150,7 @@ defmodule Realtime.RLS.ReplicationPoller do
     }
   end
 
-  defp generate_record([
+  def generate_record([
          {"wal",
           %{
             "type" => "UPDATE" = type,
@@ -179,7 +179,7 @@ defmodule Realtime.RLS.ReplicationPoller do
     }
   end
 
-  defp generate_record([
+  def generate_record([
          {"wal",
           %{
             "type" => "DELETE" = type,
@@ -206,5 +206,5 @@ defmodule Realtime.RLS.ReplicationPoller do
     }
   end
 
-  defp generate_record(_), do: nil
+  def generate_record(_), do: nil
 end
