@@ -91,7 +91,8 @@ defmodule Realtime.Application do
                 Application.fetch_env!(:realtime, :replication_poll_interval),
               publication: publication,
               slot_name: slot_name,
-              temporary_slot: Application.fetch_env!(:realtime, :temporary_slot)
+              temporary_slot: Application.fetch_env!(:realtime, :temporary_slot),
+              max_record_bytes: Application.fetch_env!(:realtime, :max_record_bytes)
             }
           ]
 

@@ -31,7 +31,8 @@ defmodule Realtime.RLS.ReplicationPoller do
       poll_ref: make_ref(),
       publication: Keyword.fetch!(opts, :publication),
       slot_name: Keyword.fetch!(opts, :slot_name),
-      temporary_slot: Keyword.fetch!(opts, :temporary_slot)
+      temporary_slot: Keyword.fetch!(opts, :temporary_slot),
+      max_record_bytes: Keyword.fetch!(opts, :max_record_bytes)
     }
 
     {:ok, state, {:continue, :prepare_replication}}
@@ -72,13 +73,14 @@ defmodule Realtime.RLS.ReplicationPoller do
           poll_interval: poll_interval,
           poll_ref: poll_ref,
           publication: publication,
-          slot_name: slot_name
+          slot_name: slot_name,
+          max_record_bytes: max_record_bytes
         } = state
       ) do
     Process.cancel_timer(poll_ref)
 
     try do
-      Replications.list_changes(slot_name, publication)
+      Replications.list_changes(slot_name, publication, max_record_bytes)
     catch
       :error, error -> {:error, error}
     end
@@ -135,12 +137,13 @@ defmodule Realtime.RLS.ReplicationPoller do
           }},
          {"is_rls_enabled", is_rls_enabled},
          {"users", users},
-         {"errors", _errors}
+         {"errors", errors}
        ])
        when is_boolean(is_rls_enabled) and is_list(users) do
     %NewRecord{
       columns: columns,
       commit_timestamp: commit_timestamp,
+      errors: convert_errors(errors),
       is_rls_enabled: is_rls_enabled,
       schema: schema,
       table: table,
@@ -163,12 +166,13 @@ defmodule Realtime.RLS.ReplicationPoller do
           }},
          {"is_rls_enabled", is_rls_enabled},
          {"users", users},
-         {"errors", _errors}
+         {"errors", errors}
        ])
        when is_boolean(is_rls_enabled) and is_list(users) do
     %UpdatedRecord{
       columns: columns,
       commit_timestamp: commit_timestamp,
+      errors: convert_errors(errors),
       is_rls_enabled: is_rls_enabled,
       schema: schema,
       table: table,
@@ -191,12 +195,13 @@ defmodule Realtime.RLS.ReplicationPoller do
           }},
          {"is_rls_enabled", is_rls_enabled},
          {"users", users},
-         {"errors", _errors}
+         {"errors", errors}
        ])
        when is_boolean(is_rls_enabled) and is_list(users) do
     %DeletedRecord{
       columns: columns,
       commit_timestamp: commit_timestamp,
+      errors: convert_errors(errors),
       is_rls_enabled: is_rls_enabled,
       schema: schema,
       table: table,
@@ -207,4 +212,8 @@ defmodule Realtime.RLS.ReplicationPoller do
   end
 
   defp generate_record(_), do: nil
+
+  defp convert_errors([_ | _] = errors), do: errors
+
+  defp convert_errors([]), do: nil
 end

@@ -43,7 +43,7 @@ defmodule Realtime.RLS.Replications do
     end
   end
 
-  def list_changes(slot_name, publication) do
+  def list_changes(slot_name, publication, max_record_bytes) do
     query(
       "with pub as (
         select
@@ -98,11 +98,23 @@ defmodule Realtime.RLS.Replications do
               x.users,
               x.errors
             from
-              cdc.apply_rls(w2j.data::jsonb) x(wal, is_rls_enabled, users, errors)
+              cdc.apply_rls(
+                wal := w2j.data::jsonb,
+                max_record_bytes := $3
+              ) x(
+                wal,
+                is_rls_enabled,
+                users,
+                errors
+              )
           ) xyz
       where pub.pub_all_tables or
         (pub.pub_all_tables is false and w2j_add_tables is not null)",
-      [publication, slot_name]
+      [
+        publication,
+        slot_name,
+        max_record_bytes
+      ]
     )
   end
 end
