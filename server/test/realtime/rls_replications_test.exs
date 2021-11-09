@@ -30,7 +30,11 @@ defmodule Realtime.RlsReplicationsTest do
 
   test "list_changes/2, empty response" do
     {:ok, res} = list_changes(@slot_name, @publication_time)
-    assert res.rows == []
+    res2 = Enum.filter(res.rows, fn
+      %{"schema" => "public"} -> true
+      _ -> false
+    end)
+    assert res2 == []
   end
 
   test "list_changes/2, response with changes" do
