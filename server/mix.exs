@@ -57,8 +57,8 @@ defmodule Realtime.MixProject do
   defp aliases do
     [
       test: [
-        "ecto.load -d '../rls_setup/sql/setup.sql' --skip-if-loaded",
-        "ecto.load -d '../rls_setup/sql/walrus--0.1.sql' --skip-if-loaded",
+        "ecto.create --quiet",
+        "ecto.load -d 'test/setup.sql' -f",
         "test"
       ]
     ]

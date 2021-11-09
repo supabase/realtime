@@ -2,11 +2,11 @@ use Mix.Config
 
 config :realtime,
   secure_channels: false,
-  ecto_repos: [RLS.Repo],
+  # ecto_repos: [RLS.Repo],
   publications: "[\"supabase_realtime\"]"
 
 config :realtime, Realtime.RLS.Repo,
-  database: "postgres",
+  database: "realtime_test#{System.get_env("MIX_TEST_PARTITION")}",
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
@@ -17,8 +17,7 @@ config :realtime, Realtime.RLS.Repo,
   backoff_type: :rand_exp,
   backoff_min: 100,
   backoff_max: 120_000,
-  log: false,
-  pool: Ecto.Adapters.SQL.Sandbox
+  log: false
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
