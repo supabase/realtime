@@ -5,6 +5,8 @@ defmodule Realtime.RLS.Subscriptions do
   alias Realtime.RLS.Repo
   alias Realtime.RLS.Subscriptions.Subscription
 
+  @spec create_topic_subscriber(%{topic: String.t(), user_id: Ecto.UUID.raw()}) ::
+          {:ok, term()} | {:error, term()}
   def create_topic_subscriber(params) do
     Multi.new()
     |> Multi.put(:params_list, [params])
