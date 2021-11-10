@@ -36,6 +36,11 @@ defmodule Realtime.SubscriptionManager do
     end
   end
 
+  @spec track_topic_subscriber(%{
+          channel_pid: pid(),
+          topic: String.t(),
+          user_id: Ecto.UUID.raw()
+        }) :: :ok | :error
   def track_topic_subscriber(topic_sub) do
     GenServer.call(__MODULE__, {:track_topic_subscriber, topic_sub}, 15_000)
   end
