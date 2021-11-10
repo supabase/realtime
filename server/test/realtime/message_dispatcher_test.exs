@@ -1,6 +1,5 @@
 defmodule Realtime.MessageDispatcherTest do
   use ExUnit.Case
-  alias Phoenix.Socket.Broadcast
   import Realtime.MessageDispatcher
   alias Phoenix.Socket.V1.JSONSerializer
 
@@ -10,35 +9,35 @@ defmodule Realtime.MessageDispatcherTest do
     msg = msg(false, [])
     dispatch([{self(), {:user_fastlane, self(), JSONSerializer, ""}}], self(), msg)
     expected = JSONSerializer.fastlane!(msg)
-    assert_received expected
+    assert_received ^expected
   end
 
   test "dispatch/3 for user_fastlane when rls enabled and user in users" do
     msg = msg(true, MapSet.new([@user_id]))
     dispatch([{self(), {:user_fastlane, self(), JSONSerializer, @user_id}}], self(), msg)
     expected = JSONSerializer.fastlane!(msg)
-    assert_received expected
+    assert_received ^expected
   end
 
   test "dispatch/3 for user_fastlane when rls enabled and user not in users" do
     msg = msg(true, MapSet.new([@user_id]))
     dispatch([{self(), {:user_fastlane, self(), JSONSerializer, "wrong_user_id"}}], self(), msg)
     expected = JSONSerializer.fastlane!(msg)
-    refute_receive expected
+    refute_receive ^expected
   end
 
   test "dispatch/3 for fastlane when rls enabled" do
     msg = msg(true, [])
     dispatch([{self(), {:fastlane, self(), JSONSerializer, ""}}], self(), msg)
     expected = JSONSerializer.fastlane!(msg)
-    refute_receive expected
+    refute_receive ^expected
   end
 
   test "dispatch/3 for fastlane when rls disabled" do
     msg = msg(false, [])
     dispatch([{self(), {:fastlane, self(), JSONSerializer, ""}}], self(), msg)
     expected = JSONSerializer.fastlane!(msg)
-    assert_received expected
+    assert_received ^expected
   end
 
   @spec msg(atom, list) :: map()

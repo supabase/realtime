@@ -86,8 +86,6 @@ defmodule Realtime.SubscriptionManagerTest do
 
   test "handle_call/track_topic_subscriber, updated state" do
     {_, bin} = Ecto.UUID.dump(@user_id)
-    # params = %{topic: "topic_test", user_id: bin}
-    IO.inspect(bin)
     Repo.query("insert into auth.users (id) values ($1)", [bin])
 
     mess = {
@@ -114,8 +112,6 @@ defmodule Realtime.SubscriptionManagerTest do
       sync_interval: 15_000,
       sync_ref: make_ref()
     }
-
-    expected = {:reply, :ok, state}
 
     case SubscriptionManager.handle_call(mess, self(), state) do
       {:reply, :ok, %{subscription_params: sub_param} = new_state} ->
