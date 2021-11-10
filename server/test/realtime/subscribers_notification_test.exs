@@ -14,7 +14,7 @@ defmodule Realtime.SubscribersNotificationTest do
   alias Realtime.Configuration.{Configuration, Webhook, WebhookEndpoint}
   alias Realtime.{ConfigurationManager, SubscribersNotification, WebhookConnector, Helpers}
   alias Realtime.Adapters.Postgres.Decoder.Messages.Relation
-  alias RealtimeWeb.RealtimeChannel
+  # alias RealtimeWeb.RealtimeChannel
 
   @commit_timestamp %DateTime{
     calendar: Calendar.ISO,
@@ -162,13 +162,9 @@ defmodule Realtime.SubscribersNotificationTest do
 
       SubscribersNotification.notify(txn)
 
-      assert_called(
-        Helpers.broadcast_change("realtime:public", @new_record_public)
-      )
+      assert_called(Helpers.broadcast_change("realtime:public", @new_record_public))
 
-      assert_called(
-        Helpers.broadcast_change("realtime:auth", @new_record_auth)
-      )
+      assert_called(Helpers.broadcast_change("realtime:auth", @new_record_auth))
 
       assert_called_exactly(Helpers.broadcast_change(:_, :_), 2)
     end
@@ -195,13 +191,9 @@ defmodule Realtime.SubscribersNotificationTest do
 
       assert_called(Helpers.broadcast_change("realtime:*", @new_record_auth))
 
-      assert_called(
-        Helpers.broadcast_change("realtime:public", @new_record_public)
-      )
+      assert_called(Helpers.broadcast_change("realtime:public", @new_record_public))
 
-      assert_called(
-        Helpers.broadcast_change("realtime:auth", @new_record_auth)
-      )
+      assert_called(Helpers.broadcast_change("realtime:auth", @new_record_auth))
 
       assert_called_exactly(Helpers.broadcast_change(:_, :_), 4)
     end
@@ -232,13 +224,9 @@ defmodule Realtime.SubscribersNotificationTest do
 
       SubscribersNotification.notify(txn)
 
-      assert_called(
-        Helpers.broadcast_change("realtime:public:users", @new_record_public)
-      )
+      assert_called(Helpers.broadcast_change("realtime:public:users", @new_record_public))
 
-      assert_called(
-        Helpers.broadcast_change("realtime:auth:auth_users", @new_record_auth)
-      )
+      assert_called(Helpers.broadcast_change("realtime:auth:auth_users", @new_record_auth))
 
       assert_called_exactly(Helpers.broadcast_change(:_, :_), 2)
     end
@@ -279,13 +267,9 @@ defmodule Realtime.SubscribersNotificationTest do
 
       SubscribersNotification.notify(txn)
 
-      assert_called(
-        Helpers.broadcast_change("realtime:public:users", @new_record_public)
-      )
+      assert_called(Helpers.broadcast_change("realtime:public:users", @new_record_public))
 
-      assert_called(
-        Helpers.broadcast_change("realtime:auth:auth_users", @new_record_auth)
-      )
+      assert_called(Helpers.broadcast_change("realtime:auth:auth_users", @new_record_auth))
 
       assert_called_exactly(Helpers.broadcast_change(:_, :_), 2)
     end
