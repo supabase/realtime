@@ -4,7 +4,7 @@ defmodule Realtime.RlsReplicationsTest do
   import Realtime.RLS.Replications
 
   @slot_name "test_realtime_slot_name"
-  @undef_slot_name "undef_test_realtime_slot_name"
+  # @undef_slot_name "undef_test_realtime_slot_name"
   @publication_time "supabase_realtime"
 
   setup_all do
@@ -19,25 +19,29 @@ defmodule Realtime.RlsReplicationsTest do
   end
 
   test "prepare_replication/2, try to create a slot with an existing name" do
-    res =
-      case prepare_replication(@slot_name, false) do
-        {:error, %Postgrex.Error{}} -> true
-        _ -> false
-      end
-
-    assert res
+    assert match?(
+             {:error, %Postgrex.Error{}},
+             prepare_replication(@slot_name, false)
+           )
   end
 
   test "list_changes/2, empty response" do
+    query("select pg_drop_replication_slot($1);", [@slot_name])
+    prepare_replication(@slot_name, false)
     {:ok, res} = list_changes(@slot_name, @publication_time)
-    res2 = Enum.filter(res.rows, fn
-      %{"schema" => "public"} -> true
-      _ -> false
-    end)
+
+    res2 =
+      Enum.filter(res.rows, fn
+        %{"schema" => "public"} -> true
+        _ -> false
+      end)
+
     assert res2 == []
   end
 
   test "list_changes/2, response with changes" do
+    query("select pg_drop_replication_slot($1);", [@slot_name])
+    prepare_replication(@slot_name, false)
     # TODO: check by user_id
     query("insert into public.todos (details, user_id) VALUES ($1, $2)", ["test", 1])
     Process.sleep(500)
