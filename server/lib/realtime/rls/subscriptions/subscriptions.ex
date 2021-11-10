@@ -19,6 +19,7 @@ defmodule Realtime.RLS.Subscriptions do
     |> Repo.transaction()
   end
 
+  @spec delete_topic_subscriber(map()) :: {integer(), nil | [term()]}
   def delete_topic_subscriber(%{entities: [_ | _] = oids, filters: filters, user_id: user_id}) do
     from(s in Subscription,
       where: s.user_id == ^user_id and s.filters == ^filters and s.entity in ^oids
