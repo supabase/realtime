@@ -20,7 +20,7 @@ defmodule Realtime.RlsReplicationsTest do
 
   test "prepare_replication/2, try to create a slot with an existing name" do
     assert match?(
-             {:error, %Postgrex.Error{}},
+             {:ok, %{create_slot: @slot_name, search_path: :set}},
              prepare_replication(@slot_name, false)
            )
   end

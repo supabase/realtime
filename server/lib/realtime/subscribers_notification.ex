@@ -135,5 +135,4 @@ defmodule Realtime.SubscribersNotification do
   end
 
   defp is_valid_notification_key(_v), do: false
-
 end

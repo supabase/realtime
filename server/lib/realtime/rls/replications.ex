@@ -7,20 +7,21 @@ defmodule Realtime.RLS.Replications do
     Multi.new()
     |> Multi.run(:create_slot, fn _, _ ->
       query(
-        "select 1 from pg_create_logical_replication_slot($1, 'wal2json', $2);",
+        "select
+          case when not exists (
+            select 1
+            from pg_replication_slots
+            where slot_name = $1
+          )
+          then (
+            select 1 from pg_create_logical_replication_slot($1, 'wal2json', $2)
+          )
+          else 1
+          end;",
         [slot_name, temporary_slot]
       )
       |> case do
         {:ok, %Postgrex.Result{rows: [[1]]}} ->
-          {:ok, slot_name}
-
-        {:error,
-         %Postgrex.Error{
-           postgres: %{
-             code: :duplicate_object,
-             routine: "ReplicationSlotCreate"
-           }
-         }} ->
           {:ok, slot_name}
 
         {_, error} ->

@@ -124,20 +124,20 @@ defmodule Realtime.RLS.ReplicationPoller do
   end
 
   def generate_record([
-         {"wal",
-          %{
-            "type" => "INSERT" = type,
-            "columns" => columns,
-            "commit_timestamp" => commit_timestamp,
-            "schema" => schema,
-            "table" => table,
-            "record" => record
-          }},
-         {"is_rls_enabled", is_rls_enabled},
-         {"users", users},
-         {"errors", _errors}
-       ])
-       when is_boolean(is_rls_enabled) and is_list(users) do
+        {"wal",
+         %{
+           "type" => "INSERT" = type,
+           "columns" => columns,
+           "commit_timestamp" => commit_timestamp,
+           "schema" => schema,
+           "table" => table,
+           "record" => record
+         }},
+        {"is_rls_enabled", is_rls_enabled},
+        {"users", users},
+        {"errors", _errors}
+      ])
+      when is_boolean(is_rls_enabled) and is_list(users) do
     %NewRecord{
       columns: columns,
       commit_timestamp: commit_timestamp,
@@ -151,21 +151,21 @@ defmodule Realtime.RLS.ReplicationPoller do
   end
 
   def generate_record([
-         {"wal",
-          %{
-            "type" => "UPDATE" = type,
-            "columns" => columns,
-            "commit_timestamp" => commit_timestamp,
-            "schema" => schema,
-            "table" => table,
-            "record" => record,
-            "old_record" => old_record
-          }},
-         {"is_rls_enabled", is_rls_enabled},
-         {"users", users},
-         {"errors", _errors}
-       ])
-       when is_boolean(is_rls_enabled) and is_list(users) do
+        {"wal",
+         %{
+           "type" => "UPDATE" = type,
+           "columns" => columns,
+           "commit_timestamp" => commit_timestamp,
+           "schema" => schema,
+           "table" => table,
+           "record" => record,
+           "old_record" => old_record
+         }},
+        {"is_rls_enabled", is_rls_enabled},
+        {"users", users},
+        {"errors", _errors}
+      ])
+      when is_boolean(is_rls_enabled) and is_list(users) do
     %UpdatedRecord{
       columns: columns,
       commit_timestamp: commit_timestamp,
@@ -180,20 +180,20 @@ defmodule Realtime.RLS.ReplicationPoller do
   end
 
   def generate_record([
-         {"wal",
-          %{
-            "type" => "DELETE" = type,
-            "columns" => columns,
-            "commit_timestamp" => commit_timestamp,
-            "schema" => schema,
-            "table" => table,
-            "old_record" => old_record
-          }},
-         {"is_rls_enabled", is_rls_enabled},
-         {"users", users},
-         {"errors", _errors}
-       ])
-       when is_boolean(is_rls_enabled) and is_list(users) do
+        {"wal",
+         %{
+           "type" => "DELETE" = type,
+           "columns" => columns,
+           "commit_timestamp" => commit_timestamp,
+           "schema" => schema,
+           "table" => table,
+           "old_record" => old_record
+         }},
+        {"is_rls_enabled", is_rls_enabled},
+        {"users", users},
+        {"errors", _errors}
+      ])
+      when is_boolean(is_rls_enabled) and is_list(users) do
     %DeletedRecord{
       columns: columns,
       commit_timestamp: commit_timestamp,
