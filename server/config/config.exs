@@ -115,7 +115,10 @@ config :realtime, RLS.Repo,
   pool_size: 1,
   ssl: db_ssl,
   socket_options: [db_ip_version],
-  parameters: [application_name: "realtime_rls"],
+  parameters: [
+    application_name: "realtime_rls",
+    "pg_stat_statements.track": "none"
+  ],
   backoff_type: :rand_exp,
   backoff_min: db_reconnect_backoff_min,
   backoff_max: db_reconnect_backoff_max,
