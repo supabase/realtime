@@ -290,7 +290,8 @@ Should the record be visible (true) or filtered out (false) after *filters* are 
         join unnest(columns) col
             on f.column_name = col.name;
 $$;
-create or replace function realtime.apply_rls(wal jsonb)
+
+create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
     returns realtime.wal_rls
     language plpgsql
     volatile
@@ -298,6 +299,7 @@ as $$
 declare
     -- Regclass of the table e.g. public.notes
     entity_ regclass = (quote_ident(wal ->> 'schema') || '.' || quote_ident(wal ->> 'table'))::regclass;
+
     -- I, U, D, T: insert, update ...
     action realtime.action = (
         case wal ->> 'action'
@@ -308,14 +310,17 @@ declare
             else 'ERROR'
         end
     );
+
     -- Is row level security enabled for the table
     is_rls_enabled bool = relrowsecurity from pg_class where oid = entity_;
+
     -- Subscription vars
     user_id uuid;
     email varchar(255);
     user_has_access bool;
     is_visible_to_user boolean;
     visible_to_user_ids uuid[] = '{}';
+
     -- user subscriptions to the wal record's table
     subscriptions realtime.subscription[] =
             array_agg(sub)
@@ -357,6 +362,14 @@ declare
                 on (x ->> 'name') = (pks ->> 'name');
 
     output jsonb;
+
+    -- Error states
+    error_record_exceeds_max_size boolean = octet_length(wal::text) > max_record_bytes;
+
+    errors text[] = case
+        when error_record_exceeds_max_size then array['Error 413: Payload Too Large']
+        else '{}'::text[]
+    end;
 begin
 
     -------------------------------
@@ -388,6 +401,7 @@ begin
     )
     -- Add "record" key for insert and update
     || case
+        when error_record_exceeds_max_size then jsonb_build_object('record', '{}'::jsonb)
         when action in ('INSERT', 'UPDATE') then
             jsonb_build_object(
                 'record',
@@ -397,6 +411,7 @@ begin
     end
     -- Add "old_record" key for update and delete
     || case
+        when error_record_exceeds_max_size then jsonb_build_object('old_record', '{}'::jsonb)
         when action in ('UPDATE', 'DELETE') then
             jsonb_build_object(
                 'old_record',
@@ -460,7 +475,7 @@ begin
         output,
         is_rls_enabled,
         visible_to_user_ids,
-        array[]::text[]
+        errors
     )::realtime.wal_rls;
 end;
 $$;

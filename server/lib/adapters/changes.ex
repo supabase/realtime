@@ -11,6 +11,7 @@ defmodule Realtime.Adapters.Changes do
     defstruct [
       :columns,
       :commit_timestamp,
+      :errors,
       :schema,
       :table,
       :record,
@@ -25,6 +26,7 @@ defmodule Realtime.Adapters.Changes do
     defstruct [
       :columns,
       :commit_timestamp,
+      :errors,
       :schema,
       :table,
       :old_record,
@@ -40,6 +42,7 @@ defmodule Realtime.Adapters.Changes do
     defstruct [
       :columns,
       :commit_timestamp,
+      :errors,
       :schema,
       :table,
       :old_record,

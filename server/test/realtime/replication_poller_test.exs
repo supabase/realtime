@@ -41,7 +41,39 @@ defmodule Realtime.ReplicationPollerTest do
       table: "todos",
       type: "INSERT",
       users: MapSet.new(["some_user_id"]),
-      record: %{"details" => "test", "id" => 12, "user_id" => 1}
+      record: %{"details" => "test", "id" => 12, "user_id" => 1},
+      errors: nil
+    }
+
+    assert expected == generate_record(record)
+  end
+
+  test "generate_record/1, INSERT, errors present" do
+    record = [
+      {"wal",
+       %{
+         "columns" => @columns,
+         "commit_timestamp" => @ts,
+         "record" => %{"details" => "test", "id" => 12, "user_id" => 1},
+         "schema" => "public",
+         "table" => "todos",
+         "type" => "INSERT"
+       }},
+      {"is_rls_enabled", false},
+      {"users", ["some_user_id"]},
+      {"errors", ["Error 413: Payload Too Large"]}
+    ]
+
+    expected = %NewRecord{
+      columns: @columns,
+      commit_timestamp: @ts,
+      is_rls_enabled: false,
+      schema: "public",
+      table: "todos",
+      type: "INSERT",
+      users: MapSet.new(["some_user_id"]),
+      record: %{"details" => "test", "id" => 12, "user_id" => 1},
+      errors: ["Error 413: Payload Too Large"]
     }
 
     assert expected == generate_record(record)
@@ -73,7 +105,8 @@ defmodule Realtime.ReplicationPollerTest do
       type: "UPDATE",
       users: MapSet.new(["some_user_id"]),
       old_record: %{"id" => 12},
-      record: %{"details" => "test1", "id" => 12, "user_id" => 1}
+      record: %{"details" => "test1", "id" => 12, "user_id" => 1},
+      errors: nil
     }
 
     assert expected == generate_record(record)
@@ -103,7 +136,8 @@ defmodule Realtime.ReplicationPollerTest do
       table: "todos",
       type: "DELETE",
       users: MapSet.new(["some_user_id"]),
-      old_record: %{"id" => 15}
+      old_record: %{"id" => 15},
+      errors: nil
     }
 
     assert expected == generate_record(record)

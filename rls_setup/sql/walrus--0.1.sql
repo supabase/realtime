@@ -1,4 +1,4 @@
--- Copied from https://github.com/supabase/realtime/blob/32f2f90b6fdd29c184544f41ce71bbe81234006a/sql/walrus--0.1.sql
+-- Copied from https://github.com/supabase/walrus/blob/1e13b9156dd5ca7174534318de4d26678cf65535/sql/walrus--0.1.sql
 
 /*
     WALRUS:
@@ -142,6 +142,8 @@ as $$
     where
         pc.oid = entity
 $$;
+
+
 create or replace function cdc.check_equality_op(
     op cdc.equality_op,
     type_ regtype,
@@ -173,6 +175,8 @@ begin
     return res;
 end;
 $$;
+
+
 create type cdc.wal_column as (
     name text,
     type text,
@@ -180,6 +184,7 @@ create type cdc.wal_column as (
     is_pkey boolean,
     is_selectable boolean
 );
+
 create or replace function cdc.build_prepared_statement_sql(
     prepared_statement_name text,
     entity regclass,
@@ -191,6 +196,7 @@ as $$
 /*
 Builds a sql string that, if executed, creates a prepared statement to
 tests retrive a row from *entity* by its primary key columns.
+
 Example
     select cdc.build_prepared_statment_sql('public.notes', '{"id"}'::text[], '{"bigint"}'::text[])
 */
@@ -212,12 +218,15 @@ Example
     group by
         entity
 $$;
+
+
 create type cdc.wal_rls as (
     wal jsonb,
     is_rls_enabled boolean,
     users uuid[],
     errors text[]
 );
+
 create function cdc.cast(val text, type_ regtype)
     returns jsonb
     immutable
@@ -230,6 +239,9 @@ begin
     return res;
 end
 $$;
+
+
+
 create or replace function cdc.is_visible_through_filters(columns cdc.wal_column[], filters cdc.user_defined_filter[])
     returns bool
     language sql
@@ -257,7 +269,9 @@ Should the record be visible (true) or filtered out (false) after *filters* are 
         join unnest(columns) col
             on f.column_name = col.name;
 $$;
-create or replace function cdc.apply_rls(wal jsonb)
+
+
+create or replace function cdc.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
     returns cdc.wal_rls
     language plpgsql
     volatile
@@ -265,6 +279,7 @@ as $$
 declare
     -- Regclass of the table e.g. public.notes
     entity_ regclass = (quote_ident(wal ->> 'schema') || '.' || quote_ident(wal ->> 'table'))::regclass;
+
     -- I, U, D, T: insert, update ...
     action cdc.action = (
         case wal ->> 'action'
@@ -275,14 +290,17 @@ declare
             else 'ERROR'
         end
     );
+
     -- Is row level security enabled for the table
     is_rls_enabled bool = relrowsecurity from pg_class where oid = entity_;
+
     -- Subscription vars
     user_id uuid;
     email varchar(255);
     user_has_access bool;
     is_visible_to_user boolean;
     visible_to_user_ids uuid[] = '{}';
+
     -- user subscriptions to the wal record's table
     subscriptions cdc.subscription[] =
             array_agg(sub)
@@ -324,6 +342,14 @@ declare
                 on (x ->> 'name') = (pks ->> 'name');
 
     output jsonb;
+
+    -- Error states
+    error_record_exceeds_max_size boolean = octet_length(wal::text) > max_record_bytes;
+
+    errors text[] = case
+        when error_record_exceeds_max_size then array['Error 413: Payload Too Large']
+        else '{}'::text[]
+    end;
 begin
 
     -------------------------------
@@ -355,6 +381,7 @@ begin
     )
     -- Add "record" key for insert and update
     || case
+        when error_record_exceeds_max_size then jsonb_build_object('record', '{}'::jsonb)
         when action in ('INSERT', 'UPDATE') then
             jsonb_build_object(
                 'record',
@@ -364,6 +391,7 @@ begin
     end
     -- Add "old_record" key for update and delete
     || case
+        when error_record_exceeds_max_size then jsonb_build_object('old_record', '{}'::jsonb)
         when action in ('UPDATE', 'DELETE') then
             jsonb_build_object(
                 'old_record',
@@ -427,7 +455,7 @@ begin
         output,
         is_rls_enabled,
         visible_to_user_ids,
-        array[]::text[]
+        errors
     )::cdc.wal_rls;
 end;
 $$;

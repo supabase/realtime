@@ -61,6 +61,10 @@ db_ip_version =
     :inet
   )
 
+# Expose Prometheus metrics
+# Defaults to true in development and false in production
+expose_metrics = System.get_env("EXPOSE_METRICS", "false") == "true"
+
 webhook_headers = System.get_env("WEBHOOK_HEADERS")
 
 db_reconnect_backoff_min = System.get_env("DB_RECONNECT_BACKOFF_MIN", "100") |> String.to_integer()
@@ -69,9 +73,11 @@ db_reconnect_backoff_max = System.get_env("DB_RECONNECT_BACKOFF_MAX", "120000") 
 replication_poll_interval = System.get_env("REPLICATION_POLL_INTERVAL", "300") |> String.to_integer()
 subscription_sync_interval = System.get_env("SUBSCRIPTION_SYNC_INTERVAL", "60000") |> String.to_integer()
 
-# Expose Prometheus metrics
-# Defaults to true in development and false in production
-expose_metrics = System.get_env("EXPOSE_METRICS", "false") == "true"
+# max_record_bytes (default 1MB): Controls the maximum size of a WAL record that will be
+# emitted with complete record and old_record data. When the size of the wal2json record
+# exceeds max_record_bytes the record and old_record keys are set as empty objects {} and
+# the errors output array will contain the string "Error 413: Payload Too Large"
+max_record_bytes = System.get_env("MAX_RECORD_BYTES", "1048576") |> String.to_integer()
 
 config :realtime,
   db_host: db_host,
@@ -90,11 +96,12 @@ config :realtime,
   jwt_secret: jwt_secret,
   jwt_claim_validators: jwt_claim_validators,
   max_replication_lag_in_mb: max_replication_lag_in_mb,
+  expose_metrics: expose_metrics,
   webhook_default_headers: [{"content-type", "application/json"}],
   webhook_headers: webhook_headers,
   replication_poll_interval: replication_poll_interval,
   subscription_sync_interval: subscription_sync_interval,
-  expose_metrics: expose_metrics
+  max_record_bytes: max_record_bytes
 
 config :realtime,
   ecto_repos: [RLS.Repo]
