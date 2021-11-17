@@ -12,16 +12,17 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def join("realtime:" <> subtopic = topic, %{"user_token" => token}, socket) do
-    with {:ok, %{"sub" => user_id}} <- ChannelsAuthorization.authorize(token),
+    with {:ok, %{"sub" => user_id, "email" => email}} <- ChannelsAuthorization.authorize(token),
          :ok <- PubSub.subscribe(Realtime.PubSub, "subscription_manager"),
          {:ok, bin_user_id} <- Ecto.UUID.dump(user_id),
-         %Socket{assigns: %{user_id: _}, channel_pid: channel_pid} = user_socket <-
-           assign(socket, :user_id, bin_user_id),
+         %Socket{assigns: %{user_id: _, email: _}, channel_pid: channel_pid} = user_socket <-
+           assign(socket, %{user_id: bin_user_id, email: email}),
          :ok <-
            SubscriptionManager.track_topic_subscriber(%{
              channel_pid: channel_pid,
              topic: subtopic,
-             user_id: bin_user_id
+             user_id: bin_user_id,
+             email: email
            }) do
       send(self(), :after_join)
       {:ok, user_socket}
@@ -44,6 +45,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           transport_pid: transport_pid
         } = socket
       ) do
+    Realtime.Metrics.SocketMonitor.track_channel(socket)
     :ok = PubSub.unsubscribe(pubsub_server, topic)
     user_fastlane = {:user_fastlane, transport_pid, serializer, user_id}
     :ok = PubSub.subscribe(pubsub_server, topic, metadata: user_fastlane)
@@ -51,7 +53,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_info(:after_join, socket), do: {:noreply, socket}
+  def handle_info(:after_join, socket) do
+    Realtime.Metrics.SocketMonitor.track_channel(socket)
+    {:noreply, socket}
+  end
 
   def handle_info(
         %Broadcast{
@@ -59,7 +64,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           topic: "subscription_manager"
         },
         %Socket{
-          assigns: %{user_id: user_id},
+          assigns: %{user_id: user_id, email: email},
           channel_pid: channel_pid,
           topic: "realtime:" <> subtopic
         } = socket
@@ -67,16 +72,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     case SubscriptionManager.track_topic_subscriber(%{
            channel_pid: channel_pid,
            topic: subtopic,
-           user_id: user_id
+           user_id: user_id,
+           email: email
          }) do
       :ok -> {:noreply, socket}
       :error -> {:stop, :track_topic_subscriber_error, socket}
     end
-  end
-
-  def handle_info(:after_join, socket) do
-    Realtime.Metrics.SocketMonitor.track_channel(socket)
-    {:noreply, socket}
   end
 
   def handle_in("access_token", _, socket) do

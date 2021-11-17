@@ -59,7 +59,7 @@ defmodule Realtime.RLS.Replications do
                 case when bool_or(pubdelete) then 'delete' else null end
               ]) act(name_)
           ) w2j_actions,
-          string_agg(cdc.quote_wal2json(prrelid::regclass), ',') w2j_add_tables
+          string_agg(realtime.quote_wal2json(prrelid::regclass), ',') w2j_add_tables
         from
           pg_publication pp
           left join pg_publication_rel ppr
@@ -99,7 +99,7 @@ defmodule Realtime.RLS.Replications do
               x.users,
               x.errors
             from
-              cdc.apply_rls(w2j.data::jsonb) x(wal, is_rls_enabled, users, errors)
+              realtime.apply_rls(w2j.data::jsonb) x(wal, is_rls_enabled, users, errors)
           ) xyz
       where pub.pub_all_tables or
         (pub.pub_all_tables is false and w2j_add_tables is not null)",

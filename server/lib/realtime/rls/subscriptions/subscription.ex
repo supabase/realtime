@@ -3,7 +3,7 @@ defmodule Realtime.RLS.Subscriptions.Subscription do
   import Ecto.Changeset
   alias Realtime.RLS.Subscriptions.Subscription.Filters
 
-  @schema_prefix "cdc"
+  @schema_prefix "realtime"
   @primary_key {:id, :id, autogenerate: true}
 
   schema "subscription" do
@@ -16,7 +16,7 @@ defmodule Realtime.RLS.Subscriptions.Subscription do
 
   def changeset(subscription, attrs) do
     subscription
-    |> cast(attrs, [:entity, :user_id, :filters])
-    |> validate_required([:entity, :user_id])
+    |> cast(attrs, [:email, :entity, :user_id, :filters])
+    |> validate_required([:email, :entity, :user_id])
   end
 end

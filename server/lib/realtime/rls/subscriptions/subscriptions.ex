@@ -5,13 +5,11 @@ defmodule Realtime.RLS.Subscriptions do
   alias Realtime.RLS.Repo
   alias Realtime.RLS.Subscriptions.Subscription
 
-  @spec create_topic_subscriber(%{topic: String.t(), user_id: Ecto.UUID.raw()}) ::
+  @spec create_topic_subscriber(%{topic: String.t(), user_id: Ecto.UUID.raw(), email: String.t()}) ::
           {:ok, term()} | {:error, term()}
   def create_topic_subscriber(params) do
     Multi.new()
     |> Multi.put(:params_list, [params])
-    |> fetch_existing_users()
-    |> confirm_existing_user()
     |> fetch_publication_tables()
     |> enrich_subscription_params()
     |> generate_topic_subscriptions()
@@ -20,9 +18,16 @@ defmodule Realtime.RLS.Subscriptions do
   end
 
   @spec delete_topic_subscriber(map()) :: {integer(), nil | [term()]}
-  def delete_topic_subscriber(%{entities: [_ | _] = oids, filters: filters, user_id: user_id}) do
+  def delete_topic_subscriber(%{
+        entities: [_ | _] = oids,
+        filters: filters,
+        user_id: user_id,
+        email: email
+      }) do
     from(s in Subscription,
-      where: s.user_id == ^user_id and s.filters == ^filters and s.entity in ^oids
+      where:
+        s.user_id == ^user_id and s.email == ^email and s.filters == ^filters and
+          s.entity in ^oids
     )
     |> Repo.delete_all()
   end
@@ -33,53 +38,11 @@ defmodule Realtime.RLS.Subscriptions do
     Multi.new()
     |> Ecto.Multi.delete_all(:delete_all, Subscription)
     |> Multi.put(:params_list, params_list)
-    |> fetch_existing_users()
     |> fetch_publication_tables()
     |> enrich_subscription_params()
     |> generate_topic_subscriptions()
     |> insert_topic_subscriptions()
     |> Repo.transaction()
-  end
-
-  defp confirm_existing_user(%Multi{} = multi) do
-    Multi.run(multi, :confirm_user, fn _,
-                                       %{existing_users: existing_users, params_list: params_list} ->
-      with [%{user_id: user_id}] <- params_list,
-           true <- MapSet.member?(existing_users, user_id) do
-        {:ok, user_id}
-      else
-        _ -> {:error, nil}
-      end
-    end)
-  end
-
-  defp fetch_existing_users(%Multi{} = multi) do
-    Multi.run(multi, :existing_users, fn _, %{params_list: params_list} ->
-      with [_ | _] <- params_list,
-           [_ | _] = expected_users <-
-             Enum.reduce(params_list, [], fn
-               p, acc ->
-                 case Map.fetch(p, :user_id) do
-                   {:ok, user_id} -> [user_id | acc]
-                   :error -> acc
-                 end
-             end),
-           {:ok, %Postgrex.Result{rows: [_ | _] = rows}} <-
-             Repo.query(
-               "select u.id
-              from auth.users as u
-              join (
-                select *
-                from unnest($1::uuid[])
-                  as t(user_id)
-              ) as eu ON u.id = eu.user_id",
-               [expected_users]
-             ) do
-        {:ok, rows |> List.flatten() |> MapSet.new()}
-      else
-        _ -> {:ok, MapSet.new()}
-      end
-    end)
   end
 
   defp fetch_publication_tables(%Multi{} = multi) do
@@ -123,69 +86,69 @@ defmodule Realtime.RLS.Subscriptions do
   defp enrich_subscription_params(%Multi{} = multi) do
     Multi.run(multi, :enriched_subscription_params, fn _,
                                                        %{
-                                                         existing_users: existing_users,
                                                          params_list: params_list,
                                                          publication_entities: oids
                                                        } ->
       enriched_params =
         case params_list do
           [_ | _] ->
-            Enum.reduce(params_list, [], fn %{topic: topic, user_id: user_id}, acc ->
-              if MapSet.member?(existing_users, user_id) do
-                topic
-                |> String.split(":")
-                |> case do
-                  [schema, table, filters] ->
-                    filters
-                    |> String.split(~r/(\=|\.)/)
-                    |> case do
-                      [_, "eq", _] = filters ->
-                        [
-                          %{
-                            entities: Map.get(oids, {schema, table}, []),
-                            filters: filters,
-                            topic: topic,
-                            user_id: user_id
-                          }
-                          | acc
-                        ]
+            Enum.reduce(params_list, [], fn %{topic: topic, user_id: user_id, email: email},
+                                            acc ->
+              topic
+              |> String.split(":")
+              |> case do
+                [schema, table, filters] ->
+                  filters
+                  |> String.split(~r/(\=|\.)/)
+                  |> case do
+                    [_, "eq", _] = filters ->
+                      [
+                        %{
+                          entities: Map.get(oids, {schema, table}, []),
+                          filters: filters,
+                          topic: topic,
+                          user_id: user_id,
+                          email: email
+                        }
+                        | acc
+                      ]
 
-                      _ ->
-                        [
-                          %{
-                            entities: [],
-                            filters: filters,
-                            topic: topic,
-                            user_id: user_id
-                          }
-                          | acc
-                        ]
-                    end
+                    _ ->
+                      [
+                        %{
+                          entities: [],
+                          filters: filters,
+                          topic: topic,
+                          user_id: user_id,
+                          email: email
+                        }
+                        | acc
+                      ]
+                  end
 
-                  [schema, table] ->
-                    [
-                      %{
-                        entities: Map.get(oids, {schema, table}, []),
-                        filters: [],
-                        topic: topic,
-                        user_id: user_id
-                      }
-                      | acc
-                    ]
+                [schema, table] ->
+                  [
+                    %{
+                      entities: Map.get(oids, {schema, table}, []),
+                      filters: [],
+                      topic: topic,
+                      user_id: user_id,
+                      email: email
+                    }
+                    | acc
+                  ]
 
-                  [schema] ->
-                    [
-                      %{
-                        entities: Map.get(oids, {schema}, []),
-                        filters: [],
-                        topic: topic,
-                        user_id: user_id
-                      }
-                      | acc
-                    ]
-                end
-              else
-                acc
+                [schema] ->
+                  [
+                    %{
+                      entities: Map.get(oids, {schema}, []),
+                      filters: [],
+                      topic: topic,
+                      user_id: user_id,
+                      email: email
+                    }
+                    | acc
+                  ]
               end
             end)
 
@@ -209,7 +172,8 @@ defmodule Realtime.RLS.Subscriptions do
             Enum.reduce(enriched_subscription_params, [], fn %{
                                                                entities: entities,
                                                                filters: filters,
-                                                               user_id: user_id
+                                                               user_id: user_id,
+                                                               email: email
                                                              },
                                                              acc ->
               case entities do
@@ -219,6 +183,7 @@ defmodule Realtime.RLS.Subscriptions do
                       %Subscription{}
                       |> Subscription.changeset(%{
                         user_id: user_id,
+                        email: email,
                         entity: oid,
                         filters: filters
                       })

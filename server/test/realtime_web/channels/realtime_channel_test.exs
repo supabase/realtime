@@ -5,11 +5,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   import Mock
   alias RealtimeWeb.{ChannelsAuthorization, UserSocket, RealtimeChannel}
 
-  @token "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTYzMjI4MzE5MSwiZXhwIjoxNjYzODE5MjExLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYmJiNTFlNGUtZjM3MS00NDYzLWJmMGEtYWY4ZjU2ZGM5YTczIn0.imL7XhNMrS523vvdzQ93iRIw3OhjJutamLEoiZnJDbI"
-  # @secret "d3v_HtNXEpT+zfsyy1LE1WPGmNKLWRfw/rpjnVtCEEM2cSFV2s+kUh5OKX7TPYmG"
+  @token "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTYzNzExMzE1NywiZXhwIjoxNjY4NjQ5MTYwLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYmJiNTFlNGUtZjM3MS00NDYzLWJmMGEtYWY4ZjU2ZGM5YTczIiwiZW1haWwiOiJ1c2VyQHRlc3QuY29tIn0.oENgF1oeGzXErP2Ro0mt8aMltiaBFil5S5KrHbm7RfY"
   @user_id "bbb51e4e-f371-4463-bf0a-af8f56dc9a73"
+  @user_email "user@test.com"
 
-  def setup_stream(_contex) do
+  def setup_stream(_context) do
     {:ok, _, socket} =
       socket(RealtimeWeb.UserSocket, "user_id", %{some: :assign})
       |> subscribe_and_join(RealtimeWeb.RealtimeChannel, "realtime:*")
@@ -17,8 +17,9 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     {:ok, socket: socket}
   end
 
-  def setup_rls(_contex) do
-    with_mock ChannelsAuthorization, authorize: fn _token -> {:ok, %{"sub" => @user_id}} end do
+  def setup_rls(_context) do
+    with_mock ChannelsAuthorization,
+      authorize: fn _token -> {:ok, %{"sub" => @user_id, "email" => @user_email}} end do
       {:ok, _, socket} =
         socket(UserSocket)
         |> subscribe_and_join(RealtimeChannel, "realtime:*", %{"user_token" => @token})

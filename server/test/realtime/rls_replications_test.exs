@@ -5,7 +5,7 @@ defmodule Realtime.RlsReplicationsTest do
 
   @slot_name "test_realtime_slot_name"
   # @undef_slot_name "undef_test_realtime_slot_name"
-  @publication_time "supabase_realtime"
+  @publication_name "supabase_realtime"
 
   setup_all do
     start_supervised(Realtime.RLS.Repo)
@@ -28,7 +28,7 @@ defmodule Realtime.RlsReplicationsTest do
   test "list_changes/2, empty response" do
     query("select pg_drop_replication_slot($1);", [@slot_name])
     prepare_replication(@slot_name, false)
-    {:ok, res} = list_changes(@slot_name, @publication_time)
+    {:ok, res} = list_changes(@slot_name, @publication_name)
 
     res2 =
       Enum.filter(res.rows, fn
@@ -45,7 +45,7 @@ defmodule Realtime.RlsReplicationsTest do
     # TODO: check by user_id
     query("insert into public.todos (details, user_id) VALUES ($1, $2)", ["test", 1])
     Process.sleep(500)
-    {:ok, %{rows: [[record, _, _, _]]}} = list_changes(@slot_name, @publication_time)
+    {:ok, %{rows: [[record, _, _, _]]}} = list_changes(@slot_name, @publication_name)
 
     columns = [
       %{"name" => "id", "type" => "int8"},

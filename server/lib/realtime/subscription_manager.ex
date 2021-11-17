@@ -39,7 +39,8 @@ defmodule Realtime.SubscriptionManager do
   @spec track_topic_subscriber(%{
           channel_pid: pid(),
           topic: String.t(),
-          user_id: Ecto.UUID.raw()
+          user_id: Ecto.UUID.raw(),
+          email: String.t()
         }) :: :ok | :error
   def track_topic_subscriber(topic_sub) do
     GenServer.call(__MODULE__, {:track_topic_subscriber, topic_sub}, 15_000)
@@ -51,7 +52,8 @@ defmodule Realtime.SubscriptionManager do
           %{
             channel_pid: channel_pid,
             topic: topic,
-            user_id: user_id
+            user_id: user_id,
+            email: email
           }
         },
         _from,
@@ -62,7 +64,7 @@ defmodule Realtime.SubscriptionManager do
         Process.monitor(channel_pid)
 
         try do
-          Subscriptions.create_topic_subscriber(%{topic: topic, user_id: user_id})
+          Subscriptions.create_topic_subscriber(%{topic: topic, user_id: user_id, email: email})
         catch
           :error, error ->
             error |> Kernel.inspect() |> Logger.error()

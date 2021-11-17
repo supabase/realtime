@@ -1,0 +1,18 @@
+defmodule Realtime.RLS.Repo.Migrations.CreateRealtimeCastFunction do
+  use Ecto.Migration
+
+  def change do
+    execute "create function realtime.cast(val text, type_ regtype)
+      returns jsonb
+      immutable
+      language plpgsql
+    as $$
+    declare
+      res jsonb;
+    begin
+      execute format('select to_jsonb(%L::'|| type_::text || ')', val)  into res;
+      return res;
+    end
+    $$;"
+  end
+end

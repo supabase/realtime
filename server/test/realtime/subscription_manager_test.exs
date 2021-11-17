@@ -1,10 +1,10 @@
 defmodule Realtime.SubscriptionManagerTest do
   use ExUnit.Case
   import Mock
-  alias Realtime.RLS.Repo
   alias Realtime.SubscriptionManager
 
   @user_id "bbb51e4e-f371-4463-bf0a-af8f56dc9a71"
+  @user_email "user@test.com"
 
   setup_all do
     start_supervised(Realtime.RLS.Repo)
@@ -17,7 +17,8 @@ defmodule Realtime.SubscriptionManagerTest do
       %{
         channel_pid: self(),
         topic: "test_topic",
-        user_id: @user_id
+        user_id: @user_id,
+        email: @user_email
       }
     }
 
@@ -47,12 +48,28 @@ defmodule Realtime.SubscriptionManagerTest do
       %{
         channel_pid: self(),
         topic: "test_topic",
-        user_id: @user_id
+        user_id: @user_id,
+        email: @user_email
       }
     }
 
     state = %{replication_mode: "RLS", subscription_params: %{}}
-    expected = {:reply, :error, %{replication_mode: "RLS", subscription_params: %{}}}
+
+    expected =
+      {:reply, :ok,
+       %{
+         replication_mode: "RLS",
+         subscription_params: %{
+           self() => %{
+             entities: [],
+             filters: [],
+             topic: "test_topic",
+             user_id: "bbb51e4e-f371-4463-bf0a-af8f56dc9a71",
+             email: "user@test.com"
+           }
+         }
+       }}
+
     assert expected == SubscriptionManager.handle_call(mess, self(), state)
   end
 
@@ -62,7 +79,8 @@ defmodule Realtime.SubscriptionManagerTest do
       %{
         channel_pid: self(),
         topic: "test_topic",
-        user_id: @user_id
+        user_id: @user_id,
+        email: @user_email
       }
     }
 
@@ -73,7 +91,8 @@ defmodule Realtime.SubscriptionManagerTest do
           entities: [16537],
           filters: [],
           topic: "public:todos",
-          user_id: <<187, 181, 30, 78, 243, 113, 68, 99, 191, 10, 175, 143, 86, 220, 154, 115>>
+          user_id: <<187, 181, 30, 78, 243, 113, 68, 99, 191, 10, 175, 143, 86, 220, 154, 115>>,
+          email: "user@test.com"
         }
       },
       sync_interval: 15_000,
@@ -86,14 +105,14 @@ defmodule Realtime.SubscriptionManagerTest do
 
   test "handle_call/track_topic_subscriber, updated state" do
     {_, bin} = Ecto.UUID.dump(@user_id)
-    Repo.query("insert into auth.users (id) values ($1)", [bin])
 
     mess = {
       :track_topic_subscriber,
       %{
         channel_pid: self(),
         topic: "test_topic",
-        user_id: bin
+        user_id: bin,
+        email: @user_email
       }
     }
 
@@ -101,7 +120,8 @@ defmodule Realtime.SubscriptionManagerTest do
       entities: [16537],
       filters: [],
       topic: "public:todos",
-      user_id: bin
+      user_id: bin,
+      email: @user_email
     }
 
     state = %{
@@ -124,7 +144,8 @@ defmodule Realtime.SubscriptionManagerTest do
                  entities: [],
                  filters: [],
                  topic: "test_topic",
-                 user_id: bin
+                 user_id: bin,
+                 email: @user_email
                }
 
       other ->
@@ -171,7 +192,8 @@ defmodule Realtime.SubscriptionManagerTest do
           entities: [],
           filters: [],
           topic: "public:todos",
-          user_id: bin
+          user_id: bin,
+          email: @user_email
         }
       }
     }
@@ -193,7 +215,8 @@ defmodule Realtime.SubscriptionManagerTest do
             entities: [],
             filters: [],
             topic: "public:todos",
-            user_id: bin
+            user_id: bin,
+            email: @user_email
           }
         }
       }
