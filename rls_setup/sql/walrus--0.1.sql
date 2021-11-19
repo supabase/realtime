@@ -1,4 +1,4 @@
--- Copied from https://github.com/supabase/walrus/blob/1e13b9156dd5ca7174534318de4d26678cf65535/sql/walrus--0.1.sql
+-- Copied from https://github.com/supabase/walrus/blob/626b6d7d5fcb2d6bd825941e69bc3473c7e8cbea/sql/walrus--0.1.sql
 
 /*
     WALRUS:
@@ -345,12 +345,23 @@ declare
 
     -- Error states
     error_record_exceeds_max_size boolean = octet_length(wal::text) > max_record_bytes;
+    error_unauthorized boolean = not pg_catalog.has_any_column_privilege('authenticated', entity_, 'SELECT');
 
     errors text[] = case
         when error_record_exceeds_max_size then array['Error 413: Payload Too Large']
         else '{}'::text[]
     end;
 begin
+
+    -- The 'authenticated' user does not have SELECT permission on any of the columns for the entity_
+    if error_unauthorized is true then
+        return (
+            null,
+            null,
+            visible_to_user_ids,
+            array['Error 401: Unauthorized']
+        )::cdc.wal_rls;
+    end if;
 
     -------------------------------
     -- Build Output JSONB Object --
