@@ -57,30 +57,24 @@ defmodule Realtime.SubscriptionManager do
           }
         },
         _from,
-        %{replication_mode: "RLS", subscription_params: sub_params} = state
+        %{replication_mode: "RLS"} = state
       ) do
-    case Map.get(sub_params, channel_pid) do
-      nil ->
-        Process.monitor(channel_pid)
+    Process.monitor(channel_pid)
 
-        try do
-          Subscriptions.create_topic_subscriber(%{topic: topic, user_id: user_id, email: email})
-        catch
-          :error, error ->
-            error |> Kernel.inspect() |> Logger.error()
-            :error
-        end
-        |> case do
-          {:ok, %{enriched_subscription_params: [sub_params]}} ->
-            new_state = Kernel.put_in(state, [:subscription_params, channel_pid], sub_params)
-            {:reply, :ok, new_state}
-
-          _ ->
-            {:reply, :error, state}
-        end
+    try do
+      Subscriptions.create_topic_subscriber(%{topic: topic, user_id: user_id, email: email})
+    catch
+      :error, error ->
+        error |> Kernel.inspect() |> Logger.error()
+        :error
+    end
+    |> case do
+      {:ok, %{enriched_subscription_params: [sub_params]}} ->
+        new_state = Kernel.put_in(state, [:subscription_params, channel_pid], sub_params)
+        {:reply, :ok, new_state}
 
       _ ->
-        {:reply, :ok, state}
+        {:reply, :error, state}
     end
   end
 

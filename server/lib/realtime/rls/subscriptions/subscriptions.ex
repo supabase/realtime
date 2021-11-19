@@ -216,9 +216,15 @@ defmodule Realtime.RLS.Subscriptions do
                                                      } ->
       total_inserts =
         valid_subs
+        |> Enum.uniq()
         |> Enum.chunk_every(20_000)
         |> Enum.reduce(0, fn batch_subs, acc ->
-          {inserts, nil} = Repo.insert_all(Subscription, batch_subs, on_conflict: :nothing)
+          {inserts, nil} =
+            Repo.insert_all(Subscription, batch_subs,
+              on_conflict: {:replace_all_except, [:id]},
+              conflict_target: [:entity, :user_id, :filters]
+            )
+
           inserts + acc
         end)
 

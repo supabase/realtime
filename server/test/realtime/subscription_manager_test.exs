@@ -74,12 +74,14 @@ defmodule Realtime.SubscriptionManagerTest do
   end
 
   test "handle_call/track_topic_subscriber, when subscription_params is not empty" do
+    {_, bin} = Ecto.UUID.dump(@user_id)
+
     mess = {
       :track_topic_subscriber,
       %{
         channel_pid: self(),
         topic: "test_topic",
-        user_id: @user_id,
+        user_id: bin,
         email: @user_email
       }
     }
@@ -88,10 +90,10 @@ defmodule Realtime.SubscriptionManagerTest do
       replication_mode: "RLS",
       subscription_params: %{
         self() => %{
-          entities: [16537],
+          entities: [],
           filters: [],
-          topic: "public:todos",
-          user_id: <<187, 181, 30, 78, 243, 113, 68, 99, 191, 10, 175, 143, 86, 220, 154, 115>>,
+          topic: "test_topic",
+          user_id: bin,
           email: "user@test.com"
         }
       },
