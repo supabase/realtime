@@ -3,6 +3,9 @@ defmodule Realtime.Metrics.PromEx do
 
   @impl true
   def plugins do
-    [Realtime.Metrics.PromEx.Plugins.Realtime]
+    [
+      PromEx.Plugins.Beam,
+      Realtime.Metrics.PromEx.Plugins.Realtime
+    ]
   end
 end
