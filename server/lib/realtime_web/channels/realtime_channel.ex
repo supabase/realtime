@@ -27,4 +27,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     Realtime.Metrics.SocketMonitor.track_channel(socket)
     {:noreply, socket}
   end
+
+  def handle_in("access_token", _, socket) do
+    {:noreply, socket}
+  end
 end
