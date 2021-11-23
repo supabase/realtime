@@ -55,7 +55,7 @@ defmodule Realtime.RLS.ReplicationPoller do
 
       {:error, error} ->
         error
-        |> Kernel.inspect()
+        |> inspect()
         |> Logger.error()
 
         {timeout, backoff} = Backoff.backoff(backoff)
@@ -115,7 +115,7 @@ defmodule Realtime.RLS.ReplicationPoller do
 
       {:error, error} ->
         error
-        |> Kernel.inspect()
+        |> inspect()
         |> Logger.error()
 
         {timeout, backoff} = Backoff.backoff(backoff)

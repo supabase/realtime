@@ -65,7 +65,7 @@ defmodule Realtime.SubscriptionManager do
       Subscriptions.create_topic_subscriber(%{topic: topic, user_id: user_id, email: email})
     catch
       :error, error ->
-        error |> Kernel.inspect() |> Logger.error()
+        error |> inspect() |> Logger.error()
         :error
     end
     |> case do
@@ -92,7 +92,7 @@ defmodule Realtime.SubscriptionManager do
       |> Map.values()
       |> Subscriptions.sync_subscriptions()
     catch
-      :error, error -> error |> Kernel.inspect() |> Logger.error()
+      :error, error -> error |> inspect() |> Logger.error()
     end
 
     new_ref =
@@ -120,7 +120,7 @@ defmodule Realtime.SubscriptionManager do
           try do
             Subscriptions.delete_topic_subscriber(sub_params)
           catch
-            :error, error -> error |> Kernel.inspect() |> Logger.error()
+            :error, error -> error |> inspect() |> Logger.error()
           end
 
           new_sub_params
