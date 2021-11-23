@@ -6,24 +6,55 @@ require Protocol
 defmodule Realtime.Adapters.Changes do
   defmodule(Transaction, do: defstruct([:changes, :commit_timestamp]))
 
-  defmodule(NewRecord,
-    do: defstruct([:type, :record, :schema, :table, :columns, :commit_timestamp])
-  )
+  defmodule NewRecord do
+    @derive {Jason.Encoder, except: [:is_rls_enabled, :users]}
+    defstruct [
+      :columns,
+      :commit_timestamp,
+      :errors,
+      :schema,
+      :table,
+      :record,
+      :users,
+      :type,
+      is_rls_enabled: true
+    ]
+  end
 
-  defmodule(UpdatedRecord,
-    do: defstruct([:type, :old_record, :record, :schema, :table, :columns, :commit_timestamp])
-  )
+  defmodule UpdatedRecord do
+    @derive {Jason.Encoder, except: [:is_rls_enabled, :users]}
+    defstruct [
+      :columns,
+      :commit_timestamp,
+      :errors,
+      :schema,
+      :table,
+      :old_record,
+      :record,
+      :users,
+      :type,
+      is_rls_enabled: true
+    ]
+  end
 
-  defmodule(DeletedRecord,
-    do: defstruct([:type, :old_record, :schema, :table, :columns, :commit_timestamp])
-  )
+  defmodule DeletedRecord do
+    @derive {Jason.Encoder, except: [:is_rls_enabled, :users]}
+    defstruct [
+      :columns,
+      :commit_timestamp,
+      :errors,
+      :schema,
+      :table,
+      :old_record,
+      :users,
+      :type,
+      is_rls_enabled: true
+    ]
+  end
 
   defmodule(TruncatedRelation, do: defstruct([:type, :schema, :table, :commit_timestamp]))
 end
 
 Protocol.derive(Jason.Encoder, Realtime.Adapters.Changes.Transaction)
-Protocol.derive(Jason.Encoder, Realtime.Adapters.Changes.NewRecord)
-Protocol.derive(Jason.Encoder, Realtime.Adapters.Changes.UpdatedRecord)
-Protocol.derive(Jason.Encoder, Realtime.Adapters.Changes.DeletedRecord)
 Protocol.derive(Jason.Encoder, Realtime.Adapters.Changes.TruncatedRelation)
 Protocol.derive(Jason.Encoder, Realtime.Adapters.Postgres.Decoder.Messages.Relation.Column)

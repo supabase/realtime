@@ -3,8 +3,8 @@ defmodule Realtime.SubscribersNotification do
 
   alias Realtime.Adapters.Changes.Transaction
   alias Realtime.Configuration.Configuration
-  alias Realtime.ConfigurationManager
-  alias RealtimeWeb.RealtimeChannel
+  alias Realtime.{ConfigurationManager}
+  import Realtime.Helpers, only: [broadcast_change: 2]
 
   @topic "realtime"
 
@@ -16,26 +16,16 @@ defmodule Realtime.SubscribersNotification do
     :ok = Realtime.WebhookConnector.notify(txn, webhooks_config)
   end
 
-  def notify(_txn) do
+  def notify(changes) when is_list(changes) do
+    {:ok, %Configuration{realtime: realtime_config}} = ConfigurationManager.get_config()
+    :ok = notify_subscribers(changes, realtime_config)
+  end
+
+  def notify(_) do
     :ok
   end
 
   defp notify_subscribers([_ | _] = changes, [_ | _] = realtime_config) do
-    # For every change in the txn.changes, we want to broadcast it specific listeners
-    # Example Change:
-    # %Realtime.Adapters.Changes.UpdatedRecord{
-    #   columns: [
-    #     %Realtime.Adapters.Postgres.Decoder.Messages.Relation.Column{ flags: [:key], name: "id", type: "int8", type_modifier: 4294967295 },
-    #     %Realtime.Adapters.Postgres.Decoder.Messages.Relation.Column{ flags: [], name: "name", type: "text", type_modifier: 4294967295 }
-    #   ],
-    #   commit_timestamp: nil,
-    #   old_record: %{},
-    #   record: %{"id" => "2", "name" => "Jane Doe2"},
-    #   schema: "public",
-    #   table: "users",
-    #   type: "UPDATE"
-    # }
-
     Enum.each(changes, fn change ->
       case change do
         %{schema: schema, table: table, type: type}
@@ -54,19 +44,19 @@ defmodule Realtime.SubscribersNotification do
 
           # Shout to specific schema - e.g. "realtime:public"
           if has_schema(event_config, schema) do
-            RealtimeChannel.handle_realtime_transaction(schema_topic, change)
+            broadcast_change(schema_topic, change)
           end
 
           # Special case for notifiying "*"
           if has_schema(event_config, "*") do
             [@topic, ":*"]
             |> IO.iodata_to_binary()
-            |> RealtimeChannel.handle_realtime_transaction(change)
+            |> broadcast_change(change)
           end
 
           # Shout to specific table - e.g. "realtime:public:users"
           if has_table(event_config, schema, table) do
-            RealtimeChannel.handle_realtime_transaction(table_topic, change)
+            broadcast_change(table_topic, change)
           end
 
           # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
@@ -81,7 +71,7 @@ defmodule Realtime.SubscribersNotification do
                   if is_valid_notification_key(v) and should_notify_column do
                     [table_topic, ":", k, "=eq.", v]
                     |> IO.iodata_to_binary()
-                    |> RealtimeChannel.handle_realtime_transaction(change)
+                    |> broadcast_change(change)
                   end
                 end)
 
@@ -95,7 +85,7 @@ defmodule Realtime.SubscribersNotification do
                   if is_valid_notification_key(v) and should_notify_column do
                     [table_topic, ":", k, "=eq.", v]
                     |> IO.iodata_to_binary()
-                    |> RealtimeChannel.handle_realtime_transaction(change)
+                    |> broadcast_change(change)
                   end
                 end)
 
@@ -109,7 +99,7 @@ defmodule Realtime.SubscribersNotification do
     end)
   end
 
-  defp notify_subscribers(_txn, _config), do: :ok
+  defp notify_subscribers(_, _config), do: :ok
 
   defp has_schema(config, schema) do
     # Determines whether the Realtime config has a specific schema relation

@@ -14,18 +14,17 @@ defmodule Realtime.Metrics.SocketMonitor do
   end
 
   def track_socket(socket = %Phoenix.Socket{}) do
-    GenServer.call(__MODULE__, {:track_socket, socket})
+    GenServer.cast(__MODULE__, {:track_socket, socket})
   end
 
   def track_channel(socket = %Phoenix.Socket{}) do
-    GenServer.call(__MODULE__, {:track_channel, socket})
+    GenServer.cast(__MODULE__, {:track_channel, socket})
   end
 
   ## Callbacks
 
-  def handle_call(
+  def handle_cast(
         {:track_socket, %Phoenix.Socket{transport_pid: transport_pid}},
-        _from,
         state = %{transport_pids: transport_pids}
       ) do
     Process.monitor(transport_pid)
@@ -37,12 +36,11 @@ defmodule Realtime.Metrics.SocketMonitor do
 
     execute_socket_telemetry(new_transport_pids)
 
-    {:reply, :ok, %{state | transport_pids: new_transport_pids}}
+    {:noreply, %{state | transport_pids: new_transport_pids}}
   end
 
-  def handle_call(
+  def handle_cast(
         {:track_channel, %Phoenix.Socket{channel_pid: channel_pid, topic: topic}},
-        _from,
         state = %{channel_pids: channel_pids}
       ) do
     Process.monitor(channel_pid)
@@ -55,7 +53,7 @@ defmodule Realtime.Metrics.SocketMonitor do
 
     execute_channel_telemetry(new_channel_pids)
 
-    {:reply, :ok, %{state | channel_pids: new_channel_pids}}
+    {:noreply, %{state | channel_pids: new_channel_pids}}
   end
 
   def handle_info(

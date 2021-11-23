@@ -1,4 +1,4 @@
-defmodule Realtime.DatabaseReplicationSupervisor do
+defmodule Realtime.ReplicationStreamSupervisor do
   use Supervisor
 
   alias Realtime.Adapters.Postgres.EpgsqlServer
