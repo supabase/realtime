@@ -57,10 +57,8 @@ defmodule Realtime.SubscriptionManager do
           }
         },
         _from,
-        %{replication_mode: "RLS"} = state
+        %{replication_mode: "RLS", subscription_params: sub_params} = state
       ) do
-    Process.monitor(channel_pid)
-
     try do
       Subscriptions.create_topic_subscriber(%{topic: topic, user_id: user_id, email: email})
     catch
@@ -69,8 +67,13 @@ defmodule Realtime.SubscriptionManager do
         :error
     end
     |> case do
-      {:ok, %{enriched_subscription_params: [sub_params]}} ->
-        new_state = Kernel.put_in(state, [:subscription_params, channel_pid], sub_params)
+      {:ok, %{enriched_subscription_params: [enriched_params]}} ->
+        if sub_params |> Map.get(channel_pid) |> is_nil() do
+          Process.monitor(channel_pid)
+        end
+
+        new_state = Kernel.put_in(state, [:subscription_params, channel_pid], enriched_params)
+
         {:reply, :ok, new_state}
 
       _ ->
