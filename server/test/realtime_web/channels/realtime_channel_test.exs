@@ -4,6 +4,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   import Realtime.Helpers, only: [broadcast_change: 2]
   import Mock
   alias Phoenix.Socket
+  alias Phoenix.Socket.Broadcast
   alias RealtimeWeb.{ChannelsAuthorization, UserSocket, RealtimeChannel}
 
   @user_id "bbb51e4e-f371-4463-bf0a-af8f56dc9a73"
@@ -57,13 +58,61 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     assert_push("DELETE", ^change)
   end
 
-  test "join channel when token is invalid" do
+  test "join channel when token is valid but does not contain sub and email" do
     with_mock ChannelsAuthorization,
-      authorize: fn _token -> :error end do
-      assert {:error, %{reason: "error occurred when joining realtime:*"}} =
+      authorize: fn _token -> {:ok, %{}} end do
+      assert {:ok, _, _} =
                UserSocket
                |> socket()
                |> subscribe_and_join(RealtimeChannel, "realtime:*", %{"user_token" => "token123"})
+    end
+  end
+
+  test "join channel when token is invalid" do
+    with_mock ChannelsAuthorization,
+      authorize: fn _token -> :error end do
+      assert {:error, %{reason: "user token is invalid"}} =
+               UserSocket
+               |> socket()
+               |> subscribe_and_join(RealtimeChannel, "realtime:*", %{"user_token" => "token123"})
+    end
+  end
+
+  test "handle_info/sync_subscription, when access token exists" do
+    with_mock ChannelsAuthorization,
+      authorize: fn _token -> {:ok, %{"sub" => @user_id, "email" => @user_email}} end do
+      socket =
+        UserSocket
+        |> socket()
+        |> subscribe_and_join(RealtimeChannel, "realtime:*", %{"user_token" => "token123"})
+
+      assert {:noreply, _} =
+               RealtimeChannel.handle_info(
+                 %Broadcast{
+                   event: "sync_subscription",
+                   topic: "subscription_manager"
+                 },
+                 socket
+               )
+    end
+  end
+
+  test "handle_info/sync_subscription, when access token does not exist" do
+    with_mock ChannelsAuthorization,
+      authorize: fn _token -> {:ok, %{"sub" => @user_id, "email" => @user_email}} end do
+      socket =
+        UserSocket
+        |> socket()
+        |> subscribe_and_join(RealtimeChannel, "realtime:*", %{})
+
+      assert {:noreply, _} =
+               RealtimeChannel.handle_info(
+                 %Broadcast{
+                   event: "sync_subscription",
+                   topic: "subscription_manager"
+                 },
+                 socket
+               )
     end
   end
 

@@ -19,24 +19,32 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{"user_token" => access_token},
         %Socket{channel_pid: channel_pid} = socket
       ) do
-    with {:ok, %{"sub" => user_id, "email" => email}} <-
-           ChannelsAuthorization.authorize(access_token),
-         :ok <- PubSub.subscribe(Realtime.PubSub, "subscription_manager"),
-         {:ok, bin_user_id} <- Ecto.UUID.dump(user_id),
-         :ok <-
-           SubscriptionManager.track_topic_subscriber(%{
-             channel_pid: channel_pid,
-             topic: subtopic,
-             user_id: bin_user_id,
-             email: email
-           }) do
-      SocketMonitor.track_channel(socket)
-      send(self(), :after_join)
-      ref = Process.send_after(self(), :verify_access_token, @verify_token_interval)
+    case ChannelsAuthorization.authorize(access_token) do
+      {:ok, %{"sub" => user_id, "email" => email}} ->
+        with :ok <- PubSub.subscribe(Realtime.PubSub, "subscription_manager"),
+             {:ok, bin_user_id} <- Ecto.UUID.dump(user_id),
+             :ok <-
+               SubscriptionManager.track_topic_subscriber(%{
+                 channel_pid: channel_pid,
+                 topic: subtopic,
+                 user_id: bin_user_id,
+                 email: email
+               }) do
+          SocketMonitor.track_channel(socket)
+          send(self(), :after_join)
+          ref = Process.send_after(self(), :verify_access_token, @verify_token_interval)
 
-      {:ok, assign(socket, %{access_token: access_token, verify_ref: ref})}
-    else
-      _ -> {:error, %{reason: "error occurred when joining #{topic}"}}
+          {:ok, assign(socket, %{access_token: access_token, verify_ref: ref})}
+        else
+          _ -> {:error, %{reason: "error occurred when joining #{topic} with user token"}}
+        end
+
+      {:ok, _} ->
+        SocketMonitor.track_channel(socket)
+        {:ok, socket}
+
+      _ ->
+        {:error, %{reason: "user token is invalid"}}
     end
   end
 
@@ -91,6 +99,16 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       _ -> {:stop, :sync_subscription_error, socket}
     end
+  end
+
+  def handle_info(
+        %Broadcast{
+          event: "sync_subscription",
+          topic: "subscription_manager"
+        },
+        socket
+      ) do
+    {:noreply, socket}
   end
 
   def handle_info(
