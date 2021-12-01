@@ -7,7 +7,7 @@
   <h1 align="center">Supabase Realtime</h1>
 
   <p align="center">
-    Listens to changes in a PostgreSQL Database and broadcasts them over websockets.
+    Listens to changes in a PostgreSQL Database and broadcasts them over WebSockets.
     <br />
     <a href="https://github.com/supabase/realtime/issues/new?assignees=&labels=bug&template=1.Bug_report.md">Report Bug</a>
     ·
@@ -41,7 +41,7 @@ This repo is still under heavy development and the documentation is constantly e
 
 ### What is this?
 
-This is a server built with Elixir using the [Phoenix Framework](https://www.phoenixframework.org) that allows you to listen to changes in your PostgreSQL database via logical replication and then broadcast those changes via websockets.
+This is a server built with Elixir using the [Phoenix Framework](https://www.phoenixframework.org) that allows you to listen to changes in your PostgreSQL database via logical replication and then broadcast those changes via WebSockets.
 
 There are two versions of this server: `Realtime` and `Realtime RLS`.
 
@@ -49,14 +49,14 @@ There are two versions of this server: `Realtime` and `Realtime RLS`.
 
 1. listening to PostgreSQL's replication functionality (using PostgreSQL's logical decoding)
 2. converting the byte stream into JSON
-3. broadcasting to all connected clients over websockets
+3. broadcasting to all connected clients over WebSockets
 
 `Realtime RLS` server works by:
 
 1. polling PostgreSQL's replication functionality (using PostgreSQL's logical decoding and [wal2json](https://github.com/eulerto/wal2json) output plugin)
 2. passing database changes to a [Write Ahead Log Realtime Unified Security (WALRUS)](https://github.com/supabase/walrus) PostgresSQL function and receiving a list of authorized users depending on Row Level Security (RLS) policies
 3. converting the changes into JSON
-3. broadcasting to authorized users over websockets
+3. broadcasting to authorized users over WebSockets
 
 ### Why not just use PostgreSQL's `NOTIFY`?
 
@@ -68,7 +68,7 @@ A few reasons:
 
 ### What are the benefits?
 
-1. The beauty of listening to the replication functionality is that you can make changes to your database from anywhere - your API, directly in the DB, via a console, etc. - and you will still receive the changes via websockets.
+1. The beauty of listening to the replication functionality is that you can make changes to your database from anywhere - your API, directly in the DB, via a console, etc. - and you will still receive the changes via WebSockets.
 2. Decoupling. For example, if you want to send a new slack message every time someone makes a new purchase you might build that functionality directly into your API. This allows you to decouple your async functionality from your API.
 3. This is built with Phoenix, an [extremely scalable Elixir framework](https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections).
 
