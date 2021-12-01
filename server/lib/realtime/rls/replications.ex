@@ -59,7 +59,19 @@ defmodule Realtime.RLS.Replications do
                 case when bool_or(pubdelete) then 'delete' else null end
               ]) act(name_)
           ) w2j_actions,
-          string_agg(realtime.quote_wal2json(prrelid::regclass), ',') w2j_add_tables
+          case
+              -- collect all tables
+              when bool_and(puballtables) then (
+                  select
+                      string_agg(cdc.quote_wal2json((schemaname || '.' || tablename)::regclass), ',')
+                  from
+                      pg_tables
+                  where
+                      schemaname not in ('cdc', 'pg_catalog', 'information_schema')
+              )
+              -- null when no tables are in the publication
+              else string_agg(cdc.quote_wal2json(prrelid::regclass), ',')
+          end w2j_add_tables
         from
           pg_publication pp
           left join pg_publication_rel ppr
@@ -109,8 +121,7 @@ defmodule Realtime.RLS.Replications do
                 errors
               )
           ) xyz
-      where pub.pub_all_tables or
-        (pub.pub_all_tables is false and w2j_add_tables is not null)",
+      where coalesce(pub.w2j_add_tables, '') <> '' ",
       [
         publication,
         slot_name,
