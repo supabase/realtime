@@ -63,14 +63,14 @@ defmodule Realtime.RLS.Replications do
               -- collect all tables
               when bool_and(puballtables) then (
                   select
-                      string_agg(cdc.quote_wal2json((schemaname || '.' || tablename)::regclass), ',')
+                      string_agg(realtime.quote_wal2json((schemaname || '.' || tablename)::regclass), ',')
                   from
                       pg_tables
                   where
-                      schemaname not in ('cdc', 'pg_catalog', 'information_schema')
+                      schemaname not in ('realtime', 'pg_catalog', 'information_schema')
               )
               -- null when no tables are in the publication
-              else string_agg(cdc.quote_wal2json(prrelid::regclass), ',')
+              else string_agg(realtime.quote_wal2json(prrelid::regclass), ',')
           end w2j_add_tables
         from
           pg_publication pp
