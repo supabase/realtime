@@ -48,34 +48,17 @@ defmodule Realtime.RLS.Replications do
     query(
       "with pub as (
         select
-          pp.pubname pub_name,
-          bool_or(puballtables) pub_all_tables,
-          (
-            select string_agg(act.name_, ',') actions
-            from
-              unnest(array[
-                case when bool_or(pubinsert) then 'insert' else null end,
-                case when bool_or(pubupdate) then 'update' else null end,
-                case when bool_or(pubdelete) then 'delete' else null end
-              ]) act(name_)
-          ) w2j_actions,
-          case
-              -- collect all tables
-              when bool_and(puballtables) then (
-                  select
-                      string_agg(realtime.quote_wal2json((schemaname || '.' || tablename)::regclass), ',')
-                  from
-                      pg_tables
-                  where
-                      schemaname not in ('realtime', 'pg_catalog', 'information_schema')
-              )
-              -- null when no tables are in the publication
-              else string_agg(realtime.quote_wal2json(prrelid::regclass), ',')
-          end w2j_add_tables
+          concat_ws(
+            ',',
+            case when bool_or(pubinsert) then 'insert' else null end,
+            case when bool_or(pubupdate) then 'update' else null end,
+            case when bool_or(pubdelete) then 'delete' else null end
+          ) as w2j_actions,
+          string_agg(realtime.quote_wal2json(format('%I.%I', schemaname, tablename)::regclass), ',') w2j_add_tables
         from
           pg_publication pp
-          left join pg_publication_rel ppr
-            on pp.oid = ppr.prpubid
+          join pg_publication_tables ppt
+            on pp.pubname = ppt.pubname
         where
           pp.pubname = $1
         group by
@@ -101,26 +84,21 @@ defmodule Realtime.RLS.Replications do
               'write-in-chunks', 'true',
               'format-version', '2',
               'actions', coalesce(pub.w2j_actions, ''),
-              'add-tables', coalesce(pub.w2j_add_tables, '')
+              'add-tables', pub.w2j_add_tables
             )
-          ) w2j,
-          lateral (
-            select
-              x.wal,
-              x.is_rls_enabled,
-              x.users,
-              x.errors
-            from
-              realtime.apply_rls(
-                wal := w2j.data::jsonb,
-                max_record_bytes := $3
-              ) x(
-                wal,
-                is_rls_enabled,
-                users,
-                errors
-              )
-          ) xyz
+        ) w2j,
+        lateral (
+          select
+            x.wal,
+            x.is_rls_enabled,
+            x.users,
+            x.errors
+          from
+            realtime.apply_rls(
+              wal := w2j.data::jsonb,
+              max_record_bytes := $3
+            ) x(wal, is_rls_enabled, users, errors)
+        ) xyz
       where coalesce(pub.w2j_add_tables, '') <> '' ",
       [
         publication,
