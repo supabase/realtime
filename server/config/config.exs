@@ -124,7 +124,6 @@ config :realtime, RLS.Repo,
   socket_options: [db_ip_version],
   parameters: [
     application_name: "realtime_rls",
-    log_statement: "none",
     "pg_stat_statements.track": "none"
   ],
   backoff_type: :rand_exp,

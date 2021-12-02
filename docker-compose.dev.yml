@@ -12,7 +12,7 @@ services:
       DB_PORT: 5432
       PORT: 4000
       JWT_SECRET: SOMETHING_SUPER_SECRET
-      SECURE_CHANNELS: 'true'
+      SECURE_CHANNELS: 'false'
     depends_on:
       - db
   db:

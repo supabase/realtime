@@ -1,8 +1,3 @@
-ALTER SYSTEM SET wal_level='logical';
-ALTER SYSTEM SET max_wal_senders='10';
-ALTER SYSTEM SET max_replication_slots='10';
-
-
 -- Tables for testing
 
 CREATE TYPE public.user_status AS ENUM ('ACTIVE', 'INACTIVE');
@@ -27,7 +22,3 @@ INSERT INTO
 VALUES 
     ('Star the repo', 1),
     ('Watch the releases', 2);
-
-
--- Create the Replication publication 
-CREATE PUBLICATION supabase_realtime FOR ALL TABLES;
