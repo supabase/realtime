@@ -14,7 +14,6 @@ defmodule Realtime.SubscribersNotificationTest do
   alias Realtime.Configuration.{Configuration, Webhook, WebhookEndpoint}
   alias Realtime.{ConfigurationManager, SubscribersNotification, WebhookConnector, Helpers}
   alias Realtime.Adapters.Postgres.Decoder.Messages.Relation
-  # alias RealtimeWeb.RealtimeChannel
 
   @commit_timestamp %DateTime{
     calendar: Calendar.ISO,
@@ -472,18 +471,33 @@ defmodule Realtime.SubscribersNotificationTest do
   } do
     [
       %Realtime.Configuration.Realtime{
+        relation: "public:users:id",
+        events: ["INSERT"]
+      },
+      %Realtime.Configuration.Realtime{
         relation: "public:users:name",
         events: ["INSERT"]
       }
     ]
     |> get_mocks.([])
     |> with_mocks do
-      valid_notification_key = String.duplicate("W", 99)
+      valid_notification_string_value = String.duplicate("W", 99)
+      valid_notification_number_value = 2
 
-      valid_notification_record = %NewRecord{
+      valid_notification_record_name_value = %NewRecord{
         columns: @columns,
         commit_timestamp: @commit_timestamp,
-        record: %{"id" => "1", "name" => valid_notification_key},
+        record: %{"id" => 1, "name" => valid_notification_string_value},
+        schema: "public",
+        table: "users",
+        type: "INSERT",
+        is_rls_enabled: false
+      }
+
+      valid_notification_record_id_value = %NewRecord{
+        columns: @columns,
+        commit_timestamp: @commit_timestamp,
+        record: %{"id" => valid_notification_number_value, "name" => "Thomas Shelby"},
         schema: "public",
         table: "users",
         type: "INSERT",
@@ -492,11 +506,12 @@ defmodule Realtime.SubscribersNotificationTest do
 
       txn = %Transaction{
         changes: [
-          valid_notification_record,
+          valid_notification_record_name_value,
+          valid_notification_record_id_value,
           %NewRecord{
             columns: @columns,
             commit_timestamp: @commit_timestamp,
-            record: %{"id" => "2", "name" => String.duplicate("W", 100)},
+            record: %{"id" => 3, "name" => String.duplicate("W", 100)},
             schema: "public",
             table: "users",
             type: "INSERT"
@@ -504,7 +519,7 @@ defmodule Realtime.SubscribersNotificationTest do
           %NewRecord{
             columns: @columns,
             commit_timestamp: @commit_timestamp,
-            record: %{"id" => "3", "name" => nil},
+            record: %{"id" => 4, "name" => nil},
             schema: "public",
             table: "users",
             type: "INSERT"
@@ -512,7 +527,7 @@ defmodule Realtime.SubscribersNotificationTest do
           %NewRecord{
             columns: @columns,
             commit_timestamp: @commit_timestamp,
-            record: %{"id" => "4", "name" => :unchanged_toast},
+            record: %{"id" => 5, "name" => :unchanged_toast},
             schema: "public",
             table: "users",
             type: "INSERT"
@@ -522,12 +537,15 @@ defmodule Realtime.SubscribersNotificationTest do
 
       SubscribersNotification.notify(txn)
 
-      ["realtime:public:users:name=eq.", valid_notification_key]
-      |> IO.iodata_to_binary()
-      |> Helpers.broadcast_change(valid_notification_record)
+      "realtime:public:users:name=eq.#{valid_notification_string_value}"
+      |> Helpers.broadcast_change(valid_notification_record_name_value)
       |> assert_called()
 
-      assert_called_exactly(Helpers.broadcast_change(:_, :_), 1)
+      "realtime:public:users:id=eq.#{valid_notification_number_value}"
+      |> Helpers.broadcast_change(valid_notification_record_id_value)
+      |> assert_called()
+
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 7)
     end
   end
 end

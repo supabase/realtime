@@ -28,6 +28,7 @@ defmodule RealtimeWeb.UserSocket do
   def connect(params, socket, %{x_headers: headers}) do
     if Application.fetch_env!(:realtime, :secure_channels) do
       token = access_token(headers, params)
+
       case ChannelsAuthorization.authorize(token) do
         {:ok, _} -> {:ok, socket}
         _ -> :error

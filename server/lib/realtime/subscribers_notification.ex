@@ -30,8 +30,8 @@ defmodule Realtime.SubscribersNotification do
       case change do
         %{schema: schema, table: table, type: type}
         when is_binary(schema) and is_binary(table) and is_binary(type) ->
-          schema_topic = [@topic, ":", schema] |> IO.iodata_to_binary()
-          table_topic = [schema_topic, ":", table] |> IO.iodata_to_binary()
+          schema_topic = "#{@topic}:#{schema}"
+          table_topic = "#{schema_topic}:#{table}"
 
           # Get only the config which includes this event type (INSERT | UPDATE | DELETE | TRUNCATE)
           event_config =
@@ -49,8 +49,7 @@ defmodule Realtime.SubscribersNotification do
 
           # Special case for notifiying "*"
           if has_schema(event_config, "*") do
-            [@topic, ":*"]
-            |> IO.iodata_to_binary()
+            "#{@topic}:*"
             |> broadcast_change(change)
           end
 
@@ -69,8 +68,7 @@ defmodule Realtime.SubscribersNotification do
                   should_notify_column = has_column(event_config, schema, table, k)
 
                   if is_valid_notification_key(v) and should_notify_column do
-                    [table_topic, ":", k, "=eq.", v]
-                    |> IO.iodata_to_binary()
+                    "#{table_topic}:#{k}=eq.#{v}"
                     |> broadcast_change(change)
                   end
                 end)
@@ -83,8 +81,7 @@ defmodule Realtime.SubscribersNotification do
                   should_notify_column = has_column(event_config, schema, table, k)
 
                   if is_valid_notification_key(v) and should_notify_column do
-                    [table_topic, ":", k, "=eq.", v]
-                    |> IO.iodata_to_binary()
+                    "#{table_topic}:#{k}=eq.#{v}"
                     |> broadcast_change(change)
                   end
                 end)
@@ -113,7 +110,7 @@ defmodule Realtime.SubscribersNotification do
     valid_patterns =
       for schema_keys <- ["*", schema],
           table_keys <- ["*", table],
-          do: [schema_keys, ":", table_keys] |> IO.iodata_to_binary()
+          do: "#{schema_keys}:#{table_keys}"
 
     Enum.any?(config, fn c -> c.relation in valid_patterns end)
   end
@@ -125,14 +122,12 @@ defmodule Realtime.SubscribersNotification do
       for schema_keys <- ["*", schema],
           table_keys <- ["*", table],
           column_keys <- ["*", column],
-          do: [schema_keys, ":", table_keys, ":", column_keys] |> IO.iodata_to_binary()
+          do: "#{schema_keys}:#{table_keys}:#{column_keys}"
 
     Enum.any?(config, fn c -> c.relation in valid_patterns end)
   end
 
-  defp is_valid_notification_key(v) when is_binary(v) do
-    String.length(v) < 100
+  defp is_valid_notification_key(v) do
+    v != nil and v != :unchanged_toast and String.length(to_string(v)) < 100
   end
-
-  defp is_valid_notification_key(_v), do: false
 end
