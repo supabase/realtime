@@ -45,7 +45,7 @@ defmodule Realtime.MixProject do
       {:jason, "~> 1.2.2"},
       {:joken, "~> 2.3.0"},
       {:plug_cowboy, "~> 2.4"},
-      {:epgsql, "~> 4.5"},
+      {:epgsql, "~> 4.6.0"},
       {:timex, "~> 3.0"},
       {:retry, "~> 0.14.1"},
       {:ecto_sql, "~> 3.0"},
