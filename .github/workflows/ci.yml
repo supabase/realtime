@@ -45,6 +45,9 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
+      - name: Run database migrations
+        run: mix ecto.migrate --prefix realtime
+
       # - name: Compile with warnings
       #   run: mix compile --warnings-as-errors
 

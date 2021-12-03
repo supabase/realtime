@@ -3,7 +3,7 @@
 version: '3'
 services:
   db:
-    image: supabase/postgres
+    image: supabase/postgres:13.3.0
     ports:
       - "5432:5432"
     volumes:
