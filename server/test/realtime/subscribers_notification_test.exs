@@ -477,17 +477,48 @@ defmodule Realtime.SubscribersNotificationTest do
       %Realtime.Configuration.Realtime{
         relation: "public:users:name",
         events: ["INSERT"]
+      },
+      %Realtime.Configuration.Realtime{
+        relation: "public:users:details",
+        events: ["INSERT"]
       }
     ]
     |> get_mocks.([])
     |> with_mocks do
+      columns = [
+        %Relation.Column{
+          flags: [:key],
+          name: "id",
+          type: "int8",
+          type_modifier: -1
+        },
+        %Relation.Column{
+          flags: [],
+          name: "name",
+          type: "text",
+          type_modifier: -1
+        },
+        %Relation.Column{
+          flags: [],
+          name: "details",
+          type: "json",
+          type_modifier: -1
+        }
+      ]
+
       valid_notification_string_value = String.duplicate("W", 99)
       valid_notification_number_value = 2
+      valid_notification_json_object_value = %{"test" => true}
+      valid_notification_json_array_value = [valid_notification_json_object_value]
 
       valid_notification_record_name_value = %NewRecord{
-        columns: @columns,
+        columns: columns,
         commit_timestamp: @commit_timestamp,
-        record: %{"id" => 1, "name" => valid_notification_string_value},
+        record: %{
+          "id" => 1,
+          "name" => valid_notification_string_value,
+          "details" => valid_notification_json_object_value
+        },
         schema: "public",
         table: "users",
         type: "INSERT",
@@ -495,9 +526,13 @@ defmodule Realtime.SubscribersNotificationTest do
       }
 
       valid_notification_record_id_value = %NewRecord{
-        columns: @columns,
+        columns: columns,
         commit_timestamp: @commit_timestamp,
-        record: %{"id" => valid_notification_number_value, "name" => "Thomas Shelby"},
+        record: %{
+          "id" => valid_notification_number_value,
+          "name" => "Thomas Shelby",
+          "details" => valid_notification_json_array_value
+        },
         schema: "public",
         table: "users",
         type: "INSERT",
@@ -545,7 +580,15 @@ defmodule Realtime.SubscribersNotificationTest do
       |> Helpers.broadcast_change(valid_notification_record_id_value)
       |> assert_called()
 
-      assert_called_exactly(Helpers.broadcast_change(:_, :_), 7)
+      "realtime:public:users:details=eq.#{Jason.encode!(valid_notification_json_object_value)}"
+      |> Helpers.broadcast_change(valid_notification_record_name_value)
+      |> assert_called()
+
+      "realtime:public:users:details=eq.#{Jason.encode!(valid_notification_json_array_value)}"
+      |> Helpers.broadcast_change(valid_notification_record_id_value)
+      |> assert_called()
+
+      assert_called_exactly(Helpers.broadcast_change(:_, :_), 9)
     end
   end
 end

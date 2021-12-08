@@ -59,35 +59,21 @@ defmodule Realtime.SubscribersNotification do
           end
 
           # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
-          case type do
-            type when type in ["INSERT", "UPDATE"] ->
-              record = Map.get(change, :record)
+          if type in ["INSERT", "UPDATE", "DELETE"] do
+            record_key = if type == "DELETE", do: :old_record, else: :record
 
-              is_map(record) &&
-                Enum.each(record, fn {k, v} ->
-                  should_notify_column = has_column(event_config, schema, table, k)
+            record = Map.get(change, record_key)
 
-                  if is_valid_notification_key(v) and should_notify_column do
-                    "#{table_topic}:#{k}=eq.#{v}"
-                    |> broadcast_change(change)
-                  end
-                end)
-
-            "DELETE" ->
-              old_record = Map.get(change, :old_record)
-
-              is_map(old_record) &&
-                Enum.each(old_record, fn {k, v} ->
-                  should_notify_column = has_column(event_config, schema, table, k)
-
-                  if is_valid_notification_key(v) and should_notify_column do
-                    "#{table_topic}:#{k}=eq.#{v}"
-                    |> broadcast_change(change)
-                  end
-                end)
-
-            "TRUNCATE" ->
-              nil
+            is_map(record) &&
+              Enum.each(record, fn {k, v} ->
+                with true <- is_notification_key_valid(v),
+                     {:ok, stringified_v} <- stringify_value(v),
+                     true <- is_notification_key_length_valid(stringified_v),
+                     true <- has_column(event_config, schema, table, k) do
+                  "#{table_topic}:#{k}=eq.#{stringified_v}"
+                  |> broadcast_change(change)
+                end
+              end)
           end
 
         _ ->
@@ -127,7 +113,12 @@ defmodule Realtime.SubscribersNotification do
     Enum.any?(config, fn c -> c.relation in valid_patterns end)
   end
 
-  defp is_valid_notification_key(v) do
-    v != nil and v != :unchanged_toast and String.length(to_string(v)) < 100
+  defp is_notification_key_valid(v) do
+    v != nil and v != :unchanged_toast
   end
+
+  defp stringify_value(v) when is_binary(v), do: {:ok, v}
+  defp stringify_value(v), do: Jason.encode(v)
+
+  defp is_notification_key_length_valid(v), do: String.length(v) < 100
 end
