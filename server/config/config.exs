@@ -19,6 +19,7 @@ alias RealtimeWeb.{Endpoint, ErrorView}
 replication_mode = System.get_env("REPLICATION_MODE", "STREAM")
 
 app_port = System.get_env("PORT", "4000") |> String.to_integer()
+max_connections = System.get_env("MAX_CONNECTIONS", "16384") |> String.to_integer()
 db_host = System.get_env("DB_HOST", "localhost")
 db_port = System.get_env("DB_PORT", "5432") |> String.to_integer()
 db_name = System.get_env("DB_NAME", "postgres")
@@ -134,7 +135,10 @@ config :realtime, RLS.Repo,
 # Configures the endpoint
 config :realtime, Endpoint,
   url: [host: "localhost"],
-  http: [port: app_port],
+  http: [
+    port: app_port,
+    transport_options: [max_connections: max_connections]    
+  ],
   render_errors: [view: ErrorView, accepts: ~w(html json)],
   pubsub_server: PubSub,
   secret_key_base: session_secret_key_base
