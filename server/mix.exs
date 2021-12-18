@@ -60,6 +60,7 @@ defmodule Realtime.MixProject do
       test: [
         "ecto.create --quiet",
         "ecto.load -d 'test/setup.sql' -f",
+        "ecto.migrate --prefix realtime --quiet",
         "test"
       ]
     ]

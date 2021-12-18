@@ -86,19 +86,25 @@ defmodule Realtime.RLS.ReplicationPoller do
     end
     |> case do
       {:ok,
-       %{columns: ["wal", "is_rls_enabled", "users", "errors"] = columns, rows: [_ | _] = rows}} ->
-        Enum.each(rows, fn row ->
-          columns
-          |> Enum.zip(row)
-          |> generate_record()
-          |> case do
-            nil ->
-              :ok
+       %Postgrex.Result{
+         columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"] = columns,
+         rows: [_ | _] = rows
+       }} ->
+        :ok =
+          Enum.reduce(rows, [], fn row, acc ->
+            columns
+            |> Enum.zip(row)
+            |> generate_record()
+            |> case do
+              nil ->
+                acc
 
-            record_struct ->
-              :ok = SubscribersNotification.notify([record_struct])
-          end
-        end)
+              record_struct ->
+                [record_struct | acc]
+            end
+          end)
+          |> Enum.reverse()
+          |> SubscribersNotification.notify()
 
       {:ok, _} ->
         :ok
@@ -136,10 +142,10 @@ defmodule Realtime.RLS.ReplicationPoller do
            "record" => record
          }},
         {"is_rls_enabled", is_rls_enabled},
-        {"users", users},
+        {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
-      when is_boolean(is_rls_enabled) and is_list(users) do
+      when is_boolean(is_rls_enabled) and is_list(subscription_ids) do
     %NewRecord{
       columns: columns,
       commit_timestamp: commit_timestamp,
@@ -148,7 +154,7 @@ defmodule Realtime.RLS.ReplicationPoller do
       schema: schema,
       table: table,
       type: type,
-      users: MapSet.new(users),
+      subscription_ids: MapSet.new(subscription_ids),
       record: record
     }
   end
@@ -165,10 +171,10 @@ defmodule Realtime.RLS.ReplicationPoller do
            "old_record" => old_record
          }},
         {"is_rls_enabled", is_rls_enabled},
-        {"users", users},
+        {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
-      when is_boolean(is_rls_enabled) and is_list(users) do
+      when is_boolean(is_rls_enabled) and is_list(subscription_ids) do
     %UpdatedRecord{
       columns: columns,
       commit_timestamp: commit_timestamp,
@@ -177,7 +183,7 @@ defmodule Realtime.RLS.ReplicationPoller do
       schema: schema,
       table: table,
       type: type,
-      users: MapSet.new(users),
+      subscription_ids: MapSet.new(subscription_ids),
       old_record: old_record,
       record: record
     }
@@ -194,10 +200,10 @@ defmodule Realtime.RLS.ReplicationPoller do
            "old_record" => old_record
          }},
         {"is_rls_enabled", is_rls_enabled},
-        {"users", users},
+        {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
-      when is_boolean(is_rls_enabled) and is_list(users) do
+      when is_boolean(is_rls_enabled) and is_list(subscription_ids) do
     %DeletedRecord{
       columns: columns,
       commit_timestamp: commit_timestamp,
@@ -206,7 +212,7 @@ defmodule Realtime.RLS.ReplicationPoller do
       schema: schema,
       table: table,
       type: type,
-      users: MapSet.new(users),
+      subscription_ids: MapSet.new(subscription_ids),
       old_record: old_record
     }
   end

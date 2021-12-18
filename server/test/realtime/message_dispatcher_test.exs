@@ -3,25 +3,37 @@ defmodule Realtime.MessageDispatcherTest do
   import Realtime.MessageDispatcher
   alias Phoenix.Socket.V1.JSONSerializer
 
-  @user_id <<187, 181, 30, 78, 243, 113, 68, 99, 191, 10, 175, 143, 86, 220, 154, 115>>
+  @subscription_id <<187, 181, 30, 78, 243, 113, 68, 99, 191, 10, 175, 143, 86, 220, 154, 115>>
 
-  test "dispatch/3 for user_fastlane when rls disabled and no users" do
+  test "dispatch/3 for subscriber_fastlane when rls disabled and no subscription_ids" do
     msg = msg(false, [])
-    dispatch([{self(), {:user_fastlane, self(), JSONSerializer, ""}}], self(), msg)
+    dispatch([{self(), {:subscriber_fastlane, self(), JSONSerializer, ""}}], self(), msg)
     expected = JSONSerializer.fastlane!(msg)
     assert_received ^expected
   end
 
-  test "dispatch/3 for user_fastlane when rls enabled and user in users" do
-    msg = msg(true, MapSet.new([@user_id]))
-    dispatch([{self(), {:user_fastlane, self(), JSONSerializer, @user_id}}], self(), msg)
+  test "dispatch/3 for subscriber_fastlane when rls enabled and subscription_id in subscription_ids" do
+    msg = msg(true, MapSet.new([@subscription_id]))
+
+    dispatch(
+      [{self(), {:subscriber_fastlane, self(), JSONSerializer, @subscription_id}}],
+      self(),
+      msg
+    )
+
     expected = JSONSerializer.fastlane!(msg)
     assert_received ^expected
   end
 
-  test "dispatch/3 for user_fastlane when rls enabled and user not in users" do
-    msg = msg(true, MapSet.new([@user_id]))
-    dispatch([{self(), {:user_fastlane, self(), JSONSerializer, "wrong_user_id"}}], self(), msg)
+  test "dispatch/3 for subscriber_fastlane when rls enabled and subscription_id not in subscription_ids" do
+    msg = msg(true, MapSet.new([@subscription_id]))
+
+    dispatch(
+      [{self(), {:subscriber_fastlane, self(), JSONSerializer, "wrong_subscription_id"}}],
+      self(),
+      msg
+    )
+
     expected = JSONSerializer.fastlane!(msg)
     refute_receive ^expected
   end
@@ -41,7 +53,7 @@ defmodule Realtime.MessageDispatcherTest do
   end
 
   @spec msg(atom, list) :: map()
-  defp msg(rls, users) do
+  defp msg(rls, subscription_ids) do
     %Phoenix.Socket.Broadcast{
       event: "INSERT",
       payload: %Realtime.Adapters.Changes.NewRecord{
@@ -61,7 +73,7 @@ defmodule Realtime.MessageDispatcherTest do
         schema: "public",
         table: "todos",
         type: "INSERT",
-        users: users
+        subscription_ids: subscription_ids
       },
       topic: "realtime:public:todos"
     }

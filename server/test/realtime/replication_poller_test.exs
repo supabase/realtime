@@ -17,6 +17,8 @@ defmodule Realtime.ReplicationPollerTest do
 
   @ts "2021-11-05T17:20:51.52406+00:00"
 
+  @subscription_id "417e76fd-9bc5-4b3e-bd5d-a031389c4a6b"
+
   test "generate_record/1, INSERT" do
     record = [
       {"wal",
@@ -29,7 +31,7 @@ defmodule Realtime.ReplicationPollerTest do
          "type" => "INSERT"
        }},
       {"is_rls_enabled", false},
-      {"users", ["some_user_id"]},
+      {"subscription_ids", [@subscription_id]},
       {"errors", []}
     ]
 
@@ -40,7 +42,7 @@ defmodule Realtime.ReplicationPollerTest do
       schema: "public",
       table: "todos",
       type: "INSERT",
-      users: MapSet.new(["some_user_id"]),
+      subscription_ids: MapSet.new([@subscription_id]),
       record: %{"details" => "test", "id" => 12, "user_id" => 1},
       errors: nil
     }
@@ -60,7 +62,7 @@ defmodule Realtime.ReplicationPollerTest do
          "type" => "INSERT"
        }},
       {"is_rls_enabled", false},
-      {"users", ["some_user_id"]},
+      {"subscription_ids", [@subscription_id]},
       {"errors", ["Error 413: Payload Too Large"]}
     ]
 
@@ -71,7 +73,7 @@ defmodule Realtime.ReplicationPollerTest do
       schema: "public",
       table: "todos",
       type: "INSERT",
-      users: MapSet.new(["some_user_id"]),
+      subscription_ids: MapSet.new([@subscription_id]),
       record: %{"details" => "test", "id" => 12, "user_id" => 1},
       errors: ["Error 413: Payload Too Large"]
     }
@@ -92,7 +94,7 @@ defmodule Realtime.ReplicationPollerTest do
          "type" => "UPDATE"
        }},
       {"is_rls_enabled", false},
-      {"users", ["some_user_id"]},
+      {"subscription_ids", [@subscription_id]},
       {"errors", []}
     ]
 
@@ -103,7 +105,7 @@ defmodule Realtime.ReplicationPollerTest do
       schema: "public",
       table: "todos",
       type: "UPDATE",
-      users: MapSet.new(["some_user_id"]),
+      subscription_ids: MapSet.new([@subscription_id]),
       old_record: %{"id" => 12},
       record: %{"details" => "test1", "id" => 12, "user_id" => 1},
       errors: nil
@@ -124,7 +126,7 @@ defmodule Realtime.ReplicationPollerTest do
          "type" => "DELETE"
        }},
       {"is_rls_enabled", false},
-      {"users", ["some_user_id"]},
+      {"subscription_ids", [@subscription_id]},
       {"errors", []}
     ]
 
@@ -135,7 +137,7 @@ defmodule Realtime.ReplicationPollerTest do
       schema: "public",
       table: "todos",
       type: "DELETE",
-      users: MapSet.new(["some_user_id"]),
+      subscription_ids: MapSet.new([@subscription_id]),
       old_record: %{"id" => 15},
       errors: nil
     }

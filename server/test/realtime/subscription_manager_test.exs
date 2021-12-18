@@ -3,8 +3,8 @@ defmodule Realtime.SubscriptionManagerTest do
   import Mock
   alias Realtime.SubscriptionManager
 
-  @user_id "bbb51e4e-f371-4463-bf0a-af8f56dc9a71"
-  @user_email "user@test.com"
+  @subscription_id "bbb51e4e-f371-4463-bf0a-af8f56dc9a71"
+  @claims %{"role" => "authenticated"}
 
   setup_all do
     start_supervised(Realtime.RLS.Repo)
@@ -17,8 +17,8 @@ defmodule Realtime.SubscriptionManagerTest do
       %{
         channel_pid: self(),
         topic: "test_topic",
-        user_id: @user_id,
-        email: @user_email
+        id: @subscription_id,
+        claims: @claims
       }
     }
 
@@ -48,8 +48,8 @@ defmodule Realtime.SubscriptionManagerTest do
       %{
         channel_pid: self(),
         topic: "test_topic",
-        user_id: @user_id,
-        email: @user_email
+        id: @subscription_id,
+        claims: @claims
       }
     }
 
@@ -64,8 +64,9 @@ defmodule Realtime.SubscriptionManagerTest do
              entities: [],
              filters: [],
              topic: "test_topic",
-             user_id: "bbb51e4e-f371-4463-bf0a-af8f56dc9a71",
-             email: "user@test.com"
+             id: "bbb51e4e-f371-4463-bf0a-af8f56dc9a71",
+             claims: %{"role" => "authenticated"},
+             claims_role: "authenticated"
            }
          }
        }}
@@ -74,15 +75,15 @@ defmodule Realtime.SubscriptionManagerTest do
   end
 
   test "handle_call/track_topic_subscriber, when subscription_params is not empty" do
-    {_, bin} = Ecto.UUID.dump(@user_id)
+    {_, bin} = Ecto.UUID.dump(@subscription_id)
 
     mess = {
       :track_topic_subscriber,
       %{
         channel_pid: self(),
         topic: "test_topic",
-        user_id: bin,
-        email: @user_email
+        id: bin,
+        claims: @claims
       }
     }
 
@@ -93,8 +94,9 @@ defmodule Realtime.SubscriptionManagerTest do
           entities: [],
           filters: [],
           topic: "test_topic",
-          user_id: bin,
-          email: "user@test.com"
+          id: bin,
+          claims: %{"role" => "authenticated"},
+          claims_role: "authenticated"
         }
       },
       sync_interval: 15_000,
@@ -106,15 +108,15 @@ defmodule Realtime.SubscriptionManagerTest do
   end
 
   test "handle_call/track_topic_subscriber, updated state" do
-    {_, bin} = Ecto.UUID.dump(@user_id)
+    {_, bin} = Ecto.UUID.dump(@subscription_id)
 
     mess = {
       :track_topic_subscriber,
       %{
         channel_pid: self(),
         topic: "test_topic",
-        user_id: bin,
-        email: @user_email
+        id: bin,
+        claims: @claims
       }
     }
 
@@ -122,8 +124,8 @@ defmodule Realtime.SubscriptionManagerTest do
       entities: [16537],
       filters: [],
       topic: "public:todos",
-      user_id: bin,
-      email: @user_email
+      id: bin,
+      claims: @claims
     }
 
     state = %{
@@ -146,8 +148,9 @@ defmodule Realtime.SubscriptionManagerTest do
                  entities: [],
                  filters: [],
                  topic: "test_topic",
-                 user_id: bin,
-                 email: @user_email
+                 id: bin,
+                 claims: @claims,
+                 claims_role: "authenticated"
                }
 
       other ->
@@ -186,7 +189,7 @@ defmodule Realtime.SubscriptionManagerTest do
 
   test "handle_info/sync_subscription, when subscription_params is not empty" do
     msg = {:DOWN, make_ref(), :process, self(), :any}
-    {_, bin} = Ecto.UUID.dump(@user_id)
+    {_, bin} = Ecto.UUID.dump(@subscription_id)
 
     state = %{
       subscription_params: %{
@@ -194,8 +197,8 @@ defmodule Realtime.SubscriptionManagerTest do
           entities: [],
           filters: [],
           topic: "public:todos",
-          user_id: bin,
-          email: @user_email
+          id: bin,
+          claims: @claims
         }
       }
     }
@@ -209,7 +212,7 @@ defmodule Realtime.SubscriptionManagerTest do
     with_mock Realtime.RLS.Subscriptions,
       delete_topic_subscriber: fn _ -> raise "" end do
       msg = {:DOWN, make_ref(), :process, self(), :any}
-      {_, bin} = Ecto.UUID.dump(@user_id)
+      {_, bin} = Ecto.UUID.dump(@subscription_id)
 
       state = %{
         subscription_params: %{
@@ -217,8 +220,8 @@ defmodule Realtime.SubscriptionManagerTest do
             entities: [],
             filters: [],
             topic: "public:todos",
-            user_id: bin,
-            email: @user_email
+            id: bin,
+            claims: @claims
           }
         }
       }

@@ -8,18 +8,18 @@ defmodule Realtime.MessageDispatcher do
   Hook invoked by Phoenix.PubSub dispatch.
   """
   @spec dispatch(
-          [{pid, nil | {:fastlane | :user_fastlane, pid, atom, binary}}],
+          [{pid, nil | {:fastlane | :subscriber_fastlane, pid, atom, binary}}],
           pid,
           Phoenix.Socket.Broadcast.t()
         ) :: :ok
-  def dispatch(subscribers, _from, %Broadcast{payload: payload} = msg) do
+  def dispatch([_ | _] = topic_subscriptions, _from, %Broadcast{payload: payload} = msg) do
     {is_rls_enabled, new_payload} = Map.pop(payload, :is_rls_enabled)
-    {users, new_payload} = Map.pop(new_payload, :users)
+    {subscription_ids, new_payload} = Map.pop(new_payload, :subscription_ids)
     new_msg = %{msg | payload: new_payload}
 
-    Enum.reduce(subscribers, %{}, fn
-      {_pid, {:user_fastlane, fastlane_pid, serializer, user_id}}, cache ->
-        if !is_rls_enabled or MapSet.member?(users, user_id) do
+    Enum.reduce(topic_subscriptions, %{}, fn
+      {_pid, {:subscriber_fastlane, fastlane_pid, serializer, subscription_id}}, cache ->
+        if !is_rls_enabled or MapSet.member?(subscription_ids, subscription_id) do
           broadcast_message(cache, fastlane_pid, new_msg, serializer)
         else
           cache
@@ -38,6 +38,8 @@ defmodule Realtime.MessageDispatcher do
 
     :ok
   end
+
+  def dispatch(_, _, _), do: :ok
 
   defp broadcast_message(cache, fastlane_pid, msg, serializer) do
     case cache do

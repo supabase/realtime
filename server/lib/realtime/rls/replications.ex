@@ -50,7 +50,7 @@ defmodule Realtime.RLS.Replications do
       select
         xyz.wal,
         xyz.is_rls_enabled,
-        xyz.users,
+        xyz.subscription_ids,
         xyz.errors
       from
         pub,
@@ -73,15 +73,16 @@ defmodule Realtime.RLS.Replications do
           select
             x.wal,
             x.is_rls_enabled,
-            x.users,
+            x.subscription_ids,
             x.errors
           from
             realtime.apply_rls(
               wal := w2j.data::jsonb,
               max_record_bytes := $3
-            ) x(wal, is_rls_enabled, users, errors)
+            ) x(wal, is_rls_enabled, subscription_ids, errors)
         ) xyz
-      where coalesce(pub.w2j_add_tables, '') <> '' ",
+      where coalesce(pub.w2j_add_tables, '') <> ''
+        and xyz.subscription_ids[1] is not null",
       [
         publication,
         slot_name,

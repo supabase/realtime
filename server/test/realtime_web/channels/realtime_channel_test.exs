@@ -7,15 +7,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   alias Phoenix.Socket.Broadcast
   alias RealtimeWeb.{ChannelsAuthorization, UserSocket, RealtimeChannel}
 
-  @user_id "bbb51e4e-f371-4463-bf0a-af8f56dc9a73"
-  @user_email "user@test.com"
+  @claims %{"role" => "authenticated"}
 
   setup do
     with_mock ChannelsAuthorization,
-      authorize: fn _token -> {:ok, %{"sub" => @user_id, "email" => @user_email}} end do
+      authorize: fn _token -> {:ok, @claims} end do
       {:ok, _, socket} =
         UserSocket
-        |> socket()
+        |> socket("", %{access_token: "access_token"})
         |> subscribe_and_join(RealtimeChannel, "realtime:*", %{"user_token" => "token123"})
 
       %{socket: socket}
@@ -58,7 +57,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     assert_push("DELETE", ^change)
   end
 
-  test "join channel when token is valid but does not contain sub and email" do
+  test "join channel when token is valid but does not contain claims" do
     with_mock ChannelsAuthorization,
       authorize: fn _token -> {:ok, %{}} end do
       assert {:ok, _, _} =
@@ -71,16 +70,16 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   test "join channel when token is invalid" do
     with_mock ChannelsAuthorization,
       authorize: fn _token -> :error end do
-      assert {:error, %{reason: "user token is invalid"}} =
+      assert {:error, %{reason: "error occurred when joining realtime:* with user token"}} =
                UserSocket
-               |> socket()
+               |> socket("", %{access_token: "access_token"})
                |> subscribe_and_join(RealtimeChannel, "realtime:*", %{"user_token" => "token123"})
     end
   end
 
   test "handle_info/sync_subscription, when access token exists" do
     with_mock ChannelsAuthorization,
-      authorize: fn _token -> {:ok, %{"sub" => @user_id, "email" => @user_email}} end do
+      authorize: fn _token -> {:ok, @claims} end do
       socket =
         UserSocket
         |> socket()
@@ -99,7 +98,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   test "handle_info/sync_subscription, when access token does not exist" do
     with_mock ChannelsAuthorization,
-      authorize: fn _token -> {:ok, %{"sub" => @user_id, "email" => @user_email}} end do
+      authorize: fn _token -> {:ok, @claims} end do
       socket =
         UserSocket
         |> socket()
@@ -118,7 +117,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   test "handle_info/verify_access_token, when access token is valid", %{socket: socket} do
     with_mock ChannelsAuthorization,
-      authorize: fn _token -> {:ok, %{"sub" => @user_id, "email" => @user_email}} end do
+      authorize: fn _token -> {:ok, @claims} end do
       assert {:noreply, %Socket{assigns: %{verify_ref: new_ref}}} =
                RealtimeChannel.handle_info(:verify_access_token, socket)
 
@@ -136,7 +135,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   test "client sends valid access token", %{socket: socket} do
     with_mock ChannelsAuthorization,
-      authorize: fn _token -> {:ok, %{"sub" => @user_id, "email" => @user_email}} end do
+      authorize: fn _token -> {:ok, @claims} end do
       push(socket, "access_token", %{"access_token" => "fresh_token_123"})
 
       assert %Socket{assigns: %{access_token: "fresh_token_123"}} =

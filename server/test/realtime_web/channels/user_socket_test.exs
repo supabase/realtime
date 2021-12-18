@@ -21,18 +21,18 @@ defmodule RealtimeWeb.UserSocketTest do
       Application.put_env(:realtime, :secure_channels, true)
 
       # WARNING: "token" param key will be deprecated.
-      assert {:ok, %Socket{}} =
+      assert {:ok, %Socket{assigns: %{access_token: "auth_token123"}}} =
                UserSocket.connect(%{"token" => "auth_token123"}, socket(UserSocket), %{
                  x_headers: []
                })
 
       # WARNING: "apikey" param key will be deprecated.
-      assert {:ok, %Socket{}} =
+      assert {:ok, %Socket{assigns: %{access_token: "auth_token123"}}} =
                UserSocket.connect(%{"apikey" => "auth_token123"}, socket(UserSocket), %{
                  x_headers: []
                })
 
-      assert {:ok, %Socket{}} =
+      assert {:ok, %Socket{assigns: %{access_token: "auth_token123"}}} =
                UserSocket.connect(%{}, socket(UserSocket), %{
                  x_headers: [{"x-api-key", "auth_token123"}]
                })
