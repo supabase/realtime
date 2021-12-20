@@ -2,6 +2,8 @@ defmodule Realtime.RLS.Repo.Migrations.EnableGenericSubscriptionClaims do
   use Ecto.Migration
 
   def change do
+    execute "truncate table realtime.subscription restart identity"
+
     execute "alter table realtime.subscription
       drop constraint subscription_entity_user_id_filters_key cascade,
       drop column email cascade"
