@@ -6,7 +6,8 @@ defmodule Realtime.RLS.Repo.Migrations.EnableGenericSubscriptionClaims do
 
     execute "alter table realtime.subscription
       drop constraint subscription_entity_user_id_filters_key cascade,
-      drop column email cascade"
+      drop column email cascade,
+      drop column created_at cascade"
 
     execute "alter table realtime.subscription rename user_id to subscription_id"
 
@@ -19,7 +20,8 @@ defmodule Realtime.RLS.Repo.Migrations.EnableGenericSubscriptionClaims do
 
     execute "alter table realtime.subscription
       add column claims jsonb not null,
-      add column claims_role regrole not null generated always as (realtime.to_regrole(claims ->> 'role')) stored"
+      add column claims_role regrole not null generated always as (realtime.to_regrole(claims ->> 'role')) stored,
+      add column created_at timestamp not null default timezone('utc', now())"
 
     execute "create unique index subscription_subscription_id_entity_filters_key on realtime.subscription (subscription_id, entity, filters)"
 
