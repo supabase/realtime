@@ -1,14 +1,11 @@
 defmodule Realtime.RLS.Replications do
   import Realtime.RLS.Repo
 
-  alias Ecto.Multi
-
   def prepare_replication(slot_name, temporary_slot) do
-    Multi.new()
-    |> Multi.run(:create_slot, fn _, _ ->
-      query(
-        "select
-          case when not exists (
+    query(
+      "select
+        case
+          when not exists (
             select 1
             from pg_replication_slots
             where slot_name = $1
@@ -17,30 +14,15 @@ defmodule Realtime.RLS.Replications do
             select 1 from pg_create_logical_replication_slot($1, 'wal2json', $2)
           )
           else 1
-          end;",
-        [slot_name, temporary_slot]
-      )
-      |> case do
-        {:ok, %Postgrex.Result{rows: [[1]]}} ->
-          {:ok, slot_name}
-
-        {_, error} ->
-          {:error, error}
-      end
-    end)
-    |> Multi.run(:search_path, fn _, _ ->
-      # Enable schema-qualified table names for public schema
-      # when casting prrelid to regclass in poll query
-      case query("set search_path = ''", []) do
-        {:ok, %Postgrex.Result{command: command}} -> {:ok, command}
-        {_, error} -> {:error, error}
-      end
-    end)
-    |> transaction()
+        end;",
+      [slot_name, temporary_slot]
+    )
     |> case do
-      {:ok, multi_map} -> {:ok, multi_map}
-      {:error, error} -> {:error, error}
-      {:error, _, error, _} -> {:error, error}
+      {:ok, %Postgrex.Result{rows: [[1]]}} ->
+        {:ok, slot_name}
+
+      {_, error} ->
+        {:error, error}
     end
   end
 
