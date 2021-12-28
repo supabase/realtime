@@ -49,7 +49,7 @@ defmodule Realtime.RLS.ReplicationPoller do
       :error, error -> {:error, error}
     end
     |> case do
-      {:ok, %{create_slot: ^slot_name, search_path: :set}} ->
+      {:ok, ^slot_name} ->
         send(self(), :poll)
         {:noreply, state}
 
