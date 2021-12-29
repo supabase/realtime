@@ -19,8 +19,12 @@ defmodule RealtimeWeb.RealtimeChannel do
         params,
         %Socket{channel_pid: channel_pid, assigns: %{access_token: access_token}} = socket
       ) do
-    with token when is_binary(token) <- params["user_token"] || access_token,
-         {:ok, %{"role" => role} = claims} <- ChannelsAuthorization.authorize(token),
+    token = case params do
+      %{"user_token" => token} -> token
+      _ -> access_token
+    end
+
+    with {:ok, %{"role" => role} = claims} <- ChannelsAuthorization.authorize(token),
          bin_id <- Ecto.UUID.bingenerate(),
          :ok <-
            SubscriptionManager.track_topic_subscriber(%{
