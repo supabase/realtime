@@ -29,7 +29,7 @@ Supabase is hiring Elixir experts to work full-time on this repo. If you have th
 - [x] Alpha: Under heavy development
 - [x] Public Alpha: Ready for use. But go easy on us, there may be a few kinks.
 - [x] Public Beta: Stable enough for most non-enterprise use-cases
-- [x] Public Gamma: Realtime RLS broadcasts changes to authorized users based on Row Level Security (RLS) policies.
+- [x] Public Gamma: Realtime RLS broadcasts changes to authorized subscribers based on Row Level Security (RLS) policies.
 - [ ] Public: Production-ready
 
 This repo is still under heavy development and the documentation is constantly evolving. You're welcome to try it, but expect some breaking changes. Watch "releases" of this repo to get notified of major updates. And give us a star if you like it!
@@ -54,9 +54,9 @@ There are two versions of this server: `Realtime` and `Realtime RLS`.
 `Realtime RLS` server works by:
 
 1. polling PostgreSQL's replication functionality (using PostgreSQL's logical decoding and [wal2json](https://github.com/eulerto/wal2json) output plugin)
-2. passing database changes to a [Write Ahead Log Realtime Unified Security (WALRUS)](https://github.com/supabase/walrus) PostgresSQL function and receiving a list of authorized users depending on Row Level Security (RLS) policies
+2. passing database changes to a [Write Ahead Log Realtime Unified Security (WALRUS)](https://github.com/supabase/walrus) PostgresSQL function and receiving a list of authorized subscribers depending on Row Level Security (RLS) policies
 3. converting the changes into JSON
-3. broadcasting to authorized users over WebSockets
+3. broadcasting to authorized subscribers over WebSockets
 
 ### Why not just use PostgreSQL's `NOTIFY`?
 
@@ -97,7 +97,7 @@ We have set up some simple examples that show how to use this server:
 
 ### Realtime RLS
 
-The JavaScript and C# client libraries are now compatible with Realtime RLS. To get started, create a database table inside the `public` schema, enable row level security, and set at least one row security policy. Then, pass a JWT containing `sub` (uuid) and `email` fields when creating a channel.
+The JavaScript and C# client libraries are now compatible with Realtime RLS. To get started, create a database table inside the `public` schema, enable row level security, and set at least one row security policy. Then, pass a JWT with your claims, `role` (a database role like `postgres`) is required, when creating a channel.
 
 You will have to manually update the Realtime Client with a valid JWT because Realtime RLS will continuously verify the JWT on every heartbeat. If the JWT is invalid (e.g. expired), then Realtime RLS will terminate the channel.
 

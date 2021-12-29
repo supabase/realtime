@@ -30,7 +30,7 @@ defmodule RealtimeWeb.UserSocket do
       token = access_token(headers, params)
 
       case ChannelsAuthorization.authorize(token) do
-        {:ok, _} -> {:ok, socket}
+        {:ok, _} -> {:ok, assign(socket, :access_token, token)}
         _ -> :error
       end
     else

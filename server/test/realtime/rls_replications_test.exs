@@ -4,11 +4,22 @@ defmodule Realtime.RlsReplicationsTest do
   import Realtime.RLS.Replications
 
   @slot_name "test_realtime_slot_name"
-  @publication_name "supabase_realtime"
+  @publication_name "supabase_realtime_test"
   @max_record_bytes 1_048_576
 
   setup_all do
     start_supervised(Realtime.RLS.Repo)
+
+    %Postgrex.Result{rows: [[oid]]} =
+      query!("select oid from pg_class where relname = $1;", ["todos"])
+
+    query!("truncate realtime.subscription restart identity;")
+
+    query!(
+      "insert into realtime.subscription (subscription_id, entity, claims) VALUES ($1, $2, $3)",
+      [Ecto.UUID.bingenerate(), oid, %{"role" => "authenticated"}]
+    )
+
     :ok
   end
 

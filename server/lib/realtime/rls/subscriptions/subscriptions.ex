@@ -5,11 +5,14 @@ defmodule Realtime.RLS.Subscriptions do
   alias Realtime.RLS.Repo
   alias Realtime.RLS.Subscriptions.Subscription
 
-  @spec create_topic_subscriber(%{topic: String.t(), user_id: Ecto.UUID.raw(), email: String.t()}) ::
-          {:ok, term()} | {:error, term()}
+  @spec create_topic_subscriber(%{topic: String.t(), id: Ecto.UUID.raw(), claims: map()}) ::
+          {:ok, term()}
+          | {:error, term()}
+          | {:error, Ecto.Multi.name(), term(), %{required(Ecto.Multi.name()) => term()}}
   def create_topic_subscriber(params) do
     Multi.new()
     |> Multi.put(:params_list, [params])
+    |> fetch_database_roles()
     |> fetch_publication_tables()
     |> enrich_subscription_params()
     |> generate_topic_subscriptions()
@@ -19,15 +22,12 @@ defmodule Realtime.RLS.Subscriptions do
 
   @spec delete_topic_subscriber(map()) :: {integer(), nil | [term()]}
   def delete_topic_subscriber(%{
+        id: id,
         entities: [_ | _] = oids,
-        filters: filters,
-        user_id: user_id,
-        email: email
+        filters: filters
       }) do
     from(s in Subscription,
-      where:
-        s.user_id == ^user_id and s.email == ^email and s.filters == ^filters and
-          s.entity in ^oids
+      where: s.subscription_id == ^id and s.entity in ^oids and s.filters == ^filters
     )
     |> Repo.delete_all()
   end
@@ -36,13 +36,30 @@ defmodule Realtime.RLS.Subscriptions do
 
   def sync_subscriptions(params_list) do
     Multi.new()
-    |> Ecto.Multi.delete_all(:delete_all, Subscription)
+    |> truncate_subscriptions()
     |> Multi.put(:params_list, params_list)
+    |> fetch_database_roles()
     |> fetch_publication_tables()
     |> enrich_subscription_params()
     |> generate_topic_subscriptions()
     |> insert_topic_subscriptions()
     |> Repo.transaction()
+  end
+
+  defp fetch_database_roles(%Multi{} = multi) do
+    Multi.run(multi, :database_roles, fn _, _ ->
+      Repo.query(
+        "select rolname from pg_authid",
+        []
+      )
+      |> case do
+        {:ok, %Postgrex.Result{columns: ["rolname"], rows: rows}} ->
+          {:ok, rows |> List.flatten() |> MapSet.new()}
+
+        _ ->
+          {:ok, MapSet.new()}
+      end
+    end)
   end
 
   defp fetch_publication_tables(%Multi{} = multi) do
@@ -83,17 +100,39 @@ defmodule Realtime.RLS.Subscriptions do
     end)
   end
 
+  defp truncate_subscriptions(%Multi{} = multi) do
+    Multi.run(multi, :truncate_subscriptions, fn _, _ ->
+      Repo.query(
+        "truncate realtime.subscription restart identity",
+        []
+      )
+      |> case do
+        {:ok, %Postgrex.Result{command: command}} -> {:ok, command}
+        {:error, error} -> {:error, inspect(error)}
+      end
+    end)
+  end
+
   defp enrich_subscription_params(%Multi{} = multi) do
     Multi.run(multi, :enriched_subscription_params, fn _,
                                                        %{
+                                                         database_roles: database_roles,
                                                          params_list: params_list,
                                                          publication_entities: oids
                                                        } ->
       enriched_params =
         case params_list do
           [_ | _] ->
-            Enum.reduce(params_list, [], fn %{topic: topic, user_id: user_id, email: email},
-                                            acc ->
+            Enum.reduce(params_list, [], fn %{id: id, claims: claims, topic: topic}, acc ->
+              claims_role = claims["role"]
+
+              claims_role =
+                if MapSet.member?(database_roles, claims_role) do
+                  claims_role
+                else
+                  nil
+                end
+
               topic
               |> String.split(":")
               |> case do
@@ -104,11 +143,12 @@ defmodule Realtime.RLS.Subscriptions do
                     [_, "eq", _] = filters ->
                       [
                         %{
+                          id: id,
+                          claims: claims,
+                          claims_role: claims_role,
                           entities: Map.get(oids, {schema, table}, []),
                           filters: filters,
-                          topic: topic,
-                          user_id: user_id,
-                          email: email
+                          topic: topic
                         }
                         | acc
                       ]
@@ -116,11 +156,12 @@ defmodule Realtime.RLS.Subscriptions do
                     _ ->
                       [
                         %{
+                          id: id,
+                          claims: claims,
+                          claims_role: claims_role,
                           entities: [],
                           filters: filters,
-                          topic: topic,
-                          user_id: user_id,
-                          email: email
+                          topic: topic
                         }
                         | acc
                       ]
@@ -129,11 +170,12 @@ defmodule Realtime.RLS.Subscriptions do
                 [schema, table] ->
                   [
                     %{
+                      id: id,
+                      claims: claims,
+                      claims_role: claims_role,
                       entities: Map.get(oids, {schema, table}, []),
                       filters: [],
-                      topic: topic,
-                      user_id: user_id,
-                      email: email
+                      topic: topic
                     }
                     | acc
                   ]
@@ -141,11 +183,12 @@ defmodule Realtime.RLS.Subscriptions do
                 [schema] ->
                   [
                     %{
+                      id: id,
+                      claims: claims,
+                      claims_role: claims_role,
                       entities: Map.get(oids, {schema}, []),
                       filters: [],
-                      topic: topic,
-                      user_id: user_id,
-                      email: email
+                      topic: topic
                     }
                     | acc
                   ]
@@ -170,10 +213,11 @@ defmodule Realtime.RLS.Subscriptions do
         case enriched_subscription_params do
           [_ | _] ->
             Enum.reduce(enriched_subscription_params, [], fn %{
+                                                               id: id,
+                                                               claims: claims,
+                                                               claims_role: claims_role,
                                                                entities: entities,
-                                                               filters: filters,
-                                                               user_id: user_id,
-                                                               email: email
+                                                               filters: filters
                                                              },
                                                              acc ->
               case entities do
@@ -182,10 +226,11 @@ defmodule Realtime.RLS.Subscriptions do
                     Enum.reduce(entities, [], fn oid, i_acc ->
                       %Subscription{}
                       |> Subscription.changeset(%{
-                        user_id: user_id,
-                        email: email,
+                        subscription_id: id,
                         entity: oid,
-                        filters: filters
+                        filters: filters,
+                        claims: claims,
+                        claims_role: claims_role
                       })
                       |> case do
                         %Changeset{changes: topic_sub, valid?: true} -> [topic_sub | i_acc]
@@ -221,8 +266,8 @@ defmodule Realtime.RLS.Subscriptions do
         |> Enum.reduce(0, fn batch_subs, acc ->
           {inserts, nil} =
             Repo.insert_all(Subscription, batch_subs,
-              on_conflict: {:replace_all_except, [:id]},
-              conflict_target: [:entity, :user_id, :filters]
+              on_conflict: {:replace, [:claims]},
+              conflict_target: [:subscription_id, :entity, :filters]
             )
 
           inserts + acc

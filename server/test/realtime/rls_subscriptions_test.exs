@@ -2,8 +2,8 @@ defmodule Realtime.RlsSubscriptionsTest do
   use ExUnit.Case
   alias Realtime.RLS.Subscriptions
 
-  @user_id "bbb51e4e-f371-4463-bf0a-af8f56dc9a71"
-  @user_email "user@test.com"
+  @id "bbb51e4e-f371-4463-bf0a-af8f56dc9a71"
+  @claims %{"role" => "authenticated"}
 
   setup_all do
     start_supervised(Realtime.RLS.Repo)
@@ -11,27 +11,22 @@ defmodule Realtime.RlsSubscriptionsTest do
   end
 
   test "create_topic_subscriber/1" do
-    params = %{topic: "topic_test", user_id: bin_user_id(), email: @user_email}
+    params = %{topic: "topic_test", id: bin_id(), claims: @claims}
 
     case Subscriptions.create_topic_subscriber(params) do
       {:ok, response} ->
-        esp = [Map.merge(params, %{entities: [], filters: []})]
+        esp = [Map.merge(params, %{entities: [], filters: [], claims_role: "authenticated"})]
 
         assert response.enriched_subscription_params == esp
         assert response.params_list == [params]
 
         entities = [
           {"*"},
-          {"auth"},
-          {"realtime"},
           {"public"},
-          {"auth", "audit_log_entries"},
-          {"auth", "instances"},
-          {"auth", "refresh_tokens"},
-          {"auth", "schema_migrations"},
-          {"auth", "users"},
-          {"realtime", "subscription"},
-          {"public", "todos"}
+          {"realtime"},
+          {"public", "todos"},
+          {"realtime", "schema_migrations"},
+          {"realtime", "subscription"}
         ]
 
         Map.keys(response.publication_entities)
@@ -44,8 +39,8 @@ defmodule Realtime.RlsSubscriptionsTest do
     end
   end
 
-  defp bin_user_id() do
-    {_, bin} = Ecto.UUID.dump(@user_id)
+  defp bin_id() do
+    {_, bin} = Ecto.UUID.dump(@id)
     bin
   end
 end
