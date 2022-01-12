@@ -122,6 +122,7 @@ config :realtime, RLS.Repo,
   port: db_port,
   pool_size: 1,
   ssl: db_ssl,
+  queue_target: 5_000,
   socket_options: [db_ip_version],
   parameters: [
     application_name: "realtime_rls",
