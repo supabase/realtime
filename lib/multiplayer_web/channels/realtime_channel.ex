@@ -41,35 +41,35 @@ defmodule MultiplayerWeb.RealtimeChannel do
 
     scope_topic_name = scope <> ":" <> topic
     make_scope_topic(socket, scope_topic_name)
-    presence_timer = Process.send_after(self(), :presence_agg, @timeout_presence_diff)
+    # presence_timer = Process.send_after(self(), :presence_agg, @timeout_presence_diff)
 
-    Logger.debug("Hooks #{inspect(hooks)}")
-    hook = hooks["session.connected"]
-    SessionsHooks.connected(self(), user_id, hook.type, hook.url)
-    kick_ref = Process.send_after(self(), :kickout_time, @kickout_time)
+    # Logger.debug("Hooks #{inspect(hooks)}")
+    # hook = hooks["session.connected"]
+    # SessionsHooks.connected(self(), user_id, hook.type, hook.url)
+    # kick_ref = Process.send_after(self(), :kickout_time, @kickout_time)
 
     new_socket =
       update_topic(socket, scope_topic_name)
-      |> assign(presence_timer: presence_timer)
-      |> assign(kickout_ref: kick_ref)
+      # |> assign(presence_timer: presence_timer)
+      # |> assign(kickout_ref: kick_ref)
       |> assign(mq: [])
-      |> assign(presence_diff: @empty_presence_diff)
+      # |> assign(presence_diff: @empty_presence_diff)
       |> assign(topic: topic)
 
-    if Application.fetch_env!(:multiplayer, :presence) do
-      Multiplayer.PresenceNotify.track_me(self(), new_socket)
-    end
+    # if Application.fetch_env!(:multiplayer, :presence) do
+    #   Multiplayer.PresenceNotify.track_me(self(), new_socket)
+    # end
 
     {:ok, new_socket}
   end
 
-  @impl true
   # send presence state to client
-  def handle_info(:presence_state, socket) do
-    add_message("presence_state", Presence.list(socket) |> :maps.size())
-    {:noreply, socket}
-  end
+  # def handle_info(:presence_state, socket) do
+  #   add_message("presence_state", Presence.list(socket) |> :maps.size())
+  #   {:noreply, socket}
+  # end
 
+  @impl true
   # accumulate messages to the queue
   def handle_info({:message, msg, event}, %{assigns: %{mq: mq}} = socket) do
     send(self(), :check_mq)
@@ -102,22 +102,22 @@ defmodule MultiplayerWeb.RealtimeChannel do
     end
   end
 
-  # handle the presence diff
-  def handle_info(:presence_agg, %{assigns: %{presence_timer: ref, presence_diff: diff}} = socket) do
-    Process.cancel_timer(ref)
-    info = %{joins: diff.joins |> :maps.size(), leaves: diff.leaves |> :maps.size()}
+  # # handle the presence diff
+  # def handle_info(:presence_agg, %{assigns: %{presence_timer: ref, presence_diff: diff}} = socket) do
+  #   Process.cancel_timer(ref)
+  #   info = %{joins: diff.joins |> :maps.size(), leaves: diff.leaves |> :maps.size()}
 
-    if !Map.equal?(diff, @empty_presence_diff) do
-      add_message("presence_diff", info)
-    end
+  #   if !Map.equal?(diff, @empty_presence_diff) do
+  #     add_message("presence_diff", info)
+  #   end
 
-    presence_timer = Process.send_after(self(), :presence_agg, @timeout_presence_diff)
+  #   presence_timer = Process.send_after(self(), :presence_agg, @timeout_presence_diff)
 
-    {:noreply,
-     socket
-     |> assign(presence_timer: presence_timer)
-     |> assign(presence_diff: @empty_presence_diff)}
-  end
+  #   {:noreply,
+  #    socket
+  #    |> assign(presence_timer: presence_timer)
+  #    |> assign(presence_diff: @empty_presence_diff)}
+  # end
 
   # handle the broadcast from BroadcastController
   def handle_info({:event, %{"type" => type} = event}, %{assigns: %{topic: _topic}} = socket) do

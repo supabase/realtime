@@ -40,10 +40,10 @@ defmodule Multiplayer.Application do
       MultiplayerWeb.Endpoint,
       # Start a worker by calling: Multiplayer.Worker.start_link(arg)
       # {Multiplayer.Worker, arg}
-      MultiplayerWeb.Presence,
-      Multiplayer.PromEx,
-      Multiplayer.PresenceNotify,
-      Multiplayer.SessionsHooksBroadway
+      # MultiplayerWeb.Presence,
+      Multiplayer.PromEx
+      # Multiplayer.PresenceNotify
+      # Multiplayer.SessionsHooksBroadway
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
