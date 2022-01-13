@@ -19,10 +19,11 @@ defmodule RealtimeWeb.RealtimeChannel do
         params,
         %Socket{channel_pid: channel_pid, assigns: %{access_token: access_token}} = socket
       ) do
-    token = case params do
-      %{"user_token" => token} -> token
-      _ -> access_token
-    end
+    token =
+      case params do
+        %{"user_token" => token} -> token
+        _ -> access_token
+      end
 
     with {:ok, %{"role" => role} = claims} <- ChannelsAuthorization.authorize(token),
          bin_id <- Ecto.UUID.bingenerate(),

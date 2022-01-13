@@ -5,6 +5,7 @@ defmodule Realtime.RlsReplicationsTest do
 
   @slot_name "test_realtime_slot_name"
   @publication_name "supabase_realtime_test"
+  @max_changes 10
   @max_record_bytes 1_048_576
 
   setup_all do
@@ -43,7 +44,7 @@ defmodule Realtime.RlsReplicationsTest do
 
   test "list_changes/2, empty response" do
     prepare_replication(@slot_name, false)
-    {:ok, res} = list_changes(@slot_name, @publication_name, @max_record_bytes)
+    {:ok, res} = list_changes(@slot_name, @publication_name, @max_changes, @max_record_bytes)
 
     res2 =
       Enum.filter(res.rows, fn
@@ -61,7 +62,7 @@ defmodule Realtime.RlsReplicationsTest do
     Process.sleep(500)
 
     {:ok, %{rows: [[record, _, _, _]]}} =
-      list_changes(@slot_name, @publication_name, @max_record_bytes)
+      list_changes(@slot_name, @publication_name, @max_changes, @max_record_bytes)
 
     columns = [
       %{"name" => "id", "type" => "int8"},
@@ -84,7 +85,7 @@ defmodule Realtime.RlsReplicationsTest do
     Process.sleep(500)
 
     {:ok, %{rows: [_, [record, _, _, errors]]}} =
-      list_changes(@slot_name, @publication_name, @max_record_bytes)
+      list_changes(@slot_name, @publication_name, @max_changes, @max_record_bytes)
 
     columns = [
       %{"name" => "id", "type" => "int8"},

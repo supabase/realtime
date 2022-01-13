@@ -32,6 +32,7 @@ defmodule Realtime.RLS.ReplicationPoller do
       publication: Keyword.fetch!(opts, :publication),
       slot_name: Keyword.fetch!(opts, :slot_name),
       temporary_slot: Keyword.fetch!(opts, :temporary_slot),
+      max_changes: Keyword.fetch!(opts, :max_changes),
       max_record_bytes: Keyword.fetch!(opts, :max_record_bytes)
     }
 
@@ -74,13 +75,14 @@ defmodule Realtime.RLS.ReplicationPoller do
           poll_ref: poll_ref,
           publication: publication,
           slot_name: slot_name,
+          max_changes: max_changes,
           max_record_bytes: max_record_bytes
         } = state
       ) do
     Process.cancel_timer(poll_ref)
 
     try do
-      Replications.list_changes(slot_name, publication, max_record_bytes)
+      Replications.list_changes(slot_name, publication, max_changes, max_record_bytes)
     catch
       :error, error -> {:error, error}
     end

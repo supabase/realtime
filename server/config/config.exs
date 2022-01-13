@@ -81,6 +81,9 @@ db_reconnect_backoff_max = System.get_env("DB_RECONNECT_BACKOFF_MAX", "120000") 
 replication_poll_interval = System.get_env("REPLICATION_POLL_INTERVAL", "300") |> String.to_integer()
 subscription_sync_interval = System.get_env("SUBSCRIPTION_SYNC_INTERVAL", "60000") |> String.to_integer()
 
+# max_changes (default 100): Soft limit for the number of database changes to fetch per replication poll
+max_changes = System.get_env("MAX_CHANGES", "100") |> String.to_integer()
+
 # max_record_bytes (default 1MB): Controls the maximum size of a WAL record that will be
 # emitted with complete record and old_record data. When the size of the wal2json record
 # exceeds max_record_bytes the record and old_record keys are set as empty objects {} and
@@ -109,6 +112,7 @@ config :realtime,
   webhook_headers: webhook_headers,
   replication_poll_interval: replication_poll_interval,
   subscription_sync_interval: subscription_sync_interval,
+  max_changes: max_changes,
   max_record_bytes: max_record_bytes
 
 config :realtime,
@@ -138,7 +142,7 @@ config :realtime, Endpoint,
   url: [host: "localhost"],
   http: [
     port: app_port,
-    transport_options: [max_connections: max_connections]    
+    transport_options: [max_connections: max_connections]
   ],
   render_errors: [view: ErrorView, accepts: ~w(html json)],
   pubsub_server: PubSub,

@@ -242,6 +242,7 @@ DB_RECONNECT_BACKOFF_MIN   # {number} Specify the minimum amount of time to wait
 DB_RECONNECT_BACKOFF_MAX   # {number} Specify the maximum amount of time to wait before reconnecting to database. Defaults to 120000 (milliseconds).
 REPLICATION_POLL_INTERVAL  # {number} Specify how often Realtime RLS should poll the replication slot for changes. Defaults to 300 (milliseconds).
 SUBSCRIPTION_SYNC_INTERVAL # {number} Specify how often Realtime RLS should confirm connected subscribers and the tables they're listening to. Defaults to 60000 (milliseconds).
+MAX_CHANGES                # {number} Soft limit for the number of database changes to fetch per replication poll. Notice: set to a smaller value as database changes grow in frequency and/or size.
 MAX_RECORD_BYTES           # {number} Controls the maximum size of a WAL record. When the size of the record exceeds max_record_bytes the record and old_record, if applicable, keys are set as empty objects and the errors output array will contain the string "Error 413: Payload Too Large". Defaults to 1048576 (bytes), which is 1MB.
 ```
 

@@ -94,6 +94,7 @@ defmodule Realtime.Application do
               publication: publication,
               slot_name: slot_name,
               temporary_slot: Application.fetch_env!(:realtime, :temporary_slot),
+              max_changes: Application.fetch_env!(:realtime, :max_changes),
               max_record_bytes: Application.fetch_env!(:realtime, :max_record_bytes)
             }
           ]
