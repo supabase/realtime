@@ -13,34 +13,18 @@ defmodule MultiplayerWeb.RealtimeChannel do
 
   @impl true
   def join(
-        topic,
+        "realtime:" <> sub_topic = topic,
         _,
-        %{
-          assigns: %{
-            scope: scope,
-            params: %{
-              user_id: user_id,
-              hooks: hooks
-            }
-          },
-          transport_pid: pid
-        } = socket
+        %{assigns: %{scope: scope, claims: claims}, transport_pid: pid} = socket
       ) do
-    # used for monitoring
-    Registry.register(
-      Multiplayer.Registry,
-      "topics",
-      {scope, topic, System.system_time(:second)}
-    )
-
-    Registry.register(
-      Multiplayer.Registry.Unique,
-      "sessions",
-      {pid, System.system_time(:second)}
-    )
+    # used for custom monitoring
+    channel_stats(pid, scope, topic)
 
     scope_topic_name = scope <> ":" <> topic
     make_scope_topic(socket, scope_topic_name)
+
+    subs_id = UUID.uuid1()
+    Ewalrus.subscribe(scope, subs_id, sub_topic, claims)
     # presence_timer = Process.send_after(self(), :presence_agg, @timeout_presence_diff)
 
     # Logger.debug("Hooks #{inspect(hooks)}")
@@ -55,6 +39,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
       |> assign(mq: [])
       # |> assign(presence_diff: @empty_presence_diff)
       |> assign(topic: topic)
+      |> assign(subs_id: subs_id)
 
     # if Application.fetch_env!(:multiplayer, :presence) do
     #   Multiplayer.PresenceNotify.track_me(self(), new_socket)
@@ -146,7 +131,8 @@ defmodule MultiplayerWeb.RealtimeChannel do
   end
 
   @impl true
-  def terminate(reason, _socket) do
+  def terminate(reason, %{assigns: %{scope: scope, subs_id: subs_id}}) do
+    Ewalrus.unsubscribe(scope, subs_id)
     Logger.debug(%{terminate: reason})
     :telemetry.execute([:prom_ex, :plugin, :multiplayer, :disconnected], %{})
     :ok
@@ -175,5 +161,19 @@ defmodule MultiplayerWeb.RealtimeChannel do
 
   defp add_message(event, messsage) do
     send(self(), {:message, messsage, event})
+  end
+
+  def channel_stats(pid, scope, topic) do
+    Registry.register(
+      Multiplayer.Registry,
+      "topics",
+      {scope, topic, System.system_time(:second)}
+    )
+
+    Registry.register(
+      Multiplayer.Registry.Unique,
+      "sessions",
+      {pid, System.system_time(:second)}
+    )
   end
 end
