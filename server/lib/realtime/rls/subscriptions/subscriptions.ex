@@ -133,66 +133,32 @@ defmodule Realtime.RLS.Subscriptions do
                   nil
                 end
 
-              topic
-              |> String.split(":")
-              |> case do
-                [schema, table, filters] ->
-                  filters
-                  |> String.split(~r/(\=|\.)/)
-                  |> case do
-                    [_, "eq", _] = filters ->
-                      [
-                        %{
-                          id: id,
-                          claims: claims,
-                          claims_role: claims_role,
-                          entities: Map.get(oids, {schema, table}, []),
-                          filters: filters,
-                          topic: topic
-                        }
-                        | acc
-                      ]
+              [schema_table_column | filter_value_list] = String.split(topic, "=eq.")
+              schema_table_column_list = String.split(schema_table_column, ":")
 
-                    _ ->
-                      [
-                        %{
-                          id: id,
-                          claims: claims,
-                          claims_role: claims_role,
-                          entities: [],
-                          filters: filters,
-                          topic: topic
-                        }
-                        | acc
-                      ]
-                  end
+              search_key =
+                case schema_table_column_list do
+                  [schema, table | _] -> {schema, table}
+                  [schema] -> {schema}
+                end
 
-                [schema, table] ->
-                  [
-                    %{
-                      id: id,
-                      claims: claims,
-                      claims_role: claims_role,
-                      entities: Map.get(oids, {schema, table}, []),
-                      filters: [],
-                      topic: topic
-                    }
-                    | acc
-                  ]
+              filters =
+                case filter_value_list do
+                  [value] -> [List.last(schema_table_column_list), "eq", value]
+                  _ -> []
+                end
 
-                [schema] ->
-                  [
-                    %{
-                      id: id,
-                      claims: claims,
-                      claims_role: claims_role,
-                      entities: Map.get(oids, {schema}, []),
-                      filters: [],
-                      topic: topic
-                    }
-                    | acc
-                  ]
-              end
+              [
+                %{
+                  id: id,
+                  claims: claims,
+                  claims_role: claims_role,
+                  entities: Map.get(oids, search_key, []),
+                  filters: filters,
+                  topic: topic
+                }
+                | acc
+              ]
             end)
 
           _ ->
