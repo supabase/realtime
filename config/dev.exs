@@ -1,4 +1,4 @@
-use Mix.Config
+import Config
 
 # For development, we disable any cache and enable
 # debugging and code reloading.
@@ -43,6 +43,7 @@ config :multiplayer, Multiplayer.PromEx,
     pool_size: 5,
     cowboy_opts: []
   ]
+
 # ## SSL Support
 #
 # In order to use HTTPS in development, a self-signed
