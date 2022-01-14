@@ -26,7 +26,7 @@ defmodule Realtime.RLS.Replications do
     end
   end
 
-  def list_changes(slot_name, publication, max_record_bytes) do
+  def list_changes(slot_name, publication, max_changes, max_record_bytes) do
     query(
       "with pub as (
         select
@@ -59,7 +59,7 @@ defmodule Realtime.RLS.Replications do
         from
           pub,
           pg_logical_slot_get_changes(
-            $2, null, null,
+            $2, null, $3,
             'include-pk', '1',
             'include-transaction', 'false',
             'include-timestamp', 'true',
@@ -78,7 +78,7 @@ defmodule Realtime.RLS.Replications do
         w2j,
         realtime.apply_rls(
           wal := w2j.data::jsonb,
-          max_record_bytes := $3
+          max_record_bytes := $4
         ) xyz(wal, is_rls_enabled, subscription_ids, errors)
       where
         w2j.w2j_add_tables <> ''
@@ -86,6 +86,7 @@ defmodule Realtime.RLS.Replications do
       [
         publication,
         slot_name,
+        max_changes,
         max_record_bytes
       ]
     )
