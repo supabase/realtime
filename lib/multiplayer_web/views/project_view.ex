@@ -11,9 +11,16 @@ defmodule MultiplayerWeb.ProjectView do
   end
 
   def render("project.json", %{project: project}) do
-    %{id: project.id,
+    %{
+      id: project.id,
       name: project.name,
       external_id: project.external_id,
-      jwt_secret: project.jwt_secret}
+      jwt_secret: project.jwt_secret,
+      db_host: project.db_host,
+      db_port: project.db_port,
+      db_name: project.db_name,
+      db_user: project.db_user,
+      db_password: project.db_password
+    }
   end
 end
