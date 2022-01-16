@@ -4,7 +4,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
   alias MultiplayerWeb.Presence
   alias Multiplayer.SessionsHooks
 
-  intercept ["presence_diff"]
+  # intercept(["presence_diff"])
   @empty_presence_diff %{joins: %{}, leaves: %{}}
   @timeout_presence_diff 1000
   @mbox_limit 100
@@ -23,14 +23,17 @@ defmodule MultiplayerWeb.RealtimeChannel do
     scope_topic_name = scope <> ":" <> topic
     make_scope_topic(socket, scope_topic_name)
 
-    subs_id = UUID.uuid1()
-    Ewalrus.subscribe(scope, subs_id, sub_topic, claims)
+    sub_id = UUID.uuid1()
+    # TODO: return sub_id from function
+    Ewalrus.subscribe(scope, sub_id, sub_topic, claims)
     # presence_timer = Process.send_after(self(), :presence_agg, @timeout_presence_diff)
 
     # Logger.debug("Hooks #{inspect(hooks)}")
     # hook = hooks["session.connected"]
     # SessionsHooks.connected(self(), user_id, hook.type, hook.url)
     # kick_ref = Process.send_after(self(), :kickout_time, @kickout_time)
+
+    Logger.debug("Start channel, #{inspect([sub_id: sub_id], pretty: true)}")
 
     new_socket =
       update_topic(socket, scope_topic_name)
@@ -39,7 +42,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
       |> assign(mq: [])
       # |> assign(presence_diff: @empty_presence_diff)
       |> assign(topic: topic)
-      |> assign(subs_id: subs_id)
+      |> assign(subs_id: sub_id)
 
     # if Application.fetch_env!(:multiplayer, :presence) do
     #   Multiplayer.PresenceNotify.track_me(self(), new_socket)
@@ -105,7 +108,8 @@ defmodule MultiplayerWeb.RealtimeChannel do
   # end
 
   # handle the broadcast from BroadcastController
-  def handle_info({:event, %{"type" => type} = event}, %{assigns: %{topic: _topic}} = socket) do
+  def handle_info({:event, %{type: type} = event}, %{assigns: %{topic: _topic}} = socket) do
+    Logger.debug("Got event, #{inspect(event, pretty: true)}")
     add_message(type, event)
     {:noreply, socket}
   end
@@ -120,7 +124,13 @@ defmodule MultiplayerWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_info(_, socket) do
+  # TODO: implement
+  def handle_info(%{event: "access_token"}, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_info(other, socket) do
+    Logger.error("Undefined msg #{inspect(other, pretty: true)}")
     {:noreply, socket}
   end
 
