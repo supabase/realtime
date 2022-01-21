@@ -75,8 +75,9 @@ config :logger, :console,
 config :phoenix, :json_library, Jason
 
 config :libcluster,
+  debug: false,
   topologies: [
-    fly: [
+    default: [
       # The selected clustering strategy. Required.
       strategy: Cluster.Strategy.Epmd,
       # Configuration for the provided strategy. Optional.
