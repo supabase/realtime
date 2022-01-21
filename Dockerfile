@@ -1,10 +1,10 @@
 ###
 ### Fist Stage - Building the Release
 ###
-FROM hexpm/elixir:1.12.1-erlang-24.0.1-alpine-3.13.3 AS build
+FROM hexpm/elixir:1.13.1-erlang-24.0.1-alpine-3.13.3 AS build
 
 # install build dependencies
-RUN apk add --no-cache build-base npm
+RUN apk add --no-cache build-base npm git
 
 # prepare build dir
 WORKDIR /app
@@ -67,10 +67,12 @@ COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/multiplayer ./
 
 ENV HOME=/app
 ENV MIX_ENV=prod
+ENV APP_NAME=multiplayer
+ENV APP_HOST=127.0.0.1
 ENV SECRET_KEY_BASE=nokey
-ENV PORT=4000
+# ENV PORT=4000
 
-COPY limits.sh ./limits.sh
+# COPY limits.sh ./limits.sh
 # RUN chmod +x /app/limits.sh
-ENTRYPOINT ["/app/limits.sh"]
+# ENTRYPOINT ["/app/limits.sh"]
 CMD ["bin/multiplayer", "start"]

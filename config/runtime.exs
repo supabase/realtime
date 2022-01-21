@@ -15,7 +15,7 @@ if config_env() == :prod do
   config :multiplayer, MultiplayerWeb.Endpoint,
     server: true,
     http: [
-      port: String.to_integer(System.get_env("PORT") || "4000"),
+      # port: String.to_integer(System.get_env("PORT") || "4000")
       # IMPORTANT: support IPv6 addresses
       # transport_options: [socket_opts: [:inet6]]
     ],

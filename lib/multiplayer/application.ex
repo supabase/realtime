@@ -10,7 +10,14 @@ defmodule Multiplayer.Application do
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
   def start(_type, _args) do
-    :ok = update_config_from_file("config.#{Mix.env()}.yml")
+    app_dir =
+      if System.get_env("MIX_ENV") == "prod" do
+        :code.root_dir()
+      else
+        "."
+      end
+
+    :ok = update_config_from_file("#{app_dir}/config.yml")
     topologies = Application.get_env(:libcluster, :topologies) || []
 
     if Application.fetch_env!(:multiplayer, :secure_channels) do
