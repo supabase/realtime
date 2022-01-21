@@ -104,11 +104,8 @@ defmodule Multiplayer.Application do
       |> Node.set_cookie()
     end
 
-    if cluster_conf["debug"] do
-      Application.put_env(:libcluster, :debug, true)
-    else
-      Application.put_env(:libcluster, :debug, false)
-    end
+    debug = if cluster_conf["debug"], do: true, else: false
+    Application.put_env(:libcluster, :debug, debug)
 
     topology = [
       strategy: Elixir.Cluster.Strategy.Kubernetes.DNS,
