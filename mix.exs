@@ -54,7 +54,7 @@ defmodule Multiplayer.MixProject do
       {:ex_json_schema, "~> 0.5"},
       {:recon, "~> 2.5"},
       {:broadway, "~> 1.0"},
-      {:ewalrus, git: "https://github.com/abc3/ewalrus"},
+      {:ewalrus, git: "https://github.com/abc3/ewalrus", tag: "0.1.2"},
       {:yaml_elixir, "~> 2.8.0"},
       {:httpoison, "~> 1.8"}
     ]

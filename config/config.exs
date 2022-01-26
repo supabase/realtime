@@ -10,7 +10,7 @@ require Logger
 
 # Channels are not secured by default in development and
 # are secured by default in production.
-rls = System.get_env("RLS") == "true"
+rls = System.get_env("RLS", "true") == "true"
 Logger.debug("RLS: #{inspect(rls)}")
 secure_channels = System.get_env("SECURE_CHANNELS") == "true"
 Logger.debug("SECURE_CHANNELS: #{inspect(secure_channels)}")
@@ -29,6 +29,7 @@ db_host = System.get_env("DB_HOST", "localhost")
 db_name = System.get_env("DB_NAME", "postgres")
 db_user = System.get_env("DB_USER", "postgres")
 db_password = System.get_env("DB_PASSWORD", "postgres")
+db_port = System.get_env("DB_PORT", "5432")
 
 # Configure your database
 config :multiplayer, Multiplayer.Repo,
@@ -36,6 +37,7 @@ config :multiplayer, Multiplayer.Repo,
   password: db_password,
   database: db_name,
   hostname: db_host,
+  port: db_port,
   show_sensitive_data_on_connection_error: true,
   pool_size: 3,
   queue_target: 5000

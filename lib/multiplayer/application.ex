@@ -85,7 +85,7 @@ defmodule Multiplayer.Application do
           :error
       end
     else
-      Logger.warning("Config file doesn't exists #{inspect(path)}")
+      Logger.warning("Custom config file doesn't exist #{inspect(path)}")
     end
   end
 
