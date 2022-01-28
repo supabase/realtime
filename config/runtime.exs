@@ -38,7 +38,7 @@ if config_env() == :prod do
     jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}")
 
   config :libcluster,
-    debug: true,
+    debug: false,
     topologies: [
       fly6pn: [
         strategy: Cluster.Strategy.DNSPoll,
