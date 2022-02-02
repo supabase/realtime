@@ -28,7 +28,7 @@ export default function Index() {
         key: dataSource.length + 1,
         type: msg.type,
         table: msg.schema + "." + msg.table,
-        record: msg.record ? JSON.stringify(msg.record) : "",
+        record: JSON.stringify(msg.record),
         old_record: JSON.stringify(msg.old_record),
         errors: JSON.stringify(msg.errors),
         columns: JSON.stringify(msg.columns),
