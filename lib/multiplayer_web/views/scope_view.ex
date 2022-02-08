@@ -14,7 +14,7 @@ defmodule MultiplayerWeb.ScopeView do
     %{
       id: scope.id,
       host: scope.host,
-      project_id: scope.project_id
+      tenant_id: scope.tenant_id
     }
   end
 end

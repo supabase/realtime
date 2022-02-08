@@ -19,12 +19,12 @@ defmodule MultiplayerWeb.UserSocketRls do
   def connect(params, socket, connect_info) do
     if Application.fetch_env!(:multiplayer, :secure_channels) do
       %{uri: %{host: host}, x_headers: headers} = connect_info
-      #  , hooks = Multiplayer.Api.get_hooks_by_project_id(project.id)
-      with project when project != nil <- Multiplayer.Api.get_project_by_host(host),
+      #  , hooks = Multiplayer.Api.get_hooks_by_tenant_id(tenant.id)
+      with tenant when tenant != nil <- Multiplayer.Api.get_tenant_by_host(host),
            token when token != nil <- access_token(params, headers),
-           {:ok, claims} <- authorize_conn(token, project.jwt_secret) do
+           {:ok, claims} <- authorize_conn(token, tenant.jwt_secret) do
         assigns = %{
-          scope: project.id,
+          scope: tenant.id,
           claims: claims,
           params: %{
             # hooks: hooks,
@@ -34,11 +34,11 @@ defmodule MultiplayerWeb.UserSocketRls do
 
         # TODO: check if connection exist
         Ewalrus.start(
-          project.id,
-          project.db_host,
-          project.db_name,
-          project.db_user,
-          project.db_password
+          tenant.id,
+          tenant.db_host,
+          tenant.db_name,
+          tenant.db_user,
+          tenant.db_password
         )
 
         {:ok, assign(socket, assigns)}

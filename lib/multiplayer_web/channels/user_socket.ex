@@ -27,19 +27,23 @@ defmodule MultiplayerWeb.UserSocket do
   end
 
   def connect(params, socket, %{uri: %{host: host}}) do
-    case Multiplayer.Api.get_project_by_host(host) do
+    case Multiplayer.Api.get_tenant_by_host(host) do
       nil ->
         Logger.error("Undefined host " <> host)
         :error
-      project ->
+
+      tenant ->
         token = Map.get(params, "apikey")
+
         case Application.fetch_env!(:multiplayer, :secure_channels)
-            |> authorize_conn(token, project.jwt_secret) do
+             |> authorize_conn(token, tenant.jwt_secret) do
           :ok ->
             user_id = Map.get(params, "user_id", UUID.uuid4())
-            assigns = %{scope: project.id, params: %{user_id: user_id}}
+            assigns = %{scope: tenant.id, params: %{user_id: user_id}}
             {:ok, assign(socket, assigns)}
-          _ -> :error
+
+          _ ->
+            :error
         end
     end
   end

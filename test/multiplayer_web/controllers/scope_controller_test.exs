@@ -13,18 +13,15 @@ defmodule MultiplayerWeb.ScopeControllerTest do
   @invalid_attrs %{host: nil}
 
   def fixture(:scope) do
-    {:ok, project} = Api.create_project(%{name: "project1", secret: "secret"})
-    attrs = Map.put(@create_attrs, :project_id, project.id)
+    {:ok, tenant} = Api.create_tenant(%{name: "tenant1", secret: "secret"})
+    attrs = Map.put(@create_attrs, :tenant_id, tenant.id)
     {:ok, scope} = Api.create_scope(attrs)
     scope
   end
 
   setup %{conn: conn} do
-    {:ok, project} = Api.create_project(%{name: "project1", secret: "secret"})
-    {:ok,
-      conn: put_req_header(conn, "accept", "application/json"),
-      project: project
-    }
+    {:ok, tenant} = Api.create_tenant(%{name: "tenant1", secret: "secret"})
+    {:ok, conn: put_req_header(conn, "accept", "application/json"), tenant: tenant}
   end
 
   describe "index" do
@@ -35,21 +32,22 @@ defmodule MultiplayerWeb.ScopeControllerTest do
   end
 
   describe "create scope" do
-    test "renders scope when data is valid", %{conn: conn, project: project} do
-      attrs = Map.put(@create_attrs, :project_id, project.id)
+    test "renders scope when data is valid", %{conn: conn, tenant: tenant} do
+      attrs = Map.put(@create_attrs, :tenant_id, tenant.id)
       conn = post(conn, Routes.scope_path(conn, :create), scope: attrs)
       assert %{"id" => id} = json_response(conn, 201)["data"]
 
       conn = get(conn, Routes.scope_path(conn, :show, id))
-      project_id = project.id
+      tenant_id = tenant.id
+
       assert %{
                "id" => id,
                "host" => "some host",
-               "project_id" => project_id
+               "tenant_id" => tenant_id
              } = json_response(conn, 200)["data"]
     end
 
-    test "renders errors when data is invalid", %{conn: conn, project: project} do
+    test "renders errors when data is invalid", %{conn: conn, tenant: tenant} do
       conn = post(conn, Routes.scope_path(conn, :create), scope: @create_attrs)
       assert json_response(conn, 422)["errors"] != %{}
     end

@@ -5,11 +5,11 @@ defmodule Multiplayer.Api.Hooks do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   schema "hooks" do
-    field :event, :string
-    field :type, :string
-    field :url, :string
+    field(:event, :string)
+    field(:type, :string)
+    field(:url, :string)
 
-    belongs_to :project, Multiplayer.Api.Project
+    belongs_to(:tenant, Multiplayer.Api.Tenant)
 
     timestamps()
   end
