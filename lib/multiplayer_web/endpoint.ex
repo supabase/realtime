@@ -1,5 +1,6 @@
 defmodule MultiplayerWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :multiplayer
+  require Logger
 
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
@@ -10,9 +11,16 @@ defmodule MultiplayerWeb.Endpoint do
     signing_salt: "5OUq5X4H"
   ]
 
-  socket "/socket", MultiplayerWeb.UserSocket,
+  socket_module = if Application.fetch_env!(:multiplayer, :rls) do
+    MultiplayerWeb.UserSocketRls
+  else
+    MultiplayerWeb.UserSocket
+  end
+  Logger.debug("User socket module: #{IO.inspect(socket_module)}")
+
+  socket "/socket", socket_module,
     websocket: [
-      connect_info: [:peer_data, :uri]
+      connect_info: [:peer_data, :uri, :x_headers]
     ],
     longpoll: false
 

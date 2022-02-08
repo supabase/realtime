@@ -1,10 +1,10 @@
 ###
 ### Fist Stage - Building the Release
 ###
-FROM hexpm/elixir:1.12.1-erlang-24.0.1-alpine-3.13.3 AS build
+FROM hexpm/elixir:1.13.1-erlang-24.0.1-alpine-3.13.3 AS build
 
 # install build dependencies
-RUN apk add --no-cache build-base npm
+RUN apk add --no-cache build-base npm git
 
 # prepare build dir
 WORKDIR /app
@@ -26,11 +26,11 @@ RUN mix deps.get --only prod && \
     mix deps.compile
 
 # install npm dependencies
-COPY assets/package.json assets/package-lock.json ./assets/
-RUN npm --prefix ./assets ci --progress=false --no-audit --loglevel=error
+# COPY assets/package.json assets/package-lock.json ./assets/
+# RUN npm --prefix ./assets ci --progress=false --no-audit --loglevel=error
 
 COPY priv priv
-COPY assets assets
+# COPY assets assets
 
 # NOTE: If using TailwindCSS, it uses a special "purge" step and that requires
 # the code in `lib` to see what is being used. Uncomment that here before
@@ -38,7 +38,7 @@ COPY assets assets
 COPY lib lib
 
 # build assets
-RUN npm run --prefix ./assets deploy
+# RUN npm run --prefix ./assets deploy
 RUN mix phx.digest
 
 # copy source here if not using TailwindCSS
@@ -67,10 +67,8 @@ COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/multiplayer ./
 
 ENV HOME=/app
 ENV MIX_ENV=prod
-ENV SECRET_KEY_BASE=nokey
-ENV PORT=4000
 
-COPY limits.sh ./limits.sh
+# COPY limits.sh ./limits.sh
 # RUN chmod +x /app/limits.sh
-ENTRYPOINT ["/app/limits.sh"]
+# ENTRYPOINT ["/app/limits.sh"]
 CMD ["bin/multiplayer", "start"]

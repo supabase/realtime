@@ -1,19 +1,16 @@
-# fly.toml file generated for multiplayer-dev on 2021-05-19T00:27:00-04:00
+# fly.toml file generated for multiplayer-staging on 2022-01-26T19:29:10+02:00
 
-app = "multiplayer-dev-post2ws"
+app = "multiplayer-staging"
 
 kill_signal = "SIGTERM"
 kill_timeout = 5
 
-[env]
-  DB_HOST = "multiplayer-postgres-dev.internal"
-  DB_NAME = "postgres"
-  DB_USER = "postgres"
-  DB_PASSWORD = "470fa633eb98963d4b96be868a9d663ba9c34977976bd39f"
-  DNS_NODES = "multiplayer-dev-post2ws.internal"
-
 [deploy]
- # release_command = "/app/bin/multiplayer eval Multiplayer.Release.migrate"
+  release_command = "/app/bin/multiplayer eval Multiplayer.Release.migrate"
+
+[env]
+  SECURE_CHANNELS = "true"
+  DNS_NODES = "multiplayer-staging.internal"
 
 [experimental]
   private_network = true
@@ -35,7 +32,7 @@ kill_timeout = 5
     port = 443
 
   [[services.tcp_checks]]
-    grace_period = "30s" # allow some time for startup
+    grace_period = "30s"
     interval = "15s"
     restart_limit = 6
     timeout = "2s"

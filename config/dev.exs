@@ -1,4 +1,4 @@
-use Mix.Config
+import Config
 
 # For development, we disable any cache and enable
 # debugging and code reloading.
@@ -21,16 +21,17 @@ config :multiplayer, MultiplayerWeb.Endpoint,
   http: [port: 4000],
   debug_errors: true,
   code_reloader: true,
-  check_origin: false,
-  watchers: [
-    node: [
-      "node_modules/webpack/bin/webpack.js",
-      "--mode",
-      "development",
-      "--watch-stdin",
-      cd: Path.expand("../assets", __DIR__)
-    ]
-  ]
+  check_origin: false
+
+# watchers: [
+#   node: [
+#     "node_modules/webpack/bin/webpack.js",
+#     "--mode",
+#     "development",
+#     "--watch-stdin",
+#     cd: Path.expand("../assets", __DIR__)
+#   ]
+# ]
 
 config :multiplayer, Multiplayer.PromEx,
   manual_metrics_start_delay: :no_delay,
@@ -43,6 +44,7 @@ config :multiplayer, Multiplayer.PromEx,
     pool_size: 5,
     cowboy_opts: []
   ]
+
 # ## SSL Support
 #
 # In order to use HTTPS in development, a self-signed
@@ -79,7 +81,9 @@ config :multiplayer, MultiplayerWeb.Endpoint,
   ]
 
 # Do not include metadata nor timestamps in development logs
-config :logger, :console, format: "[$level] $message\n"
+config :logger, :console,
+  format: "$time [$level] $message $metadata\n",
+  metadata: [:error_code, :file, :pid]
 
 # Set a higher stacktrace during development. Avoid configuring such
 # in production as building large stacktraces may be expensive.

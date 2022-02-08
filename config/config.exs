@@ -5,11 +5,15 @@
 # is restricted to this project.
 
 # General application configuration
-use Mix.Config
+import Config
+require Logger
 
 # Channels are not secured by default in development and
 # are secured by default in production.
-secure_channels = System.get_env("SECURE_CHANNELS", "true") != "false"
+rls = System.get_env("RLS", "true") == "true"
+Logger.debug("RLS: #{inspect(rls)}")
+secure_channels = System.get_env("SECURE_CHANNELS") == "true"
+Logger.debug("SECURE_CHANNELS: #{inspect(secure_channels)}")
 presence = System.get_env("PRESENCE", "true") != "false"
 
 api_key = System.get_env("API_KEY")
@@ -25,6 +29,7 @@ db_host = System.get_env("DB_HOST", "localhost")
 db_name = System.get_env("DB_NAME", "postgres")
 db_user = System.get_env("DB_USER", "postgres")
 db_password = System.get_env("DB_PASSWORD", "postgres")
+db_port = System.get_env("DB_PORT", "5432")
 
 # Configure your database
 config :multiplayer, Multiplayer.Repo,
@@ -32,6 +37,7 @@ config :multiplayer, Multiplayer.Repo,
   password: db_password,
   database: db_name,
   hostname: db_host,
+  port: db_port,
   show_sensitive_data_on_connection_error: true,
   pool_size: 3,
   queue_target: 5000
@@ -39,6 +45,7 @@ config :multiplayer, Multiplayer.Repo,
 config :multiplayer,
   ecto_repos: [Multiplayer.Repo],
   secure_channels: secure_channels,
+  rls: rls,
   jwt_claim_validators: jwt_claim_validators,
   api_key: api_key,
   presence: presence
@@ -70,8 +77,9 @@ config :logger, :console,
 config :phoenix, :json_library, Jason
 
 config :libcluster,
+  debug: false,
   topologies: [
-    fly: [
+    default: [
       # The selected clustering strategy. Required.
       strategy: Cluster.Strategy.Epmd,
       # Configuration for the provided strategy. Optional.

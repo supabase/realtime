@@ -224,4 +224,112 @@ defmodule Multiplayer.Api do
     Repo.one(query)
   end
 
+
+  alias Multiplayer.Api.Hooks
+
+  @doc """
+  Returns the list of hooks.
+
+  ## Examples
+
+      iex> list_hooks()
+      [%Hooks{}, ...]
+
+  """
+  def list_hooks do
+    Repo.all(Hooks)
+  end
+
+  @doc """
+  Gets a single hooks.
+
+  Raises `Ecto.NoResultsError` if the Hooks does not exist.
+
+  ## Examples
+
+      iex> get_hooks!(123)
+      %Hooks{}
+
+      iex> get_hooks!(456)
+      ** (Ecto.NoResultsError)
+
+  """
+  def get_hooks!(id), do: Repo.get!(Hooks, id)
+
+  def get_hooks_by_project_id(id) do
+    query = from h in Hooks,
+              where: h.project_id == ^id,
+              select: h
+    Enum.reduce(Repo.all(query), %{}, fn e, acc ->
+      hook = %{
+        type: e.type,
+        url: e.url
+      }
+      Map.put(acc, e.event, hook)
+    end)
+  end
+  @doc """
+  Creates a hooks.
+
+  ## Examples
+
+      iex> create_hooks(%{field: value})
+      {:ok, %Hooks{}}
+
+      iex> create_hooks(%{field: bad_value})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def create_hooks(attrs \\ %{}) do
+    %Hooks{}
+    |> Hooks.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Updates a hooks.
+
+  ## Examples
+
+      iex> update_hooks(hooks, %{field: new_value})
+      {:ok, %Hooks{}}
+
+      iex> update_hooks(hooks, %{field: bad_value})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def update_hooks(%Hooks{} = hooks, attrs) do
+    hooks
+    |> Hooks.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Deletes a hooks.
+
+  ## Examples
+
+      iex> delete_hooks(hooks)
+      {:ok, %Hooks{}}
+
+      iex> delete_hooks(hooks)
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def delete_hooks(%Hooks{} = hooks) do
+    Repo.delete(hooks)
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking hooks changes.
+
+  ## Examples
+
+      iex> change_hooks(hooks)
+      %Ecto.Changeset{data: %Hooks{}}
+
+  """
+  def change_hooks(%Hooks{} = hooks, attrs \\ %{}) do
+    Hooks.changeset(hooks, attrs)
+  end
 end

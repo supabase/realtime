@@ -1,4 +1,4 @@
-use Mix.Config
+import Config
 
 # For production, don't forget to configure the url host
 # to something meaningful, Phoenix uses this information
@@ -13,7 +13,9 @@ use Mix.Config
 #   url: [host: "multiplayer.dev", port: 80]
 
 # Do not print debug messages in production
-config :logger, level: :warning
+config :logger, :warning,
+  format: "$time [$level] $message $metadata\n",
+  metadata: [:error_code, :file, :pid]
 
 # ## SSL Support
 #
