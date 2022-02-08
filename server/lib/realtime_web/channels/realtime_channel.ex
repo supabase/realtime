@@ -6,7 +6,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Phoenix.Socket.Broadcast
   alias Realtime.SubscriptionManager
   alias Realtime.Metrics.SocketMonitor
-  alias RealtimeWeb.ChannelsAuthorization
+  alias RealtimeWeb.{ChannelsAuthorization, Endpoint}
 
   @verify_token_interval 60_000
 
@@ -25,7 +25,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         _ -> access_token
       end
 
-    with {:ok, %{"role" => role} = claims} <- ChannelsAuthorization.authorize(token),
+    with {:ok, claims} <- ChannelsAuthorization.authorize(token),
          bin_id <- Ecto.UUID.bingenerate(),
          :ok <-
            SubscriptionManager.track_topic_subscriber(%{
@@ -39,7 +39,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       send(self(), :after_join)
       ref = Process.send_after(self(), :verify_access_token, @verify_token_interval)
 
-      {:ok, assign(socket, %{id: bin_id, access_token: token, role: role, verify_ref: ref})}
+      {:ok, assign(socket, %{id: bin_id, access_token: token, verify_ref: ref})}
     else
       _ -> {:error, %{reason: "error occurred when joining #{topic} with user token"}}
     end
@@ -54,21 +54,20 @@ defmodule RealtimeWeb.RealtimeChannel do
         :after_join,
         %Socket{
           assigns: %{id: id, access_token: access_token},
-          pubsub_server: pubsub_server,
           serializer: serializer,
           topic: topic,
           transport_pid: transport_pid
         } = socket
       ) do
-    case ChannelsAuthorization.authorize(access_token) do
-      {:ok, _} ->
-        :ok = PubSub.unsubscribe(pubsub_server, topic)
-        subscriber_fastlane = {:subscriber_fastlane, transport_pid, serializer, id}
-        :ok = PubSub.subscribe(pubsub_server, topic, metadata: subscriber_fastlane)
-        {:noreply, socket}
-
-      _ ->
-        {:stop, :invalid_access_token, socket}
+    with {:ok, _} <- ChannelsAuthorization.authorize(access_token),
+         :ok <- Endpoint.unsubscribe(topic),
+         :ok <-
+           Endpoint.subscribe(topic,
+             metadata: {:subscriber_fastlane, transport_pid, serializer, id}
+           ) do
+      {:noreply, socket}
+    else
+      error -> {:stop, error, socket}
     end
   end
 
@@ -129,26 +128,32 @@ defmodule RealtimeWeb.RealtimeChannel do
         "access_token",
         %{"access_token" => fresh_token},
         %Socket{
-          assigns: %{id: id, access_token: _, role: role},
+          assigns: %{id: id, access_token: access_token},
           channel_pid: channel_pid,
           topic: "realtime:" <> subtopic
         } = socket
-      ) do
-    if role == "authenticated" do
-      with {:ok, %{"role" => new_role} = claims} <- ChannelsAuthorization.authorize(fresh_token),
-           :ok <-
-             SubscriptionManager.track_topic_subscriber(%{
-               id: id,
-               channel_pid: channel_pid,
-               claims: claims,
-               topic: subtopic
-             }) do
-        {:noreply, assign(socket, %{access_token: fresh_token, role: new_role})}
-      else
-        _ -> {:stop, :invalid_access_token, socket}
-      end
-    else
-      {:noreply, socket}
+      )
+      when is_binary(fresh_token) do
+    case ChannelsAuthorization.authorize(fresh_token) do
+      {:ok, fresh_claims} ->
+        new_socket =
+          if fresh_token != access_token do
+            SubscriptionManager.track_topic_subscriber(%{
+              id: id,
+              channel_pid: channel_pid,
+              claims: fresh_claims,
+              topic: subtopic
+            })
+
+            assign(socket, :access_token, fresh_token)
+          else
+            socket
+          end
+
+        {:noreply, new_socket}
+
+      _ ->
+        {:stop, :invalid_access_token, socket}
     end
   end
 
