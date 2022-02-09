@@ -3,14 +3,14 @@ defmodule Multiplayer.Repo.Migrations.CreateScopes do
 
   def change do
     create table(:scopes, primary_key: false) do
-      add :id, :binary_id, primary_key: true
-      add :host, :string
-      add :project_id, references(:projects, on_delete: :nothing, type: :binary_id)
+      add(:id, :binary_id, primary_key: true)
+      add(:host, :string)
+      add(:tenant_id, references(:tenants, on_delete: :nothing, type: :binary_id))
 
       timestamps()
     end
 
-    create index(:scopes, [:host])
-    create unique_index(:scopes, [:project_id, :host])
+    create(index(:scopes, [:host]))
+    create(unique_index(:scopes, [:tenant_id, :host]))
   end
 end

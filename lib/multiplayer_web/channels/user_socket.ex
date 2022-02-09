@@ -8,17 +8,7 @@ defmodule MultiplayerWeb.UserSocket do
   channel "realtime:*", MultiplayerWeb.RealtimeChannel
 
   @landing_host "multiplayer.red"
-  # Socket params are passed from the client and can
-  # be used to verify and authenticate a user. After
-  # verification, you can put default assigns into
-  # the socket that will be set for all channels, ie
-  #
-  #     {:ok, assign(socket, :user_id, verified_user_id)}
-  #
-  # To deny connection, return `:error`.
-  #
-  # See `Phoenix.Token` documentation for examples in
-  # performing token verification on connect.
+
   @impl true
   def connect(params, socket, %{uri: %{host: @landing_host}}) do
     {_, params} = Map.pop(params, "vsn")
@@ -26,43 +16,57 @@ defmodule MultiplayerWeb.UserSocket do
     {:ok, assign(socket, :params, params)}
   end
 
-  def connect(params, socket, %{uri: %{host: host}}) do
-    case Multiplayer.Api.get_project_by_host(host) do
-      nil ->
-        Logger.error("Undefined host " <> host)
-        :error
-      project ->
-        token = Map.get(params, "apikey")
-        case Application.fetch_env!(:multiplayer, :secure_channels)
-            |> authorize_conn(token, project.jwt_secret) do
-          :ok ->
-            user_id = Map.get(params, "user_id", UUID.uuid4())
-            assigns = %{scope: project.id, params: %{user_id: user_id}}
-            {:ok, assign(socket, assigns)}
-          _ -> :error
-        end
+  def connect(params, socket, connect_info) do
+    if Application.fetch_env!(:multiplayer, :secure_channels) do
+      %{uri: %{host: host}, x_headers: headers} = connect_info
+      #  , hooks = Multiplayer.Api.get_hooks_by_tenant_id(tenant.id)
+      with tenant when tenant != nil <- Multiplayer.Api.get_tenant_by_host(host),
+           token when token != nil <- access_token(params, headers),
+           {:ok, claims} <- authorize_conn(token, tenant.jwt_secret) do
+        assigns = %{
+          scope: tenant.id,
+          claims: claims,
+          params: %{
+            # hooks: hooks,
+            ref: make_ref()
+          }
+        }
+
+        Ewalrus.start(
+          tenant.id,
+          tenant.db_host,
+          tenant.db_name,
+          tenant.db_user,
+          tenant.db_password
+        )
+
+        {:ok, assign(socket, assigns)}
+      else
+        _ ->
+          Logger.error("Auth error")
+          :error
+      end
     end
   end
 
-  # Socket id's are topics that allow you to identify all sockets for a given user:
-  #
-  #     def id(socket), do: "user_socket:#{socket.assigns.user_id}"
-  #
-  # Would allow you to broadcast a "disconnect" event and terminate
-  # all active sockets and channels for a given user:
-  #
-  #     MultiplayerWeb.Endpoint.broadcast("user_socket:#{user.id}", "disconnect", %{})
-  #
-  # Returning `nil` makes this socket anonymous.
+  def access_token(params, headers) do
+    case :proplists.lookup("x-api-key", headers) do
+      :none -> Map.get(params, "apikey")
+      token -> token
+    end
+  end
+
   @impl true
   def id(_socket), do: nil
 
-  defp authorize_conn(true, token, secret) do
+  defp authorize_conn(token, secret) do
     case ChannelsAuthorization.authorize(token, secret) do
-      {:ok, _} -> :ok
-      _ -> :error
+      # TODO: check necessary fields
+      {:ok, %{"role" => _} = claims} ->
+        {:ok, claims}
+
+      _ ->
+        :error
     end
   end
-
-  defp authorize_conn(false, _, _), do: :ok
 end

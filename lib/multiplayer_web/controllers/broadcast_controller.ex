@@ -7,7 +7,7 @@ defmodule MultiplayerWeb.BroadcastController do
     PhoenixSwagger.Path.post("/api/broadcast")
     tag("Broadcast")
     description("Broadcast message to the scope")
-    parameter("multiplayer-project-external_id", :header, :string, "", required: true)
+    parameter("multiplayer-tenant-external_id", :header, :string, "", required: true)
 
     parameters do
       broadcast(:body, Schema.ref(:Broacast), "user attributes", required: true)
@@ -19,18 +19,18 @@ defmodule MultiplayerWeb.BroadcastController do
 
   @spec post(Plug.Conn.t(), any) :: Plug.Conn.t()
   def post(conn, %{"changes" => changes}) do
-    [external_id] = get_req_header(conn, "multiplayer-project-external-id")
+    [external_id] = get_req_header(conn, "multiplayer-tenant-external-id")
 
-    case Api.get_project_by_external_id(external_id) do
+    case Api.get_tenant_by_external_id(external_id) do
       nil ->
         send_resp(conn, 400, "")
 
-      project ->
+      tenant ->
         Enum.each(changes, fn event ->
           Phoenix.PubSub.broadcast(
             Multiplayer.PubSub,
             # topic,
-            project.id <> ":" <> "realtime:*",
+            tenant.id <> ":" <> "realtime:*",
             {:event, event}
           )
         end)

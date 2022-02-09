@@ -1,10 +1,10 @@
-defmodule Multiplayer.Api.Project do
+defmodule Multiplayer.Api.Tenant do
   use Ecto.Schema
   import Ecto.Changeset
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-  schema "projects" do
+  schema "tenants" do
     field(:name, :string)
     field(:external_id, :string)
     field(:jwt_secret, :string)
@@ -19,8 +19,8 @@ defmodule Multiplayer.Api.Project do
   end
 
   @doc false
-  def changeset(project, attrs) do
-    project
+  def changeset(tenant, attrs) do
+    tenant
     |> cast(attrs, [
       :name,
       :external_id,
