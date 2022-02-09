@@ -76,6 +76,12 @@ config :logger, :console,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+config :logflare_logger_backend,
+  url: "https://api.logflare.app",
+  flush_interval: 1_000,
+  max_batch_size: 50,
+  metadata: :all
+
 config :libcluster,
   debug: false,
   topologies: [
