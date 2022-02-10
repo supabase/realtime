@@ -34,20 +34,16 @@ defmodule MultiplayerWeb.Router do
   end
 
   defp check_api_key(conn, _) do
-    case Application.fetch_env!(:multiplayer, :api_key) do
-      nil ->
+    api_key = Application.fetch_env!(:multiplayer, :api_key)
+
+    case get_req_header(conn, "x-api-key") do
+      [^api_key] ->
         conn
 
-      api_key ->
-        case get_req_header(conn, "x-api-key") do
-          [^api_key] ->
-            conn
-
-          _ ->
-            conn
-            |> send_resp(403, "")
-            |> halt()
-        end
+      _ ->
+        conn
+        |> send_resp(403, "")
+        |> halt()
     end
   end
 
