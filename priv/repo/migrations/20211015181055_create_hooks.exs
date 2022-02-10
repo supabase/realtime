@@ -3,15 +3,15 @@ defmodule Multiplayer.Repo.Migrations.CreateHooks do
 
   def change do
     create table(:hooks, primary_key: false) do
-      add :id, :binary_id, primary_key: true
-      add :type, :string
-      add :event, :string
-      add :url, :string
-      add :project_id, references(:projects, on_delete: :nothing, type: :binary_id)
+      add(:id, :binary_id, primary_key: true)
+      add(:type, :string)
+      add(:event, :string)
+      add(:url, :string)
+      add(:tenant_id, references(:tenants, on_delete: :nothing, type: :binary_id))
 
       timestamps()
     end
 
-    create unique_index(:hooks, [:project_id, :type, :event])
+    create(unique_index(:hooks, [:tenant_id, :type, :event]))
   end
 end

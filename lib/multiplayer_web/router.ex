@@ -23,7 +23,7 @@ defmodule MultiplayerWeb.Router do
   scope "/api", MultiplayerWeb do
     pipe_through :api
     post "/broadcast", BroadcastController, :post
-    resources "/projects", ProjectController
+    resources "/tenants", TenantController
     resources "/scopes", ScopeController
   end
 
@@ -35,10 +35,14 @@ defmodule MultiplayerWeb.Router do
 
   defp check_api_key(conn, _) do
     case Application.fetch_env!(:multiplayer, :api_key) do
-      nil -> conn
+      nil ->
+        conn
+
       api_key ->
         case get_req_header(conn, "x-api-key") do
-          [^api_key] -> conn
+          [^api_key] ->
+            conn
+
           _ ->
             conn
             |> send_resp(403, "")
@@ -60,17 +64,16 @@ defmodule MultiplayerWeb.Router do
         ApiKeyAuth: %{
           type: "apiKey",
           name: "X-API-Key",
-          description:
-          "API Token must be provided via `X-API-Key: Token ` header",
-      in: "header"
+          description: "API Token must be provided via `X-API-Key: Token ` header",
+          in: "header"
         }
       },
       consumes: ["application/json"],
       produces: ["application/json"],
       tags: [
-        %{name: "Projects"},
+        %{name: "Tenants"},
         %{name: "Scopes"},
-        %{name: "Broadcast"},
+        %{name: "Broadcast"}
       ]
     }
   end

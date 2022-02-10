@@ -3,66 +3,74 @@ defmodule Multiplayer.ApiTest do
 
   alias Multiplayer.Api
 
-  describe "projects" do
-    alias Multiplayer.Api.Project
+  describe "tenants" do
+    alias Multiplayer.Api.Tenant
 
-    @valid_attrs %{external_id: "some external_id", jwt_secret: "some jwt_secret", name: "some name"}
-    @update_attrs %{external_id: "some updated external_id", jwt_secret: "some updated jwt_secret", name: "some updated name"}
+    @valid_attrs %{
+      external_id: "some external_id",
+      jwt_secret: "some jwt_secret",
+      name: "some name"
+    }
+    @update_attrs %{
+      external_id: "some updated external_id",
+      jwt_secret: "some updated jwt_secret",
+      name: "some updated name"
+    }
     @invalid_attrs %{external_id: nil, jwt_secret: nil, name: nil}
 
-    def project_fixture(attrs \\ %{}) do
-      {:ok, project} =
+    def tenant_fixture(attrs \\ %{}) do
+      {:ok, tenant} =
         attrs
         |> Enum.into(@valid_attrs)
-        |> Api.create_project()
+        |> Api.create_tenant()
 
-      project
+      tenant
     end
 
-    test "list_projects/0 returns all projects" do
-      project = project_fixture()
-      assert Api.list_projects() == [project]
+    test "list_tenants/0 returns all tenants" do
+      tenant = tenant_fixture()
+      assert Api.list_tenants() == [tenant]
     end
 
-    test "get_project!/1 returns the project with given id" do
-      project = project_fixture()
-      assert Api.get_project!(project.id) == project
+    test "get_tenant!/1 returns the tenant with given id" do
+      tenant = tenant_fixture()
+      assert Api.get_tenant!(tenant.id) == tenant
     end
 
-    test "create_project/1 with valid data creates a project" do
-      assert {:ok, %Project{} = project} = Api.create_project(@valid_attrs)
-      assert project.external_id == "some external_id"
-      assert project.jwt_secret == "some jwt_secret"
-      assert project.name == "some name"
+    test "create_tenant/1 with valid data creates a tenant" do
+      assert {:ok, %Tenant{} = tenant} = Api.create_tenant(@valid_attrs)
+      assert tenant.external_id == "some external_id"
+      assert tenant.jwt_secret == "some jwt_secret"
+      assert tenant.name == "some name"
     end
 
-    test "create_project/1 with invalid data returns error changeset" do
-      assert {:error, %Ecto.Changeset{}} = Api.create_project(@invalid_attrs)
+    test "create_tenant/1 with invalid data returns error changeset" do
+      assert {:error, %Ecto.Changeset{}} = Api.create_tenant(@invalid_attrs)
     end
 
-    test "update_project/2 with valid data updates the project" do
-      project = project_fixture()
-      assert {:ok, %Project{} = project} = Api.update_project(project, @update_attrs)
-      assert project.external_id == "some updated external_id"
-      assert project.jwt_secret == "some updated jwt_secret"
-      assert project.name == "some updated name"
+    test "update_tenant/2 with valid data updates the tenant" do
+      tenant = tenant_fixture()
+      assert {:ok, %Tenant{} = tenant} = Api.update_tenant(tenant, @update_attrs)
+      assert tenant.external_id == "some updated external_id"
+      assert tenant.jwt_secret == "some updated jwt_secret"
+      assert tenant.name == "some updated name"
     end
 
-    test "update_project/2 with invalid data returns error changeset" do
-      project = project_fixture()
-      assert {:error, %Ecto.Changeset{}} = Api.update_project(project, @invalid_attrs)
-      assert project == Api.get_project!(project.id)
+    test "update_tenant/2 with invalid data returns error changeset" do
+      tenant = tenant_fixture()
+      assert {:error, %Ecto.Changeset{}} = Api.update_tenant(tenant, @invalid_attrs)
+      assert tenant == Api.get_tenant!(tenant.id)
     end
 
-    test "delete_project/1 deletes the project" do
-      project = project_fixture()
-      assert {:ok, %Project{}} = Api.delete_project(project)
-      assert_raise Ecto.NoResultsError, fn -> Api.get_project!(project.id) end
+    test "delete_tenant/1 deletes the tenant" do
+      tenant = tenant_fixture()
+      assert {:ok, %Tenant{}} = Api.delete_tenant(tenant)
+      assert_raise Ecto.NoResultsError, fn -> Api.get_tenant!(tenant.id) end
     end
 
-    test "change_project/1 returns a project changeset" do
-      project = project_fixture()
-      assert %Ecto.Changeset{} = Api.change_project(project)
+    test "change_tenant/1 returns a tenant changeset" do
+      tenant = tenant_fixture()
+      assert %Ecto.Changeset{} = Api.change_tenant(tenant)
     end
   end
 
@@ -74,10 +82,11 @@ defmodule Multiplayer.ApiTest do
     @invalid_attrs %{host: nil}
 
     def scope_fixture(attrs \\ %{}) do
-      {:ok, project} = Api.create_project(%{name: "project1", secret: "secret"})
+      {:ok, tenant} = Api.create_tenant(%{name: "tenant1", secret: "secret"})
+
       {:ok, scope} =
         attrs
-        |> Map.put(:project_id, project.id)
+        |> Map.put(:tenant_id, tenant.id)
         |> Enum.into(@valid_attrs)
         |> Api.create_scope()
 
@@ -95,8 +104,8 @@ defmodule Multiplayer.ApiTest do
     end
 
     test "create_scope/1 with valid data creates a scope" do
-      {:ok, project} = Api.create_project(%{name: "project1", secret: "secret"})
-      attrs = Map.put(@valid_attrs, :project_id, project.id)
+      {:ok, tenant} = Api.create_tenant(%{name: "tenant1", secret: "secret"})
+      attrs = Map.put(@valid_attrs, :tenant_id, tenant.id)
       assert {:ok, %Scope{} = scope} = Api.create_scope(attrs)
       assert scope.host == "some host"
     end
@@ -133,7 +142,11 @@ defmodule Multiplayer.ApiTest do
     alias Multiplayer.Api.Hooks
 
     @valid_attrs %{event: "some event", type: "some type", url: "some url"}
-    @update_attrs %{event: "some updated event", type: "some updated type", url: "some updated url"}
+    @update_attrs %{
+      event: "some updated event",
+      type: "some updated type",
+      url: "some updated url"
+    }
     @invalid_attrs %{event: nil, type: nil, url: nil}
 
     def hooks_fixture(attrs \\ %{}) do
