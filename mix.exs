@@ -47,7 +47,7 @@ defmodule Multiplayer.MixProject do
       {:plug_cowboy, "~> 2.0"},
       {:libcluster, "~> 3.3"},
       {:uuid, "~> 1.1"},
-      {:prom_ex, "~> 1.2.2"},
+      {:prom_ex, "~> 1.4.1"},
       {:mock, "~> 0.3.0", only: :test},
       {:joken, "~> 2.3.0"},
       {:phoenix_swagger, "~> 0.8"},
@@ -56,6 +56,7 @@ defmodule Multiplayer.MixProject do
       {:broadway, "~> 1.0"},
       {:ewalrus, git: "https://github.com/abc3/ewalrus", tag: "0.1.2"},
       {:yaml_elixir, "~> 2.8.0"},
+      {:logflare_logger_backend, "~> 0.11.0"},
       {:httpoison, "~> 1.8"}
     ]
   end
