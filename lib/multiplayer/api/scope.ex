@@ -6,6 +6,7 @@ defmodule Multiplayer.Api.Scope do
   @foreign_key_type :binary_id
   schema "scopes" do
     field(:host, :string)
+    field(:active, :boolean)
 
     belongs_to(:tenant, Multiplayer.Api.Tenant)
 
