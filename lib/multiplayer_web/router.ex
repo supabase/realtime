@@ -22,7 +22,6 @@ defmodule MultiplayerWeb.Router do
 
   scope "/api", MultiplayerWeb do
     pipe_through :api
-    post "/broadcast", BroadcastController, :post
     resources "/tenants", TenantController
     resources "/scopes", ScopeController
   end
@@ -68,8 +67,7 @@ defmodule MultiplayerWeb.Router do
       produces: ["application/json"],
       tags: [
         %{name: "Tenants"},
-        %{name: "Scopes"},
-        %{name: "Broadcast"}
+        %{name: "Scopes"}
       ]
     }
   end

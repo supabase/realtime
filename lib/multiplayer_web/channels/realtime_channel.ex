@@ -107,7 +107,6 @@ defmodule MultiplayerWeb.RealtimeChannel do
   #    |> assign(presence_diff: @empty_presence_diff)}
   # end
 
-  # handle the broadcast from BroadcastController
   def handle_info({:event, %{type: type} = event}, %{assigns: %{topic: _topic}} = socket) do
     Logger.debug("Got event, #{inspect(event, pretty: true)}")
     add_message(type, event)
