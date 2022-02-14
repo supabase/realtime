@@ -106,6 +106,7 @@ defmodule MultiplayerWeb.TenantController do
             name(:string, "", required: false, example: "tenant1")
             jwt_secret(:string, "", required: false, example: "big_secret")
             external_id(:string, "", required: false, example: "okumviwlylkmpkoicbrc")
+            active(:boolean, "", required: false, example: true)
           end
         end,
       TenantReq:
@@ -116,6 +117,12 @@ defmodule MultiplayerWeb.TenantController do
             name(:string, "", required: false, example: "tenant1")
             jwt_secret(:string, "", required: true, example: "big_secret")
             external_id(:string, "", required: true, example: "okumviwlylkmpkoicbrc")
+            active(:boolean, "", required: false, example: true)
+            db_host(:string, "", required: true, example: "db.awesome.supabase.net")
+            db_port(:string, "", required: true, example: "6543")
+            db_name(:string, "", required: true, example: "postgres")
+            db_user(:string, "", required: true, example: "postgres")
+            db_password(:string, "", required: true, example: "postgres")
           end
         end,
       Tenants:

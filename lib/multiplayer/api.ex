@@ -206,7 +206,7 @@ defmodule Multiplayer.Api do
       from(s in Scope,
         join: p in Tenant,
         on: s.tenant_id == p.id,
-        where: s.host == ^host,
+        where: s.host == ^host and s.active == true and p.active == true,
         select: p
       )
 

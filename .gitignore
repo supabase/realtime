@@ -22,10 +22,9 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 multiplayer-*.tar
 
-# Since we are building assets from assets/,
-# we ignore priv/static. You may want to comment
-# this depending on your deployment strategy.
-/priv/static/
+# Ignore all files except the swagger schema.
+/priv/static/*
+!/priv/static/swagger.json
 
 node_modules
 

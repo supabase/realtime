@@ -13,6 +13,7 @@ defmodule Multiplayer.Api.Tenant do
     field(:db_name, :string)
     field(:db_user, :string)
     field(:db_password, :string)
+    field(:active, :boolean)
     has_many(:scopes, Multiplayer.Api.Scope)
 
     timestamps()

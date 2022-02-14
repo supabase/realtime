@@ -104,6 +104,7 @@ defmodule MultiplayerWeb.ScopeController do
           properties do
             id(:string, "", required: false, example: "0f4004c0-1ce8-454d-b88a-c8a9be93dc24")
             host(:string, "", required: false, example: "myawesomedomain.com")
+            active(:boolean, "", required: false, example: true)
 
             tenant_id(:string, "",
               required: false,
@@ -117,7 +118,7 @@ defmodule MultiplayerWeb.ScopeController do
 
           properties do
             host(:string, "", required: true, example: "myawesomedomain.com")
-
+            active(:boolean, "", required: false, example: true)
             tenant_id(:string, "", required: true, example: "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19")
           end
         end,
