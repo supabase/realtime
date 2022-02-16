@@ -14,6 +14,7 @@ defmodule Multiplayer.Api.Tenant do
     field(:db_user, :string)
     field(:db_password, :string)
     field(:active, :boolean)
+    field(:region, :string)
     has_many(:scopes, Multiplayer.Api.Scope)
 
     timestamps()
@@ -26,12 +27,23 @@ defmodule Multiplayer.Api.Tenant do
       :name,
       :external_id,
       :jwt_secret,
+      :active,
+      :region,
       :db_host,
       :db_port,
       :db_name,
       :db_user,
       :db_password
     ])
-    |> validate_required([:name])
+    |> validate_required([
+      :external_id,
+      :jwt_secret,
+      :region,
+      :db_host,
+      :db_port,
+      :db_name,
+      :db_user,
+      :db_password
+    ])
   end
 end

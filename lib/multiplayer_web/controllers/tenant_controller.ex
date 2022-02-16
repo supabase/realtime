@@ -49,8 +49,9 @@ defmodule MultiplayerWeb.TenantController do
     response(200, "Success", :TenantResponse)
   end
 
-  def show(conn, %{"id" => id}) do
-    tenant = Api.get_tenant!(id)
+  def show(conn, %{"id" => id} = params) do
+    tenant = get_tenant(id, params["external_id"])
+
     render(conn, "show.json", tenant: tenant)
   end
 
@@ -66,8 +67,8 @@ defmodule MultiplayerWeb.TenantController do
     response(200, "Success", :TenantResponse)
   end
 
-  def update(conn, %{"id" => id, "tenant" => tenant_params}) do
-    tenant = Api.get_tenant!(id)
+  def update(conn, %{"id" => id, "tenant" => tenant_params} = params) do
+    tenant = get_tenant(id, params["external_id"])
 
     with {:ok, %Tenant{} = tenant} <- Api.update_tenant(tenant, tenant_params) do
       render(conn, "show.json", tenant: tenant)
@@ -87,11 +88,19 @@ defmodule MultiplayerWeb.TenantController do
     response(200, "No Content - Deleted Successfully")
   end
 
-  def delete(conn, %{"id" => id}) do
-    tenant = Api.get_tenant!(id)
+  def delete(conn, %{"id" => id} = params) do
+    tenant = get_tenant(id, params["external_id"])
 
     with {:ok, %Tenant{}} <- Api.delete_tenant(tenant) do
       send_resp(conn, :no_content, "")
+    end
+  end
+
+  defp get_tenant(id, external_id) do
+    if external_id do
+      Api.get_tenant_by_external_id(id)
+    else
+      Api.get_tenant!(id)
     end
   end
 
@@ -104,9 +113,10 @@ defmodule MultiplayerWeb.TenantController do
           properties do
             id(:string, "", required: false, example: "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19")
             name(:string, "", required: false, example: "tenant1")
-            jwt_secret(:string, "", required: false, example: "big_secret")
             external_id(:string, "", required: false, example: "okumviwlylkmpkoicbrc")
             active(:boolean, "", required: false, example: true)
+            region(:string, "", required: true, example: "ap-southeast-1")
+            inserted_at(:string, "", required: false, example: "2022-02-16T20:41:47")
           end
         end,
       TenantReq:
@@ -118,6 +128,7 @@ defmodule MultiplayerWeb.TenantController do
             jwt_secret(:string, "", required: true, example: "big_secret")
             external_id(:string, "", required: true, example: "okumviwlylkmpkoicbrc")
             active(:boolean, "", required: false, example: true)
+            region(:string, "", required: true, example: "ap-southeast-1")
             db_host(:string, "", required: true, example: "db.awesome.supabase.net")
             db_port(:string, "", required: true, example: "6543")
             db_name(:string, "", required: true, example: "postgres")

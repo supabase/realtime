@@ -16,11 +16,14 @@ defmodule MultiplayerWeb.TenantView do
       name: tenant.name,
       external_id: tenant.external_id,
       jwt_secret: tenant.jwt_secret,
+      active: tenant.active,
+      region: tenant.region,
       db_host: tenant.db_host,
       db_port: tenant.db_port,
       db_name: tenant.db_name,
       db_user: tenant.db_user,
-      db_password: tenant.db_password
+      db_password: tenant.db_password,
+      inserted_at: tenant.inserted_at
     }
   end
 end
