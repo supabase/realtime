@@ -50,7 +50,7 @@ defmodule MultiplayerWeb.TenantController do
     response(200, "Success", :TenantResponse)
   end
 
-  def show(conn, %{"id" => id} = params) do
+  def show(conn, %{"id" => id}) do
     tenant = Api.get_tenant_by_external_id(id)
 
     render(conn, "show.json", tenant: tenant)
@@ -72,7 +72,7 @@ defmodule MultiplayerWeb.TenantController do
     response(200, "Success", :TenantResponse)
   end
 
-  def update(conn, %{"id" => id, "tenant" => tenant_params} = params) do
+  def update(conn, %{"id" => id, "tenant" => tenant_params}) do
     tenant = Api.get_tenant_by_external_id(id)
 
     with {:ok, %Tenant{} = tenant} <- Api.update_tenant(tenant, tenant_params) do
@@ -93,7 +93,7 @@ defmodule MultiplayerWeb.TenantController do
     response(200, "No Content - Deleted Successfully")
   end
 
-  def delete(conn, %{"id" => id} = params) do
+  def delete(conn, %{"id" => id}) do
     tenant = Api.get_tenant_by_external_id(id)
 
     with {:ok, %Tenant{}} <- Api.delete_tenant(tenant) do
