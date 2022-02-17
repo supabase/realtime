@@ -36,6 +36,7 @@ config :multiplayer, Multiplayer.Repo,
   port: db_port,
   show_sensitive_data_on_connection_error: true,
   pool_size: 3,
+  prepare: :unnamed,
   queue_target: 5000
 
 config :multiplayer,
