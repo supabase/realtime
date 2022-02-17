@@ -19,8 +19,9 @@ defmodule MultiplayerWeb.UserSocket do
   def connect(params, socket, connect_info) do
     if Application.fetch_env!(:multiplayer, :secure_channels) do
       %{uri: %{host: host}, x_headers: headers} = connect_info
+      [external_id | _] = String.split(host, ".", parts: 2)
       #  , hooks = Multiplayer.Api.get_hooks_by_tenant_id(tenant.id)
-      with tenant when tenant != nil <- Multiplayer.Api.get_tenant_by_host(host),
+      with tenant when tenant != nil <- Multiplayer.Api.get_tenant_by_external_id(external_id),
            token when token != nil <- access_token(params, headers),
            {:ok, claims} <- authorize_conn(token, tenant.jwt_secret) do
         assigns = %{
