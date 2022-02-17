@@ -74,6 +74,11 @@
           "example": "postgres",
           "type": "string"
         },
+        "external_id": {
+          "description": "",
+          "example": "okumviwlylkmpkoicbrc",
+          "type": "string"
+        },
         "jwt_secret": {
           "description": "",
           "example": "big_secret",
@@ -97,6 +102,7 @@
         "db_port",
         "db_host",
         "region",
+        "external_id",
         "jwt_secret"
       ],
       "title": "TenantReq",
