@@ -123,7 +123,7 @@ defmodule MultiplayerWeb.TenantController do
           properties do
             name(:string, "", required: false, example: "tenant1")
             jwt_secret(:string, "", required: true, example: "big_secret")
-            # external_id(:string, "", required: true, example: "okumviwlylkmpkoicbrc")
+            external_id(:string, "", required: true, example: "okumviwlylkmpkoicbrc")
             active(:boolean, "", required: false, example: true)
             region(:string, "", required: true, example: "ap-southeast-1")
             db_host(:string, "", required: true, example: "db.awesome.supabase.net")
