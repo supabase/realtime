@@ -3,11 +3,12 @@ defmodule MultiplayerWeb.TenantController do
   use PhoenixSwagger
   alias Multiplayer.Api
   alias Multiplayer.Api.Tenant
+  alias PhoenixSwagger.Path
 
   action_fallback MultiplayerWeb.FallbackController
 
   swagger_path :index do
-    PhoenixSwagger.Path.get("/api/tenants")
+    Path.get("/api/tenants")
     tag("Tenants")
     response(200, "Success", :TenantsResponse)
   end
@@ -18,7 +19,7 @@ defmodule MultiplayerWeb.TenantController do
   end
 
   swagger_path :create do
-    PhoenixSwagger.Path.post("/api/tenants")
+    Path.post("/api/tenants")
     tag("Tenants")
 
     parameters do
@@ -38,10 +39,10 @@ defmodule MultiplayerWeb.TenantController do
   end
 
   swagger_path :show do
-    PhoenixSwagger.Path.get("/api/tenants/{id}")
+    Path.get("/api/tenants/{external_id}")
     tag("Tenants")
 
-    parameter(:id, :path, :string, "",
+    parameter(:external_id, :path, :string, "",
       required: true,
       example: "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19"
     )
@@ -50,16 +51,21 @@ defmodule MultiplayerWeb.TenantController do
   end
 
   def show(conn, %{"id" => id}) do
-    tenant = Api.get_tenant!(id)
+    tenant = Api.get_tenant_by_external_id(id)
+
     render(conn, "show.json", tenant: tenant)
   end
 
   swagger_path :update do
-    PhoenixSwagger.Path.put("/api/tenants/{id}")
+    Path.put("/api/tenants/{external_id}")
     tag("Tenants")
 
     parameters do
-      id(:path, :string, "", required: true, example: "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19")
+      external_id(:path, :string, "",
+        required: true,
+        example: "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19"
+      )
+
       tenant(:body, Schema.ref(:TenantReq), "", required: true)
     end
 
@@ -67,7 +73,7 @@ defmodule MultiplayerWeb.TenantController do
   end
 
   def update(conn, %{"id" => id, "tenant" => tenant_params}) do
-    tenant = Api.get_tenant!(id)
+    tenant = Api.get_tenant_by_external_id(id)
 
     with {:ok, %Tenant{} = tenant} <- Api.update_tenant(tenant, tenant_params) do
       render(conn, "show.json", tenant: tenant)
@@ -75,7 +81,7 @@ defmodule MultiplayerWeb.TenantController do
   end
 
   swagger_path :delete do
-    PhoenixSwagger.Path.delete("/api/tenants/{id}")
+    Path.delete("/api/tenants/{external_id}")
     tag("Tenants")
     description("Delete a tenant by ID")
 
@@ -88,7 +94,7 @@ defmodule MultiplayerWeb.TenantController do
   end
 
   def delete(conn, %{"id" => id}) do
-    tenant = Api.get_tenant!(id)
+    tenant = Api.get_tenant_by_external_id(id)
 
     with {:ok, %Tenant{}} <- Api.delete_tenant(tenant) do
       send_resp(conn, :no_content, "")
@@ -104,9 +110,10 @@ defmodule MultiplayerWeb.TenantController do
           properties do
             id(:string, "", required: false, example: "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19")
             name(:string, "", required: false, example: "tenant1")
-            jwt_secret(:string, "", required: false, example: "big_secret")
             external_id(:string, "", required: false, example: "okumviwlylkmpkoicbrc")
             active(:boolean, "", required: false, example: true)
+            region(:string, "", required: true, example: "ap-southeast-1")
+            inserted_at(:string, "", required: false, example: "2022-02-16T20:41:47")
           end
         end,
       TenantReq:
@@ -118,6 +125,7 @@ defmodule MultiplayerWeb.TenantController do
             jwt_secret(:string, "", required: true, example: "big_secret")
             external_id(:string, "", required: true, example: "okumviwlylkmpkoicbrc")
             active(:boolean, "", required: false, example: true)
+            region(:string, "", required: true, example: "ap-southeast-1")
             db_host(:string, "", required: true, example: "db.awesome.supabase.net")
             db_port(:string, "", required: true, example: "6543")
             db_name(:string, "", required: true, example: "postgres")

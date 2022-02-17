@@ -23,7 +23,7 @@ defmodule MultiplayerWeb.Router do
   scope "/api", MultiplayerWeb do
     pipe_through :api
     resources "/tenants", TenantController
-    resources "/scopes", ScopeController
+    # resources "/scopes", ScopeController
   end
 
   scope "/api/swagger" do
@@ -66,8 +66,7 @@ defmodule MultiplayerWeb.Router do
       consumes: ["application/json"],
       produces: ["application/json"],
       tags: [
-        %{name: "Tenants"},
-        %{name: "Scopes"}
+        %{name: "Tenants"}
       ]
     }
   end
