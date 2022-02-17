@@ -3,84 +3,6 @@
     "application/json"
   ],
   "definitions": {
-    "Scope": {
-      "properties": {
-        "active": {
-          "description": "",
-          "example": true,
-          "type": "boolean"
-        },
-        "host": {
-          "description": "",
-          "example": "myawesomedomain.com",
-          "type": "string"
-        },
-        "id": {
-          "description": "",
-          "example": "0f4004c0-1ce8-454d-b88a-c8a9be93dc24",
-          "type": "string"
-        },
-        "tenant_id": {
-          "description": "",
-          "example": "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19",
-          "type": "string"
-        }
-      },
-      "title": "Scope",
-      "type": "object"
-    },
-    "ScopeReq": {
-      "properties": {
-        "active": {
-          "description": "",
-          "example": true,
-          "type": "boolean"
-        },
-        "host": {
-          "description": "",
-          "example": "myawesomedomain.com",
-          "type": "string"
-        },
-        "tenant_id": {
-          "description": "",
-          "example": "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19",
-          "type": "string"
-        }
-      },
-      "required": [
-        "tenant_id",
-        "host"
-      ],
-      "title": "ScopeReq",
-      "type": "object"
-    },
-    "ScopeResponse": {
-      "properties": {
-        "data": {
-          "$ref": "#/definitions/Scope",
-          "description": ""
-        }
-      },
-      "title": "ScopeResponse",
-      "type": "object"
-    },
-    "Scopes": {
-      "items": {
-        "$ref": "#/definitions/Scope"
-      },
-      "title": "Scopes",
-      "type": "array"
-    },
-    "ScopesResponse": {
-      "properties": {
-        "data": {
-          "$ref": "#/definitions/Scopes",
-          "description": ""
-        }
-      },
-      "title": "ScopesResponse",
-      "type": "object"
-    },
     "Tenant": {
       "properties": {
         "active": {
@@ -98,17 +20,25 @@
           "example": "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19",
           "type": "string"
         },
-        "jwt_secret": {
+        "inserted_at": {
           "description": "",
-          "example": "big_secret",
+          "example": "2022-02-16T20:41:47",
           "type": "string"
         },
         "name": {
           "description": "",
           "example": "tenant1",
           "type": "string"
+        },
+        "region": {
+          "description": "",
+          "example": "ap-southeast-1",
+          "type": "string"
         }
       },
+      "required": [
+        "region"
+      ],
       "title": "Tenant",
       "type": "object"
     },
@@ -144,11 +74,6 @@
           "example": "postgres",
           "type": "string"
         },
-        "external_id": {
-          "description": "",
-          "example": "okumviwlylkmpkoicbrc",
-          "type": "string"
-        },
         "jwt_secret": {
           "description": "",
           "example": "big_secret",
@@ -158,6 +83,11 @@
           "description": "",
           "example": "tenant1",
           "type": "string"
+        },
+        "region": {
+          "description": "",
+          "example": "ap-southeast-1",
+          "type": "string"
         }
       },
       "required": [
@@ -166,7 +96,7 @@
         "db_name",
         "db_port",
         "db_host",
-        "external_id",
+        "region",
         "jwt_secret"
       ],
       "title": "TenantReq",
@@ -208,138 +138,6 @@
     "version": "1.0"
   },
   "paths": {
-    "/api/scopes": {
-      "get": {
-        "description": "",
-        "operationId": "MultiplayerWeb.ScopeController.index",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "schema": {
-              "$ref": "#/definitions/ScopesResponse"
-            }
-          }
-        },
-        "summary": "",
-        "tags": [
-          "Scopes"
-        ]
-      },
-      "post": {
-        "description": "",
-        "operationId": "MultiplayerWeb.ScopeController.create",
-        "parameters": [
-          {
-            "description": "",
-            "in": "body",
-            "name": "scope",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ScopeReq"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "schema": {
-              "$ref": "#/definitions/ScopeResponse"
-            }
-          }
-        },
-        "summary": "",
-        "tags": [
-          "Scopes"
-        ]
-      }
-    },
-    "/api/scopes/{id}": {
-      "delete": {
-        "description": "Delete a scope by ID",
-        "operationId": "MultiplayerWeb.ScopeController.delete",
-        "parameters": [
-          {
-            "description": "Scope ID",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "type": "string",
-            "x-example": "0f4004c0-1ce8-454d-b88a-c8a9be93dc24"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "No Content - Deleted Successfully"
-          }
-        },
-        "summary": "",
-        "tags": [
-          "Scopes"
-        ]
-      },
-      "get": {
-        "description": "",
-        "operationId": "MultiplayerWeb.ScopeController.show",
-        "parameters": [
-          {
-            "description": "",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "type": "string",
-            "x-example": "0f4004c0-1ce8-454d-b88a-c8a9be93dc24"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "schema": {
-              "$ref": "#/definitions/ScopeResponse"
-            }
-          }
-        },
-        "summary": "",
-        "tags": [
-          "Scopes"
-        ]
-      },
-      "put": {
-        "description": "",
-        "operationId": "MultiplayerWeb.ScopeController.update",
-        "parameters": [
-          {
-            "description": "",
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "type": "string",
-            "x-example": "0f4004c0-1ce8-454d-b88a-c8a9be93dc24"
-          },
-          {
-            "description": "",
-            "in": "body",
-            "name": "tenant",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ScopeReq"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "schema": {
-              "$ref": "#/definitions/ScopeResponse"
-            }
-          }
-        },
-        "summary": "",
-        "tags": [
-          "Scopes"
-        ]
-      }
-    },
     "/api/tenants": {
       "get": {
         "description": "",
@@ -386,7 +184,7 @@
         ]
       }
     },
-    "/api/tenants/{id}": {
+    "/api/tenants/{external_id}": {
       "delete": {
         "description": "Delete a tenant by ID",
         "operationId": "MultiplayerWeb.TenantController.delete",
@@ -417,7 +215,7 @@
           {
             "description": "",
             "in": "path",
-            "name": "id",
+            "name": "external_id",
             "required": true,
             "type": "string",
             "x-example": "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19"
@@ -443,7 +241,7 @@
           {
             "description": "",
             "in": "path",
-            "name": "id",
+            "name": "external_id",
             "required": true,
             "type": "string",
             "x-example": "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19"
@@ -492,9 +290,6 @@
   "tags": [
     {
       "name": "Tenants"
-    },
-    {
-      "name": "Scopes"
     }
   ]
 }

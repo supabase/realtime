@@ -23,7 +23,6 @@ defmodule MultiplayerWeb.Router do
   scope "/api", MultiplayerWeb do
     pipe_through :api
     resources "/tenants", TenantController
-    resources "/tenants/:external_id", TenantController
     # resources "/scopes", ScopeController
   end
 
