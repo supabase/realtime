@@ -9,12 +9,9 @@ import Config
 
 # Channels are not secured by default in development and
 # are secured by default in production.
-secure_channels = System.get_env("SECURE_CHANNELS", "false") == "true"
-
 presence = System.get_env("PRESENCE", "false") == "false"
 
 config :multiplayer,
-  secure_channels: secure_channels,
   presence: presence
 
 config :multiplayer, MultiplayerWeb.Endpoint,

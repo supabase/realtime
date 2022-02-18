@@ -1,5 +1,6 @@
 defmodule MultiplayerWeb.Router do
   use MultiplayerWeb, :router
+  import MultiplayerWeb.ChannelsAuthorization, only: [authorize: 2]
 
   pipeline :browser do
     plug :accepts, ["html"]
@@ -11,7 +12,7 @@ defmodule MultiplayerWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
-    plug :check_api_key
+    plug :check_auth
   end
 
   scope "/", MultiplayerWeb do
@@ -32,13 +33,13 @@ defmodule MultiplayerWeb.Router do
       swagger_file: "swagger.json"
   end
 
-  defp check_api_key(conn, _) do
-    api_key = Application.fetch_env!(:multiplayer, :api_key)
+  defp check_auth(conn, params) do
+    secret = Application.fetch_env!(:multiplayer, :api_jwt_secret)
 
-    case get_req_header(conn, "x-api-key") do
-      [^api_key] ->
-        conn
-
+    with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
+         {:ok, _claims} <- authorize(token, secret) do
+      conn
+    else
       _ ->
         conn
         |> send_resp(403, "")

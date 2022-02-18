@@ -32,11 +32,6 @@ if config_env() == :prod do
     show_sensitive_data_on_connection_error: true,
     pool_size: 3
 
-  config :multiplayer,
-    ecto_repos: [Multiplayer.Repo],
-    secure_channels: System.get_env("SECURE_CHANNELS", "true") == "true",
-    jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}")
-
   config :libcluster,
     debug: false,
     topologies: [
@@ -50,6 +45,12 @@ if config_env() == :prod do
       ]
     ]
 end
+
+config :multiplayer,
+  ecto_repos: [Multiplayer.Repo],
+  secure_channels: System.get_env("SECURE_CHANNELS", "true") == "true",
+  jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
+  api_jwt_secret: System.get_env("API_JWT_SECRET")
 
 if System.get_env("LOGS_ENGINE") == "logflare" do
   if !System.get_env("LOGFLARE_API_KEY") or !System.get_env("LOGFLARE_SOURCE_ID") do
