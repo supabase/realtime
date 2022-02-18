@@ -75,9 +75,9 @@ defmodule MultiplayerWeb.TenantController do
   def update(conn, %{"id" => id, "tenant" => tenant_params}) do
     case Api.get_tenant_by_external_id(id) do
       nil ->
-        create(conn, %{"tenant" => tenant_params})
+        create(conn, %{"tenant" => Map.put(tenant_params, "external_id", id)})
 
-      ^tenant ->
+      tenant ->
         with {:ok, %Tenant{} = tenant} <- Api.update_tenant(tenant, tenant_params) do
           render(conn, "show.json", tenant: tenant)
         end
