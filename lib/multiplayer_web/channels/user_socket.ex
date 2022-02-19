@@ -53,7 +53,7 @@ defmodule MultiplayerWeb.UserSocket do
   def access_token(params, headers) do
     case :proplists.lookup("x-api-key", headers) do
       :none -> Map.get(params, "apikey")
-      token -> token
+      {"x-api-key", token} -> token
     end
   end
 
