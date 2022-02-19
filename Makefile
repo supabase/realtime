@@ -1,5 +1,5 @@
 dev:
-	MIX_ENV=dev API_KEY=dev SECURE_CHANNELS=true ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
+	MIX_ENV=dev API_KEY=dev SECURE_CHANNELS=true API_JWT_SECRET=dev ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
 
 prod:
 	APP_NAME=multiplayer SECRET_KEY_BASE=nokey MIX_ENV=prod ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server

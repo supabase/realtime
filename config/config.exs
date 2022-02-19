@@ -9,17 +9,7 @@ import Config
 
 # Channels are not secured by default in development and
 # are secured by default in production.
-secure_channels = System.get_env("SECURE_CHANNELS") == "true"
 presence = System.get_env("PRESENCE", "true") != "false"
-
-api_key = System.get_env("API_KEY")
-# Every JWT's claims will be compared (equality checks) to the expected
-# claims set in the JSON object.
-# e.g.
-# Set JWT_CLAIM_VALIDATORS="{\"iss\": \"Issuer\", \"nbf\": 1610078130}"
-# Then JWT's "iss" value must equal "Issuer" and "nbf" value
-# must equal 1610078130.
-jwt_claim_validators = System.get_env("JWT_CLAIM_VALIDATORS", "{}")
 
 db_host = System.get_env("DB_HOST", "localhost")
 db_name = System.get_env("DB_NAME", "postgres")
@@ -41,9 +31,6 @@ config :multiplayer, Multiplayer.Repo,
 
 config :multiplayer,
   ecto_repos: [Multiplayer.Repo],
-  secure_channels: secure_channels,
-  jwt_claim_validators: jwt_claim_validators,
-  api_key: api_key,
   presence: presence
 
 # Configures the endpoint
