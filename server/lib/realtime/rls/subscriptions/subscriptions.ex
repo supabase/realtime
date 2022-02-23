@@ -36,7 +36,7 @@ defmodule Realtime.RLS.Subscriptions do
 
   def sync_subscriptions(params_list) do
     Multi.new()
-    |> truncate_subscriptions()
+    |> Ecto.Multi.delete_all(:delete_all, Subscription)
     |> Multi.put(:params_list, params_list)
     |> fetch_database_roles()
     |> fetch_publication_tables()
@@ -96,19 +96,6 @@ defmodule Realtime.RLS.Subscriptions do
 
         _ ->
           {:ok, %{}}
-      end
-    end)
-  end
-
-  defp truncate_subscriptions(%Multi{} = multi) do
-    Multi.run(multi, :truncate_subscriptions, fn _, _ ->
-      Repo.query(
-        "truncate realtime.subscription restart identity",
-        []
-      )
-      |> case do
-        {:ok, %Postgrex.Result{command: command}} -> {:ok, command}
-        {:error, error} -> {:error, inspect(error)}
       end
     end)
   end
