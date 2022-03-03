@@ -13,26 +13,21 @@ defmodule Realtime.MessageDispatcher do
           Phoenix.Socket.Broadcast.t()
         ) :: :ok
   def dispatch([_ | _] = topic_subscriptions, _from, %Broadcast{payload: payload} = msg) do
-    {is_rls_enabled, new_payload} = Map.pop(payload, :is_rls_enabled)
-    {subscription_ids, new_payload} = Map.pop(new_payload, :subscription_ids)
+    {subscription_ids, new_payload} = Map.pop(payload, :subscription_ids)
     new_msg = %{msg | payload: new_payload}
 
     Enum.reduce(topic_subscriptions, %{}, fn
       {_pid, {:subscriber_fastlane, fastlane_pid, serializer, subscription_id}}, cache ->
-        if !is_rls_enabled or MapSet.member?(subscription_ids, subscription_id) do
+        if MapSet.member?(subscription_ids, subscription_id) do
           broadcast_message(cache, fastlane_pid, new_msg, serializer)
         else
           cache
         end
 
       {_pid, {:fastlane, fastlane_pid, serializer, _event_intercepts}}, cache ->
-        if !is_rls_enabled do
-          broadcast_message(cache, fastlane_pid, new_msg, serializer)
-        else
-          cache
-        end
+        broadcast_message(cache, fastlane_pid, new_msg, serializer)
 
-      {_pid, nil}, cache ->
+      _, cache ->
         cache
     end)
 

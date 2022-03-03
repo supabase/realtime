@@ -406,8 +406,7 @@ defmodule Realtime.ReplicationTest do
                      },
                      schema: "public",
                      table: "todos",
-                     type: "INSERT",
-                     is_rls_enabled: false
+                     type: "INSERT"
                    },
                    %NewRecord{
                      columns: @test_columns,
@@ -421,8 +420,7 @@ defmodule Realtime.ReplicationTest do
                      },
                      schema: "public",
                      table: "todos",
-                     type: "INSERT",
-                     is_rls_enabled: false
+                     type: "INSERT"
                    }
                  ]
                })

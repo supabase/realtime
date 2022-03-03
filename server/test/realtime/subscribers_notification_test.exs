@@ -521,8 +521,7 @@ defmodule Realtime.SubscribersNotificationTest do
         },
         schema: "public",
         table: "users",
-        type: "INSERT",
-        is_rls_enabled: false
+        type: "INSERT"
       }
 
       valid_notification_record_id_value = %NewRecord{
@@ -535,8 +534,7 @@ defmodule Realtime.SubscribersNotificationTest do
         },
         schema: "public",
         table: "users",
-        type: "INSERT",
-        is_rls_enabled: false
+        type: "INSERT"
       }
 
       txn = %Transaction{
