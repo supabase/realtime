@@ -38,7 +38,6 @@ defmodule Realtime.ReplicationPollerTest do
     expected = %NewRecord{
       columns: @columns,
       commit_timestamp: @ts,
-      is_rls_enabled: false,
       schema: "public",
       table: "todos",
       type: "INSERT",
@@ -70,7 +69,6 @@ defmodule Realtime.ReplicationPollerTest do
     expected = %UpdatedRecord{
       columns: @columns,
       commit_timestamp: @ts,
-      is_rls_enabled: false,
       schema: "public",
       table: "todos",
       type: "UPDATE",
@@ -102,7 +100,6 @@ defmodule Realtime.ReplicationPollerTest do
     expected = %DeletedRecord{
       columns: @columns,
       commit_timestamp: @ts,
-      is_rls_enabled: false,
       schema: "public",
       table: "todos",
       type: "DELETE",
@@ -133,7 +130,6 @@ defmodule Realtime.ReplicationPollerTest do
     expected = %NewRecord{
       columns: @columns,
       commit_timestamp: @ts,
-      is_rls_enabled: false,
       schema: "public",
       table: "todos",
       type: "INSERT",
@@ -161,7 +157,6 @@ defmodule Realtime.ReplicationPollerTest do
     expected = %NewRecord{
       columns: [],
       commit_timestamp: nil,
-      is_rls_enabled: false,
       schema: "public",
       table: "todos",
       type: "INSERT",
@@ -193,7 +188,6 @@ defmodule Realtime.ReplicationPollerTest do
     expected = %UpdatedRecord{
       columns: @columns,
       commit_timestamp: @ts,
-      is_rls_enabled: false,
       schema: "public",
       table: "todos",
       type: "UPDATE",
@@ -222,7 +216,6 @@ defmodule Realtime.ReplicationPollerTest do
     expected = %UpdatedRecord{
       columns: [],
       commit_timestamp: nil,
-      is_rls_enabled: false,
       schema: "public",
       table: "todos",
       type: "UPDATE",
@@ -254,7 +247,6 @@ defmodule Realtime.ReplicationPollerTest do
     expected = %DeletedRecord{
       columns: @columns,
       commit_timestamp: @ts,
-      is_rls_enabled: false,
       schema: "public",
       table: "todos",
       type: "DELETE",
@@ -282,7 +274,6 @@ defmodule Realtime.ReplicationPollerTest do
     expected = %DeletedRecord{
       columns: [],
       commit_timestamp: nil,
-      is_rls_enabled: false,
       schema: "public",
       table: "todos",
       type: "DELETE",

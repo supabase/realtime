@@ -140,16 +140,15 @@ defmodule Realtime.RLS.ReplicationPoller do
            "schema" => schema,
            "table" => table
          } = wal},
-        {"is_rls_enabled", is_rls_enabled},
+        {"is_rls_enabled", _},
         {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
-      when is_boolean(is_rls_enabled) and is_list(subscription_ids) do
+      when is_list(subscription_ids) do
     %NewRecord{
       columns: Map.get(wal, "columns", []),
       commit_timestamp: Map.get(wal, "commit_timestamp"),
       errors: convert_errors(errors),
-      is_rls_enabled: is_rls_enabled,
       schema: schema,
       table: table,
       type: type,
@@ -165,16 +164,15 @@ defmodule Realtime.RLS.ReplicationPoller do
            "schema" => schema,
            "table" => table
          } = wal},
-        {"is_rls_enabled", is_rls_enabled},
+        {"is_rls_enabled", _},
         {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
-      when is_boolean(is_rls_enabled) and is_list(subscription_ids) do
+      when is_list(subscription_ids) do
     %UpdatedRecord{
       columns: Map.get(wal, "columns", []),
       commit_timestamp: Map.get(wal, "commit_timestamp"),
       errors: convert_errors(errors),
-      is_rls_enabled: is_rls_enabled,
       schema: schema,
       table: table,
       type: type,
@@ -191,16 +189,15 @@ defmodule Realtime.RLS.ReplicationPoller do
            "schema" => schema,
            "table" => table
          } = wal},
-        {"is_rls_enabled", is_rls_enabled},
+        {"is_rls_enabled", _},
         {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
-      when is_boolean(is_rls_enabled) and is_list(subscription_ids) do
+      when is_list(subscription_ids) do
     %DeletedRecord{
       columns: Map.get(wal, "columns", []),
       commit_timestamp: Map.get(wal, "commit_timestamp"),
       errors: convert_errors(errors),
-      is_rls_enabled: is_rls_enabled,
       schema: schema,
       table: table,
       type: type,

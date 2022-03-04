@@ -21,38 +21,38 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
-  test "INSERT message is pushed to the client" do
+  test "INSERT message is pushed to the client", %{socket: %{assigns: %{id: id}}} do
     change = %{
       schema: "public",
       table: "users",
       type: "INSERT"
     }
 
-    broadcast_change("realtime:*", change)
+    broadcast_change("realtime:*", Map.put(change, :subscription_ids, MapSet.new([id])))
 
     assert_push("INSERT", ^change)
   end
 
-  test "UPDATE message is pushed to the client" do
+  test "UPDATE message is pushed to the client", %{socket: %{assigns: %{id: id}}} do
     change = %{
       schema: "public",
       table: "users",
       type: "UPDATE"
     }
 
-    broadcast_change("realtime:*", change)
+    broadcast_change("realtime:*", Map.put(change, :subscription_ids, MapSet.new([id])))
 
     assert_push("UPDATE", ^change)
   end
 
-  test "DELETE message is pushed to the client" do
+  test "DELETE message is pushed to the client", %{socket: %{assigns: %{id: id}}} do
     change = %{
       schema: "public",
       table: "users",
       type: "DELETE"
     }
 
-    broadcast_change("realtime:*", change)
+    broadcast_change("realtime:*", Map.put(change, :subscription_ids, MapSet.new([id])))
 
     assert_push("DELETE", ^change)
   end
