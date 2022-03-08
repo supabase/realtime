@@ -15,8 +15,11 @@ defmodule Ewalrus.Subscriptions do
   @spec delete(conn(), String.t()) :: any()
   def delete(conn, id) do
     sql = "delete from realtime.subscription where subscription_id = $1"
-    bin_uuid = UUID.string_to_binary!(id)
-    query(conn, sql, [bin_uuid])
+    query(conn, sql, [id])
+  end
+
+  def delete_all(conn) do
+    query(conn, "TRUNCATE TABLE realtime.subscription;", [])
   end
 
   def sync_subscriptions() do

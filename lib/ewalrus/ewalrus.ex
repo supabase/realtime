@@ -76,10 +76,8 @@ defmodule Ewalrus do
     if pid do
       SubscriptionManager.unsubscribe(pid, subs_id)
 
-      bin_subs_id = UUID.string_to_binary!(subs_id)
-
       case :syn.members(Ewalrus.Subscribers, scope) do
-        [{^me, ^bin_subs_id}] ->
+        [{^me, ^subs_id}] ->
           stop(scope)
 
         _ ->

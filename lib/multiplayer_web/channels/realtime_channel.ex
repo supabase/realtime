@@ -20,6 +20,8 @@ defmodule MultiplayerWeb.RealtimeChannel do
     # used for custom monitoring
     channel_stats(pid, scope, topic)
 
+    Multiplayer.UsersCounter.add(pid, scope)
+
     scope_topic_name = scope <> ":" <> topic
     make_scope_topic(socket, scope_topic_name)
 
@@ -140,8 +142,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
   end
 
   @impl true
-  def terminate(reason, %{assigns: %{scope: scope, subs_id: subs_id}}) do
-    Ewalrus.unsubscribe(scope, subs_id)
+  def terminate(reason, _state) do
     Logger.debug(%{terminate: reason})
     :telemetry.execute([:prom_ex, :plugin, :multiplayer, :disconnected], %{})
     :ok

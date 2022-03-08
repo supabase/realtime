@@ -9,7 +9,7 @@ defmodule Ewalrus.SubscriptionManager do
   @impl true
   def init(opts) do
     :global.register_name({:subscription_manager, opts.id}, self())
-    # :syn.register(Ewalrus.Managers, opts.id, self())
+    Ewalrus.Subscriptions.delete_all(opts.conn)
     {:ok, %{conn: opts.conn, id: opts.id}}
   end
 

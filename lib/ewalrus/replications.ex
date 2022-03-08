@@ -3,7 +3,7 @@ defmodule Ewalrus.Replications do
   import Postgrex, only: [transaction: 2, query: 3]
 
   def prepare_replication(conn, slot_name) do
-    {:ok, res} =
+    {:ok, _res} =
       transaction(conn, fn conn ->
         query(
           conn,
