@@ -36,7 +36,7 @@ defmodule Multiplayer.MixProject do
       {:phoenix, "~> 1.5.7"},
       {:phoenix_ecto, "~> 4.1"},
       {:ecto_sql, "~> 3.4"},
-      {:postgrex, ">= 0.0.0"},
+      {:postgrex, "~> 0.15"},
       {:phoenix_html, "~> 2.11"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_dashboard, "~> 0.4"},
@@ -54,10 +54,10 @@ defmodule Multiplayer.MixProject do
       {:ex_json_schema, "~> 0.5"},
       {:recon, "~> 2.5"},
       {:broadway, "~> 1.0"},
-      {:ewalrus, git: "https://github.com/abc3/ewalrus", tag: "0.1.2"},
       {:yaml_elixir, "~> 2.8.0"},
       {:logflare_logger_backend, "~> 0.11.0"},
-      {:httpoison, "~> 1.8"}
+      {:httpoison, "~> 1.8"},
+      {:syn, "~> 3.2"}
     ]
   end
 

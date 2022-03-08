@@ -34,7 +34,9 @@ defmodule Multiplayer.Application do
     Registry.start_link(keys: :duplicate, name: Multiplayer.Registry)
     Registry.start_link(keys: :unique, name: Multiplayer.Registry.Unique)
 
-    Multiplayer.SessionsHooks.init_table()
+    :syn.add_node_to_scopes([Ewalrus.Subscribers])
+
+    # Multiplayer.SessionsHooks.init_table()
 
     children = [
       {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
@@ -49,9 +51,10 @@ defmodule Multiplayer.Application do
       # Start a worker by calling: Multiplayer.Worker.start_link(arg)
       # {Multiplayer.Worker, arg}
       # MultiplayerWeb.Presence,
-      Multiplayer.PromEx
+      Multiplayer.PromEx,
       # Multiplayer.PresenceNotify
-      # Multiplayer.SessionsHooksBroadway
+      # Multiplayer.SessionsHooksBroadway,
+      {DynamicSupervisor, strategy: :one_for_one, name: Ewalrus.RlsSupervisor}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
