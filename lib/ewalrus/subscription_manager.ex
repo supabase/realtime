@@ -25,7 +25,7 @@ defmodule Ewalrus.SubscriptionManager do
 
   @impl true
   def handle_info({:subscribe, opts}, state) do
-    IO.inspect({:msg, opts})
+    Logger.debug("Subscribe #{inspect(opts, pretty: true)}")
     Ewalrus.Subscriptions.create(state.conn, opts)
     {:noreply, state}
   end

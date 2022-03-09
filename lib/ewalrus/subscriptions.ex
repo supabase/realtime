@@ -15,7 +15,8 @@ defmodule Ewalrus.Subscriptions do
   @spec delete(conn(), String.t()) :: any()
   def delete(conn, id) do
     sql = "delete from realtime.subscription where subscription_id = $1"
-    query(conn, sql, [id])
+    # TODO: connection can be not available
+    {:ok, _} = query(conn, sql, [id])
   end
 
   def delete_all(conn) do

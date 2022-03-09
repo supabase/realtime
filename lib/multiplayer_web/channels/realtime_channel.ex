@@ -15,19 +15,19 @@ defmodule MultiplayerWeb.RealtimeChannel do
   def join(
         "realtime:" <> sub_topic = topic,
         _,
-        %{assigns: %{scope: scope, claims: claims}, transport_pid: pid} = socket
+        %{assigns: %{tenant: tenant, claims: claims}, transport_pid: pid} = socket
       ) do
     # used for custom monitoring
-    channel_stats(pid, scope, topic)
+    channel_stats(pid, tenant, topic)
 
-    Multiplayer.UsersCounter.add(pid, scope)
+    Multiplayer.UsersCounter.add(pid, tenant)
 
-    scope_topic_name = scope <> ":" <> topic
-    make_scope_topic(socket, scope_topic_name)
+    tenant_topic_name = tenant <> ":" <> topic
+    make_tenant_topic(socket, tenant_topic_name)
 
     sub_id = UUID.uuid1()
     # TODO: return sub_id from function
-    Ewalrus.subscribe(scope, sub_id, sub_topic, claims)
+    Ewalrus.subscribe(tenant, sub_id, sub_topic, claims)
     # presence_timer = Process.send_after(self(), :presence_agg, @timeout_presence_diff)
 
     # Logger.debug("Hooks #{inspect(hooks)}")
@@ -38,7 +38,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
     Logger.debug("Start channel, #{inspect([sub_id: sub_id], pretty: true)}")
 
     new_socket =
-      update_topic(socket, scope_topic_name)
+      update_topic(socket, tenant_topic_name)
       # |> assign(presence_timer: presence_timer)
       # |> assign(kickout_ref: kick_ref)
       |> assign(mq: [])
@@ -158,7 +158,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
     }
   end
 
-  defp make_scope_topic(_socket, topic) do
+  defp make_tenant_topic(_socket, topic) do
     # Allow sending directly to the transport
     # fastlane = {:fastlane, socket.transport_pid, socket.serializer, ["presence_diff"]}
     # MultiplayerWeb.Endpoint.subscribe(topic, metadata: fastlane)
@@ -173,11 +173,11 @@ defmodule MultiplayerWeb.RealtimeChannel do
     send(self(), {:message, messsage, event})
   end
 
-  def channel_stats(pid, scope, topic) do
+  def channel_stats(pid, tenant, topic) do
     Registry.register(
       Multiplayer.Registry,
       "topics",
-      {scope, topic, System.system_time(:second)}
+      {tenant, topic, System.system_time(:second)}
     )
 
     Registry.register(

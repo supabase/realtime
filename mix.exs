@@ -57,7 +57,7 @@ defmodule Multiplayer.MixProject do
       {:yaml_elixir, "~> 2.8.0"},
       {:logflare_logger_backend, "~> 0.11.0"},
       {:httpoison, "~> 1.8"},
-      {:syn, "~> 3.2"}
+      {:syn, "~> 3.2.2"}
     ]
   end
 

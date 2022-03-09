@@ -25,7 +25,7 @@ defmodule MultiplayerWeb.UserSocket do
            token when token != nil <- access_token(params, headers),
            {:ok, claims} <- authorize_conn(token, tenant.jwt_secret) do
         assigns = %{
-          scope: tenant.id,
+          tenant: external_id,
           claims: claims,
           params: %{
             # hooks: hooks,
@@ -34,7 +34,7 @@ defmodule MultiplayerWeb.UserSocket do
         }
 
         Ewalrus.start(
-          tenant.id,
+          external_id,
           tenant.db_host,
           tenant.db_name,
           tenant.db_user,
