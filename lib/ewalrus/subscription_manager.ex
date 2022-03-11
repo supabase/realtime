@@ -32,6 +32,12 @@ defmodule Ewalrus.SubscriptionManager do
 
   def handle_info({:unsubscribe, subs_id}, state) do
     Ewalrus.Subscriptions.delete(state.conn, subs_id)
+
+    if :syn.member_count(Ewalrus.Subscribers, state.id) == 0 do
+      Ewalrus.Subscriptions.delete_all(state.conn)
+      Ewalrus.stop(state.id)
+    end
+
     {:noreply, state}
   end
 end

@@ -23,33 +23,33 @@ defmodule Ewalrus do
         publication \\ "supabase_multiplayer",
         slot_name \\ "supabase_multiplayer_replication_slot"
       ) do
-    IO.inspect({12_312_312})
-
-    case :global.whereis_name({:supervisor, scope}) do
-      :undefined ->
-        opts = [
-          id: scope,
-          db_host: host,
-          db_name: db_name,
-          db_user: db_user,
-          db_pass: db_pass,
-          poll_interval: poll_interval,
-          publication: publication,
-          slot_name: slot_name
-        ]
-
-        {:ok, pid} =
-          DynamicSupervisor.start_child(Ewalrus.RlsSupervisor, %{
+    :global.trans({{Ewalrus, scope}, self()}, fn ->
+      case :global.whereis_name({:supervisor, scope}) do
+        :undefined ->
+          opts = [
             id: scope,
-            start: {Ewalrus.DbSupervisor, :start_link, [opts]},
-            restart: :transient
-          })
+            db_host: host,
+            db_name: db_name,
+            db_user: db_user,
+            db_pass: db_pass,
+            poll_interval: poll_interval,
+            publication: publication,
+            slot_name: slot_name
+          ]
 
-        :global.register_name({:supervisor, scope}, pid)
+          {:ok, pid} =
+            DynamicSupervisor.start_child(Ewalrus.RlsSupervisor, %{
+              id: scope,
+              start: {Ewalrus.DbSupervisor, :start_link, [opts]},
+              restart: :transient
+            })
 
-      _ ->
-        {:error, :already_started}
-    end
+          :global.register_name({:supervisor, scope}, pid)
+
+        _ ->
+          {:error, :already_started}
+      end
+    end)
   end
 
   def subscribe(scope, subs_id, topic, claims) do
@@ -71,18 +71,9 @@ defmodule Ewalrus do
 
   def unsubscribe(scope, subs_id) do
     pid = manager_pid(scope)
-    me = self()
 
     if pid do
       SubscriptionManager.unsubscribe(pid, subs_id)
-
-      case :syn.members(Ewalrus.Subscribers, scope) do
-        [{^me, ^subs_id}] ->
-          stop(scope)
-
-        _ ->
-          :ok
-      end
     end
   end
 
@@ -95,7 +86,7 @@ defmodule Ewalrus do
         :global.whereis_name({:db_instance, scope})
         |> GenServer.stop(:normal)
 
-        Supervisor.stop(pid, :normal)
+        DynamicSupervisor.stop(pid, :shutdown)
     end
   end
 
