@@ -22,7 +22,7 @@ defmodule Ewalrus.Subscriptions do
 
   def delete_all(conn) do
     Logger.debug("Delete all subscriptions")
-    query(conn, "TRUNCATE TABLE realtime.subscription;", [])
+    query(conn, "truncate table realtime.subscription;", [])
   end
 
   def sync_subscriptions() do
