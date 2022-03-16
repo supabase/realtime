@@ -157,7 +157,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
     #   {:noreply, socket}
     # end
     update_topic(socket, topic) |> push(type, event)
-
+    {:noreply, socket}
     # {:noreply, Map.put(socket, :assigns, %{assigns | sender: new_sender})}
   end
 
