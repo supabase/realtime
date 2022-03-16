@@ -146,16 +146,17 @@ defmodule MultiplayerWeb.RealtimeChannel do
     # add_message(type, event)
     # new_sender = add_message(sender, type, event)
 
-    proc_len = mess_len(pid)
+    # proc_len = mess_len(pid)
 
-    if sender.size > 0 or proc_len > @mbox_limit or proc_len == nil do
-      Logger.debug("Wait for backlog, #{inspect(proc_len, pretty: true)}")
-      Process.send_after(self(), :check_mq, @wait_time)
-      {:noreply, socket |> assign(sender: backlog(sender, type, event))}
-    else
-      update_topic(socket, topic) |> push(type, event)
-      {:noreply, socket}
-    end
+    # if sender.size > 0 or proc_len > @mbox_limit or proc_len == nil do
+    #   Logger.debug("Wait for backlog, #{inspect(proc_len, pretty: true)}")
+    #   Process.send_after(self(), :check_mq, @wait_time)
+    #   {:noreply, socket |> assign(sender: backlog(sender, type, event))}
+    # else
+    #   update_topic(socket, topic) |> push(type, event)
+    #   {:noreply, socket}
+    # end
+    update_topic(socket, topic) |> push(type, event)
 
     # {:noreply, Map.put(socket, :assigns, %{assigns | sender: new_sender})}
   end
