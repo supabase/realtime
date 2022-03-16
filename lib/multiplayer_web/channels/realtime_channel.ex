@@ -1,15 +1,15 @@
 defmodule MultiplayerWeb.RealtimeChannel do
   use MultiplayerWeb, :channel
   require Logger
-  alias MultiplayerWeb.Presence
-  alias Multiplayer.SessionsHooks
+  # alias MultiplayerWeb.Presence
+  # alias Multiplayer.SessionsHooks
 
   # intercept(["presence_diff"])
-  @empty_presence_diff %{joins: %{}, leaves: %{}}
-  @timeout_presence_diff 1000
-  @mbox_limit 100
+  # @empty_presence_diff %{joins: %{}, leaves: %{}}
+  # @timeout_presence_diff 1000
+  @mbox_limit 1000
   @wait_time 500
-  @kickout_time 5000
+  # @kickout_time 5000
 
   @impl true
   def join(
@@ -45,6 +45,13 @@ defmodule MultiplayerWeb.RealtimeChannel do
       # |> assign(presence_diff: @empty_presence_diff)
       |> assign(topic: topic)
       |> assign(subs_id: sub_id)
+      |> assign(
+        sender: %{
+          last: 0,
+          size: 0,
+          tid: :ets.new(__MODULE__, [:public, :ordered_set])
+        }
+      )
 
     # if Application.fetch_env!(:multiplayer, :presence) do
     #   Multiplayer.PresenceNotify.track_me(self(), new_socket)
@@ -61,34 +68,56 @@ defmodule MultiplayerWeb.RealtimeChannel do
 
   @impl true
   # accumulate messages to the queue
-  def handle_info({:message, msg, event}, %{assigns: %{mq: mq}} = socket) do
-    send(self(), :check_mq)
-    {:noreply, socket |> assign(mq: mq ++ [{msg, event}])}
-  end
+  # def handle_info({:message, msg, event}, %{assigns: %{mq: mq}} = socket) do
+  #   send(self(), :check_mq)
+  #   {:noreply, socket |> assign(mq: mq ++ [{msg, event}])}
+  # end
 
-  def handle_info(:check_mq, %{assigns: %{mq: []}} = socket) do
-    {:noreply, socket}
-  end
+  # def handle_info(:check_mq, %{assigns: %{mq: []}} = socket) do
+  #   {:noreply, socket}
+  # end
 
   # send messages to the transport pid
   def handle_info(
         :check_mq,
-        %{transport_pid: pid, assigns: %{mq: [{msg, event} | mq], topic: topic}} = socket
+        %{transport_pid: pid, assigns: %{sender: sender, topic: topic}} = socket
       ) do
-    proc_len =
-      case Process.info(pid, :message_queue_len) do
-        nil -> nil
-        {_, len} -> len
-      end
+    IO.inspect({0, sender})
 
-    if proc_len > @mbox_limit or proc_len == nil do
+    proc_len = mess_len(pid)
+
+    if false or proc_len > @mbox_limit or proc_len == nil do
+      Logger.debug("Wait for backlog, #{inspect(proc_len, pretty: true)}")
       Process.send_after(self(), :check_mq, @wait_time)
       {:noreply, socket}
     else
-      update_topic(socket, topic) |> push(event, msg)
-      :telemetry.execute([:prom_ex, :plugin, :multiplayer, :msg_sent], %{})
-      send(self(), :check_mq)
-      {:noreply, socket |> assign(mq: mq)}
+      new_sender =
+        case :ets.select(sender.tid, [{:"$1", [], [:"$_"]}], @mbox_limit) do
+          {events, next} ->
+            events
+            |> Enum.each(fn {id, event, msg} ->
+              IO.inspect({id, event, msg})
+              update_topic(socket, topic) |> push(event, msg)
+              true = :ets.delete(sender.tid, id)
+            end)
+
+            if next != :"$end_of_table" do
+              Logger.debug("End of sender table")
+              send(self(), :check_mq)
+              %{sender | size: :ets.info(sender.tid)[:size]}
+            else
+              %{sender | size: 0}
+            end
+
+          :"$end_of_table" ->
+            Logger.debug("End of sender table on enter")
+            %{sender | size: 0}
+        end
+
+      # :telemetry.execute([:prom_ex, :plugin, :multiplayer, :msg_sent], %{})
+      # send(self(), :check_mq)
+      # {:noreply, socket |> assign(mq: mq)}
+      {:noreply, assign(socket, sender: new_sender)}
     end
   end
 
@@ -109,10 +138,26 @@ defmodule MultiplayerWeb.RealtimeChannel do
   #    |> assign(presence_diff: @empty_presence_diff)}
   # end
 
-  def handle_info({:event, %{type: type} = event}, %{assigns: %{topic: _topic}} = socket) do
+  def handle_info(
+        {:event, %{type: type} = event},
+        %{transport_pid: pid, assigns: %{sender: sender, topic: topic} = _assigns} = socket
+      ) do
     Logger.debug("Got event, #{inspect(event, pretty: true)}")
-    add_message(type, event)
-    {:noreply, socket}
+    # add_message(type, event)
+    # new_sender = add_message(sender, type, event)
+
+    proc_len = mess_len(pid)
+
+    if sender.size > 0 or proc_len > @mbox_limit or proc_len == nil do
+      Logger.debug("Wait for backlog, #{inspect(proc_len, pretty: true)}")
+      Process.send_after(self(), :check_mq, @wait_time)
+      {:noreply, socket |> assign(sender: backlog(sender, type, event))}
+    else
+      update_topic(socket, topic) |> push(type, event)
+      {:noreply, socket}
+    end
+
+    # {:noreply, Map.put(socket, :assigns, %{assigns | sender: new_sender})}
   end
 
   def handle_info(:kickout_time, socket) do
@@ -133,6 +178,13 @@ defmodule MultiplayerWeb.RealtimeChannel do
   def handle_info(other, socket) do
     Logger.error("Undefined msg #{inspect(other, pretty: true)}")
     {:noreply, socket}
+  end
+
+  def mess_len(pid) do
+    case Process.info(pid, :message_queue_len) do
+      nil -> nil
+      {_, len} -> len
+    end
   end
 
   @impl true
@@ -169,8 +221,9 @@ defmodule MultiplayerWeb.RealtimeChannel do
     Map.put(socket, :topic, topic)
   end
 
-  defp add_message(event, messsage) do
-    send(self(), {:message, messsage, event})
+  defp backlog(%{size: _size, last: last, tid: tid}, event, messsage) do
+    true = :ets.insert(tid, [{last + 1, event, messsage}])
+    %{size: :ets.info(tid)[:size], last: last + 1, tid: tid}
   end
 
   def channel_stats(pid, tenant, topic) do
