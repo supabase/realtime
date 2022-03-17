@@ -2,6 +2,7 @@ defmodule Ewalrus do
   require Logger
 
   alias Ewalrus.SubscriptionManager
+  @default_poll_interval 500
 
   @moduledoc """
   Documentation for `Ewalrus`.
@@ -19,13 +20,21 @@ defmodule Ewalrus do
         db_name,
         db_user,
         db_pass,
-        poll_interval \\ 500,
+        poll_interval \\ @default_poll_interval,
         publication \\ "supabase_multiplayer",
         slot_name \\ "supabase_multiplayer_replication_slot"
       ) do
     :global.trans({{Ewalrus, scope}, self()}, fn ->
       case :global.whereis_name({:supervisor, scope}) do
         :undefined ->
+          poll_interval =
+            if !is_integer(poll_interval) do
+              Logger.error("Wrong poll_interval value: #{inspect(poll_interval)}")
+              @default_poll_interval
+            else
+              poll_interval
+            end
+
           opts = [
             id: scope,
             db_host: host,

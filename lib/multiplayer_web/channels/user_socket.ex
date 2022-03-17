@@ -39,7 +39,7 @@ defmodule MultiplayerWeb.UserSocket do
           tenant.db_name,
           tenant.db_user,
           tenant.db_password,
-          100
+          tenant.rls_poll_interval
         )
 
         {:ok, assign(socket, assigns)}

@@ -34,6 +34,11 @@
           "description": "",
           "example": "ap-southeast-1",
           "type": "string"
+        },
+        "rls_poll_interval": {
+          "description": "",
+          "example": 500,
+          "type": "integer"
         }
       },
       "required": [
@@ -93,6 +98,11 @@
           "description": "",
           "example": "ap-southeast-1",
           "type": "string"
+        },
+        "rls_poll_interval": {
+          "description": "",
+          "example": 500,
+          "type": "integer"
         }
       },
       "required": [
