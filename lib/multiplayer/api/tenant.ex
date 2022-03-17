@@ -15,6 +15,7 @@ defmodule Multiplayer.Api.Tenant do
     field(:db_password, :string)
     field(:active, :boolean)
     field(:region, :string)
+    field(:rls_poll_interval, :integer, default: 100)
     has_many(:scopes, Multiplayer.Api.Scope)
 
     timestamps()
@@ -33,7 +34,8 @@ defmodule Multiplayer.Api.Tenant do
       :db_port,
       :db_name,
       :db_user,
-      :db_password
+      :db_password,
+      :rls_poll_interval
     ])
     |> validate_required([
       :external_id,
@@ -43,7 +45,8 @@ defmodule Multiplayer.Api.Tenant do
       :db_port,
       :db_name,
       :db_user,
-      :db_password
+      :db_password,
+      :rls_poll_interval
     ])
   end
 end

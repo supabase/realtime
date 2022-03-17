@@ -23,6 +23,7 @@ defmodule MultiplayerWeb.TenantView do
       db_name: tenant.db_name,
       db_user: tenant.db_user,
       db_password: tenant.db_password,
+      rls_poll_interval: tenant.rls_poll_interval,
       inserted_at: tenant.inserted_at
     }
   end

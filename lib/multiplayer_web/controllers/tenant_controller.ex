@@ -117,6 +117,7 @@ defmodule MultiplayerWeb.TenantController do
             external_id(:string, "", required: false, example: "okumviwlylkmpkoicbrc")
             active(:boolean, "", required: false, example: true)
             region(:string, "", required: true, example: "ap-southeast-1")
+            rls_poll_interval(:integer, "", required: false, example: 500)
             inserted_at(:string, "", required: false, example: "2022-02-16T20:41:47")
           end
         end,
@@ -135,6 +136,7 @@ defmodule MultiplayerWeb.TenantController do
             db_name(:string, "", required: true, example: "postgres")
             db_user(:string, "", required: true, example: "postgres")
             db_password(:string, "", required: true, example: "postgres")
+            rls_poll_interval(:integer, "", required: false, example: 500)
           end
         end,
       Tenants:
