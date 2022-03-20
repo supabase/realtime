@@ -33,7 +33,7 @@ defmodule MultiplayerWeb.Router do
       swagger_file: "swagger.json"
   end
 
-  defp check_auth(conn, params) do
+  defp check_auth(conn, _params) do
     secret = Application.fetch_env!(:multiplayer, :api_jwt_secret)
 
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
