@@ -12,7 +12,7 @@ defmodule MultiplayerWeb.ChannelsAuthorizationTest do
     expected_token = "token123"
 
     with_mock JwtVerification,
-      verify: fn (token, @secret) ->
+      verify: fn token, @secret ->
         assert token == expected_token
         {:ok, %{}}
       end do

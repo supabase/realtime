@@ -10,6 +10,10 @@ defmodule MultiplayerWeb.TenantView do
     %{data: render_one(tenant, TenantView, "tenant.json")}
   end
 
+  def render("no_found.json", %{tenant: nil}) do
+    %{error: "no found"}
+  end
+
   def render("tenant.json", %{tenant: tenant}) do
     %{
       id: tenant.id,

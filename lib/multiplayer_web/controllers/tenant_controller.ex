@@ -53,7 +53,12 @@ defmodule MultiplayerWeb.TenantController do
   def show(conn, %{"id" => id}) do
     tenant = Api.get_tenant_by_external_id(id)
 
-    render(conn, "show.json", tenant: tenant)
+    if tenant == nil do
+      put_status(conn, 404)
+      |> render("no_found.json", tenant: tenant)
+    else
+      render(conn, "show.json", tenant: tenant)
+    end
   end
 
   swagger_path :update do
