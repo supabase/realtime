@@ -5,7 +5,7 @@ defmodule Multiplayer.SynHandler do
 
   @impl true
   def on_process_left(Ewalrus.Subscribers, tenant, pid, subs_id, _reason) do
-    if :syn.is_local_member(Ewalrus.Subscribers, tenant, pid) do
+    if node() == node(pid) do
       Logger.debug(
         "Subscriber is disconnected #{inspect([tenant: tenant, id: subs_id |> UUID.binary_to_string!()],
         pretty: true)}"

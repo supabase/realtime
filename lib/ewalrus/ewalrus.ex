@@ -46,6 +46,8 @@ defmodule Ewalrus do
             slot_name: slot_name
           ]
 
+          Logger.debug("Starting ewalrus, #{inspect(opts, pretty: true)}")
+
           {:ok, pid} =
             DynamicSupervisor.start_child(Ewalrus.RlsSupervisor, %{
               id: scope,
