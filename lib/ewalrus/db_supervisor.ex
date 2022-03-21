@@ -13,7 +13,8 @@ defmodule Ewalrus.DbSupervisor do
         hostname: args[:db_host],
         database: args[:db_name],
         password: args[:db_pass],
-        username: args[:db_user]
+        username: args[:db_user],
+        queue_target: 1000
       )
 
     :global.register_name({:db_instance, args[:id]}, conn)
