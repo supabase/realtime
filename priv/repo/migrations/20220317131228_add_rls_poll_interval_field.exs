@@ -3,7 +3,7 @@ defmodule Multiplayer.Repo.Migrations.AddRlsPollIntervalField do
 
   def up do
     alter table("tenants") do
-      add(:rls_poll_interval, :integer)
+      add(:rls_poll_interval, :integer, default: 100)
     end
   end
 

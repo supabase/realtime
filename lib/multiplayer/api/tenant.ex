@@ -16,6 +16,7 @@ defmodule Multiplayer.Api.Tenant do
     field(:active, :boolean)
     field(:region, :string)
     field(:rls_poll_interval, :integer, default: 100)
+    field(:max_concurrent_users, :integer, default: 10_000)
     has_many(:scopes, Multiplayer.Api.Scope)
 
     timestamps()
