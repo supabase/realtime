@@ -27,6 +27,7 @@ defmodule MultiplayerWeb.UserSocket do
         assigns = %{
           tenant: external_id,
           claims: claims,
+          limits: %{max_concurrent_users: tenant.max_concurrent_users},
           params: %{
             # hooks: hooks,
             ref: make_ref()
