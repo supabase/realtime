@@ -7,32 +7,6 @@
 # General application configuration
 import Config
 
-# Channels are not secured by default in development and
-# are secured by default in production.
-presence = System.get_env("PRESENCE", "true") != "false"
-
-db_host = System.get_env("DB_HOST", "localhost")
-db_name = System.get_env("DB_NAME", "postgres")
-db_user = System.get_env("DB_USER", "postgres")
-db_password = System.get_env("DB_PASSWORD", "postgres")
-db_port = System.get_env("DB_PORT", "5432")
-
-# Configure your database
-config :multiplayer, Multiplayer.Repo,
-  username: db_user,
-  password: db_password,
-  database: db_name,
-  hostname: db_host,
-  port: db_port,
-  show_sensitive_data_on_connection_error: true,
-  pool_size: 3,
-  prepare: :unnamed,
-  queue_target: 5000
-
-config :multiplayer,
-  ecto_repos: [Multiplayer.Repo],
-  presence: presence
-
 # Configures the endpoint
 config :multiplayer, MultiplayerWeb.Endpoint,
   url: [host: "localhost"],

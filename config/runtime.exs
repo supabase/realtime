@@ -23,17 +23,6 @@ if config_env() == :prod do
     check_origin: false,
     secret_key_base: secret_key_base
 
-  config :multiplayer, Multiplayer.Repo,
-    username: System.get_env("DB_USER"),
-    password: System.get_env("DB_PASSWORD"),
-    database: System.get_env("DB_NAME"),
-    hostname: System.get_env("DB_HOST"),
-    port: System.get_env("DB_PORT"),
-    show_sensitive_data_on_connection_error: true,
-    pool_size: 3,
-    prepare: :unnamed,
-    queue_target: 5000
-
   config :libcluster,
     debug: false,
     topologies: [
@@ -47,6 +36,18 @@ if config_env() == :prod do
       ]
     ]
 end
+
+config :multiplayer, Multiplayer.Repo,
+  username: System.get_env("DB_USER", "postgres"),
+  password: System.get_env("DB_PASSWORD", "postgres"),
+  database: System.get_env("DB_NAME", "postgres"),
+  hostname: System.get_env("DB_HOST", "localhost"),
+  port: System.get_env("DB_PORT", "5432"),
+  show_sensitive_data_on_connection_error: true,
+  pool_size: System.get_env("DB_POOL_SIZE", "5") |> String.to_integer(),
+  prepare: :unnamed,
+  queue_target: 5000,
+  queue_interval: 5000
 
 config :multiplayer,
   ecto_repos: [Multiplayer.Repo],
