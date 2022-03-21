@@ -30,7 +30,9 @@ if config_env() == :prod do
     hostname: System.get_env("DB_HOST"),
     port: System.get_env("DB_PORT"),
     show_sensitive_data_on_connection_error: true,
-    pool_size: 3
+    pool_size: 3,
+    prepare: :unnamed,
+    queue_target: 5000
 
   config :libcluster,
     debug: false,
