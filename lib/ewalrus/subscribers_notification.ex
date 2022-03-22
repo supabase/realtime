@@ -1,6 +1,8 @@
 defmodule Ewalrus.SubscribersNotification do
   require Logger
 
+  alias Phoenix.Socket.Broadcast
+
   @topic "realtime"
 
   # def notify(%Transaction{changes: changes} = txn) when is_list(changes) do
@@ -20,20 +22,25 @@ defmodule Ewalrus.SubscribersNotification do
   #   :ok
   # end
 
-  def broadcast_change(_topic, %{subscription_ids: subs_id} = change, scope) do
+  def broadcast_change(topic, %{subscription_ids: subs_id} = change, scope) do
     payload =
       Map.filter(change, fn {key, _} ->
         !Enum.member?([:is_rls_enabled, :subscription_ids], key)
       end)
 
-    :syn.members(Ewalrus.Subscribers, scope)
-    |> Enum.each(fn {pid, bin_id} ->
-      if MapSet.member?(subs_id, bin_id) do
-        Logger.debug(
-          "Sent event, #{inspect([pid: pid, id: UUID.binary_to_string!(bin_id), msd: change], pretty: true)}"
-        )
+    encoded_msg =
+      %Broadcast{
+        topic: topic,
+        event: payload.type,
+        payload: payload
+      }
+      |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
 
-        send(pid, {:event, payload})
+    :syn.members(Ewalrus.Subscribers, scope)
+    |> Enum.each(fn {pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
+      if MapSet.member?(subs_id, bin_id) do
+        send(transport_pid, encoded_msg)
+        # send(pid, {:event, payload})
       end
     end)
   end
@@ -57,15 +64,14 @@ defmodule Ewalrus.SubscribersNotification do
           # end)
 
           # Shout to specific schema - e.g. "realtime:public"
-          if has_schema(event_config, schema) do
-            broadcast_change(schema_topic, change, id)
-          end
+          # if has_schema(event_config, schema) do
+          #   broadcast_change(schema_topic, change, id)
+          # end
 
           # Special case for notifiying "*"
-          # if has_schema(event_config, "*") do
-          #   "#{@topic}:*"
-          #   |> broadcast_change(change)
-          # end
+          if has_schema(event_config, "*") do
+            broadcast_change("#{@topic}:*", change, id)
+          end
 
           # Shout to specific table - e.g. "realtime:public:users"
           if has_table(event_config, schema, table) do

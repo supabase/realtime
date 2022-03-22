@@ -85,7 +85,7 @@ defmodule Ewalrus do
     end)
   end
 
-  def subscribe(scope, subs_id, topic, claims) do
+  def subscribe(scope, subs_id, topic, claims, transport_pid) do
     pid = manager_pid(scope)
 
     if pid do
@@ -97,7 +97,12 @@ defmodule Ewalrus do
 
       # TODO: move inside to SubscriptionManager
       bin_subs_id = UUID.string_to_binary!(subs_id)
-      :syn.join(Ewalrus.Subscribers, scope, self(), bin_subs_id)
+
+      :syn.join(Ewalrus.Subscribers, scope, self(), %{
+        bin_id: bin_subs_id,
+        transport_pid: transport_pid
+      })
+
       SubscriptionManager.subscribe(pid, opts)
     end
   end
