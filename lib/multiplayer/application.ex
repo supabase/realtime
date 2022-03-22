@@ -35,7 +35,8 @@ defmodule Multiplayer.Application do
     Registry.start_link(keys: :unique, name: Multiplayer.Registry.Unique)
 
     :syn.set_event_handler(Multiplayer.SynHandler)
-    :syn.add_node_to_scopes([Ewalrus.Subscribers, :users])
+    :syn.add_node_to_scopes([Ewalrus.Subscribers, :users, Ewalrus.RegionNodes])
+    :syn.join(Ewalrus.RegionNodes, System.get_env("FLY_REGION"), self(), node: node())
 
     # Multiplayer.SessionsHooks.init_table()
 

@@ -34,14 +34,18 @@ defmodule MultiplayerWeb.UserSocket do
           }
         }
 
-        Ewalrus.start(
-          external_id,
-          tenant.db_host,
-          tenant.db_name,
-          tenant.db_user,
-          tenant.db_password,
-          tenant.rls_poll_interval
-        )
+        params = %{
+          scope: external_id,
+          host: tenant.db_host,
+          db_name: tenant.db_name,
+          db_user: tenant.db_user,
+          db_pass: tenant.db_password,
+          poll_interval: tenant.rls_poll_interval,
+          publication: "supabase_multiplayer",
+          slot_name: "supabase_multiplayer_replication_slot"
+        }
+
+        Ewalrus.start_geo(tenant.region, params)
 
         {:ok, assign(socket, assigns)}
       else
