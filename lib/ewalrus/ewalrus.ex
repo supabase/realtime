@@ -8,22 +8,44 @@ defmodule Ewalrus do
   Documentation for `Ewalrus`.
   """
 
+  def start_geo(aws_region, params) do
+    [fly_region | _] = Ewalrus.Regions.aws_to_fly(aws_region)
+    lauch_node = lauch_node(fly_region, node())
+
+    Logger.debug(
+      "Starting geo ewalrus #{inspect(lauch_node: lauch_node, aws_region: aws_region, fly_region: fly_region)}"
+    )
+
+    :rpc.call(lauch_node, Ewalrus, :start, [params])
+  end
+
+  def lauch_node(fly_region, default) do
+    case :syn.members(Ewalrus.RegionNodes, fly_region) do
+      [{_, [node: lauch_node]} | _] ->
+        lauch_node
+
+      _ ->
+        Logger.warning("Didn't find lauch_node, return default #{inspect(default)}")
+        default
+    end
+  end
+
   @doc """
   Start db poller.
 
   """
-  @spec start(String.t(), String.t(), String.t(), String.t(), String.t(), String.t(), String.t()) ::
+  @spec start(map()) ::
           :ok | {:error, :already_started}
-  def start(
-        scope,
-        host,
-        db_name,
-        db_user,
-        db_pass,
-        poll_interval \\ @default_poll_interval,
-        publication \\ "supabase_multiplayer",
-        slot_name \\ "supabase_multiplayer_replication_slot"
-      ) do
+  def start(%{
+        scope: scope,
+        host: host,
+        db_name: db_name,
+        db_user: db_user,
+        db_pass: db_pass,
+        poll_interval: poll_interval,
+        publication: publication,
+        slot_name: slot_name
+      }) do
     :global.trans({{Ewalrus, scope}, self()}, fn ->
       case :global.whereis_name({:supervisor, scope}) do
         :undefined ->
