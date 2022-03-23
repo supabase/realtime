@@ -37,12 +37,28 @@ defmodule Ewalrus.SubscribersNotification do
       |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
 
     :syn.members(Ewalrus.Subscribers, scope)
-    |> Enum.each(fn {pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
-      if MapSet.member?(subs_id, bin_id) do
-        send(transport_pid, encoded_msg)
-        # send(pid, {:event, payload})
-      end
+    |> Enum.chunk_every(100)
+    |> Enum.each(fn subs_part ->
+      Process.spawn(
+        fn ->
+          Enum.each(subs_part, fn {_pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
+            if MapSet.member?(subs_id, bin_id) do
+              send(transport_pid, encoded_msg)
+              # send(pid, {:event, payload})
+            end
+          end)
+        end,
+        []
+      )
     end)
+
+    # :syn.members(Ewalrus.Subscribers, scope)
+    # |> Enum.each(fn {pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
+    #   if MapSet.member?(subs_id, bin_id) do
+    #     # send(transport_pid, encoded_msg)
+    #     send(pid, {:event, payload})
+    #   end
+    # end)
   end
 
   def notify_subscribers([_ | _] = changes, id) do
