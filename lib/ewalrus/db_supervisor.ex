@@ -28,6 +28,7 @@ defmodule Ewalrus.DbSupervisor do
       replication_poll_interval: args[:poll_interval],
       publication: args[:publication],
       slot_name: args[:slot_name],
+      max_changes: 100,
       max_record_bytes: 1_048_576
     ]
 
