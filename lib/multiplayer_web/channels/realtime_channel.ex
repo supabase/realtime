@@ -39,7 +39,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
         {:event, %{type: type} = event},
         %{assigns: %{topic: topic}} = socket
       ) do
-    Logger.debug("Got event, #{inspect(event, pretty: true)}")
+    # Logger.debug("Got event, #{inspect(event, pretty: true)}")
     update_topic(socket, topic) |> push(type, event)
     {:noreply, socket}
   end

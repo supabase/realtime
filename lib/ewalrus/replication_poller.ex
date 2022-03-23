@@ -30,6 +30,7 @@ defmodule Ewalrus.ReplicationPoller do
       publication: Keyword.fetch!(opts, :publication),
       slot_name: Keyword.fetch!(opts, :slot_name),
       max_record_bytes: Keyword.fetch!(opts, :max_record_bytes),
+      max_changes: Keyword.fetch!(opts, :max_changes),
       conn: Keyword.fetch!(opts, :conn),
       id: Keyword.fetch!(opts, :id)
     }
@@ -75,6 +76,7 @@ defmodule Ewalrus.ReplicationPoller do
           publication: publication,
           slot_name: slot_name,
           max_record_bytes: max_record_bytes,
+          max_changes: max_changes,
           conn: conn,
           id: id
         } = state
@@ -82,7 +84,7 @@ defmodule Ewalrus.ReplicationPoller do
     Process.cancel_timer(poll_ref)
 
     try do
-      Replications.list_changes(conn, slot_name, publication, max_record_bytes)
+      Replications.list_changes(conn, slot_name, publication, max_changes, max_record_bytes)
     catch
       :error, reason ->
         {:error, reason}
