@@ -37,7 +37,7 @@ defmodule Ewalrus.SubscribersNotification do
       |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
 
     :syn.members(Ewalrus.Subscribers, scope)
-    |> Enum.chunk_every(100)
+    |> Enum.chunk_every(50)
     |> Enum.each(fn subs_part ->
       Process.spawn(
         fn ->
