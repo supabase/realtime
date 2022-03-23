@@ -22,43 +22,26 @@ defmodule Ewalrus.SubscribersNotification do
   #   :ok
   # end
 
-  def broadcast_change(topic, %{subscription_ids: subs_id} = change, scope) do
+  def broadcast_change(_topic, %{subscription_ids: subs_id} = change, scope) do
     payload =
       Map.filter(change, fn {key, _} ->
         !Enum.member?([:is_rls_enabled, :subscription_ids], key)
       end)
 
-    encoded_msg =
-      %Broadcast{
-        topic: topic,
-        event: payload.type,
-        payload: payload
-      }
-      |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
-
-    # :syn.members(Ewalrus.Subscribers, scope)
-    # |> Enum.chunk_every(50)
-    # |> Enum.each(fn subs_part ->
-    #   Process.spawn(
-    #     fn ->
-    #       Enum.each(subs_part, fn {_pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
-    #         if MapSet.member?(subs_id, bin_id) do
-    #           send(transport_pid, encoded_msg)
-    #           # send(pid, {:event, payload})
-    #         end
-    #       end)
-    #     end,
-    #     []
-    #   )
-    # end)
+    # encoded_msg =
+    #   %Broadcast{
+    #     topic: topic,
+    #     event: payload.type,
+    #     payload: payload
+    #   }
+    #   |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
 
     :syn.members(Ewalrus.Subscribers, scope)
-    |> Enum.each(fn {pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
-      send(transport_pid, encoded_msg)
-      # if MapSet.member?(subs_id, bin_id) do
-      #   send(transport_pid, encoded_msg)
-      #   # send(pid, {:event, payload})
-      # end
+    |> Enum.each(fn {pid, %{transport_pid: _transport_pid, bin_id: bin_id}} ->
+      if MapSet.member?(subs_id, bin_id) do
+        # send(transport_pid, encoded_msg)
+        send(pid, {:event, payload})
+      end
     end)
   end
 

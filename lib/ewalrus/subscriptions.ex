@@ -95,10 +95,18 @@ defmodule Ewalrus.Subscriptions do
         end
 
       [schema, table] ->
+        case oids[{schema, table}] do
+          nil -> raise("No #{schema} and #{table} in #{inspect(oids)}")
+          entities -> %{subs_params | entities: entities}
+        end
+
         %{subs_params | entities: oids[{schema, table}]}
 
       [schema] ->
-        %{subs_params | entities: oids[{schema}]}
+        case oids[{schema}] do
+          nil -> raise("No #{schema} in #{inspect(oids)}")
+          entities -> %{subs_params | entities: entities}
+        end
 
       _ ->
         Logger.error("Unknown topic #{inspect(topic)}")
