@@ -1,6 +1,6 @@
-# fly.toml file generated for realtime-multi on 2022-04-14T15:47:49+02:00
+# fly.toml file generated for realtime-demo on 2022-03-24T16:09:51+01:00
 
-app = "realtime-multi"
+app = "realtime-demo"
 
 kill_signal = "SIGTERM"
 kill_timeout = 5
@@ -10,7 +10,7 @@ kill_timeout = 5
   strategy = "canary"
 
 [env]
-  DNS_NODES = "realtime-multi.internal"
+  DNS_NODES = "realtime-demo.internal"
   SECURE_CHANNELS = "true"
 
 [experimental]
