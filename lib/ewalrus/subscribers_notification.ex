@@ -22,7 +22,7 @@ defmodule Ewalrus.SubscribersNotification do
   #   :ok
   # end
 
-  def broadcast_change(topic, %{subscription_ids: subs_id} = change, scope) do
+  def broadcast_change(topic, %{subscription_ids: subs_id} = change, scope, stats) do
     payload =
       Map.filter(change, fn {key, _} ->
         !Enum.member?([:is_rls_enabled, :subscription_ids], key)
@@ -32,7 +32,11 @@ defmodule Ewalrus.SubscribersNotification do
       %Broadcast{
         topic: topic,
         event: payload.type,
-        payload: payload
+        payload: %{
+          payload
+          | record:
+              Map.merge(payload.record, Map.put(stats, "sent_msg", :os.system_time(:millisecond)))
+        }
       }
       |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
 
@@ -45,7 +49,7 @@ defmodule Ewalrus.SubscribersNotification do
     end)
   end
 
-  def notify_subscribers([_ | _] = changes, id) do
+  def notify_subscribers([_ | _] = changes, id, stats) do
     Enum.each(changes, fn change ->
       case change do
         %{schema: schema, table: table, type: type}
@@ -70,12 +74,12 @@ defmodule Ewalrus.SubscribersNotification do
 
           # Special case for notifiying "*"
           if has_schema(event_config, "*") do
-            broadcast_change("#{@topic}:*", change, id)
+            broadcast_change("#{@topic}:*", change, id, stats)
           end
 
           # Shout to specific table - e.g. "realtime:public:users"
           if has_table(event_config, schema, table) do
-            broadcast_change(table_topic, change, id)
+            broadcast_change(table_topic, change, id, stats)
           end
 
           # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
@@ -91,7 +95,7 @@ defmodule Ewalrus.SubscribersNotification do
                      true <- is_notification_key_length_valid(stringified_v),
                      true <- has_column(event_config, schema, table, k) do
                   "#{table_topic}:#{k}=eq.#{stringified_v}"
-                  |> broadcast_change(change, id)
+                  |> broadcast_change(change, id, stats)
                 end
               end)
           end
