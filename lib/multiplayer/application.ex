@@ -56,6 +56,7 @@ defmodule Multiplayer.Application do
       Multiplayer.PromEx,
       # Multiplayer.PresenceNotify
       # Multiplayer.SessionsHooksBroadway,
+      {Cachex, name: :tenants},
       {DynamicSupervisor, strategy: :one_for_one, name: Ewalrus.RlsSupervisor}
     ]
 
