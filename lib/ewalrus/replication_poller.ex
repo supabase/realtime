@@ -81,7 +81,7 @@ defmodule Ewalrus.ReplicationPoller do
           id: id
         } = state
       ) do
-    Process.cancel_timer(poll_ref)
+    cancel_timer(poll_ref)
 
     try do
       Replications.list_changes(conn, slot_name, publication, max_changes, max_record_bytes)
@@ -111,16 +111,25 @@ defmodule Ewalrus.ReplicationPoller do
         |> Enum.reverse()
         |> Ewalrus.SubscribersNotification.notify_subscribers(id)
 
+        {:ok, length(rows)}
+
       {:ok, _} ->
-        :ok
+        {:ok, 0}
 
       {:error, reason} ->
         {:error, reason}
     end
     |> case do
-      :ok ->
+      {:ok, rows_num} ->
         backoff = Backoff.reset(backoff)
-        poll_ref = Process.send_after(self(), :poll, poll_interval)
+
+        poll_ref =
+          if rows_num > 0 do
+            send(self(), :poll)
+            nil
+          else
+            Process.send_after(self(), :poll, poll_interval)
+          end
 
         {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
 
@@ -227,4 +236,10 @@ defmodule Ewalrus.ReplicationPoller do
   defp convert_errors([_ | _] = errors), do: errors
 
   defp convert_errors(_), do: nil
+
+  def cancel_timer(nil), do: false
+
+  def cancel_timer(ref) do
+    Process.cancel_timer(ref)
+  end
 end
