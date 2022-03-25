@@ -50,7 +50,6 @@ config :multiplayer, Multiplayer.Repo,
   queue_interval: 5000
 
 config :multiplayer,
-  ecto_repos: [Multiplayer.Repo],
   secure_channels: System.get_env("SECURE_CHANNELS", "true") == "true",
   jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
   api_jwt_secret: System.get_env("API_JWT_SECRET")

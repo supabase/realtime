@@ -38,7 +38,7 @@ defmodule Ewalrus.Regions do
 
   def aws_to_fly(aws_region) do
     case aws_region do
-      "us-east-1" -> ["atl", "iad", "ewr"]
+      "us-east-1" -> ["iad", "ewr"]
       "us-west-1" -> ["sjc", "lax"]
       "ap-southeast-1" -> ["sin"]
       "ap-northeast-1" -> ["nrt"]

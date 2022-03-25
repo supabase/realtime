@@ -17,6 +17,8 @@ defmodule Multiplayer.Api.Tenant do
     field(:region, :string)
     field(:rls_poll_interval, :integer, default: 100)
     field(:max_concurrent_users, :integer, default: 10_000)
+    field(:rls_poll_max_changes, :integer)
+    field(:rls_poll_max_record_bytes, :integer)
     has_many(:scopes, Multiplayer.Api.Scope)
 
     timestamps()
@@ -36,7 +38,9 @@ defmodule Multiplayer.Api.Tenant do
       :db_name,
       :db_user,
       :db_password,
-      :rls_poll_interval
+      :rls_poll_interval,
+      :rls_poll_max_changes,
+      :rls_poll_max_record_bytes
     ])
     |> validate_required([
       :external_id,
