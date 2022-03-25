@@ -43,7 +43,9 @@ defmodule MultiplayerWeb.UserSocket do
           db_pass: tenant.db_password,
           poll_interval: tenant.rls_poll_interval,
           publication: "supabase_multiplayer",
-          slot_name: "supabase_multiplayer_replication_slot"
+          slot_name: "supabase_multiplayer_replication_slot",
+          max_changes: tenant.rls_poll_max_changes,
+          max_record_bytes: tenant.rls_poll_max_record_bytes
         }
 
         Ewalrus.start_geo(tenant.region, params)

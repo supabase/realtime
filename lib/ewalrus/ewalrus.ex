@@ -44,7 +44,9 @@ defmodule Ewalrus do
         db_pass: db_pass,
         poll_interval: poll_interval,
         publication: publication,
-        slot_name: slot_name
+        slot_name: slot_name,
+        max_changes: max_changes,
+        max_record_bytes: max_record_bytes
       }) do
     :global.trans({{Ewalrus, scope}, self()}, fn ->
       case :global.whereis_name({:supervisor, scope}) do
@@ -65,7 +67,9 @@ defmodule Ewalrus do
             db_pass: db_pass,
             poll_interval: poll_interval,
             publication: publication,
-            slot_name: slot_name
+            slot_name: slot_name,
+            max_changes: max_changes,
+            max_record_bytes: max_record_bytes
           ]
 
           Logger.debug("Starting ewalrus, #{inspect(opts, pretty: true)}")
