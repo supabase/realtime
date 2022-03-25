@@ -8,22 +8,38 @@ import {
   IconMinimize2,
   IconMaximize2,
 } from "@supabase/ui";
+import { supabaseClient } from "../client/SupabaseClient";
 
 interface Props {}
 
 const WaitlistPopover: FC<Props> = ({}) => {
   const [isExpanded, setIsExpanded] = useState(true);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState<any>();
 
   const initialValues = { email: "" };
 
   const onValidate = (values: any) => {
     const errors = {} as any;
+    const emailValidateRegex =
+      /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
+    if (!emailValidateRegex.test(values.email))
+      errors.email = "Please enter a valid email";
     return errors;
   };
 
   const onSubmit = async (values: any, { setSubmitting }: any) => {
     setSubmitting(true);
-    console.log("Save the email somewhere simple");
+    const { error } = await supabaseClient
+      .from("waitlist")
+      .insert([{ email: values.email }]);
+    if (!error) {
+      setIsSuccess(true);
+      setError(undefined);
+    } else {
+      console.log(`Error registering waitlist for ${values.email}`, error);
+      setError(error);
+    }
     setSubmitting(false);
   };
 
@@ -101,18 +117,39 @@ const WaitlistPopover: FC<Props> = ({}) => {
       >
         {({ isSubmitting, handleReset }: any) => {
           return (
-            <Input
-              id="email"
-              name="email"
-              placeholder="example@email.com"
-              actions={[
-                <div className="mr-1">
-                  <Button loading={isSubmitting} htmlType="submit">
-                    Get early access
-                  </Button>
-                </div>,
-              ]}
-            />
+            <>
+              <Input
+                id="email"
+                name="email"
+                placeholder="example@email.com"
+                actions={[
+                  <div className="mr-1">
+                    <Button
+                      loading={isSubmitting}
+                      disabled={isSubmitting}
+                      htmlType="submit"
+                    >
+                      Get early access
+                    </Button>
+                  </div>,
+                ]}
+              />
+              {isSuccess && (
+                <p className="text-sm text-green-1000 mt-2">
+                  Thank you for submitting your interest!
+                </p>
+              )}
+              {error?.details.includes("already exists") && (
+                <p className="text-sm text-scale-900 mt-2">
+                  Email has already been registered for waitlist
+                </p>
+              )}
+              {error && !error?.details.includes("already exists") && (
+                <p className="text-sm text-red-900 mt-2">
+                  Unable to register email for waitlist
+                </p>
+              )}
+            </>
           );
         }}
       </Form>
