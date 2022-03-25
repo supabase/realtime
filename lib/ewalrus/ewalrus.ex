@@ -10,22 +10,22 @@ defmodule Ewalrus do
 
   def start_geo(aws_region, params) do
     [fly_region | _] = Ewalrus.Regions.aws_to_fly(aws_region)
-    lauch_node = lauch_node(fly_region, node())
+    launch_node = launch_node(fly_region, node())
 
     Logger.debug(
-      "Starting geo ewalrus #{inspect(lauch_node: lauch_node, aws_region: aws_region, fly_region: fly_region)}"
+      "Starting geo ewalrus #{inspect(lauch_node: launch_node, aws_region: aws_region, fly_region: fly_region)}"
     )
 
-    :rpc.call(lauch_node, Ewalrus, :start, [params])
+    :rpc.call(launch_node, Ewalrus, :start, [params])
   end
 
   def lauch_node(fly_region, default) do
     case :syn.members(Ewalrus.RegionNodes, fly_region) do
-      [{_, [node: lauch_node]} | _] ->
-        lauch_node
+      [{_, [node: launch_node]} | _] ->
+        launch_node
 
       _ ->
-        Logger.warning("Didn't find lauch_node, return default #{inspect(default)}")
+        Logger.warning("Didn't find launch_node, return default #{inspect(default)}")
         default
     end
   end
