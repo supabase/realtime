@@ -1,16 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .btn-primary {
+    @apply inline-block text-sm border border-green-500 rounded py-1 px-3 bg-green-500;
+    color: #fff !important;
+    font-weight: 600;
+    line-height: 20px;
+    text-align: center;
+  }
+
+  .btn-primary-hover {
+    @apply bg-green-600;
+    cursor: pointer;
+  }
+}
+
 html,
-body {
+body,
+#__next,
+.main {
+  height: 100vh;
   padding: 0;
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen,
-    Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: antialiased;
+  @apply bg-bg-primary-light dark:bg-bg-primary-dark;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 a {
   color: inherit;
   text-decoration: none;
-}
-
-* {
-  box-sizing: border-box;
 }
