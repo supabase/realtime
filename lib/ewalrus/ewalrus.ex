@@ -19,7 +19,7 @@ defmodule Ewalrus do
     :rpc.call(launch_node, Ewalrus, :start, [params])
   end
 
-  def lauch_node(fly_region, default) do
+  def launch_node(fly_region, default) do
     case :syn.members(Ewalrus.RegionNodes, fly_region) do
       [{_, [node: launch_node]} | _] ->
         launch_node
