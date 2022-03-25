@@ -29,13 +29,14 @@ const WaitlistPopover: FC<Props> = ({}) => {
   };
 
   const onSubmit = async (values: any, { setSubmitting }: any) => {
+    setIsSuccess(false);
+    setError(undefined);
     setSubmitting(true);
     const { error } = await supabaseClient
       .from("waitlist")
       .insert([{ email: values.email }]);
     if (!error) {
       setIsSuccess(true);
-      setError(undefined);
     } else {
       console.log(`Error registering waitlist for ${values.email}`, error);
       setError(error);

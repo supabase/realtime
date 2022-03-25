@@ -12,7 +12,7 @@ const Room: NextPage = () => {
       className="h-screen w-screen p-4 animate-gradient"
       style={{
         background:
-          "linear-gradient(-45deg, #78E0B8, #00CF90, #00744F, #00593C, #00744F, #00CF90, #78E0B8)",
+          "linear-gradient(-45deg, transparent, transparent, #00593C,#00CF90, #00593C,  transparent, transparent)",
         backgroundSize: "400% 400%",
       }}
     >
