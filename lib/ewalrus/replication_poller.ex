@@ -81,25 +81,20 @@ defmodule Ewalrus.ReplicationPoller do
           id: id
         } = state
       ) do
-    fn_starts = :os.system_time(:millisecond)
     cancel_timer(poll_ref)
 
     try do
-      res = Replications.list_changes(conn, slot_name, publication, max_changes, max_record_bytes)
-
-      poll_finished = :os.system_time(:millisecond)
-      stats = %{"fn_starts" => fn_starts, "poll_finished" => poll_finished}
-      {res, stats}
+      Replications.list_changes(conn, slot_name, publication, max_changes, max_record_bytes)
     catch
       :error, reason ->
         {:error, reason}
     end
     |> case do
-      {{:ok,
-        %Postgrex.Result{
-          columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"] = columns,
-          rows: [_ | _] = rows
-        }}, stats1} ->
+      {:ok,
+       %Postgrex.Result{
+         columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"] = columns,
+         rows: [_ | _] = rows
+       }} ->
         Enum.reduce(rows, [], fn row, acc ->
           columns
           |> Enum.zip(row)
@@ -114,11 +109,11 @@ defmodule Ewalrus.ReplicationPoller do
         end)
         # |> Logger.debug()
         |> Enum.reverse()
-        |> Ewalrus.SubscribersNotification.notify_subscribers(id, stats1)
+        |> Ewalrus.SubscribersNotification.notify_subscribers(id)
 
         {:ok, length(rows)}
 
-      {{:ok, _}, _} ->
+      {:ok, _} ->
         {:ok, 0}
 
       {:error, reason} ->
