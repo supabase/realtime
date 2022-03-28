@@ -87,8 +87,12 @@ defmodule Ewalrus.Subscriptions do
       [schema, table, filters] ->
         String.split(filters, ~r/(\=|\.)/)
         |> case do
-          [_, "eq", _] = filters ->
-            %{subs_params | filters: filters, entities: oids[{schema, table}]}
+          [filter_field, "eq", filter_value] ->
+            %{
+              subs_params
+              | filters: [{filter_field, "eq", filter_value}],
+                entities: oids[{schema, table}]
+            }
 
           _ ->
             %{subs_params | filters: filters}
