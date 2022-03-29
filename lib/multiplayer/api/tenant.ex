@@ -8,8 +8,14 @@ defmodule Multiplayer.Api.Tenant do
     field(:name, :string)
     field(:external_id, :string)
     field(:jwt_secret, :string)
-    field(:settings, :map)
-    field(:active, :boolean)
+
+    field(:settings, :map,
+      default: %{
+        max_concurrent_users: 10_000
+      }
+    )
+
+    field(:active, :boolean, default: false)
 
     has_many(:extensions, Multiplayer.Api.Extensions,
       foreign_key: :tenant_external_id,
