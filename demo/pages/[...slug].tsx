@@ -161,6 +161,7 @@ const Room: NextPage = () => {
       'broadcast',
       (payload: any) => {
         setUsers((users) => {
+          console.log(users)
           const usersClone = cloneDeep(users)
           const userId = payload.payload.user_id
           usersClone[userId] = {
@@ -176,7 +177,6 @@ const Room: NextPage = () => {
     channel.on(
       'broadcast',
       (payload: any) => {
-        console.log('MESSAGE', JSON.stringify(payload.payload))
         setUsers((users) => {
           const usersClone = cloneDeep(users)
           const userId = payload.payload.user_id

@@ -38,6 +38,13 @@ const Cursor: FC<Props> = ({
     if (isTyping && isLocalClient && inputRef.current) {
       inputRef.current.focus()
     }
+
+    if (isTyping && !isLocalClient) {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+      }
+    }
+
     if (message && !isLocalClient) {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
@@ -48,6 +55,8 @@ const Cursor: FC<Props> = ({
       timeoutRef.current = timeoutId
     }
   }, [isTyping, message, inputRef])
+
+  !isLocalClient && console.log(x, y, color)
 
   return (
     <>
@@ -70,9 +79,9 @@ const Cursor: FC<Props> = ({
         </svg>
       )}
       <div
-        className={`absolute top-0 left-0 transform transition px-6 py-2 rounded-full shadow-md ${
+        className={`absolute top-0 left-0 transform transition py-2 rounded-full shadow-md ${
           showMessageBubble ? 'opacity-100' : 'opacity-0'
-        } flex items-center justify-between ${_isLocalClient ? 'w-[280px]' : ''}`}
+        } flex items-center justify-between ${_isLocalClient ? 'w-[280px] px-6' : 'px-4'}`}
         style={{
           backgroundColor: color || '#3ECF8E',
           transform: `translateX(${(x || 0) + 20}px) translateY(${(y || 0) + 20}px)`,
