@@ -36,6 +36,9 @@ const Cursor: FC<Props> = ({
     if (isTyping) {
       setShowMessageBubble(true)
       if (isLocalClient) {
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current)
+        }
         setHideInput(false)
       }
     } else if (!isTyping && !message && isLocalClient) {
