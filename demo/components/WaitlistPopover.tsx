@@ -106,6 +106,7 @@ const WaitlistPopover: FC<Props> = ({}) => {
                 id="email"
                 name="email"
                 placeholder="example@email.com"
+                autoComplete="off"
                 actions={[
                   <div key="email-submit" className="mr-1">
                     <Button
