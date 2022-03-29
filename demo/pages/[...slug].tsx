@@ -1,11 +1,12 @@
 import type { NextPage } from 'next'
 import randomColor from 'randomcolor'
-import { useEffect, useState, useContext } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { nanoid } from 'nanoid'
 import cloneDeep from 'lodash.clonedeep'
 
-import { User, Message } from '../types/main.type'
+import { Message } from '../types/main.type'
+import Loader from '../components/Loader'
 import Users from '../components/Users'
 import Cursor from '../components/Cursor'
 import Chatbox from '../components/Chatbox'
@@ -31,6 +32,7 @@ const Room: NextPage = () => {
   const [messages, setMessages] = useState<Message[]>([])
   const [roomChannel, setRoomChannel] = useState<RealtimeSubscriptionV2>()
 
+  // Initialize realtime session
   useEffect(() => {
     realtimeClient.connect()
 
@@ -53,6 +55,7 @@ const Room: NextPage = () => {
     }
   }, [])
 
+  // Determine if current room is verified or not
   useEffect(() => {
     if (!channel || !isStateSynced || !roomId) return
 
@@ -82,6 +85,7 @@ const Room: NextPage = () => {
     }
   }, [channel, isStateSynced, roomId])
 
+  // Handle redirect to a verified room with enough seats
   useEffect(() => {
     if (!channel || !verifiedRoomId) return
 
@@ -99,6 +103,7 @@ const Room: NextPage = () => {
       })
   }, [channel, router, roomId, verifiedRoomId])
 
+  // Handle presence of users within the room
   useEffect(() => {
     if (!channel || !verifiedRoomId) return
 
@@ -140,6 +145,7 @@ const Room: NextPage = () => {
     )
   }, [channel, verifiedRoomId])
 
+  // Load messages of the room for the chatbox
   useEffect(() => {
     if (!verifiedRoomId) return
 
@@ -152,6 +158,7 @@ const Room: NextPage = () => {
       .then((resp: PostgrestResponse<Message>) => resp.data && setMessages(resp.data.reverse()))
   }, [verifiedRoomId])
 
+  // Listen to realtime changes based on INSERT events to the messages table
   useEffect(() => {
     if (!verifiedRoomId) return
 
@@ -181,6 +188,7 @@ const Room: NextPage = () => {
     }
   }, [verifiedRoomId])
 
+  // Handle event listeners to broadcast
   useEffect(() => {
     if (!channel) return
 
@@ -192,23 +200,20 @@ const Room: NextPage = () => {
       })
     }
 
+    const onKeyPress = (e: KeyboardEvent) => {
+      console.log('onKeyPress')
+    }
+
     window.addEventListener('mousemove', setMouseEvent)
+    window.addEventListener('keypress', onKeyPress)
 
     return () => {
       window.removeEventListener('mousemove', setMouseEvent)
+      window.removeEventListener('keypress', onKeyPress)
     }
   }, [channel])
 
-  if (!verifiedRoomId) {
-    return (
-      <div className="bg-scale-200 h-screen w-screen flex flex-col items-center justify-center space-y-4">
-        <span className="flex h-5 w-5 relative">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-900 opacity-75"></span>
-          <span className="relative inline-flex rounded-full h-full w-full bg-green-900"></span>
-        </span>
-      </div>
-    )
-  }
+  if (!verifiedRoomId) return <Loader />
 
   return (
     <div

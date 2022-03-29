@@ -149,7 +149,7 @@ module.exports = ui({
         },
       },
       animation: {
-        gradient: 'gradient 20s ease infinite',
+        gradient: 'gradient 60s ease infinite',
       },
       keyframes: {
         gradient: {
