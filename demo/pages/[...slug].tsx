@@ -28,7 +28,6 @@ const Room: NextPage = () => {
 
   const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
-  const [roomChannel, setRoomChannel] = useState<RealtimeSubscriptionV2>()
 
   // These states will be managed via ref as their mutated within event listeners
   const isTypingRef = useRef() as any
@@ -90,11 +89,11 @@ const Room: NextPage = () => {
     if (presences?.length < 5) {
       setVerifiedRoomId(roomId)
     } else if (Object.keys(state).length) {
-      const rooms = Object.entries(state).map(([roomId, users]) => {
+      const rooms = Object.entries(state).map(([id, users]) => {
         if (Array.isArray(users)) {
-          return [roomId, users.length]
+          return [id, users.length]
         } else {
-          return [roomId, undefined]
+          return [id, undefined]
         }
       })
       const sortedRooms = rooms.sort((a: any, b: any) => a[1] - b[1])
@@ -142,13 +141,15 @@ const Room: NextPage = () => {
           setUsers((prevUsers) => {
             return roomPresences.reduce((acc, presence) => {
               const userId = presence.user_id
-              acc[userId] = cloneDeep(prevUsers[userId]) || {
+
+              acc[userId] = prevUsers[userId] || {
                 x: null,
                 y: null,
                 color: randomColor(),
                 message: '',
                 isTyping: false,
               }
+
               return acc
             }, {})
           })
@@ -161,13 +162,15 @@ const Room: NextPage = () => {
       'broadcast',
       (payload: any) => {
         setUsers((users) => {
-          const usersClone = cloneDeep(users)
           const userId = payload.payload.user_id
-          usersClone[userId] = {
-            ...usersClone[userId],
-            ...{ x: payload.payload.x, y: payload.payload.y },
+          const existingUser = users[userId]
+
+          if (existingUser) {
+            users[userId] = { ...existingUser, ...{ x: payload.payload.x, y: payload.payload.y } }
+            users = cloneDeep(users)
           }
-          return usersClone
+
+          return users
         })
       },
       { event: 'POS' }
@@ -225,7 +228,6 @@ const Room: NextPage = () => {
       { event: 'INSERT' }
     )
     newChannel.subscribe()
-    setRoomChannel(newChannel)
 
     return () => {
       newChannel.unsubscribe()
