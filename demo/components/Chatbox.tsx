@@ -1,42 +1,45 @@
-import { FC } from "react";
-import { Button, Form, IconSend, Input } from "@supabase/ui";
-import { uuidv4 } from "../lib/helpers";
-import { Message } from "../types/main.type";
+import { FC } from 'react'
+import { Button, Form, IconSend, Input } from '@supabase/ui'
+import { Message } from '../types/main.type'
+import { supabaseClient } from '../client/SupabaseClient'
 
 interface Props {
-  messages: Message[];
-
-  // Probably can remove this once properly hooked up
-  onAddMessage: (message: Message) => void;
+  messages: Message[]
+  roomId: string
+  userId: string
 }
 
-const Chatbox: FC<Props> = ({ messages, onAddMessage }) => {
-  const initialValues = { message: "" };
+const Chatbox: FC<Props> = ({ messages, roomId, userId }) => {
+  const initialValues = { message: '' }
 
   const onSubmit = async (values: any, { setSubmitting, resetForm }: any) => {
-    if (values.message.length === 0) return;
+    if (values.message.length === 0) return
 
-    const date = new Date();
+    setSubmitting(true)
+
     const message = {
-      id: uuidv4(),
       message: values.message,
-      created_at: date.toISOString(),
-    };
-    console.log("Send message:", values.message);
-    onAddMessage(message);
-    resetForm();
-  };
+      room_id: roomId,
+      user_id: userId,
+    }
+
+    const { error } = await supabaseClient.from('messages').insert([message])
+
+    if (!error) {
+      resetForm()
+    }
+
+    setSubmitting(false)
+  }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col break-all">
       <div
         className="space-y-1 rounded py-2 px-3"
-        style={{ backgroundColor: "rgba(0, 207, 144, 0.05)" }}
+        style={{ backgroundColor: 'rgba(0, 207, 144, 0.05)' }}
       >
         {messages.length === 0 && (
-          <p className="text-scale-1200 text-sm opacity-75">
-            Start chatting 🥳
-          </p>
+          <p className="text-scale-1200 text-sm opacity-75">Start chatting 🥳</p>
         )}
         {messages.map((message: any) => (
           <p key={message.id} className="text-scale-1200 text-sm">
@@ -45,20 +48,16 @@ const Chatbox: FC<Props> = ({ messages, onAddMessage }) => {
         ))}
       </div>
       <div className="bg-scale-400 border border-scale-600 p-2 rounded-md w-[400px] space-y-8">
-        <Form
-          validateOnBlur
-          initialValues={initialValues}
-          validate={() => {}}
-          onSubmit={onSubmit}
-        >
+        <Form validateOnBlur initialValues={initialValues} validate={() => {}} onSubmit={onSubmit}>
           {({ isSubmitting }: any) => {
             return (
               <Input
                 id="message"
                 name="message"
                 placeholder="Type something"
+                autoComplete="off"
                 actions={[
-                  <div className="mr-1">
+                  <div key="message-submit" className="mr-1">
                     <Button
                       key="submit"
                       htmlType="submit"
@@ -69,12 +68,12 @@ const Chatbox: FC<Props> = ({ messages, onAddMessage }) => {
                   </div>,
                 ]}
               />
-            );
+            )
           }}
         </Form>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default Chatbox;
+export default Chatbox

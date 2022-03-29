@@ -87,12 +87,8 @@ defmodule Extensions.Postgres.Subscriptions do
       [schema, table, filters] ->
         String.split(filters, ~r/(\=|\.)/)
         |> case do
-          [filter_field, "eq", filter_value] ->
-            %{
-              subs_params
-              | filters: [{filter_field, "eq", filter_value}],
-                entities: oids[{schema, table}]
-            }
+          [_, "eq", _] = filters ->
+            %{subs_params | filters: [List.to_tuple(filters)], entities: oids[{schema, table}]}
 
           _ ->
             %{subs_params | filters: filters}

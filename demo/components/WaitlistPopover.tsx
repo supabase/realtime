@@ -1,66 +1,54 @@
-import { FC, useState } from "react";
-import Link from "next/Link";
-import Image from "next/image";
-import {
-  Button,
-  Form,
-  Input,
-  IconMinimize2,
-  IconMaximize2,
-} from "@supabase/ui";
-import { supabaseClient } from "../client/SupabaseClient";
+import { FC, useState } from 'react'
+import Link from 'next/link'
+import Image from 'next/image'
+import { Button, Form, Input, IconMinimize2, IconMaximize2 } from '@supabase/ui'
+import { supabaseClient } from '../client/SupabaseClient'
 
 interface Props {}
 
 const WaitlistPopover: FC<Props> = ({}) => {
-  const [isExpanded, setIsExpanded] = useState(true);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [error, setError] = useState<any>();
+  const [isExpanded, setIsExpanded] = useState(true)
+  const [isSuccess, setIsSuccess] = useState(false)
+  const [error, setError] = useState<any>()
 
-  const initialValues = { email: "" };
+  const initialValues = { email: '' }
 
   const onValidate = (values: any) => {
-    const errors = {} as any;
+    const errors = {} as any
     const emailValidateRegex =
-      /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
-    if (!emailValidateRegex.test(values.email))
-      errors.email = "Please enter a valid email";
-    return errors;
-  };
+      /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/
+    if (!emailValidateRegex.test(values.email)) errors.email = 'Please enter a valid email'
+    return errors
+  }
 
-  const onSubmit = async (values: any, { setSubmitting }: any) => {
-    setIsSuccess(false);
-    setError(undefined);
-    setSubmitting(true);
+  const onSubmit = async (values: any, { setSubmitting, resetForm }: any) => {
+    setIsSuccess(false)
+    setError(undefined)
+    setSubmitting(true)
     const { error } = await supabaseClient
-      .from("waitlist")
-      .insert([{ email: values.email }]);
+      .from('waitlist')
+      .insert([{ email: values.email }], { returning: 'minimal' })
     if (!error) {
-      setIsSuccess(true);
+      resetForm()
+      setIsSuccess(true)
     } else {
-      console.log(`Error registering waitlist for ${values.email}`, error);
-      setError(error);
+      setError(error)
     }
-    setSubmitting(false);
-  };
+    setSubmitting(false)
+  }
 
   return (
     <div
       className={`bg-scale-400 border border-scale-600 p-6 rounded-md w-[400px] space-y-8 transition-all ${
-        isExpanded ? "max-h-[600px]" : "max-h-[70px]"
+        isExpanded ? 'max-h-[600px]' : 'max-h-[70px]'
       } duration-500 overflow-hidden shadow-lg`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center justify-center space-x-2">
-          <Image
-            src="/img/supabase-dark.svg"
-            alt="supabase"
-            height={20}
-            width={100}
-          />
+          <Image src="/img/supabase-dark.svg" alt="supabase" height={20} width={100} />
           <div
             className={`transition relative -top-[1px] ${
-              !isExpanded ? "opacity-100" : "opacity-0"
+              !isExpanded ? 'opacity-100' : 'opacity-0'
             } space-x-2 flex items-center`}
           >
             <p className="text-scale-1200 text-sm">•</p>
@@ -105,18 +93,13 @@ const WaitlistPopover: FC<Props> = ({}) => {
           </Link>
         </div>
         <p className="text-sm text-scale-1100">
-          Build realtime collaborative applications quickly through a simple set
-          of APIs - Multiplayer provides Pub/Sub, presence and ephemeral state
+          Build realtime collaborative applications quickly through a simple set of APIs -
+          Multiplayer provides Pub/Sub, presence and ephemeral state
         </p>
       </div>
 
-      <Form
-        validateOnBlur
-        initialValues={initialValues}
-        validate={onValidate}
-        onSubmit={onSubmit}
-      >
-        {({ isSubmitting, handleReset }: any) => {
+      <Form validateOnBlur initialValues={initialValues} validate={onValidate} onSubmit={onSubmit}>
+        {({ isSubmitting }: any) => {
           return (
             <>
               <Input
@@ -124,7 +107,7 @@ const WaitlistPopover: FC<Props> = ({}) => {
                 name="email"
                 placeholder="example@email.com"
                 actions={[
-                  <div className="mr-1">
+                  <div key="email-submit" className="mr-1">
                     <Button
                       key="submit"
                       htmlType="submit"
@@ -141,22 +124,20 @@ const WaitlistPopover: FC<Props> = ({}) => {
                   Thank you for submitting your interest!
                 </p>
               )}
-              {error?.details.includes("already exists") && (
-                <p className="text-sm text-scale-900 mt-2">
+              {error?.message.includes('duplicate key') && (
+                <p className="text-sm text-red-900 mt-2">
                   Email has already been registered for waitlist
                 </p>
               )}
-              {error && !error?.details.includes("already exists") && (
-                <p className="text-sm text-red-900 mt-2">
-                  Unable to register email for waitlist
-                </p>
+              {error && !error?.message.includes('duplicate key') && (
+                <p className="text-sm text-red-900 mt-2">Unable to register email for waitlist</p>
               )}
             </>
-          );
+          )
         }}
       </Form>
     </div>
-  );
-};
+  )
+}
 
-export default WaitlistPopover;
+export default WaitlistPopover

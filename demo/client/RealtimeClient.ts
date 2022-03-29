@@ -1,4 +1,4 @@
-import { RealtimeClient, RealtimeSubscription, RealtimePresence } from "@supabase/realtime-js"
+import { RealtimeClient, RealtimeSubscription, RealtimePresence } from '@supabase/realtime-js'
 
 enum CHANNEL_EVENTS {
   close = 'phx_close',
@@ -16,12 +16,35 @@ export default class RealtimeClientV2 extends RealtimeClient {
 
   channel(topic: string, chanParams = {}) {
     const chan = new RealtimeSubscriptionV2(topic, chanParams, this)
+
+    chan.presence.onJoin((key, currentPresences, newPresences) => {
+      chan.trigger('presence', {
+        event: 'JOIN',
+        key,
+        currentPresences,
+        newPresences,
+      })
+    })
+
+    chan.presence.onLeave((key, currentPresences, leftPresences) => {
+      chan.trigger('presence', {
+        event: 'LEAVE',
+        key,
+        currentPresences,
+        leftPresences,
+      })
+    })
+
+    chan.presence.onSync(() => {
+      chan.trigger('presence', { event: 'SYNC' })
+    })
+
     this.channels.push(chan)
     return chan
   }
 }
 
-class RealtimeSubscriptionV2 extends RealtimeSubscription {
+export class RealtimeSubscriptionV2 extends RealtimeSubscription {
   presence: RealtimePresence
 
   constructor(topic: string, params: { [key: string]: any }, socket: RealtimeClientV2) {
@@ -34,7 +57,7 @@ class RealtimeSubscriptionV2 extends RealtimeSubscription {
     return this.presence.list()
   }
 
-  on(type: string, callback: Function, eventFilter?: { event: string, [key: string]: any }) {
+  on(type: string, callback: Function, eventFilter?: { event: string; [key: string]: any }) {
     this.bindings.push({ type, eventFilter: eventFilter ?? {}, callback })
   }
 
@@ -51,17 +74,20 @@ class RealtimeSubscriptionV2 extends RealtimeSubscription {
 
     this.bindings
       .filter((bind) => {
-        return bind?.type === type &&
-          (
-            bind?.eventFilter?.event === '*' ||
-            bind?.eventFilter?.event === payload?.event
-          )
+        return (
+          bind?.type === type &&
+          (bind?.eventFilter?.event === '*' || bind?.eventFilter?.event === payload?.event)
+        )
       })
       .map((bind) => bind.callback(handledPayload, ref))
   }
 
-  send(payload: { type: string, [key: string]: any }) {
+  send(payload: { type: string; [key: string]: any }) {
     const push = this.push(payload.type as any, payload)
-    console.log('push', push)
+
+    return new Promise((resolve) => {
+      push.receive('ok', () => resolve('ok'))
+      push.receive('timeout', () => resolve('timeout'))
+    })
   }
 }
