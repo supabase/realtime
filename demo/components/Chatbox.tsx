@@ -35,14 +35,14 @@ const Chatbox: FC<Props> = ({ messages, roomId, userId }) => {
   return (
     <div className="flex flex-col break-all">
       <div
-        className="space-y-1 rounded py-2 px-3"
+        className="space-y-1 rounded py-2 px-3 w-[400px]"
         style={{ backgroundColor: 'rgba(0, 207, 144, 0.05)' }}
       >
         {messages.length === 0 && (
           <p className="text-scale-1200 text-sm opacity-75">Start chatting 🥳</p>
         )}
         {messages.map((message: any) => (
-          <p key={message.id} className="text-scale-1200 text-sm">
+          <p key={message.id} className="text-scale-1200 text-sm whitespace-pre-line">
             {message.message}
           </p>
         ))}
@@ -56,6 +56,7 @@ const Chatbox: FC<Props> = ({ messages, roomId, userId }) => {
                 name="message"
                 placeholder="Type something"
                 autoComplete="off"
+                maxLength={100}
                 actions={[
                   <div key="message-submit" className="mr-1">
                     <Button
