@@ -1,11 +1,11 @@
 import type { NextPage } from 'next'
 import randomColor from 'randomcolor'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { nanoid } from 'nanoid'
 import cloneDeep from 'lodash.clonedeep'
 
-import { Message } from '../types/main.type'
+import { Coordinate, User, Message } from '../types/main.type'
 import Loader from '../components/Loader'
 import Users from '../components/Users'
 import Cursor from '../components/Cursor'
@@ -26,14 +26,39 @@ const Room: NextPage = () => {
   const [isStateSynced, setIsStateSynced] = useState<boolean>(false)
   const [verifiedRoomId, setVerifiedRoomId] = useState<string>()
 
-  const [users, setUsers] = useState<{
-    [key: string]: { x: null | number; y: null | number; color: string }
-  }>({})
+  const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
   const [roomChannel, setRoomChannel] = useState<RealtimeSubscriptionV2>()
 
+  // These states will be managed via ref as their mutated within event listeners
+  const isTypingRef = useRef() as any
+  const messageRef = useRef() as any
+  const mousePositionRef = useRef() as any
+  // We manage the refs with a state so that the UI can rerender
+  const [isTyping, _setIsTyping] = useState<boolean>(false)
+  const [message, _setMessage] = useState<string>('')
+  const [mousePosition, _setMousePosition] = useState<Coordinate>({ x: 0, y: 0 })
+
+  const setIsTyping = (value: boolean) => {
+    isTypingRef.current = value
+    _setIsTyping(value)
+  }
+
+  const setMessage = (value: string) => {
+    messageRef.current = value
+    _setMessage(value)
+  }
+
+  const setMousePosition = (coordinates: Coordinate) => {
+    mousePositionRef.current = coordinates
+    _setMousePosition(coordinates)
+  }
+
   // Initialize realtime session
   useEffect(() => {
+    isTypingRef.current = false
+    setMousePosition({ x: 0, y: 0 })
+
     realtimeClient.connect()
 
     const channel = realtimeClient.channel('room:*')
@@ -103,7 +128,7 @@ const Room: NextPage = () => {
       })
   }, [channel, router, roomId, verifiedRoomId])
 
-  // Handle presence of users within the room
+  // Handle presence and position of users within the room
   useEffect(() => {
     if (!channel || !verifiedRoomId) return
 
@@ -121,6 +146,8 @@ const Room: NextPage = () => {
                 x: null,
                 y: null,
                 color: randomColor(),
+                message: '',
+                isTyping: false,
               }
               return acc
             }, {})
@@ -129,9 +156,10 @@ const Room: NextPage = () => {
       },
       { event: 'SYNC' }
     )
+
     channel.on(
       'broadcast',
-      (payload: any) =>
+      (payload: any) => {
         setUsers((users) => {
           const usersClone = cloneDeep(users)
           const userId = payload.payload.user_id
@@ -140,8 +168,26 @@ const Room: NextPage = () => {
             ...{ x: payload.payload.x, y: payload.payload.y },
           }
           return usersClone
-        }),
+        })
+      },
       { event: 'POS' }
+    )
+
+    channel.on(
+      'broadcast',
+      (payload: any) => {
+        console.log('MESSAGE', JSON.stringify(payload.payload))
+        setUsers((users) => {
+          const usersClone = cloneDeep(users)
+          const userId = payload.payload.user_id
+          usersClone[userId] = {
+            ...usersClone[userId],
+            ...{ isTyping: payload.payload.isTyping, message: payload.payload.message },
+          }
+          return usersClone
+        })
+      },
+      { event: 'MESSAGE' }
     )
   }, [channel, verifiedRoomId])
 
@@ -198,18 +244,44 @@ const Room: NextPage = () => {
         event: 'POS',
         payload: { user_id: userId, x: e.clientX, y: e.clientY },
       })
+      setMousePosition({ x: e.clientX, y: e.clientY })
     }
 
-    const onKeyPress = (e: KeyboardEvent) => {
-      console.log('onKeyPress')
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Enter') {
+        if (!isTypingRef.current) {
+          setIsTyping(true)
+          setMessage('')
+          channel.send({
+            type: 'broadcast',
+            event: 'MESSAGE',
+            payload: { user_id: userId, isTyping: true, message: '' },
+          })
+        } else {
+          setIsTyping(false)
+          channel.send({
+            type: 'broadcast',
+            event: 'MESSAGE',
+            payload: { user_id: userId, isTyping: false, message: messageRef.current },
+          })
+        }
+      }
+      if (e.code === 'Escape' && isTypingRef.current) {
+        setIsTyping(false)
+        channel.send({
+          type: 'broadcast',
+          event: 'MESSAGE',
+          payload: { user_id: userId, isTyping: false, message: '' },
+        })
+      }
     }
 
     window.addEventListener('mousemove', setMouseEvent)
-    window.addEventListener('keypress', onKeyPress)
+    window.addEventListener('keydown', onKeyDown)
 
     return () => {
       window.removeEventListener('mousemove', setMouseEvent)
-      window.removeEventListener('keypress', onKeyPress)
+      window.removeEventListener('keydown', onKeyDown)
     }
   }, [channel])
 
@@ -224,22 +296,53 @@ const Room: NextPage = () => {
         backgroundSize: '400% 400%',
       }}
     >
-      {/* Fixed elements */}
-      <div>
-        <div className="flex justify-between">
-          <WaitlistPopover />
-          <Users users={users} />
-        </div>
+      <div className="flex justify-between">
+        <WaitlistPopover />
+        <Users users={users} />
       </div>
 
-      <div className="flex justify-end">
-        <Chatbox messages={messages} roomId={verifiedRoomId} userId={userId} />
+      <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center space-x-2 pointer-events-none">
+        <div className="flex items-center justify-center space-x-2 border border-scale-1200 rounded-md px-3 py-2 opacity-20">
+          <p className="text-scale-1200 cursor-default text-sm">Chat</p>
+          <code className="bg-scale-1100 text-scale-100 px-1 h-6 rounded flex items-center justify-center">
+            ↩
+          </code>
+        </div>
+        <div className="flex items-center justify-center space-x-2 border border-scale-1200 rounded-md px-3 py-2 opacity-20">
+          <p className="text-scale-1200 cursor-default text-sm">Escape</p>
+          <code className="bg-scale-1100 text-scale-100 px-1 h-6 rounded flex items-center justify-center text-xs">
+            ESC
+          </code>
+        </div>
       </div>
 
       {/* Floating elements */}
       {Object.entries(users).map(([userId, data]) => {
-        return <Cursor key={userId} x={data.x} y={data.y} color={data.color} />
+        return (
+          <Cursor
+            key={userId}
+            x={data.x}
+            y={data.y}
+            color={data.color}
+            message={data.message || ''}
+            isTyping={data.isTyping}
+          />
+        )
       })}
+
+      <Cursor
+        isLocalClient
+        x={mousePosition.x}
+        y={mousePosition.y}
+        color="#3ECF8E"
+        isTyping={isTyping}
+        message={message}
+        onUpdateMessage={setMessage}
+      />
+
+      <div className="flex justify-end">
+        <Chatbox messages={messages} roomId={verifiedRoomId} userId={userId} />
+      </div>
     </div>
   )
 }

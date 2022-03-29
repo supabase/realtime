@@ -1,8 +1,9 @@
 export interface User {
-  id: string
-  x: number
-  y: number
+  x: number | null
+  y: number | null
   color: string
+  isTyping?: boolean
+  message?: string
 }
 
 export interface Message {
@@ -11,4 +12,9 @@ export interface Message {
   room_id?: string
   message: string
   created_at: string
+}
+
+export interface Coordinate {
+  x: number
+  y: number
 }
