@@ -26,23 +26,48 @@ const Cursor: FC<Props> = ({
   const inputRef = useRef() as any
   const timeoutRef = useRef() as any
 
+  const [hideInput, setHideInput] = useState(false)
   const [showMessageBubble, setShowMessageBubble] = useState(false)
 
+  // [Joshen] This is some really bad way of writing conditionals 🙈
+  // Ideally i'd refactor them to be more concise and less error-prone
+  // but just gonna focus on shipping something working first
   useEffect(() => {
     if (isTyping) {
       setShowMessageBubble(true)
-    } else if (!isTyping && isLocalClient) {
+      if (isLocalClient) {
+        setHideInput(false)
+      }
+    } else if (!isTyping && !message && isLocalClient) {
       setShowMessageBubble(false)
     }
 
+    // Logic specifically for local client
     if (isTyping && isLocalClient && inputRef.current) {
       inputRef.current.focus()
     }
 
+    if (!isTyping && message && isLocalClient) {
+      setHideInput(true)
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+      }
+      const timeoutId = setTimeout(() => {
+        setHideInput(false)
+        setShowMessageBubble(false)
+      }, 2000)
+      timeoutRef.current = timeoutId
+    }
+
+    // Logic specifically for non-local clients
     if (isTyping && !isLocalClient) {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
       }
+    }
+
+    if (!isTyping && !message && !isLocalClient) {
+      setShowMessageBubble(false)
     }
 
     if (message && !isLocalClient) {
@@ -55,8 +80,6 @@ const Cursor: FC<Props> = ({
       timeoutRef.current = timeoutId
     }
   }, [isTyping, message, inputRef])
-
-  !isLocalClient && console.log(x, y, color)
 
   return (
     <>
@@ -81,13 +104,15 @@ const Cursor: FC<Props> = ({
       <div
         className={`absolute top-0 left-0 transform transition py-2 rounded-full shadow-md ${
           showMessageBubble ? 'opacity-100' : 'opacity-0'
-        } flex items-center justify-between ${_isLocalClient ? 'w-[280px] px-6' : 'px-4'}`}
+        } flex items-center justify-between ${_isLocalClient ? 'px-6' : 'px-4'} ${
+          _isLocalClient && !hideInput ? 'w-[280px]' : ''
+        }`}
         style={{
           backgroundColor: color || '#3ECF8E',
           transform: `translateX(${(x || 0) + 20}px) translateY(${(y || 0) + 20}px)`,
         }}
       >
-        {_isLocalClient ? (
+        {_isLocalClient && !hideInput ? (
           <>
             <input
               ref={inputRef}

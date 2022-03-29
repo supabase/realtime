@@ -161,7 +161,6 @@ const Room: NextPage = () => {
       'broadcast',
       (payload: any) => {
         setUsers((users) => {
-          console.log(users)
           const usersClone = cloneDeep(users)
           const userId = payload.payload.user_id
           usersClone[userId] = {
@@ -316,7 +315,6 @@ const Room: NextPage = () => {
         </div>
       </div>
 
-      {/* Floating elements */}
       {Object.entries(users).map(([userId, data]) => {
         return (
           <Cursor
@@ -330,6 +328,7 @@ const Room: NextPage = () => {
         )
       })}
 
+      {/* Cursor for local client: Shouldn't show the cursor itself, only the text bubble */}
       <Cursor
         isLocalClient
         x={mousePosition.x}
