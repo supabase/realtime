@@ -6,14 +6,12 @@ defmodule Multiplayer.Repo.Migrations.CreateTenants do
       add(:id, :binary_id, primary_key: true)
       add(:name, :string)
       add(:external_id, :string)
-      add(:db_host, :string)
-      add(:db_port, :string)
-      add(:db_name, :string)
-      add(:db_user, :string)
-      add(:db_password, :string)
-      add(:jwt_secret, :string)
-
+      add(:jwt_secret, :string, size: 500)
+      add(:settings, :map)
+      add(:active, :boolean, default: false)
       timestamps()
     end
+
+    create(index(:tenants, [:external_id], unique: true))
   end
 end

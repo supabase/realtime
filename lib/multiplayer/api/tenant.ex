@@ -8,18 +8,13 @@ defmodule Multiplayer.Api.Tenant do
     field(:name, :string)
     field(:external_id, :string)
     field(:jwt_secret, :string)
-    field(:db_host, :string)
-    field(:db_port, :string)
-    field(:db_name, :string)
-    field(:db_user, :string)
-    field(:db_password, :string)
+    field(:settings, :map)
     field(:active, :boolean)
-    field(:region, :string)
-    field(:rls_poll_interval, :integer, default: 100)
-    field(:max_concurrent_users, :integer, default: 10_000)
-    field(:rls_poll_max_changes, :integer)
-    field(:rls_poll_max_record_bytes, :integer)
-    has_many(:scopes, Multiplayer.Api.Scope)
+
+    has_many(:extensions, Multiplayer.Api.Extensions,
+      foreign_key: :tenant_external_id,
+      references: :external_id
+    )
 
     timestamps()
   end
@@ -31,27 +26,11 @@ defmodule Multiplayer.Api.Tenant do
       :name,
       :external_id,
       :jwt_secret,
-      :active,
-      :region,
-      :db_host,
-      :db_port,
-      :db_name,
-      :db_user,
-      :db_password,
-      :rls_poll_interval,
-      :rls_poll_max_changes,
-      :rls_poll_max_record_bytes
+      :active
     ])
     |> validate_required([
       :external_id,
-      :jwt_secret,
-      :region,
-      :db_host,
-      :db_port,
-      :db_name,
-      :db_user,
-      :db_password,
-      :rls_poll_interval
+      :jwt_secret
     ])
   end
 end
