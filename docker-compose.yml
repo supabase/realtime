@@ -3,15 +3,7 @@ services:
   realtime:
     build: .
     ports:
-      - 5432:5432
-    volumes:
-      - ./dev/postgres/mnt:/docker-entrypoint-initdb.d/
-    command:
-      - postgres
-      - -c
-      - wal_level=logical
-      - -c
-      - max_slot_wal_keep_size=1024MB
+      - "4000:4000"
     environment:
       DB_HOST: host.docker.internal
       DB_NAME: postgres

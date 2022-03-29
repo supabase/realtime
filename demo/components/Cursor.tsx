@@ -82,7 +82,7 @@ const Cursor: FC<Props> = ({
       }, 2000)
       timeoutRef.current = timeoutId
     }
-  }, [isTyping, message, inputRef])
+  }, [isLocalClient, isTyping, message, inputRef])
 
   return (
     <>
