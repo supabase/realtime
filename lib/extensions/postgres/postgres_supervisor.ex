@@ -1,4 +1,4 @@
-defmodule Extensions.Postgres.DbSupervisor do
+defmodule Extensions.Postgres.Supervisor do
   # Automatically defines child_spec/1
   use Supervisor
 
