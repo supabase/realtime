@@ -14,6 +14,7 @@ import WaitlistPopover from '../components/WaitlistPopover'
 import { supabaseClient, realtimeClient } from '../client/SupabaseClient'
 import { PostgrestResponse } from '@supabase/supabase-js'
 import { RealtimeSubscriptionV2 } from '../client/RealtimeClient'
+import logger from '../logger'
 
 const userId = nanoid()
 
@@ -111,20 +112,35 @@ const Room: NextPage = () => {
 
   // Handle redirect to a verified room with enough seats
   useEffect(() => {
-    if (!channel || !verifiedRoomId) return
+    if (!channel || !roomId || !verifiedRoomId) return
 
-    channel
-      ?.send({
-        type: 'presence',
-        event: 'TRACK',
-        key: verifiedRoomId,
-        payload: { user_id: userId },
+    if (roomId === verifiedRoomId) {
+      logger?.info(`User joined: ${userId}`, {
+        user_id: userId,
+        room_id: roomId,
+        timestamp: Date.now(),
       })
-      .then(() => {
-        if (roomId !== verifiedRoomId) {
-          router.push(`/${verifiedRoomId}`)
-        }
-      })
+    } else {
+      channel
+        ?.send({
+          type: 'presence',
+          event: 'TRACK',
+          key: verifiedRoomId,
+          payload: { user_id: userId },
+        })
+        .then(() => {
+          channel
+            ?.send({
+              type: 'presence',
+              event: 'TRACK',
+              key: verifiedRoomId,
+              payload: { user_id: userId },
+            })
+            .then(() => {
+              router.push(`/${verifiedRoomId}`)
+            })
+        })
+    }
   }, [channel, router, roomId, verifiedRoomId])
 
   // Handle presence and position of users within the room
