@@ -30,11 +30,13 @@ const Room: NextPage = () => {
   const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
 
+  const [roomChannel, setRoomChannel] = useState<RealtimeSubscriptionV2>()
+
   // These states will be managed via ref as their mutated within event listeners
   const isTypingRef = useRef() as any
   const messageRef = useRef() as any
   const mousePositionRef = useRef() as any
-  // We manage the refs with a state so that the UI can rerender
+  // We manage the refs with a state so that the UI can re-render
   const [isTyping, _setIsTyping] = useState<boolean>(false)
   const [message, _setMessage] = useState<string>('')
   const [mousePosition, _setMousePosition] = useState<Coordinate>({ x: 0, y: 0 })
@@ -114,38 +116,33 @@ const Room: NextPage = () => {
   useEffect(() => {
     if (!channel || !roomId || !verifiedRoomId) return
 
-    if (roomId === verifiedRoomId) {
-      logger?.info(`User joined: ${userId}`, {
-        user_id: userId,
-        room_id: roomId,
-        timestamp: Date.now(),
+    channel
+      ?.send({
+        type: 'presence',
+        event: 'TRACK',
+        key: verifiedRoomId,
+        payload: { user_id: userId },
       })
-    } else {
-      channel
-        ?.send({
-          type: 'presence',
-          event: 'TRACK',
-          key: verifiedRoomId,
-          payload: { user_id: userId },
-        })
-        .then(() => {
-          channel
-            ?.send({
-              type: 'presence',
-              event: 'TRACK',
-              key: verifiedRoomId,
-              payload: { user_id: userId },
+      .then((status) => {
+        if (status === 'ok') {
+          if (roomId !== verifiedRoomId) {
+            router.push(`/${verifiedRoomId}`)
+          } else {
+            logger?.info(`User joined: ${userId}`, {
+              user_id: userId,
+              room_id: roomId,
+              timestamp: Date.now(),
             })
-            .then(() => {
-              router.push(`/${verifiedRoomId}`)
-            })
-        })
-    }
-  }, [channel, router, roomId, verifiedRoomId])
+          }
+        } else {
+          router.push('/')
+        }
+      })
+  }, [channel, isStateSynced, router, roomId, verifiedRoomId])
 
   // Handle presence and position of users within the room
   useEffect(() => {
-    if (!channel || !verifiedRoomId) return
+    if (!channel || !roomChannel || !verifiedRoomId) return
 
     channel.on(
       'presence',
@@ -174,7 +171,7 @@ const Room: NextPage = () => {
       { event: 'SYNC' }
     )
 
-    channel.on(
+    roomChannel.on(
       'broadcast',
       (payload: any) => {
         setUsers((users) => {
@@ -192,7 +189,7 @@ const Room: NextPage = () => {
       { event: 'POS' }
     )
 
-    channel.on(
+    roomChannel.on(
       'broadcast',
       (payload: any) => {
         setUsers((users) => {
@@ -207,7 +204,7 @@ const Room: NextPage = () => {
       },
       { event: 'MESSAGE' }
     )
-  }, [channel, verifiedRoomId])
+  }, [channel, roomChannel, verifiedRoomId])
 
   // Load messages of the room for the chatbox
   useEffect(() => {
@@ -244,6 +241,7 @@ const Room: NextPage = () => {
       { event: 'INSERT' }
     )
     newChannel.subscribe()
+    setRoomChannel(newChannel)
 
     return () => {
       newChannel.unsubscribe()
@@ -253,10 +251,10 @@ const Room: NextPage = () => {
 
   // Handle event listeners to broadcast
   useEffect(() => {
-    if (!channel) return
+    if (!roomChannel) return
 
     const setMouseEvent = (e: MouseEvent) => {
-      channel.send({
+      roomChannel.send({
         type: 'broadcast',
         event: 'POS',
         payload: { user_id: userId, x: e.clientX, y: e.clientY },
@@ -269,14 +267,14 @@ const Room: NextPage = () => {
         if (!isTypingRef.current) {
           setIsTyping(true)
           setMessage('')
-          channel.send({
+          roomChannel.send({
             type: 'broadcast',
             event: 'MESSAGE',
             payload: { user_id: userId, isTyping: true, message: '' },
           })
         } else {
           setIsTyping(false)
-          channel.send({
+          roomChannel.send({
             type: 'broadcast',
             event: 'MESSAGE',
             payload: { user_id: userId, isTyping: false, message: messageRef.current },
@@ -285,7 +283,7 @@ const Room: NextPage = () => {
       }
       if (e.code === 'Escape' && isTypingRef.current) {
         setIsTyping(false)
-        channel.send({
+        roomChannel.send({
           type: 'broadcast',
           event: 'MESSAGE',
           payload: { user_id: userId, isTyping: false, message: '' },
@@ -300,7 +298,7 @@ const Room: NextPage = () => {
       window.removeEventListener('mousemove', setMouseEvent)
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [channel])
+  }, [roomChannel])
 
   if (!verifiedRoomId) return <Loader />
 
