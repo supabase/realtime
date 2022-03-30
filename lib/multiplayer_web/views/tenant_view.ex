@@ -19,15 +19,7 @@ defmodule MultiplayerWeb.TenantView do
       id: tenant.id,
       name: tenant.name,
       external_id: tenant.external_id,
-      jwt_secret: tenant.jwt_secret,
-      active: tenant.active,
-      region: tenant.region,
-      db_host: tenant.db_host,
-      db_port: tenant.db_port,
-      db_name: tenant.db_name,
-      db_user: tenant.db_user,
-      db_password: tenant.db_password,
-      rls_poll_interval: tenant.rls_poll_interval,
+      extensions: tenant.extensions,
       inserted_at: tenant.inserted_at
     }
   end

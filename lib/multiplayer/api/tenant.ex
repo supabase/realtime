@@ -8,18 +8,13 @@ defmodule Multiplayer.Api.Tenant do
     field(:name, :string)
     field(:external_id, :string)
     field(:jwt_secret, :string)
-
-    field(:settings, :map,
-      default: %{
-        max_concurrent_users: 10_000
-      }
-    )
-
-    field(:active, :boolean, default: false)
+    field(:max_concurrent_users, :integer, default: 10_000)
 
     has_many(:extensions, Multiplayer.Api.Extensions,
       foreign_key: :tenant_external_id,
-      references: :external_id
+      references: :external_id,
+      on_delete: :delete_all,
+      on_replace: :delete
     )
 
     timestamps()
@@ -32,11 +27,13 @@ defmodule Multiplayer.Api.Tenant do
       :name,
       :external_id,
       :jwt_secret,
-      :active
+      :max_concurrent_users
     ])
     |> validate_required([
       :external_id,
-      :jwt_secret
+      :jwt_secret,
+      :max_concurrent_users
     ])
+    |> cast_assoc(:extensions, required: true)
   end
 end

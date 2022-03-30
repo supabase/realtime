@@ -1,9 +1,11 @@
 defmodule Multiplayer do
-  @moduledoc """
-  Multiplayer keeps the contexts that define your domain
-  and business logic.
+  def extension_module(type) do
+    case type do
+      "postgres" ->
+        Extensions.Postgres
 
-  Contexts are also responsible for managing your data, regardless
-  if it comes from the database, an external API or others.
-  """
+      _ ->
+        nil
+    end
+  end
 end

@@ -1,4 +1,4 @@
-defmodule Ewalrus.Subscriptions do
+defmodule Extensions.Postgres.Subscriptions do
   require Logger
   import Postgrex, only: [query: 3]
 

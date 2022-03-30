@@ -1,4 +1,4 @@
-defmodule Ewalrus.SubscriptionManager do
+defmodule Extensions.Postgres.SubscriptionManager do
   use GenServer
   require Logger
 
@@ -9,7 +9,7 @@ defmodule Ewalrus.SubscriptionManager do
   @impl true
   def init(opts) do
     :global.register_name({:subscription_manager, opts.id}, self())
-    Ewalrus.Subscriptions.delete_all(opts.conn)
+    Extensions.Postgres.Subscriptions.delete_all(opts.conn)
     {:ok, %{conn: opts.conn, id: opts.id}}
   end
 
@@ -26,16 +26,16 @@ defmodule Ewalrus.SubscriptionManager do
   @impl true
   def handle_info({:subscribe, opts}, state) do
     Logger.debug("Subscribe #{inspect(opts, pretty: true)}")
-    Ewalrus.Subscriptions.create(state.conn, opts)
+    Extensions.Postgres.Subscriptions.create(state.conn, opts)
     {:noreply, state}
   end
 
   def handle_info({:unsubscribe, subs_id}, state) do
-    Ewalrus.Subscriptions.delete(state.conn, subs_id)
+    Extensions.Postgres.Subscriptions.delete(state.conn, subs_id)
 
-    if :syn.member_count(Ewalrus.Subscribers, state.id) == 0 do
-      Ewalrus.Subscriptions.delete_all(state.conn)
-      Ewalrus.stop(state.id)
+    if :syn.member_count(Extensions.Postgres.Subscribers, state.id) == 0 do
+      Extensions.Postgres.Subscriptions.delete_all(state.conn)
+      Extensions.Postgres.stop(state.id)
     end
 
     {:noreply, state}

@@ -7,8 +7,7 @@ defmodule Multiplayer.Repo.Migrations.CreateTenants do
       add(:name, :string)
       add(:external_id, :string)
       add(:jwt_secret, :string, size: 500)
-      add(:settings, :map)
-      add(:active, :boolean, default: false)
+      add(:max_concurrent_users, :integer, default: 10_000)
       timestamps()
     end
 

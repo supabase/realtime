@@ -1,4 +1,4 @@
-defmodule Ewalrus.Replications do
+defmodule Extensions.Postgres.Replications do
   require Logger
   import Postgrex, only: [transaction: 2, query: 3]
 

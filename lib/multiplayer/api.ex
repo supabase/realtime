@@ -2,6 +2,7 @@ defmodule Multiplayer.Api do
   @moduledoc """
   The Api context.
   """
+  require Logger
 
   import Ecto.Query, warn: false
   alias Multiplayer.Repo
@@ -18,7 +19,7 @@ defmodule Multiplayer.Api do
 
   """
   def list_tenants do
-    Repo.all(Tenant)
+    Repo.all(Tenant) |> Repo.preload(:extensions)
   end
 
   @doc """
@@ -53,6 +54,8 @@ defmodule Multiplayer.Api do
 
   """
   def create_tenant(attrs \\ %{}) do
+    Logger.debug("create_tenant #{inspect(attrs, pretty: true)}")
+
     %Tenant{}
     |> Tenant.changeset(attrs)
     |> Ecto.Changeset.put_assoc(:extensions, attrs["extensions"])
@@ -137,5 +140,6 @@ defmodule Multiplayer.Api do
       )
 
     Repo.one(query)
+    |> Repo.preload(:extensions)
   end
 end

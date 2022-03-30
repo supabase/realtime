@@ -1,9 +1,9 @@
-defmodule Ewalrus.ReplicationPoller do
+defmodule Extensions.Postgres.ReplicationPoller do
   use GenServer
 
   require Logger
 
-  alias Ewalrus.Replications
+  alias Extensions.Postgres.Replications
   alias DBConnection.Backoff
 
   alias Realtime.Adapters.Changes.{
@@ -109,7 +109,7 @@ defmodule Ewalrus.ReplicationPoller do
         end)
         # |> Logger.debug()
         |> Enum.reverse()
-        |> Ewalrus.SubscribersNotification.notify_subscribers(id)
+        |> Extensions.Postgres.SubscribersNotification.notify_subscribers(id)
 
         {:ok, length(rows)}
 

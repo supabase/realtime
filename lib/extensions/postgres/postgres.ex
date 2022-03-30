@@ -1,54 +1,59 @@
-defmodule Ewalrus do
+defmodule Extensions.Postgres do
   require Logger
 
-  alias Ewalrus.SubscriptionManager
+  alias Extensions.Postgres.SubscriptionManager
   @default_poll_interval 500
 
-  @moduledoc """
-  Documentation for `Ewalrus`.
-  """
+  def default_settings() do
+    %{
+      "poll_interval" => 100,
+      "poll_max_changes" => 100,
+      "poll_max_record_bytes" => 1_048_576,
+      "publication" => "supabase_multiplayer",
+      "slot_name" => "supabase_multiplayer_replication_slot"
+    }
+  end
 
-  def start_geo(aws_region, params) do
-    [fly_region | _] = Ewalrus.Regions.aws_to_fly(aws_region)
+  def required_settings() do
+    [
+      {"region", &is_binary/1},
+      {"db_host", &is_binary/1},
+      {"db_name", &is_binary/1},
+      {"db_user", &is_binary/1},
+      {"db_port", &is_binary/1},
+      {"db_password", &is_binary/1}
+    ]
+  end
+
+  def start_distributed(scope, %{"region" => region} = params) do
+    [fly_region | _] = Extensions.Postgres.Regions.aws_to_fly(region)
     launch_node = launch_node(fly_region, node())
 
     Logger.debug(
-      "Starting geo ewalrus #{inspect(lauch_node: launch_node, aws_region: aws_region, fly_region: fly_region)}"
+      "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
-    :rpc.call(launch_node, Ewalrus, :start, [params])
-  end
-
-  def launch_node(fly_region, default) do
-    case :syn.members(Ewalrus.RegionNodes, fly_region) do
-      [{_, [node: launch_node]} | _] ->
-        launch_node
-
-      _ ->
-        Logger.warning("Didn't find launch_node, return default #{inspect(default)}")
-        default
-    end
+    :rpc.call(launch_node, Extensions.Postgres, :start, [scope, params])
   end
 
   @doc """
   Start db poller.
 
   """
-  @spec start(map()) ::
+  @spec start(String.t(), map()) ::
           :ok | {:error, :already_started}
-  def start(%{
-        scope: scope,
-        host: host,
-        db_name: db_name,
-        db_user: db_user,
-        db_pass: db_pass,
-        poll_interval: poll_interval,
-        publication: publication,
-        slot_name: slot_name,
-        max_changes: max_changes,
-        max_record_bytes: max_record_bytes
+  def start(scope, %{
+        "db_host" => db_host,
+        "db_name" => db_name,
+        "db_user" => db_user,
+        "db_password" => db_pass,
+        "poll_interval" => poll_interval,
+        "poll_max_changes" => poll_max_changes,
+        "poll_max_record_bytes" => poll_max_record_bytes,
+        "publication" => publication,
+        "slot_name" => slot_name
       }) do
-    :global.trans({{Ewalrus, scope}, self()}, fn ->
+    :global.trans({{Extensions.Postgres, scope}, self()}, fn ->
       case :global.whereis_name({:supervisor, scope}) do
         :undefined ->
           poll_interval =
@@ -61,23 +66,23 @@ defmodule Ewalrus do
 
           opts = [
             id: scope,
-            db_host: host,
+            db_host: db_host,
             db_name: db_name,
             db_user: db_user,
             db_pass: db_pass,
             poll_interval: poll_interval,
             publication: publication,
             slot_name: slot_name,
-            max_changes: max_changes,
-            max_record_bytes: max_record_bytes
+            max_changes: poll_max_changes,
+            max_record_bytes: poll_max_record_bytes
           ]
 
-          Logger.debug("Starting ewalrus, #{inspect(opts, pretty: true)}")
+          Logger.debug("Starting Extensions.Postgres, #{inspect(opts, pretty: true)}")
 
           {:ok, pid} =
-            DynamicSupervisor.start_child(Ewalrus.RlsSupervisor, %{
+            DynamicSupervisor.start_child(Extensions.Postgres.RlsSupervisor, %{
               id: scope,
-              start: {Ewalrus.DbSupervisor, :start_link, [opts]},
+              start: {Extensions.Postgres.DbSupervisor, :start_link, [opts]},
               restart: :transient
             })
 
@@ -102,7 +107,7 @@ defmodule Ewalrus do
       # TODO: move inside to SubscriptionManager
       bin_subs_id = UUID.string_to_binary!(subs_id)
 
-      :syn.join(Ewalrus.Subscribers, scope, self(), %{
+      :syn.join(Extensions.Postgres.Subscribers, scope, self(), %{
         bin_id: bin_subs_id,
         transport_pid: transport_pid
       })
@@ -143,19 +148,14 @@ defmodule Ewalrus do
     end
   end
 
-  def dummy_params() do
-    %{
-      claims: %{
-        "aud" => "authenticated",
-        "email" => "jwt@test.com",
-        "exp" => 1_663_819_211,
-        "iat" => 1_632_283_191,
-        "iss" => "supabase",
-        "role" => "authenticated",
-        "sub" => "bbb51e4e-f371-4463-bf0a-af8f56dc9a73"
-      },
-      id: UUID.uuid1(),
-      topic: "public"
-    }
+  def launch_node(fly_region, default) do
+    case :syn.members(Extensions.Postgres.RegionNodes, fly_region) do
+      [{_, [node: launch_node]} | _] ->
+        launch_node
+
+      _ ->
+        Logger.warning("Didn't find launch_node, return default #{inspect(default)}")
+        default
+    end
   end
 end

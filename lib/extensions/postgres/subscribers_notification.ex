@@ -1,4 +1,4 @@
-defmodule Ewalrus.SubscribersNotification do
+defmodule Extensions.Postgres.SubscribersNotification do
   require Logger
 
   alias Phoenix.Socket.Broadcast
@@ -36,7 +36,7 @@ defmodule Ewalrus.SubscribersNotification do
       }
       |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
 
-    :syn.members(Ewalrus.Subscribers, scope)
+    :syn.members(Extensions.Postgres.Subscribers, scope)
     |> Enum.each(fn {pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
       if MapSet.member?(subs_id, bin_id) do
         send(transport_pid, encoded_msg)

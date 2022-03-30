@@ -1,4 +1,4 @@
-defmodule Ewalrus.DbSupervisor do
+defmodule Extensions.Postgres.DbSupervisor do
   # Automatically defines child_spec/1
   use Supervisor
 
@@ -34,13 +34,14 @@ defmodule Ewalrus.DbSupervisor do
 
     children = [
       %{
-        id: Ewalrus.ReplicationPoller,
-        start: {Ewalrus.ReplicationPoller, :start_link, [opts]},
+        id: Extensions.Postgres.ReplicationPoller,
+        start: {Extensions.Postgres.ReplicationPoller, :start_link, [opts]},
         restart: :transient
       },
       %{
-        id: Ewalrus.SubscriptionManager,
-        start: {Ewalrus.SubscriptionManager, :start_link, [%{conn: conn, id: args[:id]}]},
+        id: Extensions.Postgres.SubscriptionManager,
+        start:
+          {Extensions.Postgres.SubscriptionManager, :start_link, [%{conn: conn, id: args[:id]}]},
         restart: :transient
       }
     ]

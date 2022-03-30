@@ -20,9 +20,8 @@ defmodule MultiplayerWeb.UserSocket do
     if Application.fetch_env!(:multiplayer, :secure_channels) do
       %{uri: %{host: host}, x_headers: headers} = connect_info
       [external_id | _] = String.split(host, ".", parts: 2)
-      #  , hooks = Multiplayer.Api.get_hooks_by_tenant_id(tenant.id)
-      with tenant when tenant != nil <-
-             Multiplayer.Api.get_tenant_by_external_id(:cached, external_id),
+
+      with tenant when tenant != nil <- Multiplayer.Api.get_tenant_by_external_id(external_id),
            token when token != nil <- access_token(params, headers),
            {:ok, claims} <- authorize_conn(token, tenant.jwt_secret) do
         assigns = %{
@@ -30,25 +29,12 @@ defmodule MultiplayerWeb.UserSocket do
           claims: claims,
           limits: %{max_concurrent_users: tenant.max_concurrent_users},
           params: %{
-            # hooks: hooks,
             ref: make_ref()
           }
         }
 
-        params = %{
-          scope: external_id,
-          host: tenant.db_host,
-          db_name: tenant.db_name,
-          db_user: tenant.db_user,
-          db_pass: tenant.db_password,
-          poll_interval: tenant.rls_poll_interval,
-          publication: "supabase_multiplayer",
-          slot_name: "supabase_multiplayer_replication_slot",
-          max_changes: tenant.rls_poll_max_changes,
-          max_record_bytes: tenant.rls_poll_max_record_bytes
-        }
-
-        Ewalrus.start_geo(tenant.region, params)
+        params = filter_postgres_settings(tenant.extensions)
+        Extensions.Postgres.start_distributed(external_id, params)
 
         {:ok, assign(socket, assigns)}
       else
@@ -78,5 +64,18 @@ defmodule MultiplayerWeb.UserSocket do
       _ ->
         :error
     end
+  end
+
+  defp filter_postgres_settings(extensions) do
+    [postgres] =
+      Enum.filter(extensions, fn e ->
+        if e.type == "postgres" do
+          true
+        else
+          false
+        end
+      end)
+
+    postgres.settings
   end
 end

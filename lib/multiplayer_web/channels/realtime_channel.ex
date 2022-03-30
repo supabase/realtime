@@ -18,7 +18,7 @@ defmodule MultiplayerWeb.RealtimeChannel do
 
       sub_id = UUID.uuid1()
       # TODO: return sub_id from function
-      Ewalrus.subscribe(tenant, sub_id, sub_topic, claims, pid)
+      Extensions.Postgres.subscribe(tenant, sub_id, sub_topic, claims, pid)
       Logger.debug("Start channel, #{inspect([sub_id: sub_id], pretty: true)}")
 
       new_socket =

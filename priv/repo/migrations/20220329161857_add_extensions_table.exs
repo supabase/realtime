@@ -6,11 +6,10 @@ defmodule Multiplayer.Repo.Migrations.AddExtensionsTable do
       add(:id, :binary_id, primary_key: true)
       add(:type, :string)
       add(:settings, :map)
-      add(:active, :boolean, default: false)
 
       add(
         :tenant_external_id,
-        references(:tenants, on_delete: :nothing, type: :string, column: :external_id)
+        references(:tenants, on_delete: :delete_all, type: :string, column: :external_id)
       )
 
       timestamps()
