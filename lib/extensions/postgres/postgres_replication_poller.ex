@@ -3,7 +3,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   require Logger
 
-  alias Extensions.Postgres.Replications
+  alias Extensions.Postgres
+  alias Postgres.Replications
   alias DBConnection.Backoff
 
   alias Realtime.Adapters.Changes.{
@@ -109,7 +110,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
         end)
         # |> Logger.debug()
         |> Enum.reverse()
-        |> Extensions.Postgres.SubscribersNotification.notify_subscribers(id)
+        |> Postgres.SubscribersNotification.notify_subscribers(id)
 
         {:ok, length(rows)}
 

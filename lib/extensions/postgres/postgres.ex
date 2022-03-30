@@ -1,18 +1,19 @@
 defmodule Extensions.Postgres do
   require Logger
 
-  alias Extensions.Postgres.SubscriptionManager
+  alias Extensions.Postgres
+  alias Postgres.SubscriptionManager
   @default_poll_interval 500
 
   def start_distributed(scope, %{"region" => region} = params) do
-    [fly_region | _] = Extensions.Postgres.Regions.aws_to_fly(region)
+    [fly_region | _] = Postgres.Regions.aws_to_fly(region)
     launch_node = launch_node(fly_region, node())
 
     Logger.debug(
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
-    :rpc.call(launch_node, Extensions.Postgres, :start, [scope, params])
+    :rpc.call(launch_node, Postgres, :start, [scope, params])
   end
 
   @doc """
@@ -59,9 +60,9 @@ defmodule Extensions.Postgres do
           Logger.debug("Starting Extensions.Postgres, #{inspect(opts, pretty: true)}")
 
           {:ok, pid} =
-            DynamicSupervisor.start_child(Extensions.Postgres.Supervisor, %{
+            DynamicSupervisor.start_child(Postgres.Supervisor, %{
               id: scope,
-              start: {Extensions.Postgres.Supervisor, :start_link, [opts]},
+              start: {Postgres.Supervisor, :start_link, [opts]},
               restart: :transient
             })
 
@@ -86,7 +87,7 @@ defmodule Extensions.Postgres do
       # TODO: move inside to SubscriptionManager
       bin_subs_id = UUID.string_to_binary!(subs_id)
 
-      :syn.join(Extensions.Postgres.Subscribers, scope, self(), %{
+      :syn.join(Postgres.Subscribers, scope, self(), %{
         bin_id: bin_subs_id,
         transport_pid: transport_pid
       })
@@ -128,7 +129,7 @@ defmodule Extensions.Postgres do
   end
 
   def launch_node(fly_region, default) do
-    case :syn.members(Extensions.Postgres.RegionNodes, fly_region) do
+    case :syn.members(Postgres.RegionNodes, fly_region) do
       [{_, [node: launch_node]} | _] ->
         launch_node
 

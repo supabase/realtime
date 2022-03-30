@@ -2,6 +2,10 @@ defmodule Extensions.Postgres.Supervisor do
   # Automatically defines child_spec/1
   use Supervisor
 
+  alias Extensions.Postgres
+  alias Postgres.ReplicationPoller
+  alias Postgres.SubscriptionManager
+
   def start_link(args) do
     Supervisor.start_link(__MODULE__, args)
   end
@@ -34,14 +38,13 @@ defmodule Extensions.Postgres.Supervisor do
 
     children = [
       %{
-        id: Extensions.Postgres.ReplicationPoller,
-        start: {Extensions.Postgres.ReplicationPoller, :start_link, [opts]},
+        id: ReplicationPoller,
+        start: {ReplicationPoller, :start_link, [opts]},
         restart: :transient
       },
       %{
-        id: Extensions.Postgres.SubscriptionManager,
-        start:
-          {Extensions.Postgres.SubscriptionManager, :start_link, [%{conn: conn, id: args[:id]}]},
+        id: SubscriptionManager,
+        start: {SubscriptionManager, :start_link, [%{conn: conn, id: args[:id]}]},
         restart: :transient
       }
     ]
