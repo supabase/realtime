@@ -29,8 +29,8 @@ config :multiplayer, :phoenix_swagger,
 config :multiplayer, :extensions,
   postgres: %{
     key: "postgres",
-    module: Extensions.Postgres,
-    supervisor: Extensions.Postgres.Supervisor
+    supervisor: Extensions.Postgres.Supervisor,
+    db_settings: Extensions.Postgres.DbSettings
   }
 
 config :phoenix_swagger, json_library: Jason

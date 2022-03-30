@@ -19,15 +19,11 @@ defmodule Multiplayer.Api.Extensions do
           {attrs, []}
 
         type ->
-          module = Multiplayer.Extensions.module(type)
-
-          settings =
-            apply(module, :default_settings, [])
-            |> Map.merge(attrs["settings"])
+          %{default: default, required: required} = Multiplayer.Extensions.db_settings(type)
 
           {
-            %{attrs | "settings" => settings},
-            apply(module, :required_settings, [])
+            %{attrs | "settings" => Map.merge(default, attrs["settings"])},
+            required
           }
       end
 
