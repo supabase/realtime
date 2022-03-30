@@ -55,6 +55,9 @@ config :realtime,
   api_jwt_secret: System.get_env("API_JWT_SECRET"),
   db_enc_key: System.get_env("DB_ENC_KEY")
 
+config :logger,
+  level: :info
+
 if System.get_env("LOGS_ENGINE") == "logflare" do
   if !System.get_env("LOGFLARE_API_KEY") or !System.get_env("LOGFLARE_SOURCE_ID") do
     raise """
