@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import RealtimeClientV2 from '../client/RealtimeClient'
+import { RealtimeClient } from '@supabase/realtime-js'
 
 const SUPABASE_URL = 'https://nixfbjgqturwbakhnwym.supabase.co'
 const SUPABASE_ANON_KEY =
@@ -11,7 +11,7 @@ const REALTIME_ANON_KEY =
 
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-const realtimeClient = new RealtimeClientV2(REALTIME_URL, {
+const realtimeClient = new RealtimeClient(REALTIME_URL, {
   params: {
     apikey: REALTIME_ANON_KEY,
   },

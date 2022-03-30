@@ -2,7 +2,7 @@ import { FC, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { Button, Form, Input, IconMinimize2, IconMaximize2 } from '@supabase/ui'
-import { supabaseClient } from '../client/SupabaseClient'
+import { supabaseClient } from '../clients'
 
 interface Props {}
 

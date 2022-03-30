@@ -4,6 +4,8 @@ import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { nanoid } from 'nanoid'
 import cloneDeep from 'lodash.clonedeep'
+import { PostgrestResponse } from '@supabase/supabase-js'
+import { RealtimeChannel } from '@supabase/realtime-js'
 
 import { Coordinate, User, Message } from '../types/main.type'
 import Loader from '../components/Loader'
@@ -11,9 +13,7 @@ import Users from '../components/Users'
 import Cursor from '../components/Cursor'
 import Chatbox from '../components/Chatbox'
 import WaitlistPopover from '../components/WaitlistPopover'
-import { supabaseClient, realtimeClient } from '../client/SupabaseClient'
-import { PostgrestResponse } from '@supabase/supabase-js'
-import { RealtimeSubscriptionV2 } from '../client/RealtimeClient'
+import { supabaseClient, realtimeClient } from '../clients'
 import logger from '../logger'
 
 const userId = nanoid()
@@ -23,14 +23,14 @@ const Room: NextPage = () => {
   const { slug } = router.query
   const roomId = slug && slug[0]
 
-  const [channel, setChannel] = useState<RealtimeSubscriptionV2>()
+  const [channel, setChannel] = useState<RealtimeChannel>()
   const [isStateSynced, setIsStateSynced] = useState<boolean>(false)
   const [verifiedRoomId, setVerifiedRoomId] = useState<string>()
 
   const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
 
-  const [roomChannel, setRoomChannel] = useState<RealtimeSubscriptionV2>()
+  const [roomChannel, setRoomChannel] = useState<RealtimeChannel>()
 
   // These states will be managed via ref as their mutated within event listeners
   const isTypingRef = useRef() as any
@@ -63,14 +63,10 @@ const Room: NextPage = () => {
 
     realtimeClient.connect()
 
-    const channel = realtimeClient.channel('room:*')
-    channel.on(
-      'presence',
-      () => {
-        setIsStateSynced(true)
-      },
-      { event: 'SYNC' }
-    )
+    const channel = realtimeClient.channel('room:*', { isNewVersion: true }) as RealtimeChannel
+    channel.on('presence', { event: 'SYNC' }, () => {
+      setIsStateSynced(true)
+    })
     channel.subscribe()
 
     setChannel(channel)
@@ -144,66 +140,54 @@ const Room: NextPage = () => {
   useEffect(() => {
     if (!channel || !roomChannel || !verifiedRoomId) return
 
-    channel.on(
-      'presence',
-      () => {
-        const state = channel.presence.state
-        const roomPresences = state[verifiedRoomId] as any[]
+    channel.on('presence', { event: 'SYNC' }, () => {
+      const state = channel.presence.state
+      const roomPresences = state[verifiedRoomId] as any[]
 
-        if (roomPresences) {
-          setUsers((prevUsers) => {
-            return roomPresences.reduce((acc, presence) => {
-              const userId = presence.user_id
+      if (roomPresences) {
+        setUsers((prevUsers) => {
+          return roomPresences.reduce((acc, presence) => {
+            const userId = presence.user_id
 
-              acc[userId] = prevUsers[userId] || {
-                x: null,
-                y: null,
-                color: randomColor(),
-                message: '',
-                isTyping: false,
-              }
+            acc[userId] = prevUsers[userId] || {
+              x: null,
+              y: null,
+              color: randomColor(),
+              message: '',
+              isTyping: false,
+            }
 
-              return acc
-            }, {})
-          })
+            return acc
+          }, {})
+        })
+      }
+    })
+
+    roomChannel.on('broadcast', { event: 'POS' }, (payload: any) => {
+      setUsers((users) => {
+        const userId = payload.payload.user_id
+        const existingUser = users[userId]
+
+        if (existingUser) {
+          users[userId] = { ...existingUser, ...{ x: payload.payload.x, y: payload.payload.y } }
+          users = cloneDeep(users)
         }
-      },
-      { event: 'SYNC' }
-    )
 
-    roomChannel.on(
-      'broadcast',
-      (payload: any) => {
-        setUsers((users) => {
-          const userId = payload.payload.user_id
-          const existingUser = users[userId]
+        return users
+      })
+    })
 
-          if (existingUser) {
-            users[userId] = { ...existingUser, ...{ x: payload.payload.x, y: payload.payload.y } }
-            users = cloneDeep(users)
-          }
-
-          return users
-        })
-      },
-      { event: 'POS' }
-    )
-
-    roomChannel.on(
-      'broadcast',
-      (payload: any) => {
-        setUsers((users) => {
-          const usersClone = cloneDeep(users)
-          const userId = payload.payload.user_id
-          usersClone[userId] = {
-            ...usersClone[userId],
-            ...{ isTyping: payload.payload.isTyping, message: payload.payload.message },
-          }
-          return usersClone
-        })
-      },
-      { event: 'MESSAGE' }
-    )
+    roomChannel.on('broadcast', { event: 'MESSAGE' }, (payload: any) => {
+      setUsers((users) => {
+        const usersClone = cloneDeep(users)
+        const userId = payload.payload.user_id
+        usersClone[userId] = {
+          ...usersClone[userId],
+          ...{ isTyping: payload.payload.isTyping, message: payload.payload.message },
+        }
+        return usersClone
+      })
+    })
   }, [channel, roomChannel, verifiedRoomId])
 
   // Load messages of the room for the chatbox
@@ -223,22 +207,21 @@ const Room: NextPage = () => {
   useEffect(() => {
     if (!verifiedRoomId) return
 
-    const newChannel = realtimeClient.channel(`room:public:messages:room_id=eq.${verifiedRoomId}`)
-    newChannel.on(
-      'realtime',
-      (payload: any) =>
-        setMessages((prevMsgs: any) => {
-          let msgs = prevMsgs.slice(-9)
-          const msg = (({ id, message, room_id, user_id }) => ({
-            id,
-            message,
-            room_id,
-            user_id,
-          }))(payload.payload.record)
-          msgs.push(msg)
-          return msgs
-        }),
-      { event: 'INSERT' }
+    const newChannel = realtimeClient.channel(`room:public:messages:room_id=eq.${verifiedRoomId}`, {
+      isNewVersion: true,
+    }) as RealtimeChannel
+    newChannel.on('realtime', { event: 'INSERT' }, (payload: any) =>
+      setMessages((prevMsgs: any) => {
+        let msgs = prevMsgs.slice(-9)
+        const msg = (({ id, message, room_id, user_id }) => ({
+          id,
+          message,
+          room_id,
+          user_id,
+        }))(payload.payload.record)
+        msgs.push(msg)
+        return msgs
+      })
     )
     newChannel.subscribe()
     setRoomChannel(newChannel)
