@@ -19,7 +19,7 @@ defmodule Multiplayer.Api.Extensions do
           {attrs, []}
 
         type ->
-          module = Multiplayer.extension_module(type)
+          module = Multiplayer.Extensions.module(type)
 
           settings =
             apply(module, :default_settings, [])

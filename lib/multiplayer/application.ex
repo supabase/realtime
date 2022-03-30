@@ -46,25 +46,34 @@ defmodule Multiplayer.Application do
 
     # Multiplayer.SessionsHooks.init_table()
 
-    children = [
-      {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
-      # Start the Ecto repository
-      Multiplayer.Repo,
-      # Start the Telemetry supervisor
-      MultiplayerWeb.Telemetry,
-      # Start the PubSub system
-      {Phoenix.PubSub, name: Multiplayer.PubSub},
-      # Start the Endpoint (http/https)
-      MultiplayerWeb.Endpoint,
-      # Start a worker by calling: Multiplayer.Worker.start_link(arg)
-      # {Multiplayer.Worker, arg}
-      # MultiplayerWeb.Presence,
-      Multiplayer.PromEx,
-      # Multiplayer.PresenceNotify
-      # Multiplayer.SessionsHooksBroadway,
-      {Cachex, name: :tenants},
-      {DynamicSupervisor, strategy: :one_for_one, name: Extensions.Postgres.RlsSupervisor}
-    ]
+    extensions_supervisors =
+      Enum.reduce(Application.get_env(:multiplayer, :extensions), [], fn
+        {_, %{supervisor: name}}, acc ->
+          [{DynamicSupervisor, strategy: :one_for_one, name: name} | acc]
+
+        _, acc ->
+          acc
+      end)
+
+    children =
+      [
+        {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
+        # Start the Ecto repository
+        Multiplayer.Repo,
+        # Start the Telemetry supervisor
+        MultiplayerWeb.Telemetry,
+        # Start the PubSub system
+        {Phoenix.PubSub, name: Multiplayer.PubSub},
+        # Start the Endpoint (http/https)
+        MultiplayerWeb.Endpoint,
+        # Start a worker by calling: Multiplayer.Worker.start_link(arg)
+        # {Multiplayer.Worker, arg}
+        # MultiplayerWeb.Presence,
+        Multiplayer.PromEx,
+        # Multiplayer.PresenceNotify
+        # Multiplayer.SessionsHooksBroadway,
+        {Cachex, name: :tenants}
+      ] ++ extensions_supervisors
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

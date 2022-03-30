@@ -26,6 +26,13 @@ config :multiplayer, :phoenix_swagger,
     ]
   }
 
+config :multiplayer, :extensions,
+  postgres: %{
+    key: "postgres",
+    module: Extensions.Postgres,
+    supervisor: Extensions.Postgres.Supervisor
+  }
+
 config :phoenix_swagger, json_library: Jason
 
 # Configures Elixir's Logger
