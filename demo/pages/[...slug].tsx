@@ -23,10 +23,6 @@ const MAX_ROOM_USERS = 5
 const MAX_DISPLAY_MESSAGES = 50
 const userId = nanoid()
 
-function getRandomId(): string {
-  return (Math.random() + 1).toString(36).substring(7)
-}
-
 const Room: NextPage = () => {
   const router = useRouter()
   const { slug } = router.query
@@ -93,7 +89,7 @@ const Room: NextPage = () => {
     userChannel.subscribe().receive('ok', () => setUserChannel(userChannel))
 
     // separate channel for latency
-    const pingChannel = realtimeClient.channel(`room:${getRandomId()}`, {
+    const pingChannel = realtimeClient.channel(`room:${userId}`, {
       isNewVersion: true,
       // self_broadcast: true,
     }) as RealtimeChannel
@@ -117,7 +113,7 @@ const Room: NextPage = () => {
           ack: true,
           payload: {},
         })
-        .then((data) => {
+        .then(() => {
           const end = performance.now()
           console.log('latency', end - start)
         })
