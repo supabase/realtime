@@ -60,9 +60,9 @@ defmodule Extensions.Postgres do
           Logger.debug("Starting Extensions.Postgres, #{inspect(opts, pretty: true)}")
 
           {:ok, pid} =
-            DynamicSupervisor.start_child(Postgres.Supervisor, %{
+            DynamicSupervisor.start_child(Postgres.DynamicSupervisor, %{
               id: scope,
-              start: {Postgres.Supervisor, :start_link, [opts]},
+              start: {Postgres.DynamicSupervisor, :start_link, [opts]},
               restart: :transient
             })
 

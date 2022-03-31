@@ -34,22 +34,19 @@ defmodule Multiplayer.Application do
     Registry.start_link(keys: :duplicate, name: Multiplayer.Registry)
     Registry.start_link(keys: :unique, name: Multiplayer.Registry.Unique)
 
-    :syn.set_event_handler(Multiplayer.SynHandler)
-
-    :syn.add_node_to_scopes([
-      Extensions.Postgres.Subscribers,
-      :users,
-      Extensions.Postgres.RegionNodes
-    ])
-
-    :syn.join(Extensions.Postgres.RegionNodes, System.get_env("FLY_REGION"), self(), node: node())
-
-    # Multiplayer.SessionsHooks.init_table()
+    :syn.add_node_to_scopes([:users])
 
     extensions_supervisors =
       Enum.reduce(Application.get_env(:multiplayer, :extensions), [], fn
         {_, %{supervisor: name}}, acc ->
-          [{DynamicSupervisor, strategy: :one_for_one, name: name} | acc]
+          [
+            %{
+              id: name,
+              start: {name, :start_link, []},
+              restart: :transient
+            }
+            | acc
+          ]
 
         _, acc ->
           acc
@@ -58,20 +55,11 @@ defmodule Multiplayer.Application do
     children =
       [
         {Cluster.Supervisor, [topologies, [name: Multiplayer.ClusterSupervisor]]},
-        # Start the Ecto repository
         Multiplayer.Repo,
-        # Start the Telemetry supervisor
         MultiplayerWeb.Telemetry,
-        # Start the PubSub system
         {Phoenix.PubSub, name: Multiplayer.PubSub},
-        # Start the Endpoint (http/https)
         MultiplayerWeb.Endpoint,
-        # Start a worker by calling: Multiplayer.Worker.start_link(arg)
-        # {Multiplayer.Worker, arg}
-        # MultiplayerWeb.Presence,
         Multiplayer.PromEx,
-        # Multiplayer.PresenceNotify
-        # Multiplayer.SessionsHooksBroadway,
         {Cachex, name: :tenants}
       ] ++ extensions_supervisors
 

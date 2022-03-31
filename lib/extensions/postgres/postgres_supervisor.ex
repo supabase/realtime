@@ -1,52 +1,26 @@
 defmodule Extensions.Postgres.Supervisor do
-  # Automatically defines child_spec/1
   use Supervisor
 
   alias Extensions.Postgres
-  alias Postgres.ReplicationPoller
-  alias Postgres.SubscriptionManager
 
-  def start_link(args) do
-    Supervisor.start_link(__MODULE__, args)
+  @spec start_link :: :ignore | {:error, any} | {:ok, pid}
+  def start_link() do
+    Supervisor.start_link(__MODULE__, [], name: __MODULE__)
   end
 
   @impl true
-  def init(args) do
-    {:ok, conn} =
-      Postgrex.start_link(
-        hostname: args[:db_host],
-        database: args[:db_name],
-        password: args[:db_pass],
-        username: args[:db_user],
-        queue_target: 1000
-      )
+  def init(_args) do
+    :syn.set_event_handler(Extensions.Postgres.SynHandler)
 
-    :global.register_name({:db_instance, args[:id]}, conn)
+    :syn.add_node_to_scopes([
+      Postgres.Subscribers,
+      Postgres.RegionNodes
+    ])
 
-    opts = [
-      id: args[:id],
-      conn: conn,
-      backoff_type: :rand_exp,
-      backoff_min: 100,
-      backoff_max: 120_000,
-      replication_poll_interval: args[:poll_interval],
-      publication: args[:publication],
-      slot_name: args[:slot_name],
-      max_changes: args[:max_changes],
-      max_record_bytes: args[:max_record_bytes]
-    ]
+    :syn.join(Postgres.RegionNodes, System.get_env("FLY_REGION"), self(), node: node())
 
     children = [
-      %{
-        id: ReplicationPoller,
-        start: {ReplicationPoller, :start_link, [opts]},
-        restart: :transient
-      },
-      %{
-        id: SubscriptionManager,
-        start: {SubscriptionManager, :start_link, [%{conn: conn, id: args[:id]}]},
-        restart: :transient
-      }
+      {DynamicSupervisor, strategy: :one_for_one, name: Extensions.Postgres.DynamicSupervisor}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

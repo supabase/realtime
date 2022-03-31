@@ -1,4 +1,4 @@
-defmodule Multiplayer.SynHandler do
+defmodule Extensions.Postgres.SynHandler do
   @behaviour :syn_event_handler
 
   require Logger
