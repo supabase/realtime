@@ -14,7 +14,13 @@ const Chatbox: FC<Props> = ({ messages, chatboxRef }) => {
         style={{ backgroundColor: 'rgba(0, 207, 144, 0.05)' }}
       >
         {messages.length === 0 && (
-          <p className="text-scale-1200 text-sm opacity-75">Start chatting 🥳</p>
+          <div className="flex items-center justify-center space-x-1 text-scale-1200 text-sm opacity-75">
+            <span>Hit Enter</span>
+            <code className="bg-scale-1100 text-scale-100 px-1 h-4 rounded flex items-center justify-center">
+              ↩
+            </code>
+            <span>to start chatting 🥳</span>
+          </div>
         )}
         {messages.map((message: any) => (
           <p key={message.id} className="text-scale-1200 text-sm whitespace-pre-line">
