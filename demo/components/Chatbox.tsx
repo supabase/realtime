@@ -37,8 +37,10 @@ const Chatbox: FC<Props> = ({ messages, chatboxRef, messagesInTransit, areMessag
             {message.message}
           </p>
         ))}
-        {messagesInTransit.map((message) => (
-          <p className="text-sm text-scale-1100">{message}</p>
+        {messagesInTransit.map((message, idx: number) => (
+          <p key={`transit-${idx}`} className="text-sm text-scale-1100">
+            {message}
+          </p>
         ))}
         <div ref={chatboxRef} />
       </div>
