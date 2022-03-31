@@ -1,4 +1,4 @@
-defmodule Multiplayer.Repo.Migrations.CreateTenants do
+defmodule Realtime.Repo.Migrations.CreateTenants do
   use Ecto.Migration
 
   def change do

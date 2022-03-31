@@ -1,0 +1,21 @@
+[Unit]
+Description=Realtime
+After=network.target
+Requires=network.target
+StartLimitIntervalSec=5
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=root
+EnvironmentFile=/opt/realtime/service_vars.ini
+WorkingDirectory=/opt/realtime
+ExecStart=/opt/realtime/bin/realtime start
+ExecStop=/opt/realtime/bin/realtime stop
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+TasksMax=infinity

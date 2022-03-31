@@ -1,4 +1,4 @@
-defmodule Multiplayer.Repo.Migrations.AddExtensionsTable do
+defmodule Realtime.Repo.Migrations.AddExtensionsTable do
   use Ecto.Migration
 
   def change do

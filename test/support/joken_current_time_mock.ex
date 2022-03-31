@@ -1,4 +1,4 @@
-defmodule MultiplayerWeb.Joken.CurrentTime.Mock do
+defmodule RealtimeWeb.Joken.CurrentTime.Mock do
   @moduledoc """
 
   Mock implementation of Joken current time with time freezing.

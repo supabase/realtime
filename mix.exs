@@ -1,9 +1,9 @@
-defmodule Multiplayer.MixProject do
+defmodule Realtime.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :multiplayer,
+      app: :realtime,
       version: "0.1.0",
       elixir: "~> 1.7",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -19,7 +19,7 @@ defmodule Multiplayer.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {Multiplayer.Application, []},
+      mod: {Realtime.Application, []},
       extra_applications: [:logger, :runtime_tools, :prom_ex]
     ]
   end

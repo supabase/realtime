@@ -12,7 +12,7 @@ if config_env() == :prod do
     System.get_env("FLY_APP_NAME") ||
       raise "APP_NAME not available"
 
-  config :multiplayer, MultiplayerWeb.Endpoint,
+  config :realtime, RealtimeWeb.Endpoint,
     server: true,
     url: [host: "#{app_name}.fly.dev", port: 80],
     http: [
@@ -37,7 +37,7 @@ if config_env() == :prod do
     ]
 end
 
-config :multiplayer, Multiplayer.Repo,
+config :realtime, Realtime.Repo,
   username: System.get_env("DB_USER", "postgres"),
   password: System.get_env("DB_PASSWORD", "postgres"),
   database: System.get_env("DB_NAME", "postgres"),
@@ -49,7 +49,7 @@ config :multiplayer, Multiplayer.Repo,
   queue_target: 5000,
   queue_interval: 5000
 
-config :multiplayer,
+config :realtime,
   secure_channels: System.get_env("SECURE_CHANNELS", "true") == "true",
   jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
   api_jwt_secret: System.get_env("API_JWT_SECRET")

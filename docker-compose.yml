@@ -1,6 +1,6 @@
 version: '3'
 services:
-  multiplayer:
+  realtime:
     build: .
     ports:
       - "4000:4000"
@@ -13,6 +13,6 @@ services:
       PORT: 4000
       JWT_SECRET: SOMETHING_SUPER_SECRET
       SECURE_CHANNELS: 'false'
-      APP_NAME: multiplayer
+      APP_NAME: realtime
       APP_HOST: 127.0.0.1
       DNS_NODES: ""

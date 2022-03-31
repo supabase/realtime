@@ -2,7 +2,7 @@ dev:
 	MIX_ENV=dev API_KEY=dev SECURE_CHANNELS=true API_JWT_SECRET=dev FLY_REGION=fra ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
 
 prod:
-	APP_NAME=multiplayer SECRET_KEY_BASE=nokey MIX_ENV=prod ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
+	APP_NAME=realtime SECRET_KEY_BASE=nokey MIX_ENV=prod ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
 
 swagger:
 	mix phx.swagger.generate
