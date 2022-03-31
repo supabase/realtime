@@ -117,7 +117,7 @@ const Cursor: FC<Props> = ({
             </p>
           </>
         ) : message.length ? (
-          <div>{message}</div>
+          <div className="truncate">{message}</div>
         ) : (
           <div className="space-x-1">
             <span>•</span>
