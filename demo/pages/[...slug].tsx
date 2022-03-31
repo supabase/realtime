@@ -23,6 +23,10 @@ const MAX_ROOM_USERS = 5
 const MAX_DISPLAY_MESSAGES = 50
 const userId = nanoid()
 
+function getRandomId(): string {
+  return (Math.random() + 1).toString(36).substring(7)
+}
+
 const Room: NextPage = () => {
   const router = useRouter()
   const { slug } = router.query
@@ -30,6 +34,7 @@ const Room: NextPage = () => {
 
   const [validatedRoomId, setValidatedRoomId] = useState<string>()
   const [userChannel, setUserChannel] = useState<RealtimeChannel>()
+  const [pingChannel, setPingChannel] = useState<RealtimeChannel>()
   const [messageChannel, setMessageChannel] = useState<RealtimeChannel>()
 
   const [areMessagesFetched, setAreMessagesFetched] = useState<boolean>(false)
@@ -81,12 +86,18 @@ const Room: NextPage = () => {
     // Set up user channel and subscribe
     const userChannel = realtimeClient.channel('room:*', {
       isNewVersion: true,
-      // self_broadcast: true,
     }) as RealtimeChannel
     userChannel.on('presence', { event: 'SYNC' }, () => {
       setIsInitialStateSynced(true)
     })
     userChannel.subscribe().receive('ok', () => setUserChannel(userChannel))
+
+    // separate channel for latency
+    const pingChannel = realtimeClient.channel(`room:${getRandomId()}`, {
+      isNewVersion: true,
+      // self_broadcast: true,
+    }) as RealtimeChannel
+    pingChannel.subscribe().receive('ok', () => setPingChannel(pingChannel))
 
     return () => {
       userChannel.unsubscribe()
@@ -96,15 +107,15 @@ const Room: NextPage = () => {
   }, [])
 
   useEffect(() => {
+    if (!pingChannel) return
     const interval = setInterval(() => {
-      if (!userChannel) return
       const start = performance.now()
-      userChannel
+      pingChannel
         .send({
           type: 'broadcast',
           event: 'PING',
           ack: true,
-          payload: { haha: 1 },
+          payload: {},
         })
         .then((data) => {
           const end = performance.now()
@@ -114,7 +125,7 @@ const Room: NextPage = () => {
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [userChannel])
+  }, [pingChannel])
 
   // Determine if current room is valid or generate a new room id
   useEffect(() => {
