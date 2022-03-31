@@ -12,6 +12,8 @@ interface Props {
 
 const MAX_MESSAGE_LENGTH = 50
 const MAX_DURATION = 4000
+const MAX_BUBBLE_WIDTH_THRESHOLD = 280
+const MAX_BUBBLE_HEIGHT_THRESHOLD = 40
 
 const Cursor: FC<Props> = ({
   x,
@@ -26,7 +28,10 @@ const Cursor: FC<Props> = ({
   const _isLocalClient = !x || !y || isLocalClient
   const inputRef = useRef() as any
   const timeoutRef = useRef() as any
+  const chatBubbleRef = useRef() as any
 
+  const [flipX, setFlipX] = useState(false)
+  const [flipY, setFlipY] = useState(false)
   const [hideInput, setHideInput] = useState(false)
   const [showMessageBubble, setShowMessageBubble] = useState(false)
 
@@ -53,6 +58,14 @@ const Cursor: FC<Props> = ({
     }
   }, [isLocalClient, isTyping, message, inputRef])
 
+  useEffect(() => {
+    // [Joshen] Experimental: dynamic flipping to ensure that chat
+    // bubble always stays within the viewport, comment this block
+    // out if the effect seems weird.
+    setFlipX((x || 0) + MAX_BUBBLE_WIDTH_THRESHOLD >= window.innerWidth)
+    setFlipY((y || 0) + MAX_BUBBLE_HEIGHT_THRESHOLD >= window.innerHeight)
+  }, [x, y, isTyping, chatBubbleRef])
+
   return (
     <>
       {!_isLocalClient && (
@@ -74,6 +87,7 @@ const Cursor: FC<Props> = ({
         </svg>
       )}
       <div
+        ref={chatBubbleRef}
         className={[
           'absolute top-0 left-0 transform transition py-2 rounded-full shadow-md',
           'flex items-center justify-between px-4 space-x-2 pointer-events-none',
@@ -82,7 +96,9 @@ const Cursor: FC<Props> = ({
         ].join(' ')}
         style={{
           backgroundColor: color || '#3ECF8E',
-          transform: `translateX(${(x || 0) + 20}px) translateY(${(y || 0) + 20}px)`,
+          transform: `translateX(${
+            (x || 0) + (flipX ? -chatBubbleRef.current.clientWidth - 20 : 20)
+          }px) translateY(${(y || 0) + (flipY ? -chatBubbleRef.current.clientHeight - 20 : 20)}px)`,
         }}
       >
         {_isLocalClient && !hideInput ? (

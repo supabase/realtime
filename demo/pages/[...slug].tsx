@@ -1,15 +1,15 @@
 import type { NextPage } from 'next'
 import { useRouter } from 'next/router'
-import { useEffect, useState, useRef, ReactElement } from 'react'
-
-import cloneDeep from 'lodash.clonedeep'
 import { nanoid } from 'nanoid'
+import cloneDeep from 'lodash.clonedeep'
 import randomColor from 'randomcolor'
-
-import { supabaseClient, realtimeClient } from '../clients'
-
+import { useEffect, useState, useRef, ReactElement } from 'react'
 import { RealtimeChannel } from '@supabase/realtime-js'
 import { PostgrestResponse } from '@supabase/supabase-js'
+
+import logger from '../logger'
+import { supabaseClient, realtimeClient } from '../clients'
+import { Coordinates, DatabaseChange, Message, Payload, User } from '../types'
 
 import Chatbox from '../components/Chatbox'
 import Cursor from '../components/Cursor'
@@ -17,10 +17,8 @@ import Loader from '../components/Loader'
 import Users from '../components/Users'
 import WaitlistPopover from '../components/WaitlistPopover'
 
-import { Coordinates, DatabaseChange, Message, Payload, User } from '../types'
-import logger from '../logger'
-
 const MAX_ROOM_USERS = 5
+const MAX_MESSAGES = 50
 const userId = nanoid()
 
 const Room: NextPage = () => {
@@ -36,6 +34,8 @@ const Room: NextPage = () => {
 
   const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
+
+  const chatboxRef = useRef<any>()
 
   // These states will be managed via ref as they're mutated within event listeners
   const isTypingRef = useRef<boolean>(false)
@@ -146,7 +146,7 @@ const Room: NextPage = () => {
       .select('id, user_id, message')
       .filter('room_id', 'eq', validatedRoomId)
       .order('created_at', { ascending: false })
-      .limit(10)
+      .limit(MAX_MESSAGES)
       .then((resp: PostgrestResponse<Message>) => resp.data && setMessages(resp.data.reverse()))
   }, [validatedRoomId])
 
@@ -186,9 +186,9 @@ const Room: NextPage = () => {
       }
     ) as RealtimeChannel
 
-    messageChannel.on('realtime', { event: 'INSERT' }, (payload: Payload<DatabaseChange>) =>
+    messageChannel.on('realtime', { event: 'INSERT' }, (payload: Payload<DatabaseChange>) => {
       setMessages((prevMsgs: Message[]) => {
-        const messages = prevMsgs.slice(-9)
+        const messages = prevMsgs.slice(-MAX_MESSAGES + 1)
         const msg = (({ id, message, room_id, user_id }) => ({
           id,
           message,
@@ -198,7 +198,8 @@ const Room: NextPage = () => {
         messages.push(msg)
         return messages
       })
-    )
+      if (chatboxRef.current) chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
+    })
 
     messageChannel.on(
       'broadcast',
@@ -265,7 +266,7 @@ const Room: NextPage = () => {
       setMousePosition({ x, y })
     }
 
-    const onKeyDown = (e: KeyboardEvent) => {
+    const onKeyDown = async (e: KeyboardEvent) => {
       if (e.code === 'Enter') {
         if (!isTypingRef.current) {
           setIsTyping(true)
@@ -282,6 +283,15 @@ const Room: NextPage = () => {
             event: 'MESSAGE',
             payload: { user_id: userId, isTyping: false, message: messageRef.current },
           })
+          if (messageRef.current) {
+            await supabaseClient.from('messages').insert([
+              {
+                user_id: userId,
+                room_id: validatedRoomId,
+                message: messageRef.current,
+              },
+            ])
+          }
         }
       }
 
@@ -310,7 +320,10 @@ const Room: NextPage = () => {
 
   return (
     <div
-      className="h-screen w-screen p-4 animate-gradient flex flex-col justify-between relative overflow-hidden"
+      className={[
+        'h-screen w-screen p-4 animate-gradient flex flex-col justify-between relative',
+        'max-h-screen max-w-screen overflow-hidden',
+      ].join(' ')}
       style={{
         background:
           'linear-gradient(-45deg, transparent, transparent, rgba(0, 89, 60, 0.5), rgba(0, 207, 144, 0.5), rgba(0, 89, 60, 0.5), transparent, transparent)',
@@ -368,7 +381,7 @@ const Room: NextPage = () => {
       )}
 
       <div className="flex justify-end">
-        <Chatbox messages={messages} roomId={validatedRoomId} userId={userId} />
+        <Chatbox messages={messages} chatboxRef={chatboxRef} />
       </div>
     </div>
   )

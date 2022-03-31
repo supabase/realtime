@@ -1,41 +1,16 @@
-import { FC } from 'react'
-import { Button, Form, IconSend, Input } from '@supabase/ui'
+import { FC, RefObject } from 'react'
 import { Message } from '../types'
-import { supabaseClient } from '../clients'
 
 interface Props {
   messages: Message[]
-  roomId: string
-  userId: string
+  chatboxRef: RefObject<any>
 }
 
-const Chatbox: FC<Props> = ({ messages, roomId, userId }) => {
-  const initialValues = { message: '' }
-
-  const onSubmit = async (values: any, { setSubmitting, resetForm }: any) => {
-    if (values.message.length === 0) return
-
-    setSubmitting(true)
-
-    const message = {
-      message: values.message,
-      room_id: roomId,
-      user_id: userId,
-    }
-
-    const { error } = await supabaseClient.from('messages').insert([message])
-
-    if (!error) {
-      resetForm()
-    }
-
-    setSubmitting(false)
-  }
-
+const Chatbox: FC<Props> = ({ messages, chatboxRef }) => {
   return (
-    <div className="flex flex-col break-all">
+    <div className="flex flex-col rounded-md break-all max-h-[235px] overflow-y-scroll">
       <div
-        className="space-y-1 rounded py-2 px-3 w-[400px]"
+        className="space-y-1 py-2 px-4 w-[400px]"
         style={{ backgroundColor: 'rgba(0, 207, 144, 0.05)' }}
       >
         {messages.length === 0 && (
@@ -46,32 +21,7 @@ const Chatbox: FC<Props> = ({ messages, roomId, userId }) => {
             {message.message}
           </p>
         ))}
-      </div>
-      <div className="bg-scale-400 border border-scale-600 p-2 rounded-md w-[400px] space-y-8">
-        <Form validateOnBlur initialValues={initialValues} validate={() => {}} onSubmit={onSubmit}>
-          {({ isSubmitting }: any) => {
-            return (
-              <Input
-                id="message"
-                name="message"
-                placeholder="Type something"
-                autoComplete="off"
-                maxLength={100}
-                actions={[
-                  <div key="message-submit" className="mr-1">
-                    <Button
-                      key="submit"
-                      htmlType="submit"
-                      icon={<IconSend />}
-                      loading={isSubmitting}
-                      disabled={isSubmitting}
-                    />
-                  </div>,
-                ]}
-              />
-            )
-          }}
-        </Form>
+        <div ref={chatboxRef} />
       </div>
     </div>
   )
