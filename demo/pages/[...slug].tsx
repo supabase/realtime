@@ -80,8 +80,7 @@ const Room: NextPage = () => {
     userChannel.on('presence', { event: 'SYNC' }, () => {
       setIsInitialStateSynced(true)
     })
-    userChannel.subscribe()
-    setUserChannel(userChannel)
+    userChannel.subscribe().receive('ok', () => setUserChannel(userChannel))
 
     return () => {
       userChannel.unsubscribe()
@@ -264,8 +263,7 @@ const Room: NextPage = () => {
       }
     )
 
-    messageChannel.subscribe()
-    setMessageChannel(messageChannel)
+    messageChannel.subscribe().receive('ok', () => setMessageChannel(messageChannel))
 
     return () => {
       messageChannel.unsubscribe()
