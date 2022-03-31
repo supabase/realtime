@@ -61,7 +61,7 @@ const Cursor: FC<Props> = ({
           height="24"
           viewBox="0 0 18 24"
           fill="none"
-          className="absolute top-0 left-0 transform transition"
+          className="absolute top-0 left-0 transform transition pointer-events-none"
           style={{ color, transform: `translateX(${x}px) translateY(${y}px)` }}
           xmlns="http://www.w3.org/2000/svg"
         >
@@ -74,11 +74,12 @@ const Cursor: FC<Props> = ({
         </svg>
       )}
       <div
-        className={`absolute top-0 left-0 transform transition py-2 rounded-full shadow-md ${
-          showMessageBubble ? 'opacity-100' : 'opacity-0'
-        } flex items-center justify-between px-4 ${
-          _isLocalClient && !hideInput ? 'w-[280px]' : 'max-w-[280px] overflow-hidden'
-        }`}
+        className={[
+          'absolute top-0 left-0 transform transition py-2 rounded-full shadow-md',
+          'flex items-center justify-between px-4 space-x-2 pointer-events-none',
+          `${showMessageBubble ? 'opacity-100' : 'opacity-0'}`,
+          `${_isLocalClient && !hideInput ? 'w-[280px]' : 'max-w-[280px] overflow-hidden'}`,
+        ].join(' ')}
         style={{
           backgroundColor: color || '#3ECF8E',
           transform: `translateX(${(x || 0) + 20}px) translateY(${(y || 0) + 20}px)`,
@@ -89,7 +90,7 @@ const Cursor: FC<Props> = ({
             <input
               ref={inputRef}
               value={message}
-              className="outline-none bg-transparent border-none"
+              className="w-full outline-none bg-transparent border-none"
               onChange={(e: FormEvent<HTMLInputElement>) => {
                 const text = e.currentTarget.value
                 if (text.length <= MAX_MESSAGE_LENGTH) onUpdateMessage(e.currentTarget.value)
