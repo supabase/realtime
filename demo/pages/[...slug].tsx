@@ -310,7 +310,7 @@ const Room: NextPage = () => {
 
   return (
     <div
-      className="h-screen w-screen p-4 animate-gradient flex flex-col justify-between relative"
+      className="h-screen w-screen p-4 animate-gradient flex flex-col justify-between relative overflow-hidden"
       style={{
         background:
           'linear-gradient(-45deg, transparent, transparent, rgba(0, 89, 60, 0.5), rgba(0, 207, 144, 0.5), rgba(0, 89, 60, 0.5), transparent, transparent)',

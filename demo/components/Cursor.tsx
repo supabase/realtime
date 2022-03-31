@@ -10,7 +10,8 @@ interface Props {
   onUpdateMessage?: (message: string) => void
 }
 
-const MAX_MESSAGE_LENGTH = 20
+const MAX_MESSAGE_LENGTH = 50
+const MAX_DURATION = 4000
 
 const Cursor: FC<Props> = ({
   x,
@@ -29,58 +30,26 @@ const Cursor: FC<Props> = ({
   const [hideInput, setHideInput] = useState(false)
   const [showMessageBubble, setShowMessageBubble] = useState(false)
 
-  // [Joshen] This is some really bad way of writing conditionals 🙈
-  // Ideally i'd refactor them to be more concise and less error-prone
-  // but just gonna focus on shipping something working first
   useEffect(() => {
     if (isTyping) {
       setShowMessageBubble(true)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+
       if (isLocalClient) {
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current)
-        }
+        if (inputRef.current) inputRef.current.focus()
         setHideInput(false)
       }
-    } else if (!isTyping && !message && isLocalClient) {
-      setShowMessageBubble(false)
-    }
-
-    // Logic specifically for local client
-    if (isTyping && isLocalClient && inputRef.current) {
-      inputRef.current.focus()
-    }
-
-    if (!isTyping && message && isLocalClient) {
-      setHideInput(true)
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
-      }
-      const timeoutId = setTimeout(() => {
-        setHideInput(false)
+    } else {
+      if (!message) {
         setShowMessageBubble(false)
-      }, 2000)
-      timeoutRef.current = timeoutId
-    }
-
-    // Logic specifically for non-local clients
-    if (isTyping && !isLocalClient) {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
+      } else {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        if (isLocalClient) setHideInput(true)
+        const timeoutId = setTimeout(() => {
+          setShowMessageBubble(false)
+        }, MAX_DURATION)
+        timeoutRef.current = timeoutId
       }
-    }
-
-    if (!isTyping && !message && !isLocalClient) {
-      setShowMessageBubble(false)
-    }
-
-    if (message && !isLocalClient) {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
-      }
-      const timeoutId = setTimeout(() => {
-        setShowMessageBubble(false)
-      }, 2000)
-      timeoutRef.current = timeoutId
     }
   }, [isLocalClient, isTyping, message, inputRef])
 
@@ -107,8 +76,8 @@ const Cursor: FC<Props> = ({
       <div
         className={`absolute top-0 left-0 transform transition py-2 rounded-full shadow-md ${
           showMessageBubble ? 'opacity-100' : 'opacity-0'
-        } flex items-center justify-between ${_isLocalClient ? 'px-6' : 'px-4'} ${
-          _isLocalClient && !hideInput ? 'w-[280px]' : ''
+        } flex items-center justify-between px-4 ${
+          _isLocalClient && !hideInput ? 'w-[280px]' : 'max-w-[280px] overflow-hidden'
         }`}
         style={{
           backgroundColor: color || '#3ECF8E',
