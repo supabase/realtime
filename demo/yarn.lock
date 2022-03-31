@@ -500,10 +500,10 @@
   dependencies:
     "cross-fetch" "^3.0.6"
 
-"@supabase/realtime-js@^1.4.0", "@supabase/realtime-js@^1.5.1":
-  "integrity" "sha512-V++liKGhaeE2CcMMolC5GWO1Qr7vAMRt0xso7xK8gIt0LMjgHKhlmkbMMgixSdbgfYu1OR3qIILfudKEqnUY+g=="
-  "resolved" "https://registry.npmjs.org/@supabase/realtime-js/-/realtime-js-1.5.1.tgz"
-  "version" "1.5.1"
+"@supabase/realtime-js@^1.4.0", "@supabase/realtime-js@^1.6.0":
+  "integrity" "sha512-/XZOGrAbLf2CpSN58Q9qa14nHgIweyD4jRMwbsmGRvLU9t699Txx/1zkWvP0j+aXjXrB8O6v5DqIhCMV1F2gGQ=="
+  "resolved" "https://registry.npmjs.org/@supabase/realtime-js/-/realtime-js-1.6.0.tgz"
+  "version" "1.6.0"
   dependencies:
     "@types/phoenix" "^1.5.4"
     "lodash.clonedeep" "^4.5.0"

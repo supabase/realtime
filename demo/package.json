@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@supabase/realtime-js": "^1.5.1",
+    "@supabase/realtime-js": "^1.6.0",
     "@supabase/supabase-js": "^1.32.0",
     "@supabase/ui": "0.37.0-alpha.50",
     "next": "12.1.0",
