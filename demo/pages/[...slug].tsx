@@ -29,6 +29,7 @@ const Room: NextPage = () => {
   const [userChannel, setUserChannel] = useState<RealtimeChannel>()
   const [messageChannel, setMessageChannel] = useState<RealtimeChannel>()
 
+  const [areMessagesFetched, setAreMessagesFetched] = useState<boolean>(false)
   const [isInitialStateSynced, setIsInitialStateSynced] = useState<boolean>(false)
   const [validatedRoomId, setValidatedRoomId] = useState<string>()
 
@@ -146,6 +147,7 @@ const Room: NextPage = () => {
       .limit(MAX_DISPLAY_MESSAGES)
       .then((resp: PostgrestResponse<Message>) => {
         resp.data && setMessages(resp.data.reverse())
+        setAreMessagesFetched(true)
       })
   }, [validatedRoomId])
 
@@ -385,9 +387,11 @@ const Room: NextPage = () => {
         />
       )}
 
-      <div className="flex justify-end">
-        <Chatbox messages={messages} chatboxRef={chatboxRef} />
-      </div>
+      {areMessagesFetched ? (
+        <div className="flex justify-end">
+          <Chatbox messages={messages} chatboxRef={chatboxRef} />
+        </div>
+      ) : null}
     </div>
   )
 }
