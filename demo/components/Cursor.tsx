@@ -1,8 +1,8 @@
 import { FC, FormEvent, useEffect, useRef, useState } from 'react'
 
 interface Props {
-  x: number | null
-  y: number | null
+  x?: number
+  y?: number
   color: string
   message: string
   isTyping?: boolean

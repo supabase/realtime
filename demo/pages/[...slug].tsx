@@ -8,6 +8,7 @@ import { RealtimeChannel } from '@supabase/realtime-js'
 import { PostgrestResponse } from '@supabase/supabase-js'
 
 import logger from '../logger'
+import { removeFirst } from '../utils'
 import { supabaseClient, realtimeClient } from '../clients'
 import { Coordinates, DatabaseChange, Message, Payload, User } from '../types'
 
@@ -26,12 +27,12 @@ const Room: NextPage = () => {
   const { slug } = router.query
   const currentRoomId = slug && slug[0]
 
+  const [validatedRoomId, setValidatedRoomId] = useState<string>()
   const [userChannel, setUserChannel] = useState<RealtimeChannel>()
   const [messageChannel, setMessageChannel] = useState<RealtimeChannel>()
 
   const [areMessagesFetched, setAreMessagesFetched] = useState<boolean>(false)
   const [isInitialStateSynced, setIsInitialStateSynced] = useState<boolean>(false)
-  const [validatedRoomId, setValidatedRoomId] = useState<string>()
 
   const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
@@ -41,11 +42,13 @@ const Room: NextPage = () => {
   // These states will be managed via ref as they're mutated within event listeners
   const isTypingRef = useRef<boolean>(false)
   const messageRef = useRef<string>()
+  const messagesInTransitRef = useRef<string[]>()
   const mousePositionRef = useRef<Coordinates>()
 
   // We manage the refs with a state so that the UI can re-render
   const [isTyping, _setIsTyping] = useState<boolean>(false)
   const [message, _setMessage] = useState<string>('')
+  const [messagesInTransit, _setMessagesInTransit] = useState<string[]>([])
   const [mousePosition, _setMousePosition] = useState<Coordinates>()
 
   const setIsTyping = (value: boolean) => {
@@ -61,6 +64,11 @@ const Room: NextPage = () => {
   const setMousePosition = (coordinates: Coordinates) => {
     mousePositionRef.current = coordinates
     _setMousePosition(coordinates)
+  }
+
+  const setMessagesInTransit = (messages: string[]) => {
+    messagesInTransitRef.current = messages
+    _setMessagesInTransit(messages)
   }
 
   // Connect to socket and subscribe to user channel
@@ -148,6 +156,7 @@ const Room: NextPage = () => {
       .then((resp: PostgrestResponse<Message>) => {
         resp.data && setMessages(resp.data.reverse())
         setAreMessagesFetched(true)
+        if (chatboxRef.current) chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
       })
   }, [validatedRoomId])
 
@@ -199,6 +208,15 @@ const Room: NextPage = () => {
           user_id,
         }))(payload.payload.record)
         messages.push(msg)
+
+        if (msg.user_id === userId) {
+          const updatedMessagesInTransit = removeFirst(
+            messagesInTransitRef?.current ?? [],
+            msg.message
+          )
+          setMessagesInTransit(updatedMessagesInTransit)
+        }
+
         return messages
       })
 
@@ -291,6 +309,11 @@ const Room: NextPage = () => {
             payload: { user_id: userId, isTyping: false, message: messageRef.current },
           })
           if (messageRef.current) {
+            const updatedMessagesInTransit = (messagesInTransitRef?.current ?? []).concat([
+              messageRef.current,
+            ])
+            setMessagesInTransit(updatedMessagesInTransit)
+            if (chatboxRef.current) chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
             await supabaseClient.from('messages').insert([
               {
                 user_id: userId,
@@ -375,11 +398,11 @@ const Room: NextPage = () => {
       }, [] as ReactElement[])}
 
       {/* Cursor for local client: Shouldn't show the cursor itself, only the text bubble */}
-      {mousePosition?.x && mousePosition?.y && (
+      {Number.isInteger(mousePosition?.x) && Number.isInteger(mousePosition?.y) && (
         <Cursor
           isLocalClient
-          x={mousePosition.x}
-          y={mousePosition.y}
+          x={mousePosition?.x}
+          y={mousePosition?.y}
           color="#3ECF8E"
           isTyping={isTyping}
           message={message}
@@ -387,11 +410,14 @@ const Room: NextPage = () => {
         />
       )}
 
-      {areMessagesFetched ? (
-        <div className="flex justify-end">
-          <Chatbox messages={messages} chatboxRef={chatboxRef} />
-        </div>
-      ) : null}
+      <div className="flex justify-end">
+        <Chatbox
+          messages={messages || []}
+          chatboxRef={chatboxRef}
+          messagesInTransit={messagesInTransit}
+          areMessagesFetched={areMessagesFetched}
+        />
+      </div>
     </div>
   )
 }
