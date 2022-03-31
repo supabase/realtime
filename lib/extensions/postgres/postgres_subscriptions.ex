@@ -4,10 +4,10 @@ defmodule Extensions.Postgres.Subscriptions do
 
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), map()) :: :ok
-  def create(conn, params) do
+  @spec create(conn(), String.t(), map()) :: :ok
+  def create(conn, publication, params) do
     database_roles = fetch_database_roles(conn)
-    oids = fetch_publication_tables(conn)
+    oids = fetch_publication_tables(conn, publication)
     new_params = enrich_subscription_params(params, database_roles, oids)
     insert_topic_subscriptions(conn, new_params)
   end
@@ -42,19 +42,19 @@ defmodule Extensions.Postgres.Subscriptions do
     end
   end
 
-  @spec fetch_publication_tables(conn()) ::
+  @spec fetch_publication_tables(conn(), String.t()) ::
           %{
             {<<_::1>>} => [integer()],
             {String.t()} => [integer()],
             {String.t(), String.t()} => [integer()]
           }
           | %{}
-  def fetch_publication_tables(conn) do
+  def fetch_publication_tables(conn, publication) do
     sql = "select
     schemaname, tablename, format('%I.%I', schemaname, tablename)::regclass as oid
     from pg_publication_tables where pubname = $1"
 
-    case query(conn, sql, ["supabase_multiplayer"]) do
+    case query(conn, sql, [publication]) do
       {:ok, %{columns: ["schemaname", "tablename", "oid"], rows: rows}} ->
         Enum.reduce(rows, %{}, fn [schema, table, oid], acc ->
           Map.put(acc, {schema, table}, [oid])

@@ -43,7 +43,9 @@ defmodule Extensions.Postgres.DynamicSupervisor do
       },
       %{
         id: SubscriptionManager,
-        start: {SubscriptionManager, :start_link, [%{conn: conn, id: args[:id]}]},
+        start:
+          {SubscriptionManager, :start_link,
+           [%{conn: conn, id: args[:id], publication: args[:publication]}]},
         restart: :transient
       }
     ]

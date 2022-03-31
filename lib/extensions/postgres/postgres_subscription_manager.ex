@@ -13,7 +13,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
   def init(opts) do
     :global.register_name({:subscription_manager, opts.id}, self())
     Subscriptions.delete_all(opts.conn)
-    {:ok, %{conn: opts.conn, id: opts.id}}
+    {:ok, %{conn: opts.conn, id: opts.id, publication: opts.publication}}
   end
 
   def subscribe(pid, opts) do
@@ -29,7 +29,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
   @impl true
   def handle_info({:subscribe, opts}, state) do
     Logger.debug("Subscribe #{inspect(opts, pretty: true)}")
-    Subscriptions.create(state.conn, opts)
+    Subscriptions.create(state.conn, state.publication, opts)
     {:noreply, state}
   end
 
