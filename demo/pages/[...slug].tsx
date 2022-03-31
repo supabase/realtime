@@ -18,7 +18,7 @@ import Users from '../components/Users'
 import WaitlistPopover from '../components/WaitlistPopover'
 
 const MAX_ROOM_USERS = 5
-const MAX_MESSAGES = 50
+const MAX_DISPLAY_MESSAGES = 50
 const userId = nanoid()
 
 const Room: NextPage = () => {
@@ -89,9 +89,9 @@ const Room: NextPage = () => {
 
     let newRoomId: string | undefined
     const state = userChannel.presence.state
-    const presences = state[currentRoomId]
+    const users = state[currentRoomId]
 
-    if (presences?.length < MAX_ROOM_USERS) {
+    if (users?.length < MAX_ROOM_USERS) {
       newRoomId = currentRoomId
     } else if (Object.keys(state).length) {
       const existingRooms: [string, number][] = Object.entries(state).map(([roomId, users]) => [
@@ -110,18 +110,17 @@ const Room: NextPage = () => {
       newRoomId = nanoid()
     }
 
-    userChannel
-      .send({
-        type: 'presence',
-        event: 'TRACK',
-        key: newRoomId,
-        payload: { user_id: userId },
-      })
-      .then((status) => {
-        if (status === 'ok') {
-          if (currentRoomId !== newRoomId) {
+    if (!users?.find((user) => user.user_id === userId)) {
+      userChannel
+        .send({
+          type: 'presence',
+          event: 'TRACK',
+          key: newRoomId,
+          payload: { user_id: userId },
+        })
+        .then((status) => {
+          if (status === 'ok') {
             router.push(`/${newRoomId}`)
-          } else {
             setValidatedRoomId(newRoomId)
             logger?.info(`User joined: ${userId}`, {
               user_id: userId,
@@ -129,10 +128,8 @@ const Room: NextPage = () => {
               timestamp: Date.now(),
             })
           }
-        } else {
-          router.push('/')
-        }
-      })
+        })
+    }
   }, [currentRoomId, router, isInitialStateSynced, userChannel])
 
   // Fetch chat messages
@@ -146,8 +143,10 @@ const Room: NextPage = () => {
       .select('id, user_id, message')
       .filter('room_id', 'eq', validatedRoomId)
       .order('created_at', { ascending: false })
-      .limit(MAX_MESSAGES)
-      .then((resp: PostgrestResponse<Message>) => resp.data && setMessages(resp.data.reverse()))
+      .limit(MAX_DISPLAY_MESSAGES)
+      .then((resp: PostgrestResponse<Message>) => {
+        resp.data && setMessages(resp.data.reverse())
+      })
   }, [validatedRoomId])
 
   // Continue to sync user presence state after initial state sync
@@ -179,6 +178,8 @@ const Room: NextPage = () => {
       return
     }
 
+    realtimeClient.connect()
+
     const messageChannel = realtimeClient.channel(
       `room:public:messages:room_id=eq.${validatedRoomId}`,
       {
@@ -188,7 +189,7 @@ const Room: NextPage = () => {
 
     messageChannel.on('realtime', { event: 'INSERT' }, (payload: Payload<DatabaseChange>) => {
       setMessages((prevMsgs: Message[]) => {
-        const messages = prevMsgs.slice(-MAX_MESSAGES + 1)
+        const messages = prevMsgs.slice(-MAX_DISPLAY_MESSAGES + 1)
         const msg = (({ id, message, room_id, user_id }) => ({
           id,
           message,
@@ -198,7 +199,10 @@ const Room: NextPage = () => {
         messages.push(msg)
         return messages
       })
-      if (chatboxRef.current) chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
+
+      if (chatboxRef.current) {
+        chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
+      }
     })
 
     messageChannel.on(
@@ -246,12 +250,13 @@ const Room: NextPage = () => {
     return () => {
       messageChannel.unsubscribe()
       realtimeClient.remove(messageChannel)
+      realtimeClient.disconnect()
     }
   }, [validatedRoomId])
 
   // Handle event listeners to broadcast
   useEffect(() => {
-    if (!messageChannel) {
+    if (!messageChannel || !validatedRoomId) {
       return
     }
 
@@ -312,7 +317,7 @@ const Room: NextPage = () => {
       window.removeEventListener('mousemove', setMouseEvent)
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [messageChannel])
+  }, [messageChannel, validatedRoomId])
 
   if (!validatedRoomId) {
     return <Loader />
