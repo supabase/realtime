@@ -21,7 +21,7 @@ const Chatbox: FC<Props> = ({ messages, chatboxRef, messagesInTransit, areMessag
             <IconLoader className="animate-spin text-scale-1200" size={14} />
             <p className="text-sm text-scale-1100">Loading messages</p>
           </div>
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && messagesInTransit.length === 0 ? (
           <div className="flex items-center justify-center space-x-2 text-scale-1200 text-sm opacity-75">
             <span>Hit</span>
             <code className="bg-scale-1100 text-scale-100 px-1 h-4 rounded flex items-center justify-center">
