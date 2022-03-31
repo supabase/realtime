@@ -1,6 +1,6 @@
 import { FC } from 'react'
 import { Button, Form, IconSend, Input } from '@supabase/ui'
-import { Message } from '../types/main.type'
+import { Message } from '../types'
 import { supabaseClient } from '../clients'
 
 interface Props {

@@ -1,45 +1,51 @@
 import type { NextPage } from 'next'
-import randomColor from 'randomcolor'
-import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/router'
-import { nanoid } from 'nanoid'
-import cloneDeep from 'lodash.clonedeep'
-import { PostgrestResponse } from '@supabase/supabase-js'
-import { RealtimeChannel } from '@supabase/realtime-js'
+import { useEffect, useState, useRef, ReactElement } from 'react'
 
-import { Coordinate, User, Message } from '../types/main.type'
+import cloneDeep from 'lodash.clonedeep'
+import { nanoid } from 'nanoid'
+import randomColor from 'randomcolor'
+
+import { supabaseClient, realtimeClient } from '../clients'
+
+import { RealtimeChannel } from '@supabase/realtime-js'
+import { PostgrestResponse } from '@supabase/supabase-js'
+
+import Chatbox from '../components/Chatbox'
+import Cursor from '../components/Cursor'
 import Loader from '../components/Loader'
 import Users from '../components/Users'
-import Cursor from '../components/Cursor'
-import Chatbox from '../components/Chatbox'
 import WaitlistPopover from '../components/WaitlistPopover'
-import { supabaseClient, realtimeClient } from '../clients'
+
+import { Coordinates, DatabaseChange, Message, Payload, User } from '../types'
 import logger from '../logger'
 
+const MAX_ROOM_USERS = 5
 const userId = nanoid()
 
 const Room: NextPage = () => {
   const router = useRouter()
   const { slug } = router.query
-  const roomId = slug && slug[0]
+  const currentRoomId = slug && slug[0]
 
-  const [channel, setChannel] = useState<RealtimeChannel>()
-  const [isStateSynced, setIsStateSynced] = useState<boolean>(false)
-  const [verifiedRoomId, setVerifiedRoomId] = useState<string>()
+  const [userChannel, setUserChannel] = useState<RealtimeChannel>()
+  const [messageChannel, setMessageChannel] = useState<RealtimeChannel>()
+
+  const [isInitialStateSynced, setIsInitialStateSynced] = useState<boolean>(false)
+  const [validatedRoomId, setValidatedRoomId] = useState<string>()
 
   const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
 
-  const [roomChannel, setRoomChannel] = useState<RealtimeChannel>()
+  // These states will be managed via ref as they're mutated within event listeners
+  const isTypingRef = useRef<boolean>(false)
+  const messageRef = useRef<string>()
+  const mousePositionRef = useRef<Coordinates>()
 
-  // These states will be managed via ref as their mutated within event listeners
-  const isTypingRef = useRef() as any
-  const messageRef = useRef() as any
-  const mousePositionRef = useRef() as any
   // We manage the refs with a state so that the UI can re-render
   const [isTyping, _setIsTyping] = useState<boolean>(false)
   const [message, _setMessage] = useState<string>('')
-  const [mousePosition, _setMousePosition] = useState<Coordinate>({ x: 0, y: 0 })
+  const [mousePosition, _setMousePosition] = useState<Coordinates>()
 
   const setIsTyping = (value: boolean) => {
     isTypingRef.current = value
@@ -51,82 +57,75 @@ const Room: NextPage = () => {
     _setMessage(value)
   }
 
-  const setMousePosition = (coordinates: Coordinate) => {
+  const setMousePosition = (coordinates: Coordinates) => {
     mousePositionRef.current = coordinates
     _setMousePosition(coordinates)
   }
 
-  // Initialize realtime session
+  // Connect to socket and subscribe to user channel
   useEffect(() => {
-    isTypingRef.current = false
-    setMousePosition({ x: 0, y: 0 })
-
     realtimeClient.connect()
 
-    const channel = realtimeClient.channel('room:*', { isNewVersion: true }) as RealtimeChannel
-    channel.on('presence', { event: 'SYNC' }, () => {
-      setIsStateSynced(true)
+    // Set up user channel and subscribe
+    const userChannel = realtimeClient.channel('room:*', { isNewVersion: true }) as RealtimeChannel
+    userChannel.on('presence', { event: 'SYNC' }, () => {
+      setIsInitialStateSynced(true)
     })
-    channel.subscribe()
-
-    setChannel(channel)
+    userChannel.subscribe()
+    setUserChannel(userChannel)
 
     return () => {
-      channel.unsubscribe()
-      realtimeClient.remove(channel)
+      userChannel.unsubscribe()
+      realtimeClient.remove(userChannel)
       realtimeClient.disconnect()
     }
   }, [])
 
-  // Determine if current room is verified or not
+  // Determine if current room is valid or generate a new room id
   useEffect(() => {
-    if (!channel || !isStateSynced || !roomId) return
-
-    const state = channel?.presence.state
-    const presences = state[roomId]
-
-    if (presences?.length < 5) {
-      setVerifiedRoomId(roomId)
-    } else if (Object.keys(state).length) {
-      const rooms = Object.entries(state).map(([id, users]) => {
-        if (Array.isArray(users)) {
-          return [id, users.length]
-        } else {
-          return [id, undefined]
-        }
-      })
-      const sortedRooms = rooms.sort((a: any, b: any) => a[1] - b[1])
-      const [existingRoomId, roomCount] = sortedRooms[0] as [string, number]
-
-      if (roomCount < 5) {
-        setVerifiedRoomId(existingRoomId)
-      } else {
-        setVerifiedRoomId(nanoid())
-      }
-    } else {
-      setVerifiedRoomId(nanoid())
+    if (!isInitialStateSynced || !currentRoomId || !userChannel) {
+      return
     }
-  }, [channel, isStateSynced, roomId])
 
-  // Handle redirect to a verified room with enough seats
-  useEffect(() => {
-    if (!channel || !roomId || !verifiedRoomId) return
+    let newRoomId: string | undefined
+    const state = userChannel.presence.state
+    const presences = state[currentRoomId]
 
-    channel
-      ?.send({
+    if (presences?.length < MAX_ROOM_USERS) {
+      newRoomId = currentRoomId
+    } else if (Object.keys(state).length) {
+      const existingRooms: [string, number][] = Object.entries(state).map(([roomId, users]) => [
+        roomId,
+        users.length,
+      ])
+      const sortedRooms = existingRooms.sort((a: any, b: any) => a[1] - b[1])
+      const [existingRoomId, roomCount] = sortedRooms[0]
+
+      if (roomCount < MAX_ROOM_USERS) {
+        newRoomId = existingRoomId
+      }
+    }
+
+    if (!newRoomId) {
+      newRoomId = nanoid()
+    }
+
+    userChannel
+      .send({
         type: 'presence',
         event: 'TRACK',
-        key: verifiedRoomId,
+        key: newRoomId,
         payload: { user_id: userId },
       })
       .then((status) => {
         if (status === 'ok') {
-          if (roomId !== verifiedRoomId) {
-            router.push(`/${verifiedRoomId}`)
+          if (currentRoomId !== newRoomId) {
+            router.push(`/${newRoomId}`)
           } else {
+            setValidatedRoomId(newRoomId)
             logger?.info(`User joined: ${userId}`, {
               user_id: userId,
-              room_id: roomId,
+              room_id: newRoomId,
               timestamp: Date.now(),
             })
           }
@@ -134,115 +133,136 @@ const Room: NextPage = () => {
           router.push('/')
         }
       })
-  }, [channel, isStateSynced, router, roomId, verifiedRoomId])
+  }, [currentRoomId, router, isInitialStateSynced, userChannel])
 
-  // Handle presence and position of users within the room
+  // Fetch chat messages
   useEffect(() => {
-    if (!channel || !roomChannel || !verifiedRoomId) return
+    if (!validatedRoomId) {
+      return
+    }
 
-    channel.on('presence', { event: 'SYNC' }, () => {
-      const state = channel.presence.state
-      const roomPresences = state[verifiedRoomId] as any[]
+    supabaseClient
+      .from('messages')
+      .select('id, user_id, message')
+      .filter('room_id', 'eq', validatedRoomId)
+      .order('created_at', { ascending: false })
+      .limit(10)
+      .then((resp: PostgrestResponse<Message>) => resp.data && setMessages(resp.data.reverse()))
+  }, [validatedRoomId])
 
-      if (roomPresences) {
-        setUsers((prevUsers) => {
-          return roomPresences.reduce((acc, presence) => {
-            const userId = presence.user_id
+  // Continue to sync user presence state after initial state sync
+  useEffect(() => {
+    if (!isInitialStateSynced || !userChannel || !validatedRoomId) {
+      return
+    }
 
-            acc[userId] = prevUsers[userId] || {
-              x: null,
-              y: null,
-              color: randomColor(),
-              message: '',
-              isTyping: false,
-            }
+    userChannel.off('presence', { event: 'SYNC' })
 
+    userChannel.on('presence', { event: 'SYNC' }, () => {
+      const state = userChannel.presence.state
+      const users = state[validatedRoomId]
+
+      if (users) {
+        setUsers((existingUsers) => {
+          return users.reduce((acc: { [key: string]: User }, { user_id: userId }: any) => {
+            acc[userId] = existingUsers[userId] || { color: randomColor() }
             return acc
           }, {})
         })
       }
     })
+  }, [isInitialStateSynced, userChannel, validatedRoomId])
 
-    roomChannel.on('broadcast', { event: 'POS' }, (payload: any) => {
-      setUsers((users) => {
-        const userId = payload.payload.user_id
-        const existingUser = users[userId]
-
-        if (existingUser) {
-          users[userId] = { ...existingUser, ...{ x: payload.payload.x, y: payload.payload.y } }
-          users = cloneDeep(users)
-        }
-
-        return users
-      })
-    })
-
-    roomChannel.on('broadcast', { event: 'MESSAGE' }, (payload: any) => {
-      setUsers((users) => {
-        const usersClone = cloneDeep(users)
-        const userId = payload.payload.user_id
-        usersClone[userId] = {
-          ...usersClone[userId],
-          ...{ isTyping: payload.payload.isTyping, message: payload.payload.message },
-        }
-        return usersClone
-      })
-    })
-  }, [channel, roomChannel, verifiedRoomId])
-
-  // Load messages of the room for the chatbox
+  // Listen to database changes for chat messages and handle broadcast messages
   useEffect(() => {
-    if (!verifiedRoomId) return
+    if (!validatedRoomId) {
+      return
+    }
 
-    supabaseClient
-      .from('messages')
-      .select('id, user_id, message')
-      .filter('room_id', 'eq', verifiedRoomId)
-      .order('created_at', { ascending: false })
-      .limit(10)
-      .then((resp: PostgrestResponse<Message>) => resp.data && setMessages(resp.data.reverse()))
-  }, [verifiedRoomId])
+    const messageChannel = realtimeClient.channel(
+      `room:public:messages:room_id=eq.${validatedRoomId}`,
+      {
+        isNewVersion: true,
+      }
+    ) as RealtimeChannel
 
-  // Listen to realtime changes based on INSERT events to the messages table
-  useEffect(() => {
-    if (!verifiedRoomId) return
-
-    const newChannel = realtimeClient.channel(`room:public:messages:room_id=eq.${verifiedRoomId}`, {
-      isNewVersion: true,
-    }) as RealtimeChannel
-    newChannel.on('realtime', { event: 'INSERT' }, (payload: any) =>
-      setMessages((prevMsgs: any) => {
-        let msgs = prevMsgs.slice(-9)
+    messageChannel.on('realtime', { event: 'INSERT' }, (payload: Payload<DatabaseChange>) =>
+      setMessages((prevMsgs: Message[]) => {
+        const messages = prevMsgs.slice(-9)
         const msg = (({ id, message, room_id, user_id }) => ({
           id,
           message,
           room_id,
           user_id,
         }))(payload.payload.record)
-        msgs.push(msg)
-        return msgs
+        messages.push(msg)
+        return messages
       })
     )
-    newChannel.subscribe()
-    setRoomChannel(newChannel)
+
+    messageChannel.on(
+      'broadcast',
+      { event: 'POS' },
+      (payload: Payload<{ user_id: string } & Coordinates>) => {
+        setUsers((users) => {
+          const userId = payload.payload.user_id
+          const existingUser = users[userId]
+
+          if (existingUser) {
+            users[userId] = { ...existingUser, ...{ x: payload.payload.x, y: payload.payload.y } }
+            users = cloneDeep(users)
+          }
+
+          return users
+        })
+      }
+    )
+
+    messageChannel.on(
+      'broadcast',
+      { event: 'MESSAGE' },
+      (payload: Payload<{ user_id: string; isTyping: boolean; message: string }>) => {
+        setUsers((users) => {
+          const userId = payload.payload.user_id
+          const existingUser = users[userId]
+
+          if (existingUser) {
+            users[userId] = {
+              ...existingUser,
+              ...{ isTyping: payload.payload.isTyping, message: payload.payload.message },
+            }
+            users = cloneDeep(users)
+          }
+
+          return users
+        })
+      }
+    )
+
+    messageChannel.subscribe()
+    setMessageChannel(messageChannel)
 
     return () => {
-      newChannel.unsubscribe()
-      realtimeClient.remove(newChannel)
+      messageChannel.unsubscribe()
+      realtimeClient.remove(messageChannel)
     }
-  }, [verifiedRoomId])
+  }, [validatedRoomId])
 
   // Handle event listeners to broadcast
   useEffect(() => {
-    if (!roomChannel) return
+    if (!messageChannel) {
+      return
+    }
 
     const setMouseEvent = (e: MouseEvent) => {
-      roomChannel.send({
+      const [x, y] = [e.clientX, e.clientY]
+
+      messageChannel.send({
         type: 'broadcast',
         event: 'POS',
-        payload: { user_id: userId, x: e.clientX, y: e.clientY },
+        payload: { user_id: userId, x, y },
       })
-      setMousePosition({ x: e.clientX, y: e.clientY })
+      setMousePosition({ x, y })
     }
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -250,23 +270,24 @@ const Room: NextPage = () => {
         if (!isTypingRef.current) {
           setIsTyping(true)
           setMessage('')
-          roomChannel.send({
+          messageChannel.send({
             type: 'broadcast',
             event: 'MESSAGE',
             payload: { user_id: userId, isTyping: true, message: '' },
           })
         } else {
           setIsTyping(false)
-          roomChannel.send({
+          messageChannel.send({
             type: 'broadcast',
             event: 'MESSAGE',
             payload: { user_id: userId, isTyping: false, message: messageRef.current },
           })
         }
       }
+
       if (e.code === 'Escape' && isTypingRef.current) {
         setIsTyping(false)
-        roomChannel.send({
+        messageChannel.send({
           type: 'broadcast',
           event: 'MESSAGE',
           payload: { user_id: userId, isTyping: false, message: '' },
@@ -281,9 +302,11 @@ const Room: NextPage = () => {
       window.removeEventListener('mousemove', setMouseEvent)
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [roomChannel])
+  }, [messageChannel])
 
-  if (!verifiedRoomId) return <Loader />
+  if (!validatedRoomId) {
+    return <Loader />
+  }
 
   return (
     <div
@@ -314,32 +337,38 @@ const Room: NextPage = () => {
         </div>
       </div>
 
-      {Object.entries(users).map(([userId, data]) => {
-        return (
-          <Cursor
-            key={userId}
-            x={data.x}
-            y={data.y}
-            color={data.color}
-            message={data.message || ''}
-            isTyping={data.isTyping}
-          />
-        )
-      })}
+      {Object.entries(users).reduce((acc, [userId, data]) => {
+        const { x, y, color, message, isTyping } = data
+        if (x && y) {
+          acc.push(
+            <Cursor
+              key={userId}
+              x={x}
+              y={y}
+              color={color}
+              message={message || ''}
+              isTyping={isTyping}
+            />
+          )
+        }
+        return acc
+      }, [] as ReactElement[])}
 
       {/* Cursor for local client: Shouldn't show the cursor itself, only the text bubble */}
-      <Cursor
-        isLocalClient
-        x={mousePosition.x}
-        y={mousePosition.y}
-        color="#3ECF8E"
-        isTyping={isTyping}
-        message={message}
-        onUpdateMessage={setMessage}
-      />
+      {mousePosition?.x && mousePosition?.y && (
+        <Cursor
+          isLocalClient
+          x={mousePosition.x}
+          y={mousePosition.y}
+          color="#3ECF8E"
+          isTyping={isTyping}
+          message={message}
+          onUpdateMessage={setMessage}
+        />
+      )}
 
       <div className="flex justify-end">
-        <Chatbox messages={messages} roomId={verifiedRoomId} userId={userId} />
+        <Chatbox messages={messages} roomId={validatedRoomId} userId={userId} />
       </div>
     </div>
   )
