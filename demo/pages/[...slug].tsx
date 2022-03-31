@@ -81,7 +81,7 @@ const Room: NextPage = () => {
     // Set up user channel and subscribe
     const userChannel = realtimeClient.channel('room:*', {
       isNewVersion: true,
-      self_broadcast: true,
+      // self_broadcast: true,
     }) as RealtimeChannel
     userChannel.on('presence', { event: 'SYNC' }, () => {
       setIsInitialStateSynced(true)
@@ -94,6 +94,27 @@ const Room: NextPage = () => {
       realtimeClient.disconnect()
     }
   }, [])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!userChannel) return
+      const start = performance.now()
+      userChannel
+        .send({
+          type: 'broadcast',
+          event: 'PING',
+          ack: true,
+          payload: { haha: 1 },
+        })
+        .then((data) => {
+          const end = performance.now()
+          console.log('latency', end - start)
+        })
+        .catch((err) => console.log('broadcast error', err))
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [userChannel])
 
   // Determine if current room is valid or generate a new room id
   useEffect(() => {
