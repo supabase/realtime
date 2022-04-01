@@ -2,7 +2,7 @@ import type { NextPage } from 'next'
 import { useRouter } from 'next/router'
 import { nanoid } from 'nanoid'
 import cloneDeep from 'lodash.clonedeep'
-import randomColor from 'randomcolor'
+import randomColor from './../lib/RandomColor'
 import { useEffect, useState, useRef, ReactElement } from 'react'
 import { RealtimeChannel } from '@supabase/realtime-js'
 import { PostgrestResponse } from '@supabase/supabase-js'
@@ -17,6 +17,7 @@ import Cursor from '../components/Cursor'
 import Loader from '../components/Loader'
 import Users from '../components/Users'
 import WaitlistPopover from '../components/WaitlistPopover'
+import DarkModeToggle from '../components/DarkModeToggle'
 
 const MAX_ROOM_USERS = 5
 const MAX_DISPLAY_MESSAGES = 50
@@ -36,6 +37,8 @@ const Room: NextPage = () => {
 
   const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
+
+  const [localColor, _setLocalColor] = useState<any>(randomColor())
 
   const chatboxRef = useRef<any>()
 
@@ -174,7 +177,8 @@ const Room: NextPage = () => {
       if (users) {
         setUsers((existingUsers) => {
           return users.reduce((acc: { [key: string]: User }, { user_id: userId }: any) => {
-            acc[userId] = existingUsers[userId] || { color: randomColor() }
+            const colors = randomColor()
+            acc[userId] = existingUsers[userId] || { color: colors.bg, hue: colors.hue }
             return acc
           }, {})
         })
@@ -349,18 +353,49 @@ const Room: NextPage = () => {
   return (
     <div
       className={[
-        'h-screen w-screen p-4 animate-gradient flex flex-col justify-between relative',
+        'h-screen w-screen p-4 flex flex-col justify-between relative',
         'max-h-screen max-w-screen overflow-hidden',
       ].join(' ')}
-      style={{
-        background:
-          'linear-gradient(-45deg, transparent, transparent, rgba(0, 89, 60, 0.5), rgba(0, 207, 144, 0.5), rgba(0, 89, 60, 0.5), transparent, transparent)',
-        backgroundSize: '400% 400%',
-      }}
+      // style={{
+      //   background:
+      //     'linear-gradient(-45deg, transparent, transparent, rgba(0, 89, 60, 0.5), rgba(0, 207, 144, 0.5), rgba(0, 89, 60, 0.5), transparent, transparent)',
+      //   backgroundSize: '400% 400%',
+      // }}
     >
-      <div className="flex justify-between">
-        <WaitlistPopover />
-        <Users users={users} />
+      {/* <div
+        className="absolute animate-gradient h-full w-full left-0 top-0 opacity-100 z-0"
+        style={{
+          background:
+            'linear-gradient(-45deg, transparent, transparent, rgba(0, 89, 60, 0.2), rgba(0, 207, 144, 0.2), rgba(0, 89, 60, 0.0), transparent, transparent)',
+          backgroundSize: '400% 400%',
+        }}
+      ></div> */}
+      <div
+        className="absolute h-full w-full left-0 top-0"
+        style={{
+          backgroundSize: '16px 16px',
+          opacity: 0.02,
+          // backgroundSize: '400% 400%',
+          backgroundImage:
+            'linear-gradient(to right, gray 1px, transparent 1px),\n    linear-gradient(to bottom, gray 1px, transparent 1px)',
+        }}
+      ></div>
+      <div className="flex flex-col h-full justify-between">
+        <div className="flex justify-between z-10">
+          <WaitlistPopover />
+          <Users users={users} />
+        </div>
+        <div className="flex items-end justify-between">
+          <DarkModeToggle />
+          <div className="flex justify-end">
+            <Chatbox
+              messages={messages || []}
+              chatboxRef={chatboxRef}
+              messagesInTransit={messagesInTransit}
+              areMessagesFetched={areMessagesFetched}
+            />
+          </div>
+        </div>
       </div>
 
       <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center space-x-2 pointer-events-none">
@@ -379,7 +414,7 @@ const Room: NextPage = () => {
       </div>
 
       {Object.entries(users).reduce((acc, [userId, data]) => {
-        const { x, y, color, message, isTyping } = data
+        const { x, y, color, message, isTyping, hue } = data
         if (x && y) {
           acc.push(
             <Cursor
@@ -387,6 +422,7 @@ const Room: NextPage = () => {
               x={x}
               y={y}
               color={color}
+              hue={hue}
               message={message || ''}
               isTyping={isTyping}
             />
@@ -401,21 +437,13 @@ const Room: NextPage = () => {
           isLocalClient
           x={mousePosition?.x}
           y={mousePosition?.y}
-          color="#3ECF8E"
+          color={localColor.bg}
+          hue={localColor.hue}
           isTyping={isTyping}
           message={message}
           onUpdateMessage={setMessage}
         />
       )}
-
-      <div className="flex justify-end">
-        <Chatbox
-          messages={messages || []}
-          chatboxRef={chatboxRef}
-          messagesInTransit={messagesInTransit}
-          areMessagesFetched={areMessagesFetched}
-        />
-      </div>
     </div>
   )
 }

@@ -4,6 +4,7 @@ interface Props {
   x?: number
   y?: number
   color: string
+  hue: string
   message: string
   isTyping?: boolean
   isLocalClient?: boolean
@@ -19,6 +20,7 @@ const Cursor: FC<Props> = ({
   x,
   y,
   color,
+  hue,
   message,
   isTyping,
   isLocalClient,
@@ -66,6 +68,10 @@ const Cursor: FC<Props> = ({
     setFlipY((y || 0) + MAX_BUBBLE_HEIGHT_THRESHOLD >= window.innerHeight)
   }, [x, y, isTyping, chatBubbleRef])
 
+  const showLocalMessage = _isLocalClient && hideInput && message.length
+
+  const showRemoteMessage = !_isLocalClient && message.length
+
   return (
     <>
       {!_isLocalClient && (
@@ -81,7 +87,7 @@ const Cursor: FC<Props> = ({
           <path
             d="M2.717 2.22918L15.9831 15.8743C16.5994 16.5083 16.1503 17.5714 15.2661 17.5714H9.35976C8.59988 17.5714 7.86831 17.8598 7.3128 18.3783L2.68232 22.7C2.0431 23.2966 1 22.8434 1 21.969V2.92626C1 2.02855 2.09122 1.58553 2.717 2.22918Z"
             fill={color}
-            stroke="white"
+            stroke={hue}
             strokeWidth="2"
           />
         </svg>
@@ -89,13 +95,13 @@ const Cursor: FC<Props> = ({
       <div
         ref={chatBubbleRef}
         className={[
-          'absolute top-0 left-0 transform transition py-2 rounded-full shadow-md',
+          'transition-all absolute top-0 left-0 py-2 rounded-full shadow-md',
           'flex items-center justify-between px-4 space-x-2 pointer-events-none',
           `${showMessageBubble ? 'opacity-100' : 'opacity-0'}`,
           `${_isLocalClient && !hideInput ? 'w-[280px]' : 'max-w-[280px] overflow-hidden'}`,
         ].join(' ')}
         style={{
-          backgroundColor: color || '#3ECF8E',
+          backgroundColor: color,
           transform: `translateX(${
             (x || 0) + (flipX ? -chatBubbleRef.current.clientWidth - 20 : 20)
           }px) translateY(${(y || 0) + (flipY ? -chatBubbleRef.current.clientHeight - 20 : 20)}px)`,
@@ -106,23 +112,26 @@ const Cursor: FC<Props> = ({
             <input
               ref={inputRef}
               value={message}
-              className="w-full outline-none bg-transparent border-none"
+              className="w-full outline-none bg-transparent border-none text-white"
               onChange={(e: FormEvent<HTMLInputElement>) => {
                 const text = e.currentTarget.value
                 if (text.length <= MAX_MESSAGE_LENGTH) onUpdateMessage(e.currentTarget.value)
               }}
             />
-            <p className="text-scale-600 text-sm">
+            <p className="text-xs" style={{ color: hue }}>
               {message.length}/{MAX_MESSAGE_LENGTH}
             </p>
           </>
         ) : message.length ? (
-          <div className="truncate">{message}</div>
+          <div className="truncate text-white">{message}</div>
         ) : (
-          <div className="space-x-1">
-            <span>•</span>
-            <span>•</span>
-            <span>•</span>
+          <div className="flex items-center justify-center">
+            <div className="loader-dots block relative h-6 w-10">
+              <div className="absolute top-0 my-2.5 w-1.5 h-1.5 rounded-full bg-white opacity-75"></div>
+              <div className="absolute top-0 my-2.5 w-1.5 h-1.5 rounded-full bg-white opacity-75"></div>
+              <div className="absolute top-0 my-2.5 w-1.5 h-1.5 rounded-full bg-white opacity-75"></div>
+              <div className="absolute top-0 my-2.5 w-1.5 h-1.5 rounded-full bg-white opacity-75"></div>
+            </div>
           </div>
         )}
       </div>

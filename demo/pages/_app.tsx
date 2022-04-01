@@ -1,6 +1,7 @@
 import '../styles/globals.css'
 import type { AppProps } from 'next/app'
 import Head from 'next/head'
+import { ThemeProvider } from '../lib/ThemeProvider'
 
 function MyApp({ Component, pageProps }: AppProps) {
   return (
@@ -19,7 +20,9 @@ function MyApp({ Component, pageProps }: AppProps) {
         <meta property="og:title" key="ogtitle" content="Realtime | Supabase" />
         <meta property="og:description" key="ogdesc" content="Presence and ephemeral state" />
       </Head>
-      <Component {...pageProps} />
+      <ThemeProvider>
+        <Component {...pageProps} />
+      </ThemeProvider>
     </>
   )
 }

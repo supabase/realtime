@@ -8,11 +8,11 @@ class MyDocument extends Document {
 
   render() {
     return (
-      <Html>
+      <Html lang="en" className="dark">
         <Head>
           <link rel="stylesheet" type="text/css" href="/css/fonts.css" />
         </Head>
-        <body className="dark">
+        <body>
           <Main />
           <NextScript />
         </body>

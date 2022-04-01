@@ -1,7 +1,15 @@
 import { FC, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { Button, Form, Input, IconMinimize2, IconMaximize2 } from '@supabase/ui'
+import {
+  Button,
+  Form,
+  Input,
+  IconMinimize2,
+  IconMaximize2,
+  IconSun,
+  IconGitHub,
+} from '@supabase/ui'
 import { supabaseClient } from '../clients'
 
 interface Props {}
@@ -39,9 +47,9 @@ const WaitlistPopover: FC<Props> = ({}) => {
 
   return (
     <div
-      className={`bg-scale-400 border border-scale-600 p-6 rounded-md w-[400px] space-y-8 transition-all ${
+      className={`bg-scale-200 border border-scale-500 dark:border-scale-300 p-6 rounded-md w-[400px] space-y-8 transition-all ${
         isExpanded ? 'max-h-[600px]' : 'max-h-[70px]'
-      } duration-500 overflow-hidden shadow-lg`}
+      } duration-500 overflow-hidden shadow-2xl dark:shadow-lg`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center justify-center space-x-2">
@@ -51,51 +59,67 @@ const WaitlistPopover: FC<Props> = ({}) => {
               !isExpanded ? 'opacity-100' : 'opacity-0'
             } space-x-2 flex items-center`}
           >
-            <p className="text-scale-1200 text-sm">•</p>
-            <p className="text-scale-1200 text-sm">Multiplayer</p>
+            <p
+              className={'transition-all text-scale-900 text-sm ' + (isExpanded ? '-ml-2' : 'ml-0')}
+            >
+              /
+            </p>
+            <p
+              className={
+                'transition-all text-scale-1200 text-sm ' + (isExpanded ? '-ml-2' : 'ml-0')
+              }
+            >
+              Multiplayer
+            </p>
           </div>
         </div>
-        {isExpanded ? (
-          <IconMinimize2
-            className="text-scale-1200 cursor-pointer"
-            strokeWidth={2}
-            size={20}
-            onClick={() => setIsExpanded(false)}
-          />
-        ) : (
-          <IconMaximize2
-            className="text-scale-1200 cursor-pointer"
-            strokeWidth={2}
-            size={20}
-            onClick={() => setIsExpanded(true)}
-          />
-        )}
+        <div className="group">
+          {isExpanded ? (
+            <IconMinimize2
+              className="
+                transition-all 
+                text-scale-900 
+                group-hover:text-scale-1200 
+                cursor-pointer
+                group-hover:scale-105
+              "
+              strokeWidth={2}
+              size={16}
+              onClick={() => setIsExpanded(false)}
+            />
+          ) : (
+            <IconMaximize2
+              className="
+                transition-all 
+                text-scale-900 
+                group-hover:text-scale-1200 
+                cursor-pointer
+                group-hover:scale-105"
+              strokeWidth={2}
+              size={16}
+              onClick={() => setIsExpanded(true)}
+            />
+          )}
+        </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h1 className="text-scale-1200 text-3xl">Multiplayer</h1>
-          <Link href="https://github.com/supabase/multiplayer">
-            <a target="_blank">
-              <svg
-                className="h-6 w-6 text-scale-1200 cursor-pointer"
-                fill="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
-                  clipRule="evenodd"
-                ></path>
-              </svg>
-            </a>
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h1 className="text-scale-1200 text-2xl">Multiplayer</h1>
+          </div>
+          <p className="text-sm text-scale-900">
+            Build realtime collaborative applications quickly through a simple set of APIs -
+            Multiplayer provides Pub/Sub, presence and ephemeral state
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link href="https://github.com/supabase/multiplayer" passHref>
+            <Button as="a" type="default" icon={<IconGitHub />}>
+              View on GitHib
+            </Button>
           </Link>
         </div>
-        <p className="text-sm text-scale-1100">
-          Build realtime collaborative applications quickly through a simple set of APIs -
-          Multiplayer provides Pub/Sub, presence and ephemeral state
-        </p>
       </div>
 
       <Form validateOnBlur initialValues={initialValues} validate={onValidate} onSubmit={onSubmit}>
@@ -105,19 +129,19 @@ const WaitlistPopover: FC<Props> = ({}) => {
               <Input
                 id="email"
                 name="email"
+                size="small"
                 placeholder="example@email.com"
                 autoComplete="off"
                 actions={[
-                  <div key="email-submit" className="mr-1">
-                    <Button
-                      key="submit"
-                      htmlType="submit"
-                      loading={isSubmitting}
-                      disabled={isSubmitting}
-                    >
-                      Get early access
-                    </Button>
-                  </div>,
+                  <Button
+                    className="mr-0.5"
+                    key="submit"
+                    htmlType="submit"
+                    loading={isSubmitting}
+                    disabled={isSubmitting}
+                  >
+                    Get early access
+                  </Button>,
                 ]}
               />
               {isSuccess && (
