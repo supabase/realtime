@@ -42,7 +42,7 @@ const Chatbox: FC<Props> = ({ messages, chatboxRef, messagesInTransit, areMessag
             {message}
           </p>
         ))}
-        <div ref={chatboxRef} />
+        <div ref={chatboxRef} className="hidden" />
       </div>
     </div>
   )

@@ -358,16 +358,16 @@ const Room: NextPage = () => {
       ].join(' ')}
     >
       <div
-        className="absolute h-full w-full left-0 top-0"
+        className="absolute h-full w-full left-0 top-0 pointer-events-none"
         style={{
           opacity: 0.02,
           backgroundSize: '16px 16px',
           backgroundImage:
             'linear-gradient(to right, gray 1px, transparent 1px),\n    linear-gradient(to bottom, gray 1px, transparent 1px)',
         }}
-      ></div>
+      />
       <div className="flex flex-col h-full justify-between">
-        <div className="flex justify-between z-10">
+        <div className="flex justify-between">
           <WaitlistPopover />
           <Users users={users} />
         </div>
