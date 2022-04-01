@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid'
 import cloneDeep from 'lodash.clonedeep'
 import randomColor from './../lib/RandomColor'
 import { useEffect, useState, useRef, ReactElement } from 'react'
+import { Badge } from '@supabase/ui'
 import { RealtimeChannel } from '@supabase/realtime-js'
 import { PostgrestResponse } from '@supabase/supabase-js'
 
@@ -450,7 +451,7 @@ const Room: NextPage = () => {
         <div className="flex items-end justify-between">
           <div className="flex items-center space-x-4">
             <DarkModeToggle />
-            <p className="text-xs text-scale-1000">Latency: {latency.toFixed(2)}ms</p>
+            <Badge>Latency: {latency.toFixed(2)}ms</Badge>
           </div>
           <div className="flex justify-end">
             <Chatbox
