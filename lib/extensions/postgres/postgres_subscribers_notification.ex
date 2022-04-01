@@ -24,23 +24,12 @@ defmodule Extensions.Postgres.SubscribersNotification do
   # end
 
   def broadcast_change(topic, %{subscription_ids: subs_id} = change, scope) do
-    payload =
-      Map.filter(change, fn {key, _} ->
-        !Enum.member?([:is_rls_enabled, :subscription_ids], key)
-      end)
-
-    encoded_msg =
-      %Broadcast{
-        topic: topic,
-        event: "realtime",
-        payload: %{payload: payload, event: payload.type}
-      }
-      |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
+    message = encode_message(topic, change)
 
     :syn.members(Extensions.Postgres.Subscribers, scope)
     |> Enum.each(fn {_pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
       if MapSet.member?(subs_id, bin_id) do
-        send(transport_pid, encoded_msg)
+        send(transport_pid, message)
       end
     end)
   end
@@ -143,4 +132,18 @@ defmodule Extensions.Postgres.SubscribersNotification do
   defp stringify_value(v), do: Jason.encode(v)
 
   defp is_notification_key_length_valid(v), do: String.length(v) < 100
+
+  defp encode_message(topic, change) do
+    payload =
+      Map.filter(change, fn {key, _} ->
+        !Enum.member?([:is_rls_enabled, :subscription_ids], key)
+      end)
+
+    %Broadcast{
+      topic: topic,
+      event: "realtime",
+      payload: %{payload: payload, event: payload.type}
+    }
+    |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
+  end
 end
