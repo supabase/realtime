@@ -25,6 +25,9 @@ import { sendLog } from '../lib/sendLog'
 const MAX_ROOM_USERS = 5
 const MAX_DISPLAY_MESSAGES = 50
 const MAX_EVENTS_PER_SECOND = 10
+const X_THRESHOLD = 25
+const Y_THRESHOLD = 35
+
 const userId = nanoid()
 
 const Room: NextPage = () => {
@@ -328,10 +331,12 @@ const Room: NextPage = () => {
 
           if (existingUser) {
             const x =
-              (payload?.payload?.x ?? 0) > window.innerWidth ? window.innerWidth : payload.payload.x
+              (payload?.payload?.x ?? 0) - X_THRESHOLD > window.innerWidth
+                ? window.innerWidth - X_THRESHOLD
+                : payload.payload.x
             const y =
-              (payload?.payload?.y ?? 0) > window.innerHeight
-                ? window.innerHeight
+              (payload?.payload?.y ?? 0 - Y_THRESHOLD) > window.innerHeight
+                ? window.innerHeight - Y_THRESHOLD
                 : payload.payload.y
 
             users[userId] = { ...existingUser, ...{ x, y } }
