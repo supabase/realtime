@@ -76,7 +76,7 @@ const WaitlistPopover: FC<Props> = ({}) => {
             <p
               className={`transition-all text-scale-1200 text-sm ${isExpanded ? '-ml-2' : 'ml-0'}`}
             >
-              Multiplayer
+              Realtime
             </p>
           </div>
         </div>
@@ -100,15 +100,15 @@ const WaitlistPopover: FC<Props> = ({}) => {
       <div className="space-y-6">
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <h1 className="text-scale-1200 text-2xl">Multiplayer</h1>
+            <h1 className="text-scale-1200 text-2xl">Realtime</h1>
           </div>
           <p className="text-sm text-scale-900">
             Realtime collaborative app to display broadcast, presence, and database
-            listening capabilities
+            listening over WebSockets
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="https://github.com/supabase/multiplayer" passHref>
+          <Link href="https://github.com/supabase/realtime" passHref>
             <Button as="a" type="default" icon={<IconGitHub />}>
               View on GitHub
             </Button>
