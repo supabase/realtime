@@ -103,8 +103,8 @@ const WaitlistPopover: FC<Props> = ({}) => {
             <h1 className="text-scale-1200 text-2xl">Multiplayer</h1>
           </div>
           <p className="text-sm text-scale-900">
-            Build realtime collaborative applications quickly through a simple set of APIs -
-            Multiplayer provides Pub/Sub, presence and ephemeral state
+            Realtime collaborative app to display broadcast, presence, and database
+            listening capabilities
           </p>
         </div>
         <div className="flex items-center gap-2">
