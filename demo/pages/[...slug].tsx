@@ -171,7 +171,7 @@ const Room: NextPage = () => {
     if (!newRoomId) {
       newRoomId = nanoid()
     }
-    const startTimestamp = Date.now()
+
     if (!users?.find((user) => user.user_id === userId)) {
       userChannel
         .send({
@@ -191,9 +191,6 @@ const Room: NextPage = () => {
         })
         .catch(() => {})
     }
-    const endTimestamp = Date.now()
-    sendLog(`Time taken to join a room is ${endTimestamp - startTimestamp}ms`)
-    
   }, [currentRoomId, router, isInitialStateSynced, userChannel])
 
   // Fetch chat messages
