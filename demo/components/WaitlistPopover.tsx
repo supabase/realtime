@@ -11,10 +11,12 @@ import {
   IconTwitter,
 } from '@supabase/ui'
 import { supabaseClient } from '../clients'
+import { useTheme } from '../lib/ThemeProvider'
 
 interface Props {}
 
 const WaitlistPopover: FC<Props> = ({}) => {
+  const { isDarkMode } = useTheme()
   const [isExpanded, setIsExpanded] = useState(true)
   const [isSuccess, setIsSuccess] = useState(false)
   const [error, setError] = useState<any>()
@@ -57,7 +59,12 @@ const WaitlistPopover: FC<Props> = ({}) => {
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center justify-center space-x-2">
-          <Image src="/img/supabase-dark.svg" alt="supabase" height={20} width={100} />
+          <Image
+            src={isDarkMode ? `/img/supabase-dark.svg` : `/img/supabase-light.svg`}
+            alt="supabase"
+            height={20}
+            width={100}
+          />
           <div
             className={`transition relative -top-[1px] ${
               !isExpanded ? 'opacity-100' : 'opacity-0'
