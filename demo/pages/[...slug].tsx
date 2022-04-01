@@ -135,8 +135,6 @@ const Room: NextPage = () => {
     const state = userChannel.presence.state
     const users = state[currentRoomId]
 
-    // [TODO Joshen] This logic here seems quite volatile
-    // Quite often I get shifted to a new room despite putting a URL with a valid slug
     if (users?.length < MAX_ROOM_USERS) {
       newRoomId = currentRoomId
     } else if (Object.keys(state).length) {
