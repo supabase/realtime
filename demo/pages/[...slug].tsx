@@ -102,6 +102,8 @@ const Room: NextPage = () => {
     const state = userChannel.presence.state
     const users = state[currentRoomId]
 
+    // [TODO Joshen] This logic here seems quite volatile
+    // Quite often I get shifted to a new room despite putting a URL with a valid slug
     if (users?.length < MAX_ROOM_USERS) {
       newRoomId = currentRoomId
     } else if (Object.keys(state).length) {
@@ -177,6 +179,7 @@ const Room: NextPage = () => {
       if (users) {
         setUsers((existingUsers) => {
           return users.reduce((acc: { [key: string]: User }, { user_id: userId }: any) => {
+            // [TODO JOSHEN] Can we use a color that's not already in the session?
             const colors = randomColor()
             acc[userId] = existingUsers[userId] || { x: 0, y: 0, color: colors.bg, hue: colors.hue }
             return acc
