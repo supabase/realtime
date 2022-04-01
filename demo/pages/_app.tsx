@@ -14,7 +14,7 @@ function MyApp({ Component, pageProps }: AppProps) {
         <meta
           key="ogimage"
           property="og:image"
-          content="https://mfrkmguhoejspftfvgdz.supabase.co/storage/v1/object/public/og-assets/supabase-multiplayer-og.png"
+          content={`https://multiplayer.dev/img/multiplayer-og.png`}
         />
         <meta property="og:site_name" key="ogsitename" content="multiplayer.dev" />
         <meta property="og:title" key="ogtitle" content="Realtime | Supabase" />
