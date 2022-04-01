@@ -358,7 +358,6 @@ const Room: NextPage = () => {
     }
 
     const sendMouseBroadcast = throttle(({ x, y }) => {
-      console.log('sending mouse event')
       messageChannel
         .send({
           type: 'broadcast',
