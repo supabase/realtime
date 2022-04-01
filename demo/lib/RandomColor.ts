@@ -40,26 +40,26 @@ export default function randomColor() {
       bg: 'var(--colors-orange9)',
       hue: 'var(--colors-orange7)',
     },
-    // red: {
-    //   bg: 'var(--colors-red9)',
-    //   hue: 'var(--colors-red7)',
-    // },
-    // grass: {
-    //   bg: 'var(--colors-grass9)',
-    //   hue: 'var(--colors-grass7)',
-    // },
-    // brown: {
-    //   bg: 'var(--colors-brown9)',
-    //   hue: 'var(--colors-brown7)',
-    // },
-    // purple: {
-    //   bg: 'var(--colors-purple9)',
-    //   hue: 'var(--colors-purple7)',
-    // },
-    // violet: {
-    //   bg: 'var(--colors-violet9)',
-    //   hue: 'var(--colors-violet7)',
-    // },
+    red: {
+      bg: 'var(--colors-red9)',
+      hue: 'var(--colors-red7)',
+    },
+    grass: {
+      bg: 'var(--colors-grass9)',
+      hue: 'var(--colors-grass7)',
+    },
+    brown: {
+      bg: 'var(--colors-brown9)',
+      hue: 'var(--colors-brown7)',
+    },
+    purple: {
+      bg: 'var(--colors-purple9)',
+      hue: 'var(--colors-purple7)',
+    },
+    violet: {
+      bg: 'var(--colors-violet9)',
+      hue: 'var(--colors-violet7)',
+    },
   }
 
   return Object.values(colors)[Math.floor(Math.random() * Object.values(colors).length)]

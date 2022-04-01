@@ -206,12 +206,11 @@ const Room: NextPage = () => {
 
     userChannel.on('presence', { event: 'SYNC' }, () => {
       const state = userChannel.presence.state
-      const users = state[validatedRoomId]
+      const _users = state[validatedRoomId]
 
-      if (users) {
+      if (_users) {
         setUsers((existingUsers) => {
-          return users.reduce((acc: { [key: string]: User }, { user_id: userId }: any) => {
-            // [TODO JOSHEN] Can we use a color that's not already in the session?
+          return _users.reduce((acc: { [key: string]: User }, { user_id: userId }: any) => {
             const colors = randomColor()
             acc[userId] = existingUsers[userId] || { x: 0, y: 0, color: colors.bg, hue: colors.hue }
             return acc
@@ -278,8 +277,14 @@ const Room: NextPage = () => {
           const existingUser = users[userId]
 
           if (existingUser) {
-            // [TODO JOSHEN] Max x and y based on local client viewport
-            users[userId] = { ...existingUser, ...{ x: payload.payload.x, y: payload.payload.y } }
+            const x =
+              (payload?.payload?.x ?? 0) > window.innerWidth ? window.innerWidth : payload.payload.x
+            const y =
+              (payload?.payload?.y ?? 0) > window.innerHeight
+                ? window.innerHeight
+                : payload.payload.y
+
+            users[userId] = { ...existingUser, ...{ x, y } }
             users = cloneDeep(users)
           }
 
