@@ -17,7 +17,7 @@ const Chatbox: FC<Props> = ({ messages, chatboxRef, messagesInTransit, areMessag
         style={{ backgroundColor: 'rgba(0, 207, 144, 0.05)' }}
       >
         {!areMessagesFetched ? (
-          <div className="flex items-center justify-center space-x-2">
+          <div className="flex items-center space-x-2">
             <IconLoader className="animate-spin text-scale-1200" size={14} />
             <p className="text-sm text-scale-1100">Loading messages</p>
           </div>
@@ -42,7 +42,7 @@ const Chatbox: FC<Props> = ({ messages, chatboxRef, messagesInTransit, areMessag
             {message}
           </p>
         ))}
-        <div ref={chatboxRef} className="hidden" />
+        <div ref={chatboxRef} />
       </div>
     </div>
   )

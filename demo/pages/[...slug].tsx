@@ -178,7 +178,7 @@ const Room: NextPage = () => {
         setUsers((existingUsers) => {
           return users.reduce((acc: { [key: string]: User }, { user_id: userId }: any) => {
             const colors = randomColor()
-            acc[userId] = existingUsers[userId] || { color: colors.bg, hue: colors.hue }
+            acc[userId] = existingUsers[userId] || { x: 0, y: 0, color: colors.bg, hue: colors.hue }
             return acc
           }, {})
         })
