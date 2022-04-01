@@ -103,7 +103,7 @@ const WaitlistPopover: FC<Props> = ({}) => {
         <div className="flex items-center gap-2">
           <Link href="https://github.com/supabase/multiplayer" passHref>
             <Button as="a" type="default" icon={<IconGitHub />}>
-              View on GitHib
+              View on GitHub
             </Button>
           </Link>
           <Link href={`https://twitter.com/intent/tweet?text=${getGeneratedTweet()}`} passHref>
