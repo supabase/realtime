@@ -3,6 +3,7 @@ defmodule Extensions.Postgres.SubscribersNotification do
 
   alias Phoenix.Socket.Broadcast
 
+  # @topic "room"
   @topic "realtime"
 
   # def notify(%Transaction{changes: changes} = txn) when is_list(changes) do
@@ -31,16 +32,15 @@ defmodule Extensions.Postgres.SubscribersNotification do
     encoded_msg =
       %Broadcast{
         topic: topic,
-        event: payload.type,
-        payload: payload
+        event: "realtime",
+        payload: %{payload: payload, event: payload.type}
       }
       |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
 
     :syn.members(Extensions.Postgres.Subscribers, scope)
-    |> Enum.each(fn {pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
+    |> Enum.each(fn {_pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
       if MapSet.member?(subs_id, bin_id) do
         send(transport_pid, encoded_msg)
-        # send(pid, {:event, payload})
       end
     end)
   end
@@ -88,8 +88,7 @@ defmodule Extensions.Postgres.SubscribersNotification do
               Enum.each(record, fn {k, v} ->
                 with true <- is_notification_key_valid(v),
                      {:ok, stringified_v} <- stringify_value(v),
-                     true <- is_notification_key_length_valid(stringified_v),
-                     true <- has_column(event_config, schema, table, k) do
+                     true <- is_notification_key_length_valid(stringified_v) do
                   "#{table_topic}:#{k}=eq.#{stringified_v}"
                   |> broadcast_change(change, id)
                 end

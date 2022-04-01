@@ -59,6 +59,7 @@ defmodule Realtime.Application do
         RealtimeWeb.Telemetry,
         {Phoenix.PubSub, name: Realtime.PubSub},
         RealtimeWeb.Endpoint,
+        RealtimeWeb.Presence,
         Realtime.PromEx,
         {Cachex, name: :tenants}
       ] ++ extensions_supervisors

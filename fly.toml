@@ -1,6 +1,6 @@
 # fly.toml file generated for realtime-staging on 2022-01-26T19:29:10+02:00
 
-app = "realtime-staging"
+app = "multiplayer-staging"
 
 kill_signal = "SIGTERM"
 kill_timeout = 5
