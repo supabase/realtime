@@ -14,8 +14,8 @@ interface Props {
 
 const MAX_MESSAGE_LENGTH = 70
 const MAX_DURATION = 4000
-const MAX_BUBBLE_WIDTH_THRESHOLD = 280
-const MAX_BUBBLE_HEIGHT_THRESHOLD = 40
+const MAX_BUBBLE_WIDTH_THRESHOLD = 280 + 50
+const MAX_BUBBLE_HEIGHT_THRESHOLD = 40 + 50
 
 const Cursor: FC<Props> = ({
   x,
