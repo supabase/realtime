@@ -453,7 +453,7 @@ const Room: NextPage = () => {
         <div className="flex items-end justify-between">
           <div className="flex items-center space-x-4">
             <DarkModeToggle />
-            <Badge>Latency: {latency.toFixed(2)}ms</Badge>
+            <Badge>Latency: {latency.toFixed(1)}ms</Badge>
           </div>
           <div className="flex justify-end">
             <Chatbox
