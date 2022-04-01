@@ -1,7 +1,15 @@
 import { FC, useState, memo } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { Button, Form, Input, IconMinimize2, IconMaximize2, IconGitHub } from '@supabase/ui'
+import {
+  Button,
+  Form,
+  Input,
+  IconMinimize2,
+  IconMaximize2,
+  IconGitHub,
+  IconTwitter,
+} from '@supabase/ui'
 import { supabaseClient } from '../clients'
 
 interface Props {}
@@ -12,6 +20,10 @@ const WaitlistPopover: FC<Props> = ({}) => {
   const [error, setError] = useState<any>()
 
   const initialValues = { email: '' }
+
+  const getGeneratedTweet = () => {
+    return `Join me to experience Realtime by Supabase!%0A%0A${window.location.href}`
+  }
 
   const onValidate = (values: any) => {
     const errors = {} as any
@@ -92,6 +104,11 @@ const WaitlistPopover: FC<Props> = ({}) => {
           <Link href="https://github.com/supabase/multiplayer" passHref>
             <Button as="a" type="default" icon={<IconGitHub />}>
               View on GitHib
+            </Button>
+          </Link>
+          <Link href={`https://twitter.com/intent/tweet?text=${getGeneratedTweet()}`} passHref>
+            <Button as="a" type="alternative" icon={<IconTwitter />}>
+              Invite on Twitter
             </Button>
           </Link>
         </div>
