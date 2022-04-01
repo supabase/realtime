@@ -9,7 +9,6 @@ import { Badge } from '@supabase/ui'
 import { RealtimeChannel } from '@supabase/realtime-js'
 import { PostgrestResponse } from '@supabase/supabase-js'
 
-import logger from '../logger'
 import { removeFirst } from '../utils'
 import { supabaseClient, realtimeClient } from '../clients'
 import { Coordinates, DatabaseChange, Message, Payload, User } from '../types'
@@ -191,11 +190,11 @@ const Room: NextPage = () => {
           router.push(`/${newRoomId}`)
           setValidatedRoomId(newRoomId)
 
-          logger?.info(`User joined: ${userId}`, {
-            user_id: userId,
-            room_id: newRoomId,
-            timestamp: Date.now(),
-          })
+          // logger?.info(`User joined: ${userId}`, {
+          //   user_id: userId,
+          //   room_id: newRoomId,
+          //   timestamp: Date.now(),
+          // })
         })
         .catch(() => {})
     }
