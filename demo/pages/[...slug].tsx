@@ -38,6 +38,7 @@ const Room: NextPage = () => {
 
   const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
+  const [latency, setLatency] = useState<number>(0)
 
   const [localColor, _setLocalColor] = useState<any>(randomColor())
 
@@ -102,6 +103,7 @@ const Room: NextPage = () => {
     }
   }, [])
 
+  // Periodically check latency in ms
   useEffect(() => {
     if (!pingChannel) return
     const interval = setInterval(() => {
@@ -115,7 +117,7 @@ const Room: NextPage = () => {
         })
         .then(() => {
           const end = performance.now()
-          console.log('latency', end - start)
+          setLatency(end - start)
         })
         .catch((err) => console.log('broadcast error', err))
     }, 1000)
@@ -276,6 +278,7 @@ const Room: NextPage = () => {
           const existingUser = users[userId]
 
           if (existingUser) {
+            // [TODO JOSHEN] Max x and y based on local client viewport
             users[userId] = { ...existingUser, ...{ x: payload.payload.x, y: payload.payload.y } }
             users = cloneDeep(users)
           }
@@ -419,7 +422,10 @@ const Room: NextPage = () => {
           <Users users={users} />
         </div>
         <div className="flex items-end justify-between">
-          <DarkModeToggle />
+          <div className="flex items-center space-x-4">
+            <DarkModeToggle />
+            <p className="text-xs text-scale-1000">Latency: {latency.toFixed(2)}ms</p>
+          </div>
           <div className="flex justify-end">
             <Chatbox
               messages={messages || []}
