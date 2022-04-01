@@ -7,7 +7,7 @@ function MyApp({ Component, pageProps }: AppProps) {
   return (
     <>
       <Head>
-        <title>Multiplayer.dev</title>
+        <title>Realtime | Supabase</title>
         <link rel="icon" href="/favicon.ico" />
         <meta name="description" content="Presence and ephemeral state, by Supabase" />
 
@@ -18,7 +18,11 @@ function MyApp({ Component, pageProps }: AppProps) {
         />
         <meta property="og:site_name" key="ogsitename" content="multiplayer.dev" />
         <meta property="og:title" key="ogtitle" content="Realtime | Supabase" />
-        <meta property="og:description" key="ogdesc" content="Presence and ephemeral state" />
+        <meta
+          property="og:description"
+          key="ogdesc"
+          content="Realtime collaborative app to display broadcast, presence, and database listening over WebSockets"
+        />
       </Head>
       <ThemeProvider>
         <Component {...pageProps} />
