@@ -13,6 +13,7 @@
     "@supabase/supabase-js": "^1.32.0",
     "@supabase/ui": "0.37.0-alpha.50",
     "lodash.samplesize": "^4.2.0",
+    "lodash.throttle": "^4.1.1",
     "next": "12.1.0",
     "pino": "^7.9.2",
     "pino-logflare": "^0.3.12",

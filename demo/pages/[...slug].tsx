@@ -2,6 +2,7 @@ import type { NextPage } from 'next'
 import { useRouter } from 'next/router'
 import { nanoid } from 'nanoid'
 import cloneDeep from 'lodash.clonedeep'
+import throttle from 'lodash.throttle'
 import { getRandomColor, getRandomColors, getRandomUniqueColor } from './../lib/RandomColor'
 import { useEffect, useState, useRef, ReactElement } from 'react'
 import { Badge } from '@supabase/ui'
@@ -23,6 +24,7 @@ import { sendLog } from '../lib/sendLog'
 
 const MAX_ROOM_USERS = 5
 const MAX_DISPLAY_MESSAGES = 50
+const MAX_EVENTS_PER_SECOND = 10
 const userId = nanoid()
 
 const Room: NextPage = () => {
@@ -355,9 +357,8 @@ const Room: NextPage = () => {
       return
     }
 
-    const setMouseEvent = (e: MouseEvent) => {
-      const [x, y] = [e.clientX, e.clientY]
-
+    const sendMouseBroadcast = throttle(({ x, y }) => {
+      console.log('sending mouse event')
       messageChannel
         .send({
           type: 'broadcast',
@@ -365,6 +366,11 @@ const Room: NextPage = () => {
           payload: { user_id: userId, x, y },
         })
         .catch(() => {})
+    }, 1000 / MAX_EVENTS_PER_SECOND)
+
+    const setMouseEvent = (e: MouseEvent) => {
+      const [x, y] = [e.clientX, e.clientY]
+      sendMouseBroadcast({ x, y })
       setMousePosition({ x, y })
     }
 
