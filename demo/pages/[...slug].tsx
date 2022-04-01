@@ -351,6 +351,8 @@ const Room: NextPage = () => {
     }
 
     const onKeyDown = async (e: KeyboardEvent) => {
+      if (document.activeElement?.id === 'email') return
+
       // Start typing session
       if (e.code === 'Enter' || (e.key.length === 1 && !e.metaKey)) {
         if (!isTypingRef.current) {
