@@ -44,6 +44,7 @@ const Room: NextPage = () => {
   const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
   const [latency, setLatency] = useState<number>(0)
+  const [initialUsers, setInitialUsers] = useState<boolean>(false)
 
   const chatboxRef = useRef<any>()
   // [Joshen] Super hacky fix for a really weird bug for onKeyDown
@@ -101,7 +102,10 @@ const Room: NextPage = () => {
     userChannel.on('presence', { event: 'SYNC' }, () => {
       setIsInitialStateSynced(true)
     })
-    userChannel.subscribe().receive('ok', () => setUserChannel(userChannel))
+
+    userChannel.subscribe().receive('ok', () => {
+      setUserChannel(userChannel)
+    })
 
     // Separate channel for latency
     const pingChannel = realtimeClient.channel(`room:${userId}`, {
@@ -183,6 +187,7 @@ const Room: NextPage = () => {
         .then(() => {
           router.push(`/${newRoomId}`)
           setValidatedRoomId(newRoomId)
+
           logger?.info(`User joined: ${userId}`, {
             user_id: userId,
             room_id: newRoomId,
@@ -221,32 +226,49 @@ const Room: NextPage = () => {
     userChannel.off('presence', { event: 'SYNC' })
 
     userChannel.on('presence', { event: 'SYNC' }, () => {
-      const state = userChannel.presence.state
-      const _users = state[validatedRoomId]
-
-      // Deconflict duplicate colours at the beginning of the browser session
-      const colors =
-        Object.keys(usersRef.current).length === 0 ? getRandomColors(_users.length) : []
-
-      if (_users) {
-        setUsers((existingUsers) => {
-          const updatedUsers = _users.reduce(
-            (acc: { [key: string]: User }, { user_id: userId }: any, index: number) => {
-              const userColors = Object.values(usersRef.current).map((user: any) => user.color)
-              // Deconflict duplicate colors for incoming clients during the browser session
-              const color = colors.length > 0 ? colors[index] : getRandomUniqueColor(userColors)
-
-              acc[userId] = existingUsers[userId] || { x: 0, y: 0, color: color.bg, hue: color.hue }
-              return acc
-            },
-            {}
-          )
-          usersRef.current = updatedUsers
-          return updatedUsers
-        })
-      }
+      mapInitialUsers(userChannel, validatedRoomId)
     })
+
+    setTimeout(() => {
+      mapInitialUsers(userChannel, validatedRoomId)
+    }, 1000)
   }, [isInitialStateSynced, userChannel, validatedRoomId])
+
+  function mapInitialUsers(userChannel: RealtimeChannel, validatedRoomId: string) {
+    if (initialUsers) return
+
+    const state = userChannel.presence.state
+    const _users = state[validatedRoomId]
+
+    setIsInitialStateSynced(true)
+
+    // Deconflict duplicate colours at the beginning of the browser session
+    const colors = Object.keys(usersRef.current).length === 0 ? getRandomColors(_users.length) : []
+
+    if (_users) {
+      setUsers((existingUsers) => {
+        const updatedUsers = _users.reduce(
+          (acc: { [key: string]: User }, { user_id: userId }: any, index: number) => {
+            const userColors = Object.values(usersRef.current).map((user: any) => user.color)
+            // Deconflict duplicate colors for incoming clients during the browser session
+            const color = colors.length > 0 ? colors[index] : getRandomUniqueColor(userColors)
+
+            acc[userId] = existingUsers[userId] || {
+              x: 0,
+              y: 0,
+              color: color.bg,
+              hue: color.hue,
+            }
+            return acc
+          },
+          {}
+        )
+        usersRef.current = updatedUsers
+        return updatedUsers
+      })
+    }
+    setInitialUsers(true)
+  }
 
   // Listen to database changes for chat messages and handle broadcast messages
   useEffect(() => {
