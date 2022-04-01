@@ -2,7 +2,7 @@ import type { NextPage } from 'next'
 import { useRouter } from 'next/router'
 import { nanoid } from 'nanoid'
 import cloneDeep from 'lodash.clonedeep'
-import randomColor from './../lib/RandomColor'
+import { getRandomColor, getRandomColors, getRandomUniqueColor } from './../lib/RandomColor'
 import { useEffect, useState, useRef, ReactElement } from 'react'
 import { Badge } from '@supabase/ui'
 import { RealtimeChannel } from '@supabase/realtime-js'
@@ -28,7 +28,7 @@ const Room: NextPage = () => {
   const router = useRouter()
   const { slug } = router.query
   const currentRoomId = slug && slug[0]
-  const localColorBackup = randomColor()
+  const localColorBackup = getRandomColor()
 
   const [validatedRoomId, setValidatedRoomId] = useState<string>()
   const [userChannel, setUserChannel] = useState<RealtimeChannel>()
@@ -48,6 +48,7 @@ const Room: NextPage = () => {
   const chatInputFix = useRef<boolean>(true)
 
   // These states will be managed via ref as they're mutated within event listeners
+  const usersRef = useRef<{ [key: string]: User }>({})
   const isTypingRef = useRef<boolean>(false)
   const isCancelledRef = useRef<boolean>(false)
   const messageRef = useRef<string>()
@@ -216,13 +217,25 @@ const Room: NextPage = () => {
       const state = userChannel.presence.state
       const _users = state[validatedRoomId]
 
+      // Deconflict duplicate colours at the beginning of the browser session
+      const colors =
+        Object.keys(usersRef.current).length === 0 ? getRandomColors(_users.length) : []
+
       if (_users) {
         setUsers((existingUsers) => {
-          return _users.reduce((acc: { [key: string]: User }, { user_id: userId }: any) => {
-            const colors = randomColor()
-            acc[userId] = existingUsers[userId] || { x: 0, y: 0, color: colors.bg, hue: colors.hue }
-            return acc
-          }, {})
+          const updatedUsers = _users.reduce(
+            (acc: { [key: string]: User }, { user_id: userId }: any, index: number) => {
+              const userColors = Object.values(usersRef.current).map((user: any) => user.color)
+              // Deconflict duplicate colors for incoming clients during the browser session
+              const color = colors.length > 0 ? colors[index] : getRandomUniqueColor(userColors)
+
+              acc[userId] = existingUsers[userId] || { x: 0, y: 0, color: color.bg, hue: color.hue }
+              return acc
+            },
+            {}
+          )
+          usersRef.current = updatedUsers
+          return updatedUsers
         })
       }
     })
