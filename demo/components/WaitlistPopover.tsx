@@ -1,15 +1,7 @@
 import { FC, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import {
-  Button,
-  Form,
-  Input,
-  IconMinimize2,
-  IconMaximize2,
-  IconSun,
-  IconGitHub,
-} from '@supabase/ui'
+import { Button, Form, Input, IconMinimize2, IconMaximize2, IconGitHub } from '@supabase/ui'
 import { supabaseClient } from '../clients'
 
 interface Props {}
@@ -59,48 +51,31 @@ const WaitlistPopover: FC<Props> = ({}) => {
               !isExpanded ? 'opacity-100' : 'opacity-0'
             } space-x-2 flex items-center`}
           >
-            <p
-              className={'transition-all text-scale-900 text-sm ' + (isExpanded ? '-ml-2' : 'ml-0')}
-            >
+            <p className={`transition-all text-scale-900 text-sm ${isExpanded ? '-ml-2' : 'ml-0'}`}>
               /
             </p>
             <p
-              className={
-                'transition-all text-scale-1200 text-sm ' + (isExpanded ? '-ml-2' : 'ml-0')
-              }
+              className={`transition-all text-scale-1200 text-sm ${isExpanded ? '-ml-2' : 'ml-0'}`}
             >
               Multiplayer
             </p>
           </div>
         </div>
-        <div className="group">
-          {isExpanded ? (
-            <IconMinimize2
-              className="
-                transition-all 
-                text-scale-900 
-                group-hover:text-scale-1200 
-                cursor-pointer
-                group-hover:scale-105
-              "
-              strokeWidth={2}
-              size={16}
-              onClick={() => setIsExpanded(false)}
-            />
-          ) : (
-            <IconMaximize2
-              className="
-                transition-all 
-                text-scale-900 
-                group-hover:text-scale-1200 
-                cursor-pointer
-                group-hover:scale-105"
-              strokeWidth={2}
-              size={16}
-              onClick={() => setIsExpanded(true)}
-            />
-          )}
-        </div>
+        {isExpanded ? (
+          <IconMinimize2
+            className="transition-all text-scale-900 cursor-pointer hover:text-scale-1200 hover:scale-105"
+            strokeWidth={2}
+            size={16}
+            onClick={() => setIsExpanded(false)}
+          />
+        ) : (
+          <IconMaximize2
+            className="transition-all text-scale-900 cursor-pointer hover:text-scale-1200 hover:scale-105"
+            strokeWidth={2}
+            size={16}
+            onClick={() => setIsExpanded(true)}
+          />
+        )}
       </div>
 
       <div className="space-y-6">

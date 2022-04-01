@@ -356,26 +356,12 @@ const Room: NextPage = () => {
         'h-screen w-screen p-4 flex flex-col justify-between relative',
         'max-h-screen max-w-screen overflow-hidden',
       ].join(' ')}
-      // style={{
-      //   background:
-      //     'linear-gradient(-45deg, transparent, transparent, rgba(0, 89, 60, 0.5), rgba(0, 207, 144, 0.5), rgba(0, 89, 60, 0.5), transparent, transparent)',
-      //   backgroundSize: '400% 400%',
-      // }}
     >
-      {/* <div
-        className="absolute animate-gradient h-full w-full left-0 top-0 opacity-100 z-0"
-        style={{
-          background:
-            'linear-gradient(-45deg, transparent, transparent, rgba(0, 89, 60, 0.2), rgba(0, 207, 144, 0.2), rgba(0, 89, 60, 0.0), transparent, transparent)',
-          backgroundSize: '400% 400%',
-        }}
-      ></div> */}
       <div
         className="absolute h-full w-full left-0 top-0"
         style={{
-          backgroundSize: '16px 16px',
           opacity: 0.02,
-          // backgroundSize: '400% 400%',
+          backgroundSize: '16px 16px',
           backgroundImage:
             'linear-gradient(to right, gray 1px, transparent 1px),\n    linear-gradient(to bottom, gray 1px, transparent 1px)',
         }}

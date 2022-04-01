@@ -31,6 +31,7 @@ export interface Payload<T> {
 
 export interface User extends Coordinates {
   color: string
+  hue: string
   isTyping?: boolean
   message?: string
 }

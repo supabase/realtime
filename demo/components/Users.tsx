@@ -1,14 +1,14 @@
 import { FC } from 'react'
+import { User } from '../types'
 
 interface Props {
-  users: any
+  users: Record<string, User>
 }
 
 const Users: FC<Props> = ({ users }) => {
   return (
     <div className="relative">
       {Object.entries(users).map(([userId, userData], idx) => {
-        console.log(userData)
         return (
           <div className="relative">
             <div
@@ -18,13 +18,13 @@ const Users: FC<Props> = ({ users }) => {
                 'bg-no-repeat shadow-md flex items-center justify-center',
               ].join(' ')}
               style={{
-                border: `1px solid ${(userData as { color: string }).hue}`,
-                background: (userData as { color: string }).color,
+                border: `1px solid ${userData.hue}`,
+                background: userData.color,
                 transform: `translateX(${Math.abs(idx - (Object.keys(users).length - 1)) * -20}px)`,
               }}
             >
               <div
-                style={{ background: (userData as { color: string }).color }}
+                style={{ background: userData.color }}
                 className="left-0 top-0 absolute w-8 h-8 animate-ping rounded-full animation-"
               ></div>
             </div>

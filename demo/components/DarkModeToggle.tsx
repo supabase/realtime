@@ -15,9 +15,7 @@ function DarkModeToggle() {
 
   useEffect(() => {
     const key = localStorage.getItem('supabaseDarkMode')
-    console.log('key', key)
     if (key && key == 'false') {
-      // toggleTheme()
       document.documentElement.className = ''
     }
   }, [])
