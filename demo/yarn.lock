@@ -592,6 +592,13 @@
   dependencies:
     "@types/lodash" "*"
 
+"@types/lodash.throttle@^4.1.6":
+  "integrity" "sha512-/UIH96i/sIRYGC60NoY72jGkCJtFN5KVPhEMMMTjol65effe1gPn0tycJqV5tlSwMTzX8FqzB5yAj0rfGHTPNg=="
+  "resolved" "https://registry.npmjs.org/@types/lodash.throttle/-/lodash.throttle-4.1.6.tgz"
+  "version" "4.1.6"
+  dependencies:
+    "@types/lodash" "*"
+
 "@types/lodash@*", "@types/lodash@^4.14.153":
   "integrity" "sha512-XOKXa1KIxtNXgASAnwj7cnttJxS4fksBRywK/9LzRV5YxrF80BXZIGeQSuoESQ/VkUj30Ae0+YcuHc15wJCB2g=="
   "resolved" "https://registry.npmjs.org/@types/lodash/-/lodash-4.14.180.tgz"
