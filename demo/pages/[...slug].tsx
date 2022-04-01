@@ -79,7 +79,10 @@ const Room: NextPage = () => {
     realtimeClient.connect()
 
     // Set up user channel and subscribe
-    const userChannel = realtimeClient.channel('room:*', { isNewVersion: true }) as RealtimeChannel
+    const userChannel = realtimeClient.channel('room:*', {
+      isNewVersion: true,
+      self_broadcast: true,
+    }) as RealtimeChannel
     userChannel.on('presence', { event: 'SYNC' }, () => {
       setIsInitialStateSynced(true)
     })
@@ -131,17 +134,16 @@ const Room: NextPage = () => {
           key: newRoomId,
           payload: { user_id: userId },
         })
-        .then((status) => {
-          if (status === 'ok') {
-            router.push(`/${newRoomId}`)
-            setValidatedRoomId(newRoomId)
-            logger?.info(`User joined: ${userId}`, {
-              user_id: userId,
-              room_id: newRoomId,
-              timestamp: Date.now(),
-            })
-          }
+        .then(() => {
+          router.push(`/${newRoomId}`)
+          setValidatedRoomId(newRoomId)
+          logger?.info(`User joined: ${userId}`, {
+            user_id: userId,
+            room_id: newRoomId,
+            timestamp: Date.now(),
+          })
         })
+        .catch(() => {})
     }
   }, [currentRoomId, router, isInitialStateSynced, userChannel])
 
@@ -197,39 +199,45 @@ const Room: NextPage = () => {
 
     realtimeClient.connect()
 
-    const messageChannel = realtimeClient.channel(
-      `room:public:messages:room_id=eq.${validatedRoomId}`,
+    const messageChannel = realtimeClient.channel(`room:chat_messages:${validatedRoomId}`, {
+      isNewVersion: true,
+    }) as RealtimeChannel
+
+    messageChannel.on(
+      'realtime',
       {
-        isNewVersion: true,
-      }
-    ) as RealtimeChannel
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `room_id=eq.${validatedRoomId}`,
+      },
+      (payload: Payload<DatabaseChange>) => {
+        setMessages((prevMsgs: Message[]) => {
+          const messages = prevMsgs.slice(-MAX_DISPLAY_MESSAGES + 1)
+          const msg = (({ id, message, room_id, user_id }) => ({
+            id,
+            message,
+            room_id,
+            user_id,
+          }))(payload.payload.record)
+          messages.push(msg)
 
-    messageChannel.on('realtime', { event: 'INSERT' }, (payload: Payload<DatabaseChange>) => {
-      setMessages((prevMsgs: Message[]) => {
-        const messages = prevMsgs.slice(-MAX_DISPLAY_MESSAGES + 1)
-        const msg = (({ id, message, room_id, user_id }) => ({
-          id,
-          message,
-          room_id,
-          user_id,
-        }))(payload.payload.record)
-        messages.push(msg)
+          if (msg.user_id === userId) {
+            const updatedMessagesInTransit = removeFirst(
+              messagesInTransitRef?.current ?? [],
+              msg.message
+            )
+            setMessagesInTransit(updatedMessagesInTransit)
+          }
 
-        if (msg.user_id === userId) {
-          const updatedMessagesInTransit = removeFirst(
-            messagesInTransitRef?.current ?? [],
-            msg.message
-          )
-          setMessagesInTransit(updatedMessagesInTransit)
+          return messages
+        })
+
+        if (chatboxRef.current) {
+          chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
         }
-
-        return messages
-      })
-
-      if (chatboxRef.current) {
-        chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
       }
-    })
+    )
 
     messageChannel.on(
       'broadcast',
@@ -288,11 +296,13 @@ const Room: NextPage = () => {
     const setMouseEvent = (e: MouseEvent) => {
       const [x, y] = [e.clientX, e.clientY]
 
-      messageChannel.send({
-        type: 'broadcast',
-        event: 'POS',
-        payload: { user_id: userId, x, y },
-      })
+      messageChannel
+        .send({
+          type: 'broadcast',
+          event: 'POS',
+          payload: { user_id: userId, x, y },
+        })
+        .catch(() => {})
       setMousePosition({ x, y })
     }
 
@@ -301,18 +311,22 @@ const Room: NextPage = () => {
         if (!isTypingRef.current) {
           setIsTyping(true)
           setMessage('')
-          messageChannel.send({
-            type: 'broadcast',
-            event: 'MESSAGE',
-            payload: { user_id: userId, isTyping: true, message: '' },
-          })
+          messageChannel
+            .send({
+              type: 'broadcast',
+              event: 'MESSAGE',
+              payload: { user_id: userId, isTyping: true, message: '' },
+            })
+            .catch(() => {})
         } else {
           setIsTyping(false)
-          messageChannel.send({
-            type: 'broadcast',
-            event: 'MESSAGE',
-            payload: { user_id: userId, isTyping: false, message: messageRef.current },
-          })
+          messageChannel
+            .send({
+              type: 'broadcast',
+              event: 'MESSAGE',
+              payload: { user_id: userId, isTyping: false, message: messageRef.current },
+            })
+            .catch(() => {})
           if (messageRef.current) {
             const updatedMessagesInTransit = (messagesInTransitRef?.current ?? []).concat([
               messageRef.current,
@@ -332,11 +346,13 @@ const Room: NextPage = () => {
 
       if (e.code === 'Escape' && isTypingRef.current) {
         setIsTyping(false)
-        messageChannel.send({
-          type: 'broadcast',
-          event: 'MESSAGE',
-          payload: { user_id: userId, isTyping: false, message: '' },
-        })
+        messageChannel
+          .send({
+            type: 'broadcast',
+            event: 'MESSAGE',
+            payload: { user_id: userId, isTyping: false, message: '' },
+          })
+          .catch(() => {})
       }
     }
 
