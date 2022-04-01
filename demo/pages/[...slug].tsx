@@ -19,6 +19,7 @@ import Loader from '../components/Loader'
 import Users from '../components/Users'
 import WaitlistPopover from '../components/WaitlistPopover'
 import DarkModeToggle from '../components/DarkModeToggle'
+import { sendLog } from '../lib/sendLog'
 
 const MAX_ROOM_USERS = 5
 const MAX_DISPLAY_MESSAGES = 50
@@ -128,6 +129,10 @@ const Room: NextPage = () => {
         })
         .then(() => {
           const end = performance.now()
+          const latency = end - start
+          if (latency > 400) {
+            sendLog(`Latency is too high ${latency} ms for user ${userId}`)
+          }
           setLatency(end - start)
         })
         .catch((err) => console.log('broadcast error', err))
