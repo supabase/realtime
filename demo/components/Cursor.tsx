@@ -6,12 +6,13 @@ interface Props {
   color: string
   hue: string
   message: string
-  isTyping?: boolean
+  isTyping: boolean
+  isCancelled?: boolean
   isLocalClient?: boolean
   onUpdateMessage?: (message: string) => void
 }
 
-const MAX_MESSAGE_LENGTH = 50
+const MAX_MESSAGE_LENGTH = 70
 const MAX_DURATION = 4000
 const MAX_BUBBLE_WIDTH_THRESHOLD = 280
 const MAX_BUBBLE_HEIGHT_THRESHOLD = 40
@@ -23,6 +24,7 @@ const Cursor: FC<Props> = ({
   hue,
   message,
   isTyping,
+  isCancelled,
   isLocalClient,
   onUpdateMessage = () => {},
 }) => {
@@ -47,7 +49,7 @@ const Cursor: FC<Props> = ({
         setHideInput(false)
       }
     } else {
-      if (!message) {
+      if (!message || isCancelled) {
         setShowMessageBubble(false)
       } else {
         if (timeoutRef.current) clearTimeout(timeoutRef.current)
@@ -58,7 +60,7 @@ const Cursor: FC<Props> = ({
         timeoutRef.current = timeoutId
       }
     }
-  }, [isLocalClient, isTyping, message, inputRef])
+  }, [isLocalClient, isTyping, isCancelled, message, inputRef])
 
   useEffect(() => {
     // [Joshen] Experimental: dynamic flipping to ensure that chat
@@ -67,10 +69,6 @@ const Cursor: FC<Props> = ({
     setFlipX((x || 0) + MAX_BUBBLE_WIDTH_THRESHOLD >= window.innerWidth)
     setFlipY((y || 0) + MAX_BUBBLE_HEIGHT_THRESHOLD >= window.innerHeight)
   }, [x, y, isTyping, chatBubbleRef])
-
-  const showLocalMessage = _isLocalClient && hideInput && message.length
-
-  const showRemoteMessage = !_isLocalClient && message.length
 
   return (
     <>

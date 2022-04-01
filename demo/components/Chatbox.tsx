@@ -22,12 +22,8 @@ const Chatbox: FC<Props> = ({ messages, chatboxRef, messagesInTransit, areMessag
             <p className="text-sm text-scale-1100">Loading messages</p>
           </div>
         ) : messages.length === 0 && messagesInTransit.length === 0 ? (
-          <div className="flex space-x-2 text-scale-1200 text-sm opacity-75">
-            <span>Hit</span>
-            <code className="bg-scale-1100 text-scale-100 px-1 h-4 rounded flex items-center justify-center">
-              ↩
-            </code>
-            <span>to start chatting 🥳</span>
+          <div className="text-scale-1200 text-sm opacity-75">
+            <span>Type anything to start chatting 🥳</span>
           </div>
         ) : (
           <div />

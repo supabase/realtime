@@ -10,7 +10,7 @@ const Users: FC<Props> = ({ users }) => {
     <div className="relative">
       {Object.entries(users).map(([userId, userData], idx) => {
         return (
-          <div className="relative">
+          <div key={userId} className="relative">
             <div
               key={userId}
               className={[

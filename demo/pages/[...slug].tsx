@@ -27,6 +27,7 @@ const Room: NextPage = () => {
   const router = useRouter()
   const { slug } = router.query
   const currentRoomId = slug && slug[0]
+  const localColorBackup = randomColor()
 
   const [validatedRoomId, setValidatedRoomId] = useState<string>()
   const [userChannel, setUserChannel] = useState<RealtimeChannel>()
@@ -40,18 +41,21 @@ const Room: NextPage = () => {
   const [messages, setMessages] = useState<Message[]>([])
   const [latency, setLatency] = useState<number>(0)
 
-  const [localColor, _setLocalColor] = useState<any>(randomColor())
-
   const chatboxRef = useRef<any>()
+  // [Joshen] Super hacky fix for a really weird bug for onKeyDown
+  // input field. For some reason the first keydown event appends the character twice
+  const chatInputFix = useRef<boolean>(true)
 
   // These states will be managed via ref as they're mutated within event listeners
   const isTypingRef = useRef<boolean>(false)
+  const isCancelledRef = useRef<boolean>(false)
   const messageRef = useRef<string>()
   const messagesInTransitRef = useRef<string[]>()
   const mousePositionRef = useRef<Coordinates>()
 
   // We manage the refs with a state so that the UI can re-render
   const [isTyping, _setIsTyping] = useState<boolean>(false)
+  const [isCancelled, _setIsCancelled] = useState<boolean>(false)
   const [message, _setMessage] = useState<string>('')
   const [messagesInTransit, _setMessagesInTransit] = useState<string[]>([])
   const [mousePosition, _setMousePosition] = useState<Coordinates>()
@@ -59,6 +63,11 @@ const Room: NextPage = () => {
   const setIsTyping = (value: boolean) => {
     isTypingRef.current = value
     _setIsTyping(value)
+  }
+
+  const setIsCancelled = (value: boolean) => {
+    isCancelledRef.current = value
+    _setIsCancelled(value)
   }
 
   const setMessage = (value: string) => {
@@ -89,7 +98,7 @@ const Room: NextPage = () => {
     })
     userChannel.subscribe().receive('ok', () => setUserChannel(userChannel))
 
-    // separate channel for latency
+    // Separate channel for latency
     const pingChannel = realtimeClient.channel(`room:${userId}`, {
       isNewVersion: true,
       // self_broadcast: true,
@@ -341,10 +350,19 @@ const Room: NextPage = () => {
     }
 
     const onKeyDown = async (e: KeyboardEvent) => {
-      if (e.code === 'Enter') {
+      // Start typing session
+      if (e.code === 'Enter' || (e.key.length === 1 && !e.metaKey)) {
         if (!isTypingRef.current) {
+          console.log('Enter typing')
           setIsTyping(true)
-          setMessage('')
+          setIsCancelled(false)
+
+          if (chatInputFix.current) {
+            setMessage('')
+            chatInputFix.current = false
+          } else {
+            setMessage(e.key.length === 1 ? e.key : '')
+          }
           messageChannel
             .send({
               type: 'broadcast',
@@ -352,7 +370,8 @@ const Room: NextPage = () => {
               payload: { user_id: userId, isTyping: true, message: '' },
             })
             .catch(() => {})
-        } else {
+        } else if (e.code === 'Enter') {
+          // End typing session and send message
           setIsTyping(false)
           messageChannel
             .send({
@@ -378,8 +397,12 @@ const Room: NextPage = () => {
         }
       }
 
+      // End typing session without sending
       if (e.code === 'Escape' && isTypingRef.current) {
         setIsTyping(false)
+        setIsCancelled(true)
+        chatInputFix.current = true
+
         messageChannel
           .send({
             type: 'broadcast',
@@ -466,7 +489,7 @@ const Room: NextPage = () => {
               color={color}
               hue={hue}
               message={message || ''}
-              isTyping={isTyping}
+              isTyping={isTyping || false}
             />
           )
         }
@@ -479,9 +502,10 @@ const Room: NextPage = () => {
           isLocalClient
           x={mousePosition?.x}
           y={mousePosition?.y}
-          color={localColor.bg}
-          hue={localColor.hue}
+          color={users[userId]?.color ?? localColorBackup.bg}
+          hue={users[userId]?.hue ?? localColorBackup.hue}
           isTyping={isTyping}
+          isCancelled={isCancelled}
           message={message}
           onUpdateMessage={setMessage}
         />
