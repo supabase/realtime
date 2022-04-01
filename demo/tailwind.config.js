@@ -113,6 +113,7 @@ module.exports = ui({
       },
       animation: {
         gradient: 'gradient 60s ease infinite',
+        'ping-once': 'ping-once 1s cubic-bezier(0, 0, 0.2, 1);',
       },
       keyframes: {
         gradient: {
@@ -124,6 +125,16 @@ module.exports = ui({
           },
           '100%': {
             'background-position': '0% 50%',
+          },
+        },
+        'ping-once': {
+          '75%': {
+            transform: 'scale(2)',
+            opacity: 0,
+          },
+          '100%': {
+            transform: 'scale(2)',
+            opacity: 0,
           },
         },
       },

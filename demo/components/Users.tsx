@@ -25,8 +25,8 @@ const Users: FC<Props> = ({ users }) => {
             >
               <div
                 style={{ background: userData.color }}
-                className="w-7 h-7 animate-ping rounded-full"
-              ></div>
+                className="w-7 h-7 animate-ping-once rounded-full"
+              />
             </div>
           </div>
         )

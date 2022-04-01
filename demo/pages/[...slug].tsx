@@ -356,7 +356,6 @@ const Room: NextPage = () => {
       // Start typing session
       if (e.code === 'Enter' || (e.key.length === 1 && !e.metaKey)) {
         if (!isTypingRef.current) {
-          console.log('Enter typing')
           setIsTyping(true)
           setIsCancelled(false)
 
