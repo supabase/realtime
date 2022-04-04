@@ -35,16 +35,16 @@ defmodule Realtime.Application do
 
     replication_mode = Application.fetch_env!(:realtime, :replication_mode)
 
-    # When UNSAFE_ALL_DEBUG_LOGS is set, we show log-level of debug.
+    # When UNSAFE_SHOW_DEBUG_LOGS is set, we show log-level of debug.
     # This is marked unsafe, because it should not be used in production,
     # and is not generally guaranteed that DEBUG-level logs will be performant.
     unsafe_all_debug_logs =
       System.get_env(
-        "UNSAFE_ALL_DEBUG_LOGS",
+        "UNSAFE_SHOW_DEBUG_LOGS",
         nil
       )
     if unsafe_all_debug_logs do
-      Logger.info("UNSAFE_ALL_DEBUG_LOGS was set. Debug-level logs will be shown.")
+      Logger.info("UNSAFE_SHOW_DEBUG_LOGS was set. Debug-level logs will be shown.")
       Logger.configure(level: :debug)
     end
 
