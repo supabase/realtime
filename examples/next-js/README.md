@@ -6,7 +6,7 @@ A simple Next.js example which listens to database changes.
 
 1. Install dependencies with `npm install`
 2. Spin up database and Realtime server with `docker-compose -f docker-compose.dev.yml up` or `docker-compose -f docker-compose.rls.dev.yml up` in Realtime's root directory
-3. Add *.env* file in Next.js example directory with the following DB config env vars:
+3. Add `.env.local` file in Next.js example directory with the following DB config env vars:
     * DB_HOST=localhost
     * DB_PORT=5432
     * DB_NAME=postgres
