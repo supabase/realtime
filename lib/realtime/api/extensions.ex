@@ -31,12 +31,28 @@ defmodule Realtime.Api.Extensions do
     |> cast(attrs1, [:type, :tenant_external_id, :settings])
     |> validate_required([:type, :settings])
     |> validate_required_settings(required_settings)
+    |> encrypt_settings(required_settings)
+  end
+
+  def encrypt_settings(changeset, required) do
+    update_change(changeset, :settings, fn settings ->
+      secure_key = Application.get_env(:realtime, :db_enc_key)
+
+      Enum.reduce(required, settings, fn
+        {field, _, true}, acc ->
+          encrypted = Realtime.Helpers.encrypt(secure_key, settings[field])
+          %{acc | field => encrypted}
+
+        _, acc ->
+          acc
+      end)
+    end)
   end
 
   def validate_required_settings(changeset, required) do
     validate_change(changeset, :settings, fn
       _, value ->
-        Enum.reduce(required, [], fn {field, checker}, acc ->
+        Enum.reduce(required, [], fn {field, checker, _}, acc ->
           case value[field] do
             nil ->
               [{:settings, "#{field} can't be blank"} | acc]

@@ -11,12 +11,12 @@ defmodule Extensions.Postgres.DbSettings do
 
   def required() do
     [
-      {"region", &is_binary/1},
-      {"db_host", &is_binary/1},
-      {"db_name", &is_binary/1},
-      {"db_user", &is_binary/1},
-      {"db_port", &is_binary/1},
-      {"db_password", &is_binary/1}
+      {"region", &is_binary/1, false},
+      {"db_host", &is_binary/1, true},
+      {"db_name", &is_binary/1, true},
+      {"db_user", &is_binary/1, true},
+      {"db_port", &is_binary/1, true},
+      {"db_password", &is_binary/1, true}
     ]
   end
 end
