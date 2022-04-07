@@ -21,6 +21,7 @@ import WaitlistPopover from '../components/WaitlistPopover'
 import DarkModeToggle from '../components/DarkModeToggle'
 import { sendLog } from '../lib/sendLog'
 
+const LATENCY_THRESHOLD = 400
 const MAX_ROOM_USERS = 5
 const MAX_DISPLAY_MESSAGES = 50
 const MAX_EVENTS_PER_SECOND = 10
@@ -61,6 +62,8 @@ const Room: NextPage = () => {
   const messagesInTransitRef = useRef<string[]>()
   const mousePositionRef = useRef<Coordinates>()
 
+  const joinTimestampRef = useRef<number>()
+
   // We manage the refs with a state so that the UI can re-render
   const [isTyping, _setIsTyping] = useState<boolean>(false)
   const [isCancelled, _setIsCancelled] = useState<boolean>(false)
@@ -95,6 +98,7 @@ const Room: NextPage = () => {
 
   // Connect to socket and subscribe to user channel
   useEffect(() => {
+    joinTimestampRef.current = performance.now()
     realtimeClient.connect()
 
     // Set up user channel and subscribe
@@ -137,17 +141,21 @@ const Room: NextPage = () => {
         })
         .then(() => {
           const end = performance.now()
-          const latency = end - start
-          if (latency > 400) {
-            sendLog(`Latency is too high ${latency} ms for user ${userId}`)
+          const newLatency: number = end - start
+          if (latency > 0 && latency < LATENCY_THRESHOLD && newLatency >= LATENCY_THRESHOLD) {
+            sendLog(
+              `Latency for User ${userId} surpasses ${LATENCY_THRESHOLD} ms at ${newLatency.toFixed(
+                1
+              )} ms`
+            )
           }
-          setLatency(end - start)
+          setLatency(newLatency)
         })
         .catch((err) => console.log('broadcast error', err))
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [pingChannel])
+  }, [latency, pingChannel])
 
   // Determine if current room is valid or generate a new room id
   useEffect(() => {
@@ -189,12 +197,6 @@ const Room: NextPage = () => {
         .then(() => {
           router.push(`/${newRoomId}`)
           setValidatedRoomId(newRoomId)
-
-          // logger?.info(`User joined: ${userId}`, {
-          //   user_id: userId,
-          //   room_id: newRoomId,
-          //   timestamp: Date.now(),
-          // })
         })
         .catch(() => {})
     }
@@ -205,6 +207,14 @@ const Room: NextPage = () => {
     if (!validatedRoomId) {
       return
     }
+
+    const end = performance.now()
+    joinTimestampRef.current &&
+      sendLog(
+        `User ${userId} joined Room ${validatedRoomId} in ${(
+          end - joinTimestampRef.current
+        ).toFixed(1)} ms`
+      )
 
     supabaseClient
       .from('messages')

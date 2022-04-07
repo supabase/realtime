@@ -103,8 +103,8 @@ const WaitlistPopover: FC<Props> = ({}) => {
             <h1 className="text-scale-1200 text-2xl">Realtime</h1>
           </div>
           <p className="text-sm text-scale-900">
-            Realtime collaborative app to display broadcast, presence, and database
-            listening over WebSockets
+            Realtime collaborative app to display broadcast, presence, and database listening over
+            WebSockets
           </p>
         </div>
         <div>

@@ -2,27 +2,8 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import pino from 'pino'
 import { createPinoBrowserSend, createWriteStream } from 'pino-logflare'
 
-const LOGFLARE_API_KEY = process.env.LOGFLARE_API_KEY
-const LOGFLARE_SOURCE_ID = process.env.LOGFLARE_SOURCE_ID
-
-const send = createPinoBrowserSend({
-  apiKey: LOGFLARE_API_KEY!,
-  sourceToken: LOGFLARE_SOURCE_ID!,
-})
-
-const stream = createWriteStream({
-  apiKey: LOGFLARE_API_KEY!,
-  sourceToken: LOGFLARE_SOURCE_ID!,
-})
-
-const logger = pino(
-  {
-    browser: {
-      transmit: { send },
-    },
-  },
-  stream
-)
+const LOGFLARE_API_KEY = process.env.LOGFLARE_API_KEY || ''
+const LOGFLARE_SOURCE_ID = process.env.LOGFLARE_SOURCE_ID || ''
 
 const recordLogs = async (req: NextApiRequest, res: NextApiResponse) => {
   if (!LOGFLARE_API_KEY || !LOGFLARE_SOURCE_ID) {
@@ -31,9 +12,22 @@ const recordLogs = async (req: NextApiRequest, res: NextApiResponse) => {
   if (req.method !== 'POST') {
     return res.status(400).json('Only POST methods are supported')
   }
-  const { message } = await req.body
-  logger.info(message)
-  res.json('ok')
+
+  const body = await req.body
+
+  try {
+    await fetch(`https://api.logflare.app/api/logs?source=${LOGFLARE_SOURCE_ID}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-KEY': `${LOGFLARE_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+    })
+    res.json('ok')
+  } catch (e) {
+    console.error(JSON.stringify(e))
+  }
 }
 
 export default recordLogs

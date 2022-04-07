@@ -33,3 +33,5 @@ node_modules
 config/prod.secret.exs
 
 .idea
+
+demo/.env
