@@ -108,7 +108,7 @@ const WaitlistPopover: FC<Props> = ({}) => {
           </p>
         </div>
         <div>
-          <a href="https://www.producthunt.com/posts/realtime-multiplayer-by-supabase?utm_source=badge-featured&utm_medium=badge&utm_souce=badge-realtime&#0045;multiplayer&#0045;by&#0045;supabase" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=339695&theme=dark" alt="Realtime&#0032;Multiplayer&#0032;by&#0032;Supabase - Easily&#0032;build&#0032;real&#0045;time&#0032;apps&#0032;that&#0032;enables&#0032;user&#0032;collaboration | Product Hunt" style={{width: '250px', height: '54px'}} width="250" height="54" /></a>
+          <a href="https://www.producthunt.com/posts/realtime-multiplayer-by-supabase?utm_source=badge-featured&utm_medium=badge&utm_souce=badge-realtime&#0045;multiplayer&#0045;by&#0045;supabase" rel="noreferrer" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=339695&theme=dark" alt="Realtime&#0032;Multiplayer&#0032;by&#0032;Supabase - Easily&#0032;build&#0032;real&#0045;time&#0032;apps&#0032;that&#0032;enables&#0032;user&#0032;collaboration | Product Hunt" style={{width: '250px', height: '54px'}} width="250" height="54" /></a>
         </div>
         <div className="flex items-center gap-2">
           <Link href="https://github.com/supabase/realtime" passHref>
