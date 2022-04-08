@@ -6,6 +6,7 @@ defmodule Realtime.Api do
 
   import Ecto.Query, warn: false
   alias Realtime.Repo
+  alias Realtime.Helpers
 
   alias Realtime.Api.Tenant
 
@@ -141,5 +142,32 @@ defmodule Realtime.Api do
 
     Repo.one(query)
     |> Repo.preload(:extensions)
+    |> decrypt_extensions_data()
+  end
+
+  def decrypt_extensions_data(%Realtime.Api.Tenant{} = tenant) do
+    secure_key = Application.get_env(:realtime, :db_enc_key)
+
+    decrypted_extensions =
+      for extension <- tenant.extensions do
+        settings = extension.settings
+        %{required: required} = Realtime.Extensions.db_settings(extension.type)
+
+        decrypted_settings =
+          Enum.reduce(required, settings, fn
+            {key, _, true}, acc ->
+              case settings[key] do
+                nil -> acc
+                value -> %{acc | key => Helpers.decrypt(secure_key, value)}
+              end
+
+            _, acc ->
+              acc
+          end)
+
+        %{extension | settings: decrypted_settings}
+      end
+
+    %{tenant | extensions: decrypted_extensions}
   end
 end
