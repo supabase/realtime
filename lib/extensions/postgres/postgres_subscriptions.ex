@@ -88,7 +88,7 @@ defmodule Extensions.Postgres.Subscriptions do
         String.split(filters, ~r/(\=|\.)/)
         |> case do
           [_, "eq", _] = filters ->
-            %{subs_params | filters: [List.to_tuple(filters)], entities: oids[{schema, table}]}
+            %{subs_params | filters: [List.to_tuple(filters)], entities: Map.get(oids, {schema, table}, [])}
 
           _ ->
             %{subs_params | filters: filters}
@@ -100,7 +100,7 @@ defmodule Extensions.Postgres.Subscriptions do
           entities -> %{subs_params | entities: entities}
         end
 
-        %{subs_params | entities: oids[{schema, table}]}
+        %{subs_params | entities: Map.get(oids, {schema, table}, [])}
 
       [schema] ->
         case oids[{schema}] do

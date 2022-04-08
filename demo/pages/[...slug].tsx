@@ -63,6 +63,7 @@ const Room: NextPage = () => {
   const mousePositionRef = useRef<Coordinates>()
 
   const joinTimestampRef = useRef<number>()
+  const insertMsgTimestampRef = useRef<number>()
 
   // We manage the refs with a state so that the UI can re-render
   const [isTyping, _setIsTyping] = useState<boolean>(false)
@@ -70,6 +71,8 @@ const Room: NextPage = () => {
   const [message, _setMessage] = useState<string>('')
   const [messagesInTransit, _setMessagesInTransit] = useState<string[]>([])
   const [mousePosition, _setMousePosition] = useState<Coordinates>()
+
+  const [region, setRegion] = useState<string>('')
 
   const setIsTyping = (value: boolean) => {
     isTypingRef.current = value
@@ -108,6 +111,9 @@ const Room: NextPage = () => {
     userChannel.on('presence', { event: 'SYNC' }, () => {
       setIsInitialStateSynced(true)
     })
+    userChannel.on('region', { event: '*' }, (region: string) => {
+      setRegion(region)
+    })
 
     userChannel.subscribe().receive('ok', () => {
       setUserChannel(userChannel)
@@ -144,9 +150,9 @@ const Room: NextPage = () => {
           const newLatency: number = end - start
           if (latency > 0 && latency < LATENCY_THRESHOLD && newLatency >= LATENCY_THRESHOLD) {
             sendLog(
-              `Latency for User ${userId} surpasses ${LATENCY_THRESHOLD} ms at ${newLatency.toFixed(
+              `Roundtrip Latency for User ${userId} surpassed ${LATENCY_THRESHOLD} ms at ${newLatency.toFixed(
                 1
-              )} ms`
+              )} ms (Region: ${region})`
             )
           }
           setLatency(newLatency)
@@ -213,7 +219,7 @@ const Room: NextPage = () => {
       sendLog(
         `User ${userId} joined Room ${validatedRoomId} in ${(
           end - joinTimestampRef.current
-        ).toFixed(1)} ms`
+        ).toFixed(1)} ms (Region: ${region})`
       )
 
     supabaseClient
@@ -303,6 +309,15 @@ const Room: NextPage = () => {
         filter: `room_id=eq.${validatedRoomId}`,
       },
       (payload: Payload<DatabaseChange>) => {
+        if (payload.payload.record.user_id === userId && insertMsgTimestampRef.current) {
+          sendLog(
+            `Message Latency for User ${userId} from insert to receive was ${(
+              performance.now() - insertMsgTimestampRef.current
+            ).toFixed(1)} ms (Region: ${region})`
+          )
+          insertMsgTimestampRef.current = undefined
+        }
+
         setMessages((prevMsgs: Message[]) => {
           const messages = prevMsgs.slice(-MAX_DISPLAY_MESSAGES + 1)
           const msg = (({ id, message, room_id, user_id }) => ({
@@ -447,6 +462,7 @@ const Room: NextPage = () => {
             ])
             setMessagesInTransit(updatedMessagesInTransit)
             if (chatboxRef.current) chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
+            insertMsgTimestampRef.current = performance.now()
             await supabaseClient.from('messages').insert([
               {
                 user_id: userId,
