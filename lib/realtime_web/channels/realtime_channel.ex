@@ -8,7 +8,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def join(
         "realtime:" <> sub_topic = topic,
-        _,
+        params,
         %{assigns: %{tenant: tenant, claims: claims, limits: limits}, transport_pid: pid} = socket
       ) do
     if Realtime.UsersCounter.tenant_users(tenant) < limits.max_concurrent_users do
@@ -20,7 +20,14 @@ defmodule RealtimeWeb.RealtimeChannel do
       :ok = tenant_topic(socket, tenant_topic)
 
       id = UUID.uuid1()
-      Extensions.Postgres.subscribe(tenant, id, sub_topic, claims, pid)
+
+      postgres_topic = topic_from_config(params)
+      Logger.info("Postgres_topic is " <> postgres_topic)
+
+      if postgres_topic != "" do
+        Extensions.Postgres.subscribe(tenant, id, postgres_topic, claims, pid)
+      end
+
       Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
 
       send(self(), :after_join)
@@ -110,5 +117,21 @@ defmodule RealtimeWeb.RealtimeChannel do
       "sessions",
       {pid, System.system_time(:second)}
     )
+  end
+
+  defp topic_from_config(params) do
+    case params["configs"]["realtime"]["eventFilter"] do
+      %{"schema" => schema, "table" => table, "filter" => filter} ->
+        "#{schema}:#{table}:#{filter}"
+
+      %{"schema" => schema, "table" => table} ->
+        "#{schema}:#{table}"
+
+      %{"schema" => schema} ->
+        "#{schema}"
+
+      _ ->
+        ""
+    end
   end
 end

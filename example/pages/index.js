@@ -21,7 +21,26 @@ export default function Index() {
     localStorage.setItem("token", token)
     let socket = new RealtimeClient(host, { params: { apikey: token } })
     socket.connect()
-    let channel = socket.channel('realtime:*', { user_token: token })
+    const realtime_config = {
+      "configs": {
+        "broadcast": {
+          "eventFilter": {
+            "event": "MESSAGE"
+          },
+          "type": "broadcast"
+        },
+        "realtime": {
+          "eventFilter": {
+            "event": "INSERT",
+            "schema": "public",
+            "table": "messages"
+          },
+          "type": "realtime"
+        }
+      },
+      "user_token": token
+    }
+    let channel = socket.channel('realtime:*', realtime_config)
     channel.on('*', msg => {
       console.log('Got a message', msg)
       dataSource.unshift({
