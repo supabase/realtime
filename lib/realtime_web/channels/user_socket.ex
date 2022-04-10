@@ -19,7 +19,10 @@ defmodule RealtimeWeb.UserSocket do
         assigns = %{
           tenant: external_id,
           claims: claims,
-          limits: %{max_concurrent_users: tenant.max_concurrent_users},
+          limits: %{
+            max_concurrent_users: tenant.max_concurrent_users,
+            max_events_per_second: tenant.max_events_per_second
+          },
           params: %{
             ref: make_ref()
           }

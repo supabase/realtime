@@ -8,7 +8,8 @@ defmodule Realtime.Api.Tenant do
     field(:name, :string)
     field(:external_id, :string)
     field(:jwt_secret, :string)
-    field(:max_concurrent_users, :integer, default: 10_000)
+    field(:max_concurrent_users, :integer)
+    field(:max_events_per_second, :integer)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
