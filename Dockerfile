@@ -68,7 +68,7 @@ COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/realtime ./
 ENV HOME=/app
 ENV MIX_ENV=prod
 
-# COPY limits.sh ./limits.sh
+COPY limits.sh ./limits.sh
 # RUN chmod +x /app/limits.sh
-# ENTRYPOINT ["/app/limits.sh"]
+ENTRYPOINT ["/app/limits.sh"]
 CMD ["bin/realtime", "start"]
