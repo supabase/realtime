@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.7",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix, :gettext] ++ Mix.compilers(),
@@ -53,7 +53,6 @@ defmodule Realtime.MixProject do
       {:phoenix_swagger, "~> 0.8"},
       {:ex_json_schema, "~> 0.5"},
       {:recon, "~> 2.5"},
-      {:broadway, "~> 1.0"},
       {:yaml_elixir, "~> 2.8.0"},
       {:logflare_logger_backend, "~> 0.11.0"},
       {:httpoison, "~> 1.8"},
