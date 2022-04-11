@@ -3,7 +3,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   require Logger
 
   alias RealtimeWeb.{Endpoint, Presence}
-  alias Phoenix.Socket.Broadcast
 
   @impl true
   def join(
@@ -17,7 +16,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       channel_stats(pid, tenant, topic)
 
       tenant_topic = tenant <> ":" <> sub_topic
-      :ok = tenant_topic(socket, tenant_topic)
+      RealtimeWeb.Endpoint.subscribe(tenant_topic)
 
       id = UUID.uuid1()
 
@@ -44,7 +43,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_info(%Broadcast{event: type, payload: payload}, socket) do
+  def handle_info(%{event: type, payload: payload}, socket) do
     push(socket, type, payload)
     {:noreply, socket}
   end
@@ -96,13 +95,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     Logger.debug(%{terminate: reason})
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
     :ok
-  end
-
-  defp tenant_topic(_socket, topic) do
-    # Allow sending directly to the transport
-    # fastlane = {:fastlane, socket.transport_pid, socket.serializer, ["presence_diff"]}
-    # RealtimeWeb.Endpoint.subscribe(topic, metadata: fastlane)
-    RealtimeWeb.Endpoint.subscribe(topic)
   end
 
   def channel_stats(pid, tenant, topic) do

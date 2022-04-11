@@ -4,7 +4,6 @@ defmodule RealtimeWeb.UserSocket do
   alias RealtimeWeb.ChannelsAuthorization
 
   ## Channels
-  channel "room:*", RealtimeWeb.RoomChannel
   channel "realtime:*", RealtimeWeb.RealtimeChannel
 
   @impl true
@@ -13,7 +12,8 @@ defmodule RealtimeWeb.UserSocket do
       %{uri: %{host: host}, x_headers: headers} = connect_info
       [external_id | _] = String.split(host, ".", parts: 2)
 
-      with tenant when tenant != nil <- Realtime.Api.get_tenant_by_external_id(external_id),
+      with tenant when tenant != nil <-
+             Realtime.Api.get_tenant_by_external_id(:cached, external_id),
            token when token != nil <- access_token(params, headers),
            {:ok, claims} <- authorize_conn(token, tenant.jwt_secret) do
         assigns = %{

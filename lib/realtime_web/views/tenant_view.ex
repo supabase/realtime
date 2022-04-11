@@ -18,6 +18,7 @@ defmodule RealtimeWeb.TenantView do
     %{
       id: tenant.id,
       name: tenant.name,
+      max_concurrent_users: tenant.max_concurrent_users,
       external_id: tenant.external_id,
       extensions: tenant.extensions,
       inserted_at: tenant.inserted_at

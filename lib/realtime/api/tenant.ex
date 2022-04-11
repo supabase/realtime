@@ -32,8 +32,7 @@ defmodule Realtime.Api.Tenant do
     ])
     |> validate_required([
       :external_id,
-      :jwt_secret,
-      :max_concurrent_users
+      :jwt_secret
     ])
     |> cast_assoc(:extensions, required: true)
   end

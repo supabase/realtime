@@ -57,7 +57,7 @@ defmodule Realtime.Application do
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         Realtime.Repo,
         RealtimeWeb.Telemetry,
-        {Phoenix.PubSub, name: Realtime.PubSub},
+        {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence,
         Realtime.PromEx,
