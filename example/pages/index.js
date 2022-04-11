@@ -40,25 +40,84 @@ export default function Index() {
       },
       "user_token": token
     }
-    let channel = socket.channel('realtime:*', realtime_config)
-    channel.on('*', msg => {
-      console.log('Got a message', msg)
-      dataSource.unshift({
-        key: dataSource.length + 1,
-        type: msg.type,
-        table: msg.schema + "." + msg.table,
-        record: JSON.stringify(msg.record),
-        old_record: JSON.stringify(msg.old_record),
-        errors: JSON.stringify(msg.errors),
-        columns: JSON.stringify(msg.columns),
-        ts: msg.commit_timestamp
-      })
-      setDataSource([...dataSource])
+    let channel = socket.channel('realtime:*', {
+      isNewVersion: true,
+    })
+
+    // userChannel.on('presence', { event: 'SYNC' }, () => {
+    //   setIsInitialStateSynced(true)
+    // })
+    // userChannel.on('region', { event: '*' }, (region: string) => {
+    //   setRegion(region)
+    // })    
+
+    // channel.on('*', msg => {
+    channel.on('presence', { event: 'SYNC' }, (msg) => {
+      console.log("msg", msg)
+      // console.log('Got a message')
+      // dataSource.unshift({
+      //   key: dataSource.length + 1,
+      //   type: msg.type,
+      //   table: msg.schema + "." + msg.table,
+      //   record: JSON.stringify(msg.record),
+      //   old_record: JSON.stringify(msg.old_record),
+      //   errors: JSON.stringify(msg.errors),
+      //   columns: JSON.stringify(msg.columns),
+      //   ts: msg.commit_timestamp
+      // })
+      // setDataSource([...dataSource])
+    })
+    channel.on('realtime', { schema: 'public', table: 'messages' }, (msg) => {
+      console.log("msg", msg)
+      // console.log('Got a message')
+      // dataSource.unshift({
+      //   key: dataSource.length + 1,
+      //   type: msg.type,
+      //   table: msg.schema + "." + msg.table,
+      //   record: JSON.stringify(msg.record),
+      //   old_record: JSON.stringify(msg.old_record),
+      //   errors: JSON.stringify(msg.errors),
+      //   columns: JSON.stringify(msg.columns),
+      //   ts: msg.commit_timestamp
+      // })
+      // setDataSource([...dataSource])
+    })
+    channel.on('broadcast', { event: 'MESSAGE' }, (msg) => {
+      console.log("broadcast", msg)
+      // console.log('Got a message')
+      // dataSource.unshift({
+      //   key: dataSource.length + 1,
+      //   type: msg.type,
+      //   table: msg.schema + "." + msg.table,
+      //   record: JSON.stringify(msg.record),
+      //   old_record: JSON.stringify(msg.old_record),
+      //   errors: JSON.stringify(msg.errors),
+      //   columns: JSON.stringify(msg.columns),
+      //   ts: msg.commit_timestamp
+      // })
+      // setDataSource([...dataSource])
     })
     channel
       .subscribe()
       .receive('ok', () => {
-        console.log('Connecting')
+        let user_id = Math.random() + ""
+        channel.send({
+          type: 'presence',
+          event: 'TRACK',
+          key: "newRoomId",
+          payload: { user_id: user_id },
+        })
+
+        channel.send({
+          type: 'broadcast',
+          event: 'MESSAGE',
+          payload: {
+            user_id: user_id,
+            x: Math.random(),
+          },
+        })
+
+        console.log('Connecting', channel)
         setConnButtonState({ loading: false, value: "Connected" })
       })
       .receive('error', () => console.log('Failed'))
