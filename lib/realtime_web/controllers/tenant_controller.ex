@@ -90,6 +90,7 @@ defmodule RealtimeWeb.TenantController do
   def update(conn, %{"id" => id, "tenant" => tenant_params}) do
     case Api.get_tenant_by_external_id(id) do
       nil ->
+        Cachex.del(:tenants, id)
         create(conn, %{"tenant" => Map.put(tenant_params, "external_id", id)})
 
       tenant ->
@@ -116,6 +117,7 @@ defmodule RealtimeWeb.TenantController do
     tenant = Api.get_tenant_by_external_id(id)
 
     with {:ok, %Tenant{}} <- Api.delete_tenant(tenant) do
+      Cachex.del(:tenants, id)
       send_resp(conn, :no_content, "")
     end
   end

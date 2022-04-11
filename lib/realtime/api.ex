@@ -121,7 +121,7 @@ defmodule Realtime.Api do
   end
 
   def get_tenant_by_external_id(:cached, external_id) do
-    with {:commit, val} <- Cachex.fetch(:tenants, external_id, &get_tenant_by_external_id/1) do
+    with {:commit, val} <- Cachex.fetch(:tenants, external_id, &get_dec_tenant_by_external_id/1) do
       Cachex.expire(:tenants, external_id, :timer.seconds(500))
       val
     else
@@ -133,6 +133,11 @@ defmodule Realtime.Api do
     end
   end
 
+  def get_dec_tenant_by_external_id(external_id) do
+    get_tenant_by_external_id(external_id)
+    |> decrypt_extensions_data()
+  end
+
   def get_tenant_by_external_id(external_id) do
     query =
       from(p in Tenant,
@@ -142,7 +147,6 @@ defmodule Realtime.Api do
 
     Repo.one(query)
     |> Repo.preload(:extensions)
-    |> decrypt_extensions_data()
   end
 
   def decrypt_extensions_data(%Realtime.Api.Tenant{} = tenant) do
