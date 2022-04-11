@@ -11,10 +11,10 @@ import Config
 # are secured by default in production.
 presence = System.get_env("PRESENCE", "false") == "false"
 
-config :multiplayer,
+config :realtime,
   presence: presence
 
-config :multiplayer, MultiplayerWeb.Endpoint,
+config :realtime, RealtimeWeb.Endpoint,
   http: [port: 4000],
   debug_errors: true,
   code_reloader: true,
@@ -30,7 +30,7 @@ config :multiplayer, MultiplayerWeb.Endpoint,
 #   ]
 # ]
 
-config :multiplayer, Multiplayer.PromEx,
+config :realtime, Realtime.PromEx,
   manual_metrics_start_delay: :no_delay,
   drop_metrics_groups: [],
   grafana: :disabled,
@@ -67,13 +67,13 @@ config :multiplayer, Multiplayer.PromEx,
 # different ports.
 
 # Watch static and templates for browser reloading.
-config :multiplayer, MultiplayerWeb.Endpoint,
+config :realtime, RealtimeWeb.Endpoint,
   live_reload: [
     patterns: [
       ~r"priv/static/.*(js|css|png|jpeg|jpg|gif|svg)$",
       ~r"priv/gettext/.*(po)$",
-      ~r"lib/multiplayer_web/(live|views)/.*(ex)$",
-      ~r"lib/multiplayer_web/templates/.*(eex)$"
+      ~r"lib/realtime_web/(live|views)/.*(ex)$",
+      ~r"lib/realtime_web/templates/.*(eex)$"
     ]
   ]
 

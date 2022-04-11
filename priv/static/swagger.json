@@ -148,16 +148,16 @@
   },
   "host": "localhost:4000",
   "info": {
-    "description": "API Documentation for Multiplayer v1",
+    "description": "API Documentation for Realtime v1",
     "termsOfService": "Open for public",
-    "title": "Multiplayer",
+    "title": "Realtime",
     "version": "1.0"
   },
   "paths": {
     "/api/tenants": {
       "get": {
         "description": "",
-        "operationId": "MultiplayerWeb.TenantController.index",
+        "operationId": "RealtimeWeb.TenantController.index",
         "parameters": [],
         "responses": {
           "200": {
@@ -174,7 +174,7 @@
       },
       "post": {
         "description": "",
-        "operationId": "MultiplayerWeb.TenantController.create",
+        "operationId": "RealtimeWeb.TenantController.create",
         "parameters": [
           {
             "description": "",
@@ -203,7 +203,7 @@
     "/api/tenants/{external_id}": {
       "delete": {
         "description": "Delete a tenant by ID",
-        "operationId": "MultiplayerWeb.TenantController.delete",
+        "operationId": "RealtimeWeb.TenantController.delete",
         "parameters": [
           {
             "description": "Tenant ID",
@@ -226,7 +226,7 @@
       },
       "get": {
         "description": "",
-        "operationId": "MultiplayerWeb.TenantController.show",
+        "operationId": "RealtimeWeb.TenantController.show",
         "parameters": [
           {
             "description": "",
@@ -252,7 +252,7 @@
       },
       "put": {
         "description": "",
-        "operationId": "MultiplayerWeb.TenantController.update",
+        "operationId": "RealtimeWeb.TenantController.update",
         "parameters": [
           {
             "description": "",

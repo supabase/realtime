@@ -7,23 +7,30 @@
 # General application configuration
 import Config
 
-config :multiplayer,
-  ecto_repos: [Multiplayer.Repo]
+config :realtime,
+  ecto_repos: [Realtime.Repo]
 
 # Configures the endpoint
-config :multiplayer, MultiplayerWeb.Endpoint,
+config :realtime, RealtimeWeb.Endpoint,
   url: [host: "localhost"],
   secret_key_base: "ktyW57usZxrivYdvLo9os7UGcUUZYKchOMHT3tzndmnHuxD09k+fQnPUmxlPMUI3",
-  render_errors: [view: MultiplayerWeb.ErrorView, accepts: ~w(html json), layout: false],
-  pubsub_server: Multiplayer.PubSub,
+  render_errors: [view: RealtimeWeb.ErrorView, accepts: ~w(html json), layout: false],
+  pubsub_server: Realtime.PubSub,
   live_view: [signing_salt: "wUMBeR8j"]
 
-config :multiplayer, :phoenix_swagger,
+config :realtime, :phoenix_swagger,
   swagger_files: %{
     "priv/static/swagger.json" => [
-      router: MultiplayerWeb.Router,
-      endpoint: MultiplayerWeb.Endpoint
+      router: RealtimeWeb.Router,
+      endpoint: RealtimeWeb.Endpoint
     ]
+  }
+
+config :realtime, :extensions,
+  postgres: %{
+    key: "postgres",
+    supervisor: Extensions.Postgres.Supervisor,
+    db_settings: Extensions.Postgres.DbSettings
   }
 
 config :phoenix_swagger, json_library: Jason

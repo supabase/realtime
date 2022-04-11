@@ -1,4 +1,4 @@
-defmodule Multiplayer.DataCase do
+defmodule Realtime.DataCase do
   @moduledoc """
   This module defines the setup for tests requiring
   access to the application's data layer.
@@ -8,7 +8,7 @@ defmodule Multiplayer.DataCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. If you are using
   PostgreSQL, you can even run database tests asynchronously
-  by setting `use Multiplayer.DataCase, async: true`, although
+  by setting `use Realtime.DataCase, async: true`, although
   this option is not recommended for other databases.
   """
 
@@ -16,20 +16,20 @@ defmodule Multiplayer.DataCase do
 
   using do
     quote do
-      alias Multiplayer.Repo
+      alias Realtime.Repo
 
       import Ecto
       import Ecto.Changeset
       import Ecto.Query
-      import Multiplayer.DataCase
+      import Realtime.DataCase
     end
   end
 
   setup tags do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Multiplayer.Repo)
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Realtime.Repo)
 
     unless tags[:async] do
-      Ecto.Adapters.SQL.Sandbox.mode(Multiplayer.Repo, {:shared, self()})
+      Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, {:shared, self()})
     end
 
     :ok

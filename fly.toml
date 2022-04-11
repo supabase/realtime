@@ -1,4 +1,4 @@
-# fly.toml file generated for multiplayer-staging on 2022-01-26T19:29:10+02:00
+# fly.toml file generated for realtime-staging on 2022-01-26T19:29:10+02:00
 
 app = "multiplayer-staging"
 
@@ -7,11 +7,11 @@ kill_timeout = 5
 
 [deploy]
   strategy = "canary"
-  release_command = "/app/bin/multiplayer eval Multiplayer.Release.migrate"
+  release_command = "/app/bin/realtime eval Realtime.Release.migrate"
 
 [env]
   SECURE_CHANNELS = "true"
-  DNS_NODES = "multiplayer-staging.internal"
+  DNS_NODES = "realtime-staging.internal"
 
 [experimental]
   private_network = true
