@@ -112,7 +112,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp topic_from_config(params) do
-    case params["configs"]["realtime"]["eventFilter"] do
+    case params["configs"]["realtime"]["filter"] do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
         "#{schema}:#{table}:#{filter}"
 
