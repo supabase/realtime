@@ -7,7 +7,7 @@ kill_timeout = 5
 
 [deploy]
   release_command = "/app/bin/realtime eval Realtime.Release.migrate"
-  strategy = "canary"
+  strategy = "rolling"
 
 [env]
   DNS_NODES = "realtime-multi.internal"
