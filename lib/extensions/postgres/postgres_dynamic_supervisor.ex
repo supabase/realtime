@@ -21,6 +21,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
       )
 
     :global.register_name({:db_instance, args[:id]}, conn)
+    subscribers_tid = :ets.new(Realtime.ChannelsSubscribers, [:public, :set])
 
     opts = [
       id: args[:id],
@@ -45,7 +46,14 @@ defmodule Extensions.Postgres.DynamicSupervisor do
         id: SubscriptionManager,
         start:
           {SubscriptionManager, :start_link,
-           [%{conn: conn, id: args[:id], publication: args[:publication]}]},
+           [
+             %{
+               conn: conn,
+               id: args[:id],
+               subscribers_tid: subscribers_tid,
+               publication: args[:publication]
+             }
+           ]},
         restart: :transient
       }
     ]

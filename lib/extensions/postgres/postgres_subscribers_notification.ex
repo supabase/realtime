@@ -2,70 +2,49 @@ defmodule Extensions.Postgres.SubscribersNotification do
   require Logger
 
   alias Phoenix.Socket.Broadcast
+  alias Realtime.{MessageDispatcher, PubSub}
 
   # @topic "room"
   @topic "realtime"
 
-  # def notify(%Transaction{changes: changes} = txn) when is_list(changes) do
-  #   {:ok, %Configuration{realtime: realtime_config, webhooks: webhooks_config}} =
-  #     ConfigurationManager.get_config()
+  def broadcast_change(topics, %{subscription_ids: subscription_ids} = change, tenant) do
+    payload =
+      Map.filter(change, fn {key, _} ->
+        !Enum.member?([:is_rls_enabled, :subscription_ids], key)
+      end)
 
-  #   :ok = notify_subscribers(changes, realtime_config)
-  #   :ok = Realtime.WebhookConnector.notify(txn, webhooks_config)
-  # end
+    for topic <- topics do
+      broadcast = %Broadcast{
+        topic: "#{@topic}:#{topic}",
+        event: "realtime",
+        payload: %{payload: payload, event: payload.type}
+      }
 
-  # def notify(changes) when is_list(changes) do
-  #   {:ok, %Configuration{realtime: realtime_config}} = ConfigurationManager.get_config()
-  #   :ok = notify_subscribers(changes, realtime_config)
-  # end
-
-  # def notify(_) do
-  #   :ok
-  # end
-
-  def broadcast_change(topic, %{subscription_ids: subs_id} = change, scope) do
-    message = encode_message(topic, change)
-
-    :syn.members(Extensions.Postgres.Subscribers, scope)
-    |> Enum.each(fn {_pid, %{transport_pid: transport_pid, bin_id: bin_id}} ->
-      if MapSet.member?(subs_id, bin_id) do
-        send(transport_pid, message)
-      end
-    end)
+      Phoenix.PubSub.broadcast_from(
+        PubSub,
+        self(),
+        "#{tenant}:#{topic}",
+        {broadcast, subscription_ids, topics},
+        MessageDispatcher
+      )
+    end
   end
 
   def notify_subscribers([_ | _] = changes, id) do
-    Enum.each(changes, fn change ->
+    for {change, table_topics} <- changes_topics(changes) do
+      broadcast_change(table_topics, change, id)
+    end
+  end
+
+  def notify_subscribers(_, _), do: :ok
+
+  def changes_topics(changes) do
+    Enum.reduce(changes, [], fn change, acc ->
       case change do
         %{schema: schema, table: table, type: type}
         when is_binary(schema) and is_binary(table) and is_binary(type) ->
-          schema_topic = "#{@topic}:#{schema}"
+          schema_topic = "#{schema}"
           table_topic = "#{schema_topic}:#{table}"
-
-          # Get only the config which includes this event type (INSERT | UPDATE | DELETE | TRUNCATE)
-          # TODO: implement
-          event_config = %{}
-          # Enum.filter(realtime_config, fn config ->
-          #   case config do
-          #     %Realtime.Configuration.Realtime{events: [_ | _] = events} -> type in events
-          #     _ -> false
-          #   end
-          # end)
-
-          # Shout to specific schema - e.g. "realtime:public"
-          # if has_schema(event_config, schema) do
-          #   broadcast_change(schema_topic, change, id)
-          # end
-
-          # Special case for notifiying "*"
-          if has_schema(event_config, "*") do
-            broadcast_change("#{@topic}:*", change, id)
-          end
-
-          # Shout to specific table - e.g. "realtime:public:users"
-          if has_table(event_config, schema, table) do
-            broadcast_change(table_topic, change, id)
-          end
 
           # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
           if type in ["INSERT", "UPDATE", "DELETE"] do
@@ -73,55 +52,25 @@ defmodule Extensions.Postgres.SubscribersNotification do
 
             record = Map.get(change, record_key)
 
-            is_map(record) &&
-              Enum.each(record, fn {k, v} ->
-                with true <- is_notification_key_valid(v),
-                     {:ok, stringified_v} <- stringify_value(v),
-                     true <- is_notification_key_length_valid(stringified_v) do
-                  "#{table_topic}:#{k}=eq.#{stringified_v}"
-                  |> broadcast_change(change, id)
-                end
-              end)
+            filtered =
+              is_map(record) &&
+                Enum.reduce(record, [], fn {k, v}, acc ->
+                  with true <- is_notification_key_valid(v),
+                       {:ok, stringified_v} <- stringify_value(v),
+                       true <- is_notification_key_length_valid(stringified_v) do
+                    ["#{table_topic}:#{k}=eq.#{stringified_v}" | acc]
+                  end
+                end)
+
+            [{change, ["*", table_topic] ++ filtered} | acc]
+          else
+            acc
           end
 
         _ ->
-          nil
+          acc
       end
     end)
-  end
-
-  def notify_subscribers(_, _), do: :ok
-  # defp notify_subscribers(_, _config), do: :ok
-
-  # TODO: implement
-  defp has_schema(_config, _schema) do
-    # Determines whether the Realtime config has a specific schema relation
-    # valid_patterns = ["*", schema]
-    # Enum.any?(config, fn c -> c.relation in valid_patterns end)
-    true
-  end
-
-  defp has_table(config, schema, table) do
-    # Determines whether the Realtime config has a specific table relation
-    # Construct an array of valid patterns: "*:*", "public:todos", etc
-    valid_patterns =
-      for schema_keys <- ["*", schema],
-          table_keys <- ["*", table],
-          do: "#{schema_keys}:#{table_keys}"
-
-    Enum.any?(config, fn c -> c.relation in valid_patterns end)
-  end
-
-  defp has_column(config, schema, table, column) do
-    # Determines whether the Realtime config has a specific column relation
-    # Construct an array of valid patterns: "*:*:*", "public:todos", etc
-    valid_patterns =
-      for schema_keys <- ["*", schema],
-          table_keys <- ["*", table],
-          column_keys <- ["*", column],
-          do: "#{schema_keys}:#{table_keys}:#{column_keys}"
-
-    Enum.any?(config, fn c -> c.relation in valid_patterns end)
   end
 
   defp is_notification_key_valid(v) do
@@ -132,18 +81,4 @@ defmodule Extensions.Postgres.SubscribersNotification do
   defp stringify_value(v), do: Jason.encode(v)
 
   defp is_notification_key_length_valid(v), do: String.length(v) < 100
-
-  defp encode_message(topic, change) do
-    payload =
-      Map.filter(change, fn {key, _} ->
-        !Enum.member?([:is_rls_enabled, :subscription_ids], key)
-      end)
-
-    %Broadcast{
-      topic: topic,
-      event: "realtime",
-      payload: %{payload: payload, event: payload.type}
-    }
-    |> Phoenix.Socket.V1.JSONSerializer.fastlane!()
-  end
 end
