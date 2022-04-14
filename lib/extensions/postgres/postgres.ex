@@ -74,23 +74,16 @@ defmodule Extensions.Postgres do
     end)
   end
 
-  def subscribe(scope, subs_id, topic, claims, transport_pid) do
+  def subscribe(scope, subs_id, topic, claims, channel_pid) do
     pid = manager_pid(scope)
 
     if pid do
       opts = %{
         topic: topic,
         id: subs_id,
-        claims: claims
+        claims: claims,
+        channel_pid: channel_pid
       }
-
-      # TODO: move inside to SubscriptionManager
-      bin_subs_id = UUID.string_to_binary!(subs_id)
-
-      :syn.join(Postgres.Subscribers, scope, self(), %{
-        bin_id: bin_subs_id,
-        transport_pid: transport_pid
-      })
 
       SubscriptionManager.subscribe(pid, opts)
     end
