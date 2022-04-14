@@ -8,7 +8,11 @@ defmodule RealtimeWeb.RealtimeChannel do
   def join(
         "realtime:" <> sub_topic = topic,
         params,
-        %{assigns: %{tenant: tenant, claims: claims, limits: limits}, transport_pid: pid} = socket
+        %{
+          assigns: %{tenant: tenant, claims: claims, limits: limits},
+          transport_pid: pid,
+          serializer: serializer
+        } = socket
       ) do
     if Realtime.UsersCounter.tenant_users(tenant) < limits.max_concurrent_users do
       Realtime.UsersCounter.add(pid, tenant)
@@ -24,7 +28,15 @@ defmodule RealtimeWeb.RealtimeChannel do
       Logger.info("Postgres_topic is " <> postgres_topic)
 
       if postgres_topic != "" do
-        Extensions.Postgres.subscribe(tenant, id, postgres_topic, claims, pid)
+        Endpoint.unsubscribe(topic)
+
+        metadata = [
+          metadata:
+            {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), postgres_topic}
+        ]
+
+        Endpoint.subscribe(tenant_topic, metadata)
+        Extensions.Postgres.subscribe(tenant, id, postgres_topic, claims, self())
       end
 
       Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
@@ -112,7 +124,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp topic_from_config(params) do
-    case params["configs"]["realtime"]["eventFilter"] do
+    case params["configs"]["realtime"]["filter"] do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
         "#{schema}:#{table}:#{filter}"
 

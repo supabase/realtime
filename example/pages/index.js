@@ -24,13 +24,13 @@ export default function Index() {
     const realtime_config = {
       "configs": {
         "broadcast": {
-          "eventFilter": {
+          "filter": {
             "event": "MESSAGE"
           },
           "type": "broadcast"
         },
         "realtime": {
-          "eventFilter": {
+          "filter": {
             "event": "INSERT",
             "schema": "public",
             "table": "messages"
