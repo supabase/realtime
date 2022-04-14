@@ -47,7 +47,6 @@ defmodule Extensions.Postgres.SubscriptionManager do
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{subscribers_tid: tid} = state) do
     case :ets.lookup(tid, pid) do
       [{_pid, postgres_id, _ref}] ->
-        Logger.error("Undefined PID: #{inspect(pid)}")
         Subscriptions.delete(state.conn, UUID.string_to_binary!(postgres_id))
 
       _ ->
