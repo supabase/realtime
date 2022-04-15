@@ -45,7 +45,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{subscribers_tid: tid} = state) do
-    case :ets.lookup(tid, pid) do
+    case :ets.take(tid, pid) do
       [{_pid, postgres_id, _ref}] ->
         Subscriptions.delete(state.conn, UUID.string_to_binary!(postgres_id))
 

@@ -30,17 +30,8 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def create(conn, %{"tenant" => tenant_params}) do
-    extensions =
-      Enum.reduce(tenant_params["extensions"], [], fn
-        %{"type" => type, "settings" => settings}, acc ->
-          [%{type: type, settings: settings} | acc]
-
-        _e, acc ->
-          acc
-      end)
-
     with {:ok, %Tenant{} = tenant} <-
-           Api.create_tenant(%{tenant_params | "extensions" => extensions}) do
+           Api.create_tenant(tenant_params) do
       conn
       |> put_status(:created)
       |> put_resp_header("location", Routes.tenant_path(conn, :show, tenant))

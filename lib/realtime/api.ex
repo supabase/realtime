@@ -54,12 +54,11 @@ defmodule Realtime.Api do
       {:error, %Ecto.Changeset{}}
 
   """
-  def create_tenant(attrs \\ %{}) do
+  def create_tenant(attrs) do
     Logger.debug("create_tenant #{inspect(attrs, pretty: true)}")
 
     %Tenant{}
     |> Tenant.changeset(attrs)
-    |> Ecto.Changeset.put_assoc(:extensions, attrs["extensions"])
     |> Repo.insert()
   end
 
