@@ -121,16 +121,17 @@ defmodule Realtime.Api do
   end
 
   def get_tenant_by_external_id(:cached, external_id) do
-    with {:commit, val} <- Cachex.fetch(:tenants, external_id, &get_dec_tenant_by_external_id/1) do
-      Cachex.expire(:tenants, external_id, :timer.seconds(500))
-      val
-    else
-      {:ok, val} ->
-        val
+    # with {:commit, val} <- Cachex.fetch(:tenants, external_id, &get_dec_tenant_by_external_id/1) do
+    #   Cachex.expire(:tenants, external_id, :timer.seconds(500))
+    #   val
+    # else
+    #   {:ok, val} ->
+    #     val
 
-      _ ->
-        :error
-    end
+    #   _ ->
+    #     :error
+    # end
+    get_tenant_by_external_id(external_id)
   end
 
   def get_dec_tenant_by_external_id(external_id) do

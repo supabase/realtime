@@ -7,9 +7,9 @@ defmodule Realtime.MessageDispatcher do
   """
   def dispatch([_ | _] = topic_subscriptions, _from, {payload, subscription_ids, topics}) do
     Enum.reduce(topic_subscriptions, %{}, fn
-      {_pid, {:subscriber_fastlane, fastlane_pid, serializer, id, postgres_topic}}, cache ->
+      {_pid, {:subscriber_fastlane, fastlane_pid, serializer, id, postgres_topic, join_topic}}, cache ->
         if Enum.member?(topics, postgres_topic) and MapSet.member?(subscription_ids, id) do
-          broadcast_message(cache, fastlane_pid, payload, serializer)
+          broadcast_message(cache, fastlane_pid, %{payload | topic: join_topic}, serializer)
         else
           cache
         end

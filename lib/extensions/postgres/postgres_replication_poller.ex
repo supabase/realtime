@@ -124,13 +124,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
       {:ok, rows_num} ->
         backoff = Backoff.reset(backoff)
 
-        poll_ref =
-          if rows_num > 0 do
-            send(self(), :poll)
-            nil
-          else
-            Process.send_after(self(), :poll, poll_interval)
-          end
+        poll_ref = Process.send_after(self(), :poll, poll_interval)
 
         {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
 

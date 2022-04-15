@@ -29,13 +29,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       if postgres_topic != "" do
         Endpoint.unsubscribe(topic)
-
-        metadata = [
-          metadata:
-            {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), postgres_topic}
-        ]
-
-        Endpoint.subscribe(tenant_topic, metadata)
+        Endpoint.subscribe(tenant_topic, metadata: {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), postgres_topic})
+        Endpoint.subscribe(tenant <> ":" <> postgres_topic, metadata: {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), postgres_topic, topic})
         Extensions.Postgres.subscribe(tenant, id, postgres_topic, claims, self())
       end
 
@@ -123,8 +118,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     )
   end
 
-  def topic_from_config(params) do
-    case params["configs"]["realtime"]["filter"] do
+  def topic_from_config(params) when is_map(params) do
+    case get_in(params, ["configs", "realtime", "filter"]) do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
         "#{schema}:#{table}:#{filter}"
 
@@ -138,4 +133,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         ""
     end
   end
+
+  def topic_from_config(_), do: ""
 end
