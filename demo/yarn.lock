@@ -479,54 +479,52 @@
   "resolved" "https://registry.npmjs.org/@rushstack/eslint-patch/-/eslint-patch-1.1.1.tgz"
   "version" "1.1.1"
 
-"@supabase/functions-js@^1.1.4":
-  "integrity" "sha512-vT/dEuwY7occ5Upuev0vuGCAo/cVltbv+8mOKugA5Lsf9W5S0PlXy4di/cGF6ryvsQfYXr1ebEWNlgKgGUOCtA=="
-  "resolved" "https://registry.npmjs.org/@supabase/functions-js/-/functions-js-1.2.0.tgz"
-  "version" "1.2.0"
+"@supabase/functions-js@^1.3.3":
+  "integrity" "sha512-35vO9niHRtzGe1QSvXKdOfvGPiX2KC44dGpWU6y0/gZCfTIgog/soU9HqABzQC/maVowO3hGLWfez5aN0MKfow=="
+  "resolved" "https://registry.npmjs.org/@supabase/functions-js/-/functions-js-1.3.3.tgz"
+  "version" "1.3.3"
   dependencies:
     "cross-fetch" "^3.1.5"
 
-"@supabase/gotrue-js@^1.22.8":
-  "integrity" "sha512-2mG5M3goHSPwwQzjbgw5lmUNeVexOaPIFcUmUU9p9mwsSzbZ5u2pKbZGVS/9aBaJoD8YvW8khMej9XaGEFQeiQ=="
-  "resolved" "https://registry.npmjs.org/@supabase/gotrue-js/-/gotrue-js-1.22.8.tgz"
-  "version" "1.22.8"
+"@supabase/gotrue-js@^1.22.12":
+  "integrity" "sha512-/baPkNiumE2B+OLSpvZquDsTqnOTAsG/07GBq5rXU8/e0rSyjljAFf8gnawGPezjlDGTFr2fjRYs0BYMz4LD/A=="
+  "resolved" "https://registry.npmjs.org/@supabase/gotrue-js/-/gotrue-js-1.22.12.tgz"
+  "version" "1.22.12"
   dependencies:
     "cross-fetch" "^3.0.6"
 
-"@supabase/postgrest-js@^0.37.1":
-  "integrity" "sha512-Lm7eLuYzEr7ppGC84mlqpm8v9Vy8kyR6he6z3avrkccC8pwLOsxaK0bkKiV4LBwkJc7uARMTdlp+IskatHkz2g=="
-  "resolved" "https://registry.npmjs.org/@supabase/postgrest-js/-/postgrest-js-0.37.1.tgz"
-  "version" "0.37.1"
+"@supabase/postgrest-js@^0.37.2":
+  "integrity" "sha512-3Dgx5k3RvtKqc8DvR2BEyh2fVyjZe5P4e0zD1r8dyuVmpaYDaASZ2YeNVgyWXMCWH7xzrj4vepTYlKwfj78QLg=="
+  "resolved" "https://registry.npmjs.org/@supabase/postgrest-js/-/postgrest-js-0.37.2.tgz"
+  "version" "0.37.2"
   dependencies:
     "cross-fetch" "^3.0.6"
 
-"@supabase/realtime-js@^1.4.0", "@supabase/realtime-js@^1.6.0":
-  "integrity" "sha512-/XZOGrAbLf2CpSN58Q9qa14nHgIweyD4jRMwbsmGRvLU9t699Txx/1zkWvP0j+aXjXrB8O6v5DqIhCMV1F2gGQ=="
-  "resolved" "https://registry.npmjs.org/@supabase/realtime-js/-/realtime-js-1.6.0.tgz"
-  "version" "1.6.0"
+"@supabase/realtime-js@^1.7.0":
+  "integrity" "sha512-6wYcF7qCcVrKrLmlCxmcvSa+3yPhPp8FSPqWdT4uDp4sbUnY5tW5KcOuXc1JN3gGQwTlVUErblr9yFyreHxkDg=="
+  "resolved" "https://registry.npmjs.org/@supabase/realtime-js/-/realtime-js-1.7.0.tgz"
+  "version" "1.7.0"
   dependencies:
     "@types/phoenix" "^1.5.4"
-    "lodash.clonedeep" "^4.5.0"
-    "lodash.isequal" "^4.5.0"
     "websocket" "^1.0.34"
 
-"@supabase/storage-js@^1.6.4":
-  "integrity" "sha512-vYcr1JGRf8Wr4v+lb8Ucl0bELwCZv8lT/PrYuhEKfJff6BI6/nTJp8rRZSRaDESQR8JlpaLaL+dmD/wsNqZnNQ=="
-  "resolved" "https://registry.npmjs.org/@supabase/storage-js/-/storage-js-1.6.4.tgz"
-  "version" "1.6.4"
+"@supabase/storage-js@^1.7.0":
+  "integrity" "sha512-f5EBw0wM96hKmnrXhgiqq2Reh9O0NgjKE+jkaKY4jQmfutefqaCAWn+cBzlmHs9h135H2ldaGmhWRFHUSkLt2g=="
+  "resolved" "https://registry.npmjs.org/@supabase/storage-js/-/storage-js-1.7.0.tgz"
+  "version" "1.7.0"
   dependencies:
     "cross-fetch" "^3.1.0"
 
-"@supabase/supabase-js@^1.32.0":
-  "integrity" "sha512-ty9AYcrchxPcTqD8cixph8/q/gyZ8qNcZOdrPXkIsOonume61opMCtQ2aSOw5wWa1CcTl0uMzUTfUv4uDDzfYw=="
-  "resolved" "https://registry.npmjs.org/@supabase/supabase-js/-/supabase-js-1.32.0.tgz"
-  "version" "1.32.0"
+"@supabase/supabase-js@^1.34.0":
+  "integrity" "sha512-AFQFpm4/ppJJ9Oi7NPu6kg6SFlpIwhX5+3RZTZ963bjdiPfOjvmOPirBL0t+AbJ51Lf1aEIGZ0A1heSFD4Zf1w=="
+  "resolved" "https://registry.npmjs.org/@supabase/supabase-js/-/supabase-js-1.34.0.tgz"
+  "version" "1.34.0"
   dependencies:
-    "@supabase/functions-js" "^1.1.4"
-    "@supabase/gotrue-js" "^1.22.8"
-    "@supabase/postgrest-js" "^0.37.1"
-    "@supabase/realtime-js" "^1.4.0"
-    "@supabase/storage-js" "^1.6.4"
+    "@supabase/functions-js" "^1.3.3"
+    "@supabase/gotrue-js" "^1.22.12"
+    "@supabase/postgrest-js" "^0.37.2"
+    "@supabase/realtime-js" "^1.7.0"
+    "@supabase/storage-js" "^1.7.0"
 
 "@supabase/ui@0.37.0-alpha.50":
   "integrity" "sha512-d5jFxIVCRrZ6cHQ6qpuvyaexTmqMnxDWm0hg7vj9D2x5qcmySRCTC42uhpKXz5fKre2TUl38pFT+UpscWw/OyA=="
@@ -1230,9 +1228,9 @@
     "is-symbol" "^1.0.2"
 
 "es5-ext@^0.10.35", "es5-ext@^0.10.50":
-  "integrity" "sha512-cOgyhW0tIJyQY1Kfw6Kr0viu9ZlUctVchRMZ7R0HiH3dxTSp5zJDLecwxUqPUrGKMsgBI1wd1FL+d9Jxfi4cLw=="
-  "resolved" "https://registry.npmjs.org/es5-ext/-/es5-ext-0.10.59.tgz"
-  "version" "0.10.59"
+  "integrity" "sha512-jpKNXIt60htYG59/9FGf2PYT3pwMpnEbNKysU+k/4FGwyGtMotOvcZOuW+EmXXYASRqYSXQfGL5cVIthOTgbkg=="
+  "resolved" "https://registry.npmjs.org/es5-ext/-/es5-ext-0.10.60.tgz"
+  "version" "0.10.60"
   dependencies:
     "es6-iterator" "^2.0.3"
     "es6-symbol" "^3.1.3"
@@ -1998,11 +1996,6 @@
   "resolved" "https://registry.npmjs.org/lodash.clonedeep/-/lodash.clonedeep-4.5.0.tgz"
   "version" "4.5.0"
 
-"lodash.isequal@^4.5.0":
-  "integrity" "sha1-QVxEePK8wwEgwizhDtMib30+GOA="
-  "resolved" "https://registry.npmjs.org/lodash.isequal/-/lodash.isequal-4.5.0.tgz"
-  "version" "4.5.0"
-
 "lodash.isplainobject@^4.0.6":
   "integrity" "sha1-fFJqUtibRcRcxpC4gWO+BJf1UMs="
   "resolved" "https://registry.npmjs.org/lodash.isplainobject/-/lodash.isplainobject-4.0.6.tgz"
@@ -2145,9 +2138,9 @@
     "whatwg-url" "^5.0.0"
 
 "node-gyp-build@^4.3.0":
-  "integrity" "sha512-iWjXZvmboq0ja1pUGULQBexmxq8CV4xBhX7VDOTbL7ZR4FOowwY/VOtRxBN/yKxmdGoIp4j5ysNT4u3S2pDQ3Q=="
-  "resolved" "https://registry.npmjs.org/node-gyp-build/-/node-gyp-build-4.3.0.tgz"
-  "version" "4.3.0"
+  "integrity" "sha512-amJnQCcgtRVw9SvoebO3BKGESClrfXGCUTX9hSn1OuGQTQBOZmVd0Z0OlecpuRksKvbsUqALE8jls/ErClAPuQ=="
+  "resolved" "https://registry.npmjs.org/node-gyp-build/-/node-gyp-build-4.4.0.tgz"
+  "version" "4.4.0"
 
 "node-releases@^2.0.2":
   "integrity" "sha512-XxYDdcQ6eKqp/YjI+tb2C5WM2LgjnZrfYg4vgQt49EK268b6gYCHsBLrK2qvJo4FmCtqmKezb0WZFK4fkrZNsg=="

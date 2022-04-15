@@ -10,7 +10,7 @@ import { RealtimeChannel } from '@supabase/realtime-js'
 import { PostgrestResponse } from '@supabase/supabase-js'
 
 import { removeFirst } from '../utils'
-import { supabaseClient, realtimeClient } from '../clients'
+import { supabaseClient } from '../clients'
 import { Coordinates, DatabaseChange, Message, Payload, User } from '../types'
 
 import Chatbox from '../components/Chatbox'
@@ -102,12 +102,9 @@ const Room: NextPage = () => {
   // Connect to socket and subscribe to user channel
   useEffect(() => {
     joinTimestampRef.current = performance.now()
-    realtimeClient.connect()
 
     // Set up user channel and subscribe
-    const userChannel = realtimeClient.channel('room:*', {
-      isNewVersion: true,
-    }) as RealtimeChannel
+    const userChannel = supabaseClient.channel('realtime:*', { selfBroadcast: false }) as RealtimeChannel
     userChannel.on('presence', { event: 'SYNC' }, () => {
       setIsInitialStateSynced(true)
     })
@@ -120,16 +117,11 @@ const Room: NextPage = () => {
     })
 
     // Separate channel for latency
-    const pingChannel = realtimeClient.channel(`room:${userId}`, {
-      isNewVersion: true,
-      // self_broadcast: true,
-    }) as RealtimeChannel
+    const pingChannel = supabaseClient.channel(`realtime:${userId}`, { selfBroadcast: false }) as RealtimeChannel
     pingChannel.subscribe().receive('ok', () => setPingChannel(pingChannel))
 
     return () => {
-      userChannel.unsubscribe()
-      realtimeClient.remove(userChannel)
-      realtimeClient.disconnect()
+      supabaseClient.removeChannel(userChannel)
     }
   }, [])
 
@@ -294,11 +286,7 @@ const Room: NextPage = () => {
       return
     }
 
-    realtimeClient.connect()
-
-    const messageChannel = realtimeClient.channel(`room:chat_messages:${validatedRoomId}`, {
-      isNewVersion: true,
-    }) as RealtimeChannel
+    const messageChannel = supabaseClient.channel(`realtime:chat_messages:${validatedRoomId}`, { selfBroadcast: false }) as RealtimeChannel
 
     messageChannel.on(
       'realtime',
@@ -396,9 +384,7 @@ const Room: NextPage = () => {
     messageChannel.subscribe().receive('ok', () => setMessageChannel(messageChannel))
 
     return () => {
-      messageChannel.unsubscribe()
-      realtimeClient.remove(messageChannel)
-      realtimeClient.disconnect()
+      supabaseClient.removeChannel(messageChannel)
     }
   }, [validatedRoomId])
 

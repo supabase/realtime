@@ -19,6 +19,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       # used for custom monitoring
       channel_stats(pid, tenant, topic)
 
+      self_broadcast = is_map(params) && Map.get(params, "self_broadcast", false)
+
       tenant_topic = tenant <> ":" <> sub_topic
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
 
@@ -37,7 +39,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
 
       send(self(), :after_join)
-      {:ok, assign(socket, %{id: id, tenant_topic: tenant_topic})}
+      {:ok, assign(socket, %{id: id, tenant_topic: tenant_topic, self_broadcast: self_broadcast})}
     else
       Logger.error("Reached max_concurrent_users limit")
       {:error, %{reason: "reached max_concurrent_users limit"}}
@@ -47,6 +49,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_info(:after_join, %{assigns: %{tenant_topic: topic}} = socket) do
     push(socket, "presence_state", Presence.list(topic))
+    push(socket, "region", System.get_env("FLY_REGION")) # will remove
     {:noreply, socket}
   end
 
@@ -66,9 +69,20 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_in("broadcast" = type, payload, %{assigns: %{tenant_topic: topic}} = socket) do
-    Endpoint.broadcast_from(self(), topic, type, payload)
-    {:noreply, socket}
+  def handle_in("broadcast" = type, payload, %{assigns: %{tenant_topic: topic, self_broadcast: self_broadcast}} = socket) do
+    ack = Map.get(payload, "ack", false)
+
+    if self_broadcast do
+      Endpoint.broadcast(topic, type, payload)
+    else
+      Endpoint.broadcast_from(self(), topic, type, payload)
+    end
+
+    if ack do
+      {:reply, :ok, socket}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_in(
