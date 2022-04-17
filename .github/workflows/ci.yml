@@ -89,8 +89,6 @@ jobs:
         run: mix format --check-formatted
       - name: Run Credo
         run: mix credo
-      - name: Dialyzer checks
-        run: mix dialyze
       - name: Retrieve PLT Cache
         uses: actions/cache@v1
         id: plt-cache
