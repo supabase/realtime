@@ -57,6 +57,7 @@ defmodule Realtime.MixProject do
       {:mock, "~> 0.3.0", only: :test}
     ]
   end
+
   defp dialyzer do
     [
       plt_core_path: "priv/plts",
