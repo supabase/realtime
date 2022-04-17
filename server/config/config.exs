@@ -75,11 +75,17 @@ expose_metrics = System.get_env("EXPOSE_METRICS", "true") == "true"
 
 webhook_headers = System.get_env("WEBHOOK_HEADERS")
 
-db_reconnect_backoff_min = System.get_env("DB_RECONNECT_BACKOFF_MIN", "100") |> String.to_integer()
-db_reconnect_backoff_max = System.get_env("DB_RECONNECT_BACKOFF_MAX", "120000") |> String.to_integer()
+db_reconnect_backoff_min =
+  System.get_env("DB_RECONNECT_BACKOFF_MIN", "100") |> String.to_integer()
 
-replication_poll_interval = System.get_env("REPLICATION_POLL_INTERVAL", "300") |> String.to_integer()
-subscription_sync_interval = System.get_env("SUBSCRIPTION_SYNC_INTERVAL", "60000") |> String.to_integer()
+db_reconnect_backoff_max =
+  System.get_env("DB_RECONNECT_BACKOFF_MAX", "120000") |> String.to_integer()
+
+replication_poll_interval =
+  System.get_env("REPLICATION_POLL_INTERVAL", "300") |> String.to_integer()
+
+subscription_sync_interval =
+  System.get_env("SUBSCRIPTION_SYNC_INTERVAL", "60000") |> String.to_integer()
 
 # max_changes (default 100): Soft limit for the number of database changes to fetch per replication poll
 max_changes = System.get_env("MAX_CHANGES", "100") |> String.to_integer()
@@ -156,8 +162,7 @@ config :logger, :console,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
-config :realtime, Realtime.Metrics.PromEx,
-  disabled: !expose_metrics
+config :realtime, Realtime.Metrics.PromEx, disabled: !expose_metrics
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

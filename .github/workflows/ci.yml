@@ -83,15 +83,26 @@ jobs:
 
       - name: Install dependencies
         run: mix deps.get
-      
       - name: Compile with warnings
         run: mix compile --warnings-as-errors
-
       - name: Run formatter
         run: mix format --check-formatted
-        
       - name: Run Credo
         run: mix credo
-        
       - name: Dialyzer checks
         run: mix dialyze
+      - name: Retrieve PLT Cache
+        uses: actions/cache@v1
+        id: plt-cache
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-plts-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
+
+      - name: Create PLTs
+        if: steps.plt-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p priv/plts
+          mix dialyzer --plt
+
+      - name: Run dialyzer
+        run: mix dialyzer --no-check --halt-exit-status
