@@ -48,14 +48,50 @@ jobs:
       - name: Run database migrations
         run: mix ecto.migrate --prefix realtime
 
-      # - name: Compile with warnings
-      #   run: mix compile --warnings-as-errors
-
-      # - name: Run formatter
-      #   run: mix format --check-formatted
-
-      # - name: Run Credo
-      #   run: mix credo
-
       - name: Run tests
         run: mix test
+  mix-format:
+    name: Format ${{ matrix.otp }} / Elixir ${{ matrix.elixir }}
+
+    defaults:
+      run:
+        working-directory: ./server
+
+    strategy:
+      matrix:
+        platform: [ubuntu-18.04]
+        otp: [23.x]
+        elixir: [1.11.x]
+
+    runs-on: ubuntu-18.04
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - name: Cache Mix
+        uses: actions/cache@v1
+        with:
+          path: deps
+          key: ${{ runner.os }}-mix-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
+      - name: Install dependencies
+        run: mix deps.get
+      
+      - name: Compile with warnings
+        run: mix compile --warnings-as-errors
+
+      - name: Run formatter
+        run: mix format --check-formatted
+        
+      - name: Run Credo
+        run: mix credo
+        
+      - name: Dialyzer checks
+        run: mix dialyze
