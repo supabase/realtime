@@ -16,11 +16,11 @@ jobs:
 
     strategy:
       matrix:
-        platform: [ubuntu-18.04]
+        platform: [ubuntu-20.04]
         otp: [23.x]
         elixir: [1.11.x]
 
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
       - uses: actions/checkout@v2
@@ -59,11 +59,11 @@ jobs:
 
     strategy:
       matrix:
-        platform: [ubuntu-18.04]
+        platform: [ubuntu-20.04]
         otp: [23.x]
         elixir: [1.11.x]
 
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     steps:
       - uses: actions/checkout@v2
