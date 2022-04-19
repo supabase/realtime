@@ -3,7 +3,7 @@ defmodule RealtimeWeb.TenantController do
   use PhoenixSwagger
   alias Realtime.Api
   alias Realtime.Api.Tenant
-  alias PhoenixSwagger.Path
+  alias PhoenixSwagger.{Path, Schema}
 
   action_fallback RealtimeWeb.FallbackController
 
@@ -16,17 +16,6 @@ defmodule RealtimeWeb.TenantController do
   def index(conn, _params) do
     tenants = Api.list_tenants()
     render(conn, "index.json", tenants: tenants)
-  end
-
-  swagger_path :create do
-    Path.post("/api/tenants")
-    tag("Tenants")
-
-    parameters do
-      tenant(:body, Schema.ref(:TenantReq), "", required: true)
-    end
-
-    response(200, "Success", :TenantResponse)
   end
 
   def create(conn, %{"tenant" => tenant_params}) do
@@ -133,9 +122,39 @@ defmodule RealtimeWeb.TenantController do
             name(:string, "", required: false, example: "tenant1")
             external_id(:string, "", required: false, example: "okumviwlylkmpkoicbrc")
             active(:boolean, "", required: false, example: true)
-            region(:string, "", required: true, example: "ap-southeast-1")
-            rls_poll_interval(:integer, "", required: false, example: 500)
             inserted_at(:string, "", required: false, example: "2022-02-16T20:41:47")
+            max_concurrent_users(:integer, "", required: false, example: 10_000)
+            extensions(:array, "", required: true, items: Schema.ref(:ExtensionPostgres))
+          end
+        end,
+      ExtensionPostgres:
+        swagger_schema do
+          title("ExtensionPostgres")
+
+          properties do
+            type(:string, "", required: true, example: "postgres")
+            inserted_at(:string, "", required: false, example: "2022-02-16T20:41:47")
+            updated_at(:string, "", required: false, example: "2022-02-16T20:41:47")
+
+            settings(:object, "",
+              required: true,
+              properties: %{
+                db_host: %Schema{type: :string, example: "some encrypted value"},
+                db_name: %Schema{type: :string, example: "some encrypted value"},
+                db_password: %Schema{type: :string, example: "some encrypted value"},
+                db_port: %Schema{type: :string, example: "some encrypted value"},
+                db_user: %Schema{type: :string, example: "some encrypted value"},
+                poll_interval: %Schema{type: :integer, example: 100},
+                poll_max_changes: %Schema{type: :integer, example: 100},
+                poll_max_record_bytes: %Schema{type: :integer, example: 1_048_576},
+                publication: %Schema{type: :string, example: "supabase_multiplayer"},
+                region: %Schema{type: :string, example: "us-east-1"},
+                slot_name: %Schema{
+                  type: :string,
+                  example: "supabase_multiplayer_replication_slot"
+                }
+              }
+            )
           end
         end,
       TenantReq:
