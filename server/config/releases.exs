@@ -67,11 +67,17 @@ expose_metrics = System.get_env("EXPOSE_METRICS", "false") == "true"
 
 webhook_headers = System.get_env("WEBHOOK_HEADERS")
 
-db_reconnect_backoff_min = System.get_env("DB_RECONNECT_BACKOFF_MIN", "100") |> String.to_integer()
-db_reconnect_backoff_max = System.get_env("DB_RECONNECT_BACKOFF_MAX", "120000") |> String.to_integer()
+db_reconnect_backoff_min =
+  System.get_env("DB_RECONNECT_BACKOFF_MIN", "100") |> String.to_integer()
 
-replication_poll_interval = System.get_env("REPLICATION_POLL_INTERVAL", "300") |> String.to_integer()
-subscription_sync_interval = System.get_env("SUBSCRIPTION_SYNC_INTERVAL", "60000") |> String.to_integer()
+db_reconnect_backoff_max =
+  System.get_env("DB_RECONNECT_BACKOFF_MAX", "120000") |> String.to_integer()
+
+replication_poll_interval =
+  System.get_env("REPLICATION_POLL_INTERVAL", "300") |> String.to_integer()
+
+subscription_sync_interval =
+  System.get_env("SUBSCRIPTION_SYNC_INTERVAL", "60000") |> String.to_integer()
 
 # max_changes (default 100): Soft limit for the number of database changes to fetch per replication poll
 max_changes = System.get_env("MAX_CHANGES", "100") |> String.to_integer()
@@ -134,5 +140,4 @@ config :realtime, Endpoint,
   pubsub_server: PubSub,
   secret_key_base: session_secret_key_base
 
-config :realtime, Realtime.Metrics.PromEx,
-  disabled: !expose_metrics
+config :realtime, Realtime.Metrics.PromEx, disabled: !expose_metrics
