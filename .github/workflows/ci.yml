@@ -18,22 +18,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+      - name: Set up Postgres
+        run: docker-compose -f ../docker-compose.db.yml up -d
       - name: Setup elixir
         uses: erlef/setup-beam@v1
         with:
           otp-version: 23.x # Define the OTP version [required]
           elixir-version: 1.11.x # Define the elixir version [required]
-      - uses: actions/checkout@v2
-
-      - name: Set up Postgres
-        run: docker-compose -f ../docker-compose.db.yml up -d
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: ${{ matrix.elixir }}
-          otp-version: ${{ matrix.otp }}
-
       - name: Cache Mix
         uses: actions/cache@v1
         with:
@@ -41,38 +32,26 @@ jobs:
           key: ${{ runner.os }}-mix-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
           restore-keys: |
             ${{ runner.os }}-mix-
-
       - name: Install dependencies
         run: mix deps.get
-
       - name: Run database migrations
         run: mix ecto.migrate --prefix realtime
-
       - name: Run tests
         run: mix test
+        
   mix-format:
-    name: Format ${{ matrix.otp }} / Elixir ${{ matrix.elixir }}
-
+    name: Format and linter checks
     defaults:
       run:
         working-directory: ./server
-
-    strategy:
-      matrix:
-        platform: [ubuntu-latest]
-        otp: [23.x]
-        elixir: [1.11.x]
-
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v2
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{ matrix.elixir }}
-          otp-version: ${{ matrix.otp }}
-
+          otp-version: 23.x # Define the OTP version [required]
+          elixir-version: 1.11.x # Define the elixir version [required]
       - name: Cache Mix
         uses: actions/cache@v1
         with:
@@ -95,12 +74,10 @@ jobs:
         with:
           path: priv/plts
           key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-plts-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
-
       - name: Create PLTs
         if: steps.plt-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p priv/plts
           mix dialyzer --plt
-
       - name: Run dialyzer
         run: mix dialyzer --no-check --halt-exit-status
