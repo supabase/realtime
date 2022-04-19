@@ -21,8 +21,8 @@ jobs:
       - name: Setup elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: 1.11.x # Define the elixir version [required]
           otp-version: 23.x # Define the OTP version [required]
+          elixir-version: 1.11.x # Define the elixir version [required]
       - uses: actions/checkout@v2
 
       - name: Set up Postgres
