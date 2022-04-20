@@ -80,11 +80,6 @@
     },
     "Tenant": {
       "properties": {
-        "active": {
-          "description": "",
-          "example": true,
-          "type": "boolean"
-        },
         "extensions": {
           "description": "",
           "items": {
@@ -126,70 +121,87 @@
     },
     "TenantReq": {
       "properties": {
-        "active": {
-          "description": "",
-          "example": true,
-          "type": "boolean"
-        },
-        "db_host": {
-          "description": "",
-          "example": "db.awesome.supabase.net",
-          "type": "string"
-        },
-        "db_name": {
-          "description": "",
-          "example": "postgres",
-          "type": "string"
-        },
-        "db_password": {
-          "description": "",
-          "example": "postgres",
-          "type": "string"
-        },
-        "db_port": {
-          "description": "",
-          "example": "6543",
-          "type": "string"
-        },
-        "db_user": {
-          "description": "",
-          "example": "postgres",
-          "type": "string"
-        },
-        "external_id": {
-          "description": "",
-          "example": "okumviwlylkmpkoicbrc",
-          "type": "string"
-        },
         "jwt_secret": {
           "description": "",
           "example": "big_secret",
+          "maxLength": 500,
           "type": "string"
+        },
+        "max_concurrent_users": {
+          "default": 10000,
+          "description": "",
+          "example": 10000,
+          "type": "integer"
         },
         "name": {
           "description": "",
           "example": "tenant1",
           "type": "string"
         },
-        "region": {
+        "settings": {
           "description": "",
-          "example": "ap-southeast-1",
-          "type": "string"
-        },
-        "rls_poll_interval": {
-          "description": "",
-          "example": 500,
-          "type": "integer"
+          "properties": {
+            "db_host": {
+              "example": "127.0.0.1",
+              "required": true,
+              "type": "string"
+            },
+            "db_name": {
+              "example": "postgres",
+              "required": true,
+              "type": "string"
+            },
+            "db_password": {
+              "example": "postgres",
+              "required": true,
+              "type": "string"
+            },
+            "db_port": {
+              "example": "6432",
+              "required": true,
+              "type": "string"
+            },
+            "db_user": {
+              "example": "postgres",
+              "required": true,
+              "type": "string"
+            },
+            "poll_interval": {
+              "default": 100,
+              "example": 100,
+              "type": "integer"
+            },
+            "poll_max_changes": {
+              "default": 100,
+              "example": 100,
+              "type": "integer"
+            },
+            "poll_max_record_bytes": {
+              "default": 1048576,
+              "example": 1048576,
+              "type": "integer"
+            },
+            "publication": {
+              "default": "supabase_multiplayer",
+              "example": "supabase_multiplayer",
+              "type": "string"
+            },
+            "region": {
+              "example": "us-east-1",
+              "required": true,
+              "type": "string"
+            },
+            "slot_name": {
+              "default": "supabase_multiplayer_replication_slot",
+              "example": "supabase_multiplayer_replication_slot",
+              "type": "string"
+            }
+          },
+          "type": "object"
         }
       },
       "required": [
-        "db_password",
-        "db_user",
-        "db_name",
-        "db_port",
-        "db_host",
-        "region",
-        "external_id",
+        "settings",
         "jwt_secret"
       ],
       "title": "TenantReq",
@@ -307,6 +319,7 @@
           {
             "description": "",
             "in": "path",
+            "maxLength": 255,
             "name": "external_id",
             "required": true,
             "type": "string",

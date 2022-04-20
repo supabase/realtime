@@ -67,6 +67,7 @@ defmodule RealtimeWeb.TenantController do
     parameters do
       external_id(:path, :string, "",
         required: true,
+        maxLength: 255,
         example: "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19"
       )
 
@@ -121,7 +122,6 @@ defmodule RealtimeWeb.TenantController do
             id(:string, "", required: false, example: "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19")
             name(:string, "", required: false, example: "tenant1")
             external_id(:string, "", required: false, example: "okumviwlylkmpkoicbrc")
-            active(:boolean, "", required: false, example: true)
             inserted_at(:string, "", required: false, example: "2022-02-16T20:41:47")
             max_concurrent_users(:integer, "", required: false, example: 10_000)
             extensions(:array, "", required: true, items: Schema.ref(:ExtensionPostgres))
@@ -163,16 +163,41 @@ defmodule RealtimeWeb.TenantController do
 
           properties do
             name(:string, "", required: false, example: "tenant1")
-            jwt_secret(:string, "", required: true, example: "big_secret")
-            external_id(:string, "", required: true, example: "okumviwlylkmpkoicbrc")
-            active(:boolean, "", required: false, example: true)
-            region(:string, "", required: true, example: "ap-southeast-1")
-            db_host(:string, "", required: true, example: "db.awesome.supabase.net")
-            db_port(:string, "", required: true, example: "6543")
-            db_name(:string, "", required: true, example: "postgres")
-            db_user(:string, "", required: true, example: "postgres")
-            db_password(:string, "", required: true, example: "postgres")
-            rls_poll_interval(:integer, "", required: false, example: 500)
+            jwt_secret(:string, "", required: true, maxLength: 500, example: "big_secret")
+            max_concurrent_users(:integer, "", required: false, example: 10_000, default: 10_000)
+
+            settings(:object, "",
+              required: true,
+              properties: %{
+                db_host: %Schema{type: :string, required: true, example: "127.0.0.1"},
+                db_name: %Schema{type: :string, required: true, example: "postgres"},
+                db_password: %Schema{
+                  type: :string,
+                  required: true,
+                  example: "postgres"
+                },
+                db_user: %Schema{type: :string, required: true, example: "postgres"},
+                db_port: %Schema{type: :string, required: true, example: "6432"},
+                region: %Schema{type: :string, required: true, example: "us-east-1"},
+                poll_interval: %Schema{type: :integer, default: 100, example: 100},
+                poll_max_changes: %Schema{type: :integer, default: 100, example: 100},
+                poll_max_record_bytes: %Schema{
+                  type: :integer,
+                  default: 1_048_576,
+                  example: 1_048_576
+                },
+                publication: %Schema{
+                  type: :string,
+                  default: "supabase_multiplayer",
+                  example: "supabase_multiplayer"
+                },
+                slot_name: %Schema{
+                  type: :string,
+                  default: "supabase_multiplayer_replication_slot",
+                  example: "supabase_multiplayer_replication_slot"
+                }
+              }
+            )
           end
         end,
       Tenants:
