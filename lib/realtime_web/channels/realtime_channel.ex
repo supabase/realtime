@@ -32,10 +32,12 @@ defmodule RealtimeWeb.RealtimeChannel do
 
         metadata = [
           metadata:
-            {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), postgres_topic}
+            {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), postgres_topic,
+             topic}
         ]
 
         Endpoint.subscribe(tenant_topic, metadata)
+        Endpoint.subscribe(tenant <> ":" <> postgres_topic, metadata)
         Extensions.Postgres.subscribe(tenant, id, postgres_topic, claims, self())
       end
 
