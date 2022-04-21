@@ -78,66 +78,8 @@
       "title": "ExtensionPostgres",
       "type": "object"
     },
-    "Tenant": {
+    "ExtensionPostgresReq": {
       "properties": {
-        "extensions": {
-          "description": "",
-          "items": {
-            "$ref": "#/definitions/ExtensionPostgres"
-          },
-          "type": "array"
-        },
-        "external_id": {
-          "description": "",
-          "example": "okumviwlylkmpkoicbrc",
-          "type": "string"
-        },
-        "id": {
-          "description": "",
-          "example": "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19",
-          "type": "string"
-        },
-        "inserted_at": {
-          "description": "",
-          "example": "2022-02-16T20:41:47",
-          "type": "string"
-        },
-        "max_concurrent_users": {
-          "description": "",
-          "example": 10000,
-          "type": "integer"
-        },
-        "name": {
-          "description": "",
-          "example": "tenant1",
-          "type": "string"
-        }
-      },
-      "required": [
-        "extensions"
-      ],
-      "title": "Tenant",
-      "type": "object"
-    },
-    "TenantReq": {
-      "properties": {
-        "jwt_secret": {
-          "description": "",
-          "example": "big_secret",
-          "maxLength": 500,
-          "type": "string"
-        },
-        "max_concurrent_users": {
-          "default": 10000,
-          "description": "",
-          "example": 10000,
-          "type": "integer"
-        },
-        "name": {
-          "description": "",
-          "example": "tenant1",
-          "type": "string"
-        },
         "settings": {
           "description": "",
           "properties": {
@@ -198,11 +140,83 @@
             }
           },
           "type": "object"
+        },
+        "type": {
+          "description": "",
+          "example": "postgres",
+          "type": "string"
         }
       },
       "required": [
         "settings",
-        "jwt_secret"
+        "type"
+      ],
+      "title": "ExtensionPostgresReq",
+      "type": "object"
+    },
+    "Tenant": {
+      "properties": {
+        "extensions": {
+          "description": "",
+          "items": {
+            "$ref": "#/definitions/ExtensionPostgres"
+          },
+          "type": "array"
+        },
+        "external_id": {
+          "description": "",
+          "example": "okumviwlylkmpkoicbrc",
+          "type": "string"
+        },
+        "id": {
+          "description": "",
+          "example": "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19",
+          "type": "string"
+        },
+        "inserted_at": {
+          "description": "",
+          "example": "2022-02-16T20:41:47",
+          "type": "string"
+        },
+        "max_concurrent_users": {
+          "description": "",
+          "example": 10000,
+          "type": "integer"
+        },
+        "name": {
+          "description": "",
+          "example": "tenant1",
+          "type": "string"
+        }
+      },
+      "required": [
+        "extensions"
+      ],
+      "title": "Tenant",
+      "type": "object"
+    },
+    "TenantReq": {
+      "properties": {
+        "extensions": {
+          "description": "",
+          "items": {
+            "$ref": "#/definitions/ExtensionPostgresReq"
+          },
+          "type": "array"
+        },
+        "max_concurrent_users": {
+          "description": "",
+          "example": 10000,
+          "type": "integer"
+        },
+        "name": {
+          "description": "",
+          "example": "tenant1",
+          "type": "string"
+        }
+      },
+      "required": [
+        "extensions"
       ],
       "title": "TenantReq",
       "type": "object"
