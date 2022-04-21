@@ -3,7 +3,6 @@ defmodule Extensions.Postgres do
 
   alias Extensions.Postgres
   alias Postgres.SubscriptionManager
-  @default_poll_interval 500
 
   def start_distributed(scope, %{"region" => region} = params) do
     [fly_region | _] = Postgres.Regions.aws_to_fly(region)
@@ -36,14 +35,6 @@ defmodule Extensions.Postgres do
     :global.trans({{Extensions.Postgres, scope}, self()}, fn ->
       case :global.whereis_name({:supervisor, scope}) do
         :undefined ->
-          poll_interval =
-            if !is_integer(poll_interval) do
-              Logger.error("Wrong poll_interval value: #{inspect(poll_interval)}")
-              @default_poll_interval
-            else
-              poll_interval
-            end
-
           opts = [
             id: scope,
             db_host: db_host,

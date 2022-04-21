@@ -56,9 +56,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
       # TODO: check errors
       {:error, error} ->
-        error
-        |> IO.inspect()
-        |> Logger.error()
+        Logger.error("Prepare replication error: #{inspect(error)}")
 
         {timeout, backoff} = Backoff.backoff(backoff)
         :timer.sleep(timeout)
