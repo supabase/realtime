@@ -162,9 +162,8 @@ defmodule RealtimeWeb.TenantController do
           title("TenantReq")
 
           properties do
-            name(:string, "", required: false, example: "tenant1")
-            max_concurrent_users(:integer, "", required: false, example: 10_000)
-            jwt_secret(:string, "", required: true, maxLength: 500, example: "big_secret")
+            name(:string, "", required: false, example: "tenant1", maxLength: 255)
+            max_concurrent_users(:integer, "", required: false, example: 10_000, default: 10_000)
             extensions(:array, "", required: true, items: Schema.ref(:ExtensionPostgresReq))
           end
         end,
