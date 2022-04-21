@@ -204,6 +204,12 @@
           },
           "type": "array"
         },
+        "jwt_secret": {
+          "description": "",
+          "example": "big_secret",
+          "maxLength": 500,
+          "type": "string"
+        },
         "max_concurrent_users": {
           "description": "",
           "example": 10000,
@@ -216,7 +222,8 @@
         }
       },
       "required": [
-        "extensions"
+        "extensions",
+        "jwt_secret"
       ],
       "title": "TenantReq",
       "type": "object"
