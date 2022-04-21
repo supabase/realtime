@@ -11,7 +11,7 @@ kill_timeout = 5
 
 [env]
   SECURE_CHANNELS = "true"
-  DNS_NODES = "realtime-staging.internal"
+  DNS_NODES = "multiplayer-staging.internal"
 
 [experimental]
   private_network = true
