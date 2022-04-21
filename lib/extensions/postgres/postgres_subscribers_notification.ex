@@ -49,19 +49,8 @@ defmodule Extensions.Postgres.SubscribersNotification do
           # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
           if type in ["INSERT", "UPDATE", "DELETE"] do
             record_key = if type == "DELETE", do: :old_record, else: :record
-
             record = Map.get(change, record_key)
-
-            filtered =
-              is_map(record) &&
-                Enum.reduce(record, [], fn {k, v}, acc ->
-                  with true <- is_notification_key_valid(v),
-                       {:ok, stringified_v} <- stringify_value(v),
-                       true <- is_notification_key_length_valid(stringified_v) do
-                    ["#{table_topic}:#{k}=eq.#{stringified_v}" | acc]
-                  end
-                end)
-
+            filtered = filtered_record(record, table_topic)
             [{change, ["*", table_topic] ++ filtered} | acc]
           else
             acc
@@ -71,6 +60,17 @@ defmodule Extensions.Postgres.SubscribersNotification do
           acc
       end
     end)
+  end
+
+  defp filtered_record(record, table_topic) do
+    is_map(record) &&
+      Enum.reduce(record, [], fn {k, v}, acc ->
+        with true <- is_notification_key_valid(v),
+             {:ok, stringified_v} <- stringify_value(v),
+             true <- is_notification_key_length_valid(stringified_v) do
+          ["#{table_topic}:#{k}=eq.#{stringified_v}" | acc]
+        end
+      end)
   end
 
   defp is_notification_key_valid(v) do
