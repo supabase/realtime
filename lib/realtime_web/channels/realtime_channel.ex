@@ -1,7 +1,8 @@
 defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
   require Logger
-
+  import RealtimeWeb.ChannelsAuthorization, only: [authorize_conn: 2]
+  alias Extensions.Postgres
   alias RealtimeWeb.{Endpoint, Presence}
 
   @impl true
@@ -38,13 +39,13 @@ defmodule RealtimeWeb.RealtimeChannel do
 
         Endpoint.subscribe(tenant_topic, metadata)
         Endpoint.subscribe(tenant <> ":" <> postgres_topic, metadata)
-        Extensions.Postgres.subscribe(tenant, id, postgres_topic, claims, self())
+        Postgres.subscribe(tenant, id, postgres_topic, claims, self())
       end
 
       Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
 
       send(self(), :after_join)
-      {:ok, assign(socket, %{id: id, tenant_topic: tenant_topic})}
+      {:ok, assign(socket, %{id: id, tenant_topic: tenant_topic, postgres_topic: postgres_topic})}
     else
       Logger.error("Reached max_concurrent_users limit")
       {:error, %{reason: "reached max_concurrent_users limit"}}
@@ -68,9 +69,31 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  # TODO: implement
-  def handle_in("access_token", _, socket) do
+  def handle_in("access_token", %{"access_token" => nil}, socket) do
     {:noreply, socket}
+  end
+
+  def handle_in(
+        "access_token",
+        %{"access_token" => token},
+        %{
+          assigns: %{
+            jwt_secret: jwt_secret,
+            tenant: tenant,
+            id: id,
+            postgres_topic: postgres_topic
+          }
+        } = socket
+      ) do
+    case authorize_conn(token, jwt_secret) do
+      {:ok, claims} ->
+        Postgres.unsubscribe(tenant, id)
+        Postgres.subscribe(tenant, id, postgres_topic, claims, self())
+        {:noreply, socket}
+
+      _ ->
+        {:error, %{reason: "can't udpate access_token"}}
+    end
   end
 
   def handle_in("broadcast" = type, payload, %{assigns: %{tenant_topic: topic}} = socket) do
