@@ -86,13 +86,20 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       ) do
     case authorize_conn(token, jwt_secret) do
-      {:ok, claims} ->
-        Postgres.unsubscribe(tenant, id)
-        Postgres.subscribe(tenant, id, postgres_topic, claims, self())
-        {:noreply, socket}
+      {:ok, %{"exp" => expiration} = claims} ->
+        if expiration > System.system_time(:second) do
+          Logger.error("The client tries to refresh the expired access_token")
+          {:stop, %{reason: "the client tries to refresh the expired access_token"}, socket}
+        else
+          Postgres.unsubscribe(tenant, UUID.string_to_binary!(id))
+          new_id = UUID.uuid1()
+          Postgres.subscribe(tenant, new_id, postgres_topic, claims, self())
+          {:noreply, assign(socket, %{id: new_id})}
+        end
 
       _ ->
-        {:error, %{reason: "can't udpate access_token"}}
+        Logger.error("Can't udpate access_token")
+        {:stop, %{reason: "can't udpate access_token"}, socket}
     end
   end
 
@@ -149,8 +156,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp topic_from_config(params) do
-    case params["configs"]["realtime"]["filter"] do
-      %{"schema" => schema, "table" => table, "filter" => filter} ->
+    case params["configs"]["realtime"]["eventFilter"] do
+      %{"schema" => schema, "table" => table, "eventFilter" => filter} ->
         "#{schema}:#{table}:#{filter}"
 
       %{"schema" => schema, "table" => table} ->
