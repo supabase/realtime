@@ -87,7 +87,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       ) do
     case authorize_conn(token, jwt_secret) do
       {:ok, %{"exp" => expiration} = claims} ->
-        if expiration > System.system_time(:second) do
+        if expiration < System.system_time(:second) do
           Logger.error("The client tries to refresh the expired access_token")
           {:stop, %{reason: "the client tries to refresh the expired access_token"}, socket}
         else
