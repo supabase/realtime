@@ -1,7 +1,7 @@
 defmodule RealtimeWeb.UserSocket do
   use Phoenix.Socket
   require Logger
-  alias RealtimeWeb.ChannelsAuthorization
+  import RealtimeWeb.ChannelsAuthorization, only: [authorize_conn: 2]
 
   ## Channels
   channel "realtime:*", RealtimeWeb.RealtimeChannel
@@ -17,6 +17,8 @@ defmodule RealtimeWeb.UserSocket do
            token when token != nil <- access_token(params, headers),
            {:ok, claims} <- authorize_conn(token, tenant.jwt_secret) do
         assigns = %{
+          token: token,
+          jwt_secret: tenant.jwt_secret,
           tenant: external_id,
           claims: claims,
           limits: %{
@@ -49,17 +51,6 @@ defmodule RealtimeWeb.UserSocket do
 
   @impl true
   def id(_socket), do: nil
-
-  defp authorize_conn(token, secret) do
-    case ChannelsAuthorization.authorize(token, secret) do
-      # TODO: check necessary fields
-      {:ok, %{"role" => _} = claims} ->
-        {:ok, claims}
-
-      _ ->
-        :error
-    end
-  end
 
   defp filter_postgres_settings(extensions) do
     [postgres] =
