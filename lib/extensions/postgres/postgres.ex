@@ -114,7 +114,8 @@ defmodule Extensions.Postgres do
 
   def launch_node(fly_region, default) do
     case :syn.members(Postgres.RegionNodes, fly_region) do
-      [{_, [node: launch_node]} | _] ->
+      [_ | _] = regions_nodes ->
+        {_, [node: launch_node]} = Enum.random(regions_nodes)
         launch_node
 
       _ ->
