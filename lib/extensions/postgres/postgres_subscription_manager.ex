@@ -5,6 +5,10 @@ defmodule Extensions.Postgres.SubscriptionManager do
   alias Extensions.Postgres
   alias Postgres.Subscriptions
 
+  import Realtime.Helpers, only: [cancel_timer: 1]
+
+  @check_active_interval 15_000
+
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
@@ -19,33 +23,39 @@ defmodule Extensions.Postgres.SubscriptionManager do
        conn: opts.conn,
        id: opts.id,
        subscribers_tid: opts.subscribers_tid,
-       publication: opts.publication
+       publication: opts.publication,
+       check_active_pids: nil
      }}
   end
 
   def subscribe(pid, opts) do
-    # TODO: rewrite to call with queue
     send(pid, {:subscribe, opts})
   end
 
   @spec unsubscribe(atom | pid | port | reference | {atom, atom}, any) :: any
   def unsubscribe(pid, subs_id) do
-    # TODO: rewrite to call with queue
     send(pid, {:unsubscribe, subs_id})
   end
 
   @impl true
-  def handle_info({:subscribe, opts}, %{subscribers_tid: tid} = state) do
+  def handle_info({:subscribe, opts}, %{check_active_pids: ref, subscribers_tid: tid} = state) do
     Logger.debug("Subscribe #{inspect(opts, pretty: true)}")
     pid = opts.channel_pid
-    ref = Process.monitor(pid)
-    true = :ets.insert(tid, {pid, opts.id, ref})
+    true = :ets.insert(tid, {pid, opts.id, Process.monitor(pid)})
     Subscriptions.create(state.conn, state.publication, opts)
-    {:noreply, state}
+
+    new_state =
+      if ref == nil do
+        %{state | check_active_pids: check_active_pids()}
+      else
+        state
+      end
+
+    {:noreply, new_state}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{subscribers_tid: tid} = state) do
-    case :ets.lookup(tid, pid) do
+    case :ets.take(tid, pid) do
       [{_pid, postgres_id, _ref}] ->
         Subscriptions.delete(state.conn, UUID.string_to_binary!(postgres_id))
 
@@ -60,5 +70,39 @@ defmodule Extensions.Postgres.SubscriptionManager do
   def handle_info({:unsubscribe, subs_id}, state) do
     Subscriptions.delete(state.conn, subs_id)
     {:noreply, state}
+  end
+
+  def handle_info(:check_active_pids, %{check_active_pids: ref, subscribers_tid: tid} = state) do
+    cancel_timer(ref)
+
+    delete_zombi = fn {pid, postgres_id, _monitor_ref}, acc ->
+      if !Process.alive?(pid) do
+        Logger.error("Detected zombi subscriber")
+        :ets.delete(tid, pid)
+        Subscriptions.delete(state.conn, UUID.string_to_binary!(postgres_id))
+      end
+
+      acc + 1
+    end
+
+    objects = :ets.foldl(delete_zombi, 0, tid)
+
+    new_ref =
+      if objects == 0 do
+        Logger.debug("Cancel check_active_pids")
+        nil
+      else
+        check_active_pids()
+      end
+
+    {:noreply, %{state | check_active_pids: new_ref}}
+  end
+
+  defp check_active_pids() do
+    Process.send_after(
+      self(),
+      :check_active_pids,
+      @check_active_interval
+    )
   end
 end

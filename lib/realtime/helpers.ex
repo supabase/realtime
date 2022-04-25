@@ -24,4 +24,7 @@ defmodule Realtime.Helpers do
     to_remove = :binary.last(data)
     :binary.part(data, 0, byte_size(data) - to_remove)
   end
+
+  def cancel_timer(nil), do: false
+  def cancel_timer(ref), do: Process.cancel_timer(ref)
 end
