@@ -1,27 +1,22 @@
-name: CI
+name: Deploy production
 on:
-  pull_request:
   push:
     branches:
-      - master
-  workflow_dispatch:
-
+      - main
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 jobs:
-  mix-format:
-    name: Mix-Format and Credo tests
+  deploy:
+    name: Deploy
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [ubuntu-latest]
-        otp: [24.x]
-        elixir: [1.13.x]
+
     steps:
       - uses: actions/checkout@v2
-      - name: Set up Elixir
+      - name: Setup elixir
         uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{matrix.otp}}
-          elixir-version: ${{matrix.elixir}}
+          otp-version: 24.x # Define the OTP version [required]
+          elixir-version: 1.13.x # Define the elixir version [required]
       - name: Cache Mix
         uses: actions/cache@v1
         with:
@@ -49,3 +44,6 @@ jobs:
       #     mix dialyzer --plt
       # - name: Run dialyzer
       #   run: mix dialyzer --no-check --halt-exit-status
+      - uses: superfly/flyctl-actions@1.1
+        with:
+          args: "-c deploy/fly/production.toml deploy"
