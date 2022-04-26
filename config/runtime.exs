@@ -43,6 +43,7 @@ config :realtime, Realtime.Repo,
   database: System.get_env("DB_NAME", "postgres"),
   hostname: System.get_env("DB_HOST", "localhost"),
   port: System.get_env("DB_PORT", "5432"),
+  # TODO: remove it after all checks
   show_sensitive_data_on_connection_error: true,
   pool_size: System.get_env("DB_POOL_SIZE", "5") |> String.to_integer(),
   prepare: :unnamed,
