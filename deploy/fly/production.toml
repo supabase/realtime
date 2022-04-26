@@ -37,4 +37,3 @@ kill_timeout = 5
     interval = "15s"
     restart_limit = 6
     timeout = "2s"
-    
