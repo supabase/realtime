@@ -21,6 +21,8 @@ defmodule RealtimeWeb.Router do
     get "/", PageController, :index
   end
 
+  get "/metrics/:id", RealtimeWeb.TenantMetricsController, :index
+
   scope "/api", RealtimeWeb do
     pipe_through :api
     resources "/tenants", TenantController
