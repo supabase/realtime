@@ -63,6 +63,22 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  def handle_info(
+        :postgres_resubscribe,
+        %{
+          assigns: %{
+            id: id,
+            tenant: tenant,
+            postgres_topic: postgres_topic,
+            claims: claims
+          }
+        } = socket
+      ) do
+    Postgres.subscribe(tenant, id, postgres_topic, claims, self())
+    Logger.info("Redsubscribed #{tenant} to #{postgres_topic}")
+    {:noreply, socket}
+  end
+
   def handle_info(other, socket) do
     Logger.error("Undefined msg #{inspect(other, pretty: true)}")
     {:noreply, socket}
