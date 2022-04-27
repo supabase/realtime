@@ -102,7 +102,7 @@ defmodule Extensions.Postgres do
   end
 
   @spec manager_pid(any()) :: pid() | nil
-  defp manager_pid(scope) do
+  def manager_pid(scope) do
     case :global.whereis_name({:subscription_manager, scope}) do
       :undefined ->
         nil

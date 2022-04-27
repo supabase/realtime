@@ -32,6 +32,10 @@ defmodule Extensions.Postgres.SubscriptionManager do
     send(pid, {:subscribe, opts})
   end
 
+  def subscribers_list(pid) do
+    GenServer.call(pid, :subscribers_list)
+  end
+
   @spec unsubscribe(atom | pid | port | reference | {atom, atom}, any) :: any
   def unsubscribe(pid, subs_id) do
     send(pid, {:unsubscribe, subs_id})
@@ -96,6 +100,20 @@ defmodule Extensions.Postgres.SubscriptionManager do
       end
 
     {:noreply, %{state | check_active_pids: new_ref}}
+  end
+
+  @impl true
+  def handle_call(:subscribers_list, _, state) do
+    subscribers =
+      :ets.foldl(
+        fn {pid, _, _}, acc ->
+          [pid | acc]
+        end,
+        [],
+        state.subscribers_tid
+      )
+
+    {:reply, subscribers, state}
   end
 
   defp check_active_pids() do

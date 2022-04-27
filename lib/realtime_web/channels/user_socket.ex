@@ -30,7 +30,7 @@ defmodule RealtimeWeb.UserSocket do
           }
         }
 
-        params = filter_postgres_settings(tenant.extensions)
+        params = Extensions.Postgres.Helpers.filter_postgres_settings(tenant.extensions)
         Extensions.Postgres.start_distributed(external_id, params)
 
         {:ok, assign(socket, assigns)}
@@ -51,17 +51,4 @@ defmodule RealtimeWeb.UserSocket do
 
   @impl true
   def id(_socket), do: nil
-
-  defp filter_postgres_settings(extensions) do
-    [postgres] =
-      Enum.filter(extensions, fn e ->
-        if e.type == "postgres" do
-          true
-        else
-          false
-        end
-      end)
-
-    postgres.settings
-  end
 end

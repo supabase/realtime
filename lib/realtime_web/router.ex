@@ -26,7 +26,7 @@ defmodule RealtimeWeb.Router do
   scope "/api", RealtimeWeb do
     pipe_through :api
     resources "/tenants", TenantController
-    # resources "/scopes", ScopeController
+    get "/manager/:tenant/reload", TenantManagerController, :reload
   end
 
   scope "/api/swagger" do
