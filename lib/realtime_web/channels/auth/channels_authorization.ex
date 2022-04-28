@@ -1,4 +1,7 @@
 defmodule RealtimeWeb.ChannelsAuthorization do
+  @moduledoc """
+  Check connection is authorized to access channel
+  """
   def authorize(token, secret) when is_binary(token) do
     token
     |> clean_token()

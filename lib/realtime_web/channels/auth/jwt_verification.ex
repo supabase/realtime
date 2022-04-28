@@ -1,4 +1,7 @@
 defmodule RealtimeWeb.JwtVerification do
+  @moduledoc """
+  Parse JWT and verify claims
+  """
   defmodule JwtAuthToken do
     use Joken.Config
 
