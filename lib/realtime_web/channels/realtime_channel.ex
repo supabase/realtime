@@ -1,7 +1,6 @@
 defmodule RealtimeWeb.RealtimeChannel do
   @moduledoc """
   Used for handling channels and subscriptions.
-
   """
   use RealtimeWeb, :channel
   require Logger

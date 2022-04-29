@@ -47,6 +47,6 @@ jobs:
           mix dialyzer --plt
       - name: Run dialyzer
         run: mix dialyzer --no-check
-      # - uses: superfly/flyctl-actions@1.1
-      #   with:
-      #     args: "-c deploy/fly/staging.toml deploy"
+      - uses: superfly/flyctl-actions@1.1
+        with:
+          args: "-c deploy/fly/staging.toml deploy"
