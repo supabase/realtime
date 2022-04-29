@@ -61,6 +61,14 @@ db_ip_version =
     :inet
   )
 
+# Bind Realtime via specified IP version. Options are either "IPv4" or "Ipv6"
+realtime_ip_version =
+  Map.get(
+    %{"ipv4" => :inet, "ipv6" => :inet6},
+    System.get_env("REALTIME_IP_VERSION", "IPv6") |> String.downcase(),
+    :inet6
+  )
+
 # Expose Prometheus metrics
 # Defaults to true in development and false in production
 expose_metrics = System.get_env("EXPOSE_METRICS", "false") == "true"
@@ -136,7 +144,7 @@ config :realtime, RLS.Repo,
   log: false
 
 config :realtime, Endpoint,
-  http: [:inet6, port: app_port],
+  http: [realtime_ip_version, port: app_port],
   pubsub_server: PubSub,
   secret_key_base: session_secret_key_base
 

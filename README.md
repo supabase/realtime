@@ -233,6 +233,7 @@ REPLICATION_MODE           # {string}      (options: 'STREAM'/'RLS') Spin up ser
 SLOT_NAME                  # {string}      A unique name for Postgres to track where this server has "listened until". If the server dies, it can pick up from the last position. This should be lowercase.
 TEMPORARY_SLOT             # {string}      (options: 'true'/'false') Start logical replication slot as either temporary or permanent.
 PORT                       # {number}      Port which you can connect your client/listeners
+REALTIME_IP_VERSION        # {string}      (options: 'IPv4'/'IPv6') Bind realtime via either IPv4 or IPv6. (default: IPv6)
 PUBLICATIONS               # {string} JSON encoded array of publication names. Realtime RLS currently accepts one publication.
 SECURE_CHANNELS            # {string}      (options: 'true'/'false') Enable/Disable channels authorization via JWT verification.
 JWT_SECRET                 # {string}      HS algorithm octet key (e.g. "95x0oR8jq9unl9pOIx"). Only required if SECURE_CHANNELS is set to true.
@@ -281,6 +282,7 @@ DB_IP_VERSION           # {string}      (options: 'IPv4'/'IPv6') Connect to data
 REPLICATION_MODE        # {string}      (options: 'STREAM'/'RLS') Spin up server as Realtime or Realtime RLS. Defaults to 'STREAM'.
 SLOT_NAME               # {string}      A unique name for Postgres to track where this server has "listened until". If the server dies, it can pick up from the last position. This should be lowercase. If not provided then Realtime is started with a temporary slot.
 PORT                    # {number}      Port which you can connect your client/listeners
+REALTIME_IP_VERSION     # {string}      (options: 'IPv4'/'IPv6') Bind realtime via either IPv4 or IPv6. (default: IPv6)
 PUBLICATIONS            # {string} JSON encoded array of publication names
 SECURE_CHANNELS         # {string}      (options: 'true'/'false') Enable/Disable channels authorization via JWT verification.
 JWT_SECRET              # {string}      HS algorithm octet key (e.g. "95x0oR8jq9unl9pOIx"). Only required if SECURE_CHANNELS is set to true.
@@ -304,6 +306,7 @@ docker run                                                       \
   -e REPLICATION_MODE='STREAM'                                   \
   -e SLOT_NAME='supabase_realtime'                               \
   -e PORT=4000                                                   \
+  -e REALTIME_IP_VERSION='IPv6'                                  \
   -e PUBLICATIONS="[\"supabase_realtime\"]"                      \
   -e SECURE_CHANNELS='true'                                      \
   -e JWT_SECRET='SOMETHING_SUPER_SECRET'                         \
