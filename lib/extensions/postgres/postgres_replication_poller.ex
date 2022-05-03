@@ -33,7 +33,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
       max_record_bytes: Keyword.fetch!(opts, :max_record_bytes),
       max_changes: Keyword.fetch!(opts, :max_changes),
       conn: Keyword.fetch!(opts, :conn),
-      id: Keyword.fetch!(opts, :id)
+      tenant: Keyword.fetch!(opts, :id)
     }
 
     {:ok, state, {:continue, :prepare_replication}}
@@ -77,7 +77,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
           max_record_bytes: max_record_bytes,
           max_changes: max_changes,
           conn: conn,
-          id: id
+          tenant: tenant
         } = state
       ) do
     cancel_timer(poll_ref)
@@ -106,9 +106,9 @@ defmodule Extensions.Postgres.ReplicationPoller do
               [record_struct | acc]
           end
         end)
-        # |> Logger.debug()
         |> Enum.reverse()
-        |> Postgres.SubscribersNotification.notify_subscribers(id)
+        |> IO.inspect()
+        |> Postgres.SubscribersNotification.notify_subscribers(tenant)
 
         {:ok, length(rows)}
 

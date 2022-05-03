@@ -35,14 +35,18 @@ defmodule RealtimeWeb.RealtimeChannel do
         Endpoint.unsubscribe(topic)
 
         metadata = [
-          metadata:
-            {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), postgres_topic,
-             topic}
+          metadata: {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), topic}
         ]
 
-        Endpoint.subscribe(tenant_topic, metadata)
-        Endpoint.subscribe(tenant <> ":" <> postgres_topic, metadata)
-        Postgres.subscribe(tenant, id, postgres_topic, claims, self())
+        Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
+
+        Postgres.subscribe(
+          tenant,
+          id,
+          params["configs"]["realtime"]["eventFilter"],
+          claims,
+          self()
+        )
       end
 
       Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")

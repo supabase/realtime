@@ -4,35 +4,31 @@ defmodule Extensions.Postgres.SubscribersNotification do
   alias Phoenix.Socket.Broadcast
   alias Realtime.{MessageDispatcher, PubSub}
 
-  # @topic "room"
-  @topic "realtime"
-
-  def broadcast_change(topics, %{subscription_ids: subscription_ids} = change, tenant) do
+  def broadcast_change(topic, %{subscription_ids: subscription_ids} = change) do
     payload =
       Map.filter(change, fn {key, _} ->
         !Enum.member?([:is_rls_enabled, :subscription_ids], key)
       end)
 
-    for topic <- topics do
-      broadcast = %Broadcast{
-        topic: "#{@topic}:#{topic}",
-        event: "realtime",
-        payload: %{payload: payload, event: payload.type}
-      }
+    broadcast = %Broadcast{
+      # MessageDispatcher updates topic field
+      topic: "",
+      event: "realtime",
+      payload: %{payload: payload, event: payload.type}
+    }
 
-      Phoenix.PubSub.broadcast_from(
-        PubSub,
-        self(),
-        "#{tenant}:#{topic}",
-        {broadcast, subscription_ids, topics},
-        MessageDispatcher
-      )
-    end
+    Phoenix.PubSub.broadcast_from(
+      PubSub,
+      self(),
+      topic,
+      {broadcast, subscription_ids},
+      MessageDispatcher
+    )
   end
 
-  def notify_subscribers([_ | _] = changes, id) do
-    for {change, table_topics} <- changes_topics(changes) do
-      broadcast_change(table_topics, change, id)
+  def notify_subscribers([_ | _] = changes, tenant) do
+    for change <- changes do
+      broadcast_change("realtime:postgres:" <> tenant, change)
     end
   end
 
