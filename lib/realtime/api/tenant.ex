@@ -1,4 +1,7 @@
 defmodule Realtime.Api.Tenant do
+  @moduledoc """
+  Describes a database/tenant which makes use of the realtime service.
+  """
   use Ecto.Schema
   import Ecto.Changeset
 

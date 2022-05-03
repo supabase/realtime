@@ -2,7 +2,13 @@
 # License: https://github.com/cainophile/pgoutput_decoder/blob/master/LICENSE
 
 defmodule Realtime.Adapters.Postgres.Decoder do
+  @moduledoc """
+  Functions for decoding different types of logical replication messages.
+  """
   defmodule Messages do
+    @moduledoc """
+    Different types of logical replication messages from Postgres
+    """
     defmodule(Begin, do: defstruct([:final_lsn, :commit_timestamp, :xid]))
     defmodule(Commit, do: defstruct([:flags, :lsn, :end_lsn, :commit_timestamp]))
     defmodule(Origin, do: defstruct([:origin_commit_lsn, :name]))

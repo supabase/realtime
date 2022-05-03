@@ -1,4 +1,7 @@
 defmodule RealtimeWeb.RealtimeChannel do
+  @moduledoc """
+  Used for handling channels and subscriptions.
+  """
   use RealtimeWeb, :channel
   require Logger
   import RealtimeWeb.ChannelsAuthorization, only: [authorize_conn: 2]

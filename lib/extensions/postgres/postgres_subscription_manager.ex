@@ -1,4 +1,7 @@
 defmodule Extensions.Postgres.SubscriptionManager do
+  @moduledoc """
+  Handles subscriptions from multiple databases.
+  """
   use GenServer
   require Logger
 
