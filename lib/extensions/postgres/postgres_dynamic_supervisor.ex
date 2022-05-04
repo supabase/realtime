@@ -11,7 +11,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
 
   @impl true
   def init(args) do
-    :ok = run_migrations(args)
+    run_migrations(args)
 
     {:ok, conn} =
       Postgrex.start_link(
