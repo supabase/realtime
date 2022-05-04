@@ -41,9 +41,9 @@ jobs:
         if: steps.plt-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p priv/plts
-          mix dialyzer --plt
+          mix dialyzer.build
       - name: Run dialyzer
-        run: mix dialyzer --no-check
+        run: mix dialyzer
       - uses: superfly/flyctl-actions@1.1
         with:
           args: "-c deploy/fly/production.toml deploy"
