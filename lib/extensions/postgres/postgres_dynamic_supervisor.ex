@@ -2,8 +2,8 @@ defmodule Extensions.Postgres.DynamicSupervisor do
   use Supervisor
 
   alias Extensions.Postgres
-  alias Postgres.ReplicationPoller
-  alias Postgres.SubscriptionManager
+  alias Postgres.{ReplicationPoller, SubscriptionManager}
+  alias Realtime.Repo
 
   def start_link(args) do
     Supervisor.start_link(__MODULE__, args)
@@ -11,6 +11,8 @@ defmodule Extensions.Postgres.DynamicSupervisor do
 
   @impl true
   def init(args) do
+    :ok = run_migrations(args)
+
     {:ok, conn} =
       Postgrex.start_link(
         hostname: args[:db_host],
@@ -59,5 +61,36 @@ defmodule Extensions.Postgres.DynamicSupervisor do
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp run_migrations(args) do
+    {:ok, repo} =
+      Repo.start_link(
+        name: nil,
+        hostname: args[:db_host],
+        database: args[:db_name],
+        password: args[:db_pass],
+        username: args[:db_user],
+        pool_size: 1
+      )
+
+    Repo.put_dynamic_repo(repo)
+
+    try do
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(
+          Repo,
+          &Ecto.Migrator.run(
+            &1,
+            [Ecto.Migrator.migrations_path(&1, "postgres/migrations")],
+            :up,
+            all: true,
+            prefix: "realtime"
+          ),
+          pool_size: 1
+        )
+    after
+      Repo.stop()
+    end
   end
 end
