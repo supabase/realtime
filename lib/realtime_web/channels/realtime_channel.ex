@@ -31,7 +31,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       postgres_topic = topic_from_config(params)
       Logger.info("Postgres_topic is " <> postgres_topic)
 
-      if postgres_topic != "" do
+      if postgres_topic != "" || !params["configs"]["realtime"] do
         Endpoint.unsubscribe(topic)
 
         metadata = [
@@ -40,10 +40,30 @@ defmodule RealtimeWeb.RealtimeChannel do
 
         Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
 
+        postgres_config =
+          case params["configs"]["realtime"]["filter"] do
+            nil ->
+              case String.split(sub_topic, ":") do
+                [schema] ->
+                  %{"schema" => schema}
+
+                [schema, table] ->
+                  %{"schema" => schema, "table" => table}
+
+                [schema, table, filter] ->
+                  %{"schema" => schema, "table" => table, "filter" => filter}
+              end
+
+            config ->
+              config
+          end
+
+        Logger.debug("Postgres config is #{inspect(postgres_config, pretty: true)}")
+
         Postgres.subscribe(
           tenant,
           id,
-          params["configs"]["realtime"]["eventFilter"],
+          postgres_config,
           claims,
           self()
         )

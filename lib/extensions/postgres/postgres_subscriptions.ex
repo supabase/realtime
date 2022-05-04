@@ -158,11 +158,9 @@ defmodule Extensions.Postgres.Subscriptions do
     |> IO.inspect()
     |> Enum.each(fn
       {entity, filters} ->
-        IO.inspect({1, entity, filters})
         query(conn, sql, [bin_uuid, entity, filters, params.claims])
 
       entity ->
-        IO.inspect({2, entity, []})
         query(conn, sql, [bin_uuid, entity, [], params.claims])
     end)
   end
@@ -174,6 +172,9 @@ defmodule Extensions.Postgres.Subscriptions do
         [op, value] = String.split(rule, ".")
         [oid] = oids[{schema, table}]
         [{oid, [{column, op, value}]}]
+
+      %{"schema" => schema, "table" => "*"} ->
+        oids[{schema}]
 
       %{"schema" => schema, "table" => table} ->
         oids[{schema, table}]
