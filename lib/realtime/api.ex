@@ -10,6 +10,8 @@ defmodule Realtime.Api do
 
   alias Realtime.Api.Tenant
 
+  @ttl 120
+
   @doc """
   Returns the list of tenants.
 
@@ -59,7 +61,6 @@ defmodule Realtime.Api do
 
     %Tenant{}
     |> Tenant.changeset(attrs)
-    |> Ecto.Changeset.put_assoc(:extensions, attrs["extensions"])
     |> Repo.insert()
   end
 
@@ -77,6 +78,7 @@ defmodule Realtime.Api do
   """
   def update_tenant(%Tenant{} = tenant, attrs) do
     tenant
+    |> Repo.preload(:extensions)
     |> Tenant.changeset(attrs)
     |> Repo.update()
   end
@@ -121,20 +123,29 @@ defmodule Realtime.Api do
   end
 
   def get_tenant_by_external_id(:cached, external_id) do
-    with {:commit, val} <- Cachex.fetch(:tenants, external_id, &get_dec_tenant_by_external_id/1) do
-      Cachex.expire(:tenants, external_id, :timer.seconds(500))
-      val
-    else
-      {:ok, val} ->
+    Cachex.get_and_update(:tenants, external_id, fn
+      nil ->
+        case get_dec_tenant_by_external_id(external_id) do
+          nil -> {:ignore, nil}
+          val -> {:commit, val}
+        end
+
+      val ->
+        {:ignore, val}
+    end)
+    |> case do
+      {:commit, val} ->
+        Cachex.expire(:tenants, external_id, :timer.seconds(@ttl))
         val
 
-      _ ->
-        :error
+      {:ignore, val} ->
+        val
     end
   end
 
   def get_dec_tenant_by_external_id(external_id) do
-    get_tenant_by_external_id(external_id)
+    external_id
+    |> get_tenant_by_external_id()
     |> decrypt_extensions_data()
   end
 
@@ -174,4 +185,6 @@ defmodule Realtime.Api do
 
     %{tenant | extensions: decrypted_extensions}
   end
+
+  def decrypt_extensions_data(_), do: nil
 end
