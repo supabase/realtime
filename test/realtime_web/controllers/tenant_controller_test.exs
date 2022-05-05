@@ -5,33 +5,49 @@ defmodule RealtimeWeb.TenantControllerTest do
 
   alias Realtime.Api
   alias Realtime.Api.Tenant
-  alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
+  alias RealtimeWeb.JwtVerification
+  import Realtime.Helpers, only: [encrypt: 2]
+
+  @external_id "test_external_id"
 
   @create_attrs %{
-    external_id: "some external_id",
-    active: true,
-    name: "some name",
-    db_host: "db.awesome.supabase.net",
-    db_name: "postgres",
-    db_password: "postgres",
-    db_port: "6543",
-    region: "eu-central-1",
-    db_user: "postgres",
-    jwt_secret: "some jwt_secret",
-    rls_poll_interval: 500
+    "name" => "localhost",
+    "extensions" => [
+        %{
+            "type" => "postgres",
+            "settings" => %{
+                "db_host" => "127.0.0.1",
+                "db_name" => "postgres",
+                "db_user" => "postgres",
+                "db_password" => "postgres",
+                "db_port" => "6432",
+                "poll_interval" => 100,
+                "poll_max_changes" => 100,
+                "poll_max_record_bytes" => 1048576,
+                "region" => "us-east-1"
+            }
+        }
+    ],
+    "jwt_secret" => "new secret"
   }
+
   @update_attrs %{
     jwt_secret: "some updated jwt_secret",
-    name: "some updated name"
+    name: "some updated name",
+    max_concurrent_users: 100
   }
-  @invalid_attrs %{external_id: nil, jwt_secret: nil, name: nil}
+
+  @invalid_attrs %{external_id: nil, jwt_secret: nil, extensions: [], name: nil}
 
   def fixture(:tenant) do
-    {:ok, tenant} = Api.create_tenant(@create_attrs)
+    {:ok, tenant} =
+      Map.put(@create_attrs, "external_id", @external_id)
+      |> Api.create_tenant()
     tenant
   end
 
   setup %{conn: conn} do
+    Application.put_env(:realtime, :db_enc_key, "1234567890123456")
     new_conn =
       conn
       |> put_req_header("accept", "application/json")
@@ -43,36 +59,28 @@ defmodule RealtimeWeb.TenantControllerTest do
     {:ok, conn: new_conn}
   end
 
-  describe "index" do
-    test "lists all tenants", %{conn: conn} do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
-        conn = get(conn, Routes.tenant_path(conn, :index))
-        assert json_response(conn, 200)["data"] == []
-      end
-    end
-  end
-
   describe "create tenant" do
     test "renders tenant when data is valid", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
-        conn = post(conn, Routes.tenant_path(conn, :create), tenant: @create_attrs)
-        assert %{"id" => id, "external_id" => ext_id} = json_response(conn, 201)["data"]
+        ext_id = @external_id
+        conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @create_attrs)
+        assert %{"id" => _id, "external_id" => ^ext_id} = json_response(conn, 201)["data"]
         conn = get(conn, Routes.tenant_path(conn, :show, ext_id))
+        assert ^ext_id = json_response(conn, 200)["data"]["external_id"]
+        assert 10000 = json_response(conn, 200)["data"]["max_concurrent_users"]
+      end
+    end
 
-        assert %{
-                 "id" => id,
-                 "active" => true,
-                 "db_host" => "db.awesome.supabase.net",
-                 "db_name" => "postgres",
-                 "db_password" => "postgres",
-                 "db_port" => "6543",
-                 "db_user" => "postgres",
-                 "external_id" => "some external_id",
-                 "jwt_secret" => "some jwt_secret",
-                 "name" => "some name",
-                 "region" => "eu-central-1",
-                 "rls_poll_interval" => 500
-               } = json_response(conn, 200)["data"]
+    test "encrypt creds", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+        ext_id = @external_id
+        conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @create_attrs)
+        [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
+        sec_key = Application.get_env(:realtime, :db_enc_key)
+        assert encrypt(sec_key, "127.0.0.1") == settings["db_host"]
+        assert encrypt(sec_key, "postgres") == settings["db_name"]
+        assert encrypt(sec_key, "postgres") == settings["db_user"]
+        assert encrypt(sec_key, "postgres") == settings["db_password"]
       end
     end
 
@@ -89,27 +97,14 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "renders tenant when data is valid", %{
       conn: conn,
-      tenant: %Tenant{id: id, external_id: ext_id} = tenant
+      tenant: %Tenant{id: id, external_id: ext_id} = _tenant
     } do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
         conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @update_attrs)
         assert %{"id" => ^id, "external_id" => ^ext_id} = json_response(conn, 200)["data"]
         conn = get(conn, Routes.tenant_path(conn, :show, ext_id))
-
-        assert %{
-                 "id" => id,
-                 "active" => true,
-                 "db_host" => "db.awesome.supabase.net",
-                 "db_name" => "postgres",
-                 "db_password" => "postgres",
-                 "db_port" => "6543",
-                 "db_user" => "postgres",
-                 "external_id" => "some external_id",
-                 "jwt_secret" => "some updated jwt_secret",
-                 "name" => "some updated name",
-                 "region" => "eu-central-1",
-                 "rls_poll_interval" => 500
-               } = json_response(conn, 200)["data"]
+        assert "some updated name" = json_response(conn, 200)["data"]["name"]
+        assert 100 = json_response(conn, 200)["data"]["max_concurrent_users"]
       end
     end
 
