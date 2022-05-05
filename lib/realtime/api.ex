@@ -159,13 +159,15 @@ defmodule Realtime.Api do
     |> Repo.preload(:extensions)
   end
 
-  def decrypt_extensions_data(%Realtime.Api.Tenant{} = tenant) do
+  def decrypt_extensions_data(
+        %Realtime.Api.Tenant{extensions: %{settings: settings, type: type} = extensions} = tenant
+      )
+      when is_map(settings) and is_binary(type) do
     secure_key = Application.get_env(:realtime, :db_enc_key)
 
     decrypted_extensions =
-      for extension <- tenant.extensions do
-        settings = extension.settings
-        %{required: required} = Realtime.Extensions.db_settings(extension.type)
+      for extension <- extensions do
+        %{required: required} = Realtime.Extensions.db_settings(type)
 
         decrypted_settings =
           Enum.reduce(required, settings, fn
