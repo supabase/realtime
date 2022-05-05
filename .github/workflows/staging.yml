@@ -3,50 +3,13 @@ on:
   push:
     branches:
       - develop
-  pull_request:
-    branches:
-      - develop
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v2
-      - name: Setup elixir
-        uses: erlef/setup-beam@v1
-        with:
-          otp-version: 24.x # Define the OTP version [required]
-          elixir-version: 1.13.x # Define the elixir version [required]
-      - name: Cache Mix
-        uses: actions/cache@v1
-        with:
-          path: deps
-          key: ${{ runner.os }}-mix-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
-          restore-keys: |
-            ${{ runner.os }}-mix-
-
-      - name: Install dependencies
-        run: mix deps.get
-      - name: Run format check
-        run: mix format --check-formatted
-      - name: Credo checks
-        run: mix credo --strict --mute-exit-status
-      - name: Retrieve PLT Cache
-        uses: actions/cache@v1
-        id: plt-cache
-        with:
-          path: priv/plts
-          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-plts-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
-      - name: Create PLTs
-        if: steps.plt-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p priv/plts
-          mix dialyzer.build
-      - name: Run dialyzer
-        run: mix dialyzer
       - uses: superfly/flyctl-actions@1.1
         with:
           args: "-c deploy/fly/staging.toml deploy"
