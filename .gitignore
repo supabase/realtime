@@ -26,6 +26,9 @@ realtime-*.tar
 /priv/static/*
 !/priv/static/swagger.json
 
+# Ignore Dialyzer .plt
+/priv/plts/*
+
 node_modules
 
 .supabase

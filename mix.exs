@@ -17,6 +17,7 @@ defmodule Realtime.MixProject do
 
   defp dialyzer do
     [
+      plt_add_apps: [:mix],
       plt_core_path: "priv/plts",
       plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
     ]
