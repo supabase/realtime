@@ -107,7 +107,6 @@ defmodule Extensions.Postgres.ReplicationPoller do
           end
         end)
         |> Enum.reverse()
-        |> IO.inspect()
         |> Postgres.SubscribersNotification.notify_subscribers(tenant)
 
         {:ok, length(rows)}
