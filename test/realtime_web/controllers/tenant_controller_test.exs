@@ -13,20 +13,20 @@ defmodule RealtimeWeb.TenantControllerTest do
   @create_attrs %{
     "name" => "localhost",
     "extensions" => [
-        %{
-            "type" => "postgres",
-            "settings" => %{
-                "db_host" => "127.0.0.1",
-                "db_name" => "postgres",
-                "db_user" => "postgres",
-                "db_password" => "postgres",
-                "db_port" => "6432",
-                "poll_interval" => 100,
-                "poll_max_changes" => 100,
-                "poll_max_record_bytes" => 1048576,
-                "region" => "us-east-1"
-            }
+      %{
+        "type" => "postgres",
+        "settings" => %{
+          "db_host" => "127.0.0.1",
+          "db_name" => "postgres",
+          "db_user" => "postgres",
+          "db_password" => "postgres",
+          "db_port" => "6432",
+          "poll_interval" => 100,
+          "poll_max_changes" => 100,
+          "poll_max_record_bytes" => 1_048_576,
+          "region" => "us-east-1"
         }
+      }
     ],
     "jwt_secret" => "new secret"
   }
@@ -43,11 +43,13 @@ defmodule RealtimeWeb.TenantControllerTest do
     {:ok, tenant} =
       Map.put(@create_attrs, "external_id", @external_id)
       |> Api.create_tenant()
+
     tenant
   end
 
   setup %{conn: conn} do
     Application.put_env(:realtime, :db_enc_key, "1234567890123456")
+
     new_conn =
       conn
       |> put_req_header("accept", "application/json")
