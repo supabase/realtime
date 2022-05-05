@@ -78,7 +78,6 @@ defmodule Realtime.Api do
   """
   def update_tenant(%Tenant{} = tenant, attrs) do
     tenant
-    |> Repo.preload(:extensions)
     |> Tenant.changeset(attrs)
     |> Repo.update()
   end
