@@ -9,6 +9,7 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
+      - uses: actions/checkout@v2
       - uses: superfly/flyctl-actions@1.1
         with:
           args: "-c deploy/fly/production.toml deploy"
