@@ -12,7 +12,13 @@ defmodule Extensions.Postgres do
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
-    :rpc.call(launch_node, Postgres, :start, [scope, params])
+    case :rpc.call(launch_node, Postgres, :start, [scope, params]) do
+      {:badrpc, reason} ->
+        Logger.error("Can't start postgres ext #{inspect(reason, pretty: true)}")
+
+      _ ->
+        :ok
+    end
   end
 
   @doc """
@@ -65,18 +71,20 @@ defmodule Extensions.Postgres do
     end)
   end
 
-  def subscribe(scope, subs_id, topic, claims, channel_pid) do
+  def subscribe(scope, subs_id, config, claims, channel_pid) do
     pid = manager_pid(scope)
 
     if pid do
       opts = %{
-        topic: topic,
+        config: config,
         id: subs_id,
         claims: claims,
         channel_pid: channel_pid
       }
 
       SubscriptionManager.subscribe(pid, opts)
+    else
+      Logger.error("Can't find manager_pid " <> scope)
     end
   end
 

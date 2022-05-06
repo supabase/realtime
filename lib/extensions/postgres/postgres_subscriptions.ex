@@ -6,10 +6,12 @@ defmodule Extensions.Postgres.Subscriptions do
 
   @spec create(conn(), String.t(), map()) :: :ok
   def create(conn, publication, params) do
-    database_roles = fetch_database_roles(conn)
+    # database_roles = fetch_database_roles(conn)
     oids = fetch_publication_tables(conn, publication)
-    new_params = enrich_subscription_params(params, database_roles, oids)
-    insert_topic_subscriptions(conn, new_params)
+    # new_params = enrich_subscription_params(params, database_roles, oids)
+    # insert_topic_subscriptions(conn, new_params)
+
+    insert_topic_subscriptions(conn, params, oids)
   end
 
   @spec delete(conn(), String.t()) :: any()
@@ -118,15 +120,98 @@ defmodule Extensions.Postgres.Subscriptions do
     end
   end
 
-  @spec insert_topic_subscriptions(conn(), map()) :: :ok
-  def insert_topic_subscriptions(conn, params) do
+  # @spec insert_topic_subscriptions(conn(), map()) :: :ok
+  # def insert_topic_subscriptions(conn, params) do
+  #   sql = "insert into realtime.subscription
+  #            (subscription_id, entity, filters, claims)
+  #          values ($1, $2, $3, $4)"
+  #   bin_uuid = UUID.string_to_binary!(params.id)
+
+  #   Enum.each(params.entities, fn entity ->
+  #     query(conn, sql, [bin_uuid, entity, params.filters, params.claims])
+  #   end)
+  # end
+
+  @spec insert_topic_subscriptions(conn(), map(), map()) :: :ok
+  def insert_topic_subscriptions(conn, params, oids) do
     sql = "insert into realtime.subscription
              (subscription_id, entity, filters, claims)
            values ($1, $2, $3, $4)"
     bin_uuid = UUID.string_to_binary!(params.id)
 
-    Enum.each(params.entities, fn entity ->
-      query(conn, sql, [bin_uuid, entity, params.filters, params.claims])
+    # db_config = %{
+    #   "public" => %{
+    #     "mp_latency" => %{
+    #       "id" => %{
+    #         "lt" => "2"
+    #       }
+    #     },
+    #     "todos" => %{
+    #       "details" => %{"eq" => "abc"}
+    #     }
+    #   }
+    # }
+
+    # %{"filter" => "room_id=eq.1", "schema" => "public", "table" => "messages"}
+
+    transform_to_oid_view(oids, params.config)
+    |> IO.inspect()
+    |> Enum.each(fn
+      {entity, filters} ->
+        query(conn, sql, [bin_uuid, entity, filters, params.claims])
+
+      entity ->
+        query(conn, sql, [bin_uuid, entity, [], params.claims])
+    end)
+  end
+
+  def transform_to_oid_view(oids, config) do
+    case config do
+      %{"schema" => schema, "table" => table, "eventFilter" => filter} ->
+        [column, rule] = String.split(filter, "=")
+        [op, value] = String.split(rule, ".")
+        [oid] = oids[{schema, table}]
+        [{oid, [{column, op, value}]}]
+
+      %{"schema" => schema, "table" => "*"} ->
+        oids[{schema}]
+
+      %{"schema" => schema, "table" => table} ->
+        oids[{schema, table}]
+
+      %{"schema" => schema} ->
+        oids[{schema}]
+    end
+
+    # Map.to_list(config)
+    # |> IO.inspect()
+    # |> Enum.reduce([], fn {schema, tables}, acc ->
+    #   if is_map(tables) and map_size(tables) > 0 do
+    #     Map.to_list(tables)
+    #     |> Enum.reduce(acc, fn {table, columns}, acc2 ->
+    #       [table_oid] = oids[{schema, table}]
+
+    #       if is_map(columns) and map_size(columns) > 0 do
+    #         [{table_oid, flat_filters(columns)} | acc2]
+    #       else
+    #         [table_oid | acc2]
+    #       end
+    #     end)
+    #   else
+    #     acc ++ oids[{schema}]
+    #   end
+    # end)
+  end
+
+  # transform %{"id" => %{"lt" => 10, "gt" => 2}}
+  # to [{"id", "gt", 2}, {"id", "lt", 10}]
+  def flat_filters(filters) do
+    Map.to_list(filters)
+    |> Enum.reduce([], fn {column, filter}, acc ->
+      acc ++
+        for {operation, value} <- Map.to_list(filter) do
+          {column, operation, value}
+        end
     end)
   end
 end
