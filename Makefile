@@ -1,5 +1,4 @@
 dev:
-	mix ecto.migrate
 	MIX_ENV=dev API_KEY=dev SECURE_CHANNELS=true API_JWT_SECRET=dev FLY_REGION=fra DB_ENC_KEY="1234567890123456" ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
 
 seed:
