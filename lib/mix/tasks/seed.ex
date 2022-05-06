@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Seed do
                         "db_user": "postgres",
                         "db_password": "postgres",
                         "db_port": "5432",
-                        "poll_interval": 100,
+                        "poll_interval_ms": 100,
                         "poll_max_changes": 100,
                         "poll_max_record_bytes": 1048576,
                         "region": "us-east-1"

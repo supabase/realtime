@@ -1,7 +1,7 @@
 defmodule Extensions.Postgres.DbSettings do
   def default() do
     %{
-      "poll_interval" => 100,
+      "poll_interval_ms" => 100,
       "poll_max_changes" => 100,
       "poll_max_record_bytes" => 1_048_576,
       "publication" => "supabase_multiplayer",

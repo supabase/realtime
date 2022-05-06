@@ -9,6 +9,8 @@ defmodule Realtime.Api do
   alias Realtime.Helpers
 
   alias Realtime.Api.Tenant
+  alias Realtime.Api.Extensions
+  import Ecto.Query, only: [from: 2]
 
   @ttl 120
 
@@ -187,5 +189,21 @@ defmodule Realtime.Api do
     %{tenant | extensions: decrypted_extensions}
   end
 
-  def decrypt_extensions_data(_), do: nil
+  def list_extensions(type \\ "postgres") do
+    from(e in Extensions,
+      where: e.type == ^type,
+      select: e
+    )
+    |> Repo.all()
+  end
+
+  def rename_settings_field(from, to) do
+    for extension <- list_extensions("postgres") do
+      {value, settings} = Map.pop(extension.settings, from)
+      new_settings = Map.put(settings, to, value)
+
+      Ecto.Changeset.cast(extension, %{settings: new_settings}, [:settings])
+      |> Repo.update!()
+    end
+  end
 end

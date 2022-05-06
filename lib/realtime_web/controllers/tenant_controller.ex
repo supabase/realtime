@@ -144,7 +144,7 @@ defmodule RealtimeWeb.TenantController do
                 db_password: %Schema{type: :string, example: "some encrypted value"},
                 db_port: %Schema{type: :string, example: "some encrypted value"},
                 db_user: %Schema{type: :string, example: "some encrypted value"},
-                poll_interval: %Schema{type: :integer, example: 100},
+                poll_interval_ms: %Schema{type: :integer, example: 100},
                 poll_max_changes: %Schema{type: :integer, example: 100},
                 poll_max_record_bytes: %Schema{type: :integer, example: 1_048_576},
                 publication: %Schema{type: :string, example: "supabase_multiplayer"},
@@ -187,7 +187,7 @@ defmodule RealtimeWeb.TenantController do
                 db_user: %Schema{type: :string, required: true, example: "postgres"},
                 db_port: %Schema{type: :string, required: true, example: "6432"},
                 region: %Schema{type: :string, required: true, example: "us-east-1"},
-                poll_interval: %Schema{type: :integer, default: 100, example: 100},
+                poll_interval_ms: %Schema{type: :integer, default: 100, example: 100},
                 poll_max_changes: %Schema{type: :integer, default: 100, example: 100},
                 poll_max_record_bytes: %Schema{
                   type: :integer,
