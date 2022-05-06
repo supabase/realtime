@@ -33,7 +33,7 @@
               "example": "some encrypted value",
               "type": "string"
             },
-            "poll_interval": {
+            "poll_interval_ms": {
               "example": 100,
               "type": "integer"
             },
@@ -108,7 +108,7 @@
               "required": true,
               "type": "string"
             },
-            "poll_interval": {
+            "poll_interval_ms": {
               "default": 100,
               "example": 100,
               "type": "integer"

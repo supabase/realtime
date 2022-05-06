@@ -11,7 +11,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
 
   @impl true
   def init(args) do
-    run_migrations(args)
+    # run_migrations(args)
 
     {:ok, conn} =
       Postgrex.start_link(
@@ -31,7 +31,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
       backoff_type: :rand_exp,
       backoff_min: 100,
       backoff_max: 120_000,
-      replication_poll_interval: args[:poll_interval],
+      poll_interval_ms: args[:poll_interval_ms],
       publication: args[:publication],
       slot_name: args[:slot_name],
       max_changes: args[:max_changes],

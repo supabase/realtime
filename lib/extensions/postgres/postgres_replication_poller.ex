@@ -26,7 +26,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
           backoff_max: Keyword.fetch!(opts, :backoff_max),
           backoff_type: Keyword.fetch!(opts, :backoff_type)
         ),
-      poll_interval: Keyword.fetch!(opts, :replication_poll_interval),
+      poll_interval_ms: Keyword.fetch!(opts, :poll_interval_ms),
       poll_ref: make_ref(),
       publication: Keyword.fetch!(opts, :publication),
       slot_name: Keyword.fetch!(opts, :slot_name),
@@ -70,7 +70,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
         :poll,
         %{
           backoff: backoff,
-          poll_interval: poll_interval,
+          poll_interval_ms: poll_interval_ms,
           poll_ref: poll_ref,
           publication: publication,
           slot_name: slot_name,
@@ -106,7 +106,6 @@ defmodule Extensions.Postgres.ReplicationPoller do
               [record_struct | acc]
           end
         end)
-        # |> Logger.debug()
         |> Enum.reverse()
         |> Postgres.SubscribersNotification.notify_subscribers(id)
 
@@ -127,7 +126,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
             send(self(), :poll)
             nil
           else
-            Process.send_after(self(), :poll, poll_interval)
+            Process.send_after(self(), :poll, poll_interval_ms)
           end
 
         {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
