@@ -3,16 +3,14 @@ defmodule Mix.Tasks.Seed do
 
   @shortdoc "Seed main database with tenant"
   def run(_) do
-    for _ <- 0..1,
-        do:
-          :httpc.request(
-            :put,
-            {'http://localhost:4000/api/tenants/dev_tenant',
-             [
-               {'x-api-key', 'dev'},
-               {'Authorization',
-                'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjQ1MTkyODI0LCJleHAiOjE5NjA3Njg4MjR9.M9jrxyvPLkUxWgOYSf5dNdJ8v_eRrq810ShFRT8N-6M'}
-             ], 'application/json', '{"tenant": {
+    :httpc.request(
+      :put,
+      {'http://localhost:4000/api/tenants/dev_tenant',
+       [
+         {'x-api-key', 'dev'},
+         {'Authorization',
+          'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjQ1MTkyODI0LCJleHAiOjE5NjA3Njg4MjR9.M9jrxyvPLkUxWgOYSf5dNdJ8v_eRrq810ShFRT8N-6M'}
+       ], 'application/json', '{"tenant": {
                 "name": "dev_tenant",
                 "extensions": [
                   {
@@ -32,9 +30,9 @@ defmodule Mix.Tasks.Seed do
                 ],
               "jwt_secret": "d3v_HtNXEpT+zfsyy1LE1WPGmNKLWRfw/rpjnVtCEEM2cSFV2s+kUh5OKX7TPYmG"
               }}'},
-            [],
-            []
-          )
-          |> IO.inspect()
+      [],
+      []
+    )
+    |> IO.inspect()
   end
 end

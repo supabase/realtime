@@ -22,7 +22,7 @@ defmodule RealtimeWeb.TenantController do
     extensions =
       Enum.reduce(tenant_params["extensions"], [], fn
         %{"type" => type, "settings" => settings}, acc ->
-          [%{type: type, settings: settings} | acc]
+          [%{"type" => type, "settings" => settings} | acc]
 
         _e, acc ->
           acc

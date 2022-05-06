@@ -4,6 +4,7 @@ defmodule Realtime.Api.Tenant do
   """
   use Ecto.Schema
   import Ecto.Changeset
+  alias Realtime.Api.Extensions
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -37,6 +38,6 @@ defmodule Realtime.Api.Tenant do
       :external_id,
       :jwt_secret
     ])
-    |> cast_assoc(:extensions, required: true)
+    |> cast_assoc(:extensions, with: &Extensions.changeset/2)
   end
 end
