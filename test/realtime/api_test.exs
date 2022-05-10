@@ -4,7 +4,7 @@ defmodule Realtime.ApiTest do
   alias Realtime.Api
 
   describe "tenants" do
-    alias Realtime.Api.Tenant
+    alias Realtime.Api.{Tenant, Extensions}
 
     @valid_attrs %{
       external_id: "some external_id",
@@ -65,6 +65,17 @@ defmodule Realtime.ApiTest do
 
     test "create_tenant/1 with invalid data returns error changeset" do
       assert {:error, %Ecto.Changeset{}} = Api.create_tenant(@invalid_attrs)
+    end
+
+    test "get_dec_tenant_by_external_id/1" do
+      tenant = tenant_fixture()
+
+      %Tenant{extensions: [%Extensions{} = extension]} =
+        Api.get_dec_tenant_by_external_id("some external_id")
+
+      assert Map.has_key?(extension.settings, "db_password")
+      password = extension.settings["db_password"]
+      assert password = "postgres"
     end
 
     test "update_tenant/2 with valid data updates the tenant" do
