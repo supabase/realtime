@@ -71,7 +71,7 @@ defmodule Realtime.ApiTest do
       tenant = tenant_fixture()
 
       %Tenant{extensions: [%Extensions{} = extension]} =
-        Api.get_dec_tenant_by_external_id("some external_id")
+        Api.get_dec_tenant_by_external_id("external_id")
 
       assert Map.has_key?(extension.settings, "db_password")
       password = extension.settings["db_password"]
