@@ -50,13 +50,16 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def show(conn, %{"id" => id}) do
-    tenant = Api.get_tenant_by_external_id(id)
+    id
+    |> Api.get_tenant_by_external_id()
+    |> case do
+      %Tenant{} = tenant ->
+        render(conn, "show.json", tenant: tenant)
 
-    if tenant == nil do
-      put_status(conn, 404)
-      |> render("no_found.json", tenant: tenant)
-    else
-      render(conn, "show.json", tenant: tenant)
+      nil ->
+        conn
+        |> put_status(404)
+        |> render("no_found.json", tenant: nil)
     end
   end
 
