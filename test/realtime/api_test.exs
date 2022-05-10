@@ -7,7 +7,7 @@ defmodule Realtime.ApiTest do
     alias Realtime.Api.Tenant
 
     @valid_attrs %{
-      external_id: "some external_id",
+      external_id: "external_id",
       name: "localhost",
       extensions: [
         %{
@@ -29,7 +29,7 @@ defmodule Realtime.ApiTest do
     }
 
     @update_attrs %{
-      external_id: "some updated external_id",
+      external_id: "external_id",
       jwt_secret: "some updated jwt_secret",
       name: "some updated name"
     }
@@ -70,7 +70,7 @@ defmodule Realtime.ApiTest do
     test "update_tenant/2 with valid data updates the tenant" do
       tenant = tenant_fixture()
       assert {:ok, %Tenant{} = tenant} = Api.update_tenant(tenant, @update_attrs)
-      assert tenant.external_id == "some updated external_id"
+      assert tenant.external_id == "external_id"
       assert tenant.jwt_secret == "some updated jwt_secret"
       assert tenant.name == "some updated name"
     end
