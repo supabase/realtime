@@ -67,7 +67,7 @@ defmodule Realtime.ApiTest do
       assert {:error, %Ecto.Changeset{}} = Api.create_tenant(@invalid_attrs)
     end
 
-    test "get_dec_tenant_by_external_id/1" do
+    test "check get_dec_tenant_by_external_id/1" do
       tenant = tenant_fixture()
 
       %Tenant{extensions: [%Extensions{} = extension]} =

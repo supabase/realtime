@@ -155,7 +155,6 @@ defmodule Extensions.Postgres.Subscriptions do
     # %{"filter" => "room_id=eq.1", "schema" => "public", "table" => "messages"}
 
     transform_to_oid_view(oids, params.config)
-    |> IO.inspect()
     |> Enum.each(fn
       {entity, filters} ->
         query(conn, sql, [bin_uuid, entity, filters, params.claims])

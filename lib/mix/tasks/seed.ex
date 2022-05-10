@@ -33,6 +33,5 @@ defmodule Mix.Tasks.Seed do
       [],
       []
     )
-    |> IO.inspect()
   end
 end
