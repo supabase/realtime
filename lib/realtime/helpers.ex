@@ -1,4 +1,7 @@
 defmodule Realtime.Helpers do
+  @moduledoc """
+  This module includes helper functions for different contexts that can't be union in one module.
+  """
   def encrypt(secret_key, text) do
     :crypto.crypto_one_time(:aes_128_ecb, secret_key, pad(text), true)
     |> Base.encode64()
