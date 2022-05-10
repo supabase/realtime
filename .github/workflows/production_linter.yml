@@ -25,6 +25,8 @@ jobs:
 
       - name: Install dependencies
         run: mix deps.get
+      - name: Run database migrations
+        run: mix ecto.migrate
       - name: Run format check
         run: mix format --check-formatted
       - name: Credo checks
@@ -42,3 +44,5 @@ jobs:
           mix dialyzer.build
       - name: Run dialyzer
         run: mix dialyzer
+      - name: Run tests
+        run: mix test
