@@ -1,4 +1,7 @@
 defmodule Extensions.Postgres.Subscriptions do
+  @moduledoc """
+  This module consolidates subscriptions handling
+  """
   require Logger
   import Postgrex, only: [query: 3]
 
