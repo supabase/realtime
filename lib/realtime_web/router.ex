@@ -58,14 +58,6 @@ defmodule RealtimeWeb.Router do
         description: "API Documentation for Realtime v1",
         termsOfService: "Open for public"
       },
-      securityDefinitions: %{
-        ApiKeyAuth: %{
-          type: "apiKey",
-          name: "X-API-Key",
-          description: "API Token must be provided via `X-API-Key: Token ` header",
-          in: "header"
-        }
-      },
       consumes: ["application/json"],
       produces: ["application/json"],
       tags: [
