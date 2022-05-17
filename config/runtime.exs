@@ -43,11 +43,12 @@ config :realtime, Realtime.Repo,
   database: System.get_env("DB_NAME", "postgres"),
   hostname: System.get_env("DB_HOST", "localhost"),
   port: System.get_env("DB_PORT", "5432"),
+  # TODO: remove it after all checks
   show_sensitive_data_on_connection_error: true,
   pool_size: System.get_env("DB_POOL_SIZE", "5") |> String.to_integer(),
   prepare: :unnamed,
-  queue_target: 5000,
-  queue_interval: 5000
+  queue_target: System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer(),
+  queue_interval: System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
 
 config :realtime,
   secure_channels: System.get_env("SECURE_CHANNELS", "true") == "true",
