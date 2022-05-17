@@ -7,7 +7,6 @@ defmodule Mix.Tasks.Seed do
       :put,
       {'http://localhost:4000/api/tenants/dev_tenant',
        [
-         {'x-api-key', 'dev'},
          {'Authorization',
           'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjQ1MTkyODI0LCJleHAiOjE5NjA3Njg4MjR9.M9jrxyvPLkUxWgOYSf5dNdJ8v_eRrq810ShFRT8N-6M'}
        ], 'application/json', '{"tenant": {
