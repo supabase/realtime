@@ -4,11 +4,16 @@ defmodule Extensions.Postgres do
   alias Extensions.Postgres
   alias Postgres.SubscriptionManager
 
+  def start_distributed(_, params) when params == %{} do
+    Logger.error("Posgres extension can't start with empty params")
+    false
+  end
+
   def start_distributed(scope, %{"region" => region} = params) do
     [fly_region | _] = Postgres.Regions.aws_to_fly(region)
     launch_node = launch_node(fly_region, node())
 
-    Logger.debug(
+    Logger.warning(
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
@@ -16,8 +21,11 @@ defmodule Extensions.Postgres do
       {:badrpc, reason} ->
         Logger.error("Can't start postgres ext #{inspect(reason, pretty: true)}")
 
-      _ ->
-        :ok
+      :yes ->
+        nil
+
+      other ->
+        Logger.info("rpc response #{inspect(other)}")
     end
   end
 
@@ -71,21 +79,28 @@ defmodule Extensions.Postgres do
     end)
   end
 
-  def subscribe(scope, subs_id, config, claims, channel_pid) do
-    pid = manager_pid(scope)
+  def subscribe(scope, subs_id, config, claims, channel_pid, postgres_extension) do
+    pid =
+      case manager_pid(scope) do
+        nil ->
+          start_distributed(scope, postgres_extension)
+          manager_pid(scope)
 
-    if pid do
-      opts = %{
-        config: config,
-        id: subs_id,
-        claims: claims,
-        channel_pid: channel_pid
-      }
+        pid when is_pid(pid) ->
+          pid
+      end
 
-      SubscriptionManager.subscribe(pid, opts)
-    else
-      Logger.error("Can't find manager_pid " <> scope)
-    end
+    opts = %{
+      config: config,
+      id: subs_id,
+      claims: claims,
+      channel_pid: channel_pid
+    }
+
+    SubscriptionManager.subscribe(pid, opts)
+
+    :global.whereis_name({:supervisor, scope})
+    |> Process.monitor()
   end
 
   def unsubscribe(scope, subs_id) do

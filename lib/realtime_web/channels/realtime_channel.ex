@@ -13,7 +13,12 @@ defmodule RealtimeWeb.RealtimeChannel do
         "realtime:" <> sub_topic = topic,
         params,
         %{
-          assigns: %{tenant: tenant, claims: claims, limits: limits},
+          assigns: %{
+            tenant: tenant,
+            claims: claims,
+            limits: limits,
+            postgres_extension: postgres_extension
+          },
           transport_pid: pid,
           serializer: serializer
         } = socket
@@ -29,50 +34,57 @@ defmodule RealtimeWeb.RealtimeChannel do
       id = UUID.uuid1()
 
       postgres_topic = topic_from_config(params)
-      Logger.info("Postgres_topic is " <> postgres_topic)
+      Logger.warning("Postgres_topic is " <> postgres_topic)
 
-      if postgres_topic != "" || !params["configs"]["realtime"] do
-        Endpoint.unsubscribe(topic)
+      postgres_config =
+        if postgres_topic != "" || !params["configs"]["realtime"] do
+          Endpoint.unsubscribe(topic)
 
-        metadata = [
-          metadata: {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), topic}
-        ]
+          metadata = [
+            metadata: {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), topic}
+          ]
 
-        Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
+          Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
 
-        postgres_config =
-          case params["configs"]["realtime"]["filter"] do
-            nil ->
-              case String.split(sub_topic, ":") do
-                [schema] ->
-                  %{"schema" => schema}
+          postgres_config =
+            case params["configs"]["realtime"]["filter"] do
+              nil ->
+                case String.split(sub_topic, ":") do
+                  [schema] ->
+                    %{"schema" => schema}
 
-                [schema, table] ->
-                  %{"schema" => schema, "table" => table}
+                  [schema, table] ->
+                    %{"schema" => schema, "table" => table}
 
-                [schema, table, filter] ->
-                  %{"schema" => schema, "table" => table, "filter" => filter}
-              end
+                  [schema, table, filter] ->
+                    %{"schema" => schema, "table" => table, "filter" => filter}
+                end
 
-            config ->
-              config
-          end
+              config ->
+                config
+            end
 
-        Logger.debug("Postgres config is #{inspect(postgres_config, pretty: true)}")
+          Logger.warning("Postgres config is #{inspect(postgres_extension, pretty: true)}")
 
-        Postgres.subscribe(
-          tenant,
-          id,
-          postgres_config,
-          claims,
-          self()
-        )
-      end
+          send(self(), :postgres_subscribe)
+
+          postgres_config
+        else
+          nil
+        end
 
       Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
 
       send(self(), :after_join)
-      {:ok, assign(socket, %{id: id, tenant_topic: tenant_topic, postgres_topic: postgres_topic})}
+
+      {:ok,
+       assign(socket, %{
+         id: id,
+         postgres_config: postgres_config,
+         tenant_topic: tenant_topic,
+         postgres_topic: postgres_topic,
+         claims: claims
+       })}
     else
       Logger.error("Reached max_concurrent_users limit")
       {:error, %{reason: "reached max_concurrent_users limit"}}
@@ -91,18 +103,33 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(
-        :postgres_resubscribe,
+        :postgres_subscribe,
         %{
           assigns: %{
             id: id,
             tenant: tenant,
+            postgres_config: postgres_config,
             postgres_topic: postgres_topic,
+            postgres_extension: postgres_extension,
             claims: claims
           }
         } = socket
       ) do
-    Postgres.subscribe(tenant, id, postgres_topic, claims, self())
-    Logger.info("Redsubscribed #{tenant} to #{postgres_topic}")
+    Postgres.subscribe(
+      tenant,
+      id,
+      postgres_config,
+      claims,
+      self(),
+      postgres_extension
+    )
+
+    Logger.info("Subscribe #{tenant} to #{postgres_topic}")
+    {:noreply, socket}
+  end
+
+  def handle_info({:DOWN, _, :process, _, _reason}, socket) do
+    send(self(), :postgres_subscribe)
     {:noreply, socket}
   end
 
@@ -123,8 +150,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           assigns: %{
             jwt_secret: jwt_secret,
             tenant: tenant,
-            id: id,
-            postgres_topic: postgres_topic
+            id: id
           }
         } = socket
       ) do
@@ -136,8 +162,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         else
           Postgres.unsubscribe(tenant, UUID.string_to_binary!(id))
           new_id = UUID.uuid1()
-          Postgres.subscribe(tenant, new_id, postgres_topic, claims, self())
-          {:noreply, assign(socket, %{id: new_id})}
+          send(self(), :postgres_subscribe)
+          {:noreply, assign(socket, %{id: new_id, claims: claims})}
         end
 
       _ ->
