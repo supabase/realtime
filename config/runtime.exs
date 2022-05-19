@@ -12,7 +12,7 @@ if config_env() == :prod do
     System.get_env("FLY_APP_NAME") ||
       raise "APP_NAME not available"
 
-  config :multiplayer, MultiplayerWeb.Endpoint,
+  config :realtime, RealtimeWeb.Endpoint,
     server: true,
     url: [host: "#{app_name}.fly.dev", port: 80],
     http: [
@@ -22,15 +22,6 @@ if config_env() == :prod do
     ],
     check_origin: false,
     secret_key_base: secret_key_base
-
-  config :multiplayer, Multiplayer.Repo,
-    username: System.get_env("DB_USER"),
-    password: System.get_env("DB_PASSWORD"),
-    database: System.get_env("DB_NAME"),
-    hostname: System.get_env("DB_HOST"),
-    port: System.get_env("DB_PORT"),
-    show_sensitive_data_on_connection_error: true,
-    pool_size: 3
 
   config :libcluster,
     debug: false,
@@ -46,11 +37,24 @@ if config_env() == :prod do
     ]
 end
 
-config :multiplayer,
-  ecto_repos: [Multiplayer.Repo],
+config :realtime, Realtime.Repo,
+  username: System.get_env("DB_USER", "postgres"),
+  password: System.get_env("DB_PASSWORD", "postgres"),
+  database: System.get_env("DB_NAME", "postgres"),
+  hostname: System.get_env("DB_HOST", "localhost"),
+  port: System.get_env("DB_PORT", "5432"),
+  # TODO: remove it after all checks
+  show_sensitive_data_on_connection_error: true,
+  pool_size: System.get_env("DB_POOL_SIZE", "5") |> String.to_integer(),
+  prepare: :unnamed,
+  queue_target: System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer(),
+  queue_interval: System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
+
+config :realtime,
   secure_channels: System.get_env("SECURE_CHANNELS", "true") == "true",
   jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
-  api_jwt_secret: System.get_env("API_JWT_SECRET")
+  api_jwt_secret: System.get_env("API_JWT_SECRET"),
+  db_enc_key: System.get_env("DB_ENC_KEY")
 
 if System.get_env("LOGS_ENGINE") == "logflare" do
   if !System.get_env("LOGFLARE_API_KEY") or !System.get_env("LOGFLARE_SOURCE_ID") do

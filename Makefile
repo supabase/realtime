@@ -1,8 +1,11 @@
 dev:
-	MIX_ENV=dev API_KEY=dev SECURE_CHANNELS=true API_JWT_SECRET=dev ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
+	MIX_ENV=dev SECURE_CHANNELS=true API_JWT_SECRET=dev FLY_REGION=fra DB_ENC_KEY="1234567890123456" ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
+
+seed:
+	mix seed
 
 prod:
-	APP_NAME=multiplayer SECRET_KEY_BASE=nokey MIX_ENV=prod ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
+	MIX_ENV=prod API_KEY=dev SECURE_CHANNELS=true API_JWT_SECRET=dev FLY_REGION=fra DB_ENC_KEY="1234567890123456" ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
 
 swagger:
 	mix phx.swagger.generate
@@ -15,7 +18,7 @@ start:
 	docker-compose up
 
 start.%:
-	docker-compose -f docker-compose.yml -f docker-compose.$*.yml up
+	docker-compose -f docker-compose.$*.yml up
 
 stop:
 	docker-compose down --remove-orphans

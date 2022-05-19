@@ -1,0 +1,54 @@
+defmodule RealtimeWeb.UserSocket do
+  use Phoenix.Socket
+  require Logger
+  import RealtimeWeb.ChannelsAuthorization, only: [authorize_conn: 2]
+
+  ## Channels
+  channel "realtime:*", RealtimeWeb.RealtimeChannel
+
+  @impl true
+  def connect(params, socket, connect_info) do
+    if Application.fetch_env!(:realtime, :secure_channels) do
+      %{uri: %{host: host}, x_headers: headers} = connect_info
+      [external_id | _] = String.split(host, ".", parts: 2)
+
+      with tenant when tenant != nil <-
+             Realtime.Api.get_tenant_by_external_id(:cached, external_id),
+           token when token != nil <- access_token(params, headers),
+           {:ok, claims} <- authorize_conn(token, tenant.jwt_secret) do
+        assigns = %{
+          token: token,
+          jwt_secret: tenant.jwt_secret,
+          tenant: external_id,
+          claims: claims,
+          limits: %{
+            max_concurrent_users: tenant.max_concurrent_users,
+            max_events_per_second: tenant.max_events_per_second
+          },
+          params: %{
+            ref: make_ref()
+          }
+        }
+
+        params = Extensions.Postgres.Helpers.filter_postgres_settings(tenant.extensions)
+        Extensions.Postgres.start_distributed(external_id, params)
+
+        {:ok, assign(socket, assigns)}
+      else
+        _ ->
+          Logger.error("Auth error")
+          :error
+      end
+    end
+  end
+
+  def access_token(params, headers) do
+    case :proplists.lookup("x-api-key", headers) do
+      :none -> Map.get(params, "apikey")
+      {"x-api-key", token} -> token
+    end
+  end
+
+  @impl true
+  def id(_socket), do: nil
+end

@@ -8,7 +8,7 @@ db_repo:
     port: 5432
 cluster:
   - cookie: "cookie_config"
-    service: "multiplayer-dns"
-    application_name: "multiplayer"
+    service: "realtime-dns"
+    application_name: "realtime"
     polling_interval: 5000
     # debug: false

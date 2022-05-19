@@ -7,46 +7,30 @@
 # General application configuration
 import Config
 
-# Channels are not secured by default in development and
-# are secured by default in production.
-presence = System.get_env("PRESENCE", "true") != "false"
-
-db_host = System.get_env("DB_HOST", "localhost")
-db_name = System.get_env("DB_NAME", "postgres")
-db_user = System.get_env("DB_USER", "postgres")
-db_password = System.get_env("DB_PASSWORD", "postgres")
-db_port = System.get_env("DB_PORT", "5432")
-
-# Configure your database
-config :multiplayer, Multiplayer.Repo,
-  username: db_user,
-  password: db_password,
-  database: db_name,
-  hostname: db_host,
-  port: db_port,
-  show_sensitive_data_on_connection_error: true,
-  pool_size: 3,
-  prepare: :unnamed,
-  queue_target: 5000
-
-config :multiplayer,
-  ecto_repos: [Multiplayer.Repo],
-  presence: presence
+config :realtime,
+  ecto_repos: [Realtime.Repo]
 
 # Configures the endpoint
-config :multiplayer, MultiplayerWeb.Endpoint,
+config :realtime, RealtimeWeb.Endpoint,
   url: [host: "localhost"],
   secret_key_base: "ktyW57usZxrivYdvLo9os7UGcUUZYKchOMHT3tzndmnHuxD09k+fQnPUmxlPMUI3",
-  render_errors: [view: MultiplayerWeb.ErrorView, accepts: ~w(html json), layout: false],
-  pubsub_server: Multiplayer.PubSub,
+  render_errors: [view: RealtimeWeb.ErrorView, accepts: ~w(html json), layout: false],
+  pubsub_server: Realtime.PubSub,
   live_view: [signing_salt: "wUMBeR8j"]
 
-config :multiplayer, :phoenix_swagger,
+config :realtime, :phoenix_swagger,
   swagger_files: %{
     "priv/static/swagger.json" => [
-      router: MultiplayerWeb.Router,
-      endpoint: MultiplayerWeb.Endpoint
+      router: RealtimeWeb.Router,
+      endpoint: RealtimeWeb.Endpoint
     ]
+  }
+
+config :realtime, :extensions,
+  postgres: %{
+    key: "postgres",
+    supervisor: Extensions.Postgres.Supervisor,
+    db_settings: Extensions.Postgres.DbSettings
   }
 
 config :phoenix_swagger, json_library: Jason

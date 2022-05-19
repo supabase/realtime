@@ -1,4 +1,4 @@
-defmodule MultiplayerWeb.ChannelCase do
+defmodule RealtimeWeb.ChannelCase do
   @moduledoc """
   This module defines the test case to be used by
   channel tests.
@@ -11,7 +11,7 @@ defmodule MultiplayerWeb.ChannelCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. If you are using
   PostgreSQL, you can even run database tests asynchronously
-  by setting `use MultiplayerWeb.ChannelCase, async: true`, although
+  by setting `use RealtimeWeb.ChannelCase, async: true`, although
   this option is not recommended for other databases.
   """
 
@@ -21,18 +21,18 @@ defmodule MultiplayerWeb.ChannelCase do
     quote do
       # Import conveniences for testing with channels
       import Phoenix.ChannelTest
-      import MultiplayerWeb.ChannelCase
+      import RealtimeWeb.ChannelCase
 
       # The default endpoint for testing
-      @endpoint MultiplayerWeb.Endpoint
+      @endpoint RealtimeWeb.Endpoint
     end
   end
 
   setup tags do
-    # :ok = Ecto.Adapters.SQL.Sandbox.checkout(Multiplayer.Repo)
+    # :ok = Ecto.Adapters.SQL.Sandbox.checkout(Realtime.Repo)
 
     # unless tags[:async] do
-    #   Ecto.Adapters.SQL.Sandbox.mode(Multiplayer.Repo, {:shared, self()})
+    #   Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, {:shared, self()})
     # end
 
     :ok

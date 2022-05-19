@@ -1,2 +1,2 @@
 ExUnit.start()
-Ecto.Adapters.SQL.Sandbox.mode(Multiplayer.Repo, :manual)
+Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)

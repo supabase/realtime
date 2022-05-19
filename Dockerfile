@@ -62,13 +62,13 @@ RUN chown nobody:nobody /app
 
 # USER root
 
-COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/multiplayer ./
-# COPY --from=build /app/_build/prod/rel/multiplayer ./
+COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/realtime ./
+# COPY --from=build /app/_build/prod/rel/realtime ./
 
 ENV HOME=/app
 ENV MIX_ENV=prod
 
-# COPY limits.sh ./limits.sh
+COPY limits.sh ./limits.sh
 # RUN chmod +x /app/limits.sh
-# ENTRYPOINT ["/app/limits.sh"]
-CMD ["bin/multiplayer", "start"]
+ENTRYPOINT ["/app/limits.sh"]
+CMD ["bin/realtime", "start"]

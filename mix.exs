@@ -1,16 +1,25 @@
-defmodule Multiplayer.MixProject do
+defmodule Realtime.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :multiplayer,
-      version: "0.1.0",
+      app: :realtime,
+      version: "0.1.1",
       elixir: "~> 1.7",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:phoenix, :gettext] ++ Mix.compilers(),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
-      deps: deps()
+      deps: deps(),
+      dialyzer: dialyzer()
+    ]
+  end
+
+  defp dialyzer do
+    [
+      plt_add_apps: [:mix],
+      plt_core_path: "priv/plts",
+      plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
     ]
   end
 
@@ -19,7 +28,7 @@ defmodule Multiplayer.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {Multiplayer.Application, []},
+      mod: {Realtime.Application, []},
       extra_applications: [:logger, :runtime_tools, :prom_ex]
     ]
   end
@@ -36,7 +45,7 @@ defmodule Multiplayer.MixProject do
       {:phoenix, "~> 1.5.7"},
       {:phoenix_ecto, "~> 4.1"},
       {:ecto_sql, "~> 3.4"},
-      {:postgrex, ">= 0.0.0"},
+      {:postgrex, "~> 0.15"},
       {:phoenix_html, "~> 2.11"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_dashboard, "~> 0.4"},
@@ -53,11 +62,13 @@ defmodule Multiplayer.MixProject do
       {:phoenix_swagger, "~> 0.8"},
       {:ex_json_schema, "~> 0.5"},
       {:recon, "~> 2.5"},
-      {:broadway, "~> 1.0"},
-      {:ewalrus, git: "https://github.com/abc3/ewalrus", tag: "0.1.2"},
       {:yaml_elixir, "~> 2.8.0"},
       {:logflare_logger_backend, "~> 0.11.0"},
-      {:httpoison, "~> 1.8"}
+      {:httpoison, "~> 1.8"},
+      {:cachex, "~> 3.4"},
+      {:syn, "~> 3.2.2"},
+      {:credo, "~> 1.6.4", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.0", only: [:dev], runtime: false}
     ]
   end
 
