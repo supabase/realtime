@@ -62,7 +62,6 @@ defmodule Realtime.MixProject do
       {:phoenix_swagger, "~> 0.8"},
       {:ex_json_schema, "~> 0.5"},
       {:recon, "~> 2.5"},
-      {:yaml_elixir, "~> 2.8.0"},
       {:logflare_logger_backend, "~> 0.11.0"},
       {:httpoison, "~> 1.8"},
       {:cachex, "~> 3.4"},
