@@ -123,37 +123,56 @@ defmodule Realtime.Api do
     Repo.one(query)
   end
 
+  @spec get_tenant_by_external_id(:cached, String.t()) :: Tenant.t() | nil
   def get_tenant_by_external_id(:cached, external_id) do
-    with {:commit, val} <- Cachex.fetch(:tenants, external_id, &get_dec_tenant_by_external_id/1) do
-      Cachex.expire(:tenants, external_id, :timer.seconds(@ttl))
-      val
-    else
-      {:ok, val} ->
-        val
+    Cachex.get_and_update(:tenants, external_id, fn
+      %Tenant{} = tenant ->
+        {:ignore, tenant}
 
-      _ ->
-        :error
+      nil ->
+        case get_dec_tenant_by_external_id(external_id) do
+          %Tenant{} = tenant -> {:commit, tenant}
+          nil -> {:ignore, nil}
+        end
+    end)
+    |> case do
+      {:commit, tenant} ->
+        Cachex.expire(:tenants, external_id, :timer.seconds(@ttl))
+        tenant
+
+      {:ignore, tenant} ->
+        tenant
     end
   end
 
+  @spec get_dec_tenant_by_external_id(String.t()) :: Tenant.t() | nil
   def get_dec_tenant_by_external_id(external_id) do
     external_id
     |> get_tenant_by_external_id()
     |> decrypt_extensions_data()
   end
 
-  def get_tenant_by_external_id(external_id) do
-    query =
-      from(p in Tenant,
-        where: p.external_id == ^external_id,
-        select: p
-      )
-
-    Repo.one(query)
+  @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
+  def get_tenant_by_external_id(external_id) when is_binary(external_id) do
+    Tenant
+    |> Repo.get_by(external_id: external_id)
     |> Repo.preload(:extensions)
   end
 
-  def decrypt_extensions_data(%Realtime.Api.Tenant{} = tenant) do
+  def get_tenant_by_external_id(_), do: nil
+
+  @spec decrypt_extensions_data(
+          %Tenant{
+            extensions: [%Extensions{settings: map(), type: String.t()}]
+          }
+          | term()
+        ) :: Tenant.t() | nil
+  def decrypt_extensions_data(
+        %Realtime.Api.Tenant{
+          extensions: [%Extensions{settings: settings, type: type}]
+        } = tenant
+      )
+      when is_map(settings) and is_binary(type) do
     secure_key = Application.get_env(:realtime, :db_enc_key)
 
     decrypted_extensions =
@@ -178,6 +197,8 @@ defmodule Realtime.Api do
 
     %{tenant | extensions: decrypted_extensions}
   end
+
+  def decrypt_extensions_data(_), do: nil
 
   def list_extensions(type \\ "postgres") do
     from(e in Extensions,

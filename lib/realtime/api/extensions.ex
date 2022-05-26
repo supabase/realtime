@@ -30,6 +30,7 @@ defmodule Realtime.Api.Extensions do
     extension
     |> cast(attrs1, [:type, :tenant_external_id, :settings])
     |> validate_required([:type, :settings])
+    |> unique_constraint([:tenant_external_id, :type])
     |> validate_required_settings(required_settings)
     |> encrypt_settings(required_settings)
   end

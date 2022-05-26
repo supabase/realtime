@@ -1,8 +1,6 @@
 defmodule RealtimeWeb.ApiJwtSecretTest do
   use RealtimeWeb.ConnCase
-  use RealtimeWeb.ChannelCase
   import Mock
-  alias Realtime.Api
   alias RealtimeWeb.JwtVerification
 
   test "no api key", %{conn: conn} do

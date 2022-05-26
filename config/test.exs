@@ -8,7 +8,7 @@ import Config
 config :realtime, Realtime.Repo,
   username: "postgres",
   password: "postgres",
-  database: "realtime_test#{System.get_env("MIX_TEST_PARTITION")}",
+  database: "realtime_test",
   hostname: "localhost",
   pool: Ecto.Adapters.SQL.Sandbox
 
