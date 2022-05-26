@@ -45,6 +45,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
         %{backoff: backoff, slot_name: slot_name, conn: conn} = state
       ) do
     try do
+      # TODO: Call ReplicationPoller and SubscriptionManager in the blocking way
+      :timer.sleep(500)
       Replications.prepare_replication(conn, slot_name)
     catch
       :error, error -> {:error, error}

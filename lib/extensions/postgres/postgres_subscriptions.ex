@@ -9,12 +9,13 @@ defmodule Extensions.Postgres.Subscriptions do
 
   @spec create(conn(), String.t(), map()) :: :ok
   def create(conn, publication, params) do
-    # database_roles = fetch_database_roles(conn)
-    oids = fetch_publication_tables(conn, publication)
-    # new_params = enrich_subscription_params(params, database_roles, oids)
-    # insert_topic_subscriptions(conn, new_params)
+    case fetch_publication_tables(conn, publication) do
+      oids when oids != %{} ->
+        insert_topic_subscriptions(conn, params, oids)
 
-    insert_topic_subscriptions(conn, params, oids)
+      other ->
+        Logger.error("Unacceptable oids #{inspect(other)}")
+    end
   end
 
   @spec delete(conn(), String.t()) :: any()
@@ -27,7 +28,7 @@ defmodule Extensions.Postgres.Subscriptions do
 
   def delete_all(conn) do
     Logger.debug("Delete all subscriptions")
-    query(conn, "truncate table realtime.subscription;", [])
+    query(conn, "delete from realtime.subscription;", [])
   end
 
   def sync_subscriptions() do

@@ -1,11 +1,6 @@
-# Script for populating the database. You can run it as:
-#
-#     mix run priv/repo/seeds.exs
-#
-# Inside the script, you can read and write to any of your
-# repositories directly:
-#
-#     Realtime.Repo.insert!(%Realtime.SomeSchema{})
-#
-# We recommend using the bang functions (`insert!`, `update!`
-# and so on) as they will fail if something goes wrong.
+import Ecto.Adapters.SQL, only: [query: 3]
+
+[
+  "drop publication realtime_test",
+  "create publication realtime_test for all tables"
+] |> Enum.each(&query(Realtime.Repo, &1, []))

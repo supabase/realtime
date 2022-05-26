@@ -5,7 +5,7 @@ defmodule Extensions.Postgres do
   alias Postgres.SubscriptionManager
 
   def start_distributed(_, params) when params == %{} do
-    Logger.error("Posgres extension can't start with empty params")
+    Logger.error("Postgres extension can't start with empty params")
     false
   end
 
@@ -62,7 +62,7 @@ defmodule Extensions.Postgres do
             max_record_bytes: poll_max_record_bytes
           ]
 
-          Logger.debug("Starting Extensions.Postgres, #{inspect(opts, pretty: true)}")
+          Logger.info("Starting Extensions.Postgres, #{inspect(opts, pretty: true)}")
 
           {:ok, pid} =
             DynamicSupervisor.start_child(Postgres.DynamicSupervisor, %{

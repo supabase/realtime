@@ -29,7 +29,7 @@ jobs:
       - name: Set up Postgres
         run: docker-compose -f docker-compose.dbs.yml up -d
       - name: Run main database migrations
-        run: mix ecto.migrate
+        run: mix ecto.migrate --log-migrator-sql
       - name: Run database tenant migrations
         run: mix ecto.migrate --migrations-path priv/repo/postgres/migrations        
       - name: Run format check

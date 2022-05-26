@@ -64,7 +64,7 @@ defmodule RealtimeWeb.RealtimeChannel do
                 config
             end
 
-          Logger.warning("Postgres config is #{inspect(postgres_extension, pretty: true)}")
+          Logger.debug("Postgres config is #{inspect(postgres_extension, pretty: true)}")
 
           send(self(), :postgres_subscribe)
 
