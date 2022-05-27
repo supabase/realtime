@@ -2,21 +2,13 @@
 #
 #     mix run priv/repo/seeds.exs
 
-alias Realtime.Api.Tenant
-alias Realtime.Repo
+alias Realtime.Api
+import Ecto.Adapters.SQL, only: [query: 3]
 
 Application.put_env(:realtime, :db_enc_key, "1234567890123456")
 
 tenant_name = "dev_tenant"
-
-Tenant
-|> Repo.get_by(external_id: tenant_name)
-|> Repo.preload(:extensions)
-|> case do
-  nil -> %Tenant{}
-  tenant -> tenant
-end
-|> Tenant.changeset(%{
+create_param = %{
   "name" => tenant_name,
   "extensions" => [
     %{
@@ -36,10 +28,12 @@ end
   ],
   "external_id" => tenant_name,
   "jwt_secret" => "d3v_HtNXEpT+zfsyy1LE1WPGmNKLWRfw/rpjnVtCEEM2cSFV2s+kUh5OKX7TPYmG"
-})
-|> Repo.insert!(conflict_target: [:external_id], on_conflict: :replace_all)
+}
+
+if !Api.get_tenant_by_external_id(tenant_name) do
+  Api.create_tenant(create_param)
+end
 
 [
-  "drop publication realtime_test",
   "create publication realtime_test for all tables"
-] |> Enum.each(&Repo.query(Repo, &1, []))
+] |> Enum.each(&query(Realtime.Repo, &1, []))
