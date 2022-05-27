@@ -11,7 +11,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
 
   @impl true
   def init(args) do
-    # run_migrations(args)
+    run_migrations(args)
 
     {:ok, conn} =
       Postgrex.start_link(
@@ -71,8 +71,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
         hostname: args[:db_host],
         database: args[:db_name],
         password: args[:db_pass],
-        username: args[:db_user],
-        pool_size: 1
+        username: args[:db_user]
       )
 
     Repo.put_dynamic_repo(repo)
@@ -87,8 +86,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
             :up,
             all: true,
             prefix: "realtime"
-          ),
-          pool_size: 1
+          )
         )
     after
       Repo.stop()

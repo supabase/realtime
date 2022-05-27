@@ -140,7 +140,10 @@ defmodule Extensions.Postgres.Subscriptions do
   def insert_topic_subscriptions(conn, params, oids) do
     sql = "insert into realtime.subscription
              (subscription_id, entity, filters, claims)
-           values ($1, $2, $3, $4)"
+           values ($1, $2, $3, $4)
+           on conflict (subscription_id, entity, filters)
+           do update set claims = excluded.claims, created_at = now()"
+
     bin_uuid = UUID.string_to_binary!(params.id)
 
     # db_config = %{

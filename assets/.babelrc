@@ -1,5 +1,4 @@
 {
-    "presets": [
-        "@babel/preset-env"
-    ]
+  "presets": ["next/babel"],
+  "plugins": []
 }

@@ -373,14 +373,6 @@
     "http",
     "https"
   ],
-  "securityDefinitions": {
-    "ApiKeyAuth": {
-      "description": "API Token must be provided via `X-API-Key: Token ` header",
-      "in": "header",
-      "name": "X-API-Key",
-      "type": "apiKey"
-    }
-  },
   "swagger": "2.0",
   "tags": [
     {

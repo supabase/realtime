@@ -75,7 +75,7 @@ defmodule Realtime.ApiTest do
 
       assert Map.has_key?(extension.settings, "db_password")
       password = extension.settings["db_password"]
-      assert password = "postgres"
+      assert ^password = "postgres"
     end
 
     test "update_tenant/2 with valid data updates the tenant" do

@@ -34,7 +34,3 @@ node_modules
 .supabase
 
 config/prod.secret.exs
-
-.idea
-
-.elixir_ls

@@ -1,7 +1,9 @@
 defmodule RealtimeWeb.UserSocket do
   use Phoenix.Socket
+
   require Logger
-  alias Extensions.Postgres.Helpers
+
+  alias Realtime.Api.Tenant
   alias RealtimeWeb.ChannelsAuthorization
 
   ## Channels
@@ -13,34 +15,35 @@ defmodule RealtimeWeb.UserSocket do
       %{uri: %{host: host}, x_headers: headers} = connect_info
       [external_id | _] = String.split(host, ".", parts: 2)
 
-      with tenant when tenant != nil <-
+      with %Tenant{
+             extensions: extensions,
+             jwt_secret: jwt_secret,
+             max_concurrent_users: max_conn_users,
+             max_events_per_second: max_events_per_second
+           }
+           when is_list(extensions) and is_binary(jwt_secret) and is_integer(max_conn_users) and
+                  is_integer(max_events_per_second) <-
              Realtime.Api.get_tenant_by_external_id(:cached, external_id),
-           token when token != nil <- access_token(params, headers),
-           {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, tenant.jwt_secret) do
-        %{
-          extensions: extensions,
-          jwt_secret: jwt_secret,
-          max_concurrent_users: max_concurrent_users
-        } = tenant
-
+           token when is_binary(token) <- access_token(params, headers),
+           {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret) do
         assigns = %{
           token: token,
           jwt_secret: jwt_secret,
           tenant: external_id,
-          postgres_extension: Helpers.filter_postgres_settings(extensions),
           claims: claims,
           limits: %{
-            max_concurrent_users: max_concurrent_users
-          },
-          params: %{
-            ref: make_ref()
+            max_concurrent_users: max_conn_users,
+            max_events_per_second: max_events_per_second
           }
         }
 
+        params = Extensions.Postgres.Helpers.filter_postgres_settings(extensions)
+        Extensions.Postgres.start_distributed(external_id, params)
+
         {:ok, assign(socket, assigns)}
       else
-        _ ->
-          Logger.error("Auth error")
+        error ->
+          Logger.error("Auth error: #{inspect(error)}")
           :error
       end
     end
