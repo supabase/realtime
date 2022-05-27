@@ -4,6 +4,7 @@ defmodule RealtimeWeb.UserSocket do
   require Logger
 
   alias Realtime.Api.Tenant
+  alias Extensions.Postgres.Helpers
   alias RealtimeWeb.ChannelsAuthorization
 
   ## Channels
@@ -21,6 +22,7 @@ defmodule RealtimeWeb.UserSocket do
              max_concurrent_users: max_conn_users,
              max_events_per_second: max_events_per_second
            }
+           # TODO: remove unnecessary guards
            when is_list(extensions) and is_binary(jwt_secret) and is_integer(max_conn_users) and
                   is_integer(max_events_per_second) <-
              Realtime.Api.get_tenant_by_external_id(:cached, external_id),
@@ -30,15 +32,12 @@ defmodule RealtimeWeb.UserSocket do
           token: token,
           jwt_secret: jwt_secret,
           tenant: external_id,
+          postgres_extension: Helpers.filter_postgres_settings(extensions),
           claims: claims,
           limits: %{
-            max_concurrent_users: max_conn_users,
-            max_events_per_second: max_events_per_second
+            max_concurrent_users: max_conn_users
           }
         }
-
-        params = Extensions.Postgres.Helpers.filter_postgres_settings(extensions)
-        Extensions.Postgres.start_distributed(external_id, params)
 
         {:ok, assign(socket, assigns)}
       else

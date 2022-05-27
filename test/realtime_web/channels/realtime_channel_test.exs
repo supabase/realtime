@@ -25,7 +25,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]},
         {Postgres, [],
-         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _ -> :ok end]}
+         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _, _ -> :ok end]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
@@ -48,7 +48,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]},
         {Postgres, [],
-         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _ -> :ok end]}
+         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _, _ -> :ok end]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
@@ -78,7 +78,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]},
         {Postgres, [],
-         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _ -> :ok end]}
+         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _, _ -> :ok end]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
@@ -99,7 +99,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]},
         {Postgres, [],
-         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _ -> :ok end]}
+         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _, _ -> :ok end]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
@@ -118,7 +118,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]},
         {Postgres, [],
-         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _ -> :ok end]}
+         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _, _ -> :ok end]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{

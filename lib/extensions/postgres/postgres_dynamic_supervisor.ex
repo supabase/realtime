@@ -19,8 +19,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
         database: args[:db_name],
         password: args[:db_pass],
         username: args[:db_user],
-        queue_target: 5000,
-        pool_size: 1
+        queue_target: 5000
       )
 
     :global.register_name({:db_instance, args[:id]}, conn)

@@ -64,7 +64,7 @@ export default function Index() {
       //   ts: msg.commit_timestamp
       // })
       // setDataSource([...dataSource])
-    // })
+    })
     channel.on('realtime', { event: '*', schema: 'public', table: '*' }, (msg) => {
       console.log("msg", msg)
       // console.log('Got a message')
