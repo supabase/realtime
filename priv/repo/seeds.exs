@@ -35,5 +35,6 @@ if !Api.get_tenant_by_external_id(tenant_name) do
 end
 
 [
+  "create schema if not exists realtime",
   "create publication realtime_test for all tables"
 ] |> Enum.each(&query(Realtime.Repo, &1, []))
