@@ -9,7 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^1.34.0",
+    "@supabase/realtime-js": "1.7.2",
+    "@supabase/supabase-js": "1.32.0",
     "@supabase/ui": "0.37.0-alpha.50",
     "lodash.clonedeep": "^4.5.0",
     "lodash.samplesize": "^4.2.0",

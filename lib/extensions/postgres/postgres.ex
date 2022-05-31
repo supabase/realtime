@@ -27,7 +27,7 @@ defmodule Extensions.Postgres do
         "db_name" => db_name,
         "db_user" => db_user,
         "db_password" => db_pass,
-        "poll_interval" => poll_interval,
+        "poll_interval_ms" => poll_interval,
         "poll_max_changes" => poll_max_changes,
         "poll_max_record_bytes" => poll_max_record_bytes,
         "publication" => publication,
