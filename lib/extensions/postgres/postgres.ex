@@ -1,13 +1,9 @@
 defmodule Extensions.Postgres do
+  @moduledoc false
   require Logger
 
   alias Extensions.Postgres
   alias Postgres.SubscriptionManager
-
-  def start_distributed(_, params) when params == %{} do
-    Logger.error("Postgres extension can't start with empty params")
-    false
-  end
 
   def start_distributed(scope, %{"region" => region} = params) do
     [fly_region | _] = Postgres.Regions.aws_to_fly(region)
@@ -17,15 +13,12 @@ defmodule Extensions.Postgres do
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
-    case :rpc.call(launch_node, Postgres, :start, [scope, params]) do
-      {:badrpc, reason} ->
-        Logger.error("Can't start postgres ext #{inspect(reason, pretty: true)}")
-
-      :yes ->
-        nil
-
-      other ->
-        Logger.info("rpc response #{inspect(other)}")
+    with :ok <- :rpc.call(launch_node, Postgres, :start, [scope, params]) do
+      :ok
+    else
+      error_response ->
+        Logger.error("Can't start postgres ext #{inspect(error_response, pretty: true)}")
+        error_response
     end
   end
 
@@ -71,7 +64,10 @@ defmodule Extensions.Postgres do
               restart: :transient
             })
 
-          :global.register_name({:supervisor, scope}, pid)
+          case :global.register_name({:supervisor, scope}, pid) do
+            :yes -> :ok
+            :no -> {:error, :reserved}
+          end
 
         _ ->
           {:error, :already_started}
