@@ -84,8 +84,9 @@ defmodule Realtime.MixProject do
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: [
         "ecto.create --quiet",
+        "run priv/repo/seeds_before_migration.exs",
         "ecto.migrate --migrations-path=priv/repo/migrations --migrations-path=priv/repo/postgres/migrations",
-        "run priv/repo/seeds.exs",
+        "run priv/repo/seeds_after_migration.exs",
         "test"
       ]
     ]

@@ -11,7 +11,8 @@ defmodule Extensions.Postgres.DynamicSupervisor do
 
   @impl true
   def init(args) do
-    run_migrations(args)
+    # skip runtime tenant's migrations for test cases
+    Mix.env() == :test || run_migrations(args)
 
     {:ok, conn} =
       Postgrex.start_link(

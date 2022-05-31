@@ -37,7 +37,7 @@ if config_env() == :prod do
     ]
 end
 
-if config_env != :test do
+if config_env() != :test do
   config :realtime, Realtime.Repo,
     username: System.get_env("DB_USER", "postgres"),
     password: System.get_env("DB_PASSWORD", "postgres"),

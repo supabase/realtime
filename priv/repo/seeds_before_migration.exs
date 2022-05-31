@@ -1,4 +1,3 @@
-alias Realtime.Api
 import Ecto.Adapters.SQL, only: [query: 3]
 
 [

@@ -23,7 +23,7 @@ create_param = %{
     }
   ],
   "external_id" => tenant_name,
-  "jwt_secret" => "d3v_HtNXEpT+zfsyy1LE1WPGmNKLWRfw/rpjnVtCEEM2cSFV2s+kUh5OKX7TPYmG"
+  "jwt_secret" => "secure_jwt_secret"
 }
 
 if !Api.get_tenant_by_external_id(tenant_name) do
@@ -31,5 +31,5 @@ if !Api.get_tenant_by_external_id(tenant_name) do
 end
 
 [
-  "create publication realtime_test for all tables"
+  "create publication supabase_multiplayer for all tables"
 ] |> Enum.each(&query(Realtime.Repo, &1, []))
