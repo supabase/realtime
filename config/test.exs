@@ -19,7 +19,10 @@ config :realtime, RealtimeWeb.Endpoint,
   server: false
 
 config :realtime,
-  secure_channels: false
+  secure_channels: true,
+  db_enc_key: "1234567890123456",
+  jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
+  api_jwt_secret: System.get_env("API_JWT_SECRET")
 
 config :joken,
   current_time_adapter: RealtimeWeb.Joken.CurrentTime.Mock

@@ -1,11 +1,7 @@
-# Script for populating the database. You can run it as:
-#
-#     mix run priv/repo/seeds.exs
-
 alias Realtime.Api
 import Ecto.Adapters.SQL, only: [query: 3]
 
-Application.put_env(:realtime, :db_enc_key, "1234567890123456")
+db_conf = Application.get_env(:realtime, Realtime.Repo)
 
 tenant_name = "dev_tenant"
 create_param = %{
@@ -14,10 +10,10 @@ create_param = %{
     %{
       "type" => "postgres",
       "settings" => %{
-        "db_host" => "127.0.0.1",
-        "db_name" => "postgres",
-        "db_user" => "postgres",
-        "db_password" => "postgres",
+        "db_host" => db_conf[:hostname],
+        "db_name" => db_conf[:database],
+        "db_user" => db_conf[:username],
+        "db_password" => db_conf[:password],
         "db_port" => "5432",
         "poll_interval_ms" => 100,
         "poll_max_changes" => 100,
@@ -35,6 +31,5 @@ if !Api.get_tenant_by_external_id(tenant_name) do
 end
 
 [
-  "create schema if not exists realtime",
   "create publication realtime_test for all tables"
 ] |> Enum.each(&query(Realtime.Repo, &1, []))
