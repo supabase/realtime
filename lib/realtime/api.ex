@@ -100,11 +100,11 @@ defmodule Realtime.Api do
     Repo.delete(tenant)
   end
 
-  @spec delete_tenant_by_external_id(String.t()) :: non_neg_integer()
+  @spec delete_tenant_by_external_id(String.t()) :: true | false
   def delete_tenant_by_external_id(id) do
     Cachex.del(:tenants, id)
     {num, _} = from(t in Tenant, where: t.external_id == ^id) |> Repo.delete_all()
-    num
+    num > 0
   end
 
   @doc """

@@ -108,7 +108,7 @@ defmodule RealtimeWeb.TenantController do
 
   def delete(conn, %{"id" => id}) do
     status =
-      if Api.delete_tenant_by_external_id(id) > 0 do
+      if Api.delete_tenant_by_external_id(id) do
         204
       else
         404
