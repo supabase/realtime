@@ -100,6 +100,13 @@ defmodule Realtime.Api do
     Repo.delete(tenant)
   end
 
+  @spec delete_tenant_by_external_id(String.t()) :: true | false
+  def delete_tenant_by_external_id(id) do
+    Cachex.del(:tenants, id)
+    {num, _} = from(t in Tenant, where: t.external_id == ^id) |> Repo.delete_all()
+    num > 0
+  end
+
   @doc """
   Returns an `%Ecto.Changeset{}` for tracking tenant changes.
 
