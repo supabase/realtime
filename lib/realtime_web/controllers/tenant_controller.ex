@@ -107,11 +107,14 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def delete(conn, %{"id" => id}) do
-    with tenant when not is_nil(tenant) <- Api.get_tenant_by_external_id(id),
-         {:ok, %Tenant{}} <- Api.delete_tenant(tenant),
-         do: Cachex.del(:tenants, id)
+    status =
+      if Api.delete_tenant_by_external_id(id) > 0 do
+        204
+      else
+        404
+      end
 
-    send_resp(conn, :no_content, "")
+    send_resp(conn, status, "")
   end
 
   def swagger_definitions do
