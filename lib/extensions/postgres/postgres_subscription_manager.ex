@@ -82,17 +82,21 @@ defmodule Extensions.Postgres.SubscriptionManager do
   def handle_info(:check_active_pids, %{check_active_pids: ref, subscribers_tid: tid} = state) do
     cancel_timer(ref)
 
-    delete_zombi = fn {pid, postgres_id, _monitor_ref}, acc ->
-      if !Process.alive?(pid) do
-        Logger.error("Detected zombi subscriber")
-        :ets.delete(tid, pid)
-        Subscriptions.delete(state.conn, UUID.string_to_binary!(postgres_id))
+    objects =
+      fn {pid, postgres_id, _monitor_ref}, acc ->
+        case :rpc.call(node(pid), Process, :alive?, [pid]) do
+          true ->
+            nil
+
+          _ ->
+            Logger.error("Detected zombi subscriber")
+            :ets.delete(tid, pid)
+            Subscriptions.delete(state.conn, UUID.string_to_binary!(postgres_id))
+        end
+
+        acc + 1
       end
-
-      acc + 1
-    end
-
-    objects = :ets.foldl(delete_zombi, 0, tid)
+      |> :ets.foldl(0, tid)
 
     new_ref =
       if objects == 0 do
