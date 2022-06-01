@@ -5,7 +5,7 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.Api.Tenant
   alias PhoenixSwagger.{Path, Schema}
 
-  action_fallback RealtimeWeb.FallbackController
+  action_fallback(RealtimeWeb.FallbackController)
 
   swagger_path :index do
     Path.get("/api/tenants")
@@ -107,12 +107,11 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def delete(conn, %{"id" => id}) do
-    tenant = Api.get_tenant_by_external_id(id)
+    with tenant when not is_nil(tenant) <- Api.get_tenant_by_external_id(id),
+         {:ok, %Tenant{}} <- Api.delete_tenant(tenant),
+         do: Cachex.del(:tenants, id)
 
-    with {:ok, %Tenant{}} <- Api.delete_tenant(tenant) do
-      Cachex.del(:tenants, id)
-      send_resp(conn, :no_content, "")
-    end
+    send_resp(conn, :no_content, "")
   end
 
   def swagger_definitions do
