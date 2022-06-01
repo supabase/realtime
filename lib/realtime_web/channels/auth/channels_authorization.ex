@@ -2,6 +2,8 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   @moduledoc """
   Check connection is authorized to access channel
   """
+  require Logger
+
   def authorize(token, secret) when is_binary(token) do
     token
     |> clean_token()
@@ -20,7 +22,11 @@ defmodule RealtimeWeb.ChannelsAuthorization do
       {:ok, %{"role" => _} = claims} ->
         {:ok, claims}
 
-      _ ->
+      {:error, reason} ->
+        {:error, reason}
+
+      error ->
+        Logger.error("Undefined error #{inspect(error)}")
         :error
     end
   end

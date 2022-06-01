@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.JwtVerificationTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
 
   alias RealtimeWeb.JwtVerification
   alias RealtimeWeb.Joken.CurrentTime.Mock

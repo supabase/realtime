@@ -5,6 +5,7 @@ defmodule Realtime.ApiTest do
 
   describe "tenants" do
     alias Realtime.Api.{Tenant, Extensions}
+    db_conf = Application.get_env(:realtime, Realtime.Repo)
 
     @valid_attrs %{
       external_id: "external_id",
@@ -13,11 +14,11 @@ defmodule Realtime.ApiTest do
         %{
           "type" => "postgres",
           "settings" => %{
-            "db_host" => "127.0.0.1",
-            "db_name" => "postgres",
-            "db_user" => "postgres",
-            "db_password" => "postgres",
-            "db_port" => "6432",
+            "db_host" => db_conf[:hostname],
+            "db_name" => db_conf[:database],
+            "db_user" => db_conf[:username],
+            "db_password" => db_conf[:password],
+            "db_port" => "5432",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
@@ -36,8 +37,6 @@ defmodule Realtime.ApiTest do
     @invalid_attrs %{external_id: nil, jwt_secret: nil, name: nil}
 
     def tenant_fixture(attrs \\ %{}) do
-      Application.put_env(:realtime, :db_enc_key, "1234567890123456")
-
       {:ok, tenant} =
         attrs
         |> Enum.into(@valid_attrs)
@@ -68,14 +67,14 @@ defmodule Realtime.ApiTest do
     end
 
     test "check get_dec_tenant_by_external_id/1" do
-      tenant = tenant_fixture()
+      _tenant = tenant_fixture()
 
       %Tenant{extensions: [%Extensions{} = extension]} =
         Api.get_dec_tenant_by_external_id("external_id")
 
       assert Map.has_key?(extension.settings, "db_password")
       password = extension.settings["db_password"]
-      assert password = "postgres"
+      assert ^password = "postgres"
     end
 
     test "update_tenant/2 with valid data updates the tenant" do

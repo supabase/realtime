@@ -29,7 +29,7 @@ defmodule Realtime.MixProject do
   def application do
     [
       mod: {Realtime.Application, []},
-      extra_applications: [:logger, :runtime_tools, :prom_ex]
+      extra_applications: [:logger, :runtime_tools, :prom_ex, :mix]
     ]
   end
 
@@ -62,7 +62,6 @@ defmodule Realtime.MixProject do
       {:phoenix_swagger, "~> 0.8"},
       {:ex_json_schema, "~> 0.5"},
       {:recon, "~> 2.5"},
-      {:yaml_elixir, "~> 2.8.0"},
       {:logflare_logger_backend, "~> 0.11.0"},
       {:httpoison, "~> 1.8"},
       {:cachex, "~> 3.4"},
@@ -83,7 +82,13 @@ defmodule Realtime.MixProject do
       setup: ["deps.get", "ecto.setup", "cmd npm install --prefix assets"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
+      test: [
+        "ecto.create --quiet",
+        "run priv/repo/seeds_before_migration.exs",
+        "ecto.migrate --migrations-path=priv/repo/migrations --migrations-path=priv/repo/postgres/migrations",
+        "run priv/repo/seeds_after_migration.exs",
+        "test"
+      ]
     ]
   end
 end

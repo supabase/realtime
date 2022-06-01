@@ -13,7 +13,7 @@ defmodule RealtimeWeb.TenantManagerController do
       params = Postgres.Helpers.filter_postgres_settings(tenant_obj.extensions)
       Postgres.start_distributed(tenant, params)
 
-      Enum.each(subscribers, fn pid -> send(pid, :postgres_resubscribe) end)
+      Enum.each(subscribers, fn pid -> send(pid, :postgres_subscribe) end)
       send_resp(conn, 200, "")
     else
       send_resp(conn, 404, "")

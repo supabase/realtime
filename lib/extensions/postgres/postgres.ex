@@ -1,4 +1,5 @@
 defmodule Extensions.Postgres do
+  @moduledoc false
   require Logger
 
   alias Extensions.Postgres
@@ -8,16 +9,16 @@ defmodule Extensions.Postgres do
     [fly_region | _] = Postgres.Regions.aws_to_fly(region)
     launch_node = launch_node(fly_region, node())
 
-    Logger.debug(
+    Logger.warning(
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
-    case :rpc.call(launch_node, Postgres, :start, [scope, params]) do
-      {:badrpc, reason} ->
-        Logger.error("Can't start postgres ext #{inspect(reason, pretty: true)}")
-
-      _ ->
-        :ok
+    with :ok <- :rpc.call(launch_node, Postgres, :start, [scope, params]) do
+      :ok
+    else
+      error_response ->
+        Logger.error("Can't start postgres ext #{inspect(error_response, pretty: true)}")
+        error_response
     end
   end
 
@@ -54,7 +55,7 @@ defmodule Extensions.Postgres do
             max_record_bytes: poll_max_record_bytes
           ]
 
-          Logger.debug("Starting Extensions.Postgres, #{inspect(opts, pretty: true)}")
+          Logger.info("Starting Extensions.Postgres, #{inspect(opts, pretty: true)}")
 
           {:ok, pid} =
             DynamicSupervisor.start_child(Postgres.DynamicSupervisor, %{
@@ -63,7 +64,10 @@ defmodule Extensions.Postgres do
               restart: :transient
             })
 
-          :global.register_name({:supervisor, scope}, pid)
+          case :global.register_name({:supervisor, scope}, pid) do
+            :yes -> :ok
+            :no -> {:error, :reserved}
+          end
 
         _ ->
           {:error, :already_started}
@@ -71,21 +75,28 @@ defmodule Extensions.Postgres do
     end)
   end
 
-  def subscribe(scope, subs_id, config, claims, channel_pid) do
-    pid = manager_pid(scope)
+  def subscribe(scope, subs_id, config, claims, channel_pid, postgres_extension) do
+    pid =
+      case manager_pid(scope) do
+        nil ->
+          start_distributed(scope, postgres_extension)
+          manager_pid(scope)
 
-    if pid do
-      opts = %{
-        config: config,
-        id: subs_id,
-        claims: claims,
-        channel_pid: channel_pid
-      }
+        pid when is_pid(pid) ->
+          pid
+      end
 
-      SubscriptionManager.subscribe(pid, opts)
-    else
-      Logger.error("Can't find manager_pid " <> scope)
-    end
+    opts = %{
+      config: config,
+      id: subs_id,
+      claims: claims,
+      channel_pid: channel_pid
+    }
+
+    SubscriptionManager.subscribe(pid, opts)
+
+    :global.whereis_name({:supervisor, scope})
+    |> Process.monitor()
   end
 
   def unsubscribe(scope, subs_id) do

@@ -4,19 +4,6 @@ Presence and ephemeral state.
 
 # Local Setup
 
-Create `config.yml` in root directory and copy/paste the following:
-
-```yml
-endpoint_port: 4000
-db_repo:
-  - hostname: "localhost"
-    username: "postgres"
-    password: "postgres"
-    database: "postgres"
-    pool_size: 3
-    port: 5432
-```
-
 Open up three different terminal windows and run the following sequentially:
 
 1. In the first terminal, run `make start.dbs`.
