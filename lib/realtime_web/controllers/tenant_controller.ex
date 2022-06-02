@@ -107,14 +107,8 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def delete(conn, %{"id" => id}) do
-    status =
-      if Api.delete_tenant_by_external_id(id) do
-        204
-      else
-        404
-      end
-
-    send_resp(conn, status, "")
+    Api.delete_tenant_by_external_id(id)
+    send_resp(conn, 204, "")
   end
 
   def swagger_definitions do
