@@ -16,7 +16,7 @@ services:
     depends_on:
       - db
   db:
-    image: supabase/postgres:13.3.0
+    image: supabase/postgres:14.1.0.34
     ports:
       - "5432:5432"
     volumes:
