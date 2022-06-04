@@ -11,6 +11,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
   import Realtime.Helpers, only: [cancel_timer: 1]
 
   @check_active_interval 15_000
+  @check_oids_interval 15_000
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
@@ -20,6 +21,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
   def init(opts) do
     :global.register_name({:subscription_manager, opts.id}, self())
     Subscriptions.delete_all(opts.conn)
+    send(self(), :check_oids)
 
     {:ok,
      %{
@@ -27,7 +29,9 @@ defmodule Extensions.Postgres.SubscriptionManager do
        id: opts.id,
        subscribers_tid: opts.subscribers_tid,
        publication: opts.publication,
-       check_active_pids: nil
+       check_active_pids: nil,
+       check_oid_ref: nil,
+       oids: %{}
      }}
   end
 
@@ -45,11 +49,42 @@ defmodule Extensions.Postgres.SubscriptionManager do
   end
 
   @impl true
-  def handle_info({:subscribe, opts}, %{check_active_pids: ref, subscribers_tid: tid} = state) do
+  def handle_info(
+        :check_oids,
+        %{check_oid_ref: ref, conn: conn, publication: publication, oids: old_oids} = state
+      ) do
+    cancel_timer(ref)
+
+    oids =
+      case Subscriptions.fetch_publication_tables(conn, publication) do
+        ^old_oids ->
+          Logger.warning("Found new oids #{inspect(old_oids, pretty: true)}")
+          old_oids
+
+        new_oids ->
+          Logger.warning("Found new oids #{inspect(new_oids, pretty: true)}")
+          Subscriptions.update_all(conn, state.subscribers_tid, new_oids)
+          new_oids
+      end
+
+    {:noreply, %{state | oids: oids, check_oid_ref: check_oids()}}
+  end
+
+  def handle_info(
+        {:subscribe, opts},
+        %{check_active_pids: ref, subscribers_tid: tid, oids: oids} = state
+      ) do
     Logger.debug("Subscribe #{inspect(opts, pretty: true)}")
     pid = opts.channel_pid
-    true = :ets.insert(tid, {pid, opts.id, Process.monitor(pid)})
-    Subscriptions.create(state.conn, state.publication, opts)
+
+    subscription_opts = %{
+      id: opts.id,
+      config: opts.config,
+      claims: opts.claims
+    }
+
+    true = :ets.insert(tid, {pid, opts.id, opts.config, opts.claims, Process.monitor(pid)})
+    Subscriptions.create(state.conn, subscription_opts, oids)
 
     new_state =
       if ref == nil do
@@ -63,7 +98,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{subscribers_tid: tid} = state) do
     case :ets.take(tid, pid) do
-      [{_pid, postgres_id, _ref}] ->
+      [{_pid, postgres_id, _config, _claims, _ref}] ->
         Subscriptions.delete(state.conn, UUID.string_to_binary!(postgres_id))
 
       _ ->
@@ -83,7 +118,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
     cancel_timer(ref)
 
     objects =
-      fn {pid, postgres_id, _monitor_ref}, acc ->
+      fn {pid, postgres_id, _config, _claims, _monitor_ref}, acc ->
         case :rpc.call(node(pid), Process, :alive?, [pid]) do
           true ->
             nil
@@ -128,6 +163,14 @@ defmodule Extensions.Postgres.SubscriptionManager do
       self(),
       :check_active_pids,
       @check_active_interval
+    )
+  end
+
+  defp check_oids() do
+    Process.send_after(
+      self(),
+      :check_oids,
+      @check_oids_interval
     )
   end
 end

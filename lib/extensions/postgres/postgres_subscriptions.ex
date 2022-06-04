@@ -5,17 +5,32 @@ defmodule Extensions.Postgres.Subscriptions do
   require Logger
   import Postgrex, only: [query: 3]
 
+  @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), String.t(), map()) :: :ok
-  def create(conn, publication, params) do
-    case fetch_publication_tables(conn, publication) do
-      oids when oids != %{} ->
-        insert_topic_subscriptions(conn, params, oids)
-
-      other ->
-        Logger.error("Unacceptable oids #{inspect(other)}")
+  @spec create(conn(), map(), map()) :: :ok
+  def create(conn, subscription_opts, oids) do
+    if oids != %{} do
+      insert_topic_subscriptions(conn, subscription_opts, oids)
+    else
+      Logger.error("Empty oids")
     end
+  end
+
+  @spec update_all(conn(), tid(), map()) :: :ok
+  def update_all(conn, tid, oids) do
+    delete_all(conn)
+
+    fn {_pid, id, config, claims, _}, _ ->
+      subscription_opts = %{
+        id: id,
+        config: config,
+        claims: claims
+      }
+
+      create(conn, subscription_opts, oids)
+    end
+    |> :ets.foldl(nil, tid)
   end
 
   @spec delete(conn(), String.t()) :: any()
@@ -26,6 +41,7 @@ defmodule Extensions.Postgres.Subscriptions do
     {:ok, _} = query(conn, sql, [id])
   end
 
+  @spec delete_all(conn()) :: {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
   def delete_all(conn) do
     Logger.debug("Delete all subscriptions")
     query(conn, "delete from realtime.subscription;", [])
