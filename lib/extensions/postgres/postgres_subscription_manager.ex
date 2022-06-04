@@ -58,7 +58,6 @@ defmodule Extensions.Postgres.SubscriptionManager do
     oids =
       case Subscriptions.fetch_publication_tables(conn, publication) do
         ^old_oids ->
-          Logger.warning("Found new oids #{inspect(old_oids, pretty: true)}")
           old_oids
 
         new_oids ->
