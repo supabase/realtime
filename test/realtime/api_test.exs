@@ -96,6 +96,15 @@ defmodule Realtime.ApiTest do
       assert_raise Ecto.NoResultsError, fn -> Api.get_tenant!(tenant.id) end
     end
 
+    test "delete_tenant_by_external_id/1 deletes the tenant cached" do
+      tenant = tenant_fixture()
+      # first calling for put tenant to cache
+      Api.get_tenant_by_external_id(:cached, "external_id")
+      assert match?(true, Api.delete_tenant_by_external_id("external_id"))
+      assert match?(nil, Api.get_tenant_by_external_id(:cached, "external_id"))
+      assert match?(false, Api.delete_tenant_by_external_id("external_id"))
+    end
+
     test "change_tenant/1 returns a tenant changeset" do
       tenant = tenant_fixture()
       assert %Ecto.Changeset{} = Api.change_tenant(tenant)

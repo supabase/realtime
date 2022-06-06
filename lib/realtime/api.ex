@@ -102,7 +102,16 @@ defmodule Realtime.Api do
 
   @spec delete_tenant_by_external_id(String.t()) :: true | false
   def delete_tenant_by_external_id(id) do
-    from(t in Tenant, where: t.external_id == ^id) |> Repo.delete_all()
+    from(t in Tenant, where: t.external_id == ^id)
+    |> Repo.delete_all()
+    |> case do
+      {num, _} when num > 0 ->
+        Cachex.del(:tenants, id)
+        true
+
+      _ ->
+        false
+    end
   end
 
   @doc """
