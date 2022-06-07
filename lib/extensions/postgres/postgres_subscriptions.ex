@@ -11,7 +11,9 @@ defmodule Extensions.Postgres.Subscriptions do
   def create(conn, publication, params) do
     case fetch_publication_tables(conn, publication) do
       oids when oids != %{} ->
-        insert_topic_subscriptions(conn, params, oids)
+        if !insert_topic_subscriptions(conn, params, oids) do
+          Logger.error("Didn't create the subscription #{inspect(params.config)}")
+        end
 
       other ->
         Logger.error("Unacceptable oids #{inspect(other)}")
@@ -124,56 +126,45 @@ defmodule Extensions.Postgres.Subscriptions do
     end
   end
 
-  # @spec insert_topic_subscriptions(conn(), map()) :: :ok
-  # def insert_topic_subscriptions(conn, params) do
-  #   sql = "insert into realtime.subscription
-  #            (subscription_id, entity, filters, claims)
-  #          values ($1, $2, $3, $4)"
-  #   bin_uuid = UUID.string_to_binary!(params.id)
-
-  #   Enum.each(params.entities, fn entity ->
-  #     query(conn, sql, [bin_uuid, entity, params.filters, params.claims])
-  #   end)
-  # end
-
-  @spec insert_topic_subscriptions(conn(), map(), map()) :: :ok
+  @spec insert_topic_subscriptions(conn(), map(), map()) :: boolean()
   def insert_topic_subscriptions(conn, params, oids) do
-    sql = "insert into realtime.subscription
-             (subscription_id, entity, filters, claims)
-           values ($1, $2, $3, $4)
-           on conflict (subscription_id, entity, filters)
-           do update set claims = excluded.claims, created_at = now()"
-
-    bin_uuid = UUID.string_to_binary!(params.id)
-
-    # db_config = %{
-    #   "public" => %{
-    #     "mp_latency" => %{
-    #       "id" => %{
-    #         "lt" => "2"
-    #       }
-    #     },
-    #     "todos" => %{
-    #       "details" => %{"eq" => "abc"}
-    #     }
-    #   }
-    # }
-
-    # %{"filter" => "room_id=eq.1", "schema" => "public", "table" => "messages"}
-
     transform_to_oid_view(oids, params.config)
-    |> Enum.each(fn
-      {entity, filters} ->
-        query(conn, sql, [bin_uuid, entity, filters, params.claims])
+    |> case do
+      nil ->
+        false
 
-      entity ->
-        query(conn, sql, [bin_uuid, entity, [], params.claims])
-    end)
+      views ->
+        bin_uuid = UUID.string_to_binary!(params.id)
+        sql = "insert into realtime.subscription
+              (subscription_id, entity, filters, claims)
+              values ($1, $2, $3, $4)
+              on conflict (subscription_id, entity, filters)
+              do update set claims = excluded.claims, created_at = now()"
+
+        Enum.reduce(views, true, fn view, acc ->
+          {entity, filters} =
+            case view do
+              {entity, filters} -> {entity, filters}
+              entity -> {entity, []}
+            end
+
+          query(conn, sql, [bin_uuid, entity, filters, params.claims])
+          |> case do
+            {:error, reason} ->
+              Logger.error("Insert subscriptions query #{inspect(reason)}")
+              false
+
+            _ ->
+              acc
+          end
+        end)
+    end
   end
 
+  @spec transform_to_oid_view(map(), map()) :: [pos_integer()] | [{pos_integer(), list()}] | nil
   def transform_to_oid_view(oids, config) do
     case config do
-      %{"schema" => schema, "table" => table, "eventFilter" => filter} ->
+      %{"schema" => schema, "table" => table, "filter" => filter} ->
         [column, rule] = String.split(filter, "=")
         [op, value] = String.split(rule, ".")
         [oid] = oids[{schema, table}]
@@ -188,25 +179,6 @@ defmodule Extensions.Postgres.Subscriptions do
       %{"schema" => schema} ->
         oids[{schema}]
     end
-
-    # Map.to_list(config)
-    # |> IO.inspect()
-    # |> Enum.reduce([], fn {schema, tables}, acc ->
-    #   if is_map(tables) and map_size(tables) > 0 do
-    #     Map.to_list(tables)
-    #     |> Enum.reduce(acc, fn {table, columns}, acc2 ->
-    #       [table_oid] = oids[{schema, table}]
-
-    #       if is_map(columns) and map_size(columns) > 0 do
-    #         [{table_oid, flat_filters(columns)} | acc2]
-    #       else
-    #         [table_oid | acc2]
-    #       end
-    #     end)
-    #   else
-    #     acc ++ oids[{schema}]
-    #   end
-    # end)
   end
 
   # transform %{"id" => %{"lt" => 10, "gt" => 2}}
