@@ -21,7 +21,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         {ChannelsAuthorization, [],
          [
            authorize_conn: fn _, _ ->
-             {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "test_role"}}
+             {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
            end
          ]},
         {Postgres, [],
@@ -44,7 +44,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         {ChannelsAuthorization, [],
          [
            authorize_conn: fn _, _ ->
-             {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "test_role"}}
+             {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
            end
          ]},
         {Postgres, [],
@@ -74,7 +74,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         {ChannelsAuthorization, [],
          [
            authorize_conn: fn _, _ ->
-             {:ok, %{"exp" => Joken.current_time() + 1, "role" => "test_role"}}
+             {:ok, %{"exp" => Joken.current_time() + 1, "role" => "postgres"}}
            end
          ]},
         {Postgres, [],
@@ -95,7 +95,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         {ChannelsAuthorization, [],
          [
            authorize_conn: fn _, _ ->
-             {:ok, %{"exp" => Joken.current_time(), "role" => "test_role"}}
+             {:ok, %{"exp" => Joken.current_time(), "role" => "postgres"}}
            end
          ]},
         {Postgres, [],
@@ -114,7 +114,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         {ChannelsAuthorization, [],
          [
            authorize_conn: fn _, _ ->
-             {:ok, %{"exp" => Joken.current_time() - 1, "role" => "test_role"}}
+             {:ok, %{"exp" => Joken.current_time() - 1, "role" => "postgres"}}
            end
          ]},
         {Postgres, [],

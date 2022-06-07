@@ -3,17 +3,18 @@ defmodule Extensions.Postgres.Subscriptions do
   This module consolidates subscriptions handling
   """
   require Logger
-  import Postgrex, only: [query: 3]
+  import Postgrex, only: [transaction: 2, query: 3, query!: 3]
 
   @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), map(), map()) :: :ok
+  @spec create(conn(), map(), map()) :: {:ok, DBConnection.t() | nil} | {:error, any()}
   def create(conn, subscription_opts, oids) do
     if oids != %{} do
       insert_topic_subscriptions(conn, subscription_opts, oids)
     else
-      Logger.error("Empty oids")
+      Logger.warning("Empty oids")
+      {:ok, nil}
     end
   end
 
@@ -45,6 +46,26 @@ defmodule Extensions.Postgres.Subscriptions do
   def delete_all(conn) do
     Logger.debug("Delete all subscriptions")
     query(conn, "delete from realtime.subscription;", [])
+  end
+
+  @spec maybe_delete_all(conn()) :: {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
+  def maybe_delete_all(conn) do
+    query(
+      conn,
+      "do $$
+        begin
+          if exists (
+            select 1
+            from pg_tables
+            where schemaname = 'realtime'
+              and tablename  = 'subscription'
+          )
+          then
+            delete from realtime.subscription;
+          end if;
+      end $$",
+      []
+    )
   end
 
   def sync_subscriptions() do
@@ -152,7 +173,8 @@ defmodule Extensions.Postgres.Subscriptions do
   #   end)
   # end
 
-  @spec insert_topic_subscriptions(conn(), map(), map()) :: :ok
+  @spec insert_topic_subscriptions(conn(), map(), map()) ::
+          {:ok, DBConnection.t()} | {:error, any()}
   def insert_topic_subscriptions(conn, params, oids) do
     sql = "insert into realtime.subscription
              (subscription_id, entity, filters, claims)
@@ -177,19 +199,21 @@ defmodule Extensions.Postgres.Subscriptions do
 
     # %{"filter" => "room_id=eq.1", "schema" => "public", "table" => "messages"}
 
-    transform_to_oid_view(oids, params.config)
-    |> Enum.each(fn
-      {entity, filters} ->
-        query(conn, sql, [bin_uuid, entity, filters, params.claims])
+    transaction(conn, fn conn ->
+      transform_to_oid_view(oids, params.config)
+      |> Enum.each(fn
+        {entity, filters} ->
+          query!(conn, sql, [bin_uuid, entity, filters, params.claims])
 
-      entity ->
-        query(conn, sql, [bin_uuid, entity, [], params.claims])
+        entity ->
+          query!(conn, sql, [bin_uuid, entity, [], params.claims])
+      end)
     end)
   end
 
   def transform_to_oid_view(oids, config) do
     case config do
-      %{"schema" => schema, "table" => table, "eventFilter" => filter} ->
+      %{"schema" => schema, "table" => table, "filter" => filter} ->
         [column, rule] = String.split(filter, "=")
         [op, value] = String.split(rule, ".")
         [oid] = oids[{schema, table}]

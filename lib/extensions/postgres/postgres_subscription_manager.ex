@@ -12,31 +12,67 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   @check_active_interval 15_000
   @check_oids_interval 15_000
+  @queue_target 5_000
+  @pool_size 5
+  @subscribe_timeout 15_000
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
 
   @impl true
-  def init(opts) do
-    :global.register_name({:subscription_manager, opts.id}, self())
-    Subscriptions.delete_all(opts.conn)
+  def init(%{args: args, subscribers_tid: subscribers_tid}) do
+    id = Keyword.fetch!(args, :id)
+
+    state = %{
+      check_active_pids: nil,
+      check_oid_ref: nil,
+      conn: nil,
+      db_host: Keyword.fetch!(args, :db_host),
+      db_name: Keyword.fetch!(args, :db_name),
+      db_pass: Keyword.fetch!(args, :db_pass),
+      db_user: Keyword.fetch!(args, :db_user),
+      id: id,
+      oids: %{},
+      subscribers_tid: subscribers_tid,
+      publication: Keyword.fetch!(args, :publication)
+    }
+
+    {:ok, state, {:continue, :database_manager_setup}}
+  end
+
+  @impl true
+  def handle_continue(
+        :database_manager_setup,
+        %{
+          db_host: db_host,
+          db_name: db_name,
+          db_pass: db_pass,
+          db_user: db_user,
+          id: id
+        } = state
+      ) do
+    {:ok, conn} =
+      Postgrex.start_link(
+        hostname: db_host,
+        database: db_name,
+        password: db_pass,
+        username: db_user,
+        pool_size: @pool_size,
+        queue_target: @queue_target
+      )
+
+    {:ok, _} = Subscriptions.maybe_delete_all(conn)
+
+    :yes = :global.register_name({:tenant_db, :replication, :manager, id}, self())
+
     send(self(), :check_oids)
 
-    {:ok,
-     %{
-       conn: opts.conn,
-       id: opts.id,
-       subscribers_tid: opts.subscribers_tid,
-       publication: opts.publication,
-       check_active_pids: nil,
-       check_oid_ref: nil,
-       oids: %{}
-     }}
+    {:noreply, %{state | conn: conn}}
   end
 
   def subscribe(pid, opts) do
-    send(pid, {:subscribe, opts})
+    GenServer.call(pid, {:subscribe, opts}, @subscribe_timeout)
   end
 
   def subscribers_list(pid) do
@@ -46,6 +82,49 @@ defmodule Extensions.Postgres.SubscriptionManager do
   @spec unsubscribe(atom | pid | port | reference | {atom, atom}, any) :: any
   def unsubscribe(pid, subs_id) do
     send(pid, {:unsubscribe, subs_id})
+  end
+
+  @impl true
+  def handle_call(
+        {:subscribe, opts},
+        _,
+        %{check_active_pids: ref, subscribers_tid: tid, oids: oids} = state
+      ) do
+    Logger.debug("Subscribe #{inspect(opts, pretty: true)}")
+    pid = opts.channel_pid
+
+    subscription_opts = %{
+      id: opts.id,
+      config: opts.config,
+      claims: opts.claims
+    }
+
+    true = :ets.insert(tid, {pid, opts.id, opts.config, opts.claims, Process.monitor(pid)})
+
+    create_resp = Subscriptions.create(state.conn, subscription_opts, oids)
+
+    new_state =
+      if ref == nil do
+        %{state | check_active_pids: check_active_pids()}
+      else
+        state
+      end
+
+    {:reply, create_resp, new_state}
+  end
+
+  @impl true
+  def handle_call(:subscribers_list, _, state) do
+    subscribers =
+      :ets.foldl(
+        fn {pid, _, _}, acc ->
+          [pid | acc]
+        end,
+        [],
+        state.subscribers_tid
+      )
+
+    {:reply, subscribers, state}
   end
 
   @impl true
@@ -67,32 +146,6 @@ defmodule Extensions.Postgres.SubscriptionManager do
       end
 
     {:noreply, %{state | oids: oids, check_oid_ref: check_oids()}}
-  end
-
-  def handle_info(
-        {:subscribe, opts},
-        %{check_active_pids: ref, subscribers_tid: tid, oids: oids} = state
-      ) do
-    Logger.debug("Subscribe #{inspect(opts, pretty: true)}")
-    pid = opts.channel_pid
-
-    subscription_opts = %{
-      id: opts.id,
-      config: opts.config,
-      claims: opts.claims
-    }
-
-    true = :ets.insert(tid, {pid, opts.id, opts.config, opts.claims, Process.monitor(pid)})
-    Subscriptions.create(state.conn, subscription_opts, oids)
-
-    new_state =
-      if ref == nil do
-        %{state | check_active_pids: check_active_pids()}
-      else
-        state
-      end
-
-    {:noreply, new_state}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{subscribers_tid: tid} = state) do
@@ -141,20 +194,6 @@ defmodule Extensions.Postgres.SubscriptionManager do
       end
 
     {:noreply, %{state | check_active_pids: new_ref}}
-  end
-
-  @impl true
-  def handle_call(:subscribers_list, _, state) do
-    subscribers =
-      :ets.foldl(
-        fn {pid, _, _}, acc ->
-          [pid | acc]
-        end,
-        [],
-        state.subscribers_tid
-      )
-
-    {:reply, subscribers, state}
   end
 
   defp check_active_pids() do
