@@ -4,8 +4,8 @@ defmodule Extensions.Postgres.DbSettings do
       "poll_interval_ms" => 100,
       "poll_max_changes" => 100,
       "poll_max_record_bytes" => 1_048_576,
-      "publication" => "supabase_multiplayer",
-      "slot_name" => "supabase_multiplayer_replication_slot"
+      "publication" => "supabase_realtime",
+      "slot_name" => "supabase_realtime_replication_slot"
     }
   end
 

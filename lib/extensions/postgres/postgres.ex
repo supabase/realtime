@@ -13,12 +13,12 @@ defmodule Extensions.Postgres do
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
-    with :ok <- :rpc.call(launch_node, Postgres, :start, [scope, params]) do
-      :ok
-    else
-      error_response ->
-        Logger.error("Can't start postgres ext #{inspect(error_response, pretty: true)}")
-        error_response
+    case :rpc.call(launch_node, Postgres, :start, [scope, params]) do
+      :ok ->
+        :ok
+
+      {_, error} ->
+        Logger.error("Can't start Postgres ext #{inspect(error, pretty: true)}")
     end
   end
 
@@ -27,7 +27,7 @@ defmodule Extensions.Postgres do
 
   """
   @spec start(String.t(), map()) ::
-          :ok | {:error, :already_started}
+          :ok | {:error, :already_started | :reserved}
   def start(scope, %{
         "db_host" => db_host,
         "db_name" => db_name,
@@ -40,7 +40,7 @@ defmodule Extensions.Postgres do
         "slot_name" => slot_name
       }) do
     :global.trans({{Extensions.Postgres, scope}, self()}, fn ->
-      case :global.whereis_name({:supervisor, scope}) do
+      case :global.whereis_name({:tenant_db, :supervisor, scope}) do
         :undefined ->
           opts = [
             id: scope,
@@ -64,7 +64,7 @@ defmodule Extensions.Postgres do
               restart: :transient
             })
 
-          case :global.register_name({:supervisor, scope}, pid) do
+          case :global.register_name({:tenant_db, :supervisor, scope}, pid) do
             :yes -> :ok
             :no -> {:error, :reserved}
           end
@@ -76,27 +76,26 @@ defmodule Extensions.Postgres do
   end
 
   def subscribe(scope, subs_id, config, claims, channel_pid, postgres_extension) do
-    pid =
-      case manager_pid(scope) do
-        nil ->
-          start_distributed(scope, postgres_extension)
-          manager_pid(scope)
+    case manager_pid(scope) do
+      nil ->
+        start_distributed(scope, postgres_extension)
 
-        pid when is_pid(pid) ->
-          pid
-      end
+      manager_pid ->
+        manager_pid
+        |> SubscriptionManager.subscribe(%{
+          config: config,
+          id: subs_id,
+          claims: claims,
+          channel_pid: channel_pid
+        })
+        |> case do
+          {:ok, _} ->
+            {:ok, manager_pid}
 
-    opts = %{
-      config: config,
-      id: subs_id,
-      claims: claims,
-      channel_pid: channel_pid
-    }
-
-    SubscriptionManager.subscribe(pid, opts)
-
-    :global.whereis_name({:supervisor, scope})
-    |> Process.monitor()
+          {:error, error} ->
+            {:error, error}
+        end
+    end
   end
 
   def unsubscribe(scope, subs_id) do
@@ -108,13 +107,16 @@ defmodule Extensions.Postgres do
   end
 
   def stop(scope) do
-    case :global.whereis_name({:supervisor, scope}) do
+    case :global.whereis_name({:tenant_db, :supervisor, scope}) do
       :undefined ->
         nil
 
       pid ->
-        :global.whereis_name({:db_instance, scope})
-        |> GenServer.stop(:normal)
+        poller_pid = :global.whereis_name({:tenant_db, :replication, :poller, scope})
+        manager_pid = :global.whereis_name({:tenant_db, :replication, :manager, scope})
+
+        is_pid(poller_pid) && GenServer.stop(poller_pid, :normal)
+        is_pid(manager_pid) && GenServer.stop(manager_pid, :normal)
 
         DynamicSupervisor.stop(pid, :shutdown)
     end
@@ -122,7 +124,7 @@ defmodule Extensions.Postgres do
 
   @spec manager_pid(any()) :: pid() | nil
   def manager_pid(scope) do
-    case :global.whereis_name({:subscription_manager, scope}) do
+    case :global.whereis_name({:tenant_db, :replication, :manager, scope}) do
       :undefined ->
         nil
 

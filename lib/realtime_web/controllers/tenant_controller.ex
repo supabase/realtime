@@ -146,11 +146,11 @@ defmodule RealtimeWeb.TenantController do
                 poll_interval_ms: %Schema{type: :integer, example: 100},
                 poll_max_changes: %Schema{type: :integer, example: 100},
                 poll_max_record_bytes: %Schema{type: :integer, example: 1_048_576},
-                publication: %Schema{type: :string, example: "supabase_multiplayer"},
+                publication: %Schema{type: :string, example: "supabase_realtime"},
                 region: %Schema{type: :string, example: "us-east-1"},
                 slot_name: %Schema{
                   type: :string,
-                  example: "supabase_multiplayer_replication_slot"
+                  example: "supabase_realtime_replication_slot"
                 }
               }
             )
@@ -195,13 +195,13 @@ defmodule RealtimeWeb.TenantController do
                 },
                 publication: %Schema{
                   type: :string,
-                  default: "supabase_multiplayer",
-                  example: "supabase_multiplayer"
+                  default: "supabase_realtime",
+                  example: "supabase_realtime"
                 },
                 slot_name: %Schema{
                   type: :string,
-                  default: "supabase_multiplayer_replication_slot",
-                  example: "supabase_multiplayer_replication_slot"
+                  default: "supabase_realtime_replication_slot",
+                  example: "supabase_realtime_replication_slot"
                 }
               }
             )

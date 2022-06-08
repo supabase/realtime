@@ -36,7 +36,7 @@ defmodule Realtime.Extensions.PostgresSubscriptionsTest do
   describe "insert_topic_subscriptions/3" do
     test "success insert into db", %{} do
       with_mocks([
-        {Postgrex, [], [query: fn _, _, _ -> {:ok, :result} end]}
+        {Postgrex, [], [transaction: fn _, _ -> {:ok, :result} end]}
       ]) do
         params = %{
           id: UUID.uuid1(),
@@ -44,13 +44,16 @@ defmodule Realtime.Extensions.PostgresSubscriptionsTest do
           claims: %{}
         }
 
-        assert match?(true, Subscriptions.insert_topic_subscriptions(:conn, params, @oids))
+        assert match?(
+                 {:ok, :result},
+                 Subscriptions.insert_topic_subscriptions(:conn, params, @oids)
+               )
       end
     end
 
     test "not success insert into db", %{} do
       with_mocks([
-        {Postgrex, [], [query: fn _, _, _ -> {:error, :some_reason} end]}
+        {Postgrex, [], [transaction: fn _, _ -> {:error, :some_reason} end]}
       ]) do
         params = %{
           id: UUID.uuid1(),
@@ -58,13 +61,16 @@ defmodule Realtime.Extensions.PostgresSubscriptionsTest do
           claims: %{}
         }
 
-        assert match?(false, Subscriptions.insert_topic_subscriptions(:conn, params, @oids))
+        assert match?(
+                 {:error, :some_reason},
+                 Subscriptions.insert_topic_subscriptions(:conn, params, @oids)
+               )
       end
     end
 
     test "user can't listen changes", %{} do
       with_mocks([
-        {Postgrex, [], [query: fn _, _, _ -> {:ok, :result} end]}
+        {Postgrex, [], [transaction: fn _, _, _ -> {:ok, :result} end]}
       ]) do
         params = %{
           id: UUID.uuid1(),
@@ -72,7 +78,10 @@ defmodule Realtime.Extensions.PostgresSubscriptionsTest do
           claims: %{}
         }
 
-        assert match?(false, Subscriptions.insert_topic_subscriptions(:conn, params, @oids))
+        assert match?(
+                 {:error, "No match between subscription params and entity oids"},
+                 Subscriptions.insert_topic_subscriptions(:conn, params, @oids)
+               )
       end
     end
   end
