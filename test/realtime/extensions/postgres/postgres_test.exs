@@ -48,11 +48,11 @@ defmodule Realtime.Extensions.PostgresTest do
   end
 
   describe "Postgres extensions" do
-    test "Check supervisor crash and respawn", %{socket: _socket, tenant: %Tenant{} = _tenant} do
+    test "Check supervisor crash and respawn", %{} do
       sup = :global.whereis_name({:tenant_db, :supervisor, @external_id})
       assert Process.alive?(sup)
       DynamicSupervisor.terminate_child(Postgres.DynamicSupervisor, sup)
-      Process.sleep(5_500)
+      Process.sleep(5_000)
       sup2 = :global.whereis_name({:tenant_db, :supervisor, @external_id})
       assert Process.alive?(sup2)
       assert(sup != sup2)
@@ -61,24 +61,26 @@ defmodule Realtime.Extensions.PostgresTest do
     test "Subscription manager updates oids", %{} do
       subscriber_manager_pid =
         Enum.reduce_while(1..10, nil, fn x, acc ->
-          case Postgres.manager_pid(@external_id) do
-            nil ->
+          {:tenant_db, :replication, :poller, @external_id}
+          |> :global.whereis_name()
+          |> case do
+            :undefined ->
               Process.sleep(100)
               {:cont, acc}
 
-            pid ->
-              {:halt, pid}
+            _ ->
+              {:halt, Postgres.manager_pid(@external_id)}
           end
         end)
 
       %{conn: conn, oids: oids} = :sys.get_state(subscriber_manager_pid)
 
-      P.query!(conn, "drop publication supabase_realtime", [])
+      P.query!(conn, "drop publication supabase_realtime_test", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids2} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids, oids2)
 
-      P.query!(conn, "create publication supabase_realtime for all tables", [])
+      P.query!(conn, "create publication supabase_realtime_test for all tables", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids3} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids2, oids3)
