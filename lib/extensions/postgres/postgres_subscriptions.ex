@@ -3,19 +3,19 @@ defmodule Extensions.Postgres.Subscriptions do
   This module consolidates subscriptions handling
   """
   require Logger
-  import Postgrex, only: [transaction: 2, query: 3, query!: 3, rollback: 2]
+  import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
 
   @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), String.t(), map()) :: {:ok, list(Postgrex.Result.t())} | {:error, any()}
+  @spec create(conn(), String.t(), map()) :: {:ok, nil} | {:error, any()}
   def create(conn, publication, params) do
     transaction(conn, fn conn ->
       case fetch_publication_tables(conn, publication) do
         oids when oids != %{} ->
           case insert_topic_subscriptions(conn, params, oids) do
-            {:ok, result} ->
-              result
+            {:ok, nil} ->
+              nil
 
             {:error, error} ->
               Logger.error("Didn't create the subscription #{inspect(params.config)}")
@@ -28,29 +28,23 @@ defmodule Extensions.Postgres.Subscriptions do
     end)
   end
 
-  @spec update_all(conn(), tid(), String.t(), map()) :: {:ok, map()} | {:error, any()}
-  def update_all(conn, tid, publication, oids) do
+  @spec update_all(conn(), tid(), String.t()) :: {:ok, nil} | {:error, any()}
+  def update_all(conn, tid, publication) do
     transaction(conn, fn conn ->
-      new_oids = fetch_publication_tables(conn, publication)
+      delete_all(conn)
 
-      if oids != new_oids do
-        delete_all(conn)
+      fn {_pid, id, config, claims, _}, _ ->
+        subscription_opts = %{
+          id: id,
+          config: config,
+          claims: claims
+        }
 
-        fn {_pid, id, config, claims, _}, _ ->
-          subscription_opts = %{
-            id: id,
-            config: config,
-            claims: claims
-          }
-
-          create(conn, publication, subscription_opts)
-        end
-        |> :ets.foldl(nil, tid)
-
-        new_oids
-      else
-        rollback(conn, "No change in publication entity oids")
+        create(conn, publication, subscription_opts)
       end
+      |> :ets.foldl(nil, tid)
+
+      nil
     end)
   end
 
@@ -183,7 +177,7 @@ defmodule Extensions.Postgres.Subscriptions do
   end
 
   @spec insert_topic_subscriptions(conn(), map(), map()) ::
-          {:ok, list(Postgrex.Result.t())} | {:error, any()}
+          {:ok, nil} | {:error, any()}
   def insert_topic_subscriptions(conn, params, oids) do
     transform_to_oid_view(oids, params.config)
     |> case do
@@ -199,15 +193,20 @@ defmodule Extensions.Postgres.Subscriptions do
               do update set claims = excluded.claims, created_at = now()"
 
         transaction(conn, fn conn ->
-          Enum.reduce(views, [], fn view, acc ->
+          for view <- views do
             {entity, filters} =
               case view do
                 {entity, filters} -> {entity, filters}
                 entity -> {entity, []}
               end
 
-            [query!(conn, sql, [bin_uuid, entity, filters, params.claims]) | acc]
-          end)
+            case query(conn, sql, [bin_uuid, entity, filters, params.claims]) do
+              {:ok, _} -> nil
+              {:error, error} -> rollback(conn, error)
+            end
+          end
+
+          nil
         end)
     end
   end
@@ -218,8 +217,11 @@ defmodule Extensions.Postgres.Subscriptions do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
         [column, rule] = String.split(filter, "=")
         [op, value] = String.split(rule, ".")
-        [oid] = oids[{schema, table}]
-        [{oid, [{column, op, value}]}]
+
+        case oids[{schema, table}] do
+          nil -> nil
+          [oid] -> [{oid, [{column, op, value}]}]
+        end
 
       %{"schema" => schema, "table" => "*"} ->
         oids[{schema}]

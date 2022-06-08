@@ -135,9 +135,14 @@ defmodule Extensions.Postgres.SubscriptionManager do
     cancel_timer(ref)
 
     oids =
-      case Subscriptions.update_all(conn, state.subscribers_tid, publication, old_oids) do
-        {:ok, new_oids} -> new_oids
-        {:error, _} -> old_oids
+      case Subscriptions.fetch_publication_tables(conn, publication) do
+        ^old_oids ->
+          old_oids
+
+        new_oids ->
+          Logger.warning("Found new oids #{inspect(new_oids, pretty: true)}")
+          Subscriptions.update_all(conn, state.subscribers_tid, publication)
+          new_oids
       end
 
     {:noreply, %{state | oids: oids, check_oid_ref: check_oids()}}
