@@ -47,6 +47,7 @@ defmodule Extensions.Postgres.Regions do
       "ap-northeast-2" -> ["sin"]
       "ap-southeast-2" -> ["sin"]
       "ap-south-1" -> ["sin"]
+      "eu-west-1" -> ["fra"]
       "eu-west-2" -> ["fra"]
       "eu-central-1" -> ["fra"]
       _ -> [nil]
