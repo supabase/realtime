@@ -215,12 +215,12 @@ defmodule Extensions.Postgres.Subscriptions do
   def transform_to_oid_view(oids, config) do
     case config do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
-        [column, rule] = String.split(filter, "=")
-        [op, value] = String.split(rule, ".")
-
-        case oids[{schema, table}] do
-          nil -> nil
-          [oid] -> [{oid, [{column, op, value}]}]
+        with [oid] when is_integer(oid) <- oids[{schema, table}],
+             [column, rule] <- String.split(filter, "="),
+             [op, value] <- String.split(rule, ".") do
+          [{oid, [{column, op, value}]}]
+        else
+          _ -> nil
         end
 
       %{"schema" => schema, "table" => "*"} ->
