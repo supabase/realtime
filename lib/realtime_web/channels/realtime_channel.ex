@@ -167,7 +167,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
           )
 
-          {:stop, %{reason: inspect(error)}, socket}
+          {:stop, %{reason: error}, socket}
       end
   end
 
