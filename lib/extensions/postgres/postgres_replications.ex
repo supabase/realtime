@@ -1,27 +1,23 @@
 defmodule Extensions.Postgres.Replications do
   require Logger
-  import Postgrex, only: [transaction: 2, query: 3, query!: 3]
+  import Postgrex, only: [query: 3]
 
   def prepare_replication(conn, slot_name) do
-    transaction(conn, fn conn ->
-      query!(
-        conn,
-        "select
-          case when not exists (
-            select 1
-            from pg_replication_slots
-            where slot_name = $1
-          )
-          then (
-            select 1 from pg_create_logical_replication_slot($1, 'wal2json', 'true')
-          )
-          else 1
-          end;",
-        [slot_name]
-      )
-
-      query!(conn, "set search_path = ''", [])
-    end)
+    query(
+      conn,
+      "select
+        case when not exists (
+          select 1
+          from pg_replication_slots
+          where slot_name = $1
+        )
+        then (
+          select 1 from pg_create_logical_replication_slot($1, 'wal2json', 'true')
+        )
+        else 1
+        end;",
+      [slot_name]
+    )
   end
 
   def list_changes(conn, slot_name, publication, max_changes, max_record_bytes) do

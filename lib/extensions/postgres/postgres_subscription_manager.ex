@@ -11,7 +11,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
   import Realtime.Helpers, only: [cancel_timer: 1]
 
   @check_active_interval 15_000
-  @check_oids_interval 15_000
+  @check_oids_interval 60_000
   @queue_target 5_000
   @pool_size 5
   @subscribe_timeout 15_000
@@ -86,22 +86,22 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   @impl true
   def handle_call(
-        {:subscribe, opts},
+        {:subscribe, %{channel_pid: pid, claims: claims, config: config, id: id} = opts},
         _,
-        %{check_active_pids: ref, subscribers_tid: tid, oids: oids} = state
+        %{check_active_pids: ref, publication: publication, subscribers_tid: tid} = state
       ) do
     Logger.debug("Subscribe #{inspect(opts, pretty: true)}")
-    pid = opts.channel_pid
 
     subscription_opts = %{
-      id: opts.id,
-      config: opts.config,
-      claims: opts.claims
+      id: id,
+      config: config,
+      claims: claims
     }
 
-    true = :ets.insert(tid, {pid, opts.id, opts.config, opts.claims, Process.monitor(pid)})
+    monitor_ref = Process.monitor(pid)
+    true = :ets.insert(tid, {pid, id, config, claims, monitor_ref})
 
-    create_resp = Subscriptions.create(state.conn, subscription_opts, oids)
+    create_resp = Subscriptions.create(state.conn, publication, subscription_opts)
 
     new_state =
       if ref == nil do
@@ -117,7 +117,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
   def handle_call(:subscribers_list, _, state) do
     subscribers =
       :ets.foldl(
-        fn {pid, _, _}, acc ->
+        fn {pid, _, _, _, _}, acc ->
           [pid | acc]
         end,
         [],
@@ -135,14 +135,9 @@ defmodule Extensions.Postgres.SubscriptionManager do
     cancel_timer(ref)
 
     oids =
-      case Subscriptions.fetch_publication_tables(conn, publication) do
-        ^old_oids ->
-          old_oids
-
-        new_oids ->
-          Logger.warning("Found new oids #{inspect(new_oids, pretty: true)}")
-          Subscriptions.update_all(conn, state.subscribers_tid, new_oids)
-          new_oids
+      case Subscriptions.update_all(conn, state.subscribers_tid, publication, old_oids) do
+        {:ok, new_oids} -> new_oids
+        {:error, _} -> old_oids
       end
 
     {:noreply, %{state | oids: oids, check_oid_ref: check_oids()}}
@@ -176,7 +171,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
             nil
 
           _ ->
-            Logger.error("Detected zombi subscriber")
+            Logger.error("Detected phantom subscriber")
             :ets.delete(tid, pid)
             Subscriptions.delete(state.conn, UUID.string_to_binary!(postgres_id))
         end

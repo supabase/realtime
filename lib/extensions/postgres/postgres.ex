@@ -19,11 +19,11 @@ defmodule Extensions.Postgres do
 
       {:error, error} ->
         Logger.error("Can't start Postgres ext #{inspect(error, pretty: true)}")
-        {:error, error}
+        :ok
 
       {:badrpc, error} ->
         Logger.error("Bad RPC call #{inspect(error, pretty: true)}")
-        {:error, error}
+        :ok
     end
   end
 

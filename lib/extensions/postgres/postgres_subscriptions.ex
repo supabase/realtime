@@ -3,38 +3,55 @@ defmodule Extensions.Postgres.Subscriptions do
   This module consolidates subscriptions handling
   """
   require Logger
-  import Postgrex, only: [transaction: 2, query: 3, query!: 3]
+  import Postgrex, only: [transaction: 2, query: 3, query!: 3, rollback: 2]
 
   @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), String.t(), map()) :: :ok
+  @spec create(conn(), String.t(), map()) :: {:ok, list(Postgrex.Result.t())} | {:error, any()}
   def create(conn, publication, params) do
-    case fetch_publication_tables(conn, publication) do
-      oids when oids != %{} ->
-        if !insert_topic_subscriptions(conn, params, oids) do
-          Logger.error("Didn't create the subscription #{inspect(params.config)}")
-        end
+    transaction(conn, fn conn ->
+      case fetch_publication_tables(conn, publication) do
+        oids when oids != %{} ->
+          case insert_topic_subscriptions(conn, params, oids) do
+            {:ok, result} ->
+              result
 
-      other ->
-        Logger.error("Unacceptable oids #{inspect(other)}")
-    end
+            {:error, error} ->
+              Logger.error("Didn't create the subscription #{inspect(params.config)}")
+              rollback(conn, error)
+          end
+
+        _ ->
+          rollback(conn, "Entity oids do not exist")
+      end
+    end)
   end
 
-  @spec update_all(conn(), tid(), map()) :: :ok
-  def update_all(conn, tid, oids) do
-    delete_all(conn)
+  @spec update_all(conn(), tid(), String.t(), map()) :: {:ok, map()} | {:error, any()}
+  def update_all(conn, tid, publication, oids) do
+    transaction(conn, fn conn ->
+      new_oids = fetch_publication_tables(conn, publication)
 
-    fn {_pid, id, config, claims, _}, _ ->
-      subscription_opts = %{
-        id: id,
-        config: config,
-        claims: claims
-      }
+      if oids != new_oids do
+        delete_all(conn)
 
-      create(conn, subscription_opts, oids)
-    end
-    |> :ets.foldl(nil, tid)
+        fn {_pid, id, config, claims, _}, _ ->
+          subscription_opts = %{
+            id: id,
+            config: config,
+            claims: claims
+          }
+
+          create(conn, publication, subscription_opts)
+        end
+        |> :ets.foldl(nil, tid)
+
+        new_oids
+      else
+        rollback(conn, "No change in publication entity oids")
+      end
+    end)
   end
 
   @spec delete(conn(), String.t()) :: any()
@@ -107,6 +124,7 @@ defmodule Extensions.Postgres.Subscriptions do
           |> Map.update({schema}, [oid], &[oid | &1])
           |> Map.update({"*"}, [oid], &[oid | &1])
         end)
+        |> Enum.reduce(%{}, fn {k, v}, acc -> Map.put(acc, k, Enum.sort(v)) end)
 
       _ ->
         %{}
@@ -164,12 +182,13 @@ defmodule Extensions.Postgres.Subscriptions do
     end
   end
 
-  @spec insert_topic_subscriptions(conn(), map(), map()) :: boolean()
+  @spec insert_topic_subscriptions(conn(), map(), map()) ::
+          {:ok, list(Postgrex.Result.t())} | {:error, any()}
   def insert_topic_subscriptions(conn, params, oids) do
     transform_to_oid_view(oids, params.config)
     |> case do
       nil ->
-        false
+        {:error, "No match between subscription params and entity oids"}
 
       views ->
         bin_uuid = UUID.string_to_binary!(params.id)
@@ -179,22 +198,16 @@ defmodule Extensions.Postgres.Subscriptions do
               on conflict (subscription_id, entity, filters)
               do update set claims = excluded.claims, created_at = now()"
 
-        Enum.reduce(views, true, fn view, acc ->
-          {entity, filters} =
-            case view do
-              {entity, filters} -> {entity, filters}
-              entity -> {entity, []}
-            end
+        transaction(conn, fn conn ->
+          Enum.reduce(views, [], fn view, acc ->
+            {entity, filters} =
+              case view do
+                {entity, filters} -> {entity, filters}
+                entity -> {entity, []}
+              end
 
-          query(conn, sql, [bin_uuid, entity, filters, params.claims])
-          |> case do
-            {:error, reason} ->
-              Logger.error("Insert subscriptions query #{inspect(reason)}")
-              false
-
-            _ ->
-              acc
-          end
+            [query!(conn, sql, [bin_uuid, entity, filters, params.claims]) | acc]
+          end)
         end)
     end
   end
