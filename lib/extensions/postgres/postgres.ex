@@ -55,7 +55,9 @@ defmodule Extensions.Postgres do
             max_record_bytes: poll_max_record_bytes
           ]
 
-          Logger.info("Starting Extensions.Postgres, #{inspect(opts, pretty: true)}")
+          Logger.info(
+            "Starting Extensions.Postgres, #{inspect(Keyword.drop(opts, [:db_pass]), pretty: true)}"
+          )
 
           {:ok, pid} =
             DynamicSupervisor.start_child(Postgres.DynamicSupervisor, %{
