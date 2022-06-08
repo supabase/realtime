@@ -9,7 +9,7 @@ alter default privileges in schema public grant all on sequences to anon, authen
 
 create schema if not exists realtime;
 
-create publication supabase_multiplayer for all tables;
+create publication supabase_realtime for all tables;
 
 create table public.test (
   id serial primary key,

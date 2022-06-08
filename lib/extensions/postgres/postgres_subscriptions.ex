@@ -3,34 +3,49 @@ defmodule Extensions.Postgres.Subscriptions do
   This module consolidates subscriptions handling
   """
   require Logger
-  import Postgrex, only: [query: 3]
+  import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
 
   @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), map(), map()) :: :ok
-  def create(conn, subscription_opts, oids) do
-    if oids != %{} do
-      insert_topic_subscriptions(conn, subscription_opts, oids)
-    else
-      Logger.error("Empty oids")
-    end
+  @spec create(conn(), String.t(), map()) :: {:ok, nil} | {:error, any()}
+  def create(conn, publication, params) do
+    transaction(conn, fn conn ->
+      case fetch_publication_tables(conn, publication) do
+        oids when oids != %{} ->
+          case insert_topic_subscriptions(conn, params, oids) do
+            {:ok, nil} ->
+              nil
+
+            {:error, error} ->
+              Logger.error("Didn't create the subscription #{inspect(params.config)}")
+              rollback(conn, error)
+          end
+
+        _ ->
+          rollback(conn, "Entity oids do not exist")
+      end
+    end)
   end
 
-  @spec update_all(conn(), tid(), map()) :: :ok
-  def update_all(conn, tid, oids) do
-    delete_all(conn)
+  @spec update_all(conn(), tid(), String.t()) :: {:ok, nil} | {:error, any()}
+  def update_all(conn, tid, publication) do
+    transaction(conn, fn conn ->
+      delete_all(conn)
 
-    fn {_pid, id, config, claims, _}, _ ->
-      subscription_opts = %{
-        id: id,
-        config: config,
-        claims: claims
-      }
+      fn {_pid, id, config, claims, _}, _ ->
+        subscription_opts = %{
+          id: id,
+          config: config,
+          claims: claims
+        }
 
-      create(conn, subscription_opts, oids)
-    end
-    |> :ets.foldl(nil, tid)
+        create(conn, publication, subscription_opts)
+      end
+      |> :ets.foldl(nil, tid)
+
+      nil
+    end)
   end
 
   @spec delete(conn(), String.t()) :: any()
@@ -45,6 +60,26 @@ defmodule Extensions.Postgres.Subscriptions do
   def delete_all(conn) do
     Logger.debug("Delete all subscriptions")
     query(conn, "delete from realtime.subscription;", [])
+  end
+
+  @spec maybe_delete_all(conn()) :: {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
+  def maybe_delete_all(conn) do
+    query(
+      conn,
+      "do $$
+        begin
+          if exists (
+            select 1
+            from pg_tables
+            where schemaname = 'realtime'
+              and tablename  = 'subscription'
+          )
+          then
+            delete from realtime.subscription;
+          end if;
+      end $$",
+      []
+    )
   end
 
   def sync_subscriptions() do
@@ -83,6 +118,7 @@ defmodule Extensions.Postgres.Subscriptions do
           |> Map.update({schema}, [oid], &[oid | &1])
           |> Map.update({"*"}, [oid], &[oid | &1])
         end)
+        |> Enum.reduce(%{}, fn {k, v}, acc -> Map.put(acc, k, Enum.sort(v)) end)
 
       _ ->
         %{}
@@ -140,60 +176,52 @@ defmodule Extensions.Postgres.Subscriptions do
     end
   end
 
-  # @spec insert_topic_subscriptions(conn(), map()) :: :ok
-  # def insert_topic_subscriptions(conn, params) do
-  #   sql = "insert into realtime.subscription
-  #            (subscription_id, entity, filters, claims)
-  #          values ($1, $2, $3, $4)"
-  #   bin_uuid = UUID.string_to_binary!(params.id)
-
-  #   Enum.each(params.entities, fn entity ->
-  #     query(conn, sql, [bin_uuid, entity, params.filters, params.claims])
-  #   end)
-  # end
-
-  @spec insert_topic_subscriptions(conn(), map(), map()) :: :ok
+  @spec insert_topic_subscriptions(conn(), map(), map()) ::
+          {:ok, nil} | {:error, any()}
   def insert_topic_subscriptions(conn, params, oids) do
-    sql = "insert into realtime.subscription
-             (subscription_id, entity, filters, claims)
-           values ($1, $2, $3, $4)
-           on conflict (subscription_id, entity, filters)
-           do update set claims = excluded.claims, created_at = now()"
-
-    bin_uuid = UUID.string_to_binary!(params.id)
-
-    # db_config = %{
-    #   "public" => %{
-    #     "mp_latency" => %{
-    #       "id" => %{
-    #         "lt" => "2"
-    #       }
-    #     },
-    #     "todos" => %{
-    #       "details" => %{"eq" => "abc"}
-    #     }
-    #   }
-    # }
-
-    # %{"filter" => "room_id=eq.1", "schema" => "public", "table" => "messages"}
-
     transform_to_oid_view(oids, params.config)
-    |> Enum.each(fn
-      {entity, filters} ->
-        query(conn, sql, [bin_uuid, entity, filters, params.claims])
+    |> case do
+      nil ->
+        {:error, "No match between subscription params and entity oids"}
 
-      entity ->
-        query(conn, sql, [bin_uuid, entity, [], params.claims])
-    end)
+      views ->
+        bin_uuid = UUID.string_to_binary!(params.id)
+        sql = "insert into realtime.subscription
+              (subscription_id, entity, filters, claims)
+              values ($1, $2, $3, $4)
+              on conflict (subscription_id, entity, filters)
+              do update set claims = excluded.claims, created_at = now()"
+
+        transaction(conn, fn conn ->
+          for view <- views do
+            {entity, filters} =
+              case view do
+                {entity, filters} -> {entity, filters}
+                entity -> {entity, []}
+              end
+
+            case query(conn, sql, [bin_uuid, entity, filters, params.claims]) do
+              {:ok, _} -> nil
+              {:error, error} -> rollback(conn, error)
+            end
+          end
+
+          nil
+        end)
+    end
   end
 
+  @spec transform_to_oid_view(map(), map()) :: [pos_integer()] | [{pos_integer(), list()}] | nil
   def transform_to_oid_view(oids, config) do
     case config do
-      %{"schema" => schema, "table" => table, "eventFilter" => filter} ->
-        [column, rule] = String.split(filter, "=")
-        [op, value] = String.split(rule, ".")
-        [oid] = oids[{schema, table}]
-        [{oid, [{column, op, value}]}]
+      %{"schema" => schema, "table" => table, "filter" => filter} ->
+        with [oid] when is_integer(oid) <- oids[{schema, table}],
+             [column, rule] <- String.split(filter, "="),
+             [op, value] <- String.split(rule, ".") do
+          [{oid, [{column, op, value}]}]
+        else
+          _ -> nil
+        end
 
       %{"schema" => schema, "table" => "*"} ->
         oids[{schema}]
@@ -204,25 +232,6 @@ defmodule Extensions.Postgres.Subscriptions do
       %{"schema" => schema} ->
         oids[{schema}]
     end
-
-    # Map.to_list(config)
-    # |> IO.inspect()
-    # |> Enum.reduce([], fn {schema, tables}, acc ->
-    #   if is_map(tables) and map_size(tables) > 0 do
-    #     Map.to_list(tables)
-    #     |> Enum.reduce(acc, fn {table, columns}, acc2 ->
-    #       [table_oid] = oids[{schema, table}]
-
-    #       if is_map(columns) and map_size(columns) > 0 do
-    #         [{table_oid, flat_filters(columns)} | acc2]
-    #       else
-    #         [table_oid | acc2]
-    #       end
-    #     end)
-    #   else
-    #     acc ++ oids[{schema}]
-    #   end
-    # end)
   end
 
   # transform %{"id" => %{"lt" => 10, "gt" => 2}}

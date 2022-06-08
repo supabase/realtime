@@ -5,8 +5,11 @@ defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
 
   require Logger
+
   alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
+
+  import Realtime.Helpers, only: [cancel_timer: 1]
 
   @impl true
   def join(
@@ -46,18 +49,22 @@ defmodule RealtimeWeb.RealtimeChannel do
       postgres_topic = topic_from_config(params)
       Logger.info("Postgres_topic is " <> postgres_topic)
 
+      realtime_configs = params["configs"]["realtime"]
+
       postgres_config =
-        if postgres_topic != "" || !params["configs"]["realtime"] do
+        if postgres_topic != "" || !realtime_configs do
           Endpoint.unsubscribe(topic)
 
           metadata = [
-            metadata: {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), topic}
+            metadata:
+              {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), topic,
+               !!realtime_configs}
           ]
 
           Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
 
           postgres_config =
-            case params["configs"]["realtime"]["filter"] do
+            case realtime_configs["filter"] do
               nil ->
                 case String.split(sub_topic, ":") do
                   [schema] ->
@@ -83,7 +90,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
 
-      send(self(), :after_join)
+      # TODO: figure out a better way to send Presence list to new API clients
+      # send(self(), :after_join)
 
       {:ok,
        assign(socket, %{
@@ -118,34 +126,57 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_info(
         :postgres_subscribe,
         %{
-          assigns: %{
-            id: id,
-            tenant: tenant,
-            postgres_config: postgres_config,
-            postgres_topic: postgres_topic,
-            postgres_extension: postgres_extension,
-            claims: claims
-          }
+          assigns:
+            %{
+              id: id,
+              tenant: tenant,
+              postgres_config: postgres_config,
+              postgres_topic: postgres_topic,
+              postgres_extension: postgres_extension,
+              claims: claims
+            } = assigns
         } = socket
       ) do
-    Postgres.subscribe(
-      tenant,
-      id,
-      postgres_config,
-      claims,
-      self(),
-      postgres_extension
-    )
+    cancel_timer(assigns[:pg_sub_ref])
 
-    Logger.info("Subscribe #{tenant} to #{postgres_topic}")
-    {:noreply, socket}
+    new_socket =
+      Postgres.subscribe(
+        tenant,
+        id,
+        postgres_config,
+        claims,
+        self(),
+        postgres_extension
+      )
+      |> case do
+        {:ok, manager_pid} ->
+          Logger.info("Subscribe channel for #{tenant} to #{postgres_topic}")
+
+          Process.monitor(manager_pid)
+
+          {:noreply, socket}
+
+        :ok ->
+          Logger.warning("Re-subscribe channel for #{tenant}")
+
+          ref = Process.send_after(self(), :postgres_subscribe, 5_000)
+
+          {:noreply, assign(socket, :pg_sub_ref, ref)}
+
+        {:error, error} ->
+          Logger.error(
+            "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
+          )
+
+          {:stop, %{reason: error}, socket}
+      end
   end
 
   def handle_info(
         :expire_token,
         %{assigns: %{expire_ref: ref}} = socket
       ) do
-    Process.cancel_timer(ref)
+    cancel_timer(ref)
     {:stop, %{reason: "access token has expired"}, socket}
   end
 
@@ -176,7 +207,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       )
       when is_binary(refresh_token) do
-    Process.cancel_timer(ref)
+    cancel_timer(ref)
 
     with {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret),

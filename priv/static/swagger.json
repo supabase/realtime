@@ -46,7 +46,7 @@
               "type": "integer"
             },
             "publication": {
-              "example": "supabase_multiplayer",
+              "example": "supabase_realtime",
               "type": "string"
             },
             "region": {
@@ -54,7 +54,7 @@
               "type": "string"
             },
             "slot_name": {
-              "example": "supabase_multiplayer_replication_slot",
+              "example": "supabase_realtime_replication_slot",
               "type": "string"
             }
           },
@@ -124,8 +124,8 @@
               "type": "integer"
             },
             "publication": {
-              "default": "supabase_multiplayer",
-              "example": "supabase_multiplayer",
+              "default": "supabase_realtime",
+              "example": "supabase_realtime",
               "type": "string"
             },
             "region": {
@@ -134,8 +134,8 @@
               "type": "string"
             },
             "slot_name": {
-              "default": "supabase_multiplayer_replication_slot",
-              "example": "supabase_multiplayer_replication_slot",
+              "default": "supabase_realtime_replication_slot",
+              "example": "supabase_realtime_replication_slot",
               "type": "string"
             }
           },

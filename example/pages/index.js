@@ -65,7 +65,12 @@ export default function Index() {
       // })
       // setDataSource([...dataSource])
     })
-    channel.on('realtime', { event: '*', schema: 'public', table: '*' }, (msg) => {
+    channel.on('realtime', {
+      event: '*',
+      schema: 'public',
+      table: '*',
+      // filter: 'field=eq.some_val'
+    }, (msg) => {
       console.log("msg", msg)
       // console.log('Got a message')
       // dataSource.unshift({

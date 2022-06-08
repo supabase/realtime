@@ -4,7 +4,12 @@ import Ecto.Adapters.SQL, only: [query: 3]
 db_conf = Application.get_env(:realtime, Realtime.Repo)
 
 tenant_name = "dev_tenant"
-create_param = %{
+
+if Api.get_tenant_by_external_id(tenant_name) do
+  Api.delete_tenant_by_external_id(tenant_name)
+end
+
+%{
   "name" => tenant_name,
   "extensions" => [
     %{
@@ -18,18 +23,15 @@ create_param = %{
         "poll_interval_ms" => 100,
         "poll_max_changes" => 100,
         "poll_max_record_bytes" => 1_048_576,
+        "publication" => "supabase_realtime_test",
         "region" => "us-east-1"
       }
     }
   ],
   "external_id" => tenant_name,
   "jwt_secret" => "secure_jwt_secret"
-}
-
-if !Api.get_tenant_by_external_id(tenant_name) do
-  Api.create_tenant(create_param)
-end
+} |> Api.create_tenant()
 
 [
-  "create publication supabase_multiplayer for all tables"
+  "create publication supabase_realtime_test for all tables"
 ] |> Enum.each(&query(Realtime.Repo, &1, []))
