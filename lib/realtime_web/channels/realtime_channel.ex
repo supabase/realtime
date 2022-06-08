@@ -90,7 +90,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
 
-      send(self(), :after_join)
+      # TODO: figure out a better way to send Presence list to new API clients
+      # send(self(), :after_join)
 
       {:ok,
        assign(socket, %{
