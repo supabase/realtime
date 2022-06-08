@@ -3,8 +3,9 @@ defmodule Extensions.Postgres.Subscriptions do
   This module consolidates subscriptions handling
   """
   require Logger
-  import Postgrex, only: [query: 3]
+  import Postgrex, only: [transaction: 2, query: 3, query!: 3]
 
+  @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
   @spec create(conn(), String.t(), map()) :: :ok
@@ -20,6 +21,22 @@ defmodule Extensions.Postgres.Subscriptions do
     end
   end
 
+  @spec update_all(conn(), tid(), map()) :: :ok
+  def update_all(conn, tid, oids) do
+    delete_all(conn)
+
+    fn {_pid, id, config, claims, _}, _ ->
+      subscription_opts = %{
+        id: id,
+        config: config,
+        claims: claims
+      }
+
+      create(conn, subscription_opts, oids)
+    end
+    |> :ets.foldl(nil, tid)
+  end
+
   @spec delete(conn(), String.t()) :: any()
   def delete(conn, id) do
     Logger.debug("Delete subscription")
@@ -28,9 +45,30 @@ defmodule Extensions.Postgres.Subscriptions do
     {:ok, _} = query(conn, sql, [id])
   end
 
+  @spec delete_all(conn()) :: {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
   def delete_all(conn) do
     Logger.debug("Delete all subscriptions")
     query(conn, "delete from realtime.subscription;", [])
+  end
+
+  @spec maybe_delete_all(conn()) :: {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
+  def maybe_delete_all(conn) do
+    query(
+      conn,
+      "do $$
+        begin
+          if exists (
+            select 1
+            from pg_tables
+            where schemaname = 'realtime'
+              and tablename  = 'subscription'
+          )
+          then
+            delete from realtime.subscription;
+          end if;
+      end $$",
+      []
+    )
   end
 
   def sync_subscriptions() do

@@ -1,7 +1,6 @@
 defmodule Extensions.Postgres.SubscribersNotification do
   require Logger
 
-  alias Phoenix.Socket.Broadcast
   alias Realtime.{MessageDispatcher, PubSub}
 
   def broadcast_change(topic, %{subscription_ids: subscription_ids} = change) do
@@ -10,18 +9,11 @@ defmodule Extensions.Postgres.SubscribersNotification do
         !Enum.member?([:is_rls_enabled, :subscription_ids], key)
       end)
 
-    broadcast = %Broadcast{
-      # MessageDispatcher updates topic field
-      topic: "",
-      event: "realtime",
-      payload: %{payload: payload, event: payload.type}
-    }
-
     Phoenix.PubSub.broadcast_from(
       PubSub,
       self(),
       topic,
-      {broadcast, subscription_ids},
+      {payload, subscription_ids},
       MessageDispatcher
     )
   end

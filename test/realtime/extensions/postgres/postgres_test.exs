@@ -8,6 +8,8 @@ defmodule Realtime.Extensions.PostgresTest do
   alias Realtime.Api.Tenant
   alias RealtimeWeb.{ChannelsAuthorization, Joken.CurrentTime, UserSocket}
   import Extensions.Postgres.Helpers, only: [filter_postgres_settings: 1]
+  alias Extensions.Postgres
+  alias Postgrex, as: P
 
   @external_id "dev_tenant"
   @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjQ5OTYzNTc1LCJleHAiOjE5NjU1Mzk1NzV9.v7UZK05KaVQKInBBH_AP5h0jXUEwCCC5qtdj3iaxbNQ"
@@ -31,7 +33,7 @@ defmodule Realtime.Extensions.PostgresTest do
       {ChannelsAuthorization, [],
        [
          authorize_conn: fn _, _ ->
-           {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "test_role"}}
+           {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
          end
        ]}
     ]) do
@@ -46,13 +48,39 @@ defmodule Realtime.Extensions.PostgresTest do
 
   describe "Postgres extensions" do
     test "Check supervisor crash and respawn", %{socket: _socket, tenant: %Tenant{} = _tenant} do
-      sup = :global.whereis_name({:supervisor, @external_id})
+      sup = :global.whereis_name({:tenant_db, :supervisor, @external_id})
       assert Process.alive?(sup)
-      DynamicSupervisor.terminate_child(Extensions.Postgres.DynamicSupervisor, sup)
-      Process.sleep(500)
-      sup2 = :global.whereis_name({:supervisor, @external_id})
+      DynamicSupervisor.terminate_child(Postgres.DynamicSupervisor, sup)
+      Process.sleep(5_500)
+      sup2 = :global.whereis_name({:tenant_db, :supervisor, @external_id})
       assert Process.alive?(sup2)
       assert(sup != sup2)
+    end
+
+    test "Subscription manager updates oids", %{} do
+      subscriber_manager_pid =
+        Enum.reduce_while(1..10, nil, fn x, acc ->
+          case Postgres.manager_pid(@external_id) do
+            nil ->
+              Process.sleep(100)
+              {:cont, acc}
+
+            pid ->
+              {:halt, pid}
+          end
+        end)
+
+      %{conn: conn, oids: oids} = :sys.get_state(subscriber_manager_pid)
+
+      P.query(conn, "drop publication supabase_multiplayer", [])
+      send(subscriber_manager_pid, :check_oids)
+      %{oids: oids2} = :sys.get_state(subscriber_manager_pid)
+      assert !Map.equal?(oids, oids2)
+
+      P.query(conn, "create publication supabase_multiplayer for all tables", [])
+      send(subscriber_manager_pid, :check_oids)
+      %{oids: oids3} = :sys.get_state(subscriber_manager_pid)
+      assert !Map.equal?(oids2, oids3)
     end
   end
 end

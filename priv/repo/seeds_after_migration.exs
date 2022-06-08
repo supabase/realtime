@@ -31,5 +31,5 @@ if !Api.get_tenant_by_external_id(tenant_name) do
 end
 
 [
-  "create publication supabase_multiplayer for all tables"
+  "create publication supabase_realtime for all tables"
 ] |> Enum.each(&query(Realtime.Repo, &1, []))
