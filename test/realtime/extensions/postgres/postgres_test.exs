@@ -3,12 +3,13 @@ defmodule Realtime.Extensions.PostgresTest do
   use RealtimeWeb.ConnCase
 
   import Mock
+  import Extensions.Postgres.Helpers, only: [filter_postgres_settings: 1]
 
+  alias Extensions.Postgres
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias RealtimeWeb.{ChannelsAuthorization, Joken.CurrentTime, UserSocket}
-  import Extensions.Postgres.Helpers, only: [filter_postgres_settings: 1]
-  alias Extensions.Postgres
+  alias Postgres.SubscriptionManager
   alias Postgrex, as: P
 
   @external_id "dev_tenant"
@@ -72,12 +73,12 @@ defmodule Realtime.Extensions.PostgresTest do
 
       %{conn: conn, oids: oids} = :sys.get_state(subscriber_manager_pid)
 
-      P.query(conn, "drop publication supabase_multiplayer", [])
+      P.query!(conn, "drop publication supabase_realtime", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids2} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids, oids2)
 
-      P.query(conn, "create publication supabase_multiplayer for all tables", [])
+      P.query!(conn, "create publication supabase_realtime for all tables", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids3} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids2, oids3)

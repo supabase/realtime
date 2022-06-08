@@ -152,24 +152,23 @@ defmodule RealtimeWeb.RealtimeChannel do
           Logger.info("Subscribe channel for #{tenant} to #{postgres_topic}")
 
           Process.monitor(manager_pid)
-          socket
+
+          {:noreply, socket}
 
         :ok ->
           Logger.warning("Re-subscribe channel for #{tenant}")
 
           ref = Process.send_after(self(), :postgres_subscribe, 5_000)
-          assign(socket, :pg_sub_ref, ref)
+
+          {:noreply, assign(socket, :pg_sub_ref, ref)}
 
         {:error, error} ->
           Logger.error(
             "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
           )
 
-          ref = Process.send_after(self(), :postgres_subscribe, 5_000)
-          assign(socket, :pg_sub_ref, ref)
+          {:stop, %{reason: error}, socket}
       end
-
-    {:noreply, new_socket}
   end
 
   def handle_info(
