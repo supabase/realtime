@@ -108,19 +108,14 @@ defmodule Extensions.Postgres do
     end
   end
 
-  def stop(scope) do
+  @spec stop(String.t()) :: :ok
+  def stop(scope, timeout \\ :infinity) do
     case :global.whereis_name({:tenant_db, :supervisor, scope}) do
       :undefined ->
-        nil
+        Logger.warning("Database supervisor not found for tenant #{scope}")
 
       pid ->
-        poller_pid = :global.whereis_name({:tenant_db, :replication, :poller, scope})
-        manager_pid = :global.whereis_name({:tenant_db, :replication, :manager, scope})
-
-        is_pid(poller_pid) && GenServer.stop(poller_pid, :normal)
-        is_pid(manager_pid) && GenServer.stop(manager_pid, :normal)
-
-        DynamicSupervisor.stop(pid, :shutdown)
+        DynamicSupervisor.stop(pid, :shutdown, timeout)
     end
   end
 

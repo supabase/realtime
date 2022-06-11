@@ -48,8 +48,21 @@ defmodule Realtime.Extensions.PostgresTest do
   end
 
   describe "Postgres extensions" do
-    test "Check supervisor crash and respawn", %{} do
-      sup = :global.whereis_name({:tenant_db, :supervisor, @external_id})
+    test "Check supervisor crash and respawn" do
+      sup =
+        Enum.reduce_while(1..10, nil, fn x, acc ->
+          {:tenant_db, :supervisor, @external_id}
+          |> :global.whereis_name()
+          |> case do
+            :undefined ->
+              Process.sleep(500)
+              {:cont, acc}
+
+            pid ->
+              {:halt, pid}
+          end
+        end)
+
       assert Process.alive?(sup)
       DynamicSupervisor.terminate_child(Postgres.DynamicSupervisor, sup)
       Process.sleep(5_000)
@@ -58,14 +71,14 @@ defmodule Realtime.Extensions.PostgresTest do
       assert(sup != sup2)
     end
 
-    test "Subscription manager updates oids", %{} do
+    test "Subscription manager updates oids" do
       subscriber_manager_pid =
         Enum.reduce_while(1..10, nil, fn x, acc ->
           {:tenant_db, :replication, :poller, @external_id}
           |> :global.whereis_name()
           |> case do
             :undefined ->
-              Process.sleep(100)
+              Process.sleep(500)
               {:cont, acc}
 
             _ ->
@@ -84,6 +97,38 @@ defmodule Realtime.Extensions.PostgresTest do
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids3} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids2, oids3)
+    end
+
+    test "Stop tenant supervisor" do
+      [sup, manager, poller] =
+        Enum.reduce_while(1..10, nil, fn x, acc ->
+          pids = [
+            :global.whereis_name({:tenant_db, :supervisor, @external_id}),
+            :global.whereis_name({:tenant_db, :replication, :manager, @external_id}),
+            :global.whereis_name({:tenant_db, :replication, :poller, @external_id})
+          ]
+
+          pids
+          |> Enum.all?(&is_pid(&1))
+          |> case do
+            true ->
+              {:halt, pids}
+
+            false ->
+              Process.sleep(500)
+              {:cont, acc}
+          end
+        end)
+
+      assert Process.alive?(sup)
+      assert Process.alive?(manager)
+      assert Process.alive?(poller)
+
+      Postgres.stop(@external_id)
+
+      assert Process.alive?(sup) == false
+      assert Process.alive?(manager) == false
+      assert Process.alive?(poller) == false
     end
   end
 end
