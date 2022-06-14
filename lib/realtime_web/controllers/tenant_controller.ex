@@ -107,7 +107,10 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def delete(conn, %{"id" => id}) do
-    Api.delete_tenant_by_external_id(id)
+    if Api.delete_tenant_by_external_id(id) do
+      Extensions.Postgres.stop(id)
+    end
+
     send_resp(conn, 204, "")
   end
 
