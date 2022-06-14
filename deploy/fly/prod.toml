@@ -1,6 +1,4 @@
-# fly.toml file generated for realtime-multi on 2022-04-14T15:47:49+02:00
-
-app = "realtime-multi"
+app = "realtime-prod"
 
 kill_signal = "SIGTERM"
 kill_timeout = 5
@@ -11,7 +9,7 @@ kill_timeout = 5
 
 [env]
   SECURE_CHANNELS = "true"
-  DNS_NODES = "realtime-multi.internal"
+  DNS_NODES = "realtime-prod.internal"
 
 [experimental]
   private_network = true
