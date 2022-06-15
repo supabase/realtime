@@ -364,6 +364,34 @@
           "Tenants"
         ]
       }
+    },
+    "/api/tenants/{external_id}/reload": {
+      "post": {
+        "description": "Reload tenant database supervisor",
+        "operationId": "RealtimeWeb.TenantController.reload",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "type": "string",
+            "x-example": "123e4567-e89b-12d3-a456-426655440000"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "not found"
+          }
+        },
+        "summary": "",
+        "tags": [
+          "Tenants"
+        ]
+      }
     }
   },
   "produces": [

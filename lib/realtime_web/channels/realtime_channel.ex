@@ -90,8 +90,9 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
 
-      # TODO: figure out a better way to send Presence list to new API clients
-      # send(self(), :after_join)
+      if is_map(params) && params["configs"]["presence"] do
+        send(self(), :sync_presence)
+      end
 
       {:ok,
        assign(socket, %{
@@ -113,7 +114,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def handle_info(:after_join, %{assigns: %{tenant_topic: topic}} = socket) do
+  def handle_info(:sync_presence, %{assigns: %{tenant_topic: topic}} = socket) do
     push(socket, "presence_state", Presence.list(topic))
     {:noreply, socket}
   end

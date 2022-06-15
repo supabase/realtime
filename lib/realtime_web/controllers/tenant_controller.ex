@@ -1,9 +1,15 @@
 defmodule RealtimeWeb.TenantController do
   use RealtimeWeb, :controller
   use PhoenixSwagger
+
+  require Logger
+
+  alias Extensions.Postgres
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias PhoenixSwagger.{Path, Schema}
+
+  @stop_timeout 10_000
 
   action_fallback(RealtimeWeb.FallbackController)
 
@@ -59,7 +65,7 @@ defmodule RealtimeWeb.TenantController do
       nil ->
         conn
         |> put_status(404)
-        |> render("no_found.json", tenant: nil)
+        |> render("not_found.json", tenant: nil)
     end
   end
 
@@ -109,6 +115,35 @@ defmodule RealtimeWeb.TenantController do
   def delete(conn, %{"id" => id}) do
     Api.delete_tenant_by_external_id(id)
     send_resp(conn, 204, "")
+  end
+
+  swagger_path :reload do
+    Path.post("/api/tenants/{external_id}/reload")
+    tag("Tenants")
+    description("Reload tenant database supervisor")
+
+    parameter(:tenant_id, :path, :string, "Tenant ID",
+      required: true,
+      example: "123e4567-e89b-12d3-a456-426655440000"
+    )
+
+    response(204, "")
+    response(404, "not found")
+  end
+
+  def reload(conn, %{"tenant_id" => tenant_id}) do
+    case Api.get_tenant_by_external_id(tenant_id) do
+      %Tenant{} ->
+        Postgres.stop(tenant_id, @stop_timeout)
+        send_resp(conn, 204, "")
+
+      nil ->
+        Logger.error("Atttempted to reload non-existant tenant #{tenant_id}")
+
+        conn
+        |> put_status(404)
+        |> render("not_found.json", tenant: nil)
+    end
   end
 
   def swagger_definitions do
