@@ -86,7 +86,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   @spec disconnect_subscribers(pid) :: :ok
   def disconnect_subscribers(pid) do
-    GenServer.call(pid, :disconnect_subscribers)
+    GenServer.call(pid, :disconnect_subscribers, @timeout)
   end
 
   @impl true
