@@ -4,6 +4,7 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias PhoenixSwagger.{Path, Schema}
+  alias Extensions.Postgres
 
   action_fallback(RealtimeWeb.FallbackController)
 
@@ -108,7 +109,8 @@ defmodule RealtimeWeb.TenantController do
 
   def delete(conn, %{"id" => id}) do
     if Api.delete_tenant_by_external_id(id) do
-      Extensions.Postgres.stop(id)
+      Postgres.disconnect_subscribers(id)
+      Postgres.stop(id)
     end
 
     send_resp(conn, 204, "")

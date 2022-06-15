@@ -124,6 +124,14 @@ defmodule Extensions.Postgres do
     end
   end
 
+  def disconnect_subscribers(scope) do
+    pid = manager_pid(scope)
+
+    if pid do
+      SubscriptionManager.disconnect_subscribers(pid)
+    end
+  end
+
   @spec manager_pid(any()) :: pid() | nil
   def manager_pid(scope) do
     case :global.whereis_name({:tenant_db, :replication, :manager, scope}) do

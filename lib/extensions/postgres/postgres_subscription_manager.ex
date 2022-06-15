@@ -10,11 +10,10 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   import Realtime.Helpers, only: [cancel_timer: 1]
 
-  @check_active_interval 15_000
   @check_oids_interval 60_000
   @queue_target 5_000
   @pool_size 5
-  @subscribe_timeout 15_000
+  @timeout 15_000
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
@@ -71,8 +70,9 @@ defmodule Extensions.Postgres.SubscriptionManager do
     {:noreply, %{state | conn: conn}}
   end
 
+  @spec subscribe(pid, map) :: {:ok, nil} | {:error, any()}
   def subscribe(pid, opts) do
-    GenServer.call(pid, {:subscribe, opts}, @subscribe_timeout)
+    GenServer.call(pid, {:subscribe, opts}, @timeout)
   end
 
   def subscribers_list(pid) do
@@ -82,6 +82,11 @@ defmodule Extensions.Postgres.SubscriptionManager do
   @spec unsubscribe(atom | pid | port | reference | {atom, atom}, any) :: any
   def unsubscribe(pid, subs_id) do
     send(pid, {:unsubscribe, subs_id})
+  end
+
+  @spec disconnect_subscribers(pid) :: :ok
+  def disconnect_subscribers(pid) do
+    GenServer.call(pid, :disconnect_subscribers)
   end
 
   @impl true
@@ -113,7 +118,24 @@ defmodule Extensions.Postgres.SubscriptionManager do
     {:reply, create_resp, new_state}
   end
 
-  @impl true
+  def handle_call(:disconnect_subscribers, _, state) do
+    tid = state.subscribers_tid
+
+    fn {pid, _, _, _, ref}, _acc ->
+      Process.demonitor(ref)
+      GenServer.stop(pid, :normal, @timeout)
+    end
+    |> :ets.foldl([], tid)
+
+    tid
+    |> :ets.delete_all_objects()
+
+    state.conn
+    |> Subscriptions.delete_all()
+
+    {:reply, :ok, state}
+  end
+
   def handle_call(:subscribers_list, _, state) do
     subscribers =
       :ets.foldl(
@@ -200,7 +222,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
     Process.send_after(
       self(),
       :check_active_pids,
-      @check_active_interval
+      @timeout
     )
   end
 
