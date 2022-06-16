@@ -2,11 +2,17 @@ defmodule Realtime.RLS.Repo.Migrations.AddQuotedRegtypesSupport do
   use Ecto.Migration
 
   def change do
+    execute("drop type if exists realtime.wal_column cascade;")
+
     execute("
-      alter type realtime.wal_column
-      add attribute type_oid oid cascade,
-      drop attribute if exists type cascade,
-      add attribute type_name text cascade;
+      create type realtime.wal_column as (
+        name text,
+        type_name text,
+        type_oid oid,
+        value jsonb,
+        is_pkey boolean,
+        is_selectable boolean
+      );
     ")
 
     execute("
