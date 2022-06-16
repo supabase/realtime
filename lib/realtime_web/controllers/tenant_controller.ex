@@ -1,6 +1,7 @@
 defmodule RealtimeWeb.TenantController do
   use RealtimeWeb, :controller
   use PhoenixSwagger
+  require Logger
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias PhoenixSwagger.{Path, Schema}
@@ -109,8 +110,15 @@ defmodule RealtimeWeb.TenantController do
 
   def delete(conn, %{"id" => id}) do
     if Api.delete_tenant_by_external_id(id) do
-      Postgres.disconnect_subscribers(id)
-      Postgres.stop(id)
+      try do
+        Postgres.disconnect_subscribers(id)
+        Postgres.stop(id)
+      catch
+        error ->
+          Logger.error(
+            "There is an error when trying to delete #{id} #{inspect(error, pretty: true)}"
+          )
+      end
     end
 
     send_resp(conn, 204, "")
