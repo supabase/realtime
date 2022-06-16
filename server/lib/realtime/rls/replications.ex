@@ -60,10 +60,10 @@ defmodule Realtime.RLS.Replications do
           pub,
           pg_logical_slot_get_changes(
             $2, null, $3,
-            'include-pk', '1',
+            'include-pk', 'true',
             'include-transaction', 'false',
             'include-timestamp', 'true',
-            'write-in-chunks', 'true',
+            'include-type-oids', 'true',
             'format-version', '2',
             'actions', pub.w2j_actions,
             'add-tables', pub.w2j_add_tables

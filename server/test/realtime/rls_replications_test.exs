@@ -97,8 +97,8 @@ defmodule Realtime.RlsReplicationsTest do
     assert record["schema"] == "public"
     assert record["table"] == "todos"
     assert record["type"] == "UPDATE"
-    assert record["old_record"] == %{}
-    assert record["record"] == %{}
+    assert record["old_record"] == %{"id" => 1}
+    assert record["record"] == %{"id" => 1, "user_id" => 1}
     assert errors == ["Error 413: Payload Too Large"]
   end
 end
