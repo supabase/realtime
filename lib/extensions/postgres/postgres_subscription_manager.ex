@@ -7,6 +7,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   alias Extensions.Postgres
   alias Postgres.Subscriptions
+  alias RealtimeWeb.{UserSocket, Endpoint}
 
   import Realtime.Helpers, only: [cancel_timer: 1]
 
@@ -119,19 +120,18 @@ defmodule Extensions.Postgres.SubscriptionManager do
   end
 
   def handle_call(:disconnect_subscribers, _, state) do
-    tid = state.subscribers_tid
+    %{id: id, conn: conn, subscribers_tid: tid} = state
 
-    fn {pid, _, _, _, ref}, _acc ->
-      Process.demonitor(ref)
-      GenServer.stop(pid, :normal, @timeout)
+    fn {_, _, _, _, ref}, _acc ->
+      Process.demonitor(ref, [:flush])
     end
     |> :ets.foldl([], tid)
 
-    tid
-    |> :ets.delete_all_objects()
+    UserSocket.subscribers_id(id)
+    |> Endpoint.broadcast("disconnect", %{})
 
-    state.conn
-    |> Subscriptions.delete_all()
+    :ets.delete_all_objects(tid)
+    Subscriptions.delete_all(conn)
 
     {:reply, :ok, state}
   end

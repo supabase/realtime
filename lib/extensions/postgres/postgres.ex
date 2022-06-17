@@ -108,6 +108,7 @@ defmodule Extensions.Postgres do
     end
   end
 
+  @spec stop(String.t()) :: nil | :ok
   def stop(scope) do
     case :global.whereis_name({:tenant_db, :supervisor, scope}) do
       :undefined ->

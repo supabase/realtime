@@ -113,7 +113,7 @@ defmodule RealtimeWeb.TenantController do
       try do
         Postgres.disconnect_subscribers(id)
         Postgres.stop(id)
-      catch
+      rescue
         error ->
           Logger.error(
             "There is an error when trying to delete #{id} #{inspect(error, pretty: true)}"
