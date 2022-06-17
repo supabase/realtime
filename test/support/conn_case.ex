@@ -22,7 +22,6 @@ defmodule RealtimeWeb.ConnCase do
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest
-      import RealtimeWeb.ConnCase
       alias RealtimeWeb.Router.Helpers, as: Routes
 
       # The default endpoint for testing

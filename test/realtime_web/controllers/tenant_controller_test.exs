@@ -5,7 +5,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
   alias Realtime.Api
   alias Realtime.Api.Tenant
-  alias RealtimeWeb.JwtVerification
+  alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
   import Realtime.Helpers, only: [encrypt: 2]
 
   @external_id "test_external_id"
@@ -136,6 +136,27 @@ defmodule RealtimeWeb.TenantControllerTest do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
         conn = delete(conn, Routes.tenant_path(conn, :delete, "wrong_external_id"))
         assert response(conn, 204)
+      end
+    end
+  end
+
+  describe "reload tenant" do
+    test "reload when tenant does exist", %{conn: conn} do
+      with_mocks [
+        {ChannelsAuthorization, [], authorize: fn _, _ -> {:ok, %{}} end},
+        {Api, [], get_tenant_by_external_id: fn _ -> %Tenant{} end}
+      ] do
+        Routes.tenant_reload_path(conn, :reload, @external_id)
+        %{status: status} = post(conn, Routes.tenant_reload_path(conn, :reload, @external_id))
+        assert status == 204
+      end
+    end
+
+    test "reload when tenant does not exist", %{conn: conn} do
+      with_mock ChannelsAuthorization, authorize: fn _, _ -> {:ok, %{}} end do
+        Routes.tenant_reload_path(conn, :reload, @external_id)
+        %{status: status} = post(conn, Routes.tenant_reload_path(conn, :reload, @external_id))
+        assert status == 404
       end
     end
   end
