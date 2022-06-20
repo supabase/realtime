@@ -29,7 +29,7 @@ defmodule Realtime.MixProject do
   def application do
     [
       mod: {Realtime.Application, []},
-      extra_applications: [:logger, :runtime_tools, :prom_ex, :mix]
+      extra_applications: [:logger, :runtime_tools, :prom_ex, :mix, :os_mon]
     ]
   end
 
