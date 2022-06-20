@@ -63,10 +63,10 @@ defmodule Realtime.PromEx do
       # Plugins.Application,
       Plugins.Beam,
       {Plugins.Phoenix, router: RealtimeWeb.Router},
-      # Plugins.Ecto,
+      Plugins.Ecto,
       # Plugins.Oban,
       # Plugins.PhoenixLiveView
-      Realtime.PromEx.Plugins.Channels
+      Realtime.PromEx.Plugins.OsMon
     ]
   end
 
