@@ -5,7 +5,7 @@ defmodule Realtime.OsMetrics do
     100 - mem[:free_memory] / mem[:total_memory] * 100
   end
 
-  @spec cpu_la() :: [avg1: float(), avg5: float(), avg15: float()]
+  @spec cpu_la() :: %{avg1: float(), avg5: float(), avg15: float()}
   def cpu_la() do
     %{
       avg1: :cpu_sup.avg1() / 256,
