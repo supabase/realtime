@@ -38,8 +38,6 @@ defmodule RealtimeWeb.RealtimeChannel do
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
          expire_ref <- Process.send_after(self(), :expire_token, exp_diff * 1_000) do
       Realtime.UsersCounter.add(pid, tenant)
-      # used for custom monitoring
-      channel_stats(pid, tenant, topic)
 
       tenant_topic = tenant <> ":" <> sub_topic
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
@@ -271,20 +269,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     Logger.debug(%{terminate: reason})
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
     :ok
-  end
-
-  def channel_stats(pid, tenant, topic) do
-    Registry.register(
-      Realtime.Registry,
-      "topics",
-      {tenant, topic, System.system_time(:second)}
-    )
-
-    Registry.register(
-      Realtime.Registry.Unique,
-      "sessions",
-      {pid, System.system_time(:second)}
-    )
   end
 
   defp topic_from_config(params) do

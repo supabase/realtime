@@ -108,7 +108,7 @@ defmodule Extensions.Postgres do
     end
   end
 
-  @spec stop(String.t()) :: :ok
+  @spec stop(String.t(), timeout()) :: :ok
   def stop(scope, timeout \\ :infinity) do
     case :global.whereis_name({:tenant_db, :supervisor, scope}) do
       :undefined ->
@@ -116,6 +116,14 @@ defmodule Extensions.Postgres do
 
       pid ->
         DynamicSupervisor.stop(pid, :shutdown, timeout)
+    end
+  end
+
+  def disconnect_subscribers(scope) do
+    pid = manager_pid(scope)
+
+    if pid do
+      SubscriptionManager.disconnect_subscribers(pid)
     end
   end
 

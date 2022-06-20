@@ -4,10 +4,10 @@ defmodule RealtimeWeb.TenantController do
 
   require Logger
 
-  alias Extensions.Postgres
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias PhoenixSwagger.{Path, Schema}
+  alias Extensions.Postgres
 
   @stop_timeout 10_000
 
@@ -113,7 +113,18 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def delete(conn, %{"id" => id}) do
-    Api.delete_tenant_by_external_id(id)
+    if Api.delete_tenant_by_external_id(id) do
+      try do
+        Postgres.disconnect_subscribers(id)
+        Postgres.stop(id)
+      rescue
+        error ->
+          Logger.error(
+            "There is an error when trying to delete #{id} #{inspect(error, pretty: true)}"
+          )
+      end
+    end
+
     send_resp(conn, 204, "")
   end
 

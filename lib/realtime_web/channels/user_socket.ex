@@ -56,5 +56,12 @@ defmodule RealtimeWeb.UserSocket do
   end
 
   @impl true
-  def id(_socket), do: nil
+  def id(%{assigns: %{tenant: tenant}}) do
+    subscribers_id(tenant)
+  end
+
+  @spec subscribers_id(String.t()) :: String.t()
+  def subscribers_id(tenant) do
+    "user_socket:" <> tenant
+  end
 end
