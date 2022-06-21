@@ -104,10 +104,16 @@ defmodule Extensions.Postgres.SubscriptionManager do
       claims: claims
     }
 
-    monitor_ref = Process.monitor(pid)
-    true = :ets.insert(tid, {pid, id, config, claims, monitor_ref})
+    create_resp =
+      case Subscriptions.create(state.conn, publication, subscription_opts) do
+        {:ok, response} ->
+          monitor_ref = Process.monitor(pid)
+          true = :ets.insert(tid, {pid, id, config, claims, monitor_ref})
+          {:ok, response}
 
-    create_resp = Subscriptions.create(state.conn, publication, subscription_opts)
+        other ->
+          other
+      end
 
     new_state =
       if ref == nil do
