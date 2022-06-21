@@ -187,8 +187,6 @@ defmodule Realtime.Api do
         } = tenant
       )
       when is_map(settings) and is_binary(type) do
-    secure_key = Application.get_env(:realtime, :db_enc_key)
-
     decrypted_extensions =
       for extension <- tenant.extensions do
         settings = extension.settings
@@ -199,7 +197,7 @@ defmodule Realtime.Api do
             {key, _, true}, acc ->
               case settings[key] do
                 nil -> acc
-                value -> %{acc | key => Helpers.decrypt(secure_key, value)}
+                value -> %{acc | key => &Helpers.decrypt(&1, value)}
               end
 
             _, acc ->
