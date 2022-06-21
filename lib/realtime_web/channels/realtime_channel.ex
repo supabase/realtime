@@ -138,37 +138,32 @@ defmodule RealtimeWeb.RealtimeChannel do
       ) do
     cancel_timer(assigns[:pg_sub_ref])
 
-    new_socket =
-      Postgres.subscribe(
-        tenant,
-        id,
-        postgres_config,
-        claims,
-        self(),
-        postgres_extension
-      )
-      |> case do
-        {:ok, manager_pid} ->
-          Logger.info("Subscribe channel for #{tenant} to #{postgres_topic}")
+    Postgres.subscribe(
+      tenant,
+      id,
+      postgres_config,
+      claims,
+      self(),
+      postgres_extension
+    )
+    |> case do
+      {:ok, manager_pid} ->
+        Logger.info("Subscribe channel for #{tenant} to #{postgres_topic}")
+        Process.monitor(manager_pid)
+        {:noreply, socket}
 
-          Process.monitor(manager_pid)
+      :ok ->
+        Logger.warning("Re-subscribe channel for #{tenant}")
+        ref = Process.send_after(self(), :postgres_subscribe, 5_000)
+        {:noreply, assign(socket, :pg_sub_ref, ref)}
 
-          {:noreply, socket}
+      {:error, error} ->
+        Logger.error(
+          "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
+        )
 
-        :ok ->
-          Logger.warning("Re-subscribe channel for #{tenant}")
-
-          ref = Process.send_after(self(), :postgres_subscribe, 5_000)
-
-          {:noreply, assign(socket, :pg_sub_ref, ref)}
-
-        {:error, error} ->
-          Logger.error(
-            "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
-          )
-
-          {:stop, %{reason: error}, socket}
-      end
+        {:stop, %{reason: error}, socket}
+    end
   end
 
   def handle_info(
