@@ -54,6 +54,13 @@ defmodule Extensions.Postgres.ReplicationPoller do
           tenant: tenant
         } = state
       ) do
+    secure_key = Application.get_env(:realtime, :db_enc_key)
+
+    db_host = db_host.(secure_key)
+    db_name = db_name.(secure_key)
+    db_pass = db_pass.(secure_key)
+    db_user = db_user.(secure_key)
+
     Repo.with_dynamic_repo(
       [hostname: db_host, database: db_name, password: db_pass, username: db_user],
       fn repo ->

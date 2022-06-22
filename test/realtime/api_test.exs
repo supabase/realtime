@@ -73,7 +73,7 @@ defmodule Realtime.ApiTest do
         Api.get_dec_tenant_by_external_id("external_id")
 
       assert Map.has_key?(extension.settings, "db_password")
-      password = extension.settings["db_password"]
+      password = extension.settings["db_password"].(Application.get_env(:realtime, :db_enc_key))
       assert ^password = "postgres"
     end
 
