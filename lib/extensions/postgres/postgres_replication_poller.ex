@@ -146,8 +146,6 @@ defmodule Extensions.Postgres.ReplicationPoller do
     end
     |> case do
       {:ok, rows_num} ->
-        backoff = Backoff.reset(backoff)
-
         poll_ref =
           if rows_num > 0 do
             send(self(), :poll)

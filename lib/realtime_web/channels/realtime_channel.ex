@@ -39,8 +39,6 @@ defmodule RealtimeWeb.RealtimeChannel do
          expire_ref <- Process.send_after(self(), :expire_token, exp_diff * 1_000) do
       Realtime.UsersCounter.add(pid, tenant)
 
-      self_broadcast = is_map(params) && Map.get(params, "self_broadcast", false)
-
       tenant_topic = tenant <> ":" <> sub_topic
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
 
@@ -52,7 +50,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       realtime_configs = params["configs"]["realtime"]
 
       postgres_config =
-        if postgres_topic != "" || !realtime_configs do
+        if postgres_topic != "" do
           Endpoint.unsubscribe(topic)
 
           metadata = [
@@ -90,9 +88,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
 
-      if is_map(params) && params["configs"]["presence"] do
-        send(self(), :sync_presence)
-      end
+      send(self(), :sync_presence)
 
       {:ok,
        assign(socket, %{
@@ -286,6 +282,4 @@ defmodule RealtimeWeb.RealtimeChannel do
         ""
     end
   end
-
-  def topic_from_config(_), do: ""
 end
