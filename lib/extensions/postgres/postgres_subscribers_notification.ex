@@ -1,38 +1,26 @@
 defmodule Extensions.Postgres.SubscribersNotification do
   require Logger
 
-  alias Phoenix.Socket.Broadcast
   alias Realtime.{MessageDispatcher, PubSub}
 
-  # @topic "room"
-  @topic "realtime"
-
-  def broadcast_change(topics, %{subscription_ids: subscription_ids} = change, tenant) do
+  def broadcast_change(topic, %{subscription_ids: subscription_ids} = change) do
     payload =
       Map.filter(change, fn {key, _} ->
         !Enum.member?([:is_rls_enabled, :subscription_ids], key)
       end)
 
-    for topic <- topics do
-      broadcast = %Broadcast{
-        topic: "#{@topic}:#{topic}",
-        event: "realtime",
-        payload: %{payload: payload, event: payload.type}
-      }
-
-      Phoenix.PubSub.broadcast_from(
-        PubSub,
-        self(),
-        "#{tenant}:#{topic}",
-        {broadcast, subscription_ids, topics},
-        MessageDispatcher
-      )
-    end
+    Phoenix.PubSub.broadcast_from(
+      PubSub,
+      self(),
+      topic,
+      {payload, subscription_ids},
+      MessageDispatcher
+    )
   end
 
-  def notify_subscribers([_ | _] = changes, id) do
-    for {change, table_topics} <- changes_topics(changes) do
-      broadcast_change(table_topics, change, id)
+  def notify_subscribers([_ | _] = changes, tenant) do
+    for change <- changes do
+      broadcast_change("realtime:postgres:" <> tenant, change)
     end
   end
 
@@ -49,19 +37,8 @@ defmodule Extensions.Postgres.SubscribersNotification do
           # Shout to specific columns - e.g. "realtime:public:users.id=eq.2"
           if type in ["INSERT", "UPDATE", "DELETE"] do
             record_key = if type == "DELETE", do: :old_record, else: :record
-
             record = Map.get(change, record_key)
-
-            filtered =
-              is_map(record) &&
-                Enum.reduce(record, [], fn {k, v}, acc ->
-                  with true <- is_notification_key_valid(v),
-                       {:ok, stringified_v} <- stringify_value(v),
-                       true <- is_notification_key_length_valid(stringified_v) do
-                    ["#{table_topic}:#{k}=eq.#{stringified_v}" | acc]
-                  end
-                end)
-
+            filtered = filtered_record(record, table_topic)
             [{change, ["*", table_topic] ++ filtered} | acc]
           else
             acc
@@ -71,6 +48,17 @@ defmodule Extensions.Postgres.SubscribersNotification do
           acc
       end
     end)
+  end
+
+  defp filtered_record(record, table_topic) do
+    is_map(record) &&
+      Enum.reduce(record, [], fn {k, v}, acc ->
+        with true <- is_notification_key_valid(v),
+             {:ok, stringified_v} <- stringify_value(v),
+             true <- is_notification_key_length_valid(stringified_v) do
+          ["#{table_topic}:#{k}=eq.#{stringified_v}" | acc]
+        end
+      end)
   end
 
   defp is_notification_key_valid(v) do

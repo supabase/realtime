@@ -10,8 +10,8 @@ defmodule RealtimeWeb.TenantView do
     %{data: render_one(tenant, TenantView, "tenant.json")}
   end
 
-  def render("no_found.json", %{tenant: nil}) do
-    %{error: "no found"}
+  def render("not_found.json", %{tenant: nil}) do
+    %{error: "not found"}
   end
 
   def render("tenant.json", %{tenant: tenant}) do

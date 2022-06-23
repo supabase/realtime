@@ -5,21 +5,41 @@ defmodule Realtime.MessageDispatcher do
   @doc """
   Hook invoked by Phoenix.PubSub dispatch.
   """
-  def dispatch([_ | _] = topic_subscriptions, _from, {payload, subscription_ids, topics}) do
-    Enum.reduce(topic_subscriptions, %{}, fn
-      {_pid, {:subscriber_fastlane, fastlane_pid, serializer, id, postgres_topic, join_topic}}, cache ->
-        if Enum.member?(topics, postgres_topic) and MapSet.member?(subscription_ids, id) do
-          broadcast_message(cache, fastlane_pid, %{payload | topic: join_topic}, serializer)
-        else
+
+  alias Phoenix.Socket.Broadcast
+
+  def dispatch([_ | _] = topic_subscriptions, _from, {payload, subscription_ids}) do
+    _ =
+      Enum.reduce(topic_subscriptions, %{}, fn
+        {_pid, {:subscriber_fastlane, fastlane_pid, serializer, id, join_topic, is_new_api}},
+        cache ->
+          if MapSet.member?(subscription_ids, id) do
+            new_payload =
+              if is_new_api do
+                %Broadcast{
+                  topic: join_topic,
+                  event: "realtime",
+                  payload: %{payload: payload, event: payload.type}
+                }
+              else
+                %Broadcast{
+                  topic: join_topic,
+                  event: payload.type,
+                  payload: payload
+                }
+              end
+
+            broadcast_message(cache, fastlane_pid, new_payload, serializer)
+          else
+            cache
+          end
+
+        {_pid, {:fastlane, fastlane_pid, serializer, _event_intercepts}}, cache ->
+          broadcast_message(cache, fastlane_pid, payload, serializer)
+
+        _, cache ->
           cache
-        end
-
-      {_pid, {:fastlane, fastlane_pid, serializer, _event_intercepts}}, cache ->
-        broadcast_message(cache, fastlane_pid, payload, serializer)
-
-      _, cache ->
-        cache
-    end)
+      end)
 
     :ok
   end

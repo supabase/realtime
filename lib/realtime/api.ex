@@ -9,6 +9,10 @@ defmodule Realtime.Api do
   alias Realtime.Helpers
 
   alias Realtime.Api.Tenant
+  alias Realtime.Api.Extensions
+  import Ecto.Query, only: [from: 2]
+
+  @ttl 120
 
   @doc """
   Returns the list of tenants.
@@ -96,6 +100,20 @@ defmodule Realtime.Api do
     Repo.delete(tenant)
   end
 
+  @spec delete_tenant_by_external_id(String.t()) :: true | false
+  def delete_tenant_by_external_id(id) do
+    from(t in Tenant, where: t.external_id == ^id)
+    |> Repo.delete_all()
+    |> case do
+      {num, _} when num > 0 ->
+        Cachex.del(:tenants, id)
+        true
+
+      _ ->
+        false
+    end
+  end
+
   @doc """
   Returns an `%Ecto.Changeset{}` for tracking tenant changes.
 
@@ -119,39 +137,56 @@ defmodule Realtime.Api do
     Repo.one(query)
   end
 
+  @spec get_tenant_by_external_id(:cached, String.t()) :: Tenant.t() | nil
   def get_tenant_by_external_id(:cached, external_id) do
-    # with {:commit, val} <- Cachex.fetch(:tenants, external_id, &get_dec_tenant_by_external_id/1) do
-    #   Cachex.expire(:tenants, external_id, :timer.seconds(500))
-    #   val
-    # else
-    #   {:ok, val} ->
-    #     val
+    Cachex.get_and_update(:tenants, external_id, fn
+      %Tenant{} = tenant ->
+        {:ignore, tenant}
 
-    #   _ ->
-    #     :error
-    # end
-    get_tenant_by_external_id(external_id)
+      nil ->
+        case get_dec_tenant_by_external_id(external_id) do
+          %Tenant{} = tenant -> {:commit, tenant}
+          nil -> {:ignore, nil}
+        end
+    end)
+    |> case do
+      {:commit, tenant} ->
+        Cachex.expire(:tenants, external_id, :timer.seconds(@ttl))
+        tenant
+
+      {:ignore, tenant} ->
+        tenant
+    end
   end
 
+  @spec get_dec_tenant_by_external_id(String.t()) :: Tenant.t() | nil
   def get_dec_tenant_by_external_id(external_id) do
-    get_tenant_by_external_id(external_id)
+    external_id
+    |> get_tenant_by_external_id()
     |> decrypt_extensions_data()
   end
 
-  def get_tenant_by_external_id(external_id) do
-    query =
-      from(p in Tenant,
-        where: p.external_id == ^external_id,
-        select: p
-      )
-
-    Repo.one(query)
+  @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
+  def get_tenant_by_external_id(external_id) when is_binary(external_id) do
+    Tenant
+    |> Repo.get_by(external_id: external_id)
     |> Repo.preload(:extensions)
   end
 
-  def decrypt_extensions_data(%Realtime.Api.Tenant{} = tenant) do
-    secure_key = Application.get_env(:realtime, :db_enc_key)
+  def get_tenant_by_external_id(_), do: nil
 
+  @spec decrypt_extensions_data(
+          %Tenant{
+            extensions: [%Extensions{settings: map(), type: String.t()}]
+          }
+          | term()
+        ) :: Tenant.t() | nil
+  def decrypt_extensions_data(
+        %Realtime.Api.Tenant{
+          extensions: [%Extensions{settings: settings, type: type}]
+        } = tenant
+      )
+      when is_map(settings) and is_binary(type) do
     decrypted_extensions =
       for extension <- tenant.extensions do
         settings = extension.settings
@@ -162,7 +197,7 @@ defmodule Realtime.Api do
             {key, _, true}, acc ->
               case settings[key] do
                 nil -> acc
-                value -> %{acc | key => Helpers.decrypt(secure_key, value)}
+                value -> %{acc | key => &Helpers.decrypt(&1, value)}
               end
 
             _, acc ->
@@ -173,5 +208,25 @@ defmodule Realtime.Api do
       end
 
     %{tenant | extensions: decrypted_extensions}
+  end
+
+  def decrypt_extensions_data(_), do: nil
+
+  def list_extensions(type \\ "postgres") do
+    from(e in Extensions,
+      where: e.type == ^type,
+      select: e
+    )
+    |> Repo.all()
+  end
+
+  def rename_settings_field(from, to) do
+    for extension <- list_extensions("postgres") do
+      {value, settings} = Map.pop(extension.settings, from)
+      new_settings = Map.put(settings, to, value)
+
+      Ecto.Changeset.cast(extension, %{settings: new_settings}, [:settings])
+      |> Repo.update!()
+    end
   end
 end

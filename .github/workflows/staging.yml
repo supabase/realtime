@@ -1,0 +1,16 @@
+name: Deploy staging
+on:
+  push:
+    branches:
+      - develop
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: superfly/flyctl-actions@1.1
+        with:
+          args: "-c deploy/fly/staging.toml deploy"

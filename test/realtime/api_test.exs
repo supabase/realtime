@@ -4,15 +4,33 @@ defmodule Realtime.ApiTest do
   alias Realtime.Api
 
   describe "tenants" do
-    alias Realtime.Api.Tenant
+    alias Realtime.Api.{Tenant, Extensions}
+    db_conf = Application.get_env(:realtime, Realtime.Repo)
 
     @valid_attrs %{
-      external_id: "some external_id",
-      jwt_secret: "some jwt_secret",
-      name: "some name"
+      external_id: "external_id",
+      name: "localhost",
+      extensions: [
+        %{
+          "type" => "postgres",
+          "settings" => %{
+            "db_host" => db_conf[:hostname],
+            "db_name" => db_conf[:database],
+            "db_user" => db_conf[:username],
+            "db_password" => db_conf[:password],
+            "db_port" => "5432",
+            "poll_interval" => 100,
+            "poll_max_changes" => 100,
+            "poll_max_record_bytes" => 1_048_576,
+            "region" => "us-east-1"
+          }
+        }
+      ],
+      jwt_secret: "new secret"
     }
+
     @update_attrs %{
-      external_id: "some updated external_id",
+      external_id: "external_id",
       jwt_secret: "some updated jwt_secret",
       name: "some updated name"
     }
@@ -27,31 +45,42 @@ defmodule Realtime.ApiTest do
       tenant
     end
 
-    test "list_tenants/0 returns all tenants" do
-      tenant = tenant_fixture()
-      assert Api.list_tenants() == [tenant]
-    end
+    # test "list_tenants/0 returns all tenants" do
+    #   tenant = tenant_fixture()
+    #   assert Api.list_tenants() == [tenant]
+    # end
 
-    test "get_tenant!/1 returns the tenant with given id" do
-      tenant = tenant_fixture()
-      assert Api.get_tenant!(tenant.id) == tenant
-    end
+    # test "get_tenant!/1 returns the tenant with given id" do
+    #   tenant = tenant_fixture()
+    #   assert Api.get_tenant!(tenant.id) == tenant
+    # end
 
-    test "create_tenant/1 with valid data creates a tenant" do
-      assert {:ok, %Tenant{} = tenant} = Api.create_tenant(@valid_attrs)
-      assert tenant.external_id == "some external_id"
-      assert tenant.jwt_secret == "some jwt_secret"
-      assert tenant.name == "some name"
-    end
+    # test "create_tenant/1 with valid data creates a tenant" do
+    #   assert {:ok, %Tenant{} = tenant} = Api.create_tenant(@valid_attrs)
+    #   assert tenant.external_id == "some external_id"
+    #   assert tenant.jwt_secret == "some jwt_secret"
+    #   assert tenant.name == "some name"
+    # end
 
     test "create_tenant/1 with invalid data returns error changeset" do
       assert {:error, %Ecto.Changeset{}} = Api.create_tenant(@invalid_attrs)
     end
 
+    test "check get_dec_tenant_by_external_id/1" do
+      _tenant = tenant_fixture()
+
+      %Tenant{extensions: [%Extensions{} = extension]} =
+        Api.get_dec_tenant_by_external_id("external_id")
+
+      assert Map.has_key?(extension.settings, "db_password")
+      password = extension.settings["db_password"].(Application.get_env(:realtime, :db_enc_key))
+      assert ^password = "postgres"
+    end
+
     test "update_tenant/2 with valid data updates the tenant" do
       tenant = tenant_fixture()
       assert {:ok, %Tenant{} = tenant} = Api.update_tenant(tenant, @update_attrs)
-      assert tenant.external_id == "some updated external_id"
+      assert tenant.external_id == "external_id"
       assert tenant.jwt_secret == "some updated jwt_secret"
       assert tenant.name == "some updated name"
     end
@@ -59,13 +88,21 @@ defmodule Realtime.ApiTest do
     test "update_tenant/2 with invalid data returns error changeset" do
       tenant = tenant_fixture()
       assert {:error, %Ecto.Changeset{}} = Api.update_tenant(tenant, @invalid_attrs)
-      assert tenant == Api.get_tenant!(tenant.id)
     end
 
     test "delete_tenant/1 deletes the tenant" do
       tenant = tenant_fixture()
       assert {:ok, %Tenant{}} = Api.delete_tenant(tenant)
       assert_raise Ecto.NoResultsError, fn -> Api.get_tenant!(tenant.id) end
+    end
+
+    test "delete_tenant_by_external_id/1 deletes the tenant cached" do
+      tenant = tenant_fixture()
+      # first calling for put tenant to cache
+      Api.get_tenant_by_external_id(:cached, "external_id")
+      assert match?(true, Api.delete_tenant_by_external_id("external_id"))
+      assert match?(nil, Api.get_tenant_by_external_id(:cached, "external_id"))
+      assert match?(false, Api.delete_tenant_by_external_id("external_id"))
     end
 
     test "change_tenant/1 returns a tenant changeset" do

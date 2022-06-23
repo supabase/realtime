@@ -1,11 +1,17 @@
 defmodule RealtimeWeb.TenantController do
   use RealtimeWeb, :controller
   use PhoenixSwagger
+
+  require Logger
+
   alias Realtime.Api
   alias Realtime.Api.Tenant
-  alias PhoenixSwagger.Path
+  alias PhoenixSwagger.{Path, Schema}
+  alias Extensions.Postgres
 
-  action_fallback RealtimeWeb.FallbackController
+  @stop_timeout 10_000
+
+  action_fallback(RealtimeWeb.FallbackController)
 
   swagger_path :index do
     Path.get("/api/tenants")
@@ -16,17 +22,6 @@ defmodule RealtimeWeb.TenantController do
   def index(conn, _params) do
     tenants = Api.list_tenants()
     render(conn, "index.json", tenants: tenants)
-  end
-
-  swagger_path :create do
-    Path.post("/api/tenants")
-    tag("Tenants")
-
-    parameters do
-      tenant(:body, Schema.ref(:TenantReq), "", required: true)
-    end
-
-    response(200, "Success", :TenantResponse)
   end
 
   def create(conn, %{"tenant" => tenant_params}) do
@@ -52,13 +47,16 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def show(conn, %{"id" => id}) do
-    tenant = Api.get_tenant_by_external_id(id)
+    id
+    |> Api.get_tenant_by_external_id()
+    |> case do
+      %Tenant{} = tenant ->
+        render(conn, "show.json", tenant: tenant)
 
-    if tenant == nil do
-      put_status(conn, 404)
-      |> render("no_found.json", tenant: tenant)
-    else
-      render(conn, "show.json", tenant: tenant)
+      nil ->
+        conn
+        |> put_status(404)
+        |> render("not_found.json", tenant: nil)
     end
   end
 
@@ -69,6 +67,7 @@ defmodule RealtimeWeb.TenantController do
     parameters do
       external_id(:path, :string, "",
         required: true,
+        maxLength: 255,
         example: "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19"
       )
 
@@ -105,11 +104,47 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def delete(conn, %{"id" => id}) do
-    tenant = Api.get_tenant_by_external_id(id)
+    if Api.delete_tenant_by_external_id(id) do
+      try do
+        Postgres.disconnect_subscribers(id)
+        Postgres.stop(id)
+      rescue
+        error ->
+          Logger.error(
+            "There is an error when trying to delete #{id} #{inspect(error, pretty: true)}"
+          )
+      end
+    end
 
-    with {:ok, %Tenant{}} <- Api.delete_tenant(tenant) do
-      Cachex.del(:tenants, id)
-      send_resp(conn, :no_content, "")
+    send_resp(conn, 204, "")
+  end
+
+  swagger_path :reload do
+    Path.post("/api/tenants/{external_id}/reload")
+    tag("Tenants")
+    description("Reload tenant database supervisor")
+
+    parameter(:tenant_id, :path, :string, "Tenant ID",
+      required: true,
+      example: "123e4567-e89b-12d3-a456-426655440000"
+    )
+
+    response(204, "")
+    response(404, "not found")
+  end
+
+  def reload(conn, %{"tenant_id" => tenant_id}) do
+    case Api.get_tenant_by_external_id(tenant_id) do
+      %Tenant{} ->
+        Postgres.stop(tenant_id, @stop_timeout)
+        send_resp(conn, 204, "")
+
+      nil ->
+        Logger.error("Atttempted to reload non-existant tenant #{tenant_id}")
+
+        conn
+        |> put_status(404)
+        |> render("not_found.json", tenant: nil)
     end
   end
 
@@ -123,10 +158,39 @@ defmodule RealtimeWeb.TenantController do
             id(:string, "", required: false, example: "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19")
             name(:string, "", required: false, example: "tenant1")
             external_id(:string, "", required: false, example: "okumviwlylkmpkoicbrc")
-            active(:boolean, "", required: false, example: true)
-            region(:string, "", required: true, example: "ap-southeast-1")
-            rls_poll_interval(:integer, "", required: false, example: 500)
             inserted_at(:string, "", required: false, example: "2022-02-16T20:41:47")
+            max_concurrent_users(:integer, "", required: false, example: 10_000)
+            extensions(:array, "", required: true, items: Schema.ref(:ExtensionPostgres))
+          end
+        end,
+      ExtensionPostgres:
+        swagger_schema do
+          title("ExtensionPostgres")
+
+          properties do
+            type(:string, "", required: true, example: "postgres")
+            inserted_at(:string, "", required: false, example: "2022-02-16T20:41:47")
+            updated_at(:string, "", required: false, example: "2022-02-16T20:41:47")
+
+            settings(:object, "",
+              required: true,
+              properties: %{
+                db_host: %Schema{type: :string, example: "some encrypted value"},
+                db_name: %Schema{type: :string, example: "some encrypted value"},
+                db_password: %Schema{type: :string, example: "some encrypted value"},
+                db_port: %Schema{type: :string, example: "some encrypted value"},
+                db_user: %Schema{type: :string, example: "some encrypted value"},
+                poll_interval_ms: %Schema{type: :integer, example: 100},
+                poll_max_changes: %Schema{type: :integer, example: 100},
+                poll_max_record_bytes: %Schema{type: :integer, example: 1_048_576},
+                publication: %Schema{type: :string, example: "supabase_realtime"},
+                region: %Schema{type: :string, example: "us-east-1"},
+                slot_name: %Schema{
+                  type: :string,
+                  example: "supabase_realtime_replication_slot"
+                }
+              }
+            )
           end
         end,
       TenantReq:
@@ -134,17 +198,50 @@ defmodule RealtimeWeb.TenantController do
           title("TenantReq")
 
           properties do
-            name(:string, "", required: false, example: "tenant1")
-            jwt_secret(:string, "", required: true, example: "big_secret")
-            external_id(:string, "", required: true, example: "okumviwlylkmpkoicbrc")
-            active(:boolean, "", required: false, example: true)
-            region(:string, "", required: true, example: "ap-southeast-1")
-            db_host(:string, "", required: true, example: "db.awesome.supabase.net")
-            db_port(:string, "", required: true, example: "6543")
-            db_name(:string, "", required: true, example: "postgres")
-            db_user(:string, "", required: true, example: "postgres")
-            db_password(:string, "", required: true, example: "postgres")
-            rls_poll_interval(:integer, "", required: false, example: 500)
+            name(:string, "", required: false, example: "tenant1", maxLength: 255)
+            max_concurrent_users(:integer, "", required: false, example: 10_000, default: 10_000)
+            extensions(:array, "", required: true, items: Schema.ref(:ExtensionPostgresReq))
+          end
+        end,
+      ExtensionPostgresReq:
+        swagger_schema do
+          title("ExtensionPostgresReq")
+
+          properties do
+            type(:string, "", required: true, example: "postgres")
+
+            settings(:object, "",
+              required: true,
+              properties: %{
+                db_host: %Schema{type: :string, required: true, example: "127.0.0.1"},
+                db_name: %Schema{type: :string, required: true, example: "postgres"},
+                db_password: %Schema{
+                  type: :string,
+                  required: true,
+                  example: "postgres"
+                },
+                db_user: %Schema{type: :string, required: true, example: "postgres"},
+                db_port: %Schema{type: :string, required: true, example: "6432"},
+                region: %Schema{type: :string, required: true, example: "us-east-1"},
+                poll_interval_ms: %Schema{type: :integer, default: 100, example: 100},
+                poll_max_changes: %Schema{type: :integer, default: 100, example: 100},
+                poll_max_record_bytes: %Schema{
+                  type: :integer,
+                  default: 1_048_576,
+                  example: 1_048_576
+                },
+                publication: %Schema{
+                  type: :string,
+                  default: "supabase_realtime",
+                  example: "supabase_realtime"
+                },
+                slot_name: %Schema{
+                  type: :string,
+                  default: "supabase_realtime_replication_slot",
+                  example: "supabase_realtime_replication_slot"
+                }
+              }
+            )
           end
         end,
       Tenants:

@@ -21,10 +21,14 @@ defmodule RealtimeWeb.Router do
     get "/", PageController, :index
   end
 
+  get "/metrics/:id", RealtimeWeb.TenantMetricsController, :index
+
   scope "/api", RealtimeWeb do
     pipe_through :api
-    resources "/tenants", TenantController
-    # resources "/scopes", ScopeController
+
+    resources "/tenants", TenantController do
+      post "/reload", TenantController, :reload, as: :reload
+    end
   end
 
   scope "/api/swagger" do
@@ -55,14 +59,6 @@ defmodule RealtimeWeb.Router do
         title: "Realtime",
         description: "API Documentation for Realtime v1",
         termsOfService: "Open for public"
-      },
-      securityDefinitions: %{
-        ApiKeyAuth: %{
-          type: "apiKey",
-          name: "X-API-Key",
-          description: "API Token must be provided via `X-API-Key: Token ` header",
-          in: "header"
-        }
       },
       consumes: ["application/json"],
       produces: ["application/json"],

@@ -2,6 +2,18 @@
 
 Presence and ephemeral state.
 
+# Local Setup
+
+Open up three different terminal windows and run the following sequentially:
+
+1. In the first terminal, run `make start.dbs`.
+2. In the second terminal, run `make dev`.
+3. In the third terminal, run `make seed`.
+
+### Note
+
+- Generate a JWT from `jwt_secret` column on `tenants` table for tenant `dev_tenant`.
+
 ## Motivation
 
 Software is becoming more collaborative. Often the data that we need to share is ephemeral, meaning that it doesn't need to be stored in a database. The goals for ephemeral data are different from stored data:

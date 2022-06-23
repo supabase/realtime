@@ -21,7 +21,6 @@ defmodule RealtimeWeb.ChannelCase do
     quote do
       # Import conveniences for testing with channels
       import Phoenix.ChannelTest
-      import RealtimeWeb.ChannelCase
 
       # The default endpoint for testing
       @endpoint RealtimeWeb.Endpoint
@@ -29,12 +28,8 @@ defmodule RealtimeWeb.ChannelCase do
   end
 
   setup tags do
-    # :ok = Ecto.Adapters.SQL.Sandbox.checkout(Realtime.Repo)
-
-    # unless tags[:async] do
-    #   Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, {:shared, self()})
-    # end
-
+    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Realtime.Repo, shared: not tags[:async])
+    on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
     :ok
   end
 end

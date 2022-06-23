@@ -19,7 +19,7 @@ export default function Index() {
     setConnButtonState({ loading: true, value: "Connection ..." })
     localStorage.setItem("host", host)
     localStorage.setItem("token", token)
-    let socket = new RealtimeClient(host, { params: { apikey: token } })
+    let socket = new RealtimeClient(host, { params: { apikey: token, vsndate: '2022-05-13' } })
     socket.connect()
     const realtime_config = {
       "configs": {
@@ -40,9 +40,7 @@ export default function Index() {
       },
       "user_token": token
     }
-    let channel = socket.channel('realtime:*', {
-      isNewVersion: true,
-    })
+    let channel = socket.channel('realtime:any')
 
     // userChannel.on('presence', { event: 'SYNC' }, () => {
     //   setIsInitialStateSynced(true)
@@ -67,7 +65,12 @@ export default function Index() {
       // })
       // setDataSource([...dataSource])
     })
-    channel.on('realtime', { schema: 'public', table: 'messages' }, (msg) => {
+    channel.on('realtime', {
+      event: '*',
+      schema: 'public',
+      table: '*',
+      // filter: 'field=eq.some_val'
+    }, (msg) => {
       console.log("msg", msg)
       // console.log('Got a message')
       // dataSource.unshift({

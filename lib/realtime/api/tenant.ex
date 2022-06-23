@@ -1,6 +1,12 @@
 defmodule Realtime.Api.Tenant do
+  @moduledoc """
+  Describes a database/tenant which makes use of the realtime service.
+  """
   use Ecto.Schema
   import Ecto.Changeset
+  alias Realtime.Api.Extensions
+
+  @type t :: %__MODULE__{}
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -34,6 +40,7 @@ defmodule Realtime.Api.Tenant do
       :external_id,
       :jwt_secret
     ])
-    |> cast_assoc(:extensions, required: true)
+    |> unique_constraint([:external_id])
+    |> cast_assoc(:extensions, with: &Extensions.changeset/2)
   end
 end

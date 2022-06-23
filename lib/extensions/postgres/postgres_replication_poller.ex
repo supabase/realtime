@@ -5,13 +5,18 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   alias Extensions.Postgres
   alias Postgres.Replications
-  alias DBConnection.Backoff
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
     NewRecord,
     UpdatedRecord
   }
+
+  alias Realtime.Repo
+
+  import Realtime.Helpers, only: [cancel_timer: 1]
+
+  @queue_target 5_000
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
@@ -20,20 +25,18 @@ defmodule Extensions.Postgres.ReplicationPoller do
   @impl true
   def init(opts) do
     state = %{
-      backoff:
-        Backoff.new(
-          backoff_min: Keyword.fetch!(opts, :backoff_min),
-          backoff_max: Keyword.fetch!(opts, :backoff_max),
-          backoff_type: Keyword.fetch!(opts, :backoff_type)
-        ),
-      poll_interval: Keyword.fetch!(opts, :replication_poll_interval),
+      conn: nil,
+      db_host: Keyword.fetch!(opts, :db_host),
+      db_name: Keyword.fetch!(opts, :db_name),
+      db_pass: Keyword.fetch!(opts, :db_pass),
+      db_user: Keyword.fetch!(opts, :db_user),
+      max_changes: Keyword.fetch!(opts, :max_changes),
+      max_record_bytes: Keyword.fetch!(opts, :max_record_bytes),
+      poll_interval_ms: Keyword.fetch!(opts, :poll_interval_ms),
       poll_ref: make_ref(),
       publication: Keyword.fetch!(opts, :publication),
       slot_name: Keyword.fetch!(opts, :slot_name),
-      max_record_bytes: Keyword.fetch!(opts, :max_record_bytes),
-      max_changes: Keyword.fetch!(opts, :max_changes),
-      conn: Keyword.fetch!(opts, :conn),
-      id: Keyword.fetch!(opts, :id)
+      tenant: Keyword.fetch!(opts, :id)
     }
 
     {:ok, state, {:continue, :prepare_replication}}
@@ -42,44 +45,66 @@ defmodule Extensions.Postgres.ReplicationPoller do
   @impl true
   def handle_continue(
         :prepare_replication,
-        %{backoff: backoff, slot_name: slot_name, conn: conn} = state
+        %{
+          db_host: db_host,
+          db_name: db_name,
+          db_pass: db_pass,
+          db_user: db_user,
+          slot_name: slot_name,
+          tenant: tenant
+        } = state
       ) do
-    try do
-      Replications.prepare_replication(conn, slot_name)
-    catch
-      :error, error -> {:error, error}
-    end
-    |> case do
-      {:ok, {:ok, %{command: :set}}} ->
-        send(self(), :poll)
-        {:noreply, state}
+    secure_key = Application.get_env(:realtime, :db_enc_key)
 
-      # TODO: check errors
-      {:error, error} ->
-        error
-        |> IO.inspect()
-        |> Logger.error()
+    db_host = db_host.(secure_key)
+    db_name = db_name.(secure_key)
+    db_pass = db_pass.(secure_key)
+    db_user = db_user.(secure_key)
 
-        {timeout, backoff} = Backoff.backoff(backoff)
-        :timer.sleep(timeout)
+    Repo.with_dynamic_repo(
+      [hostname: db_host, database: db_name, password: db_pass, username: db_user],
+      fn repo ->
+        Ecto.Migrator.run(
+          Repo,
+          [Ecto.Migrator.migrations_path(Repo, "postgres/migrations")],
+          :up,
+          all: true,
+          prefix: "realtime",
+          dynamic_repo: repo
+        )
+      end
+    )
 
-        {:noreply, %{state | backoff: backoff}, {:continue, :prepare_replication}}
-    end
+    {:ok, conn} =
+      Postgrex.start_link(
+        hostname: db_host,
+        database: db_name,
+        password: db_pass,
+        username: db_user,
+        queue_target: @queue_target
+      )
+
+    {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+    :yes = :global.register_name({:tenant_db, :replication, :poller, tenant}, conn)
+
+    send(self(), :poll)
+
+    {:noreply, %{state | conn: conn}}
   end
 
   @impl true
   def handle_info(
         :poll,
         %{
-          backoff: backoff,
-          poll_interval: poll_interval,
+          poll_interval_ms: poll_interval_ms,
           poll_ref: poll_ref,
           publication: publication,
           slot_name: slot_name,
           max_record_bytes: max_record_bytes,
           max_changes: max_changes,
           conn: conn,
-          id: id
+          tenant: tenant
         } = state
       ) do
     cancel_timer(poll_ref)
@@ -108,9 +133,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
               [record_struct | acc]
           end
         end)
-        # |> Logger.debug()
         |> Enum.reverse()
-        |> Postgres.SubscribersNotification.notify_subscribers(id)
+        |> Postgres.SubscribersNotification.notify_subscribers(tenant)
 
         {:ok, length(rows)}
 
@@ -124,19 +148,18 @@ defmodule Extensions.Postgres.ReplicationPoller do
       {:ok, rows_num} ->
         backoff = Backoff.reset(backoff)
 
-        poll_ref = Process.send_after(self(), :poll, poll_interval)
+        poll_ref =
+          if rows_num > 0 do
+            send(self(), :poll)
+            nil
+          else
+            Process.send_after(self(), :poll, poll_interval_ms)
+          end
 
-        {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
+        {:noreply, %{state | poll_ref: poll_ref}}
 
       {:error, reason} ->
-        reason
-        |> inspect(pretty: true)
-        |> Logger.error()
-
-        {timeout, backoff} = Backoff.backoff(backoff)
-        :timer.sleep(timeout)
-
-        {:noreply, %{state | backoff: backoff}, {:continue, :prepare_replication}}
+        {:stop, inspect(reason, pretty: true), state}
     end
   end
 
@@ -231,10 +254,4 @@ defmodule Extensions.Postgres.ReplicationPoller do
   defp convert_errors([_ | _] = errors), do: errors
 
   defp convert_errors(_), do: nil
-
-  def cancel_timer(nil), do: false
-
-  def cancel_timer(ref) do
-    Process.cancel_timer(ref)
-  end
 end

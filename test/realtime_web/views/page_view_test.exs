@@ -1,3 +1,3 @@
 defmodule RealtimeWeb.PageViewTest do
-  use RealtimeWeb.ConnCase, async: true
+  use RealtimeWeb.ConnCase
 end

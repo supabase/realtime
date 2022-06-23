@@ -1,6 +1,10 @@
 defmodule RealtimeWeb.UserSocket do
   use Phoenix.Socket
+
   require Logger
+
+  alias Realtime.Api.Tenant
+  alias Extensions.Postgres.Helpers
   alias RealtimeWeb.ChannelsAuthorization
 
   ## Channels
@@ -12,29 +16,33 @@ defmodule RealtimeWeb.UserSocket do
       %{uri: %{host: host}, x_headers: headers} = connect_info
       [external_id | _] = String.split(host, ".", parts: 2)
 
-      with tenant when tenant != nil <-
+      with %Tenant{
+             extensions: extensions,
+             jwt_secret: jwt_secret,
+             max_concurrent_users: max_conn_users,
+             max_events_per_second: max_events_per_second
+           }
+           # TODO: remove unnecessary guards
+           when is_list(extensions) and is_binary(jwt_secret) and is_integer(max_conn_users) and
+                  is_integer(max_events_per_second) <-
              Realtime.Api.get_tenant_by_external_id(:cached, external_id),
-           token when token != nil <- access_token(params, headers),
-           {:ok, claims} <- authorize_conn(token, tenant.jwt_secret) do
+           token when is_binary(token) <- access_token(params, headers),
+           {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret) do
         assigns = %{
+          token: token,
+          jwt_secret: jwt_secret,
           tenant: external_id,
+          postgres_extension: Helpers.filter_postgres_settings(extensions),
           claims: claims,
           limits: %{
-            max_concurrent_users: tenant.max_concurrent_users,
-            max_events_per_second: tenant.max_events_per_second
-          },
-          params: %{
-            ref: make_ref()
+            max_concurrent_users: max_conn_users
           }
         }
 
-        params = filter_postgres_settings(tenant.extensions)
-        Extensions.Postgres.start_distributed(external_id, params)
-
         {:ok, assign(socket, assigns)}
       else
-        _ ->
-          Logger.error("Auth error")
+        error ->
+          Logger.error("Auth error: #{inspect(error)}")
           :error
       end
     end
@@ -48,29 +56,12 @@ defmodule RealtimeWeb.UserSocket do
   end
 
   @impl true
-  def id(_socket), do: nil
-
-  defp authorize_conn(token, secret) do
-    case ChannelsAuthorization.authorize(token, secret) do
-      # TODO: check necessary fields
-      {:ok, %{"role" => _} = claims} ->
-        {:ok, claims}
-
-      _ ->
-        :error
-    end
+  def id(%{assigns: %{tenant: tenant}}) do
+    subscribers_id(tenant)
   end
 
-  defp filter_postgres_settings(extensions) do
-    [postgres] =
-      Enum.filter(extensions, fn e ->
-        if e.type == "postgres" do
-          true
-        else
-          false
-        end
-      end)
-
-    postgres.settings
+  @spec subscribers_id(String.t()) :: String.t()
+  def subscribers_id(tenant) do
+    "user_socket:" <> tenant
   end
 end
