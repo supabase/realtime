@@ -1,6 +1,7 @@
 defmodule Realtime.Api.Extensions do
   use Ecto.Schema
   import Ecto.Changeset
+  import Realtime.Helpers, only: [encrypt!: 2]
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -41,7 +42,7 @@ defmodule Realtime.Api.Extensions do
 
       Enum.reduce(required, settings, fn
         {field, _, true}, acc ->
-          encrypted = Realtime.Helpers.encrypt(secure_key, settings[field])
+          encrypted = encrypt!(settings[field], secure_key)
           %{acc | field => encrypted}
 
         _, acc ->

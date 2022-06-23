@@ -52,9 +52,14 @@ defmodule Realtime.Application do
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence,
-        Realtime.PromEx,
-        {Cachex, name: :tenants}
+        Realtime.PromEx
       ] ++ extensions_supervisors
+
+    children =
+      case Realtime.Repo.replica() do
+        Realtime.Repo -> children
+        replica_repo -> List.insert_at(children, 2, replica_repo)
+      end
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

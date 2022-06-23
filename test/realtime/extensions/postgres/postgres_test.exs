@@ -7,9 +7,7 @@ defmodule Realtime.Extensions.PostgresTest do
 
   alias Extensions.Postgres
   alias Realtime.Api
-  alias Realtime.Api.Tenant
-  alias RealtimeWeb.{ChannelsAuthorization, Joken.CurrentTime, UserSocket}
-  alias Postgres.SubscriptionManager
+  alias RealtimeWeb.ChannelsAuthorization
   alias Postgrex, as: P
 
   @external_id "dev_tenant"
@@ -17,7 +15,7 @@ defmodule Realtime.Extensions.PostgresTest do
 
   setup %{} do
     {:ok, _pid} = start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
-    tenant = Api.get_dec_tenant_by_external_id(@external_id)
+    tenant = Api.get_tenant_by_external_id(@external_id)
 
     assigns = %{
       token: @token,
@@ -50,7 +48,7 @@ defmodule Realtime.Extensions.PostgresTest do
   describe "Postgres extensions" do
     test "Check supervisor crash and respawn" do
       sup =
-        Enum.reduce_while(1..10, nil, fn x, acc ->
+        Enum.reduce_while(1..10, nil, fn _, acc ->
           {:tenant_db, :supervisor, @external_id}
           |> :global.whereis_name()
           |> case do
@@ -73,7 +71,7 @@ defmodule Realtime.Extensions.PostgresTest do
 
     test "Subscription manager updates oids" do
       subscriber_manager_pid =
-        Enum.reduce_while(1..10, nil, fn x, acc ->
+        Enum.reduce_while(1..10, nil, fn _, acc ->
           {:tenant_db, :replication, :poller, @external_id}
           |> :global.whereis_name()
           |> case do
@@ -101,7 +99,7 @@ defmodule Realtime.Extensions.PostgresTest do
 
     test "Stop tenant supervisor" do
       [sup, manager, poller] =
-        Enum.reduce_while(1..10, nil, fn x, acc ->
+        Enum.reduce_while(1..10, nil, fn _, acc ->
           pids = [
             :global.whereis_name({:tenant_db, :supervisor, @external_id}),
             :global.whereis_name({:tenant_db, :replication, :manager, @external_id}),

@@ -89,7 +89,6 @@ defmodule RealtimeWeb.TenantController do
   def update(conn, %{"id" => id, "tenant" => tenant_params}) do
     case Api.get_tenant_by_external_id(id) do
       nil ->
-        Cachex.del(:tenants, id)
         create(conn, %{"tenant" => Map.put(tenant_params, "external_id", id)})
 
       tenant ->
@@ -113,16 +112,16 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def delete(conn, %{"id" => id}) do
-    if Api.delete_tenant_by_external_id(id) do
-      try do
-        Postgres.disconnect_subscribers(id)
-        Postgres.stop(id)
-      rescue
-        error ->
-          Logger.error(
-            "There is an error when trying to delete #{id} #{inspect(error, pretty: true)}"
-          )
-      end
+    Api.delete_tenant_by_external_id(id)
+
+    try do
+      Postgres.disconnect_subscribers(id)
+      Postgres.stop(id, @stop_timeout)
+    rescue
+      error ->
+        Logger.error(
+          "There is an error when attempting to stop DB replication for tenant #{id}: #{inspect(error, pretty: true)}"
+        )
     end
 
     send_resp(conn, 204, "")

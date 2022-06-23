@@ -38,24 +38,49 @@ if config_env() == :prod do
 end
 
 if config_env() != :test do
-  config :realtime, Realtime.Repo,
-    username: System.get_env("DB_USER", "postgres"),
-    password: System.get_env("DB_PASSWORD", "postgres"),
-    database: System.get_env("DB_NAME", "postgres"),
-    hostname: System.get_env("DB_HOST", "localhost"),
-    port: System.get_env("DB_PORT", "5432"),
-    # TODO: remove it after all checks
-    show_sensitive_data_on_connection_error: true,
-    pool_size: System.get_env("DB_POOL_SIZE", "5") |> String.to_integer(),
-    prepare: :unnamed,
-    queue_target: System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer(),
-    queue_interval: System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
-
   config :realtime,
     secure_channels: System.get_env("SECURE_CHANNELS", "true") == "true",
     jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
     api_jwt_secret: System.get_env("API_JWT_SECRET"),
-    db_enc_key: System.get_env("DB_ENC_KEY")
+    db_enc_key: System.get_env("DB_ENC_KEY"),
+    fly_region: System.get_env("FLY_REGION")
+
+  default_db_host = System.get_env("DB_HOST", "localhost")
+  username = System.get_env("DB_USER", "postgres")
+  password = System.get_env("DB_PASSWORD", "postgres")
+  database = System.get_env("DB_NAME", "postgres")
+  port = System.get_env("DB_PORT", "5432")
+  queue_target = System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer()
+  queue_interval = System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
+
+  config :realtime, Realtime.Repo,
+    hostname: default_db_host,
+    username: username,
+    password: password,
+    database: database,
+    port: port,
+    pool_size: System.get_env("DB_POOL_SIZE", "5") |> String.to_integer(),
+    queue_target: queue_target,
+    queue_interval: queue_interval
+
+  replica_repos = %{
+    Realtime.Repo.Replica.FRA => System.get_env("DB_HOST_REPLICA_FRA", default_db_host),
+    Realtime.Repo.Replica.IAD => System.get_env("DB_HOST_REPLICA_IAD", default_db_host),
+    Realtime.Repo.Replica.SIN => System.get_env("DB_HOST_REPLICA_SIN", default_db_host)
+  }
+
+  # username, password, database, and port must match primary credentials
+  for {replica_repo, hostname} <- replica_repos do
+    config :realtime, replica_repo,
+      hostname: hostname,
+      username: username,
+      password: password,
+      database: database,
+      port: port,
+      pool_size: System.get_env("DB_REPLICA_POOL_SIZE", "30") |> String.to_integer(),
+      queue_target: queue_target,
+      queue_interval: queue_interval
+  end
 end
 
 if System.get_env("LOGS_ENGINE") == "logflare" do
