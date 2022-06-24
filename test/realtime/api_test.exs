@@ -66,15 +66,15 @@ defmodule Realtime.ApiTest do
       assert {:error, %Ecto.Changeset{}} = Api.create_tenant(@invalid_attrs)
     end
 
-    test "check get_dec_tenant_by_external_id/1" do
-      _tenant = tenant_fixture()
+    test "check get_tenant_by_external_id/1" do
+      tenant_fixture()
 
       %Tenant{extensions: [%Extensions{} = extension]} =
-        Api.get_dec_tenant_by_external_id("external_id")
+        Api.get_tenant_by_external_id("external_id")
 
       assert Map.has_key?(extension.settings, "db_password")
-      password = extension.settings["db_password"].(Application.get_env(:realtime, :db_enc_key))
-      assert ^password = "postgres"
+      password = extension.settings["db_password"]
+      assert ^password = "v1QVng3N+pZd/0AEObABwg=="
     end
 
     test "update_tenant/2 with valid data updates the tenant" do
@@ -94,15 +94,6 @@ defmodule Realtime.ApiTest do
       tenant = tenant_fixture()
       assert {:ok, %Tenant{}} = Api.delete_tenant(tenant)
       assert_raise Ecto.NoResultsError, fn -> Api.get_tenant!(tenant.id) end
-    end
-
-    test "delete_tenant_by_external_id/1 deletes the tenant cached" do
-      tenant = tenant_fixture()
-      # first calling for put tenant to cache
-      Api.get_tenant_by_external_id(:cached, "external_id")
-      assert match?(true, Api.delete_tenant_by_external_id("external_id"))
-      assert match?(nil, Api.get_tenant_by_external_id(:cached, "external_id"))
-      assert match?(false, Api.delete_tenant_by_external_id("external_id"))
     end
 
     test "change_tenant/1 returns a tenant changeset" do

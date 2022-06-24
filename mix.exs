@@ -64,7 +64,6 @@ defmodule Realtime.MixProject do
       {:recon, "~> 2.5"},
       {:logflare_logger_backend, "~> 0.11.0"},
       {:httpoison, "~> 1.8"},
-      {:cachex, "~> 3.4"},
       {:syn, "~> 3.2.2"},
       {:credo, "~> 1.6.4", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false}
