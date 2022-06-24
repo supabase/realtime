@@ -46,13 +46,13 @@ defmodule Realtime.Application do
 
     children =
       [
+        Realtime.PromEx,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         Realtime.Repo,
         RealtimeWeb.Telemetry,
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
         RealtimeWeb.Endpoint,
-        RealtimeWeb.Presence,
-        Realtime.PromEx
+        RealtimeWeb.Presence
       ] ++ extensions_supervisors
 
     children =
