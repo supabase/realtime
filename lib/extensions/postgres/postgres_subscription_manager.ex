@@ -9,7 +9,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
   alias Postgres.Subscriptions
   alias RealtimeWeb.{UserSocket, Endpoint}
 
-  import Realtime.Helpers, only: [cancel_timer: 1]
+  import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
   @check_oids_interval 60_000
   @queue_target 5_000
@@ -53,11 +53,10 @@ defmodule Extensions.Postgres.SubscriptionManager do
         } = state
       ) do
     secure_key = Application.get_env(:realtime, :db_enc_key)
-
-    db_host = db_host.(secure_key)
-    db_name = db_name.(secure_key)
-    db_pass = db_pass.(secure_key)
-    db_user = db_user.(secure_key)
+    db_host = decrypt!(db_host, secure_key)
+    db_name = decrypt!(db_name, secure_key)
+    db_pass = decrypt!(db_pass, secure_key)
+    db_user = decrypt!(db_user, secure_key)
 
     {:ok, conn} =
       Postgrex.start_link(

@@ -7,20 +7,18 @@ defmodule Realtime.Helpers do
   def cancel_timer(nil), do: nil
   def cancel_timer(ref), do: Process.cancel_timer(ref)
 
-  def encrypt(secret_key, text) do
-    :crypto.crypto_one_time(:aes_128_ecb, secret_key, pad(text), true)
+  def encrypt!(text, secret_key) do
+    :aes_128_ecb
+    |> :crypto.crypto_one_time(secret_key, pad(text), true)
     |> Base.encode64()
   end
 
-  def decrypt(secret_key, base64_text) do
-    case Base.decode64(base64_text) do
-      {:ok, crypto_text} ->
-        :crypto.crypto_one_time(:aes_128_ecb, secret_key, crypto_text, false)
-        |> unpad()
+  def decrypt!(base64_text, secret_key) do
+    crypto_text = Base.decode64!(base64_text)
 
-      _ ->
-        :error
-    end
+    :aes_128_ecb
+    |> :crypto.crypto_one_time(secret_key, crypto_text, false)
+    |> unpad()
   end
 
   defp pad(data) do

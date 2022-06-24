@@ -25,7 +25,7 @@ defmodule RealtimeWeb.UserSocket do
            # TODO: remove unnecessary guards
            when is_list(extensions) and is_binary(jwt_secret) and is_integer(max_conn_users) and
                   is_integer(max_events_per_second) <-
-             Realtime.Api.get_tenant_by_external_id(:cached, external_id),
+             Realtime.Api.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- access_token(params, headers),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret) do
         assigns = %{

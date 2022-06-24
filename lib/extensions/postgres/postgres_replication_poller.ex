@@ -3,6 +3,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   require Logger
 
+  import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
+
   alias Extensions.Postgres
   alias Postgres.Replications
 
@@ -13,8 +15,6 @@ defmodule Extensions.Postgres.ReplicationPoller do
   }
 
   alias Realtime.Repo
-
-  import Realtime.Helpers, only: [cancel_timer: 1]
 
   @queue_target 5_000
 
@@ -55,11 +55,10 @@ defmodule Extensions.Postgres.ReplicationPoller do
         } = state
       ) do
     secure_key = Application.get_env(:realtime, :db_enc_key)
-
-    db_host = db_host.(secure_key)
-    db_name = db_name.(secure_key)
-    db_pass = db_pass.(secure_key)
-    db_user = db_user.(secure_key)
+    db_host = decrypt!(db_host, secure_key)
+    db_name = decrypt!(db_name, secure_key)
+    db_pass = decrypt!(db_pass, secure_key)
+    db_user = decrypt!(db_user, secure_key)
 
     Repo.with_dynamic_repo(
       [hostname: db_host, database: db_name, password: db_pass, username: db_user],
