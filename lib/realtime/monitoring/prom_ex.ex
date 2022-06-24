@@ -92,4 +92,35 @@ defmodule Realtime.PromEx do
       # {:realtime, "/grafana_dashboards/user_metrics.json"}
     ]
   end
+
+  def get_metrics() do
+    def_tags =
+      "node=\"#{inspect(node())}\",region=\"#{Application.get_env(:realtime, :fly_region)}\""
+
+    metrics =
+      PromEx.get_metrics(Realtime.PromEx)
+      |> String.split("\n")
+      |> Enum.map(fn line ->
+        case Regex.run(~r/(?!\#)^(\w+)(?:{(.*?)})?\s*(.+)$/, line) do
+          nil ->
+            line
+
+          [_, key, tags, value] ->
+            tags =
+              if tags == "" do
+                def_tags
+              else
+                tags <> "," <> def_tags
+              end
+
+            "#{key}{#{tags}} #{value}"
+        end
+      end)
+      |> Enum.join("\n")
+
+    Realtime.PromEx.__ets_cron_flusher_name__()
+    |> PromEx.ETSCronFlusher.defer_ets_flush()
+
+    metrics
+  end
 end

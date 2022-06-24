@@ -15,13 +15,23 @@ defmodule RealtimeWeb.Router do
     plug :check_auth
   end
 
+  pipeline :metrics do
+    # plug :check_metrics
+  end
+
   scope "/", RealtimeWeb do
     pipe_through :browser
 
     get "/", PageController, :index
   end
 
-  get "/metrics/:id", RealtimeWeb.TenantMetricsController, :index
+  # get "/metrics/:id", RealtimeWeb.TenantMetricsController, :index
+
+  scope "/metrics", RealtimeWeb do
+    pipe_through :metrics
+
+    get "/node/:region/:num", MetricsController, :index
+  end
 
   scope "/api", RealtimeWeb do
     pipe_through :api
