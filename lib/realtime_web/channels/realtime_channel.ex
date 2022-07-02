@@ -17,10 +17,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         params,
         %{
           assigns: %{
+            is_new_api: is_new_api,
             jwt_secret: jwt_secret,
-            tenant: tenant,
-            # claims: claims,
             limits: %{max_concurrent_users: max_conn_users},
+            tenant: tenant,
             token: token
           },
           transport_pid: pid,
@@ -47,22 +47,20 @@ defmodule RealtimeWeb.RealtimeChannel do
       postgres_topic = topic_from_config(params)
       Logger.info("Postgres_topic is " <> postgres_topic)
 
-      realtime_configs = params["configs"]["realtime"]
-
       postgres_config =
-        if postgres_topic != "" || !realtime_configs do
+        if postgres_topic != "" || !is_new_api do
           Endpoint.unsubscribe(topic)
 
           metadata = [
             metadata:
               {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), topic,
-               !!realtime_configs}
+               is_new_api}
           ]
 
           Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
 
           postgres_config =
-            case realtime_configs["filter"] do
+            case params["configs"]["realtime"]["filter"] do
               nil ->
                 case String.split(sub_topic, ":") do
                   [schema] ->

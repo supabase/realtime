@@ -29,14 +29,13 @@ defmodule RealtimeWeb.UserSocket do
            token when is_binary(token) <- access_token(params, headers),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret) do
         assigns = %{
-          token: token,
-          jwt_secret: jwt_secret,
-          tenant: external_id,
-          postgres_extension: Helpers.filter_postgres_settings(extensions),
           claims: claims,
-          limits: %{
-            max_concurrent_users: max_conn_users
-          }
+          is_new_api: !!params["vsndate"],
+          jwt_secret: jwt_secret,
+          limits: %{max_concurrent_users: max_conn_users},
+          postgres_extension: Helpers.filter_postgres_settings(extensions),
+          tenant: external_id,
+          token: token
         }
 
         {:ok, assign(socket, assigns)}
