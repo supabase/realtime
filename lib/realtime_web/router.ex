@@ -12,11 +12,11 @@ defmodule RealtimeWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
-    plug :check_auth
+    plug :check_auth, :api_jwt_secret
   end
 
   pipeline :metrics do
-    # plug :check_metrics
+    plug :check_auth, :metrics_jwt_secret
   end
 
   scope "/", RealtimeWeb do
@@ -47,8 +47,8 @@ defmodule RealtimeWeb.Router do
       swagger_file: "swagger.json"
   end
 
-  defp check_auth(conn, _params) do
-    secret = Application.fetch_env!(:realtime, :api_jwt_secret)
+  defp check_auth(conn, secret_key) do
+    secret = Application.fetch_env!(:realtime, secret_key)
 
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
          {:ok, _claims} <- authorize(token, secret) do
