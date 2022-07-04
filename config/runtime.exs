@@ -42,6 +42,7 @@ if config_env() != :test do
     secure_channels: System.get_env("SECURE_CHANNELS", "true") == "true",
     jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
     api_jwt_secret: System.get_env("API_JWT_SECRET"),
+    metrics_jwt_secret: System.get_env("METRICS_JWT_SECRET"),
     db_enc_key: System.get_env("DB_ENC_KEY"),
     fly_region: System.get_env("FLY_REGION")
 
