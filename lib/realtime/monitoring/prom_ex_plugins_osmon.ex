@@ -9,7 +9,7 @@ defmodule Realtime.PromEx.Plugins.OsMon do
 
   @impl true
   def polling_metrics(opts) do
-    poll_rate = Keyword.get(opts, :poll_rate, 5_000)
+    poll_rate = Keyword.get(opts, :poll_rate)
 
     [
       metrics(poll_rate)

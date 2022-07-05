@@ -1,11 +1,11 @@
 dev:
-	MIX_ENV=dev SECURE_CHANNELS=true API_JWT_SECRET=dev METRICS_JWT_SECRET=dev FLY_REGION=fra DB_ENC_KEY="1234567890123456" ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
+	MIX_ENV=dev SECURE_CHANNELS=true API_JWT_SECRET=dev METRICS_JWT_SECRET=dev FLY_REGION=fra FLY_ALLOC_ID=fly_id DB_ENC_KEY="1234567890123456" ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
 
 seed:
 	mix run priv/repo/seeds.exs
 
 prod:
-	MIX_ENV=prod API_KEY=dev SECURE_CHANNELS=true API_JWT_SECRET=dev METRICS_JWT_SECRET=dev FLY_REGION=fra DB_ENC_KEY="1234567890123456" ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
+	MIX_ENV=prod API_KEY=dev SECURE_CHANNELS=true API_JWT_SECRET=dev METRICS_JWT_SECRET=dev FLY_REGION=fra FLY_ALLOC_ID=fly_id DB_ENC_KEY="1234567890123456" ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
 
 swagger:
 	mix phx.swagger.generate
