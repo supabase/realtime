@@ -44,7 +44,9 @@ if config_env() != :test do
     api_jwt_secret: System.get_env("API_JWT_SECRET"),
     metrics_jwt_secret: System.get_env("METRICS_JWT_SECRET"),
     db_enc_key: System.get_env("DB_ENC_KEY"),
-    fly_region: System.get_env("FLY_REGION")
+    fly_region: System.get_env("FLY_REGION"),
+    fly_alloc_id: System.get_env("FLY_ALLOC_ID"),
+    prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer()
 
   default_db_host = System.get_env("DB_HOST", "localhost")
   username = System.get_env("DB_USER", "postgres")
