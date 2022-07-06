@@ -31,7 +31,7 @@ defmodule RealtimeWeb.MetricsController do
     |> send_resp(200, cluster_metrics)
   end
 
-  def single_node(conn, %{"region" => region, "num" => num}) do
+  def show(conn, %{"region" => region, "num" => num}) do
     num = String.to_integer(num)
 
     :syn.members(Extensions.Postgres.RegionNodes, region)

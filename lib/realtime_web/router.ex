@@ -31,7 +31,7 @@ defmodule RealtimeWeb.Router do
     pipe_through :metrics
 
     get "/", MetricsController, :index
-    get "/node/:region/:num", MetricsController, :single_node
+    get "/node/:region/:num", MetricsController, :show
   end
 
   scope "/api", RealtimeWeb do
