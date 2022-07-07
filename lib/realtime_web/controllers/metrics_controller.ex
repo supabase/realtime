@@ -8,7 +8,7 @@ defmodule RealtimeWeb.MetricsController do
       Node.list()
       |> Task.async_stream(
         fn node ->
-          {node, :rpc.call(node, PromEx, :get_metrics, [], 5_000)}
+          {node, :rpc.call(node, PromEx, :get_metrics, [], 10_000)}
         end,
         timeout: :infinity
       )
@@ -29,27 +29,5 @@ defmodule RealtimeWeb.MetricsController do
     conn
     |> put_resp_content_type("text/plain")
     |> send_resp(200, cluster_metrics)
-  end
-
-  def show(conn, %{"region" => region, "num" => num}) do
-    num = String.to_integer(num)
-
-    :syn.members(Extensions.Postgres.RegionNodes, region)
-    |> Enum.at(num)
-    |> case do
-      nil ->
-        send_resp(conn, 404, "Not found")
-
-      {_, [node: node]} ->
-        case :rpc.call(node, Realtime.PromEx, :get_metrics, []) do
-          {:badrpc, reason} ->
-            send_resp(conn, 503, inspect(reason))
-
-          metrics ->
-            conn
-            |> put_resp_content_type("text/plain")
-            |> send_resp(200, metrics)
-        end
-    end
   end
 end

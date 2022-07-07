@@ -99,7 +99,7 @@ defmodule Realtime.PromEx do
     region = Application.get_env(:realtime, :fly_region)
     alloc_id = Application.get_env(:realtime, :fly_alloc_id)
 
-    def_tags = "node=\"#{inspect(node())}\",region=\"#{region}\",alloc_id=\"#{alloc_id}\""
+    def_tags = "region=\"#{region}\",alloc_id=\"#{alloc_id}\""
 
     metrics =
       PromEx.get_metrics(Realtime.PromEx)
