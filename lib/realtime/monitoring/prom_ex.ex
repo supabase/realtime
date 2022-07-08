@@ -96,11 +96,13 @@ defmodule Realtime.PromEx do
   end
 
   def get_metrics() do
-    region = Application.get_env(:realtime, :fly_region)
-    alloc_id = Application.get_env(:realtime, :fly_alloc_id)
+    %{
+      region: region,
+      node_host: node_host,
+      short_alloc_id: short_alloc_id
+    } = get_metrics_tags()
 
-    node_name = Atom.to_string(node())
-    def_tags = "node=\"#{node_name}\",region=\"#{region}\",alloc_id=\"#{alloc_id}\""
+    def_tags = "host=\"#{node_host}\",region=\"#{region}\",id=\"#{short_alloc_id}\""
 
     metrics =
       PromEx.get_metrics(Realtime.PromEx)
@@ -118,7 +120,8 @@ defmodule Realtime.PromEx do
                 tags <> "," <> def_tags
               end
 
-            "#{key}{#{tags}} #{value}"
+            clean_key = String.replace_prefix(key, "realtime_prom_ex_", "")
+            "#{clean_key}{#{tags}} #{value}"
         end
       end)
       |> Enum.join("\n")
@@ -127,5 +130,29 @@ defmodule Realtime.PromEx do
     |> PromEx.ETSCronFlusher.defer_ets_flush()
 
     metrics
+  end
+
+  def set_metrics_tags() do
+    [_, node_host] = node() |> Atom.to_string() |> String.split("@")
+
+    fly_alloc_id = Application.get_env(:realtime, :fly_alloc_id)
+
+    short_alloc_id =
+      case String.split(fly_alloc_id, "-", parts: 2) do
+        [short_alloc_id, _] -> short_alloc_id
+        _ -> fly_alloc_id
+      end
+
+    metrics_tags = %{
+      region: Application.get_env(:realtime, :fly_region),
+      node_host: node_host,
+      short_alloc_id: short_alloc_id
+    }
+
+    Application.put_env(:realtime, :metrics_tags, metrics_tags)
+  end
+
+  def get_metrics_tags() do
+    Application.get_env(:realtime, :metrics_tags)
   end
 end
