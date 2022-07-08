@@ -1,5 +1,7 @@
 defmodule RealtimeWeb.Router do
   use RealtimeWeb, :router
+
+  import Phoenix.LiveDashboard.Router
   import RealtimeWeb.ChannelsAuthorization, only: [authorize: 2]
 
   pipeline :browser do
@@ -13,6 +15,10 @@ defmodule RealtimeWeb.Router do
   pipeline :api do
     plug :accepts, ["json"]
     plug :check_auth, :api_jwt_secret
+  end
+
+  pipeline :dashboard_admin do
+    plug :dashboard_basic_auth
   end
 
   pipeline :metrics do
@@ -47,20 +53,6 @@ defmodule RealtimeWeb.Router do
       swagger_file: "swagger.json"
   end
 
-  defp check_auth(conn, secret_key) do
-    secret = Application.fetch_env!(:realtime, secret_key)
-
-    with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
-         {:ok, _claims} <- authorize(token, secret) do
-      conn
-    else
-      _ ->
-        conn
-        |> send_resp(403, "")
-        |> halt()
-    end
-  end
-
   def swagger_info do
     %{
       schemes: ["http", "https"],
@@ -85,12 +77,41 @@ defmodule RealtimeWeb.Router do
   # If your application does not have an admins-only section yet,
   # you can use Plug.BasicAuth to set up some basic authentication
   # as long as you are also using SSL (which you should anyway).
-  if Mix.env() in [:dev, :test] do
-    import Phoenix.LiveDashboard.Router
+  scope "/" do
+    pipe_through :browser
 
-    scope "/" do
-      pipe_through :browser
-      live_dashboard "/dashboard", metrics: RealtimeWeb.Telemetry
+    unless Mix.env() in [:dev, :test] do
+      pipe_through :dashboard_admin
     end
+
+    live_dashboard "/dashboard",
+      ecto_repos: [
+        Realtime.Repo,
+        Realtime.Repo.Replica.FRA,
+        Realtime.Repo.Replica.IAD,
+        Realtime.Repo.Replica.SIN
+      ],
+      ecto_psql_extras_options: [long_running_queries: [threshold: "400 milliseconds"]],
+      metrics: RealtimeWeb.Telemetry
+  end
+
+  defp check_auth(conn, secret_key) do
+    secret = Application.fetch_env!(:realtime, secret_key)
+
+    with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
+         {:ok, _claims} <- authorize(token, secret) do
+      conn
+    else
+      _ ->
+        conn
+        |> send_resp(403, "")
+        |> halt()
+    end
+  end
+
+  defp dashboard_basic_auth(conn, _opts) do
+    user = System.fetch_env!("DASHBOARD_USER")
+    password = System.fetch_env!("DASHBOARD_PASSWORD")
+    Plug.BasicAuth.basic_auth(conn, username: user, password: password)
   end
 end
