@@ -23,6 +23,8 @@ defmodule Realtime.Application do
       end
     end
 
+    Realtime.PromEx.set_metrics_tags()
+
     Registry.start_link(keys: :duplicate, name: Realtime.Registry)
     Registry.start_link(keys: :unique, name: Realtime.Registry.Unique)
 
