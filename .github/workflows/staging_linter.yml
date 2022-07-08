@@ -1,4 +1,3 @@
-
 name: Staging Formatting Checks
 on:
   pull_request:
@@ -14,7 +13,7 @@ jobs:
       - name: Setup elixir
         uses: erlef/setup-beam@v1
         with:
-          otp-version: 24.x # Define the OTP version [required]
+          otp-version: 23.x # Define the OTP version [required]
           elixir-version: 1.13.x # Define the elixir version [required]
       - name: Cache Mix
         uses: actions/cache@v1
@@ -31,7 +30,7 @@ jobs:
       - name: Run main database migrations
         run: mix ecto.migrate --log-migrator-sql
       - name: Run database tenant migrations
-        run: mix ecto.migrate --migrations-path priv/repo/postgres/migrations        
+        run: mix ecto.migrate --migrations-path priv/repo/postgres/migrations
       - name: Run format check
         run: mix format --check-formatted
       - name: Credo checks
