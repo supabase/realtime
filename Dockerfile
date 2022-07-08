@@ -1,7 +1,7 @@
 ###
 ### Fist Stage - Building the Release
 ###
-FROM hexpm/elixir:1.13.4-erlang-25.0-alpine-3.16.0 AS build
+FROM hexpm/elixir:1.13.4-erlang-23.2.7.5-alpine-3.14.6 AS build
 
 # install build dependencies
 RUN apk add --no-cache build-base npm git
@@ -11,7 +11,7 @@ WORKDIR /app
 
 # install hex + rebar
 RUN mix local.hex --force && \
-    mix local.rebar --force
+  mix local.rebar --force
 
 # set build ENV as prod
 ENV MIX_ENV=prod
@@ -22,7 +22,7 @@ COPY mix.exs mix.lock ./
 COPY config config
 
 RUN mix deps.get --only prod && \
-    mix deps.compile
+  mix deps.compile
 
 # install npm dependencies
 # COPY assets/package.json assets/package-lock.json ./assets/

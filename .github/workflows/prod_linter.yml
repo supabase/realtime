@@ -13,7 +13,7 @@ jobs:
       - name: Setup elixir
         uses: erlef/setup-beam@v1
         with:
-          otp-version: 24.x # Define the OTP version [required]
+          otp-version: 23.x # Define the OTP version [required]
           elixir-version: 1.13.x # Define the elixir version [required]
       - name: Cache Mix
         uses: actions/cache@v1
