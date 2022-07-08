@@ -63,9 +63,10 @@ defmodule Realtime.PromEx do
     [
       # PromEx built in plugins
       # Plugins.Application,
-      {Plugins.Beam, poll_rate: poll_rate},
-      {Plugins.Phoenix, router: RealtimeWeb.Router, poll_rate: poll_rate},
-      {Plugins.Ecto, poll_rate: poll_rate},
+      {Plugins.Beam, poll_rate: poll_rate, metric_prefix: [:beam]},
+      {Plugins.Phoenix,
+       router: RealtimeWeb.Router, poll_rate: poll_rate, metric_prefix: [:phoenix]},
+      {Plugins.Ecto, poll_rate: poll_rate, metric_prefix: [:ecto]},
       # Plugins.Oban,
       # Plugins.PhoenixLiveView
       {Realtime.PromEx.Plugins.OsMon, poll_rate: poll_rate}
@@ -120,8 +121,7 @@ defmodule Realtime.PromEx do
                 tags <> "," <> def_tags
               end
 
-            clean_key = String.replace_prefix(key, "realtime_prom_ex_", "")
-            "#{clean_key}{#{tags}} #{value}"
+            "#{key}{#{tags}} #{value}"
         end
       end)
       |> Enum.join("\n")

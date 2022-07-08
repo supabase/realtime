@@ -25,7 +25,8 @@ defmodule Realtime.Extensions.PostgresTest do
       claims: %{},
       limits: %{
         max_concurrent_users: 1
-      }
+      },
+      is_new_api: false
     }
 
     with_mocks([
