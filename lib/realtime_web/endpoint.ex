@@ -28,7 +28,7 @@ defmodule RealtimeWeb.Endpoint do
     gzip: false,
     only: ~w(css fonts images js favicon.ico robots.txt)
 
-  plug PromEx.Plug, path: "/metrics", prom_ex_module: Realtime.PromEx
+  # plug PromEx.Plug, path: "/metrics", prom_ex_module: Realtime.PromEx
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.

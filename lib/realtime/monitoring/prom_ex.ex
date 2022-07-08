@@ -58,15 +58,17 @@ defmodule Realtime.PromEx do
 
   @impl true
   def plugins do
+    poll_rate = Application.get_env(:realtime, :prom_poll_rate)
+
     [
       # PromEx built in plugins
       # Plugins.Application,
-      Plugins.Beam,
-      {Plugins.Phoenix, router: RealtimeWeb.Router},
-      Plugins.Ecto,
+      {Plugins.Beam, poll_rate: poll_rate},
+      {Plugins.Phoenix, router: RealtimeWeb.Router, poll_rate: poll_rate},
+      {Plugins.Ecto, poll_rate: poll_rate},
       # Plugins.Oban,
       # Plugins.PhoenixLiveView
-      Realtime.PromEx.Plugins.OsMon
+      {Realtime.PromEx.Plugins.OsMon, poll_rate: poll_rate}
     ]
   end
 
@@ -91,5 +93,38 @@ defmodule Realtime.PromEx do
       # Add your dashboard definitions here with the format: {:otp_app, "path_in_priv"}
       # {:realtime, "/grafana_dashboards/user_metrics.json"}
     ]
+  end
+
+  def get_metrics() do
+    region = Application.get_env(:realtime, :fly_region)
+    alloc_id = Application.get_env(:realtime, :fly_alloc_id)
+
+    def_tags = "node=\"#{inspect(node())}\",region=\"#{region}\",alloc_id=\"#{alloc_id}\""
+
+    metrics =
+      PromEx.get_metrics(Realtime.PromEx)
+      |> String.split("\n")
+      |> Enum.map(fn line ->
+        case Regex.run(~r/(?!\#)^(\w+)(?:{(.*?)})?\s*(.+)$/, line) do
+          nil ->
+            line
+
+          [_, key, tags, value] ->
+            tags =
+              if tags == "" do
+                def_tags
+              else
+                tags <> "," <> def_tags
+              end
+
+            "#{key}{#{tags}} #{value}"
+        end
+      end)
+      |> Enum.join("\n")
+
+    Realtime.PromEx.__ets_cron_flusher_name__()
+    |> PromEx.ETSCronFlusher.defer_ets_flush()
+
+    metrics
   end
 end
