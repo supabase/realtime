@@ -1,28 +1,29 @@
 app = "realtime-prod"
-
 kill_signal = "SIGTERM"
 kill_timeout = 5
+processes = []
 
 [deploy]
   release_command = "/app/bin/realtime eval Realtime.Release.migrate"
   strategy = "rolling"
 
-[env]
-  SECURE_CHANNELS = "true"
-  DNS_NODES = "realtime-prod.internal"
-
 [experimental]
-  private_network = true
+  allowed_public_ports = []
+  auto_rollback = true
 
 [[services]]
+  http_checks = []
   internal_port = 4000
+  processes = ["app"]
   protocol = "tcp"
-
+  script_checks = []
   [services.concurrency]
     hard_limit = 100000
     soft_limit = 100000
+    type = "connections"
 
   [[services.ports]]
+    force_https = true
     handlers = ["http"]
     port = 80
 
