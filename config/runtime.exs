@@ -30,7 +30,7 @@ if config_env() == :prod do
         strategy: Cluster.Strategy.DNSPoll,
         config: [
           polling_interval: 5_000,
-          query: "#{app_name}.internal",
+          query: System.get_env("DNS_NODES"),
           node_basename: app_name
         ]
       ]

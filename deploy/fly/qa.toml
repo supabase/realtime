@@ -7,6 +7,9 @@ processes = []
   release_command = "/app/bin/realtime eval Realtime.Release.migrate"
   strategy = "rolling"
 
+[env]
+  DNS_NODES = "realtime-qa.internal"
+
 [experimental]
   allowed_public_ports = []
   auto_rollback = true
