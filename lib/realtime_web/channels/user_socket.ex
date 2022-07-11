@@ -37,6 +37,7 @@ defmodule RealtimeWeb.UserSocket do
           tenant: external_id,
           token: token
         }
+
         Logger.metadata(external_id: external_id, project: external_id)
 
         {:ok, assign(socket, assigns)}
