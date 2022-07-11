@@ -27,6 +27,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           serializer: serializer
         } = socket
       ) do
+    Logger.metadata(external_id: tenant, project: tenant)
     with true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
          access_token when is_binary(access_token) <-
            (case params do
