@@ -14,7 +14,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
   @check_oids_interval 60_000
   @queue_target 5_000
   @pool_size 5
-  @timeout 15_000
+  @timeout 60_000
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
