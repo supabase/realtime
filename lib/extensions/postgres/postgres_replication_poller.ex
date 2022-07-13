@@ -24,6 +24,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   @impl true
   def init(opts) do
+    id = Keyword.fetch!(opts, :id)
+
     state = %{
       conn: nil,
       db_host: Keyword.fetch!(opts, :db_host),
@@ -36,9 +38,10 @@ defmodule Extensions.Postgres.ReplicationPoller do
       poll_ref: make_ref(),
       publication: Keyword.fetch!(opts, :publication),
       slot_name: Keyword.fetch!(opts, :slot_name),
-      tenant: Keyword.fetch!(opts, :id)
+      tenant: id
     }
 
+    Process.put(:tenant, id)
     {:ok, state, {:continue, :prepare_replication}}
   end
 

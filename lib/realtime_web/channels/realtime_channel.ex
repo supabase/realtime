@@ -90,6 +90,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         send(self(), :sync_presence)
       end
 
+      Process.put(:tenant, tenant)
+
       {:ok,
        assign(socket, %{
          access_token: access_token,
