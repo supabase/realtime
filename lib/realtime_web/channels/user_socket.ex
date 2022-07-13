@@ -38,6 +38,8 @@ defmodule RealtimeWeb.UserSocket do
           token: token
         }
 
+        Logger.metadata(external_id: external_id, project: external_id)
+
         {:ok, assign(socket, assigns)}
       else
         error ->
