@@ -38,6 +38,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
       publication: Keyword.fetch!(args, :publication)
     }
 
+    Process.put(:tenant, id)
     {:ok, state, {:continue, :database_manager_setup}}
   end
 

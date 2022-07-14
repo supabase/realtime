@@ -129,5 +129,22 @@ defmodule Realtime.Extensions.PostgresTest do
       assert Process.alive?(manager) == false
       assert Process.alive?(poller) == false
     end
+
+    test "SubscriptionManager consists tenant id in dict" do
+      pid =
+        Enum.reduce_while(1..10, nil, fn _, acc ->
+          case :global.whereis_name({:tenant_db, :replication, :manager, @external_id}) do
+            :undefined ->
+              Process.sleep(500)
+              {:cont, acc}
+
+            pid ->
+              {:halt, pid}
+          end
+        end)
+
+      tenant = Process.info(pid)[:dictionary][:tenant]
+      assert tenant == @external_id
+    end
   end
 end
