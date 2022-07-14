@@ -27,6 +27,8 @@ defmodule RealtimeWeb.RealtimeChannel do
           serializer: serializer
         } = socket
       ) do
+    Logger.metadata(external_id: tenant, project: tenant)
+
     with true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
          access_token when is_binary(access_token) <-
            (case params do
@@ -89,6 +91,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       if is_map(params) && params["configs"]["presence"] do
         send(self(), :sync_presence)
       end
+
+      Process.put(:tenant, tenant)
 
       {:ok,
        assign(socket, %{
@@ -172,8 +176,14 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:stop, %{reason: "access token has expired"}, socket}
   end
 
-  def handle_info({:DOWN, _, :process, _, _reason}, socket) do
-    send(self(), :postgres_subscribe)
+  def handle_info(
+        {:DOWN, _, :process, _, _reason},
+        %{assigns: %{postgres_config: postgres_config}} = socket
+      ) do
+    unless is_nil(postgres_config) do
+      send(self(), :postgres_subscribe)
+    end
+
     {:noreply, socket}
   end
 
@@ -194,7 +204,8 @@ defmodule RealtimeWeb.RealtimeChannel do
           assigns: %{
             expire_ref: ref,
             id: id,
-            jwt_secret: jwt_secret
+            jwt_secret: jwt_secret,
+            postgres_config: postgres_config
           }
         } = socket
       )
@@ -205,7 +216,10 @@ defmodule RealtimeWeb.RealtimeChannel do
            ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
          expire_ref <- Process.send_after(self(), :expire_token, exp_diff * 1_000) do
-      send(self(), :postgres_subscribe)
+      unless is_nil(postgres_config) do
+        send(self(), :postgres_subscribe)
+      end
+
       {:noreply, assign(socket, %{claims: claims, id: id, expire_ref: expire_ref})}
     else
       _ -> {:stop, %{reason: "received an invalid access token from client"}, socket}

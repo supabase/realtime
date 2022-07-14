@@ -36,6 +36,8 @@ defmodule RealtimeWeb.TenantController do
 
     with {:ok, %Tenant{} = tenant} <-
            Api.create_tenant(%{tenant_params | "extensions" => extensions}) do
+      Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
+
       conn
       |> put_status(:created)
       |> put_resp_header("location", Routes.tenant_path(conn, :show, tenant))
@@ -56,6 +58,8 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def show(conn, %{"id" => id}) do
+    Logger.metadata(external_id: id, project: id)
+
     id
     |> Api.get_tenant_by_external_id()
     |> case do
@@ -87,6 +91,8 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def update(conn, %{"id" => id, "tenant" => tenant_params}) do
+    Logger.metadata(external_id: id, project: id, tenant_params: tenant_params)
+
     case Api.get_tenant_by_external_id(id) do
       nil ->
         create(conn, %{"tenant" => Map.put(tenant_params, "external_id", id)})
@@ -112,6 +118,7 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def delete(conn, %{"id" => id}) do
+    Logger.metadata(external_id: id, project: id)
     Api.delete_tenant_by_external_id(id)
 
     try do
@@ -142,6 +149,8 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def reload(conn, %{"tenant_id" => tenant_id}) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+
     case Api.get_tenant_by_external_id(tenant_id) do
       %Tenant{} ->
         Postgres.stop(tenant_id, @stop_timeout)
