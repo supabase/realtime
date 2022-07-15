@@ -64,9 +64,8 @@ defmodule Realtime.PromEx do
       # PromEx built in plugins
       # Plugins.Application,
       {Plugins.Beam, poll_rate: poll_rate, metric_prefix: [:beam]},
-      {Plugins.Phoenix,
-       router: RealtimeWeb.Router, poll_rate: poll_rate, metric_prefix: [:phoenix]},
-      {Plugins.Ecto, poll_rate: poll_rate, metric_prefix: [:ecto]},
+      # {Plugins.Phoenix, router: RealtimeWeb.Router, poll_rate: poll_rate, metric_prefix: [:phoenix]},
+      # {Plugins.Ecto, poll_rate: poll_rate, metric_prefix: [:ecto]},
       # Plugins.Oban,
       # Plugins.PhoenixLiveView
       {Realtime.PromEx.Plugins.OsMon, poll_rate: poll_rate}
