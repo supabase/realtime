@@ -9,7 +9,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
 
-  import Realtime.Helpers, only: [cancel_timer: 1]
+  import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
   @impl true
   def join(
@@ -28,6 +28,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       ) do
     Logger.metadata(external_id: tenant, project: tenant)
+    secure_key = Application.get_env(:realtime, :db_enc_key)
 
     with true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
          access_token when is_binary(access_token) <-
@@ -35,8 +36,9 @@ defmodule RealtimeWeb.RealtimeChannel do
               %{"user_token" => user_token} -> user_token
               _ -> token
             end),
+         jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(access_token, jwt_secret),
+           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
          expire_ref <- Process.send_after(self(), :expire_token, exp_diff * 1_000) do
       Realtime.UsersCounter.add(pid, tenant)
