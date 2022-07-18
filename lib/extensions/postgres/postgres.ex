@@ -100,14 +100,6 @@ defmodule Extensions.Postgres do
     end
   end
 
-  def unsubscribe(scope, subs_id) do
-    pid = manager_pid(scope)
-
-    if pid do
-      SubscriptionManager.unsubscribe(pid, subs_id)
-    end
-  end
-
   @spec stop(String.t(), timeout()) :: :ok
   def stop(scope, timeout \\ :infinity) do
     case :global.whereis_name({:tenant_db, :supervisor, scope}) do
