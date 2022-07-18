@@ -87,7 +87,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         end
 
       pg_sub_ref =
-        unless is_nil(postgres_config) do
+        if postgres_config do
           Process.send_after(self(), :postgres_subscribe, backoff())
         else
           nil
@@ -191,7 +191,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     cancel_timer(pg_sub_ref)
 
     ref =
-      unless is_nil(postgres_config) do
+      if postgres_config do
         Process.send_after(self(), :postgres_subscribe, backoff())
       else
         nil
@@ -233,7 +233,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       cancel_timer(pg_sub_ref)
 
       pg_sub_ref =
-        unless is_nil(postgres_config) do
+        if postgres_config do
           Process.send_after(self(), :postgres_subscribe, backoff())
         else
           nil
