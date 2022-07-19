@@ -21,7 +21,8 @@ defmodule Extensions.Postgres.SubscriptionManager do
     GenServer.start_link(__MODULE__, opts)
   end
 
-  @spec subscribe(pid, map) :: {:ok, nil} | {:error, any()}
+  @spec subscribe(pid, map) ::
+          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t()}
   def subscribe(pid, opts) do
     GenServer.call(pid, {:subscribe, opts}, :infinity)
   end
