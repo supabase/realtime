@@ -98,10 +98,17 @@ defmodule Realtime.Api do
     Repo.delete(tenant)
   end
 
-  @spec delete_tenant_by_external_id(String.t()) :: {non_neg_integer(), nil}
+  @spec delete_tenant_by_external_id(String.t()) :: boolean()
   def delete_tenant_by_external_id(id) do
     from(t in Tenant, where: t.external_id == ^id)
     |> Repo.delete_all()
+    |> case do
+      {num, _} when num > 0 ->
+        true
+
+      _ ->
+        false
+    end
   end
 
   @doc """
