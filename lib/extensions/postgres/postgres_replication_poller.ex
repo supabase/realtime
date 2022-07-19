@@ -83,7 +83,10 @@ defmodule Extensions.Postgres.ReplicationPoller do
         database: db_name,
         password: db_pass,
         username: db_user,
-        queue_target: @queue_target
+        queue_target: @queue_target,
+        parameters: [
+          application_name: "realtime_rls"
+        ]
       )
 
     {:ok, _} = Replications.prepare_replication(conn, slot_name)
