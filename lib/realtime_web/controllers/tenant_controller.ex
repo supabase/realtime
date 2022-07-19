@@ -122,16 +122,19 @@ defmodule RealtimeWeb.TenantController do
   def delete(conn, %{"id" => id}) do
     Logger.metadata(external_id: id, project: id)
 
-    Repo.transaction(fn ->
-      if Api.delete_tenant_by_external_id(id) do
-        with :ok <- UserSocket.subscribers_id(id) |> Endpoint.broadcast("disconnect", %{}),
-             :ok <- Postgres.stop(id, @stop_timeout) do
-          :ok
-        else
-          other -> Repo.rollback(other)
+    Repo.transaction(
+      fn ->
+        if Api.delete_tenant_by_external_id(id) do
+          with :ok <- UserSocket.subscribers_id(id) |> Endpoint.broadcast("disconnect", %{}),
+               :ok <- Postgres.stop(id) do
+            :ok
+          else
+            other -> Repo.rollback(other)
+          end
         end
-      end
-    end)
+      end,
+      timeout: @stop_timeout
+    )
     |> case do
       {:error, reason} ->
         Logger.error("Can't remove tenant #{inspect(reason)}")
