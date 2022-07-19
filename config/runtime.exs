@@ -20,7 +20,8 @@ if config_env() == :prod do
       transport_options: [
         max_connections: String.to_integer(System.get_env("MAX_CONNECTIONS") || "16384"),
         num_acceptors: String.to_integer(System.get_env("NUM_ACCEPTORS") || "100"),
-        socket_opts: [:inet6] # IMPORTANT: support IPv6 addresses
+        # IMPORTANT: support IPv6 addresses
+        socket_opts: [:inet6]
       ]
     ],
     check_origin: false,
