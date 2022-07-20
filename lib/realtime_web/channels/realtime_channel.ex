@@ -65,7 +65,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           postgres_config =
             case params["configs"]["realtime"]["filter"] do
               nil ->
-                case String.split(sub_topic, ":") do
+                case String.split(sub_topic, ":", parts: 3) do
                   [schema] ->
                     %{"schema" => schema}
 
