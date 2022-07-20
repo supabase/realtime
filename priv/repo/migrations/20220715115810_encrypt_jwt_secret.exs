@@ -1,8 +1,7 @@
-defmodule Realtime.Repo.Migrations.EncryptJwtSecretEncrypted do
+defmodule Realtime.Repo.Migrations.EncryptJwtSecret do
   use Ecto.Migration
   import Ecto.Query
-  import Ecto.Changeset
-  alias Realtime.{Repo, Api.Tenant, Api.Extensions}
+  alias Realtime.{Repo, Api.Tenant}
   import Realtime.Helpers, only: [encrypt!: 2]
 
   def change do
