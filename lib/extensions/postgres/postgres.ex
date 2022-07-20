@@ -13,7 +13,7 @@ defmodule Extensions.Postgres do
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
-    case :rpc.call(launch_node, Postgres, :start, [scope, params]) do
+    case :rpc.call(launch_node, Postgres, :start, [scope, params], 30_000) do
       :ok ->
         :ok
 

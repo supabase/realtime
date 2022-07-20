@@ -200,7 +200,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
     new_ref =
       if objects == 0 do
         Logger.debug("Cancel check_active_pids")
-        Postgres.stop(state.id)
+        # Postgres.stop(state.id)
         nil
       else
         check_active_pids()
