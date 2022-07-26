@@ -12,6 +12,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   import Realtime.Helpers, only: [cancel_timer: 1]
 
+  @confirm_token_ms_interval 1_000 * 60 * 5
+
   @impl true
   def join(
         "realtime:" <> sub_topic = topic,
@@ -39,7 +41,12 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         expire_ref <- Process.send_after(self(), :expire_token, exp_diff * 1_000) do
+         confirm_token_ref <-
+           Process.send_after(
+             self(),
+             :confirm_token,
+             min(@confirm_token_ms_interval, exp_diff * 1_000)
+           ) do
       Realtime.UsersCounter.add(pid, tenant)
 
       tenant_topic = tenant <> ":" <> sub_topic
@@ -105,7 +112,7 @@ defmodule RealtimeWeb.RealtimeChannel do
        assign(socket, %{
          access_token: access_token,
          claims: claims,
-         expire_ref: expire_ref,
+         confirm_token_ref: confirm_token_ref,
          id: id,
          pg_sub_ref: pg_sub_ref,
          postgres_topic: postgres_topic,
@@ -177,11 +184,25 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(
-        :expire_token,
-        %{assigns: %{expire_ref: ref}} = socket
+        :confirm_token,
+        %{assigns: %{confirm_token_ref: ref, jwt_secret: jwt_secret, access_token: access_token}} =
+          socket
       ) do
     cancel_timer(ref)
-    {:stop, %{reason: "access token has expired"}, socket}
+
+    with {:ok, %{"exp" => exp}} when is_integer(exp) <-
+           ChannelsAuthorization.authorize_conn(access_token, jwt_secret),
+         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
+         confirm_token_ref <-
+           Process.send_after(
+             self(),
+             :confirm_token,
+             min(@confirm_token_ms_interval, exp_diff * 1_000)
+           ) do
+      {:ok, assign(socket, :confirm_token_ref, confirm_token_ref)}
+    else
+      _ -> {:stop, %{reason: "access token has expired"}, socket}
+    end
   end
 
   def handle_info(
@@ -205,17 +226,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  @impl true
-  def handle_in("access_token", %{"access_token" => nil}, socket) do
-    {:noreply, socket}
-  end
-
   def handle_in(
         "access_token",
         %{"access_token" => refresh_token},
         %{
           assigns: %{
-            expire_ref: ref,
+            confirm_token_ref: ref,
             id: id,
             jwt_secret: jwt_secret,
             pg_sub_ref: pg_sub_ref,
@@ -229,7 +245,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     with {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         expire_ref <- Process.send_after(self(), :expire_token, exp_diff * 1_000) do
+         confirm_token_ref <-
+           Process.send_after(
+             self(),
+             :confirm_token,
+             min(@confirm_token_ms_interval, exp_diff * 1_000)
+           ) do
       cancel_timer(pg_sub_ref)
 
       pg_sub_ref =
@@ -240,7 +261,13 @@ defmodule RealtimeWeb.RealtimeChannel do
         end
 
       {:noreply,
-       assign(socket, %{claims: claims, expire_ref: expire_ref, id: id, pg_sub_ref: pg_sub_ref})}
+       assign(socket, %{
+         access_token: refresh_token,
+         claims: claims,
+         confirm_token_ref: confirm_token_ref,
+         id: id,
+         pg_sub_ref: pg_sub_ref
+       })}
     else
       _ -> {:stop, %{reason: "received an invalid access token from client"}, socket}
     end
