@@ -214,8 +214,11 @@ defmodule RealtimeWeb.RealtimeChannel do
       when is_binary(refresh_token) do
     cancel_timer(ref)
 
-    with {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret),
+    secure_key = Application.get_env(:realtime, :db_enc_key)
+
+    with jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
+         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
+           ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
          expire_ref <- Process.send_after(self(), :expire_token, exp_diff * 1_000) do
       unless is_nil(postgres_config) do
