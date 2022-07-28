@@ -91,7 +91,7 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def update(conn, %{"id" => id, "tenant" => tenant_params}) do
-    Logger.metadata(external_id: id, project: id, tenant_params: tenant_params)
+    Logger.metadata(external_id: id, project: id)
 
     case Api.get_tenant_by_external_id(id) do
       nil ->
