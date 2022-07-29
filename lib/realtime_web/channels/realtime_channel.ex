@@ -10,7 +10,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
 
-  import Realtime.Helpers, only: [cancel_timer: 1]
+  import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
   @confirm_token_ms_interval 1_000 * 60 * 5
 
@@ -31,6 +31,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       ) do
     Logger.metadata(external_id: tenant, project: tenant)
+    secure_key = Application.get_env(:realtime, :db_enc_key)
 
     with true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
          access_token when is_binary(access_token) <-
@@ -38,8 +39,9 @@ defmodule RealtimeWeb.RealtimeChannel do
               %{"user_token" => user_token} -> user_token
               _ -> token
             end),
+         jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(access_token, jwt_secret),
+           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
          confirm_token_ref <-
            Process.send_after(
@@ -242,8 +244,11 @@ defmodule RealtimeWeb.RealtimeChannel do
       when is_binary(refresh_token) do
     cancel_timer(ref)
 
-    with {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret),
+    secure_key = Application.get_env(:realtime, :db_enc_key)
+
+    with jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
+         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
+           ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
          confirm_token_ref <-
            Process.send_after(

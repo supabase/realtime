@@ -81,7 +81,13 @@ defmodule Realtime.ApiTest do
       tenant = tenant_fixture()
       assert {:ok, %Tenant{} = tenant} = Api.update_tenant(tenant, @update_attrs)
       assert tenant.external_id == "external_id"
-      assert tenant.jwt_secret == "some updated jwt_secret"
+
+      assert tenant.jwt_secret ==
+               Realtime.Helpers.encrypt!(
+                 "some updated jwt_secret",
+                 Application.get_env(:realtime, :db_enc_key)
+               )
+
       assert tenant.name == "some updated name"
     end
 
