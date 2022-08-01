@@ -2,154 +2,17 @@
 
 if Code.ensure_loaded?(Phoenix) do
   defmodule Realtime.PromEx.Plugins.Phoenix do
-    @moduledoc """
-    This plugin captures metrics emitted by Phoenix. Specifically, it captures HTTP request metrics and
-    Phoenix channel metrics.
-
-    ## Plugin options
-
-    This plugin supports the following options:
-    - `metric_prefix`: This option is OPTIONAL and is used to override the default metric prefix of
-      `[otp_app, :prom_ex, :phoenix]`. If this changes you will also want to set `phoenix_metric_prefix`
-      in your `dashboard_assigns` to the snakecase version of your prefix, the default
-      `phoenix_metric_prefix` is `{otp_app}_prom_ex_phoenix`.
-
-    ### Single Endpoint/Router
-    - `router`: This option is REQUIRED and is the full module name of your Phoenix Router (e.g MyAppWeb.Router).
-
-    - `endpoint`: This is a REQUIRED option and is the full module name of your Phoenix Endpoint (e.g MyAppWeb.Endpoint).
-
-    - `event_prefix`: This option is OPTIONAL and allows you to set the event prefix for the Telemetry events. This
-      value should align with what you pass to `Plug.Telemetry` in your `endpoint.ex` file (see the plug docs
-      for more information https://hexdocs.pm/plug/Plug.Telemetry.html) This value should align with what you pass
-      to `Plug.Telemetry` in your `endpoint.ex` file (see the plug docs for more
-      information https://hexdocs.pm/plug/Plug.Telemetry.html)
-
-    - `additional_routes`: This option is OPTIONAL and allows you to specify route path labels for applications routes
-      not defined in your Router module.
-
-      For example, if you want to track telemetry events for a plug in your
-      `endpoint.ex` file, you can provide a keyword list with the structure `[some-route: ~r(\/some-path)]` and any
-      time that the route is called and the plug handles the call, the path label for this particular Prometheus metric
-      will be set to `some-route`. You can pass in either a regular expression or a string to match the incoming
-      request.
-
-    #### Example plugin configuration
-
-    ```elixir
-    {
-      PromEx.Plugins.Phoenix,
-      endpoint: MyApp.Endpoint,
-      router: MyAppWeb.Public.Router,
-      event_prefix: [:admin, :endpoint]
-    }
-    ```
-
-    ### Multiple Endpoints/Router
-
-    - `endpoints`: This accepts a list of per Phoenix Endpoint options `{endpoint_name, endpoint_opts}`
-      - `endpoint_name`: This option is REQUIRED and is the full module name of your Phoenix Endpoint (e.g MyAppWeb.Endpoint).
-
-      - `endpoint_opts`: Per endpoint plugin options:
-        - `:routers`: This option is REQUIRED and lists all of routers modules for the endpoint, the HTTP metrics will
-          be augmented with controller/action/path information from the routers.
-
-        - `:event_prefix`: This option is OPTIONAL and allows you to set the event prefix for the Telemetry events. This
-        value should align with what you pass to `Plug.Telemetry` in the  corresponding endpoint module (see the plug docs
-        for more information https://hexdocs.pm/plug/Plug.Telemetry.html)
-
-        - `:additional_routes`: This option is OPTIONAL and allows you to specify route path labels for applications routes
-        not defined in your Router modules for the corresponding endpoint.
-
-    #### Example plugin configuration
-
-    ```elixir
-    {
-      PromEx.Plugins.Phoenix,
-      endpoints: [
-        {MyApp.Endpoint, routers: [MyAppWeb.Public.Router]},
-        {MyApp.Endpoint2, routers: [MyAppWeb.Admin.Router], event_prefix: [:admin, :endpoint]}
-      ]
-    }
-    ```
-
-    ## Metric Groups
-
-    This plugin exposes the following metric groups:
-    - `:phoenix_http_event_metrics`
-    - `:phoenix_channel_event_metrics`
-    - `:phoenix_socket_event_metrics`
-    - `:phoenix_endpoint_manual_metrics`
-
-    ## Usage
-
-    To use plugin in your application, add the following to your PromEx module:
-
-    ```elixir
-    defmodule WebApp.PromEx do
-      use PromEx, otp_app: :web_app
-
-      @impl true
-      def plugins do
-        [
-          ...
-          {
-            PromEx.Plugins.Phoenix,
-            endpoint: MyApp.Endpoint,
-            router: MyAppWeb.Public.Router
-          }
-        ]
-      end
-
-      @impl true
-      def dashboards do
-        [
-          ...
-          {:prom_ex, "phoenix.json"}
-        ]
-      end
-    end
-    ```
-
-    When working with multiple Phoenix routers use the `endpoints` option instead:
-
-    ```elixir
-    defmodule WebApp.PromEx do
-      use PromEx, otp_app: :web_app
-
-      @impl true
-      def plugins do
-        [
-          ...
-          {
-            PromEx.Plugins.Phoenix,
-            endpoints: [
-              {MyApp.Endpoint, routers: [MyAppWeb.Public.Router]},
-              {MyApp.Endpoint2, routers: [MyAppWeb.Admin.Router], event_prefix: [:admin, :endpoint]}
-            ]
-          }
-        ]
-      end
-
-      @impl true
-      def dashboards do
-        [
-          ...
-          {:prom_ex, "phoenix.json"}
-        ]
-      end
-    end
-    ```
-    """
-
+    @moduledoc false
     use PromEx.Plugin
 
     require Logger
 
     alias Phoenix.Socket
     alias Plug.Conn
+    alias RealtimeWeb.Endpoint.HTTP, as: HTTP
 
     @stop_event [:prom_ex, :plugin, :phoenix, :stop]
+    @event_all_connections [:prom_ex, :plugin, :phoenix, :all_connections]
 
     @impl true
     def event_metrics(opts) do
@@ -164,6 +27,49 @@ if Code.ensure_loaded?(Phoenix) do
         channel_events(metric_prefix),
         socket_events(metric_prefix)
       ]
+    end
+
+    @impl true
+    def polling_metrics(opts) do
+      otp_app = Keyword.fetch!(opts, :otp_app)
+      metric_prefix = Keyword.get(opts, :metric_prefix, PromEx.metric_prefix(otp_app, :phoenix))
+      poll_rate = Keyword.get(opts, :poll_rate)
+
+      [
+        metrics(metric_prefix, poll_rate)
+      ]
+    end
+
+    def metrics(metric_prefix, poll_rate) do
+      Polling.build(
+        :realtime_osmon1_events1,
+        poll_rate,
+        {__MODULE__, :execute_metrics, []},
+        [
+          last_value(
+            metric_prefix ++ [:connections, :total],
+            event_name: @event_all_connections,
+            description: "The total open connections to ranch.",
+            measurement: :active
+          )
+        ]
+      )
+    end
+
+    def execute_metrics() do
+      active_conn =
+        case :ets.lookup(:ranch_server, {:listener_sup, HTTP}) do
+          [] ->
+            -1
+
+          _ ->
+            HTTP
+            |> :ranch_server.get_connections_sup()
+            |> :supervisor.count_children()
+            |> Keyword.get(:active)
+        end
+
+      :telemetry.execute(@event_all_connections, %{active: active_conn}, %{})
     end
 
     defp channel_events(metric_prefix) do
