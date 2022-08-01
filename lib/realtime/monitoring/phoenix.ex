@@ -42,7 +42,7 @@ if Code.ensure_loaded?(Phoenix) do
 
     def metrics(metric_prefix, poll_rate) do
       Polling.build(
-        :realtime_osmon1_events1,
+        :phoenix_all_connections,
         poll_rate,
         {__MODULE__, :execute_metrics, []},
         [
