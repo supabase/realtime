@@ -14,7 +14,8 @@ defmodule Extensions.Postgres.Supervisor do
     :syn.join(Postgres.RegionNodes, System.get_env("FLY_REGION"), self(), node: node())
 
     children = [
-      {DynamicSupervisor, strategy: :one_for_one, name: Extensions.Postgres.DynamicSupervisor}
+      {DynamicSupervisor, strategy: :one_for_one, name: Postgres.DynamicSupervisor},
+      Postgres.SubscriptionManagerTracker
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

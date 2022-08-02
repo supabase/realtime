@@ -7,144 +7,57 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   alias Extensions.Postgres
   alias Postgres.Subscriptions
-  alias RealtimeWeb.{UserSocket, Endpoint}
-
-  import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
+  import Realtime.Helpers, only: [cancel_timer: 1]
 
   @check_oids_interval 60_000
-  @queue_target 5_000
-  @pool_size 5
   @timeout 15_000
+  @max_delete_records 100
 
   @spec start_link(GenServer.options()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
 
-  @spec subscribe(pid, map) ::
-          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t()}
-  def subscribe(pid, opts) do
-    GenServer.call(pid, {:subscribe, opts}, :infinity)
-  end
-
-  @spec disconnect_subscribers(pid) :: :ok
-  def disconnect_subscribers(pid) do
-    GenServer.call(pid, :disconnect_subscribers, @timeout)
-  end
-
   ## Callbacks
 
   @impl true
-  def init(%{args: args, subscribers_tid: subscribers_tid}) do
-    id = Keyword.fetch!(args, :id)
-
-    state = %{
-      check_active_pids: nil,
-      check_oid_ref: nil,
-      conn: nil,
-      db_host: Keyword.fetch!(args, :db_host),
-      db_name: Keyword.fetch!(args, :db_name),
-      db_pass: Keyword.fetch!(args, :db_pass),
-      db_user: Keyword.fetch!(args, :db_user),
-      id: id,
-      oids: %{},
-      subscribers_tid: subscribers_tid,
-      publication: Keyword.fetch!(args, :publication)
-    }
-
-    Process.put(:tenant, id)
-    {:ok, state, {:continue, :database_manager_setup}}
-  end
-
-  @impl true
-  def handle_continue(
-        :database_manager_setup,
-        %{
-          db_host: db_host,
-          db_name: db_name,
-          db_pass: db_pass,
-          db_user: db_user,
-          id: id
-        } = state
-      ) do
-    secure_key = Application.get_env(:realtime, :db_enc_key)
-    db_host = decrypt!(db_host, secure_key)
-    db_name = decrypt!(db_name, secure_key)
-    db_pass = decrypt!(db_pass, secure_key)
-    db_user = decrypt!(db_user, secure_key)
-
-    {:ok, conn} =
-      Postgrex.start_link(
-        hostname: db_host,
-        database: db_name,
-        password: db_pass,
-        username: db_user,
-        pool_size: @pool_size,
-        queue_target: @queue_target
-      )
+  def init(args) do
+    %{
+      "id" => id,
+      "conn" => conn,
+      "publication" => publication,
+      "subscribers_tid" => subscribers_tid
+    } = args
 
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
 
-    :yes = :global.register_name({:tenant_db, :replication, :manager, id}, self())
-
-    send(self(), :check_oids)
-
-    {:noreply, %{state | conn: conn}}
-  end
-
-  @impl true
-  def handle_call(
-        {:subscribe, %{channel_pid: pid, claims: claims, config: config, id: id} = opts},
-        _,
-        %{check_active_pids: ref, publication: publication, subscribers_tid: tid} = state
-      ) do
-    Logger.debug("Subscribe #{inspect(opts, pretty: true)}")
-
-    subscription_opts = %{
+    state = %{
       id: id,
-      config: config,
-      claims: claims
+      oids: %{},
+      conn: conn,
+      check_oid_ref: nil,
+      publication: publication,
+      subscribers_tid: subscribers_tid,
+      delete_queue: %{
+        ref: check_delete_queue(),
+        queue: :queue.new()
+      }
     }
 
-    create_resp =
-      case Subscriptions.create(state.conn, publication, subscription_opts) do
-        {:ok, response} ->
-          monitor_ref = Process.monitor(pid)
-          true = :ets.insert(tid, {pid, id, config, claims, monitor_ref})
-          {:ok, response}
-
-        other ->
-          other
-      end
-
-    new_state =
-      if ref == nil do
-        %{state | check_active_pids: check_active_pids()}
-      else
-        state
-      end
-
-    {:reply, create_resp, new_state}
-  end
-
-  def handle_call(:disconnect_subscribers, _, state) do
-    %{id: id, conn: conn, subscribers_tid: tid} = state
-
-    fn {_, _, _, _, ref}, _acc ->
-      Process.demonitor(ref, [:flush])
-    end
-    |> :ets.foldl([], tid)
-
-    UserSocket.subscribers_id(id)
-    |> Endpoint.broadcast("disconnect", %{})
-
-    :ets.delete_all_objects(tid)
-    Subscriptions.delete_all(conn)
-
-    {:reply, :ok, state}
+    send(self(), :check_oids)
+    Postgres.track_manager(id, self(), conn)
+    {:ok, state}
   end
 
   @impl true
+  def handle_info({:subscribed, {pid, id}}, state) do
+    true =
+      state.subscribers_tid
+      |> :ets.insert({pid, id, Process.monitor(pid)})
+
+    {:noreply, state}
+  end
+
   def handle_info(
         :check_oids,
         %{check_oid_ref: ref, conn: conn, publication: publication, oids: old_oids} = state
@@ -158,61 +71,76 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
         new_oids ->
           Logger.warning("Found new oids #{inspect(new_oids, pretty: true)}")
-          Subscriptions.update_all(conn, state.subscribers_tid, publication)
+          Subscriptions.delete_all(conn)
+
+          fn {pid, _id, ref}, _acc ->
+            Process.demonitor(ref, [:flush])
+            send(pid, :postgres_subscribe)
+          end
+          |> :ets.foldl([], state.subscribers_tid)
+
           new_oids
       end
 
     {:noreply, %{state | oids: oids, check_oid_ref: check_oids()}}
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, %{subscribers_tid: tid} = state) do
-    case :ets.take(tid, pid) do
-      [{_pid, postgres_id, _config, _claims, _ref}] ->
-        Subscriptions.delete(state.conn, UUID.string_to_binary!(postgres_id))
+  def handle_info(
+        {:DOWN, _ref, :process, pid, _reason},
+        %{subscribers_tid: tid, delete_queue: %{queue: q}} = state
+      ) do
+    q1 =
+      case :ets.take(tid, pid) do
+        [{_pid, id, _ref}] ->
+          UUID.string_to_binary!(id)
+          |> :queue.in(q)
 
-      _ ->
-        Logger.error("Undefined PID: #{inspect(pid)}")
-        nil
-    end
+        _ ->
+          q
+      end
 
+    {:noreply, put_in(state.delete_queue.queue, q1)}
+  end
+
+  def handle_info(:check_delete_queue, %{delete_queue: %{ref: ref, queue: q}} = state) do
+    cancel_timer(ref)
+
+    q1 =
+      if !:queue.is_empty(q) do
+        {ids, q1} = queue_take(q, @max_delete_records)
+        Logger.debug("delete sub id #{inspect(ids)}")
+        Subscriptions.delete_multi(state.conn, ids)
+        q1
+      else
+        q
+      end
+
+    {:noreply, %{state | delete_queue: %{ref: check_delete_queue(), queue: q1}}}
+  end
+
+  def handle_info(msg, state) do
+    Logger.error("Undef msg #{inspect(msg, pretty: true)}")
     {:noreply, state}
   end
 
-  def handle_info(:check_active_pids, %{check_active_pids: ref, subscribers_tid: tid} = state) do
-    cancel_timer(ref)
+  ## Internal functions
 
-    objects =
-      fn {pid, postgres_id, _config, _claims, _monitor_ref}, acc ->
-        case :rpc.call(node(pid), Process, :alive?, [pid]) do
-          true ->
-            nil
+  def queue_take(q, count) do
+    Enum.reduce_while(0..count, {[], q}, fn _, {items, queue} ->
+      case :queue.out(queue) do
+        {{:value, item}, new_q} ->
+          {:cont, {[item | items], new_q}}
 
-          _ ->
-            Logger.error("Detected phantom subscriber")
-            :ets.delete(tid, pid)
-            Subscriptions.delete(state.conn, UUID.string_to_binary!(postgres_id))
-        end
-
-        acc + 1
+        {:empty, new_q} ->
+          {:halt, {items, new_q}}
       end
-      |> :ets.foldl(0, tid)
-
-    new_ref =
-      if objects == 0 do
-        Logger.debug("Cancel check_active_pids")
-        Postgres.stop(state.id)
-        nil
-      else
-        check_active_pids()
-      end
-
-    {:noreply, %{state | check_active_pids: new_ref}}
+    end)
   end
 
-  defp check_active_pids() do
+  defp check_delete_queue() do
     Process.send_after(
       self(),
-      :check_active_pids,
+      :check_delete_queue,
       @timeout
     )
   end

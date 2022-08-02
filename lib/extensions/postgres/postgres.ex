@@ -3,9 +3,9 @@ defmodule Extensions.Postgres do
   require Logger
 
   alias Extensions.Postgres
-  alias Postgres.SubscriptionManager
+  alias Postgres.{Subscriptions, SubscriptionManagerTracker}
 
-  def start_distributed(scope, %{"region" => region} = params) do
+  def start_distributed(%{"region" => region} = args) do
     [fly_region | _] = Postgres.Regions.aws_to_fly(region)
     launch_node = launch_node(fly_region, node())
 
@@ -13,8 +13,8 @@ defmodule Extensions.Postgres do
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
-    case :rpc.call(launch_node, Postgres, :start, [scope, params], 30_000) do
-      :ok ->
+    case :rpc.call(launch_node, Postgres, :start, [args], 30_000) do
+      {:ok, _pid} ->
         :ok
 
       {_, error} ->
@@ -26,78 +26,14 @@ defmodule Extensions.Postgres do
   Start db poller.
 
   """
-  @spec start(String.t(), map()) ::
+  @spec start(map()) ::
           :ok | {:error, :already_started | :reserved}
-  def start(scope, %{
-        "db_host" => db_host,
-        "db_name" => db_name,
-        "db_user" => db_user,
-        "db_password" => db_pass,
-        "poll_interval_ms" => poll_interval_ms,
-        "poll_max_changes" => poll_max_changes,
-        "poll_max_record_bytes" => poll_max_record_bytes,
-        "publication" => publication,
-        "slot_name" => slot_name
-      }) do
-    :global.trans({{Extensions.Postgres, scope}, self()}, fn ->
-      case :global.whereis_name({:tenant_db, :supervisor, scope}) do
-        :undefined ->
-          opts = [
-            id: scope,
-            db_host: db_host,
-            db_name: db_name,
-            db_user: db_user,
-            db_pass: db_pass,
-            poll_interval_ms: poll_interval_ms,
-            publication: publication,
-            slot_name: slot_name,
-            max_changes: poll_max_changes,
-            max_record_bytes: poll_max_record_bytes
-          ]
-
-          Logger.info(
-            "Starting Extensions.Postgres, #{inspect(Keyword.drop(opts, [:db_pass]), pretty: true)}"
-          )
-
-          {:ok, pid} =
-            DynamicSupervisor.start_child(Postgres.DynamicSupervisor, %{
-              id: scope,
-              start: {Postgres.DynamicSupervisor, :start_link, [opts]},
-              restart: :transient
-            })
-
-          case :global.register_name({:tenant_db, :supervisor, scope}, pid) do
-            :yes -> :ok
-            :no -> {:error, :reserved}
-          end
-
-        _ ->
-          {:error, :already_started}
-      end
-    end)
-  end
-
-  def subscribe(scope, subs_id, config, claims, channel_pid, postgres_extension) do
-    case manager_pid(scope) do
-      nil ->
-        start_distributed(scope, postgres_extension)
-
-      manager_pid ->
-        manager_pid
-        |> SubscriptionManager.subscribe(%{
-          config: config,
-          id: subs_id,
-          claims: claims,
-          channel_pid: channel_pid
-        })
-        |> case do
-          {:ok, _} ->
-            {:ok, manager_pid}
-
-          {:error, error} ->
-            {:error, error}
-        end
-    end
+  def start(args) do
+    DynamicSupervisor.start_child(Postgres.DynamicSupervisor, %{
+      id: args["id"],
+      start: {Postgres.DynamicSupervisor, :start_link, [args]},
+      restart: :transient
+    })
   end
 
   @spec stop(String.t(), timeout()) :: :ok
@@ -111,22 +47,15 @@ defmodule Extensions.Postgres do
     end
   end
 
-  def disconnect_subscribers(scope) do
-    pid = manager_pid(scope)
-
-    if pid do
-      SubscriptionManager.disconnect_subscribers(pid)
-    end
-  end
-
-  @spec manager_pid(any()) :: pid() | nil
-  def manager_pid(scope) do
-    case :global.whereis_name({:tenant_db, :replication, :manager, scope}) do
-      :undefined ->
+  @spec get_manager_conn(String.t()) :: nil | {:ok, pid(), pid()}
+  def get_manager_conn(id) do
+    Phoenix.Tracker.get_by_key(SubscriptionManagerTracker, "subscription_manager", id)
+    |> case do
+      [] ->
         nil
 
-      pid ->
-        pid
+      [{_, %{manager_pid: pid, conn: conn}}] ->
+        {:ok, pid, conn}
     end
   end
 
@@ -140,5 +69,37 @@ defmodule Extensions.Postgres do
         Logger.warning("Didn't find launch_node, return default #{inspect(default)}")
         default
     end
+  end
+
+  def get_or_start_conn(args, retries \\ 5) do
+    Enum.reduce_while(1..retries, nil, fn _, acc ->
+      get_manager_conn(args["id"])
+      |> case do
+        nil ->
+          start_distributed(args)
+          Process.sleep(1_000)
+          {:cont, acc}
+
+        {:ok, _pid, _conn} = resp ->
+          {:halt, resp}
+      end
+    end)
+  end
+
+  def create_subscription(conn, publication, opts, timeout \\ 5_000) do
+    conn_node = node(conn)
+
+    if conn_node !== node() do
+      :rpc.call(conn_node, Subscriptions, :create, [conn, publication, opts], timeout)
+    else
+      Subscriptions.create(conn, publication, opts)
+    end
+  end
+
+  def track_manager(id, pid, conn) do
+    Phoenix.Tracker.track(SubscriptionManagerTracker, self(), "subscription_manager", id, %{
+      conn: conn,
+      manager_pid: pid
+    })
   end
 end
