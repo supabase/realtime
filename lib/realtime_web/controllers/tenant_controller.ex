@@ -5,9 +5,11 @@ defmodule RealtimeWeb.TenantController do
   require Logger
 
   alias Realtime.Api
+  alias Realtime.Repo
   alias Realtime.Api.Tenant
-  alias PhoenixSwagger.{Path, Schema}
   alias Extensions.Postgres
+  alias PhoenixSwagger.{Path, Schema}
+  alias RealtimeWeb.{UserSocket, Endpoint}
 
   @stop_timeout 10_000
 
@@ -26,7 +28,9 @@ defmodule RealtimeWeb.TenantController do
 
   def create(conn, %{"tenant" => tenant_params}) do
     with {:ok, %Tenant{} = tenant} <-
-           Api.create_tenant(tenant_params) do
+      Api.create_tenant(tenant_params) do
+      Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
+
       conn
       |> put_status(:created)
       |> put_resp_header("location", Routes.tenant_path(conn, :show, tenant))
@@ -47,6 +51,8 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def show(conn, %{"id" => id}) do
+    Logger.metadata(external_id: id, project: id)
+
     id
     |> Api.get_tenant_by_external_id()
     |> case do
@@ -78,9 +84,10 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def update(conn, %{"id" => id, "tenant" => tenant_params}) do
+    Logger.metadata(external_id: id, project: id)
+
     case Api.get_tenant_by_external_id(id) do
       nil ->
-        Cachex.del(:tenants, id)
         create(conn, %{"tenant" => Map.put(tenant_params, "external_id", id)})
 
       tenant ->
@@ -104,19 +111,29 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def delete(conn, %{"id" => id}) do
-    if Api.delete_tenant_by_external_id(id) do
-      try do
-        Postgres.disconnect_subscribers(id)
-        Postgres.stop(id)
-      rescue
-        error ->
-          Logger.error(
-            "There is an error when trying to delete #{id} #{inspect(error, pretty: true)}"
-          )
-      end
-    end
+    Logger.metadata(external_id: id, project: id)
 
-    send_resp(conn, 204, "")
+    Repo.transaction(
+      fn ->
+        if Api.delete_tenant_by_external_id(id) do
+          with :ok <- UserSocket.subscribers_id(id) |> Endpoint.broadcast("disconnect", %{}),
+               :ok <- Postgres.stop(id) do
+            :ok
+          else
+            other -> Repo.rollback(other)
+          end
+        end
+      end,
+      timeout: @stop_timeout
+    )
+    |> case do
+      {:error, reason} ->
+        Logger.error("Can't remove tenant #{inspect(reason)}")
+        send_resp(conn, 503, "")
+
+      _ ->
+        send_resp(conn, 204, "")
+    end
   end
 
   swagger_path :reload do
@@ -134,6 +151,8 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def reload(conn, %{"tenant_id" => tenant_id}) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+
     case Api.get_tenant_by_external_id(tenant_id) do
       %Tenant{} ->
         Postgres.stop(tenant_id, @stop_timeout)

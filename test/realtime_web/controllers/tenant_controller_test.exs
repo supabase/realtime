@@ -2,11 +2,11 @@ defmodule RealtimeWeb.TenantControllerTest do
   use RealtimeWeb.ConnCase
 
   import Mock
+  import Realtime.Helpers, only: [encrypt!: 2]
 
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
-  import Realtime.Helpers, only: [encrypt: 2]
 
   @external_id "test_external_id"
 
@@ -79,10 +79,10 @@ defmodule RealtimeWeb.TenantControllerTest do
         conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @create_attrs)
         [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
         sec_key = Application.get_env(:realtime, :db_enc_key)
-        assert encrypt(sec_key, "127.0.0.1") == settings["db_host"]
-        assert encrypt(sec_key, "postgres") == settings["db_name"]
-        assert encrypt(sec_key, "postgres") == settings["db_user"]
-        assert encrypt(sec_key, "postgres") == settings["db_password"]
+        assert encrypt!("127.0.0.1", sec_key) == settings["db_host"]
+        assert encrypt!("postgres", sec_key) == settings["db_name"]
+        assert encrypt!("postgres", sec_key) == settings["db_user"]
+        assert encrypt!("postgres", sec_key) == settings["db_password"]
       end
     end
 
@@ -132,7 +132,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       end
     end
 
-    test "tenant doesn't exist", %{conn: conn, tenant: tenant} do
+    test "tenant doesn't exist", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
         conn = delete(conn, Routes.tenant_path(conn, :delete, "wrong_external_id"))
         assert response(conn, 204)

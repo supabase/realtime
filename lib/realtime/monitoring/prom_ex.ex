@@ -58,15 +58,17 @@ defmodule Realtime.PromEx do
 
   @impl true
   def plugins do
+    poll_rate = Application.get_env(:realtime, :prom_poll_rate)
+
     [
       # PromEx built in plugins
       # Plugins.Application,
-      Plugins.Beam,
-      {Plugins.Phoenix, router: RealtimeWeb.Router},
-      Plugins.Ecto,
+      {Plugins.Beam, poll_rate: poll_rate, metric_prefix: [:beam]},
+      # {Plugins.Phoenix, router: RealtimeWeb.Router, poll_rate: poll_rate, metric_prefix: [:phoenix]},
+      # {Plugins.Ecto, poll_rate: poll_rate, metric_prefix: [:ecto]},
       # Plugins.Oban,
       # Plugins.PhoenixLiveView
-      Realtime.PromEx.Plugins.OsMon
+      {Realtime.PromEx.Plugins.OsMon, poll_rate: poll_rate}
     ]
   end
 
@@ -91,5 +93,65 @@ defmodule Realtime.PromEx do
       # Add your dashboard definitions here with the format: {:otp_app, "path_in_priv"}
       # {:realtime, "/grafana_dashboards/user_metrics.json"}
     ]
+  end
+
+  def get_metrics() do
+    %{
+      region: region,
+      node_host: node_host,
+      short_alloc_id: short_alloc_id
+    } = get_metrics_tags()
+
+    def_tags = "host=\"#{node_host}\",region=\"#{region}\",id=\"#{short_alloc_id}\""
+
+    metrics =
+      PromEx.get_metrics(Realtime.PromEx)
+      |> String.split("\n")
+      |> Enum.map(fn line ->
+        case Regex.run(~r/(?!\#)^(\w+)(?:{(.*?)})?\s*(.+)$/, line) do
+          nil ->
+            line
+
+          [_, key, tags, value] ->
+            tags =
+              if tags == "" do
+                def_tags
+              else
+                tags <> "," <> def_tags
+              end
+
+            "#{key}{#{tags}} #{value}"
+        end
+      end)
+      |> Enum.join("\n")
+
+    Realtime.PromEx.__ets_cron_flusher_name__()
+    |> PromEx.ETSCronFlusher.defer_ets_flush()
+
+    metrics
+  end
+
+  def set_metrics_tags() do
+    [_, node_host] = node() |> Atom.to_string() |> String.split("@")
+
+    fly_alloc_id = Application.get_env(:realtime, :fly_alloc_id)
+
+    short_alloc_id =
+      case String.split(fly_alloc_id, "-", parts: 2) do
+        [short_alloc_id, _] -> short_alloc_id
+        _ -> fly_alloc_id
+      end
+
+    metrics_tags = %{
+      region: Application.get_env(:realtime, :fly_region),
+      node_host: node_host,
+      short_alloc_id: short_alloc_id
+    }
+
+    Application.put_env(:realtime, :metrics_tags, metrics_tags)
+  end
+
+  def get_metrics_tags() do
+    Application.get_env(:realtime, :metrics_tags)
   end
 end

@@ -3,6 +3,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   require Logger
 
+  import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
+
   alias Extensions.Postgres
   alias Postgres.Replications
 
@@ -14,8 +16,6 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   alias Realtime.Repo
 
-  import Realtime.Helpers, only: [cancel_timer: 1]
-
   @queue_target 5_000
 
   def start_link(opts) do
@@ -24,6 +24,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   @impl true
   def init(opts) do
+    id = Keyword.fetch!(opts, :id)
+
     state = %{
       conn: nil,
       db_host: Keyword.fetch!(opts, :db_host),
@@ -36,9 +38,10 @@ defmodule Extensions.Postgres.ReplicationPoller do
       poll_ref: make_ref(),
       publication: Keyword.fetch!(opts, :publication),
       slot_name: Keyword.fetch!(opts, :slot_name),
-      tenant: Keyword.fetch!(opts, :id)
+      tenant: id
     }
 
+    Process.put(:tenant, id)
     {:ok, state, {:continue, :prepare_replication}}
   end
 
@@ -55,11 +58,10 @@ defmodule Extensions.Postgres.ReplicationPoller do
         } = state
       ) do
     secure_key = Application.get_env(:realtime, :db_enc_key)
-
-    db_host = db_host.(secure_key)
-    db_name = db_name.(secure_key)
-    db_pass = db_pass.(secure_key)
-    db_user = db_user.(secure_key)
+    db_host = decrypt!(db_host, secure_key)
+    db_name = decrypt!(db_name, secure_key)
+    db_pass = decrypt!(db_pass, secure_key)
+    db_user = decrypt!(db_user, secure_key)
 
     Repo.with_dynamic_repo(
       [hostname: db_host, database: db_name, password: db_pass, username: db_user],
@@ -81,7 +83,10 @@ defmodule Extensions.Postgres.ReplicationPoller do
         database: db_name,
         password: db_pass,
         username: db_user,
-        queue_target: @queue_target
+        queue_target: @queue_target,
+        parameters: [
+          application_name: "realtime_rls"
+        ]
       )
 
     {:ok, _} = Replications.prepare_replication(conn, slot_name)

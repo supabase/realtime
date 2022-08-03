@@ -3,29 +3,81 @@ defmodule Extensions.Postgres.Subscriptions do
   This module consolidates subscriptions handling
   """
   require Logger
-  import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
+  import Postgrex, only: [transaction: 2, query: 3]
 
   @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), String.t(), map()) :: {:ok, nil} | {:error, any()}
-  def create(conn, publication, params) do
-    transaction(conn, fn conn ->
-      case fetch_publication_tables(conn, publication) do
-        oids when oids != %{} ->
-          case insert_topic_subscriptions(conn, params, oids) do
-            {:ok, nil} ->
-              nil
+  @spec create(conn(), String.t(), map()) ::
+          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | String.t()}
+  def create(conn, publication, %{id: id, config: config, claims: claims}) do
+    sql = "with sub_tables as (
+		    select
+			    rr.entity
+		    from
+			    pg_publication_tables pub,
+			    lateral (
+				    select
+					    format('%I.%I', pub.schemaname, pub.tablename)::regclass entity
+			    ) rr
+		    where
+			    pub.pubname = $1
+			  and pub.schemaname like (case $2 when '*' then '%' else $2 end)
+			  and pub.tablename like (case $3 when '*' then '%' else $3 end)
+	    )
+	    insert into realtime.subscription as x(
+		    subscription_id,
+		    entity,
+        filters,
+        claims
+      )
+      select
+        $4::text::uuid,
+        sub_tables.entity,
+        $6,
+        $5
+      from
+        sub_tables
+        on conflict
+        (subscription_id, entity, filters)
+        do update set
+        claims = excluded.claims,
+        created_at = now()
+      returning
+         id"
 
-            {:error, error} ->
-              Logger.error("Didn't create the subscription #{inspect(params.config)}")
-              rollback(conn, error)
-          end
+    with [schema, table, filters] <-
+           (case config do
+              %{"schema" => schema, "table" => table, "filter" => filter} ->
+                with [col, rest] <- String.split(filter, "=", parts: 2),
+                     [filter_type, value] <- String.split(rest, ".", parts: 2) do
+                  [schema, table, [{col, filter_type, value}]]
+                else
+                  _ -> []
+                end
 
-        _ ->
-          rollback(conn, "Entity oids do not exist")
-      end
-    end)
+              %{"schema" => schema, "table" => table} ->
+                [schema, table, []]
+
+              %{"schema" => schema} ->
+                [schema, "*", []]
+
+              _ ->
+                []
+            end),
+         {:ok,
+          %Postgrex.Result{
+            num_rows: num_rows
+          } = result}
+         when num_rows > 0 <- query(conn, sql, [publication, schema, table, id, claims, filters]) do
+      {:ok, result}
+    else
+      {_, other} ->
+        {:error, other}
+
+      [] ->
+        {:error, "malformed postgres config"}
+    end
   end
 
   @spec update_all(conn(), tid(), String.t()) :: {:ok, nil} | {:error, any()}
@@ -88,17 +140,6 @@ defmodule Extensions.Postgres.Subscriptions do
 
   #################
 
-  @spec fetch_database_roles(conn()) :: []
-  def fetch_database_roles(conn) do
-    case query(conn, "select rolname from pg_authid", []) do
-      {:ok, %{rows: rows}} ->
-        rows |> List.flatten()
-
-      _ ->
-        []
-    end
-  end
-
   @spec fetch_publication_tables(conn(), String.t()) ::
           %{
             {<<_::1>>} => [integer()],
@@ -122,88 +163,6 @@ defmodule Extensions.Postgres.Subscriptions do
 
       _ ->
         %{}
-    end
-  end
-
-  @spec enrich_subscription_params(map(), [String.t()], map()) :: map()
-  def enrich_subscription_params(params, _database_roles, oids) do
-    %{claims: claims, topic: topic, id: id} = params
-
-    # claims_role = (Enum.member?(database_roles, claims["role"]) && claims["role"]) || nil
-
-    subs_params = %{
-      id: id,
-      claims: claims,
-      # TODO: remove? claims_role: claims_role,
-      entities: [],
-      filters: [],
-      topic: topic
-    }
-
-    # TODO: what if a table name consist ":" symbol?
-    case String.split(topic, ":") do
-      [schema, table, filters] ->
-        String.split(filters, ~r/(\=|\.)/)
-        |> case do
-          [_, "eq", _] = filters ->
-            %{subs_params | filters: [List.to_tuple(filters)], entities: Map.get(oids, {schema, table}, [])}
-
-          _ ->
-            %{subs_params | filters: filters}
-        end
-
-      [schema, table] ->
-        case oids[{schema, table}] do
-          nil -> raise("No #{schema} and #{table} in #{inspect(oids)}")
-          entities -> %{subs_params | entities: entities}
-        end
-
-        %{subs_params | entities: Map.get(oids, {schema, table}, [])}
-
-      [schema] ->
-        case oids[{schema}] do
-          nil -> raise("No #{schema} in #{inspect(oids)}")
-          entities -> %{subs_params | entities: entities}
-        end
-
-      _ ->
-        Logger.error("Unknown topic #{inspect(topic)}")
-        subs_params
-    end
-  end
-
-  @spec insert_topic_subscriptions(conn(), map(), map()) ::
-          {:ok, nil} | {:error, any()}
-  def insert_topic_subscriptions(conn, params, oids) do
-    transform_to_oid_view(oids, params.config)
-    |> case do
-      nil ->
-        {:error, "No match between subscription params and entity oids"}
-
-      views ->
-        bin_uuid = UUID.string_to_binary!(params.id)
-        sql = "insert into realtime.subscription
-              (subscription_id, entity, filters, claims)
-              values ($1, $2, $3, $4)
-              on conflict (subscription_id, entity, filters)
-              do update set claims = excluded.claims, created_at = now()"
-
-        transaction(conn, fn conn ->
-          for view <- views do
-            {entity, filters} =
-              case view do
-                {entity, filters} -> {entity, filters}
-                entity -> {entity, []}
-              end
-
-            case query(conn, sql, [bin_uuid, entity, filters, params.claims]) do
-              {:ok, _} -> nil
-              {:error, error} -> rollback(conn, error)
-            end
-          end
-
-          nil
-        end)
     end
   end
 

@@ -4,15 +4,9 @@ defmodule Realtime.Api do
   """
   require Logger
 
-  import Ecto.Query, warn: false
-  alias Realtime.Repo
-  alias Realtime.Helpers
+  import Ecto.Query, warn: false, only: [from: 2]
 
-  alias Realtime.Api.Tenant
-  alias Realtime.Api.Extensions
-  import Ecto.Query, only: [from: 2]
-
-  @ttl 120
+  alias Realtime.{Repo, Api.Tenant, Api.Extensions}
 
   @doc """
   Returns the list of tenants.
@@ -24,7 +18,11 @@ defmodule Realtime.Api do
 
   """
   def list_tenants do
-    Repo.all(Tenant) |> Repo.preload(:extensions)
+    repo_replica = Repo.replica()
+
+    Tenant
+    |> repo_replica.all()
+    |> repo_replica.preload(:extensions)
   end
 
   @doc """
@@ -44,7 +42,7 @@ defmodule Realtime.Api do
       ** (Ecto.NoResultsError)
 
   """
-  def get_tenant!(id), do: Repo.get!(Tenant, id)
+  def get_tenant!(id), do: Repo.replica().get!(Tenant, id)
 
   @doc """
   Creates a tenant.
@@ -100,13 +98,12 @@ defmodule Realtime.Api do
     Repo.delete(tenant)
   end
 
-  @spec delete_tenant_by_external_id(String.t()) :: true | false
+  @spec delete_tenant_by_external_id(String.t()) :: boolean()
   def delete_tenant_by_external_id(id) do
     from(t in Tenant, where: t.external_id == ^id)
     |> Repo.delete_all()
     |> case do
       {num, _} when num > 0 ->
-        Cachex.del(:tenants, id)
         true
 
       _ ->
@@ -128,96 +125,24 @@ defmodule Realtime.Api do
   end
 
   def get_tenant_by_name(name) do
-    query =
-      from(p in Tenant,
-        where: p.name == ^name,
-        select: p
-      )
-
-    Repo.one(query)
-  end
-
-  @spec get_tenant_by_external_id(:cached, String.t()) :: Tenant.t() | nil
-  def get_tenant_by_external_id(:cached, external_id) do
-    Cachex.get_and_update(:tenants, external_id, fn
-      %Tenant{} = tenant ->
-        {:ignore, tenant}
-
-      nil ->
-        case get_dec_tenant_by_external_id(external_id) do
-          %Tenant{} = tenant -> {:commit, tenant}
-          nil -> {:ignore, nil}
-        end
-    end)
-    |> case do
-      {:commit, tenant} ->
-        Cachex.expire(:tenants, external_id, :timer.seconds(@ttl))
-        tenant
-
-      {:ignore, tenant} ->
-        tenant
-    end
-  end
-
-  @spec get_dec_tenant_by_external_id(String.t()) :: Tenant.t() | nil
-  def get_dec_tenant_by_external_id(external_id) do
-    external_id
-    |> get_tenant_by_external_id()
-    |> decrypt_extensions_data()
+    Repo.replica().get_by(Tenant, name: name)
   end
 
   @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
-  def get_tenant_by_external_id(external_id) when is_binary(external_id) do
+  def get_tenant_by_external_id(external_id) do
+    repo_replica = Repo.replica()
+
     Tenant
-    |> Repo.get_by(external_id: external_id)
-    |> Repo.preload(:extensions)
+    |> repo_replica.get_by(external_id: external_id)
+    |> repo_replica.preload(:extensions)
   end
-
-  def get_tenant_by_external_id(_), do: nil
-
-  @spec decrypt_extensions_data(
-          %Tenant{
-            extensions: [%Extensions{settings: map(), type: String.t()}]
-          }
-          | term()
-        ) :: Tenant.t() | nil
-  def decrypt_extensions_data(
-        %Realtime.Api.Tenant{
-          extensions: [%Extensions{settings: settings, type: type}]
-        } = tenant
-      )
-      when is_map(settings) and is_binary(type) do
-    decrypted_extensions =
-      for extension <- tenant.extensions do
-        settings = extension.settings
-        %{required: required} = Realtime.Extensions.db_settings(extension.type)
-
-        decrypted_settings =
-          Enum.reduce(required, settings, fn
-            {key, _, true}, acc ->
-              case settings[key] do
-                nil -> acc
-                value -> %{acc | key => &Helpers.decrypt(&1, value)}
-              end
-
-            _, acc ->
-              acc
-          end)
-
-        %{extension | settings: decrypted_settings}
-      end
-
-    %{tenant | extensions: decrypted_extensions}
-  end
-
-  def decrypt_extensions_data(_), do: nil
 
   def list_extensions(type \\ "postgres") do
     from(e in Extensions,
       where: e.type == ^type,
       select: e
     )
-    |> Repo.all()
+    |> Repo.replica().all()
   end
 
   def rename_settings_field(from, to) do

@@ -23,6 +23,8 @@ defmodule Realtime.Application do
       end
     end
 
+    Realtime.PromEx.set_metrics_tags()
+
     Registry.start_link(keys: :duplicate, name: Realtime.Registry)
     Registry.start_link(keys: :unique, name: Realtime.Registry.Unique)
 
@@ -46,15 +48,20 @@ defmodule Realtime.Application do
 
     children =
       [
+        Realtime.PromEx,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         Realtime.Repo,
         RealtimeWeb.Telemetry,
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
         RealtimeWeb.Endpoint,
-        RealtimeWeb.Presence,
-        Realtime.PromEx,
-        {Cachex, name: :tenants}
+        RealtimeWeb.Presence
       ] ++ extensions_supervisors
+
+    children =
+      case Realtime.Repo.replica() do
+        Realtime.Repo -> children
+        replica_repo -> List.insert_at(children, 2, replica_repo)
+      end
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

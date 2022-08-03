@@ -1,9 +1,7 @@
-# fly.toml file generated for realtime-qa on 2022-05-19T16:07:32+02:00
-
 app = "realtime-qa"
-
 kill_signal = "SIGTERM"
 kill_timeout = 5
+processes = []
 
 [deploy]
   release_command = "/app/bin/realtime eval Realtime.Release.migrate"
@@ -11,20 +9,24 @@ kill_timeout = 5
 
 [env]
   DNS_NODES = "realtime-qa.internal"
-  SECURE_CHANNELS = "true"
 
 [experimental]
-  private_network = true
+  allowed_public_ports = []
+  auto_rollback = true
 
 [[services]]
+  http_checks = []
   internal_port = 4000
+  processes = ["app"]
   protocol = "tcp"
-
+  script_checks = []
   [services.concurrency]
     hard_limit = 100000
     soft_limit = 100000
+    type = "connections"
 
   [[services.ports]]
+    force_https = true
     handlers = ["http"]
     port = 80
 

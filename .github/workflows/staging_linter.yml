@@ -1,4 +1,3 @@
-
 name: Staging Formatting Checks
 on:
   pull_request:
@@ -12,9 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Setup elixir
+        id: beam
         uses: erlef/setup-beam@v1
         with:
-          otp-version: 24.x # Define the OTP version [required]
+          otp-version: 25.x # Define the OTP version [required]
           elixir-version: 1.13.x # Define the elixir version [required]
       - name: Cache Mix
         uses: actions/cache@v1
@@ -31,7 +31,7 @@ jobs:
       - name: Run main database migrations
         run: mix ecto.migrate --log-migrator-sql
       - name: Run database tenant migrations
-        run: mix ecto.migrate --migrations-path priv/repo/postgres/migrations        
+        run: mix ecto.migrate --migrations-path priv/repo/postgres/migrations
       - name: Run format check
         run: mix format --check-formatted
       - name: Credo checks
@@ -41,7 +41,7 @@ jobs:
         id: plt-cache
         with:
           path: priv/plts
-          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-plts-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
+          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-plts-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
       - name: Create PLTs
         if: steps.plt-cache.outputs.cache-hit != 'true'
         run: |
