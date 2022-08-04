@@ -5,9 +5,11 @@ defmodule RealtimeWeb.TenantController do
   require Logger
 
   alias Realtime.Api
+  alias Realtime.Repo
   alias Realtime.Api.Tenant
-  alias PhoenixSwagger.{Path, Schema}
   alias Extensions.Postgres
+  alias PhoenixSwagger.{Path, Schema}
+  alias RealtimeWeb.{UserSocket, Endpoint}
 
   @stop_timeout 10_000
 
@@ -119,19 +121,28 @@ defmodule RealtimeWeb.TenantController do
 
   def delete(conn, %{"id" => id}) do
     Logger.metadata(external_id: id, project: id)
-    Api.delete_tenant_by_external_id(id)
 
-    try do
-      Postgres.disconnect_subscribers(id)
-      Postgres.stop(id, @stop_timeout)
-    rescue
-      error ->
-        Logger.error(
-          "There is an error when attempting to stop DB replication for tenant #{id}: #{inspect(error, pretty: true)}"
-        )
+    Repo.transaction(
+      fn ->
+        if Api.delete_tenant_by_external_id(id) do
+          with :ok <- UserSocket.subscribers_id(id) |> Endpoint.broadcast("disconnect", %{}),
+               :ok <- Postgres.stop(id) do
+            :ok
+          else
+            other -> Repo.rollback(other)
+          end
+        end
+      end,
+      timeout: @stop_timeout
+    )
+    |> case do
+      {:error, reason} ->
+        Logger.error("Can't remove tenant #{inspect(reason)}")
+        send_resp(conn, 503, "")
+
+      _ ->
+        send_resp(conn, 204, "")
     end
-
-    send_resp(conn, 204, "")
   end
 
   swagger_path :reload do
