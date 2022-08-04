@@ -8,8 +8,7 @@ defmodule Extensions.Postgres.Subscriptions do
   @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), String.t(), map()) ::
-          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t()}
+  @spec create(conn(), String.t(), map()) :: {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | String.t()}
   def create(conn, publication, %{id: id, config: config, claims: claims}) do
     sql = "with sub_tables as (
 		    select
@@ -46,29 +45,37 @@ defmodule Extensions.Postgres.Subscriptions do
       returning
          id"
 
-    [schema, table, filters] =
-      case config do
-        %{"schema" => schema, "table" => table, "filter" => filter} ->
-          filters = [filter |> String.split(~r(\=|\.)) |> List.to_tuple()]
-          [schema, table, filters]
+    with [schema, table, filters] <-
+           (case config do
+              %{"schema" => schema, "table" => table, "filter" => filter} ->
+                with [col, rest] <- String.split(filter, "=", parts: 2),
+                     [filter_type, value] <- String.split(rest, ".", parts: 2) do
+                  [schema, table, [{col, filter_type, value}]]
+                else
+                  _ -> []
+                end
 
-        %{"schema" => schema, "table" => table} ->
-          [schema, table, []]
+              %{"schema" => schema, "table" => table} ->
+                [schema, table, []]
 
-        %{"schema" => schema} ->
-          [schema, "*", []]
-      end
+              %{"schema" => schema} ->
+                [schema, "*", []]
 
-    case query(conn, sql, [publication, schema, table, id, claims, filters]) do
-      {:ok,
-       %Postgrex.Result{
-         num_rows: num_rows
-       } = result}
-      when num_rows > 0 ->
-        {:ok, result}
-
+              _ ->
+                []
+            end),
+         {:ok,
+          %Postgrex.Result{
+            num_rows: num_rows
+          } = result}
+         when num_rows > 0 <- query(conn, sql, [publication, schema, table, id, claims, filters]) do
+      {:ok, result}
+    else
       {_, other} ->
         {:error, other}
+
+      [] ->
+        {:error, "malformed postgres config"}
     end
   end
 
