@@ -9,7 +9,7 @@ import Config
 
 config :realtime,
   ecto_repos: [Realtime.Repo],
-  db_enc_key: System.get_env("DB_ENC_KEY")
+  db_enc_key: System.get_env("DB_ENC_KEY", "")
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,
