@@ -98,15 +98,14 @@ defmodule Realtime.Extensions.PostgresTest do
     test "Stop tenant supervisor" do
       sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
-          {pid, _} = :syn.lookup(Extensions.Postgres.Sup, @external_id)
-
-          case is_pid(pid) do
-            true ->
-              {:halt, pid}
-
-            false ->
+          :syn.lookup(Extensions.Postgres.Sup, @external_id)
+          |> case do
+            :undefined ->
               Process.sleep(500)
               {:cont, acc}
+
+            {pid, _} ->
+              {:halt, pid}
           end
         end)
 
