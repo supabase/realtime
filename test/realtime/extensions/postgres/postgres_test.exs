@@ -50,14 +50,13 @@ defmodule Realtime.Extensions.PostgresTest do
     test "Check supervisor crash and respawn" do
       sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
-          {:tenant_db, :supervisor, @external_id}
-          |> :global.whereis_name()
+          :syn.lookup(Extensions.Postgres.Sup, @external_id)
           |> case do
             :undefined ->
               Process.sleep(500)
               {:cont, acc}
 
-            pid ->
+            {pid, _} ->
               {:halt, pid}
           end
         end)
@@ -65,27 +64,25 @@ defmodule Realtime.Extensions.PostgresTest do
       assert Process.alive?(sup)
       DynamicSupervisor.terminate_child(Postgres.DynamicSupervisor, sup)
       Process.sleep(5_000)
-      sup2 = :global.whereis_name({:tenant_db, :supervisor, @external_id})
+      {sup2, _} = :syn.lookup(Extensions.Postgres.Sup, @external_id)
       assert Process.alive?(sup2)
       assert(sup != sup2)
     end
 
     test "Subscription manager updates oids" do
-      subscriber_manager_pid =
+      {subscriber_manager_pid, conn} =
         Enum.reduce_while(1..10, nil, fn _, acc ->
-          {:tenant_db, :replication, :poller, @external_id}
-          |> :global.whereis_name()
-          |> case do
-            :undefined ->
+          case Postgres.get_manager_conn(@external_id) do
+            nil ->
               Process.sleep(500)
               {:cont, acc}
 
-            _ ->
-              {:halt, Postgres.manager_pid(@external_id)}
+            {:ok, pid, conn} ->
+              {:halt, {pid, conn}}
           end
         end)
 
-      %{conn: conn, oids: oids} = :sys.get_state(subscriber_manager_pid)
+      %{oids: oids} = :sys.get_state(subscriber_manager_pid)
 
       P.query!(conn, "drop publication supabase_realtime_test", [])
       send(subscriber_manager_pid, :check_oids)
@@ -99,19 +96,13 @@ defmodule Realtime.Extensions.PostgresTest do
     end
 
     test "Stop tenant supervisor" do
-      [sup, manager, poller] =
+      sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
-          pids = [
-            :global.whereis_name({:tenant_db, :supervisor, @external_id}),
-            :global.whereis_name({:tenant_db, :replication, :manager, @external_id}),
-            :global.whereis_name({:tenant_db, :replication, :poller, @external_id})
-          ]
+          {pid, _} = :syn.lookup(Extensions.Postgres.Sup, @external_id)
 
-          pids
-          |> Enum.all?(&is_pid(&1))
-          |> case do
+          case is_pid(pid) do
             true ->
-              {:halt, pids}
+              {:halt, pid}
 
             false ->
               Process.sleep(500)
@@ -120,31 +111,8 @@ defmodule Realtime.Extensions.PostgresTest do
         end)
 
       assert Process.alive?(sup)
-      assert Process.alive?(manager)
-      assert Process.alive?(poller)
-
       Postgres.stop(@external_id)
-
       assert Process.alive?(sup) == false
-      assert Process.alive?(manager) == false
-      assert Process.alive?(poller) == false
-    end
-
-    test "SubscriptionManager consists tenant id in dict" do
-      pid =
-        Enum.reduce_while(1..10, nil, fn _, acc ->
-          case :global.whereis_name({:tenant_db, :replication, :manager, @external_id}) do
-            :undefined ->
-              Process.sleep(500)
-              {:cont, acc}
-
-            pid ->
-              {:halt, pid}
-          end
-        end)
-
-      tenant = Process.info(pid)[:dictionary][:tenant]
-      assert tenant == @external_id
     end
   end
 end

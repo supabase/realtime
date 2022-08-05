@@ -13,6 +13,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
   @confirm_token_ms_interval 1_000 * 60 * 5
+  @secure_key Application.get_env(:realtime, :db_enc_key)
 
   @impl true
   def join(
@@ -31,7 +32,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       ) do
     Logger.metadata(external_id: tenant, project: tenant)
-    secure_key = Application.get_env(:realtime, :db_enc_key)
 
     with true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
          access_token when is_binary(access_token) <-
@@ -39,7 +39,7 @@ defmodule RealtimeWeb.RealtimeChannel do
               %{"user_token" => user_token} -> user_token
               _ -> token
             end),
-         jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
+         jwt_secret_dec <- decrypt!(jwt_secret, @secure_key),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
@@ -108,8 +108,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         send(self(), :sync_presence)
       end
 
-      Process.put(:tenant, tenant)
-
       {:ok,
        assign(socket, %{
          access_token: access_token,
@@ -136,6 +134,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  def handle_info(%{event: "subscription_manager_down"}, socket) do
+    pg_sub_ref = Process.send_after(self(), :postgres_subscribe, backoff())
+    {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
+  end
+
   def handle_info(%{event: type, payload: payload}, socket) do
     push(socket, type, payload)
     {:noreply, socket}
@@ -157,31 +160,37 @@ defmodule RealtimeWeb.RealtimeChannel do
       ) do
     cancel_timer(pg_sub_ref)
 
-    Postgres.subscribe(
-      tenant,
-      id,
-      postgres_config,
-      claims,
-      self(),
-      postgres_extension
-    )
-    |> case do
-      {:ok, manager_pid} ->
-        Logger.info("Subscribe channel for #{tenant} to #{postgres_topic}")
-        Process.monitor(manager_pid)
-        {:noreply, assign(socket, :pg_sub_ref, nil)}
+    args = Map.put(postgres_extension, "id", tenant)
 
-      :ok ->
+    case Postgres.get_or_start_conn(args) do
+      {:ok, manager_pid, conn} ->
+        opts = %{
+          config: postgres_config,
+          id: id,
+          claims: claims
+        }
+
+        Logger.info("Subscribe channel for #{tenant} to #{postgres_topic}")
+
+        case Postgres.create_subscription(conn, postgres_extension["publication"], opts) do
+          {:ok, _response} ->
+            Endpoint.subscribe("subscription_manager:" <> tenant)
+            send(manager_pid, {:subscribed, {self(), id}})
+
+            {:noreply, assign(socket, :pg_sub_ref, nil)}
+
+          {:error, error} ->
+            Logger.error(
+              "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
+            )
+
+            {:stop, %{reason: error}, assign(socket, :pg_sub_ref, nil)}
+        end
+
+      nil ->
         Logger.warning("Re-subscribe channel for #{tenant}")
         ref = Process.send_after(self(), :postgres_subscribe, backoff())
         {:noreply, assign(socket, :pg_sub_ref, ref)}
-
-      {:error, error} ->
-        Logger.error(
-          "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
-        )
-
-        {:stop, %{reason: error}, assign(socket, :pg_sub_ref, nil)}
     end
   end
 
@@ -192,8 +201,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       ) do
     cancel_timer(ref)
 
-    with {:ok, %{"exp" => exp}} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(access_token, jwt_secret),
+    with jwt_secret_dec <- decrypt!(jwt_secret, @secure_key),
+         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
+           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
          confirm_token_ref <-
            Process.send_after(
@@ -201,7 +211,7 @@ defmodule RealtimeWeb.RealtimeChannel do
              :confirm_token,
              min(@confirm_token_ms_interval, exp_diff * 1_000)
            ) do
-      {:ok, assign(socket, :confirm_token_ref, confirm_token_ref)}
+      {:ok, assign(socket, %{confirm_token_ref: confirm_token_ref, claims: claims})}
     else
       _ -> {:stop, %{reason: "access token has expired"}, socket}
     end
@@ -244,9 +254,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       when is_binary(refresh_token) do
     cancel_timer(ref)
 
-    secure_key = Application.get_env(:realtime, :db_enc_key)
-
-    with jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
+    with jwt_secret_dec <- decrypt!(jwt_secret, @secure_key),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
