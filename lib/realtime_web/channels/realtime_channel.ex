@@ -13,7 +13,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
   @confirm_token_ms_interval 1_000 * 60 * 5
-  @secure_key Application.get_env(:realtime, :db_enc_key)
 
   @impl true
   def join(
@@ -39,7 +38,7 @@ defmodule RealtimeWeb.RealtimeChannel do
               %{"user_token" => user_token} -> user_token
               _ -> token
             end),
-         jwt_secret_dec <- decrypt!(jwt_secret, @secure_key),
+         jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
@@ -201,7 +200,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       ) do
     cancel_timer(ref)
 
-    with jwt_secret_dec <- decrypt!(jwt_secret, @secure_key),
+    with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
@@ -254,7 +253,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       when is_binary(refresh_token) do
     cancel_timer(ref)
 
-    with jwt_secret_dec <- decrypt!(jwt_secret, @secure_key),
+    with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
@@ -352,6 +351,11 @@ defmodule RealtimeWeb.RealtimeChannel do
       _ ->
         ""
     end
+  end
+
+  defp decrypt_jwt_secret(secret) do
+    secure_key = Application.get_env(:realtime, :db_enc_key)
+    decrypt!(secret, secure_key)
   end
 
   defp backoff() do
