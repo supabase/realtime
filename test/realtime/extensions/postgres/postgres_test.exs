@@ -50,14 +50,13 @@ defmodule Realtime.Extensions.PostgresTest do
     test "Check supervisor crash and respawn" do
       sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
-          {:tenant_db, :supervisor, @external_id}
-          |> :global.whereis_name()
+          :syn.lookup(Extensions.Postgres.Sup, @external_id)
           |> case do
             :undefined ->
               Process.sleep(500)
               {:cont, acc}
 
-            pid ->
+            {pid, _} ->
               {:halt, pid}
           end
         end)
@@ -65,7 +64,7 @@ defmodule Realtime.Extensions.PostgresTest do
       assert Process.alive?(sup)
       DynamicSupervisor.terminate_child(Postgres.DynamicSupervisor, sup)
       Process.sleep(5_000)
-      sup2 = :global.whereis_name({:tenant_db, :supervisor, @external_id})
+      {sup2, _} = :syn.lookup(Extensions.Postgres.Sup, @external_id)
       assert Process.alive?(sup2)
       assert(sup != sup2)
     end
@@ -99,7 +98,7 @@ defmodule Realtime.Extensions.PostgresTest do
     test "Stop tenant supervisor" do
       sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
-          pid = :global.whereis_name({:tenant_db, :supervisor, @external_id})
+          {pid, _} = :syn.lookup(Extensions.Postgres.Sup, @external_id)
 
           case is_pid(pid) do
             true ->
