@@ -8,7 +8,8 @@ defmodule Extensions.Postgres.Subscriptions do
   @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), String.t(), map()) :: {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | String.t()}
+  @spec create(conn(), String.t(), map()) ::
+          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | String.t()}
   def create(conn, publication, %{id: id, config: config, claims: claims}) do
     sql = "with sub_tables as (
 		    select
