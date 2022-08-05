@@ -38,11 +38,11 @@ defmodule Extensions.Postgres do
 
   @spec stop(String.t(), timeout()) :: :ok
   def stop(scope, timeout \\ :infinity) do
-    case :global.whereis_name({:tenant_db, :supervisor, scope}) do
+    case :syn.lookup(Extensions.Postgres.Sup, scope) do
       :undefined ->
         Logger.warning("Database supervisor not found for tenant #{scope}")
 
-      pid ->
+      {pid, _} ->
         DynamicSupervisor.stop(pid, :shutdown, timeout)
     end
   end

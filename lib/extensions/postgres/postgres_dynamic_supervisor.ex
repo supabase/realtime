@@ -10,7 +10,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
   @pool_size 5
 
   def start_link(args) do
-    name = [name: {:global, {:tenant_db, :supervisor, args["id"]}}]
+    name = [name: {:via, :syn, {Postgres.Sup, args["id"]}}]
     Supervisor.start_link(__MODULE__, args, name)
   end
 

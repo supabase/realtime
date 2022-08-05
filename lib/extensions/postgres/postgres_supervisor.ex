@@ -10,7 +10,7 @@ defmodule Extensions.Postgres.Supervisor do
 
   @impl true
   def init(_args) do
-    :syn.add_node_to_scopes([Postgres.RegionNodes])
+    :syn.add_node_to_scopes([Postgres.RegionNodes, Postgres.Sup])
     :syn.join(Postgres.RegionNodes, System.get_env("FLY_REGION"), self(), node: node())
 
     children = [
