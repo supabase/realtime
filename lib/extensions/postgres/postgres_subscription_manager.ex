@@ -122,7 +122,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
     Logger.error("Undef msg #{inspect(msg, pretty: true)}")
     {:noreply, state}
   end
-
+  
   ## Internal functions
 
   def queue_take(q, count) do
