@@ -9,24 +9,24 @@ defmodule RealtimeWeb.Joken.CurrentTime.Mock do
 
   use Agent
 
-  def start_link(name) do
+  def start_link do
     Agent.start_link(
       fn ->
         %{is_frozen: false, frozen_value: nil}
       end,
-      name: name
+      name: Joken
     )
   end
 
   def child_spec(_args) do
     %{
       id: __MODULE__,
-      start: {__MODULE__, :start_link, [unique_name_per_process()]}
+      start: {__MODULE__, :start_link, []}
     }
   end
 
   def current_time do
-    state = Agent.get(unique_name_per_process(), fn state -> state end)
+    state = Agent.get(Joken, fn state -> state end)
 
     if state[:is_frozen] do
       state[:frozen_value]
@@ -40,17 +40,8 @@ defmodule RealtimeWeb.Joken.CurrentTime.Mock do
   end
 
   def freeze(timestamp) do
-    Agent.update(unique_name_per_process(), fn _state ->
+    Agent.update(Joken, fn _state ->
       %{is_frozen: true, frozen_value: timestamp}
     end)
-  end
-
-  def unique_name_per_process do
-    binary_pid =
-      self()
-      |> :erlang.pid_to_list()
-      |> :erlang.iolist_to_binary()
-
-    "{__MODULE__}_#{binary_pid}" |> String.to_atom()
   end
 end
