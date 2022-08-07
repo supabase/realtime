@@ -24,7 +24,11 @@ defmodule Realtime.MessageDispatcherTest do
     msg = msg(MapSet.new([@subscription_id]))
 
     dispatch(
-      [{self(), {:subscriber_fastlane, self(), JSONSerializer, @subscription_id}}],
+      [
+        {self(),
+         {:subscriber_fastlane, self(), JSONSerializer, @subscription_id, "realtime:public:todos",
+          false}}
+      ],
       self(),
       msg
     )

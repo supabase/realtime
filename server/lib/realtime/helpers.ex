@@ -36,10 +36,8 @@ defmodule Realtime.Helpers do
     end)
   end
 
-  def broadcast_change(topic, %{type: event} = change) do
+  def broadcast_change(topic, change) do
     broadcast = %Broadcast{
-      topic: topic,
-      event: event,
       payload: change
     }
 
