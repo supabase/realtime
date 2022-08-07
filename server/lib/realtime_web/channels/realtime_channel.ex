@@ -8,25 +8,33 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Metrics.SocketMonitor
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint}
 
-  @verify_token_interval 60_000
-
-  def join("realtime:", _, _socket) do
-    {:error, %{reason: "realtime subtopic does not exist"}}
-  end
+  @verify_token_ms 1_000 * 60 * 5
 
   def join(
         "realtime:" <> subtopic = topic,
         params,
-        %Socket{channel_pid: channel_pid, assigns: %{access_token: access_token}} = socket
+        %Socket{
+          assigns: %{access_token: access_token},
+          channel_pid: channel_pid,
+          serializer: serializer,
+          transport_pid: transport_pid
+        } = socket
       ) do
-    token =
-      case params do
-        %{"user_token" => token} -> token
-        _ -> access_token
-      end
-
-    with {:ok, claims} <- ChannelsAuthorization.authorize(token),
+    with token when is_binary(token) <-
+           (case params do
+              %{"user_token" => token} -> token
+              _ -> access_token
+            end),
+         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
+           ChannelsAuthorization.authorize(token),
          bin_id <- Ecto.UUID.bingenerate(),
+         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
+         verify_token_ref <-
+           Process.send_after(
+             self(),
+             :verify_token,
+             min(@verify_token_ms, exp_diff * 1_000)
+           ),
          :ok <-
            SubscriptionManager.track_topic_subscriber(%{
              id: bin_id,
@@ -34,14 +42,18 @@ defmodule RealtimeWeb.RealtimeChannel do
              claims: claims,
              topic: subtopic
            }),
-         :ok <- PubSub.subscribe(Realtime.PubSub, "subscription_manager") do
+         :ok <- PubSub.subscribe(Realtime.PubSub, "subscription_manager"),
+         :ok <- Endpoint.unsubscribe(topic),
+         :ok <-
+           Endpoint.subscribe(topic,
+             metadata: {:subscriber_fastlane, transport_pid, serializer, bin_id}
+           ) do
       SocketMonitor.track_channel(socket)
-      send(self(), :after_join)
-      ref = Process.send_after(self(), :verify_access_token, @verify_token_interval)
 
-      {:ok, assign(socket, %{id: bin_id, access_token: token, verify_ref: ref})}
+      {:ok,
+       assign(socket, %{id: bin_id, access_token: token, verify_token_ref: verify_token_ref})}
     else
-      _ -> {:error, %{reason: "error occurred when joining #{topic} with user token"}}
+      _ -> {:error, %{reason: "error occurred when joining #{topic}"}}
     end
   end
 
@@ -51,38 +63,17 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(
-        :after_join,
-        %Socket{
-          assigns: %{id: id, access_token: access_token},
-          serializer: serializer,
-          topic: topic,
-          transport_pid: transport_pid
-        } = socket
-      ) do
-    with {:ok, _} <- ChannelsAuthorization.authorize(access_token),
-         :ok <- Endpoint.unsubscribe(topic),
-         :ok <-
-           Endpoint.subscribe(topic,
-             metadata: {:subscriber_fastlane, transport_pid, serializer, id}
-           ) do
-      {:noreply, socket}
-    else
-      error -> {:stop, error, socket}
-    end
-  end
-
-  def handle_info(
         %Broadcast{
           event: "sync_subscription",
           topic: "subscription_manager"
         },
         %Socket{
-          assigns: %{id: id, access_token: access_token},
+          assigns: %{id: id, access_token: token},
           channel_pid: channel_pid,
           topic: "realtime:" <> subtopic
         } = socket
       ) do
-    with {:ok, claims} <- ChannelsAuthorization.authorize(access_token),
+    with {:ok, claims} <- ChannelsAuthorization.authorize(token),
          :ok <-
            SubscriptionManager.track_topic_subscriber(%{
              id: id,
@@ -107,18 +98,23 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(
-        :verify_access_token,
+        :verify_token,
         %Socket{
-          assigns: %{access_token: access_token, verify_ref: ref}
+          assigns: %{access_token: access_token, verify_token_ref: ref}
         } = socket
       ) do
     Process.cancel_timer(ref)
 
-    case ChannelsAuthorization.authorize(access_token) do
-      {:ok, _} ->
-        ref = Process.send_after(self(), :verify_access_token, @verify_token_interval)
-        {:noreply, assign(socket, :verify_ref, ref)}
-
+    with {:ok, %{"exp" => exp}} <- ChannelsAuthorization.authorize(access_token),
+         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
+         verify_token_ref <-
+           Process.send_after(
+             self(),
+             :verify_token,
+             min(@verify_token_ms, exp_diff * 1_000)
+           ) do
+      {:noreply, assign(socket, :verify_token_ref, verify_token_ref)}
+    else
       _ ->
         {:stop, :invalid_access_token, socket}
     end
@@ -128,30 +124,38 @@ defmodule RealtimeWeb.RealtimeChannel do
         "access_token",
         %{"access_token" => fresh_token},
         %Socket{
-          assigns: %{id: id, access_token: access_token},
+          assigns: %{id: id, access_token: access_token, verify_token_ref: ref},
           channel_pid: channel_pid,
           topic: "realtime:" <> subtopic
         } = socket
       )
       when is_binary(fresh_token) do
-    case ChannelsAuthorization.authorize(fresh_token) do
-      {:ok, fresh_claims} ->
-        new_socket =
-          if fresh_token != access_token do
-            SubscriptionManager.track_topic_subscriber(%{
-              id: id,
-              channel_pid: channel_pid,
-              claims: fresh_claims,
-              topic: subtopic
-            })
+    Process.cancel_timer(ref)
 
-            assign(socket, :access_token, fresh_token)
-          else
-            socket
-          end
+    with {:ok, %{"exp" => exp} = fresh_claims} <- ChannelsAuthorization.authorize(fresh_token),
+         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
+         verify_token_ref <-
+           Process.send_after(
+             self(),
+             :verify_token,
+             min(@verify_token_ms, exp_diff * 1_000)
+           ) do
+      new_socket =
+        if fresh_token != access_token do
+          SubscriptionManager.track_topic_subscriber(%{
+            id: id,
+            channel_pid: channel_pid,
+            claims: fresh_claims,
+            topic: subtopic
+          })
 
-        {:noreply, new_socket}
+          assign(socket, %{access_token: fresh_token, verify_token_ref: verify_token_ref})
+        else
+          assign(socket, :verify_token_ref, verify_token_ref)
+        end
 
+      {:noreply, new_socket}
+    else
       _ ->
         {:stop, :invalid_access_token, socket}
     end
