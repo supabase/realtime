@@ -46,13 +46,13 @@ defmodule Realtime.GenCounter do
     end
   end
 
-  @spec incr(term()) :: :ok | :error
-  def incr(term) do
-    incr(term, 1)
+  @spec add(term()) :: :ok | :error
+  def add(term) do
+    add(term, 1)
   end
 
-  @spec incr(term(), integer()) :: :ok | :error
-  def incr(term, count) when is_integer(count) do
+  @spec add(term(), integer()) :: :ok | :error
+  def add(term, count) when is_integer(count) do
     with {:ok, pid} <- find_worker(term),
          {:ok, index} <- find_index(pid),
          {:ok, counter_ref} <- find_counter(term) do
