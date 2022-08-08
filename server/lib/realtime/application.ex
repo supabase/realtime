@@ -131,6 +131,10 @@ defmodule Realtime.Application do
 
     Application.put_env(:realtime, :webhook_headers, headers)
 
+    if System.get_env("PROJECT") do
+      :logger.update_primary_config(%{metadata: %{project: System.get_env("PROJECT")}})
+    end
+
     essential_children = [
       Realtime.Metrics.PromEx,
       Realtime.Metrics.SocketMonitor,

@@ -53,8 +53,9 @@ defmodule Realtime.MixProject do
       {:retry, "~> 0.14.1"},
       {:ecto_sql, "~> 3.0"},
       {:postgrex, "~> 0.15.10"},
-      {:prom_ex, "~> 1.3.0"},
-      {:mock, "~> 0.3.0", only: :test}
+      {:prom_ex, "~> 1.7.1"},
+      {:mock, "~> 0.3.0", only: :test},
+      {:logflare_logger_backend, "~> 0.11.0"}
     ]
   end
 
