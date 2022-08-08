@@ -127,9 +127,6 @@ defmodule Realtime.GenCounter do
   @impl true
   def init(args) do
     id = Keyword.get(args, :id)
-    # tenant = Realtime.Api.get_tenant_by_external_id(tenant)
-
-    # unless tenant, do: raise("Tenant not found in database!")
 
     state = %__MODULE__{id: id, counters: []}
 
