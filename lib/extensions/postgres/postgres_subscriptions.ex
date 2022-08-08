@@ -8,7 +8,8 @@ defmodule Extensions.Postgres.Subscriptions do
   @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), String.t(), map()) :: {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | String.t()}
+  @spec create(conn(), String.t(), map()) ::
+          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | String.t()}
   def create(conn, publication, %{id: id, config: config, claims: claims}) do
     sql = "with sub_tables as (
 		    select
@@ -111,6 +112,14 @@ defmodule Extensions.Postgres.Subscriptions do
   def delete_all(conn) do
     Logger.debug("Delete all subscriptions")
     query(conn, "delete from realtime.subscription;", [])
+  end
+
+  @spec delete_multi(conn(), [Ecto.UUID.t()]) :: any()
+  def delete_multi(conn, ids) do
+    Logger.debug("Delete multi ids subscriptions")
+    sql = "delete from realtime.subscription where subscription_id = ANY($1::uuid[])"
+    # TODO: connection can be not available
+    {:ok, _} = query(conn, sql, [ids])
   end
 
   @spec maybe_delete_all(conn()) :: {:ok, Postgrex.Result.t()} | {:error, Exception.t()}

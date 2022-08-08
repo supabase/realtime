@@ -23,25 +23,22 @@ defmodule Extensions.Postgres.ReplicationPoller do
   end
 
   @impl true
-  def init(opts) do
-    id = Keyword.fetch!(opts, :id)
-
+  def init(args) do
     state = %{
       conn: nil,
-      db_host: Keyword.fetch!(opts, :db_host),
-      db_name: Keyword.fetch!(opts, :db_name),
-      db_pass: Keyword.fetch!(opts, :db_pass),
-      db_user: Keyword.fetch!(opts, :db_user),
-      max_changes: Keyword.fetch!(opts, :max_changes),
-      max_record_bytes: Keyword.fetch!(opts, :max_record_bytes),
-      poll_interval_ms: Keyword.fetch!(opts, :poll_interval_ms),
+      db_host: args["db_host"],
+      db_name: args["db_name"],
+      db_user: args["db_user"],
+      db_pass: args["db_password"],
+      max_changes: args["poll_max_changes"],
+      max_record_bytes: args["poll_max_record_bytes"],
+      poll_interval_ms: args["poll_interval_ms"],
       poll_ref: make_ref(),
-      publication: Keyword.fetch!(opts, :publication),
-      slot_name: Keyword.fetch!(opts, :slot_name),
-      tenant: id
+      publication: args["publication"],
+      slot_name: args["slot_name"],
+      tenant: args["id"]
     }
 
-    Process.put(:tenant, id)
     {:ok, state, {:continue, :prepare_replication}}
   end
 
@@ -53,8 +50,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
           db_name: db_name,
           db_pass: db_pass,
           db_user: db_user,
-          slot_name: slot_name,
-          tenant: tenant
+          slot_name: slot_name
         } = state
       ) do
     secure_key = Application.get_env(:realtime, :db_enc_key)
@@ -90,8 +86,6 @@ defmodule Extensions.Postgres.ReplicationPoller do
       )
 
     {:ok, _} = Replications.prepare_replication(conn, slot_name)
-
-    :yes = :global.register_name({:tenant_db, :replication, :poller, tenant}, conn)
 
     send(self(), :poll)
 
