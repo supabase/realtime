@@ -25,8 +25,17 @@ defmodule Realtime.Application do
 
     Realtime.PromEx.set_metrics_tags()
 
-    Registry.start_link(keys: :duplicate, name: Realtime.Registry)
-    Registry.start_link(keys: :unique, name: Realtime.Registry.Unique)
+    Registry.start_link(
+      keys: :duplicate,
+      name: Realtime.Registry,
+      partitions: System.schedulers_online()
+    )
+
+    Registry.start_link(
+      keys: :unique,
+      name: Realtime.Registry.Unique,
+      partitions: System.schedulers_online()
+    )
 
     :syn.add_node_to_scopes([:users])
 
@@ -53,6 +62,7 @@ defmodule Realtime.Application do
         Realtime.Repo,
         RealtimeWeb.Telemetry,
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
+        Realtime.GenCounter.DynamicSupervisor,
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
       ] ++ extensions_supervisors
