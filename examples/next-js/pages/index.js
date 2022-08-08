@@ -1,9 +1,9 @@
 import React from 'react'
+import Link from 'next/link'
 import axios from 'axios'
 import { RealtimeClient } from '@supabase/realtime-js'
 
 const REALTIME_URL = process.env.REALTIME_URL || 'ws://localhost:4000/socket'
-import Link from 'next/link'
 
 export default class Index extends React.Component {
   constructor() {
