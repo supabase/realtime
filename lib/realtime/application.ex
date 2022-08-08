@@ -62,7 +62,6 @@ defmodule Realtime.Application do
         Realtime.Repo,
         RealtimeWeb.Telemetry,
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
-        Realtime.GenCounter.DynamicSupervisor,
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
       ] ++ extensions_supervisors
