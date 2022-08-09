@@ -210,7 +210,7 @@ defmodule RealtimeWeb.RealtimeChannel do
              :confirm_token,
              min(@confirm_token_ms_interval, exp_diff * 1_000)
            ) do
-      {:ok, assign(socket, %{confirm_token_ref: confirm_token_ref, claims: claims})}
+      {:noreply, assign(socket, %{confirm_token_ref: confirm_token_ref, claims: claims})}
     else
       _ -> {:stop, %{reason: "access token has expired"}, socket}
     end
