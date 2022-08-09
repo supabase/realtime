@@ -171,12 +171,19 @@ defmodule RealtimeWeb.RealtimeChannel do
 
         Logger.info("Subscribe channel for #{tenant} to #{postgres_topic}")
 
-        case Postgres.create_subscription(conn, postgres_extension["publication"], opts) do
+        case Postgres.create_subscription(conn, postgres_extension["publication"], opts, 15_000) do
           {:ok, _response} ->
             Endpoint.subscribe("subscription_manager:" <> tenant)
             send(manager_pid, {:subscribed, {self(), id}})
 
             {:noreply, assign(socket, :pg_sub_ref, nil)}
+
+          {:badrpc, :timeout} = error ->
+            Logger.error(
+              "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
+            )
+
+            {:stop, %{reason: error}, assign(socket, :pg_sub_ref, nil)}
 
           {:error, error} ->
             Logger.error(
