@@ -49,7 +49,7 @@ defmodule Realtime.RLS.Subscriptions do
   defp fetch_database_roles(%Multi{} = multi) do
     Multi.run(multi, :database_roles, fn _, _ ->
       Repo.query(
-        "select rolname from pg_authid",
+        "select rolname from pg_roles",
         []
       )
       |> case do
