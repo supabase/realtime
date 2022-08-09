@@ -138,6 +138,7 @@ defmodule Realtime.Application do
         Phoenix.PubSub,
         name: PubSub, adapter: Phoenix.PubSub.PG2
       },
+      RealtimeWeb.Presence,
       Endpoint,
       {
         SubscriptionManager,
