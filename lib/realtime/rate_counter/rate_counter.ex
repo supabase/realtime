@@ -1,6 +1,12 @@
 defmodule Realtime.RateCounter do
   @moduledoc """
   Start a RateCounter for any Erlang term.
+
+  These rate counters use the GenCounter module which wraps the Erlang :counter module.
+  Counts and rates are not ran through the GenServer. `:counters` are addressed
+  directly do avoid any serialization bottlenecks.
+
+  Start your RateCounter here and increment it with a `GenCounter.add/1` call, for example.
   """
 
   use GenServer
@@ -34,6 +40,7 @@ defmodule Realtime.RateCounter do
           idle_shutdown_ref: reference()
         }
 
+  @spec start_link([keyword()]) :: {:ok, pid()} | {:error, {:already_started, pid()}}
   def start_link(args) do
     id = Keyword.get(args, :id)
     unless id, do: raise("Supply an identifier to start a counter!")
@@ -43,6 +50,11 @@ defmodule Realtime.RateCounter do
     )
   end
 
+  @doc """
+  Starts a new RateCounter under a DynamicSupervisor
+  """
+
+  @spec new(term(), [keyword()]) :: DynamicSupervisor.on_start_child()
   def new(term, opts \\ []) do
     opts = [id: term] ++ opts
 
@@ -53,6 +65,11 @@ defmodule Realtime.RateCounter do
     })
   end
 
+  @doc """
+  Gets the state of the RateCounter.
+  """
+
+  @spec get(term()) :: {:ok, term()} | {:error, term()}
   def get(term) do
     case find_worker(term) do
       {:ok, ref} -> GenServer.call(ref, :get)
