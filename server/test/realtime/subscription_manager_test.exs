@@ -11,18 +11,20 @@ defmodule Realtime.SubscriptionManagerTest do
     :ok
   end
 
-  test "track_topic_subscriber/1" do
+  test "track_topic_subscribers/1" do
     mess = {
-      :track_topic_subscriber,
-      %{
-        channel_pid: self(),
-        topic: "test_topic",
-        id: @subscription_id,
-        claims: @claims
-      }
+      :track_topic_subscribers,
+      [
+        %{
+          channel_pid: self(),
+          topic: "test_topic",
+          id: @subscription_id,
+          claims: @claims
+        }
+      ]
     }
 
-    assert :ok == SubscriptionManager.track_topic_subscriber(mess)
+    assert :ok == SubscriptionManager.track_topic_subscribers(mess)
   end
 
   test "init/1" do
@@ -42,15 +44,17 @@ defmodule Realtime.SubscriptionManagerTest do
     end
   end
 
-  test "handle_call/track_topic_subscriber, when subscription_params is empty" do
+  test "handle_call/track_topic_subscribers, when subscription_params is empty" do
     mess = {
-      :track_topic_subscriber,
-      %{
-        channel_pid: self(),
-        topic: "test_topic",
-        id: @subscription_id,
-        claims: @claims
-      }
+      :track_topic_subscribers,
+      [
+        %{
+          channel_pid: self(),
+          topic: "test_topic",
+          id: @subscription_id,
+          claims: @claims
+        }
+      ]
     }
 
     state = %{replication_mode: "RLS", subscription_params: %{}}
@@ -74,17 +78,19 @@ defmodule Realtime.SubscriptionManagerTest do
     assert expected == SubscriptionManager.handle_call(mess, self(), state)
   end
 
-  test "handle_call/track_topic_subscriber, when subscription_params is not empty" do
+  test "handle_call/track_topic_subscribers, when subscription_params is not empty" do
     {_, bin} = Ecto.UUID.dump(@subscription_id)
 
     mess = {
-      :track_topic_subscriber,
-      %{
-        channel_pid: self(),
-        topic: "test_topic",
-        id: bin,
-        claims: @claims
-      }
+      :track_topic_subscribers,
+      [
+        %{
+          channel_pid: self(),
+          topic: "test_topic",
+          id: bin,
+          claims: @claims
+        }
+      ]
     }
 
     state = %{
@@ -107,17 +113,19 @@ defmodule Realtime.SubscriptionManagerTest do
     assert expected == SubscriptionManager.handle_call(mess, self(), state)
   end
 
-  test "handle_call/track_topic_subscriber, updated state" do
+  test "handle_call/track_topic_subscribers, updated state" do
     {_, bin} = Ecto.UUID.dump(@subscription_id)
 
     mess = {
-      :track_topic_subscriber,
-      %{
-        channel_pid: self(),
-        topic: "test_topic",
-        id: bin,
-        claims: @claims
-      }
+      :track_topic_subscribers,
+      [
+        %{
+          channel_pid: self(),
+          topic: "test_topic",
+          id: bin,
+          claims: @claims
+        }
+      ]
     }
 
     prev_sub = %{

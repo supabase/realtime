@@ -10,10 +10,10 @@ defmodule Realtime.RlsSubscriptionsTest do
     :ok
   end
 
-  test "create_topic_subscriber/1" do
+  test "create_topic_subscribers/1" do
     params = %{topic: "topic_test", id: bin_id(), claims: @claims}
 
-    case Subscriptions.create_topic_subscriber(params) do
+    case Subscriptions.create_topic_subscribers([params]) do
       {:ok, response} ->
         esp = [Map.merge(params, %{entities: [], filters: [], claims_role: "authenticated"})]
 

@@ -12,37 +12,27 @@ defmodule Realtime.MessageDispatcher do
           pid,
           Phoenix.Socket.Broadcast.t()
         ) :: :ok
-  def dispatch([_ | _] = topic_subscriptions, _from, %Broadcast{payload: payload} = msg) do
-    {subscription_ids, new_payload} = Map.pop(payload, :subscription_ids)
-    new_msg = %{msg | payload: new_payload}
+  def dispatch([_ | _] = topic_subscriptions, _from, %Broadcast{payload: payload}) do
+    new_payload = Map.drop(payload, [:subscription_ids])
 
     Enum.reduce(topic_subscriptions, %{}, fn
-      {_pid,
-       {:subscriber_fastlane, fastlane_pid, serializer, subscription_id, join_topic, is_new_api}},
-      cache ->
-        if MapSet.member?(subscription_ids, subscription_id) do
-          new_payload =
-            if is_new_api do
-              %Broadcast{
-                topic: join_topic,
-                event: "realtime",
-                payload: %{payload: new_payload, event: new_payload.type}
-              }
-            else
-              %Broadcast{
-                topic: join_topic,
-                event: new_payload.type,
-                payload: new_payload
-              }
-            end
+      {_pid, {:subscriber_fastlane, fastlane_pid, serializer, join_topic, is_new_api}}, cache ->
+        new_payload =
+          if is_new_api do
+            %Broadcast{
+              topic: join_topic,
+              event: "realtime",
+              payload: %{payload: new_payload, event: new_payload.type}
+            }
+          else
+            %Broadcast{
+              topic: join_topic,
+              event: new_payload.type,
+              payload: new_payload
+            }
+          end
 
-          broadcast_message(cache, fastlane_pid, new_payload, serializer)
-        else
-          cache
-        end
-
-      {_pid, {:fastlane, fastlane_pid, serializer, _event_intercepts}}, cache ->
-        broadcast_message(cache, fastlane_pid, new_msg, serializer)
+        broadcast_message(cache, fastlane_pid, new_payload, serializer)
 
       _, cache ->
         cache

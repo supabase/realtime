@@ -25,9 +25,7 @@ defmodule Realtime.MessageDispatcherTest do
 
     dispatch(
       [
-        {self(),
-         {:subscriber_fastlane, self(), JSONSerializer, @subscription_id, "realtime:public:todos",
-          false}}
+        {self(), {:subscriber_fastlane, self(), JSONSerializer, "realtime:public:todos", false}}
       ],
       self(),
       msg
