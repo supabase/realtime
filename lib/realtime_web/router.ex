@@ -1,8 +1,12 @@
 defmodule RealtimeWeb.Router do
   use RealtimeWeb, :router
 
+  require Logger
+
   import Phoenix.LiveDashboard.Router
   import RealtimeWeb.ChannelsAuthorization, only: [authorize: 2]
+
+  alias Realtime.Api
 
   pipeline :browser do
     plug :accepts, ["html"]
@@ -10,6 +14,7 @@ defmodule RealtimeWeb.Router do
     plug :fetch_flash
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug :check_rate_counter
   end
 
   pipeline :api do
@@ -105,6 +110,25 @@ defmodule RealtimeWeb.Router do
       _ ->
         conn
         |> send_resp(403, "")
+        |> halt()
+    end
+  end
+
+  defp check_rate_counter(conn, _opts) do
+    uri = request_url(conn) |> URI.parse()
+
+    [external_id | _] = String.split(uri.host, ".")
+
+    tenant = Api.get_tenant_by_external_id(external_id) |> Api.preload_rate_counter()
+
+    cond do
+      tenant.max_events_per_second > tenant.current_events_per_second_avg ->
+        IO.inspect(tenant.current_events_per_second_avg, label: "### COUNT ###")
+        conn
+
+      true ->
+        conn
+        |> send_resp(403, "too many requests")
         |> halt()
     end
   end
