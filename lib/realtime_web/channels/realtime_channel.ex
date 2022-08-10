@@ -9,6 +9,10 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias DBConnection.Backoff
   alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
+  alias Realtime.Api
+  alias Realtime.Api.Tenant
+  alias Realtime.GenCounter
+  alias Realtime.RateCounter
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
@@ -22,7 +26,9 @@ defmodule RealtimeWeb.RealtimeChannel do
           assigns: %{
             is_new_api: is_new_api,
             jwt_secret: jwt_secret,
-            limits: %{max_concurrent_users: max_conn_users},
+            limits: %{
+              max_concurrent_users: max_conn_users
+            },
             tenant: tenant,
             token: token
           },
@@ -33,6 +39,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     Logger.metadata(external_id: tenant, project: tenant)
 
     with true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
+         {:ok, _} <- limit_joins(socket),
          access_token when is_binary(access_token) <-
            (case params do
               %{"user_token" => user_token} -> user_token
@@ -120,6 +127,12 @@ defmodule RealtimeWeb.RealtimeChannel do
          tenant_topic: tenant_topic
        })}
     else
+      {:error, error} ->
+        error_msg = inspect(error, pretty: true)
+        Logger.error("Start channel error: #{error_msg}")
+
+        {:error, %{reason: error_msg}}
+
       error ->
         error_msg = inspect(error, pretty: true)
         Logger.error("Start channel error: #{error_msg}")
@@ -361,5 +374,43 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp backoff() do
     {wait, _} = Backoff.backoff(%Backoff{type: :rand, min: 0, max: 5_000})
     wait
+  end
+
+  defp limit_joins(
+         %{
+           assigns: %{
+             limits: %{
+               max_concurrent_users: _max_conn_users,
+               max_events_per_second: max_events_per_second
+             },
+             tenant: tenant
+           },
+           transport_pid: _pid,
+           serializer: _serializer
+         } = socket
+       ) do
+    %Tenant{
+      events_per_second_rolling: avg,
+      events_per_second_now: _current,
+      max_events_per_second: max
+    } =
+      %Tenant{external_id: tenant, max_events_per_second: max_events_per_second}
+      |> tap(&GenCounter.new(&1.external_id))
+      |> tap(&RateCounter.new(&1.external_id, idle_shutdown: :infinity))
+      |> tap(&GenCounter.add(&1.external_id))
+      |> Api.preload_counters()
+
+    avg = Integer.to_string(trunc(avg))
+    max = Integer.to_string(max)
+
+    if avg < max do
+      {:ok, socket}
+    else
+      {:error, :too_many_joins}
+    end
+  end
+
+  defp limit_joins(socket) do
+    {:ok, socket}
   end
 end
