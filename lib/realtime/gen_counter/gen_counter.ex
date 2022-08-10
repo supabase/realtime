@@ -46,11 +46,17 @@ defmodule Realtime.GenCounter do
          {:ok, ref} <- GenServer.call(pid, :new) do
       {:ok, ref}
     else
+      {:error, {:already_started, _pid}} ->
+        Logger.warn("Counter already started")
+        {:error, :already_started}
+
       {:error, err} ->
+        IO.inspect(err)
         Logger.error("Error creating counter", error_string: inspect(err))
         {:error, err}
 
       err ->
+        IO.inspect(err)
         Logger.error("Error creating counter", error_string: inspect(err))
         {:error, :not_created}
     end
