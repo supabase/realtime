@@ -23,9 +23,9 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
         [external_id, _] ->
           Api.get_tenant_by_external_id(external_id)
           |> tap(&GenCounter.new(&1.external_id))
-          |> tap(&RateCounter.new(&1.external_id))
+          |> tap(&RateCounter.new(&1.external_id, idle_shutdown: :infinity))
           |> tap(&GenCounter.add(&1.external_id))
-          |> Api.preload_rate_counter()
+          |> Api.preload_counters()
 
         _ ->
           nil
