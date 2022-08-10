@@ -36,7 +36,7 @@ defmodule Realtime.RateCounter do
           max_bucket_len: integer(),
           tick: integer(),
           tick_ref: reference(),
-          idle_shutdown: integer(),
+          idle_shutdown: integer() | :infinity,
           idle_shutdown_ref: reference()
         }
 
@@ -89,7 +89,9 @@ defmodule Realtime.RateCounter do
     ensure_counter_started(id)
 
     ticker = tick(0)
-    idle_shutdown_ref = shutdown_after(idle_shutdown_ms)
+
+    idle_shutdown_ref =
+      unless idle_shutdown_ms == :infinity, do: shutdown_after(idle_shutdown_ms), else: nil
 
     state = %__MODULE__{
       id: id,
@@ -114,7 +116,7 @@ defmodule Realtime.RateCounter do
     {:ok, count} = GenCounter.get(state.id)
     :ok = GenCounter.put(state.id, 0)
 
-    unless count == 0 do
+    if is_reference(state.idle_shutdown_ref) and count > 0 do
       Process.cancel_timer(state.idle_shutdown_ref)
       shutdown_after(state.idle_shutdown)
     end
