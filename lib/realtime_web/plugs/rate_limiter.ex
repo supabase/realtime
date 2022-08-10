@@ -3,7 +3,7 @@ defmodule RealtimeWeb.Plugs.RateLimiter do
   Rate limits tenants.
   """
   import Plug.Conn
-
+  import Phoenix.Controller, only: [json: 2]
   require Logger
 
   alias Realtime.Api.Tenant
@@ -35,10 +35,9 @@ defmodule RealtimeWeb.Plugs.RateLimiter do
       |> put_resp_header("x-rate-limit-remaining", remaining)
 
     if avg > max do
-      message = %{message: "Too many requests"}
-
       conn
-      |> send_resp(429, message)
+      |> put_status(429)
+      |> json(%{message: "Too many requests"})
       |> halt()
     else
       conn
