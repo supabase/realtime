@@ -24,15 +24,11 @@ defmodule RealtimeWeb.Plugs.RateLimiter do
         } = conn,
         _opts
       ) do
-    remaining = Integer.to_string(abs(max - current))
-    avg = Integer.to_string(trunc(avg))
-    max = Integer.to_string(max)
-
     conn =
       conn
-      |> put_resp_header("x-rate-rolling", avg)
-      |> put_resp_header("x-rate-limit", max)
-      |> put_resp_header("x-rate-limit-remaining", remaining)
+      |> put_resp_header("x-rate-rolling", Integer.to_string(trunc(avg)))
+      |> put_resp_header("x-rate-limit", Integer.to_string(max))
+      |> put_resp_header("x-rate-limit-remaining", Integer.to_string(abs(max - current)))
 
     if avg > max do
       conn
