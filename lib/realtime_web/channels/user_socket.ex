@@ -22,7 +22,8 @@ defmodule RealtimeWeb.UserSocket do
       with %Tenant{
              extensions: extensions,
              jwt_secret: jwt_secret,
-             max_concurrent_users: max_conn_users
+             max_concurrent_users: max_conn_users,
+             max_events_per_second: max_events_per_second
            } <- Realtime.Api.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- access_token(params, headers),
            jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
@@ -31,7 +32,10 @@ defmodule RealtimeWeb.UserSocket do
           claims: claims,
           is_new_api: !!params["vsndate"],
           jwt_secret: jwt_secret,
-          limits: %{max_concurrent_users: max_conn_users},
+          limits: %{
+            max_concurrent_users: max_conn_users,
+            max_events_per_second: max_events_per_second
+          },
           postgres_extension: Helpers.filter_postgres_settings(extensions),
           tenant: external_id,
           token: token
