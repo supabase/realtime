@@ -400,9 +400,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> tap(&GenCounter.add(&1.external_id))
       |> Api.preload_counters()
 
-    avg = Integer.to_string(trunc(avg))
-    max = Integer.to_string(max)
-
     if avg < max do
       {:ok, socket}
     else
