@@ -98,6 +98,7 @@ defmodule Realtime.RateCounter do
       tick: every,
       tick_ref: ticker,
       max_bucket_len: max_bucket_len,
+      idle_shutdown: idle_shutdown_ms,
       idle_shutdown_ref: idle_shutdown_ref
     }
 
