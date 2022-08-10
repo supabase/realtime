@@ -6,7 +6,7 @@ defmodule Realtime.Api do
 
   import Ecto.Query, warn: false, only: [from: 2]
 
-  alias Realtime.{Repo, Api.Tenant, Api.Extensions}
+  alias Realtime.{Repo, Api.Tenant, Api.Extensions, RateCounter, GenCounter}
 
   @doc """
   Returns the list of tenants.
@@ -153,5 +153,13 @@ defmodule Realtime.Api do
       Ecto.Changeset.cast(extension, %{settings: new_settings}, [:settings])
       |> Repo.update!()
     end
+  end
+
+  def preload_rate_counter(%Tenant{} = tenant) do
+    RateCounter.new(tenant.external_id)
+    GenCounter.add(tenant.external_id)
+    {:ok, %RateCounter{avg: avg}} = RateCounter.get(tenant.external_id)
+
+    Map.put(tenant, :current_events_per_second_avg, avg)
   end
 end
