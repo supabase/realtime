@@ -155,11 +155,17 @@ defmodule Realtime.Api do
     end
   end
 
-  def preload_rate_counter(%Tenant{} = tenant) do
-    RateCounter.new(tenant.external_id)
-    GenCounter.add(tenant.external_id)
-    {:ok, %RateCounter{avg: avg}} = RateCounter.get(tenant.external_id)
+  def preload_counters(nil) do
+    nil
+  end
 
-    Map.put(tenant, :current_events_per_second_avg, avg)
+  def preload_counters(%Tenant{} = tenant) do
+    id = tenant.external_id
+    {:ok, current} = GenCounter.get(id)
+    {:ok, %RateCounter{avg: avg}} = RateCounter.get(id)
+
+    tenant
+    |> Map.put(:events_per_second_rolling, avg)
+    |> Map.put(:events_per_second_now, current)
   end
 end
