@@ -16,9 +16,13 @@ defmodule RealtimeWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug :check_auth, :api_jwt_secret
+  end
+
+  pipeline :tenant_api do
+    plug :accepts, ["json"]
     plug RealtimeWeb.Plugs.AssignTenant
     plug RealtimeWeb.Plugs.RateLimiter
-    plug :check_auth, :api_jwt_secret
   end
 
   pipeline :dashboard_admin do
@@ -49,6 +53,12 @@ defmodule RealtimeWeb.Router do
     resources "/tenants", TenantController do
       post "/reload", TenantController, :reload, as: :reload
     end
+  end
+
+  scope "/api", RealtimeWeb do
+    pipe_through :tenant_api
+
+    get "/ping", PingController, :ping
   end
 
   scope "/api/swagger" do
