@@ -17,18 +17,20 @@ defmodule RealtimeWeb.Plugs.RateLimiter do
           assigns: %{
             tenant: %Tenant{
               events_per_second_rolling: avg,
-              events_per_second_now: current,
+              events_per_second_now: _current,
               max_events_per_second: max
             }
           }
         } = conn,
         _opts
       ) do
+    avg = trunc(avg)
+
     conn =
       conn
-      |> put_resp_header("x-rate-rolling", Integer.to_string(trunc(avg)))
+      |> put_resp_header("x-rate-rolling", Integer.to_string(avg))
       |> put_resp_header("x-rate-limit", Integer.to_string(max))
-      |> put_resp_header("x-rate-limit-remaining", Integer.to_string(max - current))
+      |> put_resp_header("x-rate-limit-remaining", Integer.to_string(max - avg))
 
     if avg > max do
       conn
