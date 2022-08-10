@@ -38,10 +38,10 @@ defmodule Realtime.SubscriptionManager do
 
   @spec track_topic_subscribers(
           list(%{
-            channel_pid: pid(),
-            topic: String.t(),
             id: Ecto.UUID.raw(),
-            claims: map()
+            channel_pid: pid(),
+            claims: map(),
+            params: map()
           })
         ) :: :ok | :error
   def track_topic_subscribers(topic_subs) do
@@ -66,14 +66,14 @@ defmodule Realtime.SubscriptionManager do
         :error
     end
     |> case do
-      {:ok, %{enriched_subscription_params: [enriched_params]}} ->
-        [%{channel_pid: channel_pid} | _] = topic_subs
+      {:ok, _} ->
+        channel_pid = topic_subs |> List.first() |> Map.get(:channel_pid)
 
         if sub_params |> Map.get(channel_pid) |> is_nil() do
           Process.monitor(channel_pid)
         end
 
-        new_state = Kernel.put_in(state, [:subscription_params, channel_pid], enriched_params)
+        new_state = Kernel.put_in(state, [:subscription_params, channel_pid], topic_subs)
 
         {:reply, :ok, new_state}
 
@@ -94,6 +94,7 @@ defmodule Realtime.SubscriptionManager do
     try do
       sub_params
       |> Map.values()
+      |> List.flatten()
       |> Subscriptions.sync_subscriptions()
     catch
       :error, error -> error |> inspect() |> Logger.error()
@@ -120,9 +121,11 @@ defmodule Realtime.SubscriptionManager do
         {nil, sub_params} ->
           sub_params
 
-        {sub_params, new_sub_params} ->
+        {params, new_sub_params} ->
           try do
-            Subscriptions.delete_topic_subscriber(sub_params)
+            for %{id: id} <- params do
+              Subscriptions.delete_topic_subscriber(id)
+            end
           catch
             :error, error -> error |> inspect() |> Logger.error()
           end
