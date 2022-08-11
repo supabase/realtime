@@ -96,7 +96,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       pg_sub_ref =
         if postgres_config do
-          Process.send_after(self(), :postgres_subscribe, backoff())
+          postgres_subscribe()
         else
           nil
         end
@@ -134,7 +134,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(%{event: "subscription_manager_down"}, socket) do
-    pg_sub_ref = Process.send_after(self(), :postgres_subscribe, backoff())
+    pg_sub_ref = postgres_subscribe()
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
   end
 
@@ -175,27 +175,22 @@ defmodule RealtimeWeb.RealtimeChannel do
           {:ok, _response} ->
             Endpoint.subscribe("subscription_manager:" <> tenant)
             send(manager_pid, {:subscribed, {self(), id}})
-
+            push(socket, "system", %{status: "ok", message: "subscribed to relatime"})
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
-          {:badrpc, :timeout} = error ->
+          error ->
+            push(socket, "system", %{status: "error", message: "failed to subscribe channel"})
+
             Logger.error(
               "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
             )
 
-            {:stop, %{reason: error}, assign(socket, :pg_sub_ref, nil)}
-
-          {:error, error} ->
-            Logger.error(
-              "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
-            )
-
-            {:stop, %{reason: error}, assign(socket, :pg_sub_ref, nil)}
+            {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
         end
 
       nil ->
         Logger.warning("Re-subscribe channel for #{tenant}")
-        ref = Process.send_after(self(), :postgres_subscribe, backoff())
+        ref = postgres_subscribe()
         {:noreply, assign(socket, :pg_sub_ref, ref)}
     end
   end
@@ -365,8 +360,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     decrypt!(secret, secure_key)
   end
 
-  defp backoff() do
-    {wait, _} = Backoff.backoff(%Backoff{type: :rand, min: 0, max: 5_000})
+  defp postgres_subscribe() do
+    Process.send_after(self(), :postgres_subscribe, backoff())
+  end
+
+  defp backoff(min \\ 5, max \\ 10) do
+    {wait, _} = Backoff.backoff(%Backoff{type: :rand, min: min * 1000, max: max * 1000})
     wait
   end
 end
