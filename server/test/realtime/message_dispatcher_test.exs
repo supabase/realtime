@@ -5,55 +5,10 @@ defmodule Realtime.MessageDispatcherTest do
   alias Phoenix.Socket.V1.JSONSerializer
   alias Realtime.Adapters.Changes.NewRecord
 
-  @subscription_id <<187, 181, 30, 78, 243, 113, 68, 99, 191, 10, 175, 143, 86, 220, 154, 115>>
-
-  test "dispatch/3 for subscriber_fastlane when subscription_ids is empty" do
-    msg = msg([])
-
-    dispatch(
-      [{self(), {:subscriber_fastlane, self(), JSONSerializer, @subscription_id}}],
-      self(),
-      msg
-    )
-
-    expected = JSONSerializer.fastlane!(msg)
-    refute_received ^expected
-  end
+  @subscription_id "417e76fd-9bc5-4b3e-bd5d-a031389c4a6b"
 
   test "dispatch/3 for subscriber_fastlane when subscription_id in subscription_ids" do
-    msg = msg(MapSet.new([@subscription_id]))
-
-    dispatch(
-      [
-        {self(), {:subscriber_fastlane, self(), JSONSerializer, "realtime:public:todos", false}}
-      ],
-      self(),
-      msg
-    )
-
-    expected = JSONSerializer.fastlane!(msg)
-    assert_received ^expected
-  end
-
-  test "dispatch/3 for subscriber_fastlane when subscription_id not in subscription_ids" do
-    msg = msg(MapSet.new([@subscription_id]))
-
-    other_subscription_id =
-      <<160, 66, 132, 13, 21, 219, 69, 221, 164, 160, 40, 72, 156, 208, 114, 4>>
-
-    dispatch(
-      [{self(), {:subscriber_fastlane, self(), JSONSerializer, other_subscription_id}}],
-      self(),
-      msg
-    )
-
-    expected = JSONSerializer.fastlane!(msg)
-    refute_received ^expected
-  end
-
-  @spec msg(list) :: map()
-  defp msg(subscription_ids) do
-    %Broadcast{
+    msg = %Broadcast{
       event: "INSERT",
       payload: %NewRecord{
         columns: [
@@ -71,10 +26,20 @@ defmodule Realtime.MessageDispatcherTest do
           "id" => 32,
           "user_id" => 1
         },
-        subscription_ids: MapSet.new(subscription_ids),
         type: "INSERT"
       },
-      topic: "realtime:public:todos"
+      topic: "test"
     }
+
+    dispatch(
+      [
+        {self(), {:subscriber_fastlane, self(), JSONSerializer, @subscription_id, "test", false}}
+      ],
+      self(),
+      msg
+    )
+
+    expected = JSONSerializer.fastlane!(msg)
+    assert_received ^expected
   end
 end

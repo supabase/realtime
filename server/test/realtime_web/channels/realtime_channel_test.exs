@@ -33,8 +33,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     }
 
     broadcast_change(
-      "postgres_changes:#{Ecto.UUID.cast!(id)}",
-      Map.put(change, :subscription_ids, MapSet.new([id]))
+      "postgres_changes:#{id}",
+      change
     )
 
     assert_push("INSERT", ^change)
@@ -50,8 +50,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     }
 
     broadcast_change(
-      "postgres_changes:#{Ecto.UUID.cast!(id)}",
-      Map.put(change, :subscription_ids, MapSet.new([id]))
+      "postgres_changes:#{id}",
+      change
     )
 
     assert_push("UPDATE", ^change)
@@ -67,8 +67,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     }
 
     broadcast_change(
-      "postgres_changes:#{Ecto.UUID.cast!(id)}",
-      Map.put(change, :subscription_ids, MapSet.new([id]))
+      "postgres_changes:#{id}",
+      change
     )
 
     assert_push("DELETE", ^change)

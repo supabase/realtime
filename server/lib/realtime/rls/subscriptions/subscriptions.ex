@@ -4,7 +4,7 @@ defmodule Realtime.RLS.Subscriptions do
   alias Realtime.RLS.Repo
   alias Realtime.RLS.Subscriptions.Subscription
 
-  @spec create_topic_subscribers(list(%{id: Ecto.UUID.raw(), claims: map(), params: map()})) ::
+  @spec create_topic_subscribers(list(%{id: Ecto.UUID.t(), claims: map(), params: map()})) ::
           {:ok, any()}
           | {:error, any()}
           | {:error, Ecto.Multi.name(), any(), %{required(Ecto.Multi.name()) => any()}}
@@ -77,7 +77,7 @@ defmodule Realtime.RLS.Subscriptions do
               Application.get_env(:realtime, :publications) |> Jason.decode!() |> List.first(),
               schema,
               table,
-              id |> Ecto.UUID.cast!(),
+              id,
               claims,
               filters
             ]
@@ -89,7 +89,7 @@ defmodule Realtime.RLS.Subscriptions do
     end)
   end
 
-  @spec delete_topic_subscriber(Ecto.UUID.raw()) :: {integer(), nil | [term()]}
+  @spec delete_topic_subscriber(Ecto.UUID.t()) :: {integer(), nil | [term()]}
   def delete_topic_subscriber(id) do
     from(s in Subscription,
       where: s.subscription_id == ^id
@@ -97,7 +97,7 @@ defmodule Realtime.RLS.Subscriptions do
     |> Repo.delete_all()
   end
 
-  @spec sync_subscriptions(list(%{id: Ecto.UUID.raw(), claims: map(), params: map()})) ::
+  @spec sync_subscriptions(list(%{id: Ecto.UUID.t(), claims: map(), params: map()})) ::
           {:ok, any()}
           | {:error, any()}
           | {:error, Ecto.Multi.name(), any(), %{required(Ecto.Multi.name()) => any()}}
