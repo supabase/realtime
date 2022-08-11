@@ -50,7 +50,7 @@ defmodule RealtimeWeb.RealtimeChannel do
               params_list
               |> Enum.map(fn params ->
                 %{
-                  id: Ecto.UUID.bingenerate(),
+                  id: Ecto.UUID.generate(),
                   channel_pid: channel_pid,
                   claims: claims,
                   params: params
@@ -82,7 +82,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
         pg_change_params = [
           %{
-            id: Ecto.UUID.bingenerate(),
+            id: Ecto.UUID.generate(),
             channel_pid: channel_pid,
             claims: claims,
             params: params
@@ -111,15 +111,20 @@ defmodule RealtimeWeb.RealtimeChannel do
             end
 
           for %{id: id} <- pg_change_params do
-            metadata = {:subscriber_fastlane, transport_pid, serializer, topic, is_new_api}
-            Endpoint.subscribe("postgres_changes:#{Ecto.UUID.cast!(id)}", metadata: metadata)
+            metadata = {:subscriber_fastlane, transport_pid, serializer, id, topic, is_new_api}
+            Endpoint.subscribe("postgres_changes:#{id}", metadata: metadata)
           end
 
           send(self(), :after_join)
 
           {
             :ok,
-            %{realtime: Enum.map(pg_change_params, &Map.fetch!(&1, :id))},
+            %{
+              postgres_changes:
+                Enum.map(pg_change_params, fn %{id: id, params: params} ->
+                  Map.put(params, :id, id)
+                end)
+            },
             assign(
               socket,
               %{
