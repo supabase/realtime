@@ -54,7 +54,7 @@ defmodule Realtime.RateCounter do
   Starts a new RateCounter under a DynamicSupervisor
   """
 
-  @spec new(term(), [keyword()]) :: DynamicSupervisor.on_start_child()
+  @spec new(term(), keyword()) :: DynamicSupervisor.on_start_child()
   def new(term, opts \\ []) do
     opts = [id: term] ++ opts
 
