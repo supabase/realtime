@@ -54,7 +54,7 @@ defmodule RealtimeWeb.RealtimeChannel do
              min(@confirm_token_ms_interval, exp_diff * 1_000)
            ) do
       Realtime.UsersCounter.add(pid, tenant)
-      Registry.register(Realtime.Registry, limit_channels_key(pid, tenant), [])
+      Registry.register(Realtime.Registry, limit_channels_key(tenant), pid)
 
       tenant_topic = tenant <> ":" <> sub_topic
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
@@ -398,9 +398,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def limit_channels(%{assigns: %{tenant: tenant}, transport_pid: pid}) do
-    key = limit_channels_key(pid, tenant)
+    key = limit_channels_key(tenant)
 
-    if Registry.count_match(Realtime.Registry, key, :_) > @max_user_channels do
+    if Registry.count_match(Realtime.Registry, key, pid) > @max_user_channels do
       Logger.error("Reached the limit of channels per connection for #{tenant}")
       {:error, :too_many_channels}
     else
@@ -408,7 +408,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp limit_channels_key(pid, tenant) do
-    {:limit, :user_channels, {pid, tenant}}
+  defp limit_channels_key(tenant) do
+    {:limit, :user_channels, tenant}
   end
 end
