@@ -151,7 +151,7 @@ defmodule Realtime.GenCounter do
     end
   end
 
-  @spec stop(term()) :: :ok | {:error, :not_found}
+  @spec stop(term()) :: :ok | {:error, :not_found | :counter_not_found}
   def stop(term) do
     case find_worker(term) do
       {:ok, pid} -> DynamicSupervisor.terminate_child(GenCounter.DynamicSupervisor, pid)
