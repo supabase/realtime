@@ -14,24 +14,29 @@ defmodule Realtime.MessageDispatcher do
         ) :: :ok
   def dispatch([_ | _] = topic_subscriptions, _from, %Broadcast{payload: payload}) do
     Enum.reduce(topic_subscriptions, %{}, fn
-      {_pid, {:subscriber_fastlane, fastlane_pid, serializer, id, join_topic, is_new_api}},
+      {_pid, {:subscriber_fastlane, fastlane_pid, serializer, id, join_topic, event, is_new_api}},
       cache ->
-        new_payload =
-          if is_new_api do
-            %Broadcast{
+        if is_new_api do
+          if event == "*" || event == payload.type do
+            new_payload = %Broadcast{
               topic: join_topic,
               event: "postgres_changes",
               payload: %{id: id, data: payload}
             }
-          else
-            %Broadcast{
-              topic: join_topic,
-              event: payload.type,
-              payload: payload
-            }
-          end
 
-        broadcast_message(cache, fastlane_pid, new_payload, serializer)
+            broadcast_message(cache, fastlane_pid, new_payload, serializer)
+          else
+            cache
+          end
+        else
+          new_payload = %Broadcast{
+            topic: join_topic,
+            event: payload.type,
+            payload: payload
+          }
+
+          broadcast_message(cache, fastlane_pid, new_payload, serializer)
+        end
 
       _, cache ->
         cache

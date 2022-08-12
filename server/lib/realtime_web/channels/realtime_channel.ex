@@ -43,7 +43,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         end
 
       if is_new_api do
-        params["configs"]["realtime"]
+        params["configs"]["postgres_changes"]
         |> case do
           [_ | _] = params_list ->
             pg_change_params =
@@ -110,8 +110,11 @@ defmodule RealtimeWeb.RealtimeChannel do
               _ -> Ecto.UUID.generate()
             end
 
-          for %{id: id} <- pg_change_params do
-            metadata = {:subscriber_fastlane, transport_pid, serializer, id, topic, is_new_api}
+          for %{id: id, params: params} <- pg_change_params do
+            metadata =
+              {:subscriber_fastlane, transport_pid, serializer, id, topic,
+               params |> Map.get("event", "") |> String.upcase(), is_new_api}
+
             Endpoint.subscribe("postgres_changes:#{id}", metadata: metadata)
           end
 
