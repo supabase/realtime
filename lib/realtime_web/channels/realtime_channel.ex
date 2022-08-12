@@ -9,10 +9,12 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias DBConnection.Backoff
   alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
+  alias Realtime.{GenCounter, RateCounter}
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
   @confirm_token_ms_interval 1_000 * 60 * 5
+  @max_join_rate 150
 
   @impl true
   def join(
@@ -32,7 +34,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       ) do
     Logger.metadata(external_id: tenant, project: tenant)
 
-    with true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
+    with :ok <- limit_joins(socket),
+         true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
          access_token when is_binary(access_token) <-
            (case params do
               %{"user_token" => user_token} -> user_token
@@ -368,5 +371,26 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp backoff() do
     {wait, _} = Backoff.backoff(%Backoff{type: :rand, min: 0, max: 5_000})
     wait
+  end
+
+  def limit_joins(%{assigns: %{tenant: tenant}}) do
+    id = {:limit, :channel_joins, tenant}
+    GenCounter.new(id)
+    RateCounter.new(id, idle_shutdown: :infinity)
+    GenCounter.add(id)
+
+    case RateCounter.get(id) do
+      {:ok, %{avg: avg}} ->
+        if avg < @max_join_rate do
+          :ok
+        else
+          Logger.error("Rate limit exceeded for #{tenant} #{avg}")
+          {:error, :too_many_joins}
+        end
+
+      other ->
+        Logger.error("Unexpected error for #{tenant} #{inspect(other)}")
+        {:error, other}
+    end
   end
 end
