@@ -33,7 +33,8 @@ defmodule Realtime.MessageDispatcherTest do
 
     dispatch(
       [
-        {self(), {:subscriber_fastlane, self(), JSONSerializer, @subscription_id, "test", false}}
+        {self(),
+         {:subscriber_fastlane, self(), JSONSerializer, @subscription_id, "test", "*", false}}
       ],
       self(),
       msg
