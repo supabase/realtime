@@ -175,7 +175,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           {:ok, _response} ->
             Endpoint.subscribe("subscription_manager:" <> tenant)
             send(manager_pid, {:subscribed, {self(), id}})
-            push(socket, "system", %{status: "ok", message: "subscribed to relatime"})
+            push(socket, "system", %{status: "ok", message: "subscribed to realtime"})
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
           error ->
