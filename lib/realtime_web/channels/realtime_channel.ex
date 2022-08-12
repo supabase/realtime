@@ -185,7 +185,7 @@ defmodule RealtimeWeb.RealtimeChannel do
               "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
             )
 
-            {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
+            {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
         end
 
       nil ->
@@ -226,7 +226,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     ref =
       if postgres_config do
-        Process.send_after(self(), :postgres_subscribe, backoff())
+        postgres_subscribe()
       else
         nil
       end
@@ -269,7 +269,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       pg_sub_ref =
         if postgres_config do
-          Process.send_after(self(), :postgres_subscribe, backoff())
+          postgres_subscribe()
         else
           nil
         end
@@ -360,11 +360,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     decrypt!(secret, secure_key)
   end
 
-  defp postgres_subscribe() do
-    Process.send_after(self(), :postgres_subscribe, backoff())
+  defp postgres_subscribe(min \\ 1, max \\ 5) do
+    Process.send_after(self(), :postgres_subscribe, backoff(min, max))
   end
 
-  defp backoff(min \\ 5, max \\ 10) do
+  defp backoff(min, max) do
     {wait, _} = Backoff.backoff(%Backoff{type: :rand, min: min * 1000, max: max * 1000})
     wait
   end
