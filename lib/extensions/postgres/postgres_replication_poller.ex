@@ -8,13 +8,13 @@ defmodule Extensions.Postgres.ReplicationPoller do
   alias Extensions.Postgres
   alias Postgres.Replications
 
+  alias Realtime.{MessageDispatcher, PubSub, Repo}
+
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
     NewRecord,
     UpdatedRecord
   }
-
-  alias Realtime.Repo
 
   @queue_target 5_000
 
@@ -133,7 +133,15 @@ defmodule Extensions.Postgres.ReplicationPoller do
           end
         end)
         |> Enum.reverse()
-        |> Postgres.SubscribersNotification.notify_subscribers(tenant)
+        |> Enum.each(fn change ->
+          Phoenix.PubSub.broadcast_from(
+            PubSub,
+            self(),
+            "realtime:postgres:" <> tenant,
+            change,
+            MessageDispatcher
+          )
+        end)
 
         {:ok, length(rows)}
 
@@ -179,11 +187,10 @@ defmodule Extensions.Postgres.ReplicationPoller do
       columns: columns,
       commit_timestamp: commit_timestamp,
       errors: convert_errors(errors),
-      is_rls_enabled: is_rls_enabled,
       schema: schema,
       table: table,
       type: type,
-      subscription_ids: MapSet.new(subscription_ids),
+      subscription_ids: subscription_ids,
       record: record
     }
   end
@@ -208,11 +215,10 @@ defmodule Extensions.Postgres.ReplicationPoller do
       columns: columns,
       commit_timestamp: commit_timestamp,
       errors: convert_errors(errors),
-      is_rls_enabled: is_rls_enabled,
       schema: schema,
       table: table,
       type: type,
-      subscription_ids: MapSet.new(subscription_ids),
+      subscription_ids: subscription_ids,
       old_record: old_record,
       record: record
     }
@@ -237,11 +243,10 @@ defmodule Extensions.Postgres.ReplicationPoller do
       columns: columns,
       commit_timestamp: commit_timestamp,
       errors: convert_errors(errors),
-      is_rls_enabled: is_rls_enabled,
       schema: schema,
       table: table,
       type: type,
-      subscription_ids: MapSet.new(subscription_ids),
+      subscription_ids: subscription_ids,
       old_record: old_record
     }
   end
