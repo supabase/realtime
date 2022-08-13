@@ -7,7 +7,7 @@ defmodule Realtime.Adapters.Changes do
   defmodule(Transaction, do: defstruct([:changes, :commit_timestamp]))
 
   defmodule NewRecord do
-    @derive {Jason.Encoder, except: [:is_rls_enabled, :subscription_ids]}
+    @derive {Jason.Encoder, except: [:subscription_ids]}
     defstruct [
       :columns,
       :commit_timestamp,
@@ -16,13 +16,12 @@ defmodule Realtime.Adapters.Changes do
       :table,
       :record,
       :subscription_ids,
-      :type,
-      is_rls_enabled: true
+      :type
     ]
   end
 
   defmodule UpdatedRecord do
-    @derive {Jason.Encoder, except: [:is_rls_enabled, :subscription_ids]}
+    @derive {Jason.Encoder, except: [:subscription_ids]}
     defstruct [
       :columns,
       :commit_timestamp,
@@ -32,13 +31,12 @@ defmodule Realtime.Adapters.Changes do
       :old_record,
       :record,
       :subscription_ids,
-      :type,
-      is_rls_enabled: true
+      :type
     ]
   end
 
   defmodule DeletedRecord do
-    @derive {Jason.Encoder, except: [:is_rls_enabled, :subscription_ids]}
+    @derive {Jason.Encoder, except: [:subscription_ids]}
     defstruct [
       :columns,
       :commit_timestamp,
@@ -47,8 +45,7 @@ defmodule Realtime.Adapters.Changes do
       :table,
       :old_record,
       :subscription_ids,
-      :type,
-      is_rls_enabled: true
+      :type
     ]
   end
 
