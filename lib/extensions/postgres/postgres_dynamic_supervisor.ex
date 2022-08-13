@@ -11,7 +11,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
 
   @impl true
   def init(args) do
-    subscribers_tid = :ets.new(Realtime.ChannelsSubscribers, [:public, :set])
+    subscribers_tid = :ets.new(Realtime.ChannelsSubscribers, [:public, :bag])
     tid_args = Map.merge(args, %{"subscribers_tid" => subscribers_tid})
 
     children = [

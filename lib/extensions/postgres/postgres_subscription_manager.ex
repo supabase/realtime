@@ -96,12 +96,15 @@ defmodule Extensions.Postgres.SubscriptionManager do
       ) do
     q1 =
       case :ets.take(tid, pid) do
-        [{_pid, id, _ref}] ->
-          UUID.string_to_binary!(id)
-          |> :queue.in(q)
-
-        _ ->
+        [] ->
           q
+
+        values ->
+          for {_pid, id, _ref} <- values, reduce: q do
+            acc ->
+              UUID.string_to_binary!(id)
+              |> :queue.in(acc)
+          end
       end
 
     {:noreply, put_in(state.delete_queue.queue, q1)}

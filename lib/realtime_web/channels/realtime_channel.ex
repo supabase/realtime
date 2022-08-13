@@ -58,8 +58,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       tenant_topic = tenant <> ":" <> sub_topic
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
 
-      id = UUID.uuid1()
-
       is_new_api =
         case params do
           %{"configs" => _} -> true
@@ -133,7 +131,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           _ -> nil
         end
 
-      Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
+      Logger.debug("Start channel, #{inspect(pg_change_params, pretty: true)}")
 
       presence_key =
         with key when is_binary(key) <- params["configs"]["presence"]["key"],
@@ -154,7 +152,6 @@ defmodule RealtimeWeb.RealtimeChannel do
          access_token: access_token,
          ack_broadcast: !!params["configs"]["broadcast"]["ack"],
          confirm_token_ref: confirm_token_ref,
-         id: id,
          is_new_api: is_new_api,
          pg_sub_ref: pg_sub_ref,
          pg_change_params: pg_change_params,
@@ -190,7 +187,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         :postgres_subscribe,
         %{
           assigns: %{
-            id: id,
             tenant: tenant,
             pg_sub_ref: pg_sub_ref,
             pg_change_params: pg_change_params,
@@ -215,7 +211,10 @@ defmodule RealtimeWeb.RealtimeChannel do
              ) do
           {:ok, _response} ->
             Endpoint.subscribe("subscription_manager:" <> tenant)
-            send(manager_pid, {:subscribed, {self(), id}})
+
+            for %{id: id} <- pg_change_params do
+              send(manager_pid, {:subscribed, {self(), id}})
+            end
 
             push(socket, "system", %{
               status: "ok",
