@@ -3,14 +3,14 @@ defmodule Extensions.Postgres.Subscriptions do
   This module consolidates subscriptions handling
   """
   require Logger
-  import Postgrex, only: [transaction: 2, query: 3]
+  import Postgrex, only: [transaction: 2, query: 3, query!: 3, rollback: 2]
 
   @type tid() :: :ets.tid()
   @type conn() :: DBConnection.conn()
 
-  @spec create(conn(), String.t(), map()) ::
+  @spec create(conn(), String.t(), list(map())) ::
           {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | String.t()}
-  def create(conn, publication, %{id: id, config: config, claims: claims}) do
+  def create(conn, publication, params_list) do
     sql = "with sub_tables as (
 		    select
 			    rr.entity
@@ -46,59 +46,70 @@ defmodule Extensions.Postgres.Subscriptions do
       returning
          id"
 
-    with [schema, table, filters] <-
-           (case config do
-              %{"schema" => schema, "table" => table, "filter" => filter} ->
-                with [col, rest] <- String.split(filter, "=", parts: 2),
-                     [filter_type, value] <- String.split(rest, ".", parts: 2) do
-                  [schema, table, [{col, filter_type, value}]]
-                else
-                  _ -> []
-                end
-
-              %{"schema" => schema, "table" => table} ->
-                [schema, table, []]
-
-              %{"schema" => schema} ->
-                [schema, "*", []]
-
-              _ ->
-                []
-            end),
-         {:ok,
-          %Postgrex.Result{
-            num_rows: num_rows
-          } = result}
-         when num_rows > 0 <- query(conn, sql, [publication, schema, table, id, claims, filters]) do
-      {:ok, result}
-    else
-      {_, other} ->
-        {:error, other}
-
-      [] ->
-        {:error, "malformed postgres config"}
-    end
-  end
-
-  @spec update_all(conn(), tid(), String.t()) :: {:ok, nil} | {:error, any()}
-  def update_all(conn, tid, publication) do
     transaction(conn, fn conn ->
-      delete_all(conn)
+      params_list
+      |> Enum.map(fn %{
+                       id: id,
+                       claims: claims,
+                       params: params
+                     } ->
+        with [schema, table, filters] <-
+               (case params do
+                  %{"schema" => schema, "table" => table, "filter" => filter} ->
+                    with [col, rest] <- String.split(filter, "=", parts: 2),
+                         [filter_type, value] <- String.split(rest, ".", parts: 2) do
+                      [schema, table, [{col, filter_type, value}]]
+                    else
+                      _ -> []
+                    end
 
-      fn {_pid, id, config, claims, _}, _ ->
-        subscription_opts = %{
-          id: id,
-          config: config,
-          claims: claims
-        }
+                  %{"schema" => schema, "table" => table} ->
+                    [schema, table, []]
 
-        create(conn, publication, subscription_opts)
-      end
-      |> :ets.foldl(nil, tid)
+                  %{"schema" => schema} ->
+                    [schema, "*", []]
 
-      nil
+                  _ ->
+                    []
+                end) do
+          query!(
+            conn,
+            sql,
+            [
+              publication,
+              schema,
+              table,
+              id,
+              claims,
+              filters
+            ]
+          )
+        else
+          _ -> rollback(conn, "malformed postgres params")
+        end
+      end)
     end)
   end
+
+  # @spec update_all(conn(), tid(), String.t()) :: {:ok, nil} | {:error, any()}
+  # def update_all(conn, tid, publication) do
+  #   transaction(conn, fn conn ->
+  #     delete_all(conn)
+
+  #     fn {_pid, id, config, claims, _}, _ ->
+  #       subscription_opts = %{
+  #         id: id,
+  #         config: config,
+  #         claims: claims
+  #       }
+
+  #       create(conn, publication, subscription_opts)
+  #     end
+  #     |> :ets.foldl(nil, tid)
+
+  #     nil
+  #   end)
+  # end
 
   @spec delete(conn(), String.t()) :: any()
   def delete(conn, id) do
