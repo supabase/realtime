@@ -91,25 +91,25 @@ defmodule Extensions.Postgres.Subscriptions do
     end)
   end
 
-  @spec update_all(conn(), tid(), String.t()) :: {:ok, nil} | {:error, any()}
-  def update_all(conn, tid, publication) do
-    transaction(conn, fn conn ->
-      delete_all(conn)
+  # @spec update_all(conn(), tid(), String.t()) :: {:ok, nil} | {:error, any()}
+  # def update_all(conn, tid, publication) do
+  #   transaction(conn, fn conn ->
+  #     delete_all(conn)
 
-      fn {_pid, id, config, claims, _}, _ ->
-        subscription_opts = %{
-          id: id,
-          config: config,
-          claims: claims
-        }
+  #     fn {_pid, id, config, claims, _}, _ ->
+  #       subscription_opts = %{
+  #         id: id,
+  #         config: config,
+  #         claims: claims
+  #       }
 
-        create(conn, publication, subscription_opts)
-      end
-      |> :ets.foldl(nil, tid)
+  #       create(conn, publication, subscription_opts)
+  #     end
+  #     |> :ets.foldl(nil, tid)
 
-      nil
-    end)
-  end
+  #     nil
+  #   end)
+  # end
 
   @spec delete(conn(), String.t()) :: any()
   def delete(conn, id) do
