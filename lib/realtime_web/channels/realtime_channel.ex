@@ -14,7 +14,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
   @confirm_token_ms_interval 1_000 * 60 * 5
-  @max_join_rate 150
+  @max_join_rate 100
   @max_user_channels 15
 
   @impl true
@@ -129,7 +129,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       pg_sub_ref =
         case pg_change_params do
-          [_ | _] -> Process.send_after(self(), :postgres_subscribe, backoff())
+          [_ | _] -> postgres_subscribe()
           _ -> nil
         end
 
@@ -177,7 +177,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(%{event: "subscription_manager_down"}, socket) do
-    pg_sub_ref = Process.send_after(self(), :postgres_subscribe, backoff())
+    pg_sub_ref = postgres_subscribe()
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
   end
 
@@ -194,7 +194,8 @@ defmodule RealtimeWeb.RealtimeChannel do
             tenant: tenant,
             pg_sub_ref: pg_sub_ref,
             pg_change_params: pg_change_params,
-            postgres_extension: postgres_extension
+            postgres_extension: postgres_extension,
+            tenant_topic: tenant_topic
           }
         } = socket
       ) do
@@ -216,27 +217,31 @@ defmodule RealtimeWeb.RealtimeChannel do
             Endpoint.subscribe("subscription_manager:" <> tenant)
             send(manager_pid, {:subscribed, {self(), id}})
 
+            push(socket, "system", %{
+              status: "ok",
+              message: "subscribed to realtime",
+              topic: tenant_topic
+            })
+
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
-          {:badrpc, :timeout} = error ->
+          error ->
+            push(socket, "system", %{
+              status: "error",
+              message: "failed to subscribe channel",
+              topic: tenant_topic
+            })
+
             Logger.error(
-              "Failed to subscribe channel for #{tenant} to #{inspect(pg_change_params)}: #{inspect(error)}"
+              "Failed to subscribe channel for #{tenant} to #{tenant_topic}: #{inspect(error)}"
             )
 
-            {:stop, %{reason: error}, assign(socket, :pg_sub_ref, nil)}
-
-          {:error, error} ->
-            Logger.error(
-              "Failed to subscribe channel for #{tenant} to #{inspect(pg_change_params)}: #{inspect(error)}"
-            )
-
-            {:stop, %{reason: error}, assign(socket, :pg_sub_ref, nil)}
+            {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
         end
 
       nil ->
         Logger.warning("Re-subscribe channel for #{tenant}")
-        ref = Process.send_after(self(), :postgres_subscribe, backoff())
-        {:noreply, assign(socket, :pg_sub_ref, ref)}
+        {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
     end
   end
 
@@ -280,7 +285,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     ref =
       case pg_change_params do
-        [_ | _] -> Process.send_after(self(), :postgres_subscribe, backoff())
+        [_ | _] -> postgres_subscribe()
         _ -> nil
       end
 
@@ -324,7 +329,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       pg_sub_ref =
         case pg_change_params do
-          [_ | _] -> Process.send_after(self(), :postgres_subscribe, backoff())
+          [_ | _] -> postgres_subscribe()
           _ -> nil
         end
 
@@ -415,8 +420,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     decrypt!(secret, secure_key)
   end
 
-  defp backoff() do
-    {wait, _} = Backoff.backoff(%Backoff{type: :rand, min: 0, max: 5_000})
+  defp postgres_subscribe(min \\ 1, max \\ 5) do
+    Process.send_after(self(), :postgres_subscribe, backoff(min, max))
+  end
+
+  defp backoff(min, max) do
+    {wait, _} = Backoff.backoff(%Backoff{type: :rand, min: min * 1000, max: max * 1000})
     wait
   end
 
