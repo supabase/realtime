@@ -233,14 +233,14 @@ defmodule RealtimeWeb.RealtimeChannel do
             })
 
             Logger.error(
-              "Failed to subscribe channel for #{tenant} to #{tenant_topic}: #{inspect(error)}"
+              "Failed to subscribe channel for #{tenant} to #{inspect(pg_change_params)}: #{inspect(error)}"
             )
 
             {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
         end
 
       nil ->
-        Logger.warning("Re-subscribe channel for #{tenant}")
+        Logger.warning("Re-subscribe channel for #{tenant} to #{inspect(pg_change_params)}")
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
     end
   end
