@@ -7,7 +7,7 @@ defmodule Extensions.Postgres.SubscriptionsChecker do
   alias Extensions.Postgres
   alias Postgres.Subscriptions
 
-  import Realtime.Helpers, only: [cancel_timer: 1]
+  alias Realtime.Helpers, as: H
 
   @timeout 120_000
 
@@ -22,9 +22,14 @@ defmodule Extensions.Postgres.SubscriptionsChecker do
   def init(args) do
     %{
       "id" => id,
-      "conn" => conn,
+      "db_host" => host,
+      "db_name" => name,
+      "db_user" => user,
+      "db_password" => pass,
       "subscribers_tid" => subscribers_tid
     } = args
+
+    {:ok, conn} = H.connect_db(host, name, user, pass, 1)
 
     state = %{
       id: id,
@@ -38,7 +43,7 @@ defmodule Extensions.Postgres.SubscriptionsChecker do
 
   @impl true
   def handle_info(:check_active_pids, %{check_active_pids: ref, subscribers_tid: tid} = state) do
-    cancel_timer(ref)
+    H.cancel_timer(ref)
 
     ids =
       fn {pid, postgres_id, _ref}, acc ->
