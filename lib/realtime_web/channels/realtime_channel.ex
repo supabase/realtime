@@ -15,6 +15,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @confirm_token_ms_interval 1_000 * 60 * 5
   @max_join_rate 150
+  @max_user_channels 15
 
   @impl true
   def join(
@@ -35,6 +36,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     Logger.metadata(external_id: tenant, project: tenant)
 
     with :ok <- limit_joins(socket),
+         :ok <- limit_channels(socket),
          true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
          access_token when is_binary(access_token) <-
            (case params do
@@ -437,5 +439,21 @@ defmodule RealtimeWeb.RealtimeChannel do
         Logger.error("Unexpected error for #{tenant} #{inspect(other)}")
         {:error, other}
     end
+  end
+
+  def limit_channels(%{assigns: %{tenant: tenant}, transport_pid: pid}) do
+    key = limit_channels_key(tenant)
+
+    if Registry.count_match(Realtime.Registry, key, pid) > @max_user_channels do
+      Logger.error("Reached the limit of channels per connection for #{tenant}")
+      {:error, :too_many_channels}
+    else
+      Registry.register(Realtime.Registry, limit_channels_key(tenant), pid)
+      :ok
+    end
+  end
+
+  defp limit_channels_key(tenant) do
+    {:limit, :user_channels, tenant}
   end
 end
