@@ -39,7 +39,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     Logger.metadata(external_id: tenant, project: tenant)
 
     with true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
-         {:ok, _} <- limit_joins(socket),
          access_token when is_binary(access_token) <-
            (case params do
               %{"user_token" => user_token} -> user_token
@@ -264,6 +263,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       )
       when is_binary(refresh_token) do
+    maybe_log_limits(socket)
     cancel_timer(ref)
 
     with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
@@ -300,6 +300,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_in("access_token", _, socket) do
+    maybe_log_limits(socket)
     {:noreply, socket}
   end
 
@@ -308,6 +309,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         payload,
         %{assigns: %{self_broadcast: self_broadcast, tenant_topic: topic}} = socket
       ) do
+    maybe_log_limits(socket)
+
     if self_broadcast do
       Endpoint.broadcast(topic, type, payload)
     else
@@ -322,6 +325,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{"event" => "TRACK", "payload" => payload} = msg,
         %{assigns: %{id: id, tenant_topic: topic}} = socket
       ) do
+    maybe_log_limits(socket)
+
     case Presence.track(self(), topic, Map.get(msg, "key", id), payload) do
       {:ok, _} ->
         :ok
@@ -338,6 +343,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{"event" => "UNTRACK"} = msg,
         %{assigns: %{id: id, tenant_topic: topic}} = socket
       ) do
+    maybe_log_limits(socket)
+
     Presence.untrack(self(), topic, Map.get(msg, "key", id))
 
     {:reply, :ok, socket}
@@ -376,7 +383,14 @@ defmodule RealtimeWeb.RealtimeChannel do
     wait
   end
 
-  defp limit_joins(
+  defp maybe_log_limits(socket) do
+    case limit_events(socket) do
+      {:ok, _socket} -> :noop
+      {:error, err} -> Logger.warn("Lots of events: #{inspect(err)}")
+    end
+  end
+
+  defp limit_events(
          %{
            assigns: %{
              limits: %{
@@ -407,7 +421,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp limit_joins(socket) do
+  defp limit_events(socket) do
     {:ok, socket}
   end
 end
