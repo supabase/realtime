@@ -40,7 +40,8 @@ defmodule RealtimeWeb.RealtimeChannel do
          true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
          access_token when is_binary(access_token) <-
            (case params do
-              %{"user_token" => user_token} -> user_token
+              %{"user_token" => user_token} -> user_token # will deprecate
+              %{"access_token" => access_token} -> access_token
               _ -> token
             end),
          jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
