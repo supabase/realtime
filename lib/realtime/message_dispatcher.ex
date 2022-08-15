@@ -8,18 +8,24 @@ defmodule Realtime.MessageDispatcher do
 
   alias Phoenix.Socket.Broadcast
 
-  def dispatch([_ | _] = topic_subscriptions, _from, {payload, subscription_ids}) do
-    _ =
-      Enum.reduce(topic_subscriptions, %{}, fn
-        {_pid, {:subscriber_fastlane, fastlane_pid, serializer, id, join_topic, is_new_api}},
-        cache ->
-          if MapSet.member?(subscription_ids, id) do
+  def dispatch([_ | _] = topic_subscriptions, _from, payload) do
+    {sub_ids, payload} = Map.pop(payload, :subscription_ids)
+
+    Enum.reduce(topic_subscriptions, %{}, fn
+      {_pid, {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, is_new_api}},
+      cache ->
+        sub_ids
+        |> MapSet.new()
+        |> MapSet.intersection(MapSet.new(ids))
+        |> MapSet.to_list()
+        |> case do
+          [_ | _] = valid_ids ->
             new_payload =
               if is_new_api do
                 %Broadcast{
                   topic: join_topic,
-                  event: "realtime",
-                  payload: %{payload: payload, event: payload.type}
+                  event: "postgres_changes",
+                  payload: %{ids: Enum.map(valid_ids, &UUID.binary_to_string!(&1)), data: payload}
                 }
               else
                 %Broadcast{
@@ -30,32 +36,25 @@ defmodule Realtime.MessageDispatcher do
               end
 
             broadcast_message(cache, fastlane_pid, new_payload, serializer)
-          else
+
+          _ ->
             cache
-          end
-
-        {_pid, {:fastlane, fastlane_pid, serializer, _event_intercepts}}, cache ->
-          broadcast_message(cache, fastlane_pid, payload, serializer)
-
-        _, cache ->
-          cache
-      end)
+        end
+    end)
 
     :ok
   end
 
-  def dispatch(_, _, _), do: :ok
-
   defp broadcast_message(cache, fastlane_pid, msg, serializer) do
     case cache do
-      %{^serializer => encoded_msg} ->
+      %{^msg => encoded_msg} ->
         send(fastlane_pid, encoded_msg)
         cache
 
       %{} ->
         encoded_msg = serializer.fastlane!(msg)
         send(fastlane_pid, encoded_msg)
-        Map.put(cache, serializer, encoded_msg)
+        Map.put(cache, msg, encoded_msg)
     end
   end
 end
