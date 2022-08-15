@@ -13,7 +13,8 @@ defmodule RealtimeWeb.Endpoint do
   socket "/socket", RealtimeWeb.UserSocket,
     websocket: [
       connect_info: [:peer_data, :uri, :x_headers],
-      fullsweep_after: 20
+      fullsweep_after: 20,
+      max_frame_size: 8_000_000
     ],
     longpoll: false
 
