@@ -49,7 +49,7 @@ defmodule Realtime.Extensions.PostgresTest do
   describe "Postgres extensions" do
     test "Check supervisor crash and respawn" do
       sup =
-        Enum.reduce_while(1..10, nil, fn _, acc ->
+        Enum.reduce_while(1..15, nil, fn _, acc ->
           :syn.lookup(Extensions.Postgres.Sup, @external_id)
           |> case do
             :undefined ->

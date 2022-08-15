@@ -46,18 +46,11 @@ defmodule Realtime.GenCounter do
          {:ok, ref} <- GenServer.call(pid, :new) do
       {:ok, ref}
     else
-      {:error, {:already_started, _pid}} ->
-        Logger.warn("Counter already started")
-        {:error, :already_started}
-
-      {:error, err} ->
-        IO.inspect(err)
-        Logger.error("Error creating counter", error_string: inspect(err))
-        {:error, err}
+      {:error, {:already_started, _}} = started ->
+        started
 
       err ->
-        IO.inspect(err)
-        Logger.error("Error creating counter", error_string: inspect(err))
+        Logger.error("Error creating counter #{inspect(err)}")
         {:error, :not_created}
     end
   end
@@ -158,7 +151,7 @@ defmodule Realtime.GenCounter do
     end
   end
 
-  @spec stop(term()) :: :ok | {:error, :not_found}
+  @spec stop(term()) :: :ok | {:error, :not_found | :counter_not_found}
   def stop(term) do
     case find_worker(term) do
       {:ok, pid} -> DynamicSupervisor.terminate_child(GenCounter.DynamicSupervisor, pid)

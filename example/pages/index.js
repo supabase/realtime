@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Input, Button, Card, Table, Tag, Row, Col } from 'antd';
+import { Form, Input, Button, Card, Table, Tag, Row, Col, Tabs } from 'antd';
+const { TabPane } = Tabs;
 import { RealtimeClient } from '@supabase/realtime-js';
+// const SupabaseClient = require('@supabase/supabase-js').SupabaseClient;
+
+let channel = null;
 
 export default function Index() {
   const [form] = Form.useForm();
+  const [form_broadcast] = Form.useForm();
   const [dataSource, setDataSource] = useState([]);
   const [connButton, setConnButtonState] = useState({
     loading: false,
@@ -15,6 +20,10 @@ export default function Index() {
       host: localStorage.getItem('host'),
       token: localStorage.getItem('token'),
     });
+    form_broadcast.setFieldsValue({
+      event: 'TEST',
+      payload: '{"msg": 1}'
+    });
   }, []);
 
   const onFinish = ({ host, token }) => {
@@ -22,127 +31,71 @@ export default function Index() {
     localStorage.setItem('host', host);
     localStorage.setItem('token', token);
     let socket = new RealtimeClient(host, {
-      params: { apikey: token, vsndate: '2022-05-13' },
+      params: { apikey: token, vsndate: '2022' },
     });
-    socket.connect();
-    const realtime_config = {
-      configs: {
-        broadcast: {
-          filter: {
-            event: 'MESSAGE',
-          },
-          type: 'broadcast',
-        },
-        realtime: {
-          filter: {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'messages',
-          },
-          type: 'realtime',
-        },
-      },
-      user_token: token,
-    };
-    let channel = socket.channel('realtime:any');
 
-    // userChannel.on('presence', { event: 'SYNC' }, () => {
-    //   setIsInitialStateSynced(true)
-    // })
-    // userChannel.on('region', { event: '*' }, (region: string) => {
-    //   setRegion(region)
-    // })
+    channel = socket.channel('any', { configs: { broadcast: { self: true } } })
 
-    // channel.on('*', msg => {
-    channel.on('presence', { event: 'SYNC' }, (msg) => {
-      console.log('msg', msg);
-      // console.log('Got a message')
-      // dataSource.unshift({
-      //   key: dataSource.length + 1,
-      //   type: msg.type,
-      //   table: msg.schema + "." + msg.table,
-      //   record: JSON.stringify(msg.record),
-      //   old_record: JSON.stringify(msg.old_record),
-      //   errors: JSON.stringify(msg.errors),
-      //   columns: JSON.stringify(msg.columns),
-      //   ts: msg.commit_timestamp
-      // })
-      // setDataSource([...dataSource])
-    });
-    channel.on(
-      'realtime',
-      {
-        event: '*',
-        schema: 'public',
-        table: '*',
-        // filter: 'field=eq.some_val'
-      },
-      (msg) => {
-        console.log('database change', msg);
-        const {
-          columns,
-          commit_timestamp,
-          errors,
-          old_record,
-          record,
-          schema,
-          table,
-          type,
-        } = msg.payload;
+    channel
+      .on("postgres_changes", { event: "*", schema: "public" }, payload => {
+        console.log('DB', payload)
         dataSource.unshift({
           key: dataSource.length + 1,
-          type: type,
-          table: schema + '.' + table,
-          record: JSON.stringify(record),
-          old_record: JSON.stringify(old_record),
-          errors: JSON.stringify(errors),
-          columns: JSON.stringify(columns),
-          ts: commit_timestamp,
-        });
-        setDataSource([...dataSource]);
-      }
-    );
-    channel.on('broadcast', { event: 'MESSAGE' }, (msg) => {
-      console.log('broadcast', msg);
-      // console.log('Got a message')
-      // dataSource.unshift({
-      //   key: dataSource.length + 1,
-      //   type: msg.type,
-      //   table: msg.schema + "." + msg.table,
-      //   record: JSON.stringify(msg.record),
-      //   old_record: JSON.stringify(msg.old_record),
-      //   errors: JSON.stringify(msg.errors),
-      //   columns: JSON.stringify(msg.columns),
-      //   ts: msg.commit_timestamp
-      // })
-      // setDataSource([...dataSource])
-    });
-    channel
-      .subscribe()
-      .receive('ok', () => {
-        let user_id = Math.random() + '';
-        channel.send({
-          type: 'presence',
-          event: 'TRACK',
-          key: 'newRoomId',
-          payload: { user_id: user_id },
-        });
-
-        channel.send({
-          type: 'broadcast',
-          event: 'MESSAGE',
-          payload: {
-            user_id: user_id,
-            x: Math.random(),
-          },
-        });
-
-        console.log('Connecting', channel);
-        setConnButtonState({ loading: false, value: 'Connected' });
+          type: "DB/" + payload.eventType,
+          'table/event': payload.schema + "." + payload.table,
+          'record/payload': JSON.stringify(payload.new),
+          old_record: JSON.stringify(payload.old),
+          errors: JSON.stringify(payload.errors),
+          columns: JSON.stringify(payload.columns),
+          ts: payload.commit_timestamp
+        })
+        setDataSource([...dataSource])
       })
-      .receive('error', () => console.log('Failed'))
-      .receive('timeout', () => console.log('Waiting...'));
+      .on("broadcast", { event: "*" }, payload => {
+        console.log('PAYLOAD', payload)
+        dataSource.unshift({
+          key: dataSource.length + 1,
+          type: payload.type,
+          'table/event': payload.event,
+          'record/payload': JSON.stringify(payload.payload)
+        })
+        setDataSource([...dataSource])
+      })
+      .on("presence", { event: "*" }, payload => {
+        console.log('presence', payload)
+        dataSource.unshift({
+          key: dataSource.length + 1,
+          type: 'presence',
+          'table/event': payload.event,
+          'record/payload': JSON.stringify(payload),
+        })
+        setDataSource([...dataSource])
+      })
+
+    channel.subscribe((status, err) => {
+      console.log('status', status, err)
+      if (status === 'SUBSCRIBED') {
+        setConnButtonState({ loading: false, value: 'Connected' });
+        const name = 'realtime_presence_' + Math.floor(Math.random() * 100);
+        channel.send(
+          {
+            type: 'presence',
+            event: 'TRACK',
+            payload: { name: name, t: performance.now() },
+          })
+      }
+    })
   };
+
+  const onBroadcast = ({ event, payload }) => {
+    payload = JSON.parse(payload)
+    console.log('broadcast event', event, payload)
+    channel.send({
+      type: "broadcast",
+      event: event,
+      payload: payload
+    })
+  }
 
   const formItemLayout = {
     labelCol: { span: 4 },
@@ -154,8 +107,8 @@ export default function Index() {
 
   const columns = [
     'type',
-    'table',
-    'record',
+    'table/event',
+    'record/payload',
     'old_record',
     'errors',
     'columns',
@@ -170,14 +123,20 @@ export default function Index() {
       column['render'] = (type) => {
         let color = '#ccc';
         switch (type) {
-          case 'INSERT':
+          case 'DB/INSERT':
             color = 'green';
             break;
-          case 'UPDATE':
+          case 'DB/UPDATE':
             color = 'blue';
             break;
-          case 'DELETE':
+          case 'DB/DELETE':
             color = 'red';
+            break;
+          case 'broadcast':
+            color = 'purple';
+            break;
+          case 'presence':
+            color = 'gold';
             break;
         }
         return (
@@ -199,29 +158,57 @@ export default function Index() {
   return (
     <>
       <Card>
-        <Form
-          {...formItemLayout}
-          layout={'horizontal'}
-          form={form}
-          onFinish={onFinish}
-        >
-          <Form.Item label="Address" name={'host'}>
-            <Input placeholder="input placeholder" size="large" />
-          </Form.Item>
-          <Form.Item label="Token" name={'token'}>
-            <Input.TextArea size="large" rows={4} />
-          </Form.Item>
-          <Form.Item {...buttonItemLayout}>
-            <Button
-              type="primary"
-              htmlType="submit"
-              loading={connButton.loading}
+        <Tabs defaultActiveKey="connection">
+          <TabPane tab="Connection" key="connection">
+            <Form
+              {...formItemLayout}
+              layout={'horizontal'}
+              form={form}
+              onFinish={onFinish}
             >
-              {connButton.value}
-            </Button>
-          </Form.Item>
-        </Form>
+              <Form.Item label="Address" name={'host'}>
+                <Input placeholder="input placeholder" size="large" />
+              </Form.Item>
+              <Form.Item label="Token" name={'token'}>
+                <Input.TextArea size="large" rows={4} />
+              </Form.Item>
+              <Form.Item {...buttonItemLayout}>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  loading={connButton.loading}
+                >
+                  {connButton.value}
+                </Button>
+              </Form.Item>
+            </Form>
+          </TabPane>
+          <TabPane tab="Broadcast" key="broadcast">
+            <Form
+              {...formItemLayout}
+              layout={'horizontal'}
+              form={form_broadcast}
+              onFinish={onBroadcast}
+            >
+              <Form.Item label="Event" name={'event'}>
+                <Input size="large" />
+              </Form.Item>
+              <Form.Item label="Payload" name={'payload'}>
+                <Input.TextArea size="large" rows={4} />
+              </Form.Item>
+              <Form.Item {...buttonItemLayout}>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                >
+                  Broadcast
+                </Button>
+              </Form.Item>
+            </Form>
+          </TabPane>
+        </Tabs>
       </Card>
+
 
       <Table dataSource={dataSource} columns={columns} pagination={false} />
     </>

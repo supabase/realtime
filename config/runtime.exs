@@ -68,7 +68,10 @@ if config_env() != :test do
     port: port,
     pool_size: System.get_env("DB_POOL_SIZE", "5") |> String.to_integer(),
     queue_target: queue_target,
-    queue_interval: queue_interval
+    queue_interval: queue_interval,
+    parameters: [
+      application_name: "supabase_mt_realtime"
+    ]
 
   replica_repos = %{
     Realtime.Repo.Replica.FRA => System.get_env("DB_HOST_REPLICA_FRA", default_db_host),
@@ -84,9 +87,12 @@ if config_env() != :test do
       password: password,
       database: database,
       port: port,
-      pool_size: System.get_env("DB_REPLICA_POOL_SIZE", "30") |> String.to_integer(),
+      pool_size: System.get_env("DB_REPLICA_POOL_SIZE", "5") |> String.to_integer(),
       queue_target: queue_target,
-      queue_interval: queue_interval
+      queue_interval: queue_interval,
+      parameters: [
+        application_name: "supabase_mt_realtime_ro"
+      ]
   end
 end
 

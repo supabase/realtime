@@ -7,7 +7,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   alias Extensions.Postgres
   alias Postgres.Subscriptions
-  import Realtime.Helpers, only: [cancel_timer: 1]
+  alias Realtime.Helpers, as: H
 
   @check_oids_interval 60_000
   @timeout 15_000
@@ -24,11 +24,16 @@ defmodule Extensions.Postgres.SubscriptionManager do
   def init(args) do
     %{
       "id" => id,
-      "conn" => conn,
       "publication" => publication,
-      "subscribers_tid" => subscribers_tid
+      "subscribers_tid" => subscribers_tid,
+      "db_host" => host,
+      "db_name" => name,
+      "db_user" => user,
+      "db_password" => pass
     } = args
 
+    {:ok, conn} = H.connect_db(host, name, user, pass, 1)
+    {:ok, conn_pub} = H.connect_db(host, name, user, pass)
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
 
     state = %{
@@ -45,7 +50,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
     }
 
     send(self(), :check_oids)
-    Postgres.track_manager(id, self(), conn)
+    Postgres.track_manager(id, self(), conn_pub)
     {:ok, state}
   end
 
@@ -62,7 +67,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
         :check_oids,
         %{check_oid_ref: ref, conn: conn, publication: publication, oids: old_oids} = state
       ) do
-    cancel_timer(ref)
+    H.cancel_timer(ref)
 
     oids =
       case Subscriptions.fetch_publication_tables(conn, publication) do
@@ -91,19 +96,22 @@ defmodule Extensions.Postgres.SubscriptionManager do
       ) do
     q1 =
       case :ets.take(tid, pid) do
-        [{_pid, id, _ref}] ->
-          UUID.string_to_binary!(id)
-          |> :queue.in(q)
-
-        _ ->
+        [] ->
           q
+
+        values ->
+          for {_pid, id, _ref} <- values, reduce: q do
+            acc ->
+              UUID.string_to_binary!(id)
+              |> :queue.in(acc)
+          end
       end
 
     {:noreply, put_in(state.delete_queue.queue, q1)}
   end
 
   def handle_info(:check_delete_queue, %{delete_queue: %{ref: ref, queue: q}} = state) do
-    cancel_timer(ref)
+    H.cancel_timer(ref)
 
     q1 =
       if !:queue.is_empty(q) do

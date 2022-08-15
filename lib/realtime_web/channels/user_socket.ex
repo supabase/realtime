@@ -30,7 +30,6 @@ defmodule RealtimeWeb.UserSocket do
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec) do
         assigns = %{
           claims: claims,
-          is_new_api: !!params["vsndate"],
           jwt_secret: jwt_secret,
           limits: %{
             max_concurrent_users: max_conn_users,
