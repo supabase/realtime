@@ -14,8 +14,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
   @confirm_token_ms_interval 1_000 * 60 * 5
-  @max_join_rate 100
-  @max_user_channels 15
+  @max_join_rate 25
+  @max_user_channels 5
 
   @impl true
   def join(
