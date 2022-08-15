@@ -34,3 +34,5 @@ node_modules
 .supabase
 
 config/prod.secret.exs
+
+/.vscode/
