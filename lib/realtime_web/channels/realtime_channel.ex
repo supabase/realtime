@@ -485,7 +485,7 @@ defmodule RealtimeWeb.RealtimeChannel do
            assigns: %{
              limits: %{
                max_concurrent_users: _max_conn_users,
-               max_events_per_second: max_events_per_second
+               max_events_per_second: max
              },
              tenant: tenant
            },
@@ -493,20 +493,18 @@ defmodule RealtimeWeb.RealtimeChannel do
            serializer: _serializer
          } = socket
        ) do
-    tenant = %Api.Tenant{external_id: tenant, max_events_per_second: max_events_per_second}
+    tenant = %Api.Tenant{external_id: tenant, max_events_per_second: max}
 
     key = limit_events_key(tenant)
 
+    GenCounter.new(key)
+    RateCounter.new(key, idle_shutdown: :infinity)
+    GenCounter.add(key)
+
     %Api.Tenant{
       events_per_second_rolling: avg,
-      events_per_second_now: _current,
-      max_events_per_second: max
-    } =
-      tenant
-      |> tap(fn -> GenCounter.new(key) end)
-      |> tap(fn -> RateCounter.new(key, idle_shutdown: :infinity) end)
-      |> tap(fn -> GenCounter.add(key) end)
-      |> Api.preload_counters(key)
+      events_per_second_now: _current
+    } = Api.preload_counters(tenant, key)
 
     if avg < max do
       {:ok, socket}
