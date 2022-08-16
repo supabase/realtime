@@ -17,6 +17,8 @@ defmodule Realtime.Api.Tenant do
     field(:jwt_secret, :string)
     field(:max_concurrent_users, :integer)
     field(:max_events_per_second, :integer)
+    field(:events_per_second_rolling, :float, virtual: true)
+    field(:events_per_second_now, :integer, virtual: true)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,

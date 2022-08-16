@@ -9,7 +9,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias DBConnection.Backoff
   alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
-  alias Realtime.{GenCounter, RateCounter}
+  alias Realtime.{GenCounter, RateCounter, Api}
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
@@ -312,6 +312,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       )
       when is_binary(refresh_token) do
+    maybe_log_limits(socket)
     cancel_timer(ref)
 
     with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
@@ -360,6 +361,8 @@ defmodule RealtimeWeb.RealtimeChannel do
           }
         } = socket
       ) do
+    maybe_log_limits(socket)
+
     if self_broadcast do
       Endpoint.broadcast(tenant_topic, type, payload)
     else
@@ -380,6 +383,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{assigns: %{is_new_api: true, presence_key: presence_key, tenant_topic: tenant_topic}} =
           socket
       ) do
+    maybe_log_limits(socket)
+
     result =
       event
       |> String.downcase()
@@ -406,6 +411,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_in(_, _, socket) do
+    maybe_log_limits(socket)
     {:noreply, socket}
   end
 
@@ -465,5 +471,53 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp limit_channels_key(tenant) do
     {:limit, :user_channels, tenant}
+  end
+
+  defp maybe_log_limits(socket) do
+    case limit_events(socket) do
+      {:ok, _socket} -> :noop
+      {:error, err} -> Logger.warn("Lots of events: #{inspect(err)}")
+    end
+  end
+
+  defp limit_events(
+         %{
+           assigns: %{
+             limits: %{
+               max_concurrent_users: _max_conn_users,
+               max_events_per_second: max
+             },
+             tenant: tenant
+           },
+           transport_pid: _pid,
+           serializer: _serializer
+         } = socket
+       ) do
+    tenant = %Api.Tenant{external_id: tenant, max_events_per_second: max}
+
+    key = limit_events_key(tenant)
+
+    GenCounter.new(key)
+    RateCounter.new(key, idle_shutdown: :infinity)
+    GenCounter.add(key)
+
+    %Api.Tenant{
+      events_per_second_rolling: avg,
+      events_per_second_now: _current
+    } = Api.preload_counters(tenant, key)
+
+    if avg < max do
+      {:ok, socket}
+    else
+      {:error, :too_many_events}
+    end
+  end
+
+  defp limit_events(socket) do
+    {:ok, socket}
+  end
+
+  defp limit_events_key(%Api.Tenant{} = tenant) do
+    {:limits, :tenant_events, tenant.external_id}
   end
 end
