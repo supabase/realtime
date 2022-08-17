@@ -379,7 +379,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_in(
         "presence",
-        %{"event" => event, "payload" => payload},
+        %{"event" => event} = payload,
         %{assigns: %{is_new_api: true, presence_key: presence_key, tenant_topic: tenant_topic}} =
           socket
       ) do
@@ -390,6 +390,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> String.downcase()
       |> case do
         "track" ->
+          payload = Map.get(payload, "payload", %{})
+
           with {:error, {:already_tracked, _, _, _}} <-
                  Presence.track(self(), tenant_topic, presence_key, payload),
                {:ok, _} <- Presence.update(self(), tenant_topic, presence_key, payload) do
