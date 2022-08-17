@@ -16,6 +16,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @confirm_token_ms_interval 1_000 * 60 * 5
   @max_join_rate 25
   @max_user_channels 25
+  @update_tenant_limits_every 5_000
 
   @impl true
   def join(
@@ -55,6 +56,7 @@ defmodule RealtimeWeb.RealtimeChannel do
              :confirm_token,
              min(@confirm_token_ms_interval, exp_diff * 1_000)
            ) do
+      socket = assign_counter(socket)
       Realtime.UsersCounter.add(transport_pid, tenant)
 
       tenant_topic = tenant <> ":" <> sub_topic
@@ -143,6 +145,8 @@ defmodule RealtimeWeb.RealtimeChannel do
           _ -> UUID.uuid1()
         end
 
+      update_tenant_limits()
+
       {:ok,
        %{
          postgres_changes:
@@ -169,18 +173,34 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
+  def handle_info(
+        _any,
+        %{
+          assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}
+        } = socket
+      )
+      when avg > max do
+    {:stop, :normal, socket}
+  end
+
   @impl true
   def handle_info(:sync_presence, %{assigns: %{tenant_topic: topic}} = socket) do
+    socket = assign_counter(socket)
     push(socket, "presence_state", Presence.list(topic))
+
     {:noreply, socket}
   end
 
   def handle_info(%{event: "subscription_manager_down"}, socket) do
+    socket = assign_counter(socket)
     pg_sub_ref = postgres_subscribe()
+
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
   end
 
   def handle_info(%{event: type, payload: payload}, socket) do
+    socket = assign_counter(socket)
+
     push(socket, type, payload)
     {:noreply, socket}
   end
@@ -197,6 +217,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           }
         } = socket
       ) do
+    socket = assign_counter(socket)
     cancel_timer(pg_sub_ref)
 
     args = Map.put(postgres_extension, "id", tenant)
@@ -257,6 +278,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           }
         } = socket
       ) do
+    socket = assign_counter(socket)
     cancel_timer(ref)
 
     with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
@@ -293,9 +315,36 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, assign(socket, :pg_sub_ref, ref)}
   end
 
+  def handle_info(:update_tenant_limits, %{assigns: %{limits: limits, tenant: tenant}} = socket) do
+    # If we listed to our own Postgres wal we could update tenant limits without having to poll as this won't scale amazingly well
+    # Why I'm not canceling the timer here
+
+    socket =
+      case Api.get_tenant_by_external_id(tenant) do
+        nil ->
+          socket
+
+        %Api.Tenant{max_events_per_second: max} ->
+          limits = %{limits | max_events_per_second: max}
+          assign(socket, :limits, limits)
+      end
+
+    update_tenant_limits()
+    {:noreply, socket}
+  end
+
   def handle_info(other, socket) do
     Logger.error("Undefined msg #{inspect(other, pretty: true)}")
     {:noreply, socket}
+  end
+
+  def handle_in(
+        _,
+        _,
+        %{assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}} = socket
+      )
+      when avg > max do
+    {:stop, :normal, socket}
   end
 
   def handle_in(
@@ -312,7 +361,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       )
       when is_binary(refresh_token) do
-    maybe_log_limits(socket)
+    socket = assign_counter(socket)
     cancel_timer(ref)
 
     with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
@@ -361,7 +410,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           }
         } = socket
       ) do
-    maybe_log_limits(socket)
+    socket = assign_counter(socket)
 
     if self_broadcast do
       Endpoint.broadcast(tenant_topic, type, payload)
@@ -383,7 +432,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{assigns: %{is_new_api: true, presence_key: presence_key, tenant_topic: tenant_topic}} =
           socket
       ) do
-    maybe_log_limits(socket)
+    socket = assign_counter(socket)
 
     result =
       event
@@ -413,7 +462,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_in(_, _, socket) do
-    maybe_log_limits(socket)
+    socket = assign_counter(socket)
     {:noreply, socket}
   end
 
@@ -449,7 +498,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         if avg < @max_join_rate do
           :ok
         else
-          Logger.error("Rate limit exceeded for #{tenant} #{avg}")
           {:error, :too_many_joins}
         end
 
@@ -475,51 +523,22 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:limit, :user_channels, tenant}
   end
 
-  defp maybe_log_limits(socket) do
-    case limit_events(socket) do
-      {:ok, _socket} -> :noop
-      {:error, err} -> Logger.warn("Lots of events: #{inspect(err)}")
-    end
-  end
-
-  defp limit_events(
-         %{
-           assigns: %{
-             limits: %{
-               max_concurrent_users: _max_conn_users,
-               max_events_per_second: max
-             },
-             tenant: tenant
-           },
-           transport_pid: _pid,
-           serializer: _serializer
-         } = socket
-       ) do
-    tenant = %Api.Tenant{external_id: tenant, max_events_per_second: max}
-
-    key = limit_events_key(tenant)
+  defp assign_counter(%{assigns: %{tenant: tenant}} = socket) do
+    key = {:limits, :tenant_events, tenant}
 
     GenCounter.new(key)
     RateCounter.new(key, idle_shutdown: :infinity)
     GenCounter.add(key)
+    {:ok, rate_counter} = RateCounter.get(key)
 
-    %Api.Tenant{
-      events_per_second_rolling: avg,
-      events_per_second_now: _current
-    } = Api.preload_counters(tenant, key)
-
-    if avg < max do
-      {:ok, socket}
-    else
-      {:error, :too_many_events}
-    end
+    assign(socket, :rate_counter, rate_counter)
   end
 
-  defp limit_events(socket) do
-    {:ok, socket}
+  defp assign_counter(socket) do
+    socket
   end
 
-  defp limit_events_key(%Api.Tenant{} = tenant) do
-    {:limits, :tenant_events, tenant.external_id}
+  defp update_tenant_limits(every \\ @update_tenant_limits_every) do
+    Process.send_after(self(), :update_tenant_limits, every)
   end
 end
