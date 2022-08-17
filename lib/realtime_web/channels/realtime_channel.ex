@@ -16,6 +16,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @confirm_token_ms_interval 1_000 * 60 * 5
   @max_join_rate 25
   @max_user_channels 25
+  @update_tenant_limits_every 5_000
 
   @impl true
   def join(
@@ -35,7 +36,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       ) do
     Logger.metadata(external_id: tenant, project: tenant)
 
-    with :ok <- limit_joins(socket),
+    with {:ok, _socket} <- limit_events(socket),
+         :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
          true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
          access_token when is_binary(access_token) <-
@@ -143,6 +145,8 @@ defmodule RealtimeWeb.RealtimeChannel do
           _ -> UUID.uuid1()
         end
 
+      update_tenant_limits()
+
       {:ok,
        %{
          postgres_changes:
@@ -181,8 +185,16 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(%{event: type, payload: payload}, socket) do
-    push(socket, type, payload)
-    {:noreply, socket}
+    IO.inspect("BAMMMMMMMM")
+
+    case limit_events(socket) do
+      {:ok, socket} ->
+        push(socket, type, payload)
+        {:noreply, socket}
+
+      {:error, _reason} ->
+        {:stop, :normal, socket}
+    end
   end
 
   def handle_info(
@@ -293,6 +305,24 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, assign(socket, :pg_sub_ref, ref)}
   end
 
+  def handle_info(:update_tenant_limits, %{assigns: %{limits: limits, tenant: tenant}} = socket) do
+    # If we listed to our own Postgres wal we could update tenant limits without having to poll as this won't scale amazingly well
+    # Why I'm not canceling the timer here
+
+    socket =
+      case Api.get_tenant_by_external_id(tenant) do
+        nil ->
+          socket
+
+        %Api.Tenant{max_events_per_second: max} ->
+          limits = %{limits | max_events_per_second: max}
+          assign(socket, :limits, limits)
+      end
+
+    update_tenant_limits()
+    {:noreply, socket}
+  end
+
   def handle_info(other, socket) do
     Logger.error("Undefined msg #{inspect(other, pretty: true)}")
     {:noreply, socket}
@@ -312,10 +342,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       )
       when is_binary(refresh_token) do
-    maybe_log_limits(socket)
     cancel_timer(ref)
 
-    with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
+    with {:ok, _socket} <- limit_events(socket),
+         jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
@@ -361,18 +391,22 @@ defmodule RealtimeWeb.RealtimeChannel do
           }
         } = socket
       ) do
-    maybe_log_limits(socket)
+    case limit_events(socket) do
+      {:ok, _socket} ->
+        if self_broadcast do
+          Endpoint.broadcast(tenant_topic, type, payload)
+        else
+          Endpoint.broadcast_from(self(), tenant_topic, type, payload)
+        end
 
-    if self_broadcast do
-      Endpoint.broadcast(tenant_topic, type, payload)
-    else
-      Endpoint.broadcast_from(self(), tenant_topic, type, payload)
-    end
+        if ack_broadcast do
+          {:reply, :ok, socket}
+        else
+          {:noreply, socket}
+        end
 
-    if ack_broadcast do
-      {:reply, :ok, socket}
-    else
-      {:noreply, socket}
+      {:error, _err} ->
+        {:stop, :normal, socket}
     end
   end
 
@@ -383,36 +417,45 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{assigns: %{is_new_api: true, presence_key: presence_key, tenant_topic: tenant_topic}} =
           socket
       ) do
-    maybe_log_limits(socket)
+    case limit_events(socket) do
+      {:ok, _socket} ->
+        result =
+          event
+          |> String.downcase()
+          |> case do
+            "track" ->
+              with {:error, {:already_tracked, _, _, _}} <-
+                     Presence.track(self(), tenant_topic, presence_key, payload),
+                   {:ok, _} <- Presence.update(self(), tenant_topic, presence_key, payload) do
+                :ok
+              else
+                {:ok, _} -> :ok
+                {:error, _} -> :error
+              end
 
-    result =
-      event
-      |> String.downcase()
-      |> case do
-        "track" ->
-          with {:error, {:already_tracked, _, _, _}} <-
-                 Presence.track(self(), tenant_topic, presence_key, payload),
-               {:ok, _} <- Presence.update(self(), tenant_topic, presence_key, payload) do
-            :ok
-          else
-            {:ok, _} -> :ok
-            {:error, _} -> :error
+            "untrack" ->
+              Presence.untrack(self(), tenant_topic, presence_key)
+
+            _ ->
+              :error
           end
 
-        "untrack" ->
-          Presence.untrack(self(), tenant_topic, presence_key)
+        {:reply, result, socket}
 
-        _ ->
-          :error
-      end
-
-    {:reply, result, socket}
+      {:error, _err} ->
+        {:stop, :normal, socket}
+    end
   end
 
   @impl true
   def handle_in(_, _, socket) do
-    maybe_log_limits(socket)
-    {:noreply, socket}
+    case limit_events(socket) do
+      {:ok, _socket} ->
+        {:noreply, socket}
+
+      {:error, _err} ->
+        {:stop, :normal, socket}
+    end
   end
 
   @impl true
@@ -472,13 +515,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:limit, :user_channels, tenant}
   end
 
-  defp maybe_log_limits(socket) do
-    case limit_events(socket) do
-      {:ok, _socket} -> :noop
-      {:error, err} -> Logger.warn("Lots of events: #{inspect(err)}")
-    end
-  end
-
   defp limit_events(%{assigns: %{limits: %{max_events_per_second: max}, tenant: tenant}} = socket) do
     tenant = %Api.Tenant{external_id: tenant, max_events_per_second: max}
 
@@ -490,6 +526,9 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     %Api.Tenant{events_per_second_rolling: avg} = Api.preload_counters(tenant, key)
 
+    IO.inspect(avg, label: "AVGGGGG")
+    IO.inspect(max, label: "MAXXXXX")
+
     if avg < max do
       {:ok, socket}
     else
@@ -499,5 +538,9 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp limit_events(socket) do
     {:ok, socket}
+  end
+
+  defp update_tenant_limits(every \\ @update_tenant_limits_every) do
+    Process.send_after(self(), :update_tenant_limits, every)
   end
 end
