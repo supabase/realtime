@@ -447,7 +447,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         if avg < @max_join_rate do
           :ok
         else
-          Logger.error("Rate limit exceeded for #{tenant} #{avg}")
           {:error, :too_many_joins}
         end
 
