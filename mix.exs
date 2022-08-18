@@ -67,7 +67,8 @@ defmodule Realtime.MixProject do
       {:httpoison, "~> 1.8.1"},
       {:syn, "~> 3.3.0"},
       {:credo, "~> 1.6.4", only: [:dev, :test], runtime: false},
-      {:dialyxir, "~> 1.1.0", only: [:dev], runtime: false}
+      {:dialyxir, "~> 1.1.0", only: [:dev], runtime: false},
+      {:benchee, "~> 1.1.0", only: :dev}
     ]
   end
 

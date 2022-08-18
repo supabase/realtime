@@ -24,7 +24,8 @@ defmodule Realtime.Extensions.PostgresTest do
       postgres_extension: filter_postgres_settings(tenant.extensions),
       claims: %{},
       limits: %{
-        max_concurrent_users: 1
+        max_concurrent_users: 1,
+        max_events_per_second: 1
       },
       is_new_api: false
     }
