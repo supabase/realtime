@@ -64,7 +64,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       is_new_api =
         case params do
-          %{"configs" => _} -> true
+          %{"config" => _} -> true
           _ -> false
         end
 
@@ -72,7 +72,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         if is_new_api do
           send(self(), :sync_presence)
 
-          params["configs"]["postgres_changes"]
+          params["config"]["postgres_changes"]
           |> case do
             [_ | _] = params_list ->
               params_list
@@ -138,7 +138,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       Logger.debug("Start channel, #{inspect(pg_change_params, pretty: true)}")
 
       presence_key =
-        with key when is_binary(key) <- params["configs"]["presence"]["key"],
+        with key when is_binary(key) <- params["config"]["presence"]["key"],
              true <- String.length(key) > 0 do
           key
         else
@@ -156,13 +156,13 @@ defmodule RealtimeWeb.RealtimeChannel do
        },
        assign(socket, %{
          access_token: access_token,
-         ack_broadcast: !!params["configs"]["broadcast"]["ack"],
+         ack_broadcast: !!params["config"]["broadcast"]["ack"],
          confirm_token_ref: confirm_token_ref,
          is_new_api: is_new_api,
          pg_sub_ref: pg_sub_ref,
          pg_change_params: pg_change_params,
          presence_key: presence_key,
-         self_broadcast: !!params["configs"]["broadcast"]["self"],
+         self_broadcast: !!params["config"]["broadcast"]["self"],
          tenant_topic: tenant_topic
        })}
     else
