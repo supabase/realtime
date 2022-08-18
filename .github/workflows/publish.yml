@@ -4,7 +4,17 @@ on:
   push:
     tags:
       - "v*"
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Image tag"
+        required: true
+        type: string
 
 jobs:
   publish:
@@ -16,9 +26,11 @@ jobs:
           images: |
             supabase/realtime
             public.ecr.aws/t3w2s2c9/realtime
+          flavor: |
+            latest=false
           tags: |
             type=ref,event=tag
-            type=raw,value=latest
+            type=raw,value=${{ inputs.version }},enable=${{ github.event_name != 'push' }}
 
       - uses: docker/setup-qemu-action@v2
         with:

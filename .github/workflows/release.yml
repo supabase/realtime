@@ -174,3 +174,25 @@ jobs:
           asset_path: ./realtime-v${{ env.VERSION_AFTER }}-aarch64-linux-gnu.tar.gz
           asset_name: realtime-v${{ env.VERSION_AFTER }}-aarch64-linux-gnu.tar.gz
           asset_content_type: application/gzip
+
+  upload-docker:
+    name: Upload Docker image
+
+    needs:
+      - release
+
+    runs-on: ubuntu-18.04
+
+    steps:
+      - uses: actions/download-artifact@v2
+
+      - name: Check for new release
+        run: |
+          echo VERSION_BEFORE=$(cat version-before/version-before) >> $GITHUB_ENV
+          echo VERSION_AFTER=$(cat version-after/version-after) >> $GITHUB_ENV
+
+      - if: env.VERSION_BEFORE != env.VERSION_AFTER
+        uses: ./.github/workflows/publish.yml
+        with:
+          version: v${{ env.VERSION_AFTER }}
+        secrets: inherit
