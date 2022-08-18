@@ -12,7 +12,7 @@ defmodule Realtime.Repo.Migrations.ChangeLimitsDefaults do
       modify(:max_concurrent_users, :integer,
         null: false,
         default: 200,
-        from: {:integer, null: false, default: 100}
+        from: {:integer, null: false, default: 200}
       )
     end
   end
