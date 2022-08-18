@@ -34,7 +34,7 @@ export default function Index() {
       params: { apikey: token, vsndate: '2022' },
     });
 
-    channel = socket.channel('any', { configs: { broadcast: { self: true } } })
+    channel = socket.channel('any', { config: { broadcast: { self: true } } })
 
     channel
       .on("postgres_changes", { event: "*", schema: "public" }, payload => {
