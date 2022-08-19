@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - id: semantic
-        uses: cycjimmy/semantic-release-action@v2
+        uses: cycjimmy/semantic-release-action@v3
         with:
           semantic_version: 18
           extra_plugins: |
