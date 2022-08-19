@@ -52,11 +52,11 @@ jobs:
       - name: Prepare release
         run: |
           cd server
-          sed -i "s/@version \".*\"/@version \"${{ steps.semantic.outputs.new_release_version }}\"/" mix.exs
+          sed -i "s/@version \".*\"/@version \"${{ needs.release.outputs.version }}\"/" mix.exs
           mix deps.get
           mix compile
           mix release
-          tar -czf ../realtime-v${{ steps.semantic.outputs.new_release_version }}-x86_64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
+          tar -czf ../realtime-v${{ needs.release.outputs.version }}-x86_64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
         env:
           MIX_ENV: prod
 
@@ -69,8 +69,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ env.UPLOAD_URL }}
-          asset_path: ./realtime-v${{ steps.semantic.outputs.new_release_version }}-x86_64-linux-gnu.tar.gz
-          asset_name: realtime-v${{ steps.semantic.outputs.new_release_version }}-x86_64-linux-gnu.tar.gz
+          asset_path: ./realtime-v${{ needs.release.outputs.version }}-x86_64-linux-gnu.tar.gz
+          asset_name: realtime-v${{ needs.release.outputs.version }}-x86_64-linux-gnu.tar.gz
           asset_content_type: application/gzip
 
   upload-aarch64:
@@ -102,13 +102,13 @@ jobs:
             apt-get -y install --no-install-recommends esl-erlang=1:22.3.4.9-1 elixir=1.10.4-1
 
             cd server
-            sed -i "s/@version \".*\"/@version \"${{ steps.semantic.outputs.new_release_version }}\"/" mix.exs
+            sed -i "s/@version \".*\"/@version \"${{ needs.release.outputs.version }}\"/" mix.exs
             mix local.hex --force
             mix local.rebar --force
             mix deps.get
             mix deps.compile
             mix release
-            tar -czf ../realtime-v${{ steps.semantic.outputs.new_release_version }}-aarch64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
+            tar -czf ../realtime-v${{ needs.release.outputs.version }}-aarch64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
 
       - name: Get upload url
         run: echo UPLOAD_URL=$(curl --silent https://api.github.com/repos/supabase/realtime/releases/latest | jq .upload_url --raw-output) >> $GITHUB_ENV
@@ -119,8 +119,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ env.UPLOAD_URL }}
-          asset_path: ./realtime-v${{ steps.semantic.outputs.new_release_version }}-aarch64-linux-gnu.tar.gz
-          asset_name: realtime-v${{ steps.semantic.outputs.new_release_version }}-aarch64-linux-gnu.tar.gz
+          asset_path: ./realtime-v${{ needs.release.outputs.version }}-aarch64-linux-gnu.tar.gz
+          asset_name: realtime-v${{ needs.release.outputs.version }}-aarch64-linux-gnu.tar.gz
           asset_content_type: application/gzip
 
   upload-docker:
@@ -137,7 +137,7 @@ jobs:
             supabase/realtime
             public.ecr.aws/t3w2s2c9/realtime
           tags: |
-            type=raw,value=v${{ steps.semantic.outputs.new_release_version }}
+            type=raw,value=v${{ needs.release.outputs.version }}
 
       - uses: docker/setup-qemu-action@v2
         with:
