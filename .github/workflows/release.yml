@@ -15,7 +15,7 @@ jobs:
       version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
       - uses: actions/checkout@v3
-      - id: semantic-release
+      - id: semantic
         uses: cycjimmy/semantic-release-action@v2
         with:
           semantic_version: 18
