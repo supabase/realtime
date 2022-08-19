@@ -9,69 +9,38 @@ on:
 jobs:
   release:
     name: Release
-
     runs-on: ubuntu-18.04
-
+    outputs:
+      published: ${{ steps.semantic.outputs.new_release_published }}
+      version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
-      - uses: actions/checkout@v2
-
-      # No easy way to check whether or not semantic-release released a new
-      # version, so we use artifacts as a workaround
-      - name: Get version before
-        run: echo $(curl --silent https://api.github.com/repos/supabase/realtime/releases/latest | jq .name --raw-output | cut -c 2-) > version-before
-
-      - uses: actions/upload-artifact@v2
+      - uses: actions/checkout@v3
+      - id: semantic-release
+        uses: cycjimmy/semantic-release-action@v2
         with:
-          name: version-before
-          path: version-before
-
-      - name: Release on GitHub
-        run: |
-          npx semantic-release --plugins              \
-            @semantic-release/commit-analyzer         \
-            @semantic-release/release-notes-generator \
+          semantic_version: 18
+          extra_plugins: |
+            @semantic-release/commit-analyzer
+            @semantic-release/release-notes-generator
             @semantic-release/github
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # TODO: Race condition: GitHub may not update releases just in time before
-      # this step is invoked. Very unlikely to happen.
-      - name: Get version after
-        run: echo $(curl --silent https://api.github.com/repos/supabase/realtime/releases/latest | jq .name --raw-output | cut -c 2-) > version-after
-
-      - uses: actions/upload-artifact@v2
-        with:
-          name: version-after
-          path: version-after
-
   upload-x86_64:
     name: Upload / Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }}
-
     needs:
       - release
-
     strategy:
       matrix:
         elixir: [1.11.x]
         otp: [23.x]
-
     runs-on: ubuntu-18.04
-
+    if: needs.release.outputs.published == 'true'
     steps:
-      - uses: actions/download-artifact@v2
-
-      - name: Check for new release
-        run: |
-          echo VERSION_BEFORE=$(cat version-before/version-before) >> $GITHUB_ENV
-          echo VERSION_AFTER=$(cat version-after/version-after) >> $GITHUB_ENV
-
-      # No easy way to conditionally skip steps, so we use `if` as a workaround
-      - uses: actions/checkout@v2
-        if: env.VERSION_BEFORE != env.VERSION_AFTER
+      - uses: actions/checkout@v3
 
       - name: Cache Mix
-        if: env.VERSION_BEFORE != env.VERSION_AFTER
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: deps
           key: ${{ runner.os }}-mix-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
@@ -79,60 +48,45 @@ jobs:
             ${{ runner.os }}-mix-
 
       - name: Set up Elixir
-        if: env.VERSION_BEFORE != env.VERSION_AFTER
         uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
 
       - name: Prepare release
-        if: env.VERSION_BEFORE != env.VERSION_AFTER
         run: |
           cd server
-          sed -i "s/@version \".*\"/@version \"${{ env.VERSION_AFTER }}\"/" mix.exs
+          sed -i "s/@version \".*\"/@version \"${{ steps.semantic.outputs.new_release_version }}\"/" mix.exs
           mix deps.get
           mix compile
           mix release
-          tar -czf ../realtime-v${{ env.VERSION_AFTER }}-x86_64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
+          tar -czf ../realtime-v${{ steps.semantic.outputs.new_release_version }}-x86_64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
         env:
           MIX_ENV: prod
 
       - name: Get upload url
-        if: env.VERSION_BEFORE != env.VERSION_AFTER
         run: echo UPLOAD_URL=$(curl --silent https://api.github.com/repos/supabase/realtime/releases/latest | jq .upload_url --raw-output) >> $GITHUB_ENV
 
       - name: Upload release asset
-        if: env.VERSION_BEFORE != env.VERSION_AFTER
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ env.UPLOAD_URL }}
-          asset_path: ./realtime-v${{ env.VERSION_AFTER }}-x86_64-linux-gnu.tar.gz
-          asset_name: realtime-v${{ env.VERSION_AFTER }}-x86_64-linux-gnu.tar.gz
+          asset_path: ./realtime-v${{ steps.semantic.outputs.new_release_version }}-x86_64-linux-gnu.tar.gz
+          asset_name: realtime-v${{ steps.semantic.outputs.new_release_version }}-x86_64-linux-gnu.tar.gz
           asset_content_type: application/gzip
 
   upload-aarch64:
     name: Build and upload arm64 binaries
-
     needs:
       - release
-
     runs-on: ubuntu-18.04
-
+    if: needs.release.outputs.published == 'true'
     steps:
-      - uses: actions/download-artifact@v2
-
-      - name: Check for new release
-        run: |
-          echo VERSION_BEFORE=$(cat version-before/version-before) >> $GITHUB_ENV
-          echo VERSION_AFTER=$(cat version-after/version-after) >> $GITHUB_ENV
-
-      - uses: actions/checkout@v2
-        if: env.VERSION_BEFORE != env.VERSION_AFTER
+      - uses: actions/checkout@v3
 
       - uses: uraimo/run-on-arch-action@v2.0.5
-        if: env.VERSION_BEFORE != env.VERSION_AFTER
         name: Build realtime for aarch64
         id: runcmd
         with:
@@ -152,47 +106,65 @@ jobs:
             apt-get -y install --no-install-recommends esl-erlang=1:22.3.4.9-1 elixir=1.10.4-1
 
             cd server
-            sed -i "s/@version \".*\"/@version \"${{ env.VERSION_AFTER }}\"/" mix.exs
+            sed -i "s/@version \".*\"/@version \"${{ steps.semantic.outputs.new_release_version }}\"/" mix.exs
             mix local.hex --force
             mix local.rebar --force
             mix deps.get
             mix deps.compile
             mix release
-            tar -czf ../realtime-v${{ env.VERSION_AFTER }}-aarch64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
+            tar -czf ../realtime-v${{ steps.semantic.outputs.new_release_version }}-aarch64-linux-gnu.tar.gz -C ./_build/prod/rel realtime
 
       - name: Get upload url
-        if: env.VERSION_BEFORE != env.VERSION_AFTER
         run: echo UPLOAD_URL=$(curl --silent https://api.github.com/repos/supabase/realtime/releases/latest | jq .upload_url --raw-output) >> $GITHUB_ENV
 
       - name: Upload release asset
-        if: env.VERSION_BEFORE != env.VERSION_AFTER
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ env.UPLOAD_URL }}
-          asset_path: ./realtime-v${{ env.VERSION_AFTER }}-aarch64-linux-gnu.tar.gz
-          asset_name: realtime-v${{ env.VERSION_AFTER }}-aarch64-linux-gnu.tar.gz
+          asset_path: ./realtime-v${{ steps.semantic.outputs.new_release_version }}-aarch64-linux-gnu.tar.gz
+          asset_name: realtime-v${{ steps.semantic.outputs.new_release_version }}-aarch64-linux-gnu.tar.gz
           asset_content_type: application/gzip
 
   upload-docker:
     name: Upload Docker image
-
     needs:
       - release
-
-    runs-on: ubuntu-18.04
-
+    runs-on: ubuntu-latest
+    if: needs.release.outputs.published == 'true'
     steps:
-      - uses: actions/download-artifact@v2
-
-      - name: Check for new release
-        run: |
-          echo VERSION_BEFORE=$(cat version-before/version-before) >> $GITHUB_ENV
-          echo VERSION_AFTER=$(cat version-after/version-after) >> $GITHUB_ENV
-
-      - if: env.VERSION_BEFORE != env.VERSION_AFTER
-        uses: ./.github/workflows/publish.yml
+      - id: meta
+        uses: docker/metadata-action@v4
         with:
-          version: v${{ env.VERSION_AFTER }}
-        secrets: inherit
+          images: |
+            supabase/realtime
+            public.ecr.aws/t3w2s2c9/realtime
+          tags: |
+            type=raw,value=v${{ steps.semantic.outputs.new_release_version }}
+
+      - uses: docker/setup-qemu-action@v2
+        with:
+          platforms: amd64,arm64
+      - uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login to ECR
+        uses: docker/login-action@v2
+        with:
+          registry: public.ecr.aws
+          username: ${{ secrets.PROD_ACCESS_KEY_ID }}
+          password: ${{ secrets.PROD_SECRET_ACCESS_KEY }}
+
+      - uses: docker/build-push-action@v3
+        with:
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
