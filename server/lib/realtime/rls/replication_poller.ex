@@ -3,8 +3,6 @@ defmodule Realtime.RLS.ReplicationPoller do
 
   require Logger
 
-  import Realtime.Helpers, only: [broadcast_change: 2]
-
   alias DBConnection.Backoff
 
   alias Realtime.Adapters.Changes.{
@@ -13,6 +11,7 @@ defmodule Realtime.RLS.ReplicationPoller do
     UpdatedRecord
   }
 
+  alias Realtime.SubscribersNotification
   alias Realtime.RLS.Replications
 
   def start_link(opts) do
@@ -107,11 +106,7 @@ defmodule Realtime.RLS.ReplicationPoller do
             end
           end)
           |> Enum.reverse()
-          |> Enum.each(fn %{subscription_ids: ids} = change ->
-            for id <- ids do
-              broadcast_change("postgres_changes:#{Ecto.UUID.cast!(id)}", change)
-            end
-          end)
+          |> SubscribersNotification.notify()
 
       {:ok, _} ->
         :ok
