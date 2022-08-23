@@ -50,7 +50,7 @@ defmodule Realtime.SubscriptionManagerTest do
       [
         %{
           channel_pid: self(),
-          params: %{"schema" => "*"},
+          topic: "test_topic",
           id: @subscription_id,
           claims: @claims
         }
@@ -64,14 +64,14 @@ defmodule Realtime.SubscriptionManagerTest do
        %{
          replication_mode: "RLS",
          subscription_params: %{
-           self() => [
-             %{
-               channel_pid: self(),
-               params: %{"schema" => "*"},
-               id: @subscription_id,
-               claims: @claims
-             }
-           ]
+           self() => %{
+             entities: [],
+             filters: [],
+             topic: "test_topic",
+             id: "bbb51e4e-f371-4463-bf0a-af8f56dc9a71",
+             claims: %{"role" => "authenticated"},
+             claims_role: "authenticated"
+           }
          }
        }}
 
@@ -86,7 +86,7 @@ defmodule Realtime.SubscriptionManagerTest do
       [
         %{
           channel_pid: self(),
-          params: %{"schema" => "public", "table" => "*"},
+          topic: "test_topic",
           id: bin,
           claims: @claims
         }
@@ -96,14 +96,14 @@ defmodule Realtime.SubscriptionManagerTest do
     state = %{
       replication_mode: "RLS",
       subscription_params: %{
-        self() => [
-          %{
-            channel_pid: self(),
-            params: %{"schema" => "public", "table" => "*"},
-            id: bin,
-            claims: @claims
-          }
-        ]
+        self() => %{
+          entities: [],
+          filters: [],
+          topic: "test_topic",
+          id: bin,
+          claims: %{"role" => "authenticated"},
+          claims_role: "authenticated"
+        }
       },
       sync_interval: 15_000,
       sync_ref: make_ref()
@@ -121,21 +121,20 @@ defmodule Realtime.SubscriptionManagerTest do
       [
         %{
           channel_pid: self(),
-          params: %{"schema" => "*"},
+          topic: "test_topic",
           id: bin,
           claims: @claims
         }
       ]
     }
 
-    prev_sub = [
-      %{
-        channel_pid: :some_prev_pid,
-        params: %{"schema" => "public"},
-        id: bin,
-        claims: @claims
-      }
-    ]
+    prev_sub = %{
+      entities: [16537],
+      filters: [],
+      topic: "public:todos",
+      id: bin,
+      claims: @claims
+    }
 
     state = %{
       replication_mode: "RLS",
@@ -153,14 +152,14 @@ defmodule Realtime.SubscriptionManagerTest do
         assert is_reference(new_state.sync_ref)
         assert sub_param.some_prev_pid == prev_sub
 
-        assert sub_param[self()] == [
-                 %{
-                   channel_pid: self(),
-                   params: %{"schema" => "*"},
-                   id: bin,
-                   claims: @claims
-                 }
-               ]
+        assert sub_param[self()] == %{
+                 entities: [],
+                 filters: [],
+                 topic: "test_topic",
+                 id: bin,
+                 claims: @claims,
+                 claims_role: "authenticated"
+               }
 
       other ->
         assert match?({:reply, :ok, _}, other)

@@ -45,15 +45,36 @@ defmodule RealtimeWeb.RealtimeChannel do
       if is_new_api do
         params["configs"]["realtime"]
         |> case do
+          [_ | _] = db_changes_params ->
+            Enum.map(db_changes_params, fn p ->
+              case p do
+                %{"schema" => schema, "table" => table, "filter" => filter} ->
+                  "#{schema}:#{table}:#{filter}"
+
+                %{"schema" => schema, "table" => table} ->
+                  "#{schema}:#{table}"
+
+                %{"schema" => schema} ->
+                  "#{schema}"
+              end
+            end)
+
+          _ ->
+            []
+        end
+        |> Enum.map(&String.downcase/1)
+        |> MapSet.new()
+        |> MapSet.to_list()
+        |> case do
           [_ | _] = params_list ->
             pg_change_params =
               params_list
-              |> Enum.map(fn params ->
+              |> Enum.map(fn subtopic ->
                 %{
                   id: Ecto.UUID.bingenerate(),
                   channel_pid: channel_pid,
                   claims: claims,
-                  params: params
+                  topic: subtopic
                 }
               end)
 
@@ -68,24 +89,12 @@ defmodule RealtimeWeb.RealtimeChannel do
             {:ok, []}
         end
       else
-        params =
-          case String.split(subtopic, ":", parts: 3) do
-            [schema] ->
-              %{"schema" => schema}
-
-            [schema, table] ->
-              %{"schema" => schema, "table" => table}
-
-            [schema, table, filter] ->
-              %{"schema" => schema, "table" => table, "filter" => filter}
-          end
-
         pg_change_params = [
           %{
             id: Ecto.UUID.bingenerate(),
             channel_pid: channel_pid,
             claims: claims,
-            params: params
+            topic: subtopic
           }
         ]
 
@@ -117,22 +126,16 @@ defmodule RealtimeWeb.RealtimeChannel do
 
           send(self(), :after_join)
 
-          {
-            :ok,
-            %{realtime: Enum.map(pg_change_params, &Map.fetch!(&1, :id))},
-            assign(
-              socket,
-              %{
-                access_token: token,
-                ack_broadcast: !!params["configs"]["broadcast"]["ack"],
-                is_new_api: is_new_api,
-                pg_change_params: pg_change_params,
-                presence_key: presence_key,
-                self_broadcast: !!params["configs"]["broadcast"]["self"],
-                verify_token_ref: verify_token_ref
-              }
-            )
-          }
+          {:ok,
+           assign(socket, %{
+             access_token: token,
+             ack_broadcast: !!params["configs"]["broadcast"]["ack"],
+             is_new_api: is_new_api,
+             pg_change_params: pg_change_params,
+             presence_key: presence_key,
+             self_broadcast: !!params["configs"]["broadcast"]["self"],
+             verify_token_ref: verify_token_ref
+           })}
 
         :error ->
           {:error, %{reason: "unable to insert topic subscriptions into database"}}
