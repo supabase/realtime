@@ -108,8 +108,6 @@ defmodule Realtime.RLS.ReplicationPoller do
           end)
           |> Enum.reverse()
           |> Enum.each(fn %{subscription_ids: ids} = change ->
-            change = Map.drop(change, [:subscription_ids])
-
             for id <- ids do
               broadcast_change("postgres_changes:#{Ecto.UUID.cast!(id)}", change)
             end

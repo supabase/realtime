@@ -38,7 +38,7 @@ defmodule Realtime.SubscriptionManager do
 
   @spec track_topic_subscribers(
           list(%{
-            id: Ecto.UUID.t(),
+            id: Ecto.UUID.raw(),
             channel_pid: pid(),
             claims: map(),
             params: map()
