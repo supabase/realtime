@@ -17,26 +17,9 @@ defmodule Realtime.MessageDispatcher do
     new_msg = %{msg | payload: new_payload}
 
     Enum.reduce(topic_subscriptions, %{}, fn
-      {_pid,
-       {:subscriber_fastlane, fastlane_pid, serializer, subscription_id, join_topic, is_new_api}},
-      cache ->
+      {_pid, {:subscriber_fastlane, fastlane_pid, serializer, subscription_id}}, cache ->
         if MapSet.member?(subscription_ids, subscription_id) do
-          new_payload =
-            if is_new_api do
-              %Broadcast{
-                topic: join_topic,
-                event: "realtime",
-                payload: %{payload: new_payload, event: new_payload.type}
-              }
-            else
-              %Broadcast{
-                topic: join_topic,
-                event: new_payload.type,
-                payload: new_payload
-              }
-            end
-
-          broadcast_message(cache, fastlane_pid, new_payload, serializer)
+          broadcast_message(cache, fastlane_pid, new_msg, serializer)
         else
           cache
         end

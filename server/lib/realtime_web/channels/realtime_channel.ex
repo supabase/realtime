@@ -35,17 +35,6 @@ defmodule RealtimeWeb.RealtimeChannel do
              :verify_token,
              min(@verify_token_ms, exp_diff * 1_000)
            ),
-         :ok <- Endpoint.unsubscribe(topic),
-         is_new_api <-
-           (case params do
-              %{"configs" => _} -> true
-              _ -> false
-            end),
-         :ok <-
-           Endpoint.subscribe(topic,
-             metadata:
-               {:subscriber_fastlane, transport_pid, serializer, bin_id, topic, is_new_api}
-           ),
          :ok <-
            SubscriptionManager.track_topic_subscriber(%{
              id: bin_id,
@@ -53,7 +42,12 @@ defmodule RealtimeWeb.RealtimeChannel do
              claims: claims,
              topic: subtopic
            }),
-         :ok <- PubSub.subscribe(Realtime.PubSub, "subscription_manager") do
+         :ok <- PubSub.subscribe(Realtime.PubSub, "subscription_manager"),
+         :ok <- Endpoint.unsubscribe(topic),
+         :ok <-
+           Endpoint.subscribe(topic,
+             metadata: {:subscriber_fastlane, transport_pid, serializer, bin_id}
+           ) do
       SocketMonitor.track_channel(socket)
 
       {:ok,
