@@ -79,13 +79,15 @@ defmodule Realtime.SubscriptionManagerTest do
   end
 
   test "handle_call/track_topic_subscribers, when subscription_params is not empty" do
+    {_, bin} = Ecto.UUID.dump(@subscription_id)
+
     mess = {
       :track_topic_subscribers,
       [
         %{
           channel_pid: self(),
           params: %{"schema" => "public", "table" => "*"},
-          id: @subscription_id,
+          id: bin,
           claims: @claims
         }
       ]
@@ -98,7 +100,7 @@ defmodule Realtime.SubscriptionManagerTest do
           %{
             channel_pid: self(),
             params: %{"schema" => "public", "table" => "*"},
-            id: @subscription_id,
+            id: bin,
             claims: @claims
           }
         ]
@@ -112,13 +114,15 @@ defmodule Realtime.SubscriptionManagerTest do
   end
 
   test "handle_call/track_topic_subscribers, updated state" do
+    {_, bin} = Ecto.UUID.dump(@subscription_id)
+
     mess = {
       :track_topic_subscribers,
       [
         %{
           channel_pid: self(),
           params: %{"schema" => "*"},
-          id: @subscription_id,
+          id: bin,
           claims: @claims
         }
       ]
@@ -128,7 +132,7 @@ defmodule Realtime.SubscriptionManagerTest do
       %{
         channel_pid: :some_prev_pid,
         params: %{"schema" => "public"},
-        id: @subscription_id,
+        id: bin,
         claims: @claims
       }
     ]
@@ -153,7 +157,7 @@ defmodule Realtime.SubscriptionManagerTest do
                  %{
                    channel_pid: self(),
                    params: %{"schema" => "*"},
-                   id: @subscription_id,
+                   id: bin,
                    claims: @claims
                  }
                ]
@@ -194,6 +198,7 @@ defmodule Realtime.SubscriptionManagerTest do
 
   test "handle_info/sync_subscription, when subscription_params is not empty" do
     msg = {:DOWN, make_ref(), :process, self(), :any}
+    {_, bin} = Ecto.UUID.dump(@subscription_id)
 
     state = %{
       subscription_params: %{
@@ -201,7 +206,7 @@ defmodule Realtime.SubscriptionManagerTest do
           entities: [],
           filters: [],
           topic: "public:todos",
-          id: @subscription_id,
+          id: bin,
           claims: @claims
         }
       }
@@ -216,6 +221,7 @@ defmodule Realtime.SubscriptionManagerTest do
     with_mock Realtime.RLS.Subscriptions,
       delete_topic_subscriber: fn _ -> raise "" end do
       msg = {:DOWN, make_ref(), :process, self(), :any}
+      {_, bin} = Ecto.UUID.dump(@subscription_id)
 
       state = %{
         subscription_params: %{
@@ -223,7 +229,7 @@ defmodule Realtime.SubscriptionManagerTest do
             entities: [],
             filters: [],
             topic: "public:todos",
-            id: @subscription_id,
+            id: bin,
             claims: @claims
           }
         }
