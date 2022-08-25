@@ -10,14 +10,19 @@ defmodule Realtime.MessageDispatcher do
 
   def dispatch([_ | _] = topic_subscriptions, _from, payload) do
     {sub_ids, payload} = Map.pop(payload, :subscription_ids)
+    sub_ids = MapSet.new(sub_ids)
 
     Enum.reduce(topic_subscriptions, %{}, fn
       {_pid, {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, is_new_api}},
       cache ->
-        sub_ids
-        |> MapSet.new()
-        |> MapSet.intersection(MapSet.new(ids))
-        |> MapSet.to_list()
+        for {bin_id, id} <- ids, reduce: [] do
+          acc ->
+            if MapSet.member?(sub_ids, bin_id) do
+              [id | acc]
+            else
+              acc
+            end
+        end
         |> case do
           [_ | _] = valid_ids ->
             new_payload =
@@ -25,7 +30,7 @@ defmodule Realtime.MessageDispatcher do
                 %Broadcast{
                   topic: join_topic,
                   event: "postgres_changes",
-                  payload: %{ids: Enum.map(valid_ids, &UUID.binary_to_string!(&1)), data: payload}
+                  payload: %{ids: valid_ids, data: payload}
                 }
               else
                 %Broadcast{
@@ -48,6 +53,7 @@ defmodule Realtime.MessageDispatcher do
   defp broadcast_message(cache, fastlane_pid, msg, serializer) do
     case cache do
       %{^msg => encoded_msg} ->
+        IO.inspect({"========================"})
         send(fastlane_pid, encoded_msg)
         cache
 
