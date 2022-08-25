@@ -53,7 +53,6 @@ defmodule Realtime.MessageDispatcher do
   defp broadcast_message(cache, fastlane_pid, msg, serializer) do
     case cache do
       %{^msg => encoded_msg} ->
-        IO.inspect({"========================"})
         send(fastlane_pid, encoded_msg)
         cache
 
