@@ -332,7 +332,9 @@ defmodule RealtimeWeb.RealtimeChannel do
           assign(socket, :limits, limits)
       end
 
-    update_tenant_limits()
+    backoff(30, 90)
+    |> update_tenant_limits()
+
     {:noreply, socket}
   end
 
