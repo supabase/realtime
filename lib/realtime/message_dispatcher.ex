@@ -11,40 +11,41 @@ defmodule Realtime.MessageDispatcher do
   def dispatch([_ | _] = topic_subscriptions, _from, payload) do
     {sub_ids, payload} = Map.pop(payload, :subscription_ids)
 
-    Enum.reduce(topic_subscriptions, %{}, fn
-      {_pid, {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, is_new_api}},
-      cache ->
-        for {bin_id, id} <- ids, reduce: [] do
-          acc ->
-            if MapSet.member?(sub_ids, bin_id) do
-              [id | acc]
-            else
-              acc
-            end
-        end
-        |> case do
-          [_ | _] = valid_ids ->
-            new_payload =
-              if is_new_api do
-                %Broadcast{
-                  topic: join_topic,
-                  event: "postgres_changes",
-                  payload: %{ids: valid_ids, data: payload}
-                }
+    _ =
+      Enum.reduce(topic_subscriptions, %{}, fn
+        {_pid, {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, is_new_api}},
+        cache ->
+          for {bin_id, id} <- ids, reduce: [] do
+            acc ->
+              if MapSet.member?(sub_ids, bin_id) do
+                [id | acc]
               else
-                %Broadcast{
-                  topic: join_topic,
-                  event: payload.type,
-                  payload: payload
-                }
+                acc
               end
+          end
+          |> case do
+            [_ | _] = valid_ids ->
+              new_payload =
+                if is_new_api do
+                  %Broadcast{
+                    topic: join_topic,
+                    event: "postgres_changes",
+                    payload: %{ids: valid_ids, data: payload}
+                  }
+                else
+                  %Broadcast{
+                    topic: join_topic,
+                    event: payload.type,
+                    payload: payload
+                  }
+                end
 
-            broadcast_message(cache, fastlane_pid, new_payload, serializer)
+              broadcast_message(cache, fastlane_pid, new_payload, serializer)
 
-          _ ->
-            cache
-        end
-    end)
+            _ ->
+              cache
+          end
+      end)
 
     :ok
   end
