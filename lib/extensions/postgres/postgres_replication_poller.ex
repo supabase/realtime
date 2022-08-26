@@ -7,6 +7,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   alias Extensions.Postgres
   alias Postgres.Replications
+  alias DBConnection.Backoff
 
   alias Realtime.{MessageDispatcher, PubSub, Repo}
 
@@ -24,8 +25,17 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   @impl true
   def init(args) do
+    {:ok, conn} =
+      connect_db(args["db_host"], args["db_name"], args["db_user"], args["db_password"])
+
     state = %{
-      conn: nil,
+      backoff:
+        Backoff.new(
+          backoff_min: 100,
+          backoff_max: 120_000,
+          backoff_type: :rand_exp
+        ),
+      conn: conn,
       db_host: args["db_host"],
       db_name: args["db_name"],
       db_user: args["db_user"],
@@ -46,56 +56,39 @@ defmodule Extensions.Postgres.ReplicationPoller do
   def handle_continue(
         :prepare_replication,
         %{
+          backoff: backoff,
+          conn: conn,
           db_host: db_host,
           db_name: db_name,
-          db_pass: db_pass,
           db_user: db_user,
+          db_pass: db_pass,
           slot_name: slot_name
         } = state
       ) do
-    secure_key = Application.get_env(:realtime, :db_enc_key)
-    db_host = decrypt!(db_host, secure_key)
-    db_name = decrypt!(db_name, secure_key)
-    db_pass = decrypt!(db_pass, secure_key)
-    db_user = decrypt!(db_user, secure_key)
+    try do
+      migrate_tenant(db_host, db_name, db_user, db_pass)
+      Replications.prepare_replication(conn, slot_name)
+    catch
+      :error, error -> {:error, error}
+    end
+    |> case do
+      {:ok, _} ->
+        send(self(), :poll)
+        {:noreply, state}
 
-    Repo.with_dynamic_repo(
-      [hostname: db_host, database: db_name, password: db_pass, username: db_user],
-      fn repo ->
-        Ecto.Migrator.run(
-          Repo,
-          [Ecto.Migrator.migrations_path(Repo, "postgres/migrations")],
-          :up,
-          all: true,
-          prefix: "realtime",
-          dynamic_repo: repo
-        )
-      end
-    )
-
-    {:ok, conn} =
-      Postgrex.start_link(
-        hostname: db_host,
-        database: db_name,
-        password: db_pass,
-        username: db_user,
-        queue_target: @queue_target,
-        parameters: [
-          application_name: "realtime_rls"
-        ]
-      )
-
-    {:ok, _} = Replications.prepare_replication(conn, slot_name)
-
-    send(self(), :poll)
-
-    {:noreply, %{state | conn: conn}}
+      {:error, error} ->
+        Logger.error("Prepare replication error: #{inspect(error)}")
+        {timeout, backoff} = Backoff.backoff(backoff)
+        Process.sleep(timeout)
+        {:noreply, %{state | backoff: backoff}, {:continue, :prepare_replication}}
+    end
   end
 
   @impl true
   def handle_info(
         :poll,
         %{
+          backoff: backoff,
           poll_interval_ms: poll_interval_ms,
           poll_ref: poll_ref,
           publication: publication,
@@ -153,6 +146,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
     end
     |> case do
       {:ok, rows_num} ->
+        backoff = Backoff.reset(backoff)
+
         poll_ref =
           if rows_num > 0 do
             send(self(), :poll)
@@ -161,10 +156,15 @@ defmodule Extensions.Postgres.ReplicationPoller do
             Process.send_after(self(), :poll, poll_interval_ms)
           end
 
-        {:noreply, %{state | poll_ref: poll_ref}}
+        {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
 
       {:error, reason} ->
-        {:stop, inspect(reason, pretty: true), state}
+        Logger.error("Error polling replication: #{inspect(reason, pretty: true)}")
+
+        {timeout, backoff} = Backoff.backoff(backoff)
+        Process.sleep(timeout)
+
+        {:noreply, %{state | backoff: backoff}, {:continue, :prepare_replication}}
     end
   end
 
@@ -246,4 +246,48 @@ defmodule Extensions.Postgres.ReplicationPoller do
   defp convert_errors([_ | _] = errors), do: errors
 
   defp convert_errors(_), do: nil
+
+  def connect_db(host, name, user, pass) do
+    {host, name, user, pass} = decrypt_creds(host, name, user, pass)
+
+    Postgrex.start_link(
+      hostname: host,
+      database: name,
+      password: pass,
+      username: user,
+      queue_target: @queue_target,
+      parameters: [
+        application_name: "realtime_rls"
+      ]
+    )
+  end
+
+  def migrate_tenant(host, name, user, pass) do
+    {host, name, user, pass} = decrypt_creds(host, name, user, pass)
+
+    Repo.with_dynamic_repo(
+      [hostname: host, database: name, password: pass, username: user],
+      fn repo ->
+        Ecto.Migrator.run(
+          Repo,
+          [Ecto.Migrator.migrations_path(Repo, "postgres/migrations")],
+          :up,
+          all: true,
+          prefix: "realtime",
+          dynamic_repo: repo
+        )
+      end
+    )
+  end
+
+  def decrypt_creds(host, name, user, pass) do
+    secure_key = Application.get_env(:realtime, :db_enc_key)
+
+    {
+      decrypt!(host, secure_key),
+      decrypt!(name, secure_key),
+      decrypt!(user, secure_key),
+      decrypt!(pass, secure_key)
+    }
+  end
 end
