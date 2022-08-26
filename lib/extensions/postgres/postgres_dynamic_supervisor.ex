@@ -1,4 +1,5 @@
 defmodule Extensions.Postgres.DynamicSupervisor do
+  @moduledoc false
   use Supervisor
 
   alias Extensions.Postgres

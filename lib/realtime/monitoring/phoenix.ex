@@ -8,7 +8,6 @@ if Code.ensure_loaded?(Phoenix) do
     require Logger
 
     alias Phoenix.Socket
-    alias Plug.Conn
     alias RealtimeWeb.Endpoint.HTTP, as: HTTP
 
     @stop_event [:prom_ex, :plugin, :phoenix, :stop]
@@ -143,70 +142,6 @@ if Code.ensure_loaded?(Phoenix) do
       )
     end
 
-    defp get_conn_tags(routers, additional_routes) do
-      fn
-        %{conn: %Conn{} = conn} ->
-          default_route_tags = handle_additional_routes_check(conn, additional_routes)
-
-          conn
-          |> do_get_router_info(routers, default_route_tags)
-          |> Map.merge(%{
-            status: conn.status,
-            method: conn.method
-          })
-
-        _ ->
-          Logger.warning("Could not resolve path for request")
-      end
-    end
-
-    defp do_get_router_info(conn, routers, default_route_tags) do
-      routers
-      |> Enum.find_value(default_route_tags, fn router ->
-        case Phoenix.Router.route_info(router, conn.method, conn.request_path, "") do
-          :error ->
-            false
-
-          %{route: path, plug: controller, plug_opts: action} ->
-            %{
-              path: path,
-              controller: normalize_module_name(controller),
-              action: normalize_action(action)
-            }
-        end
-      end)
-    end
-
-    defp handle_additional_routes_check(%Conn{request_path: request_path}, additional_routes) do
-      default_tags = %{
-        path: "Unknown",
-        controller: "Unknown",
-        action: "Unknown"
-      }
-
-      additional_routes
-      |> Enum.find_value(default_tags, fn {path_label, route_check} ->
-        cond do
-          is_binary(route_check) and route_check == request_path ->
-            %{
-              path: path_label,
-              controller: "NA",
-              action: "NA"
-            }
-
-          match?(%Regex{}, route_check) and Regex.match?(route_check, request_path) ->
-            %{
-              path: path_label,
-              controller: "NA",
-              action: "NA"
-            }
-
-          true ->
-            false
-        end
-      end)
-    end
-
     defp set_up_telemetry_proxy(phoenix_event_prefixes) do
       phoenix_event_prefixes
       |> Enum.each(fn telemetry_prefix ->
@@ -234,27 +169,6 @@ if Code.ensure_loaded?(Phoenix) do
 
     defp normalize_module_name(name), do: name
 
-    defp normalize_action(action) when is_atom(action), do: action
-    defp normalize_action(_action), do: "Unknown"
-
-    defp fetch_additional_routes!(opts) do
-      opts
-      |> fetch_either!(:router, :endpoints)
-      |> case do
-        endpoints when is_list(endpoints) ->
-          endpoints
-          |> Enum.flat_map(fn
-            {_endpoint, endpoint_opts} ->
-              Keyword.get(endpoint_opts, :additional_routes, [])
-          end)
-          |> MapSet.new()
-          |> MapSet.to_list()
-
-        _router ->
-          Keyword.get(opts, :additional_routes, [])
-      end
-    end
-
     defp fetch_event_prefixes!(opts) do
       opts
       |> fetch_either!(:router, :endpoints)
@@ -271,25 +185,6 @@ if Code.ensure_loaded?(Phoenix) do
       end
       |> MapSet.new()
       |> MapSet.to_list()
-    end
-
-    defp fetch_routers!(opts) do
-      opts
-      |> fetch_either!(:router, :endpoints)
-      |> case do
-        endpoints when is_list(endpoints) ->
-          endpoints
-          |> Enum.flat_map(fn
-            {_endpoint, endpoint_opts} ->
-              endpoint_opts
-              |> Keyword.fetch!(:routers)
-          end)
-          |> MapSet.new()
-          |> MapSet.to_list()
-
-        router ->
-          [router]
-      end
     end
 
     defp fetch_either!(keywordlist, key1, key2) do

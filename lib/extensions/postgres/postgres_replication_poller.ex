@@ -172,26 +172,23 @@ defmodule Extensions.Postgres.ReplicationPoller do
         {"wal",
          %{
            "type" => "INSERT" = type,
-           "columns" => columns,
-           "commit_timestamp" => commit_timestamp,
            "schema" => schema,
-           "table" => table,
-           "record" => record
-         }},
-        {"is_rls_enabled", is_rls_enabled},
+           "table" => table
+         } = wal},
+        {"is_rls_enabled", _},
         {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
-      when is_boolean(is_rls_enabled) and is_list(subscription_ids) do
+      when is_list(subscription_ids) do
     %NewRecord{
-      columns: columns,
-      commit_timestamp: commit_timestamp,
+      columns: Map.get(wal, "columns", []),
+      commit_timestamp: Map.get(wal, "commit_timestamp"),
       errors: convert_errors(errors),
       schema: schema,
       table: table,
       type: type,
-      subscription_ids: subscription_ids,
-      record: record
+      subscription_ids: MapSet.new(subscription_ids),
+      record: Map.get(wal, "record", %{})
     }
   end
 
@@ -199,28 +196,24 @@ defmodule Extensions.Postgres.ReplicationPoller do
         {"wal",
          %{
            "type" => "UPDATE" = type,
-           "columns" => columns,
-           "commit_timestamp" => commit_timestamp,
            "schema" => schema,
-           "table" => table,
-           "record" => record,
-           "old_record" => old_record
-         }},
-        {"is_rls_enabled", is_rls_enabled},
+           "table" => table
+         } = wal},
+        {"is_rls_enabled", _},
         {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
-      when is_boolean(is_rls_enabled) and is_list(subscription_ids) do
+      when is_list(subscription_ids) do
     %UpdatedRecord{
-      columns: columns,
-      commit_timestamp: commit_timestamp,
+      columns: Map.get(wal, "columns", []),
+      commit_timestamp: Map.get(wal, "commit_timestamp"),
       errors: convert_errors(errors),
       schema: schema,
       table: table,
       type: type,
-      subscription_ids: subscription_ids,
-      old_record: old_record,
-      record: record
+      subscription_ids: MapSet.new(subscription_ids),
+      old_record: Map.get(wal, "old_record", %{}),
+      record: Map.get(wal, "record", %{})
     }
   end
 
@@ -228,26 +221,23 @@ defmodule Extensions.Postgres.ReplicationPoller do
         {"wal",
          %{
            "type" => "DELETE" = type,
-           "columns" => columns,
-           "commit_timestamp" => commit_timestamp,
            "schema" => schema,
-           "table" => table,
-           "old_record" => old_record
-         }},
-        {"is_rls_enabled", is_rls_enabled},
+           "table" => table
+         } = wal},
+        {"is_rls_enabled", _},
         {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
-      when is_boolean(is_rls_enabled) and is_list(subscription_ids) do
+      when is_list(subscription_ids) do
     %DeletedRecord{
-      columns: columns,
-      commit_timestamp: commit_timestamp,
+      columns: Map.get(wal, "columns", []),
+      commit_timestamp: Map.get(wal, "commit_timestamp"),
       errors: convert_errors(errors),
       schema: schema,
       table: table,
       type: type,
-      subscription_ids: subscription_ids,
-      old_record: old_record
+      subscription_ids: MapSet.new(subscription_ids),
+      old_record: Map.get(wal, "old_record", %{})
     }
   end
 

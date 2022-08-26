@@ -1,4 +1,5 @@
 defmodule Realtime.UsersCounter do
+  @moduledoc false
   require Logger
 
   def add(pid, tenant) do

@@ -1,6 +1,5 @@
 defmodule Realtime.Extensions.PostgresSubscriptionsTest do
   use RealtimeWeb.ChannelCase
-  import Mock
   alias Extensions.Postgres.Subscriptions
 
   @oids %{{"public", "some_table"} => [1]}

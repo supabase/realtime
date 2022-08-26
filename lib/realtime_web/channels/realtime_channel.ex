@@ -112,11 +112,13 @@ defmodule RealtimeWeb.RealtimeChannel do
         end
         |> case do
           [_ | _] = pg_change_params ->
+            ids =
+              for %{id: id, params: params} <- pg_change_params do
+                {UUID.string_to_binary!(id), :erlang.phash2(params)}
+              end
+
             metadata = [
-              metadata:
-                {:subscriber_fastlane, transport_pid, serializer,
-                 Enum.map(pg_change_params, &(&1 |> Map.fetch!(:id) |> UUID.string_to_binary!())),
-                 topic, is_new_api}
+              metadata: {:subscriber_fastlane, transport_pid, serializer, ids, topic, is_new_api}
             ]
 
             Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
@@ -150,7 +152,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:ok,
        %{
          postgres_changes:
-           Enum.map(pg_change_params, fn %{id: id, params: params} ->
+           Enum.map(pg_change_params, fn %{params: params} ->
+             id = :erlang.phash2(params)
              Map.put(params, :id, id)
            end)
        },
@@ -329,7 +332,9 @@ defmodule RealtimeWeb.RealtimeChannel do
           assign(socket, :limits, limits)
       end
 
-    update_tenant_limits()
+    backoff(30, 90)
+    |> update_tenant_limits()
+
     {:noreply, socket}
   end
 
