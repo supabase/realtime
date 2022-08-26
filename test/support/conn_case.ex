@@ -16,6 +16,7 @@ defmodule RealtimeWeb.ConnCase do
   """
 
   use ExUnit.CaseTemplate
+  alias Ecto.Adapters.SQL.Sandbox
 
   using do
     quote do
@@ -30,10 +31,10 @@ defmodule RealtimeWeb.ConnCase do
   end
 
   setup tags do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Realtime.Repo)
+    :ok = Sandbox.checkout(Realtime.Repo)
 
     unless tags[:async] do
-      Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, {:shared, self()})
+      Sandbox.mode(Realtime.Repo, {:shared, self()})
     end
 
     {:ok, conn: Phoenix.ConnTest.build_conn()}
