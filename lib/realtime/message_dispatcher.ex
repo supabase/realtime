@@ -10,7 +10,6 @@ defmodule Realtime.MessageDispatcher do
 
   def dispatch([_ | _] = topic_subscriptions, _from, payload) do
     {sub_ids, payload} = Map.pop(payload, :subscription_ids)
-    sub_ids = MapSet.new(sub_ids)
 
     Enum.reduce(topic_subscriptions, %{}, fn
       {_pid, {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, is_new_api}},
