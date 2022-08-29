@@ -2,7 +2,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
   use RealtimeWeb.ConnCase
 
   import Mock
-  alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
+  alias RealtimeWeb.JwtVerification
 
   setup %{conn: conn} do
     new_conn =

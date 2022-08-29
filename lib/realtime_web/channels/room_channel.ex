@@ -1,4 +1,6 @@
 defmodule RealtimeWeb.RoomChannel do
+  @moduledoc false
+
   use RealtimeWeb, :channel
   alias RealtimeWeb.Presence
 

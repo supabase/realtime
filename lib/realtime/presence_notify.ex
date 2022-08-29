@@ -1,4 +1,6 @@
 defmodule Realtime.PresenceNotify do
+  @moduledoc false
+
   use GenServer
   require Logger
 

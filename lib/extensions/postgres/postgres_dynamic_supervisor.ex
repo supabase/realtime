@@ -1,4 +1,5 @@
 defmodule Extensions.Postgres.DynamicSupervisor do
+  @moduledoc false
   use Supervisor
 
   alias Extensions.Postgres
@@ -32,6 +33,6 @@ defmodule Extensions.Postgres.DynamicSupervisor do
       }
     ]
 
-    Supervisor.init(children, strategy: :one_for_one)
+    Supervisor.init(children, strategy: :one_for_all, max_restarts: 10, max_seconds: 60)
   end
 end

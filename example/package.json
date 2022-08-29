@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^4.7.0",
-    "@supabase/supabase-js": "1.36.0-next.22",
+    "@supabase/supabase-js": "v2.0.0-rc.3",
     "antd": "^4.18.5",
     "next": "12.1.0",
     "react": "17.0.2",
