@@ -45,5 +45,7 @@ COPY --from=app_builder /app/_build .
 # RUN chown -R app: ./prod
 # USER app
 
+ENTRYPOINT ["docker-entrypoint.sh"]
+
 # Run the Phoenix app
 CMD ["./prod/rel/realtime/bin/realtime", "start"]
