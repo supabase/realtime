@@ -14,7 +14,7 @@ defmodule Realtime.Repo do
 
   def with_dynamic_repo(credentials, callback) do
     default_dynamic_repo = get_dynamic_repo()
-    start_opts = [name: @name, pool_size: @pool_size, socket_options: [:inet6]] ++ credentials
+    start_opts = [name: @name, pool_size: @pool_size] ++ credentials
     {:ok, repo} = Realtime.Repo.start_link(start_opts)
 
     try do
