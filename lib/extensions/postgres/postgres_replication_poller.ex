@@ -285,7 +285,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
         database: name,
         password: pass,
         username: user,
-        socket_opts: socket_opts
+        socket_options: socket_opts
       ],
       fn repo ->
         Ecto.Migrator.run(
