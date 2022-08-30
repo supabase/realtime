@@ -183,7 +183,7 @@ defmodule Realtime.Api do
       {:limit, :all, tenant.external_id},
       {:limit, :user_channels, tenant.external_id},
       {:limit, :channel_joins, tenant.external_id},
-      {:limit, :tenant_events, tenant}
+      {:limit, :tenant_events, tenant.external_id}
     ]
 
     nodes = [Node.self() | Node.list()]
