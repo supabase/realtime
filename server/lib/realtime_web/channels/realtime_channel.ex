@@ -15,9 +15,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         params,
         %Socket{
           assigns: %{access_token: access_token},
-          channel_pid: channel_pid,
-          serializer: serializer,
-          transport_pid: transport_pid
+          channel_pid: channel_pid
         } = socket
       ) do
     with token when is_binary(token) <-
@@ -42,13 +40,10 @@ defmodule RealtimeWeb.RealtimeChannel do
              claims: claims,
              topic: subtopic
            }),
-         :ok <- PubSub.subscribe(Realtime.PubSub, "subscription_manager"),
-         :ok <- Endpoint.unsubscribe(topic),
-         :ok <-
-           Endpoint.subscribe(topic,
-             metadata: {:subscriber_fastlane, transport_pid, serializer, bin_id}
-           ) do
+         :ok <- PubSub.subscribe(Realtime.PubSub, "subscription_manager") do
       SocketMonitor.track_channel(socket)
+
+      send(self(), :after_join)
 
       {:ok,
        assign(socket, %{id: bin_id, access_token: token, verify_token_ref: verify_token_ref})}
@@ -60,6 +55,26 @@ defmodule RealtimeWeb.RealtimeChannel do
   def join(_, _, socket) do
     SocketMonitor.track_channel(socket)
     {:ok, socket}
+  end
+
+  def handle_info(
+        :after_join,
+        %Socket{
+          assigns: %{id: id},
+          serializer: serializer,
+          topic: topic,
+          transport_pid: transport_pid
+        } = socket
+      ) do
+    with :ok <- Endpoint.unsubscribe(topic),
+         :ok <-
+           Endpoint.subscribe(topic,
+             metadata: {:subscriber_fastlane, transport_pid, serializer, id}
+           ) do
+      {:noreply, socket}
+    else
+      _ -> {:stop, :subscriber_fastlane_subscribe_error, socket}
+    end
   end
 
   def handle_info(
