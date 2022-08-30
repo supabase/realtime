@@ -23,13 +23,15 @@ defmodule Extensions.Postgres.SubscriptionsChecker do
     %{
       "id" => id,
       "db_host" => host,
+      "db_port" => port,
       "db_name" => name,
       "db_user" => user,
       "db_password" => pass,
+      "db_socket_opts" => socket_opts,
       "subscribers_tid" => subscribers_tid
     } = args
 
-    {:ok, conn} = H.connect_db(host, name, user, pass, 1)
+    {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1)
 
     state = %{
       id: id,

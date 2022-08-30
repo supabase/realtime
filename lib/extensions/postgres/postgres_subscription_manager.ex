@@ -27,13 +27,15 @@ defmodule Extensions.Postgres.SubscriptionManager do
       "publication" => publication,
       "subscribers_tid" => subscribers_tid,
       "db_host" => host,
+      "db_port" => port,
       "db_name" => name,
       "db_user" => user,
-      "db_password" => pass
+      "db_password" => pass,
+      "db_socket_opts" => socket_opts
     } = args
 
-    {:ok, conn} = H.connect_db(host, name, user, pass, 1)
-    {:ok, conn_pub} = H.connect_db(host, name, user, pass)
+    {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1)
+    {:ok, conn_pub} = H.connect_db(host, port, name, user, pass, socket_opts)
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
 
     state = %{

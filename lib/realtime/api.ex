@@ -160,7 +160,7 @@ defmodule Realtime.Api do
   end
 
   def preload_counters(%Tenant{} = tenant) do
-    id = {:limits, :all, tenant.external_id}
+    id = {:limit, :all, tenant.external_id}
 
     preload_counters(tenant, id)
   end
@@ -176,5 +176,34 @@ defmodule Realtime.Api do
     tenant
     |> Map.put(:events_per_second_rolling, avg)
     |> Map.put(:events_per_second_now, current)
+  end
+
+  def get_tenant_limits(%Tenant{} = tenant) do
+    limiter_keys = [
+      {:limit, :all, tenant.external_id},
+      {:limit, :user_channels, tenant.external_id},
+      {:limit, :channel_joins, tenant.external_id},
+      {:limit, :tenant_events, tenant.external_id}
+    ]
+
+    nodes = [Node.self() | Node.list()]
+
+    nodes
+    |> Enum.map(fn node ->
+      Task.Supervisor.async({Realtime.TaskSupervisor, node}, fn ->
+        for {_key, name, _external_id} = key <- limiter_keys do
+          {_status, response} = Realtime.GenCounter.get(key)
+
+          %{
+            external_id: tenant.external_id,
+            node: node,
+            limiter: name,
+            counter: response
+          }
+        end
+      end)
+    end)
+    |> Task.await_many()
+    |> List.flatten()
   end
 end

@@ -529,7 +529,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp assign_counter(%{assigns: %{tenant: tenant}} = socket) do
-    key = {:limits, :tenant_events, tenant}
+    key = {:limit, :tenant_events, tenant}
 
     GenCounter.new(key)
     RateCounter.new(key, idle_shutdown: :infinity)
