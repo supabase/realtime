@@ -29,6 +29,20 @@ defmodule Extensions.Postgres do
   @spec start(map()) ::
           :ok | {:error, :already_started | :reserved}
   def start(args) do
+    addrtype =
+      case args["ip_version"] do
+        6 ->
+          :inet6
+
+        _ ->
+          :inet
+      end
+
+    args =
+      Map.merge(args, %{
+        "db_socket_opts" => [addrtype]
+      })
+
     DynamicSupervisor.start_child(Postgres.DynamicSupervisor, %{
       id: args["id"],
       start: {Postgres.DynamicSupervisor, :start_link, [args]},

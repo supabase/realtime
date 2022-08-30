@@ -26,7 +26,14 @@ defmodule Extensions.Postgres.ReplicationPoller do
   @impl true
   def init(args) do
     {:ok, conn} =
-      connect_db(args["db_host"], args["db_name"], args["db_user"], args["db_password"])
+      connect_db(
+        args["db_host"],
+        args["db_port"],
+        args["db_name"],
+        args["db_user"],
+        args["db_password"],
+        args["db_socket_opts"]
+      )
 
     state = %{
       backoff:
@@ -37,9 +44,11 @@ defmodule Extensions.Postgres.ReplicationPoller do
         ),
       conn: conn,
       db_host: args["db_host"],
+      db_port: args["db_port"],
       db_name: args["db_name"],
       db_user: args["db_user"],
       db_pass: args["db_password"],
+      db_socket_opts: args["db_socket_opts"],
       max_changes: args["poll_max_changes"],
       max_record_bytes: args["poll_max_record_bytes"],
       poll_interval_ms: args["poll_interval_ms"],
@@ -59,14 +68,16 @@ defmodule Extensions.Postgres.ReplicationPoller do
           backoff: backoff,
           conn: conn,
           db_host: db_host,
+          db_port: db_port,
           db_name: db_name,
           db_user: db_user,
           db_pass: db_pass,
+          db_socket_opts: socket_opts,
           slot_name: slot_name
         } = state
       ) do
     try do
-      migrate_tenant(db_host, db_name, db_user, db_pass)
+      migrate_tenant(db_host, db_port, db_name, db_user, db_pass, socket_opts)
       Replications.prepare_replication(conn, slot_name)
     catch
       :error, error -> {:error, error}
@@ -247,11 +258,12 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   defp convert_errors(_), do: nil
 
-  def connect_db(host, name, user, pass) do
-    {host, name, user, pass} = decrypt_creds(host, name, user, pass)
+  def connect_db(host, port, name, user, pass, socket_opts) do
+    {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
 
     Postgrex.start_link(
       hostname: host,
+      port: port,
       database: name,
       password: pass,
       username: user,
@@ -259,15 +271,22 @@ defmodule Extensions.Postgres.ReplicationPoller do
       parameters: [
         application_name: "realtime_rls"
       ],
-      socket_options: [:inet6]
+      socket_options: socket_opts
     )
   end
 
-  def migrate_tenant(host, name, user, pass) do
-    {host, name, user, pass} = decrypt_creds(host, name, user, pass)
+  def migrate_tenant(host, port, name, user, pass, socket_opts) do
+    {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
 
     Repo.with_dynamic_repo(
-      [hostname: host, database: name, password: pass, username: user],
+      [
+        hostname: host,
+        port: port,
+        database: name,
+        password: pass,
+        username: user,
+        socket_opts: socket_opts
+      ],
       fn repo ->
         Ecto.Migrator.run(
           Repo,
@@ -281,11 +300,12 @@ defmodule Extensions.Postgres.ReplicationPoller do
     )
   end
 
-  def decrypt_creds(host, name, user, pass) do
+  def decrypt_creds(host, port, name, user, pass) do
     secure_key = Application.get_env(:realtime, :db_enc_key)
 
     {
       decrypt!(host, secure_key),
+      decrypt!(port, secure_key),
       decrypt!(name, secure_key),
       decrypt!(user, secure_key),
       decrypt!(pass, secure_key)
