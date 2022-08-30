@@ -258,7 +258,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
       queue_target: @queue_target,
       parameters: [
         application_name: "realtime_rls"
-      ]
+      ],
+      socket_options: [:inet6]
     )
   end
 

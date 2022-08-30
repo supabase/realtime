@@ -47,7 +47,8 @@ defmodule Realtime.Helpers do
       queue_target: queue_target,
       parameters: [
         application_name: "supabase_realtime"
-      ]
+      ],
+      socket_options: [:inet6]
     )
   end
 
