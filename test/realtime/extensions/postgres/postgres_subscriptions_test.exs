@@ -1,6 +1,5 @@
 defmodule Realtime.Extensions.PostgresSubscriptionsTest do
   use RealtimeWeb.ChannelCase
-  import Mock
   alias Extensions.Postgres.Subscriptions, as: S
   alias Postgrex, as: P
 
