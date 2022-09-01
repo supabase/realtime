@@ -11,6 +11,18 @@ defmodule Extensions.Postgres.SubscriptionsChecker do
 
   @timeout 120_000
 
+  defmodule State do
+    @moduledoc false
+    defstruct [:id, :conn, :check_active_pids, :subscribers_tid]
+
+    @type t :: %__MODULE__{
+            id: String.t(),
+            conn: Postgrex.conn(),
+            check_active_pids: reference(),
+            subscribers_tid: :ets.tid()
+          }
+  end
+
   @spec start_link(GenServer.options()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
@@ -33,7 +45,7 @@ defmodule Extensions.Postgres.SubscriptionsChecker do
 
     {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1)
 
-    state = %{
+    state = %State{
       id: id,
       conn: conn,
       check_active_pids: check_active_pids(),
@@ -44,7 +56,10 @@ defmodule Extensions.Postgres.SubscriptionsChecker do
   end
 
   @impl true
-  def handle_info(:check_active_pids, %{check_active_pids: ref, subscribers_tid: tid} = state) do
+  def handle_info(
+        :check_active_pids,
+        %State{check_active_pids: ref, subscribers_tid: tid} = state
+      ) do
     H.cancel_timer(ref)
 
     ids =

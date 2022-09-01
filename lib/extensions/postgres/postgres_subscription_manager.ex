@@ -14,6 +14,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
   @max_delete_records 100
 
   defmodule State do
+    @moduledoc false
     defstruct [
       :id,
       :publication,
@@ -28,7 +29,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
             id: String.t(),
             publication: String.t(),
             subscribers_tid: :ets.tid(),
-            conn: pid(),
+            conn: Postgrex.conn(),
             oids: map(),
             check_oid_ref: reference() | nil,
             delete_queue: %{
