@@ -10,7 +10,6 @@ defmodule Extensions.Postgres.Subscriptions do
   @spec create(conn(), String.t(), list(map())) ::
           {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | String.t()}
   def create(conn, publication, params_list) do
-    # IO.inspect({123, publication, params_list})
     sql = "with sub_tables as (
 		    select
 			    rr.entity
