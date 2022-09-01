@@ -5,12 +5,12 @@ defmodule Extensions.Postgres.Subscriptions do
   require Logger
   import Postgrex, only: [transaction: 2, query: 3, query!: 3, rollback: 2]
 
-  @type tid() :: :ets.tid()
-  @type conn() :: DBConnection.conn()
+  @type conn() :: Postgrex.conn()
 
   @spec create(conn(), String.t(), list(map())) ::
           {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | String.t()}
   def create(conn, publication, params_list) do
+    # IO.inspect({123, publication, params_list})
     sql = "with sub_tables as (
 		    select
 			    rr.entity
@@ -91,26 +91,6 @@ defmodule Extensions.Postgres.Subscriptions do
     end)
   end
 
-  # @spec update_all(conn(), tid(), String.t()) :: {:ok, nil} | {:error, any()}
-  # def update_all(conn, tid, publication) do
-  #   transaction(conn, fn conn ->
-  #     delete_all(conn)
-
-  #     fn {_pid, id, config, claims, _}, _ ->
-  #       subscription_opts = %{
-  #         id: id,
-  #         config: config,
-  #         claims: claims
-  #       }
-
-  #       create(conn, publication, subscription_opts)
-  #     end
-  #     |> :ets.foldl(nil, tid)
-
-  #     nil
-  #   end)
-  # end
-
   @spec delete(conn(), String.t()) :: any()
   def delete(conn, id) do
     Logger.debug("Delete subscription")
@@ -153,12 +133,6 @@ defmodule Extensions.Postgres.Subscriptions do
     )
   end
 
-  def sync_subscriptions() do
-    :ok
-  end
-
-  #################
-
   @spec fetch_publication_tables(conn(), String.t()) ::
           %{
             {<<_::1>>} => [integer()],
@@ -183,40 +157,5 @@ defmodule Extensions.Postgres.Subscriptions do
       _ ->
         %{}
     end
-  end
-
-  @spec transform_to_oid_view(map(), map()) :: [pos_integer()] | [{pos_integer(), list()}] | nil
-  def transform_to_oid_view(oids, config) do
-    case config do
-      %{"schema" => schema, "table" => table, "filter" => filter} ->
-        with [oid] when is_integer(oid) <- oids[{schema, table}],
-             [column, rule] <- String.split(filter, "="),
-             [op, value] <- String.split(rule, ".") do
-          [{oid, [{column, op, value}]}]
-        else
-          _ -> nil
-        end
-
-      %{"schema" => schema, "table" => "*"} ->
-        oids[{schema}]
-
-      %{"schema" => schema, "table" => table} ->
-        oids[{schema, table}]
-
-      %{"schema" => schema} ->
-        oids[{schema}]
-    end
-  end
-
-  # transform %{"id" => %{"lt" => 10, "gt" => 2}}
-  # to [{"id", "gt", 2}, {"id", "lt", 10}]
-  def flat_filters(filters) do
-    Map.to_list(filters)
-    |> Enum.reduce([], fn {column, filter}, acc ->
-      acc ++
-        for {operation, value} <- Map.to_list(filter) do
-          {column, operation, value}
-        end
-    end)
   end
 end
