@@ -53,22 +53,6 @@ defmodule Realtime.Extensions.PostgresSubscriptionsTest do
           "role" => "anon"
         },
         id: UUID.uuid1(),
-        params: %{
-          "schema" => "public",
-          "table" => "tenants",
-          "filter" => "external_id=eq.localhost"
-        }
-      }
-    ]
-
-    assert {:ok, [%Postgrex.Result{}]} = S.create(conn, "supabase_realtime_test", params_list)
-
-    params_list = [
-      %{
-        claims: %{
-          "role" => "anon"
-        },
-        id: UUID.uuid1(),
         params: %{}
       }
     ]
