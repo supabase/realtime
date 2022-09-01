@@ -1,6 +1,6 @@
 defmodule Extensions.Postgres.SubscriptionManager do
   @moduledoc """
-  Handles subscriptions from multiple databases.
+  Handles subscriptions from tenant's database.
   """
   use GenServer
   require Logger
@@ -12,6 +12,31 @@ defmodule Extensions.Postgres.SubscriptionManager do
   @check_oids_interval 60_000
   @timeout 15_000
   @max_delete_records 100
+
+  defmodule State do
+    defstruct [
+      :id,
+      :publication,
+      :subscribers_tid,
+      :conn,
+      :delete_queue,
+      oids: %{},
+      check_oid_ref: nil
+    ]
+
+    @type t :: %__MODULE__{
+            id: String.t(),
+            publication: String.t(),
+            subscribers_tid: :ets.tid(),
+            conn: pid(),
+            oids: map(),
+            check_oid_ref: reference() | nil,
+            delete_queue: %{
+              ref: reference(),
+              queue: :queue.queue()
+            }
+          }
+  end
 
   @spec start_link(GenServer.options()) :: GenServer.on_start()
   def start_link(opts) do
@@ -38,11 +63,9 @@ defmodule Extensions.Postgres.SubscriptionManager do
     {:ok, conn_pub} = H.connect_db(host, port, name, user, pass, socket_opts)
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
 
-    state = %{
+    state = %State{
       id: id,
-      oids: %{},
       conn: conn,
-      check_oid_ref: nil,
       publication: publication,
       subscribers_tid: subscribers_tid,
       delete_queue: %{
@@ -67,7 +90,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   def handle_info(
         :check_oids,
-        %{check_oid_ref: ref, conn: conn, publication: publication, oids: old_oids} = state
+        %State{check_oid_ref: ref, conn: conn, publication: publication, oids: old_oids} = state
       ) do
     H.cancel_timer(ref)
 
@@ -94,7 +117,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   def handle_info(
         {:DOWN, _ref, :process, pid, _reason},
-        %{subscribers_tid: tid, delete_queue: %{queue: q}} = state
+        %State{subscribers_tid: tid, delete_queue: %{queue: q}} = state
       ) do
     q1 =
       case :ets.take(tid, pid) do
@@ -112,7 +135,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
     {:noreply, put_in(state.delete_queue.queue, q1)}
   end
 
-  def handle_info(:check_delete_queue, %{delete_queue: %{ref: ref, queue: q}} = state) do
+  def handle_info(:check_delete_queue, %State{delete_queue: %{ref: ref, queue: q}} = state) do
     H.cancel_timer(ref)
 
     q1 =
