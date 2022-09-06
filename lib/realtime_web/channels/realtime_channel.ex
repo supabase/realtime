@@ -15,7 +15,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @confirm_token_ms_interval 1_000 * 60 * 5
   @max_join_rate 25
-  @max_user_channels 25
+  @max_user_channels 100
   @update_tenant_limits_every 5_000
 
   @impl true
