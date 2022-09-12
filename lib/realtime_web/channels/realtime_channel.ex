@@ -166,6 +166,12 @@ defmodule RealtimeWeb.RealtimeChannel do
          tenant_topic: tenant_topic
        })}
     else
+      {:error, :too_many_channels} = error ->
+        error_msg = inspect(error, pretty: true)
+        # Don't Logger.error here, it creates lots of log events
+        Logger.debug("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
       {:error, :too_many_joins} = error ->
         error_msg = inspect(error, pretty: true)
         # Don't Logger.error here, it creates lots of log events
@@ -504,7 +510,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     key = limit_channels_key(tenant)
 
     if Registry.count_match(Realtime.Registry, key, pid) > @max_user_channels do
-      Logger.error("Reached the limit of channels per connection for #{tenant}")
       {:error, :too_many_channels}
     else
       Registry.register(Realtime.Registry, limit_channels_key(tenant), pid)
