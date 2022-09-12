@@ -166,6 +166,17 @@ defmodule RealtimeWeb.RealtimeChannel do
          tenant_topic: tenant_topic
        })}
     else
+      {:error, :too_many_joins} = error ->
+        error_msg = inspect(error, pretty: true)
+        # Don't Logger.error here, it creates lots of log events
+        Logger.debug("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
+      {:error, [message: "Invalid token", claim: _clain, claim_val: _value]} = error ->
+        error_msg = inspect(error, pretty: true)
+        Logger.warn("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
       error ->
         error_msg = inspect(error, pretty: true)
         Logger.error("Start channel error: #{error_msg}")
