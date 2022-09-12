@@ -128,7 +128,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             other
         end
 
-      Logger.info("Postgres change params: " <> inspect(pg_change_params))
+      Logger.debug("Postgres change params: " <> inspect(pg_change_params))
 
       pg_sub_ref =
         case pg_change_params do
