@@ -18,7 +18,7 @@ defmodule Extensions.Postgres do
         :ok
 
       {_, error} ->
-        Logger.warn("Can't start Postgres ext #{inspect(error, pretty: true)}")
+        Logger.error("Can't start Postgres ext #{inspect(error, pretty: true)}")
     end
   end
 
