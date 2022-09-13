@@ -9,14 +9,13 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias DBConnection.Backoff
   alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
-  alias Realtime.{GenCounter, RateCounter, Api}
+  alias Realtime.{GenCounter, RateCounter}
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
   @confirm_token_ms_interval 1_000 * 60 * 5
   @max_join_rate 25
   @max_user_channels 100
-  @update_tenant_limits_every 5_000
 
   @impl true
   def join(
@@ -146,8 +145,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         else
           _ -> UUID.uuid1()
         end
-
-      update_tenant_limits()
 
       {:ok,
        %{
@@ -316,26 +313,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       end
 
     {:noreply, assign(socket, :pg_sub_ref, ref)}
-  end
-
-  def handle_info(:update_tenant_limits, %{assigns: %{limits: limits, tenant: tenant}} = socket) do
-    # If we listed to our own Postgres wal we could update tenant limits without having to poll as this won't scale amazingly well
-    # Why I'm not canceling the timer here
-
-    socket =
-      case Api.get_tenant_by_external_id(tenant) do
-        nil ->
-          socket
-
-        %Api.Tenant{max_events_per_second: max} ->
-          limits = %{limits | max_events_per_second: max}
-          assign(socket, :limits, limits)
-      end
-
-    backoff(30, 90)
-    |> update_tenant_limits()
-
-    {:noreply, socket}
   end
 
   def handle_info(other, socket) do
@@ -541,9 +518,5 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp assign_counter(socket) do
     socket
-  end
-
-  defp update_tenant_limits(every \\ @update_tenant_limits_every) do
-    Process.send_after(self(), :update_tenant_limits, every)
   end
 end
