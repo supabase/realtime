@@ -11,7 +11,7 @@ defmodule RealtimeWeb.UserSocket do
   ## Channels
   channel "realtime:*", RealtimeWeb.RealtimeChannel
 
-  @default_log_level :error
+  @default_log_level "error"
 
   @impl true
   def connect(params, socket, connect_info) do
@@ -19,7 +19,12 @@ defmodule RealtimeWeb.UserSocket do
       %{uri: %{host: host, query: query}, x_headers: headers} = connect_info
 
       [external_id | _] = String.split(host, ".", parts: 2)
-      log_level = URI.decode_query(query) |> Map.get("log_level", @default_log_level)
+
+      log_level =
+        URI.decode_query(query)
+        |> Map.get("log_level", @default_log_level)
+        |> String.to_existing_atom()
+
       secure_key = Application.get_env(:realtime, :db_enc_key)
 
       with %Tenant{
