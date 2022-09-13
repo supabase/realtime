@@ -26,6 +26,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             jwt_secret: jwt_secret,
             limits: %{max_concurrent_users: max_conn_users},
             tenant: tenant,
+            log_level: log_level,
             token: token
           },
           channel_pid: channel_pid,
@@ -34,6 +35,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       ) do
     Logger.metadata(external_id: tenant, project: tenant)
+    Logger.put_process_level(self(), log_level)
 
     with :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
