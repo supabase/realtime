@@ -23,6 +23,10 @@ defmodule RealtimeWeb.UserSocket do
       log_level =
         URI.decode_query(query)
         |> Map.get("log_level", @default_log_level)
+        |> case do
+          "" -> @default_log_level
+          level -> level
+        end
         |> String.to_existing_atom()
 
       secure_key = Application.get_env(:realtime, :db_enc_key)
@@ -50,6 +54,7 @@ defmodule RealtimeWeb.UserSocket do
         }
 
         Logger.metadata(external_id: external_id, project: external_id)
+        Logger.put_process_level(self(), log_level)
 
         {:ok, assign(socket, assigns)}
       else
