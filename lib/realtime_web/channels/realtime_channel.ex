@@ -26,6 +26,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             jwt_secret: jwt_secret,
             limits: %{max_concurrent_users: max_conn_users},
             tenant: tenant,
+            log_level: log_level,
             token: token
           },
           channel_pid: channel_pid,
@@ -34,6 +35,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       ) do
     Logger.metadata(external_id: tenant, project: tenant)
+    Logger.put_process_level(self(), log_level)
 
     with :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
@@ -128,7 +130,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             other
         end
 
-      Logger.info("Postgres change params: " <> inspect(pg_change_params))
+      Logger.debug("Postgres change params: " <> inspect(pg_change_params))
 
       pg_sub_ref =
         case pg_change_params do
@@ -166,6 +168,23 @@ defmodule RealtimeWeb.RealtimeChannel do
          tenant_topic: tenant_topic
        })}
     else
+      {:error, :too_many_channels} = error ->
+        error_msg = inspect(error, pretty: true)
+        # Don't Logger.error here, it creates lots of log events
+        Logger.debug("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
+      {:error, :too_many_joins} = error ->
+        error_msg = inspect(error, pretty: true)
+        # Don't Logger.error here, it creates lots of log events
+        Logger.debug("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
+      {:error, [message: "Invalid token", claim: _clain, claim_val: _value]} = error ->
+        error_msg = inspect(error, pretty: true)
+        Logger.warn("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
       error ->
         error_msg = inspect(error, pretty: true)
         Logger.error("Start channel error: #{error_msg}")
@@ -493,7 +512,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     key = limit_channels_key(tenant)
 
     if Registry.count_match(Realtime.Registry, key, pid) > @max_user_channels do
-      Logger.error("Reached the limit of channels per connection for #{tenant}")
       {:error, :too_many_channels}
     else
       Registry.register(Realtime.Registry, limit_channels_key(tenant), pid)
