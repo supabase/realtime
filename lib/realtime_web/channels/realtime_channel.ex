@@ -9,14 +9,13 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias DBConnection.Backoff
   alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
-  alias Realtime.{GenCounter, RateCounter, Api}
+  alias Realtime.{GenCounter, RateCounter}
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
   @confirm_token_ms_interval 1_000 * 60 * 5
   @max_join_rate 25
   @max_user_channels 100
-  @update_tenant_limits_every 5_000
 
   @impl true
   def join(
@@ -27,6 +26,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             jwt_secret: jwt_secret,
             limits: %{max_concurrent_users: max_conn_users},
             tenant: tenant,
+            log_level: log_level,
             token: token
           },
           channel_pid: channel_pid,
@@ -35,6 +35,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       ) do
     Logger.metadata(external_id: tenant, project: tenant)
+    Logger.put_process_level(self(), log_level)
 
     with :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
@@ -129,7 +130,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             other
         end
 
-      Logger.info("Postgres change params: " <> inspect(pg_change_params))
+      Logger.debug("Postgres change params: " <> inspect(pg_change_params))
 
       pg_sub_ref =
         case pg_change_params do
@@ -146,8 +147,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         else
           _ -> UUID.uuid1()
         end
-
-      update_tenant_limits()
 
       {:ok,
        %{
@@ -169,6 +168,23 @@ defmodule RealtimeWeb.RealtimeChannel do
          tenant_topic: tenant_topic
        })}
     else
+      {:error, :too_many_channels} = error ->
+        error_msg = inspect(error, pretty: true)
+        # Don't Logger.error here, it creates lots of log events
+        Logger.debug("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
+      {:error, :too_many_joins} = error ->
+        error_msg = inspect(error, pretty: true)
+        # Don't Logger.error here, it creates lots of log events
+        Logger.debug("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
+      {:error, [message: "Invalid token", claim: _clain, claim_val: _value]} = error ->
+        error_msg = inspect(error, pretty: true)
+        Logger.warn("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
       error ->
         error_msg = inspect(error, pretty: true)
         Logger.error("Start channel error: #{error_msg}")
@@ -316,26 +332,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       end
 
     {:noreply, assign(socket, :pg_sub_ref, ref)}
-  end
-
-  def handle_info(:update_tenant_limits, %{assigns: %{limits: limits, tenant: tenant}} = socket) do
-    # If we listed to our own Postgres wal we could update tenant limits without having to poll as this won't scale amazingly well
-    # Why I'm not canceling the timer here
-
-    socket =
-      case Api.get_tenant_by_external_id(tenant) do
-        nil ->
-          socket
-
-        %Api.Tenant{max_events_per_second: max} ->
-          limits = %{limits | max_events_per_second: max}
-          assign(socket, :limits, limits)
-      end
-
-    backoff(30, 90)
-    |> update_tenant_limits()
-
-    {:noreply, socket}
   end
 
   def handle_info(other, socket) do
@@ -516,7 +512,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     key = limit_channels_key(tenant)
 
     if Registry.count_match(Realtime.Registry, key, pid) > @max_user_channels do
-      Logger.error("Reached the limit of channels per connection for #{tenant}")
       {:error, :too_many_channels}
     else
       Registry.register(Realtime.Registry, limit_channels_key(tenant), pid)
@@ -541,9 +536,5 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp assign_counter(socket) do
     socket
-  end
-
-  defp update_tenant_limits(every \\ @update_tenant_limits_every) do
-    Process.send_after(self(), :update_tenant_limits, every)
   end
 end

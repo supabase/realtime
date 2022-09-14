@@ -19,6 +19,7 @@ export default function Index() {
     form.setFieldsValue({
       host: localStorage.getItem('host'),
       token: localStorage.getItem('token'),
+      logLevel: localStorage.getItem('logLevel'),
     });
     form_broadcast.setFieldsValue({
       event: 'TEST',
@@ -26,12 +27,13 @@ export default function Index() {
     });
   }, []);
 
-  const onFinish = ({ host, token }) => {
+  const onFinish = ({ host, logLevel, token }) => {
     setConnButtonState({ loading: true, value: 'Connection ...' });
     localStorage.setItem('host', host);
     localStorage.setItem('token', token);
+    localStorage.setItem('logLevel', logLevel);
     let socket = new RealtimeClient(host, {
-      params: { apikey: token, vsndate: '2022' },
+      params: { log_level: logLevel, apikey: token, vsndate: '2022' },
     });
 
     channel = socket.channel('any', { config: { broadcast: { self: true } } })
@@ -167,6 +169,9 @@ export default function Index() {
               onFinish={onFinish}
             >
               <Form.Item label="Address" name={'host'}>
+                <Input placeholder="input placeholder" size="large" />
+              </Form.Item>
+              <Form.Item label="Log level" name={'logLevel'}>
                 <Input placeholder="input placeholder" size="large" />
               </Form.Item>
               <Form.Item label="Token" name={'token'}>

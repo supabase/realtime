@@ -11,11 +11,23 @@ defmodule RealtimeWeb.UserSocket do
   ## Channels
   channel "realtime:*", RealtimeWeb.RealtimeChannel
 
+  @default_log_level "error"
+
   @impl true
   def connect(params, socket, connect_info) do
     if Application.fetch_env!(:realtime, :secure_channels) do
-      %{uri: %{host: host}, x_headers: headers} = connect_info
+      %{uri: %{host: host, query: query}, x_headers: headers} = connect_info
+
       [external_id | _] = String.split(host, ".", parts: 2)
+
+      log_level =
+        URI.decode_query(query)
+        |> Map.get("log_level", @default_log_level)
+        |> case do
+          "" -> @default_log_level
+          level -> level
+        end
+        |> String.to_existing_atom()
 
       secure_key = Application.get_env(:realtime, :db_enc_key)
 
@@ -37,10 +49,12 @@ defmodule RealtimeWeb.UserSocket do
           },
           postgres_extension: Helpers.filter_postgres_settings(extensions),
           tenant: external_id,
+          log_level: log_level,
           token: token
         }
 
         Logger.metadata(external_id: external_id, project: external_id)
+        Logger.put_process_level(self(), log_level)
 
         {:ok, assign(socket, assigns)}
       else
