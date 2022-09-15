@@ -173,7 +173,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         Logger.debug("Start channel error: #{error_msg}")
         {:error, %{reason: error_msg}}
 
-      {:error, %{reason: :too_many_connections}} = error ->
+      {:error, :too_many_connections} = error ->
         error_msg = inspect(error, pretty: true)
         Logger.debug("Start channel error: #{error_msg}")
         {:error, %{reason: error_msg}}
@@ -216,7 +216,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     Logger.error(message)
 
-    {:stop, :normal, socket}
+    {:stop, :shutdown, socket}
   end
 
   @impl true
@@ -344,7 +344,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
         Logger.warn(message)
 
-        {:stop, :normal, socket}
+        {:stop, :shutdown, socket}
     end
   end
 
@@ -390,7 +390,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     Logger.error(message)
 
-    {:stop, :normal, socket}
+    {:stop, :shutdown, socket}
   end
 
   def handle_in(
@@ -402,7 +402,8 @@ defmodule RealtimeWeb.RealtimeChannel do
             id: id,
             jwt_secret: jwt_secret,
             pg_sub_ref: pg_sub_ref,
-            pg_change_params: pg_change_params
+            pg_change_params: pg_change_params,
+            tenant_topic: tenant_topic
           }
         } = socket
       )
@@ -439,7 +440,18 @@ defmodule RealtimeWeb.RealtimeChannel do
          pg_sub_ref: pg_sub_ref
        })}
     else
-      _ -> {:stop, %{reason: "received an invalid access token from client"}, socket}
+      _ ->
+        message = "Received an invalid access token from client"
+
+        push(socket, "system", %{
+          status: "error",
+          message: message,
+          topic: tenant_topic
+        })
+
+        Logger.error(message)
+
+        {:stop, :shutdown, socket}
     end
   end
 
@@ -576,8 +588,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     if conns < max_conn_users do
       :ok
     else
-      {:error,
-       %{reason: :too_many_connections, concurrent_conns: conns, max_conns: max_conn_users}}
+      {:error, :too_many_connections}
     end
   end
 
