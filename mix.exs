@@ -63,6 +63,8 @@ defmodule Realtime.MixProject do
       {:phoenix_swagger, "~> 0.8.3"},
       {:ex_json_schema, "~> 0.7.1"},
       {:recon, "~> 2.5.2"},
+      {:mint, "~> 1.4", override: true},
+      {:mint_web_socket, "~> 1.0.0"},
       {:logflare_logger_backend, "~> 0.11.0"},
       {:httpoison, "~> 1.8.1"},
       {:syn, "~> 3.3.0"},
