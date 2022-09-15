@@ -29,7 +29,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket"},
+            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
             x_headers: [{"x-api-key", "token123"}]
           })
 
@@ -52,7 +52,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket"},
+            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
             x_headers: [{"x-api-key", "token123"}]
           })
 
@@ -82,7 +82,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket"},
+            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
             x_headers: [{"x-api-key", "token123"}]
           })
 
@@ -103,7 +103,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket"},
+            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
             x_headers: [{"x-api-key", "token123"}]
           })
 
@@ -122,7 +122,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket"},
+            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
             x_headers: [{"x-api-key", "token123"}]
           })
 
