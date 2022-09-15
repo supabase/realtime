@@ -27,7 +27,8 @@ defmodule Realtime.Extensions.PostgresTest do
         max_concurrent_users: 1,
         max_events_per_second: 1
       },
-      is_new_api: false
+      is_new_api: false,
+      log_level: :info
     }
 
     with_mocks([
