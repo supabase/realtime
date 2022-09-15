@@ -183,7 +183,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         Logger.debug("Start channel error: #{error_msg}")
         {:error, %{reason: error_msg}}
 
-      {:error, [message: "Invalid token", claim: _clain, claim_val: _value]} = error ->
+      {:error, [message: "Invalid token", claim: _claim, claim_val: _value]} = error ->
         error_msg = inspect(error, pretty: true)
         Logger.warn("Start channel error: #{error_msg}")
         {:error, %{reason: error_msg}}
