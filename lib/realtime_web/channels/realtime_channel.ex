@@ -24,7 +24,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{
           assigns: %{
             jwt_secret: jwt_secret,
-            limits: %{max_concurrent_users: max_conn_users},
+            limits: %{max_concurrent_users: _max_conn_users},
             tenant: tenant,
             log_level: log_level,
             token: token
@@ -39,7 +39,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     with :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
-         true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
+         :ok <- limit_max_users(socket),
          access_token when is_binary(access_token) <-
            (case params do
               # will deprecate
@@ -130,7 +130,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             other
         end
 
-      Logger.debug("Postgres change params: " <> inspect(pg_change_params))
+      Logger.debug("Postgres change params: " <> inspect(pg_change_params, pretty: true))
 
       pg_sub_ref =
         case pg_change_params do
@@ -138,7 +138,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           _ -> nil
         end
 
-      Logger.debug("Start channel, #{inspect(pg_change_params, pretty: true)}")
+      Logger.debug("Start channel: " <> inspect(pg_change_params, pretty: true))
 
       presence_key =
         with key when is_binary(key) <- params["config"]["presence"]["key"],
@@ -170,17 +170,20 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       {:error, :too_many_channels} = error ->
         error_msg = inspect(error, pretty: true)
-        # Don't Logger.error here, it creates lots of log events
+        Logger.debug("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
+      {:error, :too_many_connections} = error ->
+        error_msg = inspect(error, pretty: true)
         Logger.debug("Start channel error: #{error_msg}")
         {:error, %{reason: error_msg}}
 
       {:error, :too_many_joins} = error ->
         error_msg = inspect(error, pretty: true)
-        # Don't Logger.error here, it creates lots of log events
         Logger.debug("Start channel error: #{error_msg}")
         {:error, %{reason: error_msg}}
 
-      {:error, [message: "Invalid token", claim: _clain, claim_val: _value]} = error ->
+      {:error, [message: "Invalid token", claim: _claim, claim_val: _value]} = error ->
         error_msg = inspect(error, pretty: true)
         Logger.warn("Start channel error: #{error_msg}")
         {:error, %{reason: error_msg}}
@@ -195,11 +198,25 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_info(
         _any,
         %{
-          assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}
+          assigns: %{
+            rate_counter: %{avg: avg},
+            limits: %{max_events_per_second: max},
+            tenant_topic: tenant_topic
+          }
         } = socket
       )
       when avg > max do
-    {:stop, :normal, socket}
+    message = "Too many messages per second"
+
+    push(socket, "system", %{
+      status: "error",
+      message: message,
+      topic: tenant_topic
+    })
+
+    Logger.error(message)
+
+    {:stop, :shutdown, socket}
   end
 
   @impl true
@@ -260,7 +277,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
             push(socket, "system", %{
               status: "ok",
-              message: "subscribed to realtime",
+              message: "Subscribed to Realtime",
               topic: tenant_topic
             })
 
@@ -269,12 +286,12 @@ defmodule RealtimeWeb.RealtimeChannel do
           error ->
             push(socket, "system", %{
               status: "error",
-              message: "failed to subscribe channel",
+              message: "Failed to subscribe Channel",
               topic: tenant_topic
             })
 
             Logger.error(
-              "Failed to subscribe channel for #{tenant} to #{inspect(pg_change_params)}: #{inspect(error)}"
+              "Failed to subscribe Channel for #{tenant} to #{inspect(pg_change_params)}: #{inspect(error)}"
             )
 
             {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
@@ -293,7 +310,8 @@ defmodule RealtimeWeb.RealtimeChannel do
             confirm_token_ref: ref,
             jwt_secret: jwt_secret,
             access_token: access_token,
-            pg_change_params: pg_change_params
+            pg_change_params: pg_change_params,
+            tenant_topic: tenant_topic
           }
         } = socket
       ) do
@@ -315,7 +333,18 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:noreply,
        assign(socket, %{confirm_token_ref: confirm_token_ref, pg_change_params: pg_change_params})}
     else
-      _ -> {:stop, %{reason: "access token has expired"}, socket}
+      error ->
+        message = "access token has expired: " <> inspect(error, pretty: true)
+
+        push(socket, "system", %{
+          status: "warn",
+          message: message,
+          topic: tenant_topic
+        })
+
+        Logger.warn(message)
+
+        {:stop, :shutdown, socket}
     end
   end
 
@@ -342,10 +371,26 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_in(
         _,
         _,
-        %{assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}} = socket
+        %{
+          assigns: %{
+            rate_counter: %{avg: avg},
+            limits: %{max_events_per_second: max},
+            tenant_topic: tenant_topic
+          }
+        } = socket
       )
       when avg > max do
-    {:stop, :normal, socket}
+    message = "Too many messages per second"
+
+    push(socket, "system", %{
+      status: "error",
+      message: message,
+      topic: tenant_topic
+    })
+
+    Logger.error(message)
+
+    {:stop, :shutdown, socket}
   end
 
   def handle_in(
@@ -357,7 +402,8 @@ defmodule RealtimeWeb.RealtimeChannel do
             id: id,
             jwt_secret: jwt_secret,
             pg_sub_ref: pg_sub_ref,
-            pg_change_params: pg_change_params
+            pg_change_params: pg_change_params,
+            tenant_topic: tenant_topic
           }
         } = socket
       )
@@ -394,7 +440,18 @@ defmodule RealtimeWeb.RealtimeChannel do
          pg_sub_ref: pg_sub_ref
        })}
     else
-      _ -> {:stop, %{reason: "received an invalid access token from client"}, socket}
+      _ ->
+        message = "Received an invalid access token from client"
+
+        push(socket, "system", %{
+          status: "error",
+          message: message,
+          topic: tenant_topic
+        })
+
+        Logger.error(message)
+
+        {:stop, :shutdown, socket}
     end
   end
 
@@ -521,6 +578,18 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp limit_channels_key(tenant) do
     {:limit, :user_channels, tenant}
+  end
+
+  defp limit_max_users(%{
+         assigns: %{limits: %{max_concurrent_users: max_conn_users}, tenant: tenant}
+       }) do
+    conns = Realtime.UsersCounter.tenant_users(tenant)
+
+    if conns < max_conn_users do
+      :ok
+    else
+      {:error, :too_many_connections}
+    end
   end
 
   defp assign_counter(%{assigns: %{tenant: tenant}} = socket) do
