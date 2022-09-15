@@ -31,6 +31,9 @@ defmodule RealtimeWeb.UserSocket do
 
       secure_key = Application.get_env(:realtime, :db_enc_key)
 
+      Logger.metadata(external_id: external_id, project: external_id)
+      Logger.put_process_level(self(), log_level)
+
       with %Tenant{
              extensions: extensions,
              jwt_secret: jwt_secret,
@@ -52,9 +55,6 @@ defmodule RealtimeWeb.UserSocket do
           log_level: log_level,
           token: token
         }
-
-        Logger.metadata(external_id: external_id, project: external_id)
-        Logger.put_process_level(self(), log_level)
 
         {:ok, assign(socket, assigns)}
       else
