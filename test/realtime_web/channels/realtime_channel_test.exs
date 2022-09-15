@@ -59,10 +59,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         socket_at_capacity = Socket.assign(socket, %{limits: %{max_concurrent_users: 0}})
         socket_over_capacity = Socket.assign(socket, %{limits: %{max_concurrent_users: -1}})
 
-        assert {:error, %{reason: "false"}} =
+        assert {:error, %{reason: "{:error, :too_many_connections}"}} =
                  subscribe_and_join(socket_at_capacity, "realtime:test", %{})
 
-        assert {:error, %{reason: "false"}} =
+        assert {:error, %{reason: "{:error, :too_many_connections}"}} =
                  subscribe_and_join(socket_over_capacity, "realtime:test", %{})
       end
     end
