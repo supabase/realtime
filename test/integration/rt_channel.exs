@@ -63,7 +63,7 @@ defmodule Phoenix.Integration.RtChannelTest do
     :ok
   end
 
-  test "connection" do
+  test "postgres" do
     socket = get_connection()
 
     config = %{
@@ -71,13 +71,13 @@ defmodule Phoenix.Integration.RtChannelTest do
     }
 
     WebsocketClient.join(socket, "realtime:any", %{config: config})
-    id = :erlang.phash2(%{"event" => "*", "schema" => "public"})
+    sub_id = :erlang.phash2(%{"event" => "*", "schema" => "public"})
 
     assert_receive %Message{
       event: "phx_reply",
       payload: %{
         "response" => %{
-          "postgres_changes" => [%{"event" => "*", "id" => ^id, "schema" => "public"}]
+          "postgres_changes" => [%{"event" => "*", "id" => ^sub_id, "schema" => "public"}]
         },
         "status" => "ok"
       },
@@ -97,6 +97,83 @@ defmodule Phoenix.Integration.RtChannelTest do
         "message" => "subscribed to realtime",
         "status" => "ok",
         "topic" => "dev_tenant:any"
+      },
+      ref: nil,
+      topic: "realtime:any"
+    }
+
+    {:ok, _, conn} = Postgres.get_manager_conn(@external_id)
+    P.query!(conn, "insert into test (details) values ('test')", [])
+    :timer.sleep(1000)
+
+    assert_receive %Message{
+      event: "postgres_changes",
+      join_ref: nil,
+      payload: %{
+        "data" => %{
+          "columns" => [
+            %{"name" => "id", "type" => "int4"},
+            %{"name" => "details", "type" => "text"}
+          ],
+          "commit_timestamp" => _ts,
+          "errors" => nil,
+          "record" => %{"details" => "test", "id" => id},
+          "schema" => "public",
+          "table" => "test",
+          "type" => "INSERT"
+        },
+        "ids" => [^sub_id]
+      },
+      ref: nil,
+      topic: "realtime:any"
+    }
+
+    P.query!(conn, "update test set details = 'test' where id = #{id}", [])
+    :timer.sleep(1000)
+
+    assert_receive %Message{
+      event: "postgres_changes",
+      join_ref: nil,
+      payload: %{
+        "data" => %{
+          "columns" => [
+            %{"name" => "id", "type" => "int4"},
+            %{"name" => "details", "type" => "text"}
+          ],
+          "commit_timestamp" => _ts,
+          "errors" => nil,
+          "old_record" => %{"id" => ^id},
+          "record" => %{"details" => "test", "id" => ^id},
+          "schema" => "public",
+          "table" => "test",
+          "type" => "UPDATE"
+        },
+        "ids" => [^sub_id]
+      },
+      ref: nil,
+      topic: "realtime:any"
+    }
+
+    P.query!(conn, "delete from test where id = #{id}", [])
+    :timer.sleep(1000)
+
+    assert_receive %Message{
+      event: "postgres_changes",
+      join_ref: nil,
+      payload: %{
+        "data" => %{
+          "columns" => [
+            %{"name" => "id", "type" => "int4"},
+            %{"name" => "details", "type" => "text"}
+          ],
+          "commit_timestamp" => _ts,
+          "errors" => nil,
+          "old_record" => %{"id" => ^id},
+          "schema" => "public",
+          "table" => "test",
+          "type" => "DELETE"
+        },
+        "ids" => [^sub_id]
       },
       ref: nil,
       topic: "realtime:any"

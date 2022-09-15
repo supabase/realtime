@@ -33,5 +33,12 @@ end
 } |> Api.create_tenant()
 
 [
+  "DROP TABLE IF EXISTS \"public\".\"test\";",
+  "CREATE SEQUENCE IF NOT EXISTS test_id_seq;",
+  "CREATE TABLE \"public\".\"test\" (
+      \"id\" int4 NOT NULL DEFAULT nextval('test_id_seq'::regclass),
+      \"details\" text,
+      PRIMARY KEY (\"id\")
+  );",
   "create publication supabase_realtime_test for all tables"
 ] |> Enum.each(&query(Realtime.Repo, &1, []))
