@@ -19,7 +19,7 @@ defmodule Realtime.Extensions.PostgresTest do
     tenant = Api.get_tenant_by_external_id(@external_id)
 
     assigns = %{
-      token: @token,
+      tenant_token: @token,
       jwt_secret: tenant.jwt_secret,
       tenant: tenant.external_id,
       postgres_extension: filter_postgres_settings(tenant.extensions),
