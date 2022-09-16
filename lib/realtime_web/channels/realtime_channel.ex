@@ -13,6 +13,37 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
+  defmodule Assigns do
+    @moduledoc false
+    defstruct [
+      :tenant,
+      :log_level,
+      :rate_counter,
+      :limits,
+      :tenant_topic,
+      :pg_sub_ref,
+      :pg_change_params,
+      :postgres_extension,
+      :claims,
+      :jwt_secret,
+      :token
+    ]
+
+    @type t :: %__MODULE__{
+            tenant: String.t(),
+            log_level: atom(),
+            rate_counter: RateCounter.t(),
+            limits: %{max_events_per_second: integer(), max_concurrent_users: integer()},
+            tenant_topic: String.t(),
+            pg_sub_ref: reference() | nil,
+            pg_change_params: map(),
+            postgres_extension: map(),
+            claims: map(),
+            jwt_secret: String.t(),
+            token: String.t()
+          }
+  end
+
   @confirm_token_ms_interval 1_000 * 60 * 5
   @max_join_rate 25
   @max_user_channels 100
@@ -23,11 +54,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         params,
         %{
           assigns: %{
-            jwt_secret: jwt_secret,
-            limits: %{max_concurrent_users: _max_conn_users},
             tenant: tenant,
-            log_level: log_level,
-            token: token
+            log_level: log_level
           },
           channel_pid: channel_pid,
           serializer: serializer,
@@ -40,23 +68,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     with :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket),
-         access_token when is_binary(access_token) <-
-           (case params do
-              # will deprecate
-              %{"user_token" => user_token} -> user_token
-              %{"access_token" => access_token} -> access_token
-              _ -> token
-            end),
-         jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
-         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
-         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         confirm_token_ref <-
-           Process.send_after(
-             self(),
-             :confirm_token,
-             min(@confirm_token_ms_interval, exp_diff * 1_000)
-           ) do
+         socket <- assign_access_token(socket, params),
+         {:ok, claims, confirm_token_ref} <- confirm_token(socket) do
       socket = assign_counter(socket)
       Realtime.UsersCounter.add(transport_pid, tenant)
 
@@ -140,13 +153,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       Logger.debug("Start channel: " <> inspect(pg_change_params, pretty: true))
 
-      presence_key =
-        with key when is_binary(key) <- params["config"]["presence"]["key"],
-             true <- String.length(key) > 0 do
-          key
-        else
-          _ -> UUID.uuid1()
-        end
+      presence_key = presence_key(params)
 
       {:ok,
        %{
@@ -157,7 +164,6 @@ defmodule RealtimeWeb.RealtimeChannel do
            end)
        },
        assign(socket, %{
-         access_token: access_token,
          ack_broadcast: !!params["config"]["broadcast"]["ack"],
          confirm_token_ref: confirm_token_ref,
          is_new_api: is_new_api,
@@ -227,6 +233,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  @impl true
   def handle_info(%{event: "subscription_manager_down"}, socket) do
     socket = assign_counter(socket)
     pg_sub_ref = postgres_subscribe()
@@ -234,6 +241,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
   end
 
+  @impl true
   def handle_info(%{event: type, payload: payload}, socket) do
     socket = assign_counter(socket)
 
@@ -241,6 +249,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  @impl true
   def handle_info(
         :postgres_subscribe,
         %{
@@ -260,8 +269,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     case Postgres.get_or_start_conn(args) do
       {:ok, manager_pid, conn} ->
-        Logger.info("Subscribe channel for #{tenant} to #{inspect(pg_change_params)}")
-
         case Postgres.create_subscription(
                conn,
                postgres_extension["publication"],
@@ -275,65 +282,56 @@ defmodule RealtimeWeb.RealtimeChannel do
               send(manager_pid, {:subscribed, {self(), id}})
             end
 
+            message = "Subscribed to PostgreSQL"
+
+            Logger.info(message)
+
             push(socket, "system", %{
               status: "ok",
-              message: "Subscribed to Realtime",
+              message: message,
               topic: tenant_topic
             })
 
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
           error ->
+            message = "Subscribing to PostgreSQL failed: #{inspect(error)}"
+
             push(socket, "system", %{
               status: "error",
-              message: "Failed to subscribe Channel",
+              message: message,
               topic: tenant_topic
             })
 
-            Logger.error(
-              "Failed to subscribe Channel for #{tenant} to #{inspect(pg_change_params)}: #{inspect(error)}"
-            )
+            Logger.error(message)
 
             {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
         end
 
       nil ->
-        Logger.warning("Re-subscribe channel for #{tenant} to #{inspect(pg_change_params)}")
+        Logger.warning("Re-subscribed to PostgreSQL")
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
     end
   end
 
+  @impl true
   def handle_info(
         :confirm_token,
-        %{
-          assigns: %{
-            confirm_token_ref: ref,
-            jwt_secret: jwt_secret,
-            access_token: access_token,
-            pg_change_params: pg_change_params,
-            tenant_topic: tenant_topic
-          }
-        } = socket
+        %{assigns: %{pg_change_params: pg_change_params, tenant_topic: tenant_topic}} = socket
       ) do
     socket = assign_counter(socket)
-    cancel_timer(ref)
 
-    with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
-         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
-         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         confirm_token_ref <-
-           Process.send_after(
-             self(),
-             :confirm_token,
-             min(@confirm_token_ms_interval, exp_diff * 1_000)
-           ) do
-      pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
+    case confirm_token(socket) do
+      {:ok, claims, confirm_token_ref} ->
+        pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
-      {:noreply,
-       assign(socket, %{confirm_token_ref: confirm_token_ref, pg_change_params: pg_change_params})}
-    else
-      error ->
+        {:noreply,
+         assign(socket, %{
+           confirm_token_ref: confirm_token_ref,
+           pg_change_params: pg_change_params
+         })}
+
+      {:error, error} ->
         message = "access token has expired: " <> inspect(error, pretty: true)
 
         push(socket, "system", %{
@@ -348,6 +346,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
+  @impl true
   def handle_info(
         {:DOWN, _, :process, _, _reason},
         %{assigns: %{pg_sub_ref: pg_sub_ref, pg_change_params: pg_change_params}} = socket
@@ -363,11 +362,13 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, assign(socket, :pg_sub_ref, ref)}
   end
 
+  @impl true
   def handle_info(other, socket) do
     Logger.error("Undefined msg #{inspect(other, pretty: true)}")
     {:noreply, socket}
   end
 
+  @impl true
   def handle_in(
         _,
         _,
@@ -393,14 +394,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:stop, :shutdown, socket}
   end
 
+  @impl true
   def handle_in(
         "access_token",
         %{"access_token" => refresh_token},
         %{
           assigns: %{
-            confirm_token_ref: ref,
-            id: id,
-            jwt_secret: jwt_secret,
             pg_sub_ref: pg_sub_ref,
             pg_change_params: pg_change_params,
             tenant_topic: tenant_topic
@@ -408,40 +407,29 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       )
       when is_binary(refresh_token) do
-    socket = assign_counter(socket)
-    cancel_timer(ref)
+    socket = assign_counter(socket) |> assign(:access_token, refresh_token)
 
-    with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
-         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret_dec),
-         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         confirm_token_ref <-
-           Process.send_after(
-             self(),
-             :confirm_token,
-             min(@confirm_token_ms_interval, exp_diff * 1_000)
-           ) do
-      cancel_timer(pg_sub_ref)
+    case confirm_token(socket) do
+      {:ok, claims, confirm_token_ref} ->
+        cancel_timer(pg_sub_ref)
 
-      pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
+        pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
-      pg_sub_ref =
-        case pg_change_params do
-          [_ | _] -> postgres_subscribe()
-          _ -> nil
-        end
+        pg_sub_ref =
+          case pg_change_params do
+            [_ | _] -> postgres_subscribe()
+            _ -> nil
+          end
 
-      {:noreply,
-       assign(socket, %{
-         access_token: refresh_token,
-         confirm_token_ref: confirm_token_ref,
-         id: id,
-         pg_change_params: pg_change_params,
-         pg_sub_ref: pg_sub_ref
-       })}
-    else
-      _ ->
-        message = "Received an invalid access token from client"
+        {:noreply,
+         assign(socket, %{
+           confirm_token_ref: confirm_token_ref,
+           pg_change_params: pg_change_params,
+           pg_sub_ref: pg_sub_ref
+         })}
+
+      {:error, error} ->
+        message = "Received an invalid access token from client: " <> inspect(error)
 
         push(socket, "system", %{
           status: "error",
@@ -605,5 +593,55 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp assign_counter(socket) do
     socket
+  end
+
+  defp presence_key(params) do
+    with key when is_binary(key) <- params["config"]["presence"]["key"],
+         true <- String.length(key) > 0 do
+      key
+    else
+      _ -> UUID.uuid1()
+    end
+  end
+
+  defp assign_access_token(socket, %{"user_token" => token}) when is_binary(token) do
+    assign(socket, :access_token, token)
+  end
+
+  defp assign_access_token(socket, %{"access_token" => token}) when is_binary(token) do
+    assign(socket, :access_token, token)
+  end
+
+  defp assign_access_token(socket, params) do
+    IO.inspect(params)
+    assign(socket, :access_token, nil)
+  end
+
+  defp confirm_token(%{
+         assigns:
+           %{
+             jwt_secret: jwt_secret,
+             access_token: access_token
+           } = assigns
+       }) do
+    with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
+         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
+           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
+         _ <- IO.inspect("BLAH"),
+         exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
+      if ref = assigns[:confirm_token_ref], do: cancel_timer(ref)
+
+      ref =
+        Process.send_after(
+          self(),
+          :confirm_token,
+          min(@confirm_token_ms_interval, exp_diff * 1_000)
+        )
+
+      {:ok, claims, ref}
+    else
+      e ->
+        {:error, e}
+    end
   end
 end
