@@ -6,6 +6,7 @@ defmodule Realtime.Extensions.PostgresTest do
   import Extensions.Postgres.Helpers, only: [filter_postgres_settings: 1]
 
   alias Extensions.Postgres
+  alias Postgres.SubscriptionManager
   alias Realtime.Api
   alias RealtimeWeb.ChannelsAuthorization
   alias Postgrex, as: P
@@ -51,21 +52,21 @@ defmodule Realtime.Extensions.PostgresTest do
   describe "Postgres extensions" do
     test "Check supervisor crash and respawn" do
       sup =
-        Enum.reduce_while(1..15, nil, fn _, acc ->
+        Enum.reduce_while(1..30, nil, fn _, acc ->
           :syn.lookup(Extensions.Postgres.Sup, @external_id)
           |> case do
             :undefined ->
               Process.sleep(500)
               {:cont, acc}
 
-            {pid, _} ->
+            {pid, _} when is_pid(pid) ->
               {:halt, pid}
           end
         end)
 
       assert Process.alive?(sup)
       DynamicSupervisor.terminate_child(Postgres.DynamicSupervisor, sup)
-      Process.sleep(5_000)
+      Process.sleep(10_000)
       {sup2, _} = :syn.lookup(Extensions.Postgres.Sup, @external_id)
       assert Process.alive?(sup2)
       assert(sup != sup2)
@@ -73,7 +74,7 @@ defmodule Realtime.Extensions.PostgresTest do
 
     test "Subscription manager updates oids" do
       {subscriber_manager_pid, conn} =
-        Enum.reduce_while(1..10, nil, fn _, acc ->
+        Enum.reduce_while(1..25, nil, fn _, acc ->
           case Postgres.get_manager_conn(@external_id) do
             nil ->
               Process.sleep(500)
@@ -84,7 +85,7 @@ defmodule Realtime.Extensions.PostgresTest do
           end
         end)
 
-      %{oids: oids} = :sys.get_state(subscriber_manager_pid)
+      %SubscriptionManager.State{oids: oids} = :sys.get_state(subscriber_manager_pid)
 
       P.query!(conn, "drop publication supabase_realtime_test", [])
       send(subscriber_manager_pid, :check_oids)
