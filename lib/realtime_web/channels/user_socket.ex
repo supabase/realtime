@@ -55,7 +55,7 @@ defmodule RealtimeWeb.UserSocket do
             postgres_extension: Helpers.filter_postgres_settings(extensions),
             tenant: external_id,
             log_level: log_level,
-            token: token
+            tenant_token: token
           }
           |> Map.from_struct()
 
