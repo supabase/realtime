@@ -26,8 +26,8 @@ defmodule RealtimeWeb.ChannelsAuthorization do
         {:error, reason}
 
       error ->
-        Logger.error("Undefined error #{inspect(error)}")
-        :error
+        Logger.error("Unknown connection authorization error: #{inspect(error)}")
+        {:error, :unknown}
     end
   end
 end
