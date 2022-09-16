@@ -6,22 +6,23 @@ defmodule RealtimeWeb.UserSocket do
   alias Realtime.Api.Tenant
   alias Extensions.Postgres.Helpers
   alias RealtimeWeb.ChannelsAuthorization
+  alias RealtimeWeb.RealtimeChannel
   import Realtime.Helpers, only: [decrypt!: 2]
 
   ## Channels
-  channel "realtime:*", RealtimeWeb.RealtimeChannel
+  channel "realtime:*", RealtimeChannel
 
   @default_log_level "error"
 
   @impl true
   def connect(params, socket, connect_info) do
     if Application.fetch_env!(:realtime, :secure_channels) do
-      %{uri: %{host: host, query: query}, x_headers: headers} = connect_info
+      %{uri: %{host: host}, x_headers: headers} = connect_info
 
       [external_id | _] = String.split(host, ".", parts: 2)
 
       log_level =
-        URI.decode_query(query)
+        params
         |> Map.get("log_level", @default_log_level)
         |> case do
           "" -> @default_log_level
@@ -43,18 +44,20 @@ defmodule RealtimeWeb.UserSocket do
            token when is_binary(token) <- access_token(params, headers),
            jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec) do
-        assigns = %{
-          claims: claims,
-          jwt_secret: jwt_secret,
-          limits: %{
-            max_concurrent_users: max_conn_users,
-            max_events_per_second: max_events_per_second
-          },
-          postgres_extension: Helpers.filter_postgres_settings(extensions),
-          tenant: external_id,
-          log_level: log_level,
-          token: token
-        }
+        assigns =
+          %RealtimeChannel.Assigns{
+            claims: claims,
+            jwt_secret: jwt_secret,
+            limits: %{
+              max_concurrent_users: max_conn_users,
+              max_events_per_second: max_events_per_second
+            },
+            postgres_extension: Helpers.filter_postgres_settings(extensions),
+            tenant: external_id,
+            log_level: log_level,
+            token: token
+          }
+          |> Map.from_struct()
 
         {:ok, assign(socket, assigns)}
       else
