@@ -6,6 +6,7 @@ defmodule Realtime.Extensions.PostgresTest do
   import Extensions.Postgres.Helpers, only: [filter_postgres_settings: 1]
 
   alias Extensions.Postgres
+  alias Postgres.SubscriptionManager
   alias Realtime.Api
   alias RealtimeWeb.ChannelsAuthorization
   alias Postgrex, as: P
@@ -84,7 +85,7 @@ defmodule Realtime.Extensions.PostgresTest do
           end
         end)
 
-      %{oids: oids} = :sys.get_state(subscriber_manager_pid)
+      %SubscriptionManager.State{oids: oids} = :sys.get_state(subscriber_manager_pid)
 
       P.query!(conn, "drop publication supabase_realtime_test", [])
       send(subscriber_manager_pid, :check_oids)
