@@ -25,7 +25,7 @@ defmodule Realtime.Extensions.PostgresTest do
       claims: %{},
       limits: %{
         max_concurrent_users: 1,
-        max_events_per_second: 1
+        max_events_per_second: 100
       },
       is_new_api: false,
       log_level: :info
