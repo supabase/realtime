@@ -17,7 +17,7 @@ defmodule RealtimeWeb.PageLive.Index do
 
   defp apply_action(socket, :index, _params) do
     socket
-    |> assign(:page_title, "Listing Notifications")
+    |> assign(:page_title, "Home - Supabase Realtime")
   end
 
   defp assign_time(socket) do
