@@ -328,7 +328,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  @impl true
   def handle_info(
         {:DOWN, _, :process, _, _reason},
         %{assigns: %{pg_sub_ref: pg_sub_ref, pg_change_params: pg_change_params}} = socket
@@ -344,7 +343,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, assign(socket, :pg_sub_ref, ref)}
   end
 
-  @impl true
   def handle_info(other, socket) do
     Logger.error("Undefined msg #{inspect(other, pretty: true)}")
     {:noreply, socket}
@@ -367,7 +365,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     shutdown_response(socket, message)
   end
 
-  @impl true
   def handle_in(
         "access_token",
         %{"access_token" => refresh_token},
@@ -402,7 +399,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  @impl true
   def handle_in(
         "broadcast" = type,
         payload,
@@ -430,7 +426,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  @impl true
   def handle_in(
         "presence",
         %{"event" => event} = payload,
@@ -465,7 +460,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:reply, result, socket}
   end
 
-  @impl true
   def handle_in(_, _, socket) do
     socket = assign_counter(socket)
     {:noreply, socket}
