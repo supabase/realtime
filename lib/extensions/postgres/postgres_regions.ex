@@ -38,19 +38,19 @@ defmodule Extensions.Postgres.Regions do
 
   def aws_to_fly(aws_region) do
     case aws_region do
-      "us-east-1" -> ["iad"]
-      "us-west-1" -> ["iad"]
-      "sa-east-1" -> ["iad"]
-      "ca-central-1" -> ["iad"]
-      "ap-southeast-1" -> ["sin"]
-      "ap-northeast-1" -> ["sin"]
-      "ap-northeast-2" -> ["sin"]
-      "ap-southeast-2" -> ["sin"]
-      "ap-south-1" -> ["sin"]
-      "eu-west-1" -> ["fra"]
-      "eu-west-2" -> ["fra"]
-      "eu-central-1" -> ["fra"]
-      _ -> [nil]
+      "us-east-1" -> "iad"
+      "us-west-1" -> "iad"
+      "sa-east-1" -> "gru"
+      "ca-central-1" -> "iad"
+      "ap-southeast-1" -> "sin"
+      "ap-northeast-1" -> "sin"
+      "ap-northeast-2" -> "sin"
+      "ap-southeast-2" -> "sin"
+      "ap-south-1" -> "sin"
+      "eu-west-1" -> "fra"
+      "eu-west-2" -> "fra"
+      "eu-central-1" -> "fra"
+      _ -> nil
     end
   end
 end
