@@ -53,9 +53,9 @@ if config_env() != :test do
     prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer()
 
   default_db_host = System.get_env("DB_HOST", "localhost")
-  username = System.get_env("DB_USER", "realtime")
+  username = System.get_env("DB_USER", "postgres")
   password = System.get_env("DB_PASSWORD", "postgres")
-  database = System.get_env("DB_NAME", "realtime")
+  database = System.get_env("DB_NAME", "postgres")
   port = System.get_env("DB_PORT", "5432")
   queue_target = System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer()
   queue_interval = System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
