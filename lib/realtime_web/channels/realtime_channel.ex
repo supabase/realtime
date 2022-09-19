@@ -302,7 +302,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         end
 
       nil ->
-        Logger.warning("Re-subscribed to PostgreSQL")
+        Logger.warning("Re-subscribed to PostgreSQL with params: #{inspect(pg_change_params)}")
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
     end
   end
