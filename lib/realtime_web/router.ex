@@ -36,13 +36,13 @@ defmodule RealtimeWeb.Router do
   scope "/", RealtimeWeb do
     pipe_through :browser
 
-    get "/", PageController, :index
-    live "/databases", DatabaseLive.Index, :index
-    live "/databases/new", DatabaseLive.Index, :new
-    live "/databases/:id/edit", DatabaseLive.Index, :edit
+    live "/", PageLive.Index, :index
+  end
 
-    live "/databases/:id", DatabaseLive.Show, :show
-    live "/databases/:id/show/edit", DatabaseLive.Show, :edit
+  scope "/admin", RealtimeWeb do
+    pipe_through :browser
+
+    live "/", AdminLive.Index, :index
   end
 
   # get "/metrics/:id", RealtimeWeb.TenantMetricsController, :index
