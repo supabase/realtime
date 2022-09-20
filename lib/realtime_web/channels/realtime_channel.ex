@@ -598,6 +598,9 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:ok, claims, ref}
     else
+      {:error, e} ->
+        {:error, e}
+
       e ->
         {:error, e}
     end
