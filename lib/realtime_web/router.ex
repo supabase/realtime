@@ -42,6 +42,10 @@ defmodule RealtimeWeb.Router do
   scope "/admin", RealtimeWeb do
     pipe_through :browser
 
+    unless Mix.env() in [:dev, :test] do
+      pipe_through :dashboard_admin
+    end
+
     live "/", AdminLive.Index, :index
   end
 
@@ -97,7 +101,7 @@ defmodule RealtimeWeb.Router do
   # If your application does not have an admins-only section yet,
   # you can use Plug.BasicAuth to set up some basic authentication
   # as long as you are also using SSL (which you should anyway).
-  scope "/" do
+  scope "/admin" do
     pipe_through :browser
 
     unless Mix.env() in [:dev, :test] do
