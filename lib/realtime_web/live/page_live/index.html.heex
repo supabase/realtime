@@ -2,6 +2,6 @@
 <h2>Listen to PostgreSQL changes in realtime over websockets.</h2>
 
 <div>
-    <p>Server time is: <%= @server_time %></p>
+    <p><%= live_render(@socket, RealtimeWeb.TimeLive, id: 1) %></p>
     <p>Node: <%= Node.self() %></p>
 </div>

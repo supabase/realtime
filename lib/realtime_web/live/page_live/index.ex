@@ -3,7 +3,7 @@ defmodule RealtimeWeb.PageLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign_time(socket)}
+    {:ok, socket}
   end
 
   @impl true
@@ -11,21 +11,8 @@ defmodule RealtimeWeb.PageLive.Index do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
-  def handle_info(:time, socket) do
-    {:noreply, assign_time(socket)}
-  end
-
   defp apply_action(socket, :index, _params) do
     socket
     |> assign(:page_title, "Home - Supabase Realtime")
-  end
-
-  defp assign_time(socket) do
-    Process.send_after(self(), :time, 100)
-    now = DateTime.utc_now() |> DateTime.to_string()
-
-    socket =
-      socket
-      |> assign(:server_time, now)
   end
 end
