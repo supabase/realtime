@@ -42,14 +42,17 @@ defmodule Realtime.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:phoenix, "~> 1.6.10"},
+      {:phoenix, "~> 1.6.12"},
       {:phoenix_ecto, "~> 4.4.0"},
       {:ecto_sql, "~> 3.8.3"},
       {:ecto_psql_extras, "~> 0.6"},
       {:postgrex, "~> 0.16.3"},
       {:phoenix_html, "~> 3.2.0"},
-      {:phoenix_live_reload, "~> 1.3.3", only: :dev},
+      {:phoenix_live_view, "~> 0.17.11"},
+      {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_dashboard, "~> 0.6.5"},
+      {:esbuild, "~> 0.4", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.1", runtime: Mix.env() == :dev},
       {:telemetry_metrics, "~> 0.6.1"},
       {:telemetry_poller, "~> 1.0.0"},
       {:gettext, "~> 0.19.1"},
@@ -89,7 +92,8 @@ defmodule Realtime.MixProject do
         "ecto.migrate --migrations-path=priv/repo/migrations",
         "run priv/repo/seeds_after_migration.exs",
         "test"
-      ]
+      ],
+      "assets.deploy": ["tailwind default --minify", "esbuild default --minify", "phx.digest"]
     ]
   end
 end

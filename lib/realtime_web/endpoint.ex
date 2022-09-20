@@ -28,7 +28,7 @@ defmodule RealtimeWeb.Endpoint do
     at: "/",
     from: :realtime,
     gzip: false,
-    only: ~w(css fonts images js favicon.ico robots.txt)
+    only: ~w(assets fonts images favicon.ico robots.txt)
 
   # plug PromEx.Plug, path: "/metrics", prom_ex_module: Realtime.PromEx
 
