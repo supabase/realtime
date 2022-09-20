@@ -6,6 +6,7 @@ defmodule Realtime.Extensions.PostgresTest do
   import Extensions.Postgres.Helpers, only: [filter_postgres_settings: 1]
 
   alias Extensions.Postgres
+  alias Postgres.SubscriptionManager
   alias Realtime.Api
   alias RealtimeWeb.ChannelsAuthorization
   alias Postgrex, as: P
@@ -18,14 +19,14 @@ defmodule Realtime.Extensions.PostgresTest do
     tenant = Api.get_tenant_by_external_id(@external_id)
 
     assigns = %{
-      token: @token,
+      tenant_token: @token,
       jwt_secret: tenant.jwt_secret,
       tenant: tenant.external_id,
       postgres_extension: filter_postgres_settings(tenant.extensions),
       claims: %{},
       limits: %{
         max_concurrent_users: 1,
-        max_events_per_second: 1
+        max_events_per_second: 100
       },
       is_new_api: false,
       log_level: :info
@@ -84,7 +85,7 @@ defmodule Realtime.Extensions.PostgresTest do
           end
         end)
 
-      %{oids: oids} = :sys.get_state(subscriber_manager_pid)
+      %SubscriptionManager.State{oids: oids} = :sys.get_state(subscriber_manager_pid)
 
       P.query!(conn, "drop publication supabase_realtime_test", [])
       send(subscriber_manager_pid, :check_oids)

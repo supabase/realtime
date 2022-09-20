@@ -6,7 +6,7 @@ defmodule Extensions.Postgres do
   alias Postgres.{Subscriptions, SubscriptionManagerTracker}
 
   def start_distributed(%{"region" => region} = args) do
-    [fly_region | _] = Postgres.Regions.aws_to_fly(region)
+    fly_region = Postgres.Regions.aws_to_fly(region)
     launch_node = launch_node(fly_region, node())
 
     Logger.warning(
