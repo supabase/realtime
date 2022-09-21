@@ -40,5 +40,8 @@ end
       \"details\" text,
       PRIMARY KEY (\"id\")
   );",
+  "GRANT ALL ON TABLE public.test TO anon;",
+  "GRANT ALL ON TABLE public.test TO postgres;",
+  "GRANT ALL ON TABLE public.test TO authenticated;",
   "create publication supabase_realtime_test for all tables"
 ] |> Enum.each(&query(Realtime.Repo, &1, []))
