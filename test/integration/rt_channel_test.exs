@@ -95,7 +95,7 @@ defmodule Phoenix.Integration.RtChannelTest do
       event: "system",
       join_ref: nil,
       payload: %{
-        "message" => "subscribed to realtime",
+        "message" => "Subscribed to PostgreSQL",
         "status" => "ok",
         "topic" => "dev_tenant:any"
       },
