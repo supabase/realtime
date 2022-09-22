@@ -1,12 +1,12 @@
 Code.require_file("../support/websocket_client.exs", __DIR__)
 
-defmodule Phoenix.Integration.RtChannelTest do
+defmodule Realtime.Integration.RtChannelTest do
   use RealtimeWeb.ConnCase
   import ExUnit.CaptureLog
   alias Postgrex, as: P
   require Logger
 
-  alias Phoenix.Integration.WebsocketClient
+  alias Realtime.Integration.WebsocketClient
   alias Phoenix.Socket.{V1, Message}
   alias __MODULE__.Endpoint
   alias Extensions.Postgres
@@ -16,7 +16,7 @@ defmodule Phoenix.Integration.RtChannelTest do
   @serializer V1.JSONSerializer
   @external_id "dev_tenant"
   @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlhdCI6MTY0MzIxNjMxOCwiZXhwIjoxOTU4NzkyMzE4fQ._6IqnkAINCM4M777lHItLeJrEEfAzXm_EQ04j6k3JuE"
-  @uri "ws://#{@external_id}.localhost:#{@port}/socket/websocket?vsndate=2022&vsn=1.0.0"
+  @uri "ws://#{@external_id}.localhost:#{@port}/socket/websocket?vsn=1.0.0"
 
   Application.put_env(:phoenix, Endpoint,
     https: false,
@@ -82,103 +82,98 @@ defmodule Phoenix.Integration.RtChannelTest do
         },
         "status" => "ok"
       },
-      join_ref: nil,
       ref: "1",
       topic: "realtime:any"
     }
 
+    # skip the presence_state event
     assert_receive %Message{}
 
-    :timer.sleep(6000)
-
     assert_receive %Message{
-      event: "system",
-      join_ref: nil,
-      payload: %{
-        "message" => "Subscribed to PostgreSQL",
-        "status" => "ok",
-        "topic" => "dev_tenant:any"
-      },
-      ref: nil,
-      topic: "realtime:any"
-    }
+                     event: "system",
+                     payload: %{
+                       "message" => "Subscribed to PostgreSQL",
+                       "status" => "ok",
+                       "topic" => "dev_tenant:any"
+                     },
+                     ref: nil,
+                     topic: "realtime:any"
+                   },
+                   6000
 
     {:ok, _, conn} = Postgres.get_manager_conn(@external_id)
     P.query!(conn, "insert into test (details) values ('test')", [])
-    :timer.sleep(1000)
 
     assert_receive %Message{
-      event: "postgres_changes",
-      join_ref: nil,
-      payload: %{
-        "data" => %{
-          "columns" => [
-            %{"name" => "id", "type" => "int4"},
-            %{"name" => "details", "type" => "text"}
-          ],
-          "commit_timestamp" => _ts,
-          "errors" => nil,
-          "record" => %{"details" => "test", "id" => id},
-          "schema" => "public",
-          "table" => "test",
-          "type" => "INSERT"
-        },
-        "ids" => [^sub_id]
-      },
-      ref: nil,
-      topic: "realtime:any"
-    }
+                     event: "postgres_changes",
+                     payload: %{
+                       "data" => %{
+                         "columns" => [
+                           %{"name" => "id", "type" => "int4"},
+                           %{"name" => "details", "type" => "text"}
+                         ],
+                         "commit_timestamp" => _ts,
+                         "errors" => nil,
+                         "record" => %{"details" => "test", "id" => id},
+                         "schema" => "public",
+                         "table" => "test",
+                         "type" => "INSERT"
+                       },
+                       "ids" => [^sub_id]
+                     },
+                     ref: nil,
+                     topic: "realtime:any"
+                   },
+                   1000
 
     P.query!(conn, "update test set details = 'test' where id = #{id}", [])
-    :timer.sleep(1000)
 
     assert_receive %Message{
-      event: "postgres_changes",
-      join_ref: nil,
-      payload: %{
-        "data" => %{
-          "columns" => [
-            %{"name" => "id", "type" => "int4"},
-            %{"name" => "details", "type" => "text"}
-          ],
-          "commit_timestamp" => _ts,
-          "errors" => nil,
-          "old_record" => %{"id" => ^id},
-          "record" => %{"details" => "test", "id" => ^id},
-          "schema" => "public",
-          "table" => "test",
-          "type" => "UPDATE"
-        },
-        "ids" => [^sub_id]
-      },
-      ref: nil,
-      topic: "realtime:any"
-    }
+                     event: "postgres_changes",
+                     payload: %{
+                       "data" => %{
+                         "columns" => [
+                           %{"name" => "id", "type" => "int4"},
+                           %{"name" => "details", "type" => "text"}
+                         ],
+                         "commit_timestamp" => _ts,
+                         "errors" => nil,
+                         "old_record" => %{"id" => ^id},
+                         "record" => %{"details" => "test", "id" => ^id},
+                         "schema" => "public",
+                         "table" => "test",
+                         "type" => "UPDATE"
+                       },
+                       "ids" => [^sub_id]
+                     },
+                     ref: nil,
+                     topic: "realtime:any"
+                   },
+                   1000
 
     P.query!(conn, "delete from test where id = #{id}", [])
-    :timer.sleep(1000)
 
     assert_receive %Message{
-      event: "postgres_changes",
-      join_ref: nil,
-      payload: %{
-        "data" => %{
-          "columns" => [
-            %{"name" => "id", "type" => "int4"},
-            %{"name" => "details", "type" => "text"}
-          ],
-          "commit_timestamp" => _ts,
-          "errors" => nil,
-          "old_record" => %{"id" => ^id},
-          "schema" => "public",
-          "table" => "test",
-          "type" => "DELETE"
-        },
-        "ids" => [^sub_id]
-      },
-      ref: nil,
-      topic: "realtime:any"
-    }
+                     event: "postgres_changes",
+                     payload: %{
+                       "data" => %{
+                         "columns" => [
+                           %{"name" => "id", "type" => "int4"},
+                           %{"name" => "details", "type" => "text"}
+                         ],
+                         "commit_timestamp" => _ts,
+                         "errors" => nil,
+                         "old_record" => %{"id" => ^id},
+                         "schema" => "public",
+                         "table" => "test",
+                         "type" => "DELETE"
+                       },
+                       "ids" => [^sub_id]
+                     },
+                     ref: nil,
+                     topic: "realtime:any"
+                   },
+                   1000
   end
 
   test "broadcast" do
@@ -198,7 +193,6 @@ defmodule Phoenix.Integration.RtChannelTest do
         },
         "status" => "ok"
       },
-      join_ref: nil,
       ref: "1",
       topic: "realtime:any"
     }
@@ -210,7 +204,6 @@ defmodule Phoenix.Integration.RtChannelTest do
 
     assert_receive %Message{
       event: "broadcast",
-      join_ref: nil,
       payload: ^payload,
       ref: nil,
       topic: "realtime:any"
@@ -234,14 +227,12 @@ defmodule Phoenix.Integration.RtChannelTest do
         },
         "status" => "ok"
       },
-      join_ref: nil,
       ref: "1",
       topic: "realtime:any"
     }
 
     assert_receive %Message{
       event: "presence_state",
-      join_ref: nil,
       payload: %{},
       ref: nil,
       topic: "realtime:any"
@@ -257,7 +248,6 @@ defmodule Phoenix.Integration.RtChannelTest do
 
     assert_receive %Message{
       event: "presence_diff",
-      join_ref: nil,
       payload:
         %{
           # "joins" => %{

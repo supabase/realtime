@@ -1,4 +1,7 @@
-defmodule Phoenix.Integration.WebsocketClient do
+# This file draws heavily from https://github.com/phoenixframework/phoenix/blob/22ef871312bd06fa591c2da04d32949ebc77f750/test/support/websocket_client.exs
+# License: https://github.com/phoenixframework/phoenix/blob/22ef871312bd06fa591c2da04d32949ebc77f750/LICENSE.md
+
+defmodule Realtime.Integration.WebsocketClient do
   @moduledoc """
   A WebSocket client used to test Phoenix.Channel
   """
