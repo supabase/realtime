@@ -19,8 +19,7 @@ defmodule RealtimeWeb.TimeLive do
     Process.send_after(self(), :time, 100)
     now = DateTime.utc_now() |> DateTime.to_string()
 
-    socket =
-      socket
-      |> assign(:server_time, now)
+    socket
+    |> assign(:server_time, now)
   end
 end
