@@ -59,10 +59,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         socket_at_capacity = Socket.assign(socket, %{limits: %{max_concurrent_users: 0}})
         socket_over_capacity = Socket.assign(socket, %{limits: %{max_concurrent_users: -1}})
 
-        assert {:error, %{reason: "false"}} =
+        assert {:error, %{reason: "{:error, :too_many_connections}"}} =
                  subscribe_and_join(socket_at_capacity, "realtime:test", %{})
 
-        assert {:error, %{reason: "false"}} =
+        assert {:error, %{reason: "{:error, :too_many_connections}"}} =
                  subscribe_and_join(socket_over_capacity, "realtime:test", %{})
       end
     end
@@ -107,7 +107,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
             x_headers: [{"x-api-key", "token123"}]
           })
 
-        assert {:error, %{reason: "0"}} = subscribe_and_join(socket, "realtime:test", %{})
+        assert {:error, %{reason: "{:error, 0}"}} =
+                 subscribe_and_join(socket, "realtime:test", %{})
       end
 
       with_mocks([
@@ -126,7 +127,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
             x_headers: [{"x-api-key", "token123"}]
           })
 
-        assert {:error, %{reason: "-1"}} = subscribe_and_join(socket, "realtime:test", %{})
+        assert {:error, %{reason: "{:error, -1}"}} =
+                 subscribe_and_join(socket, "realtime:test", %{})
       end
     end
   end

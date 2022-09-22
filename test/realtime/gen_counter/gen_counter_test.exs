@@ -68,6 +68,7 @@ defmodule Realtime.GenCounterTest do
       term = Ecto.UUID.generate()
       {:ok, _} = GenCounter.new(term)
       :ok = GenCounter.stop(term)
+      Process.sleep(100)
       assert :error = GenCounter.info(term)
     end
   end

@@ -1,140 +1,46 @@
-// We need to import the CSS so that webpack will load it.
-// The MiniCssExtractPlugin is used to separate it out into
-// its own CSS file.
-import "../css/app.scss";
+// We import the CSS which is extracted to its own file by esbuild.
+// Remove this line if you add a your own CSS build pipeline (e.g postcss).
+import "../css/app.css"
 
-// webpack automatically bundles all modules in your
-// entry points. Those entry points can be configured
-// in "webpack.config.js".
+// If you want to use Phoenix channels, run `mix help phx.gen.channel`
+// to get started and then uncomment the line below.
+// import "./user_socket.js"
+
+// You can include dependencies in two ways.
 //
-// Import deps with the dep name or local files with a relative path, for example:
+// The simplest option is to put them in assets/vendor and
+// import them using relative paths:
 //
-//     import {Socket} from "phoenix"
-//     import socket from "./socket"
+//     import "../vendor/some-package.js"
 //
-import "phoenix_html";
+// Alternatively, you can `npm install some-package --prefix assets` and import
+// them using a path starting with the package name:
+//
+//     import "some-package"
+//
 
-import { Socket, Presence } from "phoenix";
-
-function uuidv4() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
-    var r = (Math.random() * 16) | 0,
-      v = c == "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
-console.log("uuidv4()", uuidv4());
-
-let socket = new Socket("/socket", {
-  params: { user_id: uuidv4() },
-});
-
-let channel = socket.channel("room:lobby", {});
-let presence = new Presence(channel);
+// Include phoenix_html to handle method=PUT/DELETE in forms and buttons.
+import "phoenix_html"
+// Establish Phoenix Socket and LiveView configuration.
+import {Socket} from "phoenix"
+import {LiveSocket} from "phoenix_live_view"
+import topbar from "../vendor/topbar"
 
 
-const totalUsersDom = document.querySelector("#total-users");
-const totalRedDom = document.querySelector("#total-red");
-const totalBlueDom = document.querySelector("#total-blue");
-const currentTeamDom = document.querySelector("#current-team");
-const typingDom = document.querySelector("div[role=presence]");
-function renderOnlineUsers(presence) {
-  let response = "";
-  let totalUsers = 0;
-  let totalRed = 0;
-  let totalBlue = 0;
+let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
+let liveSocket = new LiveSocket("/live", Socket, {params: {_csrf_token: csrfToken}})
 
-  presence.list((userId, { metas: [first, ...rest] }) => {
-    totalUsers++;
-    if (first.team == 'red') totalRed++;
-    else totalBlue++;
-    
-    response += `<br>User: <code>${userId}</code> , (typing: ${first.typing})</br>`;
-    if (first.mouse && first.mouse.x)
-      draw(first.color, first.mouse.x, first.mouse.y);
-  });
+// Show progress bar on live navigation and form submits
+topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
+window.addEventListener("phx:page-loading-start", info => topbar.show())
+window.addEventListener("phx:page-loading-stop", info => topbar.hide())
 
-  typingDom.innerHTML = response;
-  totalUsersDom.innerHTML = `<code>${totalUsers}</code>`;
-  totalRedDom.innerHTML = `${totalRed}`;
-  totalBlueDom.innerHTML = `${totalBlue}`;
-}
-presence.onSync(() => renderOnlineUsers(presence));
+// connect if there are any LiveViews on the page
+liveSocket.connect()
 
-socket.connect();
-channel.join();
+// expose liveSocket on window for web console debug logs and latency simulation:
+// >> liveSocket.enableDebug()
+// >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
+// >> liveSocket.disableLatencySim()
+window.liveSocket = liveSocket
 
-const red = '#EF4444';
-const blue = "#3B82F6";
-const team = Math.random() < 0.5 ? 'red' : 'blue'
-
-let state = {
-  typing: false,
-  color: team == 'red' ? red : blue,
-  team: team,
-  mouse: {
-    x: 0,
-    y: 0,
-  },
-};
-channel.push("broadcast", state);
-currentTeamDom.innerHTML = `${team}`;
-
-// TYPING EXAMPLE
-const TYPING_TIMEOUT = 600;
-var typingTimer;
-
-const userStartsTyping = function () {
-  if (state.typing) return;
-  state = { ...state, typing: true };
-  channel.push("broadcast", state);
-};
-
-const userStopsTyping = function () {
-  clearTimeout(typingTimer);
-  state = { ...state, typing: false };
-  channel.push("broadcast", state);
-};
-
-let textbox = document.querySelector("#typingInput");
-textbox.addEventListener("keydown", () => {
-  userStartsTyping();
-  clearTimeout(typingTimer);
-});
-textbox.addEventListener("keyup", () => {
-  clearTimeout(typingTimer);
-  typingTimer = setTimeout(userStopsTyping, TYPING_TIMEOUT);
-});
-
-/**
- * Drawing example
- */
-var canvas = document.getElementById("imgCanvas");
-var context = canvas.getContext("2d");
-
-window.addEventListener(
-  "mousemove",
-  (e) => {
-    var pos = getMousePosOffset(canvas, e);
-    let x = pos.x;
-    let y = pos.y;
-    if (x > 0 && x < canvas.width && y > 0 && y < canvas.height) {
-      state = { ...state, mouse: { x, y } };
-      channel.push("broadcast", state);
-    }
-  },
-  false
-);
-
-function draw(color, x, y) {
-  context.fillStyle = color;
-  context.fillRect(x, y, 4, 4);
-}
-function getMousePosOffset(canvas, evt) {
-  var rect = canvas.getBoundingClientRect();
-  return {
-    x: ((evt.clientX - rect.left) / (rect.right - rect.left)) * canvas.width,
-    y: ((evt.clientY - rect.top) / (rect.bottom - rect.top)) * canvas.height,
-  };
-}

@@ -19,14 +19,14 @@ defmodule Realtime.Extensions.PostgresTest do
     tenant = Api.get_tenant_by_external_id(@external_id)
 
     assigns = %{
-      token: @token,
+      tenant_token: @token,
       jwt_secret: tenant.jwt_secret,
       tenant: tenant.external_id,
       postgres_extension: filter_postgres_settings(tenant.extensions),
       claims: %{},
       limits: %{
         max_concurrent_users: 1,
-        max_events_per_second: 1
+        max_events_per_second: 100
       },
       is_new_api: false,
       log_level: :info

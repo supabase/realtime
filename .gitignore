@@ -22,9 +22,8 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 realtime-*.tar
 
-# Ignore all files except the swagger schema.
-/priv/static/*
-!/priv/static/swagger.json
+# Ignore assets that are produced by build tools.
+/priv/static/assets/
 
 # Ignore Dialyzer .plt
 /priv/plts/*
