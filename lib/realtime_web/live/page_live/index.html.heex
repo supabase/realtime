@@ -1,7 +1,20 @@
-<h1 class="mt-10 flex items-center text-sm font-semibold leading-6 text-brand">Supabase Realtime</h1>
-<h2>Listen to PostgreSQL changes in realtime over websockets.</h2>
+<h1 class="mb-2 flex items-center text-lg font-semibold leading-6 text-brand">Supabase Realtime</h1>
+<h2>Listen to PostgreSQL changes in realtime over websockets</h2>
+<h2>Presence and Broadcast for multiplayer features</h2>
 
-<div>
-    <p><%= live_render(@socket, RealtimeWeb.TimeLive, id: "server-time") %></p>
-    <p>Node: <%= Node.self() %></p>
+<div class="my-5">
+<h3 class="font-bold">Nav</h3>
+<ul>
+    <li><%= live_redirect "Inspector", to: Routes.inspector_index_path(@socket, :index) %></li>
+</ul>
+</div>
+
+<div class="my-5">
+<h3 class="font-bold">Links</h3>
+<ul>
+    <li><%= link "Guides", to: "https://supabase.com/docs/guides/realtime" %></li>
+    <li><%= link "Github", to: "https://github.com/supabase/realtime" %></li>
+    <li><%= link "realtime-js", to: "https://github.com/supabase/realtime-js" %></li>
+    <li><%= link "multiplayer.dev", to: "https://multiplayer.dev" %></li>
+</ul>
 </div>

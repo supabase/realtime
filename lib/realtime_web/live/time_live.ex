@@ -7,7 +7,7 @@ defmodule RealtimeWeb.TimeLive do
 
   def render(assigns) do
     ~H"""
-    <span>Server time is: <%= @server_time %></span>
+    <span class="font-mono"><%= @server_time %></span>
     """
   end
 
