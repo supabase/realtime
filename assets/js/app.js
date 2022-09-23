@@ -25,21 +25,21 @@ Hooks.Payload = {
   // The event name can by anything
   // Match on specific event names to filter for only those types of events and do something with them
   this.channel.on("broadcast", { event: "*" }, payload => {
-    let line = `<li><span>BROADCAST</span><span>${JSON.stringify(payload)}</span></li>`
+    let line = `<tr><td>BROADCAST</td><td>${JSON.stringify(payload)}</td></tr>`
     let list = document.querySelector("#plist")
     list.innerHTML = line + list.innerHTML;
   })
 
   // Listen for all (`*`) `presence` events
   this.channel.on("presence", { event: "*" }, payload => {
-    let line = `<li><span>PRESENCE</span><span>${JSON.stringify(payload)}</span></li>`
+    let line = `<tr><td>PRESENCE</td><td>${JSON.stringify(payload)}</td></tr>`
     let list = document.querySelector("#plist")
     list.innerHTML = line + list.innerHTML;
   })
 
   // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
   this.channel.on("postgres_changes", { event: "*", schema: "public" }, payload => {
-    let line = `<li><span>POSTGRES</span><span>${JSON.stringify(payload)}</span></li>`
+    let line = `<tr><td>POSTGRES</td><td>${JSON.stringify(payload)}</td></tr>`
     let list = document.querySelector("#plist")
     list.innerHTML = line + list.innerHTML;
   })

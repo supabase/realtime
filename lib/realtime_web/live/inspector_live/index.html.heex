@@ -22,7 +22,7 @@
     </div>
     <div class="mb-4">
         <%= label f, :token, class: "block text-gray-700 text-sm font-bold mb-2" %>
-        <%= text_input f, :token, class: "shadow appearance-none border rounded w-full py-2 px-3 mb-1 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" %>
+        <%= password_input f, :token, value: (Ecto.Changeset.get_field(@conn_changeset, :token)), class: "shadow appearance-none border rounded w-full py-2 px-3 mb-1 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" %>
         <%= error_tag f, :token %>
         <p class="text-gray-600 text-xs italic">Your Supabase `anon_key` or Auth user JWT</p>
     </div>
@@ -55,6 +55,14 @@
 
 
 <div id="payload" phx-hook="Payload">
-    <ul id="plist">
-    </ul>
+    <table class="table-auto">
+        <thead>
+            <tr>
+                <th>Extension</th>
+                <th>Payload</th>
+            </tr>
+        </thead>
+        <tbody id="plist">
+        </tbody>
+    </table>
 </div>
