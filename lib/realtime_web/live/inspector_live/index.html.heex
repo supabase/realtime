@@ -53,13 +53,12 @@
     <%= submit "Send", phx_disable_with: "Sending...", class: "bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" %>
 </.form>
 
-
-<div id="payload" phx-hook="Payload">
-    <table class="table-auto">
-        <thead>
+<div id="payload" phx-hook="Payload" class="overflow-x-auto relative shadow-md rounded">
+    <table class="table-fixed w-full text-sm text-left text-gray-500 dark:text-gray-400">
+        <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
             <tr>
-                <th>Extension</th>
-                <th>Payload</th>
+                <th scope="col" class="w-36 py-3 px-6">Extension</th>
+                <th scope="col" class="py-3 px-6">Payload</th>
             </tr>
         </thead>
         <tbody id="plist">
