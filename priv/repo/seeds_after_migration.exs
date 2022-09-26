@@ -1,7 +1,10 @@
 alias Realtime.Api
+alias Realtime.Repo
 import Ecto.Adapters.SQL, only: [query: 3]
 
-db_conf = Application.get_env(:realtime, Realtime.Repo)
+publication = "supabase_realtime_test"
+
+db_conf = Application.get_env(:realtime, Repo)
 
 tenant_name = "dev_tenant"
 
@@ -23,7 +26,7 @@ end
         "poll_interval_ms" => 100,
         "poll_max_changes" => 100,
         "poll_max_record_bytes" => 1_048_576,
-        "publication" => "supabase_realtime_test",
+        "publication" => publication,
         "region" => "us-east-1"
       }
     }
@@ -32,16 +35,20 @@ end
   "jwt_secret" => "secure_jwt_secret"
 } |> Api.create_tenant()
 
-[
-  "DROP TABLE IF EXISTS \"public\".\"test\";",
-  "CREATE SEQUENCE IF NOT EXISTS test_id_seq;",
-  "CREATE TABLE \"public\".\"test\" (
-      \"id\" int4 NOT NULL DEFAULT nextval('test_id_seq'::regclass),
-      \"details\" text,
-      PRIMARY KEY (\"id\")
-  );",
-  "GRANT ALL ON TABLE public.test TO anon;",
-  "GRANT ALL ON TABLE public.test TO postgres;",
-  "GRANT ALL ON TABLE public.test TO authenticated;",
-  "create publication supabase_realtime_test for all tables"
-] |> Enum.each(&query(Realtime.Repo, &1, []))
+query(Repo, "drop publication #{publication}", [])
+
+{:ok, _} = Repo.transaction(fn ->
+  [
+    "drop table if exists \"public\".\"test\";",
+    "create sequence if not exists test_id_seq;",
+    "create table \"public\".\"test\" (
+        \"id\" int4 not null default nextval('test_id_seq'::regclass),
+        \"details\" text,
+        primary key (\"id\")
+    );",
+    "grant all on table public.test to anon;",
+    "grant all on table public.test to postgres;",
+    "grant all on table public.test to authenticated;",
+    "create publication #{publication} for all tables"
+  ] |> Enum.each(&query(Repo, &1, []))
+end)
