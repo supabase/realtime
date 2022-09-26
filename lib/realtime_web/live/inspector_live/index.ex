@@ -9,11 +9,12 @@ defmodule RealtimeWeb.InspectorLive.Index do
       field(:log_level, :string)
       field(:token, :string)
       field(:path, :string)
+      field(:project, :string)
     end
 
     def changeset(form, params \\ %{}) do
       form
-      |> cast(params, [:log_level, :token, :path])
+      |> cast(params, [:log_level, :token, :path, :project])
     end
   end
 
@@ -52,6 +53,41 @@ defmodule RealtimeWeb.InspectorLive.Index do
   end
 
   @impl true
+  def handle_event(
+        "validate",
+        %{"_target" => ["connection", "path"], "connection" => conn},
+        socket
+      ) do
+    conn = Map.drop(conn, ["project"])
+
+    conn_changeset = Connection.changeset(%Connection{}, conn)
+
+    socket = socket |> assign(conn_changeset: conn_changeset)
+    {:noreply, socket}
+  end
+
+  def handle_event(
+        "validate",
+        %{"_target" => ["connection", "project"], "connection" => %{"project" => project} = conn},
+        socket
+      ) do
+    ws_url = "wss://#{project}.realtime.supabase.co/socket"
+
+    conn = conn |> Map.put("path", ws_url) |> Map.put("project", project)
+
+    conn_changeset = Connection.changeset(%Connection{}, conn)
+
+    socket = socket |> assign(conn_changeset: conn_changeset)
+    {:noreply, socket}
+  end
+
+  def handle_event("validate", %{"connection" => conn}, socket) do
+    conn_changeset = Connection.changeset(%Connection{}, conn)
+
+    socket = socket |> assign(conn_changeset: conn_changeset)
+    {:noreply, socket}
+  end
+
   def handle_event("validate", _params, socket) do
     {:noreply, socket}
   end
