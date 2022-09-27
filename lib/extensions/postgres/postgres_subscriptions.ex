@@ -104,12 +104,12 @@ defmodule Extensions.Postgres.Subscriptions do
     query(conn, "delete from realtime.subscription;", [])
   end
 
-  @spec delete_multi(conn(), [Ecto.UUID.t()]) :: any()
+  @spec delete_multi(conn(), [Ecto.UUID.t()]) ::
+          {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
   def delete_multi(conn, ids) do
     Logger.debug("Delete multi ids subscriptions")
     sql = "delete from realtime.subscription where subscription_id = ANY($1::uuid[])"
-    # TODO: connection can be not available
-    {:ok, _} = query(conn, sql, [ids])
+    query(conn, sql, [ids])
   end
 
   @spec maybe_delete_all(conn()) :: {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
