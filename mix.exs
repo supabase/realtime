@@ -68,7 +68,7 @@ defmodule Realtime.MixProject do
       {:recon, "~> 2.5.2"},
       {:mint, "~> 1.4"},
       {:mint_web_socket, "~> 1.0.0"},
-      {:logflare_logger_backend, github: "Logflare/logflare_logger_backend", tag: "v0.11.1-rc.0"},
+      {:logflare_logger_backend, github: "Logflare/logflare_logger_backend", tag: "v0.11.1-rc.1"},
       {:httpoison, "~> 1.8.1"},
       {:syn, "~> 3.3.0"},
       {:credo, "~> 1.6.4", only: [:dev, :test], runtime: false},
