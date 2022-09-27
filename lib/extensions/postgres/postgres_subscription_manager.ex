@@ -11,7 +11,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
 
   @check_oids_interval 60_000
   @timeout 15_000
-  @max_delete_records 100
+  @max_delete_records 1000
 
   defmodule State do
     @moduledoc false
@@ -143,8 +143,15 @@ defmodule Extensions.Postgres.SubscriptionManager do
       if !:queue.is_empty(q) do
         {ids, q1} = queue_take(q, @max_delete_records)
         Logger.debug("delete sub id #{inspect(ids)}")
-        Subscriptions.delete_multi(state.conn, ids)
-        q1
+
+        case Subscriptions.delete_multi(state.conn, ids) do
+          {:ok, _} ->
+            q1
+
+          {:error, reason} ->
+            Logger.error("delete subscriptions from the queue failed: #{inspect(reason)}")
+            q
+        end
       else
         q
       end
