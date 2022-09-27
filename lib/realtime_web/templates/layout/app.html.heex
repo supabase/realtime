@@ -13,24 +13,10 @@
         Supabase Realtime
       </p>
     </div>
-    <div class="flex items-center gap-4">
-      <a
-        href="#"
-        class="text-[0.8125rem] font-semibold leading-6 text-zinc-900 hover:text-zinc-700"
-      >
-        Sign in
-      </a>
-      <a
-        href="#"
-        class="rounded-lg bg-zinc-100 px-2 py-1 text-[0.8125rem] font-semibold leading-6 text-zinc-900 hover:bg-zinc-200/80 active:text-zinc-900/70"
-      >
-        Create an account <span aria-hidden="true">&rarr;</span>
-      </a>
-    </div>
   </div>
 </header>
 <main class="px-4 py-20 sm:px-6 lg:px-8">
-  <div class="mx-auto max-w-xl">
+  <div class="mx-auto max-w-5xl">
     <p class="alert alert-info" role="alert"><%= get_flash(@conn, :info) %></p>
     <p class="alert alert-danger" role="alert"><%= get_flash(@conn, :error) %></p>
 

@@ -1,46 +1,159 @@
-// We import the CSS which is extracted to its own file by esbuild.
-// Remove this line if you add a your own CSS build pipeline (e.g postcss).
 import "../css/app.css"
-
-// If you want to use Phoenix channels, run `mix help phx.gen.channel`
-// to get started and then uncomment the line below.
-// import "./user_socket.js"
-
-// You can include dependencies in two ways.
-//
-// The simplest option is to put them in assets/vendor and
-// import them using relative paths:
-//
-//     import "../vendor/some-package.js"
-//
-// Alternatively, you can `npm install some-package --prefix assets` and import
-// them using a path starting with the package name:
-//
-//     import "some-package"
-//
-
-// Include phoenix_html to handle method=PUT/DELETE in forms and buttons.
 import "phoenix_html"
-// Establish Phoenix Socket and LiveView configuration.
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
+import { RealtimeClient } from '@supabase/realtime-js';
 
+// LiveView is managing this page because we have Phoenix running
+// We're using LiveView to handle the Realtime client via LiveView Hooks
+
+let Hooks = {}
+Hooks.Payload = {
+  initRealtime(path, log_level, token) {
+  // Instantiate our client with the Realtime server and params to connect with
+  this.realtimeSocket = new RealtimeClient(path, {
+      params: { log_level: log_level, apikey: token }
+      })
+
+  // Join the Channel 'any'
+  // Channels can be named anything
+  // All clients on the same Channel will get messages sent to that Channel
+  this.channel = this.realtimeSocket.channel('any', { config: { broadcast: { self: true } } })
+
+  // Listen for all (`*`) `broadcast` events
+  // The event name can by anything
+  // Match on specific event names to filter for only those types of events and do something with them
+  this.channel.on("broadcast", { event: "*" }, payload => {
+    let line = 
+    `<tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
+      <td class="py-4 px-6">BROADCAST</td>
+      <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+    </tr>`
+    let list = document.querySelector("#plist")
+    list.innerHTML = line + list.innerHTML;
+  })
+
+  // Listen for all (`*`) `presence` events
+  this.channel.on("presence", { event: "*" }, payload => {
+    let line = 
+    `<tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
+      <td class="py-4 px-6">PRESENCE</td>
+      <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+    </tr>`
+    let list = document.querySelector("#plist")
+    list.innerHTML = line + list.innerHTML;
+  })
+
+  // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
+  this.channel.on("postgres_changes", { event: "*", schema: "public" }, payload => {
+    let line = 
+    `<tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
+      <td class="py-4 px-6">POSTGRES</td>
+      <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+    </tr>`
+    let list = document.querySelector("#plist")
+    list.innerHTML = line + list.innerHTML;
+  })
+
+  // Finally, subscribe to the Channel we just setup
+  this.channel.subscribe(async (status) => {
+  if (status === 'SUBSCRIBED') {
+    console.log(`Realtime Channel status: ${status}`)
+
+    // Let LiveView know we connected so we can update the button text
+    this.pushEvent("subscribed", {})
+    
+    // Save params to local storage if `SUBSCRIBED`
+    localStorage.setItem("path", path)
+    localStorage.setItem("token", token)
+    localStorage.setItem("log_level", log_level)
+
+    // Initiate Presence for a connected user
+    // Now when a new user connects and sends a `TRACK` message all clients will receive a message like: 
+    // {
+    //     "event":"join",
+    //     "key":"2b88be54-3b41-11ed-9887-1a9e1a785cf8",
+    //     "currentPresences":[
+    //     
+    //     ],
+    //     "newPresences":[
+    //        {
+    //           "name":"realtime_presence_55",
+    //           "t":1968.1000000238419,
+    //           "presence_ref":"Fxd_ZWlhIIfuIwlD"
+    //        }
+    //     ]
+    // }
+    //
+    // And when `TRACK`ed users leave we'll receive an event like:
+    // 
+    // {
+    //     "event":"leave",
+    //     "key":"2b88be54-3b41-11ed-9887-1a9e1a785cf8",
+    //     "currentPresences":[
+    //     
+    //     ],
+    //     "leftPresences":[
+    //        {
+    //           "name":"realtime_presence_55",
+    //           "t":1968.1000000238419,
+    //           "presence_ref":"Fxd_ZWlhIIfuIwlD"
+    //        }
+    //     ]
+    // }
+    const name = 'user_name_' + Math.floor(Math.random() * 100)
+    this.channel.send(
+      {
+        type: 'presence',
+        event: 'TRACK',
+        payload: { name: name, t: performance.now() },
+      })
+      } else {
+        console.log(`Realtime Channel status: ${status}`)
+      }
+    })
+  },
+
+  sendRealtime(event, payload) {
+    // Send a `broadcast` message over the Channel
+    // All connected clients will receive this message if they're subscribed 
+    // to `broadcast` events and matching on the `event` name or using `*` to match all event names
+    this.channel.send({
+      type: "broadcast",
+      event: event,
+      payload: payload
+    })
+  },
+
+  mounted() {
+    let params = { 
+      log_level: localStorage.getItem("log_level"), 
+      token: localStorage.getItem("token"), 
+      path: localStorage.getItem("path")
+    }
+
+    this.pushEvent("local_storage", params)
+
+    this.handleEvent("connect", ({connection}) => 
+      this.initRealtime(connection.path, connection.log_level, connection.token)
+    )
+
+    this.handleEvent("send_message", ({message}) => 
+      this.sendRealtime(message.event, message.payload)
+    )
+  }
+}
 
 let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
-let liveSocket = new LiveSocket("/live", Socket, {params: {_csrf_token: csrfToken}})
+let liveSocket = new LiveSocket("/live", Socket, {hooks: Hooks, params: {_csrf_token: csrfToken}})
 
-// Show progress bar on live navigation and form submits
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
 window.addEventListener("phx:page-loading-start", info => topbar.show())
 window.addEventListener("phx:page-loading-stop", info => topbar.hide())
 
-// connect if there are any LiveViews on the page
 liveSocket.connect()
 
-// expose liveSocket on window for web console debug logs and latency simulation:
-// >> liveSocket.enableDebug()
-// >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
-// >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
+
 

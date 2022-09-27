@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@supabase/supabase-js": "^2.0.0-rc.3"
+  }
+}

@@ -37,6 +37,7 @@ defmodule RealtimeWeb.Router do
     pipe_through :browser
 
     live "/", PageLive.Index, :index
+    live "/inspector", InspectorLive.Index, :index
   end
 
   scope "/admin", RealtimeWeb do

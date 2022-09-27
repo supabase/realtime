@@ -7,7 +7,7 @@ defmodule RealtimeWeb.TimeLive do
 
   def render(assigns) do
     ~H"""
-    <span>Server time is: <%= @server_time %></span>
+    <span class="font-mono"><%= @server_time %></span>
     """
   end
 
@@ -16,11 +16,11 @@ defmodule RealtimeWeb.TimeLive do
   end
 
   defp assign_time(socket) do
-    Process.send_after(self(), :time, 100)
+    timer = if Mix.env() == :dev, do: 60_000, else: 100
+    Process.send_after(self(), :time, timer)
     now = DateTime.utc_now() |> DateTime.to_string()
 
-    socket =
-      socket
-      |> assign(:server_time, now)
+    socket
+    |> assign(:server_time, now)
   end
 end
