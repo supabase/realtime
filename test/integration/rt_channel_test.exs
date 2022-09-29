@@ -103,7 +103,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: "realtime:any"
                    },
-                   2000
+                   6000
 
     {:ok, _, conn} = Postgres.get_manager_conn(@external_id)
     P.query!(conn, "insert into test (details) values ('test')", [])
