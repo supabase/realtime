@@ -15,8 +15,8 @@ defmodule Realtime.Integration.RtChannelTest do
   @port 4002
   @serializer V1.JSONSerializer
   @external_id "dev_tenant"
-  @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlhdCI6MTY0MzIxNjMxOCwiZXhwIjoxOTU4NzkyMzE4fQ._6IqnkAINCM4M777lHItLeJrEEfAzXm_EQ04j6k3JuE"
   @uri "ws://#{@external_id}.localhost:#{@port}/socket/websocket?vsn=1.0.0"
+  @secret "secure_jwt_secret"
 
   Application.put_env(:phoenix, Endpoint,
     https: false,
@@ -55,6 +55,10 @@ defmodule Realtime.Integration.RtChannelTest do
       |> put_session(:from_session, "123")
       |> send_resp(200, Plug.CSRFProtection.get_csrf_token())
     end
+  end
+
+  defmodule Token do
+    use Joken.Config
   end
 
   setup_all do
@@ -268,8 +272,38 @@ defmodule Realtime.Integration.RtChannelTest do
     }
   end
 
+  test "token required the role key" do
+    {:ok, token, _} = token_no_role()
+
+    assert {:error, %{status_code: 403}} =
+             WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
+  end
+
+  defp token_valid() do
+    %{role: "anon"} |> generate_token()
+  end
+
+  defp token_no_role() do
+    generate_token()
+  end
+
+  defp generate_token(claims \\ %{}) do
+    claims =
+      %{
+        iss: "supabase",
+        ref: "localhost",
+        iat: System.system_time(:second),
+        exp: System.system_time(:second) + 604_800
+      }
+      |> Map.merge(claims)
+
+    signer = Joken.Signer.create("HS256", @secret)
+    Token.generate_and_sign(claims, signer)
+  end
+
   defp get_connection() do
-    {:ok, socket} = WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", @token}])
+    {:ok, token, _} = token_valid()
+    {:ok, socket} = WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
     socket
   end
 end
