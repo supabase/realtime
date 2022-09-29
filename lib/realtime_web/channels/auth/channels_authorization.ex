@@ -25,7 +25,7 @@ defmodule RealtimeWeb.ChannelsAuthorization do
         if MapSet.subset?(required, claims_keys) do
           {:ok, claims}
         else
-          {:error, "Fields 'role' and 'exp' are required in JWT"}
+          {:error, "Fields `role` and `exp` are required in JWT"}
         end
 
       {:error, reason} ->
