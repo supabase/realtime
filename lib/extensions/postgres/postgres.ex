@@ -88,12 +88,12 @@ defmodule Extensions.Postgres do
   end
 
   def get_or_start_conn(args, retries \\ 5) do
-    Enum.reduce_while(1..retries, nil, fn _, acc ->
+    Enum.reduce_while(1..retries, nil, fn retry, acc ->
       get_manager_conn(args["id"])
       |> case do
         nil ->
           start_distributed(args)
-          Process.sleep(1_000)
+          if retry > 1, do: Process.sleep(1_000)
           {:cont, acc}
 
         {:ok, _pid, _conn} = resp ->
