@@ -273,7 +273,7 @@ defmodule Realtime.Integration.RtChannelTest do
   end
 
   test "token required the role key" do
-    {:ok, token, _} = token_no_role()
+    {:ok, token} = token_no_role()
 
     assert {:error, %{status_code: 403}} =
              WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
@@ -290,7 +290,6 @@ defmodule Realtime.Integration.RtChannelTest do
   defp generate_token(claims \\ %{}) do
     claims =
       %{
-        iss: "supabase",
         ref: "localhost",
         iat: System.system_time(:second),
         exp: System.system_time(:second) + 604_800
@@ -298,11 +297,11 @@ defmodule Realtime.Integration.RtChannelTest do
       |> Map.merge(claims)
 
     signer = Joken.Signer.create("HS256", @secret)
-    Token.generate_and_sign(claims, signer)
+    Joken.Signer.sign(claims, signer)
   end
 
   defp get_connection() do
-    {:ok, token, _} = token_valid()
+    {:ok, token} = token_valid()
     {:ok, socket} = WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
     socket
   end
