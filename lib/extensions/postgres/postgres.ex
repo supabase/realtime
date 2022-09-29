@@ -5,9 +5,9 @@ defmodule Extensions.Postgres do
   alias Extensions.Postgres
   alias Postgres.{Subscriptions, SubscriptionManagerTracker}
 
-  def start_distributed(%{"region" => region} = args) do
+  def start_distributed(%{"region" => region, "id" => tenant} = args) do
     fly_region = Postgres.Regions.aws_to_fly(region)
-    launch_node = launch_node(fly_region, node())
+    launch_node = launch_node(tenant, fly_region, node())
 
     Logger.warning(
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
@@ -73,10 +73,12 @@ defmodule Extensions.Postgres do
     end
   end
 
-  def launch_node(fly_region, default) do
+  def launch_node(tenant, fly_region, default) do
     case :syn.members(Postgres.RegionNodes, fly_region) do
       [_ | _] = regions_nodes ->
-        {_, [node: launch_node]} = Enum.random(regions_nodes)
+        member_count = Enum.count(regions_nodes)
+        index = :erlang.phash2(tenant, member_count)
+        {_, [node: launch_node]} = Enum.at(regions_nodes, index)
         launch_node
 
       _ ->
