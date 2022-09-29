@@ -147,9 +147,11 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       Logger.debug("Postgres change params: " <> inspect(pg_change_params, pretty: true))
 
-      if !Enum.empty?(pg_change_params) do
-        send(self(), :postgres_subscribe)
-      end
+      pg_sub_ref =
+        case pg_change_params do
+          [_ | _] -> postgres_subscribe()
+          _ -> nil
+        end
 
       Logger.debug("Start channel: " <> inspect(pg_change_params, pretty: true))
 
@@ -167,7 +169,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          ack_broadcast: !!params["config"]["broadcast"]["ack"],
          confirm_token_ref: confirm_token_ref,
          is_new_api: is_new_api,
-         pg_sub_ref: nil,
+         pg_sub_ref: pg_sub_ref,
          pg_change_params: pg_change_params,
          presence_key: presence_key,
          self_broadcast: !!params["config"]["broadcast"]["self"],
