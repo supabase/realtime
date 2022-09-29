@@ -1,0 +1,73 @@
+<h1 class="mb-10 flex items-center text-lg font-semibold leading-6 text-brand">Realtime Inspector</h1>
+
+<.form 
+    id="form"
+    let={f} 
+    for={@conn_changeset} 
+    phx_change="validate" 
+    class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4"
+    phx_submit="connect"
+    >
+    <div class="mb-4">
+        <%= label f, :project, class: "block text-gray-700 text-sm font-bold mb-2" %>
+        <%= text_input f, :project, class: "shadow appearance-none border rounded w-full py-2 px-3 mb-1 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" %>
+        <%= error_tag f, :project %>
+        <p class="text-gray-600 text-xs italic">Supabase platform project ID or...</p>
+    </div>
+    <div class="mb-4">
+        <%= label f, :path, class: "block text-gray-700 text-sm font-bold mb-2" %>
+        <%= text_input f, :path, class: "shadow appearance-none border rounded w-full py-2 px-3 mb-1 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" %>
+        <%= error_tag f, :path %>
+        <p class="text-gray-600 text-xs italic">The websocket path to connect to</p>
+    </div>
+    <div class="mb-4">
+        <%= label f, :log_level, class: "block text-gray-700 text-sm font-bold mb-2" %>
+        <%= text_input f, :log_level, class: "shadow appearance-none border rounded w-full py-2 px-3 mb-1 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" %>
+        <%= error_tag f, :log_level %>
+        <p class="text-gray-600 text-xs italic">Set the backend log level for this connection</p>
+    </div>
+    <div class="mb-4">
+        <%= label f, :token, class: "block text-gray-700 text-sm font-bold mb-2" %>
+        <%= password_input f, :token, value: (Ecto.Changeset.get_field(@conn_changeset, :token)), class: "shadow appearance-none border rounded w-full py-2 px-3 mb-1 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" %>
+        <%= error_tag f, :token %>
+        <p class="text-gray-600 text-xs italic">Your Supabase `anon_key` or Auth user JWT</p>
+    </div>
+    
+    <%= submit (@subscribed_state), class: "bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" %>
+</.form>
+
+<.form 
+    id="message"
+    let={m} 
+    for={@message_changeset} 
+    class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4"
+    phx_submit="send_message"
+    >
+    <div class="mb-4">
+        <%= label m, :event, class: "block text-gray-700 text-sm font-bold mb-2" %>
+        <%= text_input m, :event, class: "shadow appearance-none border rounded w-full py-2 px-3 mb-1 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" %>
+        <%= error_tag m, :event %>
+        <p class="text-gray-600 text-xs italic">Event name</p>
+    </div>
+    <div class="mb-4">
+        <%= label m, :payload, class: "block text-gray-700 text-sm font-bold mb-2" %>
+        <%= text_input m, :payload, class: "shadow appearance-none border rounded w-full py-2 px-3 mb-1 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" %>
+        <%= error_tag m, :payload %>
+        <p class="text-gray-600 text-xs italic">Message payload</p>
+    </div>
+    
+    <%= submit "Send", phx_disable_with: "Sending...", class: "bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" %>
+</.form>
+
+<div id="payload" phx-hook="Payload" class="overflow-x-auto relative shadow-md rounded">
+    <table class="table-fixed w-full text-sm text-left text-gray-500 dark:text-gray-400">
+        <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
+            <tr>
+                <th scope="col" class="w-36 py-3 px-6">Extension</th>
+                <th scope="col" class="py-3 px-6">Payload</th>
+            </tr>
+        </thead>
+        <tbody id="plist">
+        </tbody>
+    </table>
+</div>

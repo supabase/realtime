@@ -42,14 +42,17 @@ defmodule Realtime.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:phoenix, "~> 1.6.10"},
+      {:phoenix, "~> 1.6.12"},
       {:phoenix_ecto, "~> 4.4.0"},
       {:ecto_sql, "~> 3.8.3"},
       {:ecto_psql_extras, "~> 0.6"},
       {:postgrex, "~> 0.16.3"},
       {:phoenix_html, "~> 3.2.0"},
-      {:phoenix_live_reload, "~> 1.3.3", only: :dev},
+      {:phoenix_live_view, "~> 0.17.11"},
+      {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_dashboard, "~> 0.6.5"},
+      {:esbuild, "~> 0.4", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.1", runtime: Mix.env() == :dev},
       {:telemetry_metrics, "~> 0.6.1"},
       {:telemetry_poller, "~> 1.0.0"},
       {:gettext, "~> 0.19.1"},
@@ -63,7 +66,9 @@ defmodule Realtime.MixProject do
       {:phoenix_swagger, "~> 0.8.3"},
       {:ex_json_schema, "~> 0.7.1"},
       {:recon, "~> 2.5.2"},
-      {:logflare_logger_backend, "~> 0.11.0"},
+      {:mint, "~> 1.4"},
+      {:mint_web_socket, "~> 1.0.0"},
+      {:logflare_logger_backend, github: "Logflare/logflare_logger_backend", tag: "v0.11.1-rc.1"},
       {:httpoison, "~> 1.8.1"},
       {:syn, "~> 3.3.0"},
       {:credo, "~> 1.6.4", only: [:dev, :test], runtime: false},
@@ -89,7 +94,8 @@ defmodule Realtime.MixProject do
         "ecto.migrate --migrations-path=priv/repo/migrations",
         "run priv/repo/seeds_after_migration.exs",
         "test"
-      ]
+      ],
+      "assets.deploy": ["tailwind default --minify", "esbuild default --minify", "phx.digest"]
     ]
   end
 end

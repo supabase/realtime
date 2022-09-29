@@ -25,7 +25,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]},
         {Postgres, [],
-         [get_or_start_conn: fn _ -> :ok end, create_subscription: fn _, _, _ -> :ok end]}
+         [
+           get_or_start_conn: fn _ -> {:ok, self(), self()} end,
+           create_subscription: fn _, _, _, _ -> {:ok, %{}} end
+         ]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
@@ -48,7 +51,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]},
         {Postgres, [],
-         [get_or_start_conn: fn _ -> :ok end, create_subscription: fn _, _, _ -> :ok end]}
+         [
+           get_or_start_conn: fn _ -> {:ok, self(), self()} end,
+           create_subscription: fn _, _, _, _ -> {:ok, %{}} end
+         ]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
@@ -78,7 +84,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]},
         {Postgres, [],
-         [get_or_start_conn: fn _ -> :ok end, create_subscription: fn _, _, _ -> :ok end]}
+         [
+           get_or_start_conn: fn _ -> {:ok, self(), self()} end,
+           create_subscription: fn _, _, _, _ -> {:ok, %{}} end
+         ]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
@@ -99,7 +108,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]},
         {Postgres, [],
-         [get_or_start_conn: fn _ -> :ok end, create_subscription: fn _, _, _ -> :ok end]}
+         [
+           get_or_start_conn: fn _ -> {:ok, self(), self()} end,
+           create_subscription: fn _, _, _, _ -> {:ok, %{}} end
+         ]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
@@ -119,7 +131,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]},
         {Postgres, [],
-         [get_or_start_conn: fn _ -> :ok end, create_subscription: fn _, _, _ -> :ok end]}
+         [
+           get_or_start_conn: fn _ -> {:ok, self(), self()} end,
+           create_subscription: fn _, _, _, _ -> {:ok, %{}} end
+         ]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{

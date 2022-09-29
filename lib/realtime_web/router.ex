@@ -3,13 +3,13 @@ defmodule RealtimeWeb.Router do
 
   require Logger
 
-  import Phoenix.LiveDashboard.Router
   import RealtimeWeb.ChannelsAuthorization, only: [authorize: 2]
 
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
-    plug :fetch_flash
+    plug :fetch_live_flash
+    plug :put_root_layout, {RealtimeWeb.LayoutView, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
   end
@@ -36,7 +36,18 @@ defmodule RealtimeWeb.Router do
   scope "/", RealtimeWeb do
     pipe_through :browser
 
-    get "/", PageController, :index
+    live "/", PageLive.Index, :index
+    live "/inspector", InspectorLive.Index, :index
+  end
+
+  scope "/admin", RealtimeWeb do
+    pipe_through :browser
+
+    unless Mix.env() in [:dev, :test] do
+      pipe_through :dashboard_admin
+    end
+
+    live "/", AdminLive.Index, :index
   end
 
   # get "/metrics/:id", RealtimeWeb.TenantMetricsController, :index
@@ -91,7 +102,7 @@ defmodule RealtimeWeb.Router do
   # If your application does not have an admins-only section yet,
   # you can use Plug.BasicAuth to set up some basic authentication
   # as long as you are also using SSL (which you should anyway).
-  scope "/" do
+  scope "/admin" do
     pipe_through :browser
 
     unless Mix.env() in [:dev, :test] do
