@@ -38,6 +38,7 @@ defmodule RealtimeWeb.Router do
 
     live "/", PageLive.Index, :index
     live "/inspector", InspectorLive.Index, :index
+    live "/inspector/new", InspectorLive.Index, :new
   end
 
   scope "/admin", RealtimeWeb do
