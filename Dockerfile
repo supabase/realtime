@@ -23,6 +23,7 @@ FROM ${BUILDER_IMAGE} as builder
 
 # install build dependencies
 RUN apt-get update -y \
+  && apt-get install curl -y \
   && apt-get install -y build-essential git \
   && apt-get clean \
   && rm -f /var/lib/apt/lists/*_* \
