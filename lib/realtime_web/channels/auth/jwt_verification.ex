@@ -27,12 +27,12 @@ defmodule RealtimeWeb.JwtVerification do
   @hs_algorithms ["HS256", "HS384", "HS512"]
 
   def verify(token, secret) when is_binary(token) do
-    with :ok <- check_claims_format(token),
+    with {:ok, _claims} <- check_claims_format(token),
          {:ok, header} <- check_header_format(token),
          {:ok, signer} <- generate_signer(header, secret) do
       JwtAuthToken.verify_and_validate(token, signer)
     else
-      _ -> :error
+      error -> error
     end
   end
 
@@ -41,14 +41,14 @@ defmodule RealtimeWeb.JwtVerification do
   defp check_header_format(token) do
     case Joken.peek_header(token) do
       {:ok, header} when is_map(header) -> {:ok, header}
-      _ -> :error
+      error -> error
     end
   end
 
   defp check_claims_format(token) do
     case Joken.peek_claims(token) do
-      {:ok, claims} when is_map(claims) -> :ok
-      _ -> :error
+      {:ok, claims} when is_map(claims) -> {:ok, claims}
+      error -> error
     end
   end
 

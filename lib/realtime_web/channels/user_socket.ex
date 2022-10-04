@@ -61,6 +61,10 @@ defmodule RealtimeWeb.UserSocket do
 
         {:ok, assign(socket, assigns)}
       else
+        nil ->
+          Logger.error("Auth error: tenant `#{external_id}` not found")
+          :error
+
         error ->
           Logger.error("Auth error: #{inspect(error)}")
           :error
