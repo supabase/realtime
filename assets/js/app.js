@@ -10,7 +10,7 @@ import { RealtimeClient } from '@supabase/realtime-js';
 
 let Hooks = {}
 Hooks.Payload = {
-  initRealtime(path, log_level, token) {
+  initRealtime(channelName, path, log_level, token) {
   // Instantiate our client with the Realtime server and params to connect with
   this.realtimeSocket = new RealtimeClient(path, {
       params: { log_level: log_level, apikey: token }
@@ -19,17 +19,17 @@ Hooks.Payload = {
   // Join the Channel 'any'
   // Channels can be named anything
   // All clients on the same Channel will get messages sent to that Channel
-  this.channel = this.realtimeSocket.channel('any', { config: { broadcast: { self: true } } })
+  this.channel = this.realtimeSocket.channel(channelName, { config: { broadcast: { self: true } } })
 
   // Listen for all (`*`) `broadcast` events
   // The event name can by anything
   // Match on specific event names to filter for only those types of events and do something with them
   this.channel.on("broadcast", { event: "*" }, payload => {
     let line = 
-    `<tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
-      <td class="py-4 px-6">BROADCAST</td>
-      <td class="py-4 px-6">${JSON.stringify(payload)}</td>
-    </tr>`
+      `<tr class="bg-white border-b hover:bg-gray-50">
+        <td class="py-4 px-6">BROADCAST</td>
+        <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+      </tr>`
     let list = document.querySelector("#plist")
     list.innerHTML = line + list.innerHTML;
   })
@@ -37,10 +37,10 @@ Hooks.Payload = {
   // Listen for all (`*`) `presence` events
   this.channel.on("presence", { event: "*" }, payload => {
     let line = 
-    `<tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
-      <td class="py-4 px-6">PRESENCE</td>
-      <td class="py-4 px-6">${JSON.stringify(payload)}</td>
-    </tr>`
+      `<tr class="bg-white border-b hover:bg-gray-50">
+        <td class="py-4 px-6">BROADCAST</td>
+        <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+      </tr>`
     let list = document.querySelector("#plist")
     list.innerHTML = line + list.innerHTML;
   })
@@ -48,10 +48,10 @@ Hooks.Payload = {
   // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
   this.channel.on("postgres_changes", { event: "*", schema: "public" }, payload => {
     let line = 
-    `<tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
-      <td class="py-4 px-6">POSTGRES</td>
-      <td class="py-4 px-6">${JSON.stringify(payload)}</td>
-    </tr>`
+      `<tr class="bg-white border-b hover:bg-gray-50">
+        <td class="py-4 px-6">BROADCAST</td>
+        <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+      </tr>`
     let list = document.querySelector("#plist")
     list.innerHTML = line + list.innerHTML;
   })
@@ -62,12 +62,13 @@ Hooks.Payload = {
     console.log(`Realtime Channel status: ${status}`)
 
     // Let LiveView know we connected so we can update the button text
-    this.pushEvent("subscribed", {})
+    this.pushEventTo("#conn_component", "subscribed", {})
     
     // Save params to local storage if `SUBSCRIBED`
     localStorage.setItem("path", path)
     localStorage.setItem("token", token)
     localStorage.setItem("log_level", log_level)
+    localStorage.setItem("channel", channelName)
 
     // Initiate Presence for a connected user
     // Now when a new user connects and sends a `TRACK` message all clients will receive a message like: 
@@ -126,21 +127,35 @@ Hooks.Payload = {
     })
   },
 
+  disconnectRealtime() {
+    // Send a `broadcast` message over the Channel
+    // All connected clients will receive this message if they're subscribed 
+    // to `broadcast` events and matching on the `event` name or using `*` to match all event names
+    this.channel.unsubscribe()
+  },
+
+  
+
   mounted() {
     let params = { 
       log_level: localStorage.getItem("log_level"), 
       token: localStorage.getItem("token"), 
-      path: localStorage.getItem("path")
+      path: localStorage.getItem("path"),
+      channel: localStorage.getItem("channel")
     }
 
-    this.pushEvent("local_storage", params)
+    this.pushEventTo("#conn_component", "local_storage", params)
 
     this.handleEvent("connect", ({connection}) => 
-      this.initRealtime(connection.path, connection.log_level, connection.token)
+      this.initRealtime(connection.channel, connection.path, connection.log_level, connection.token)
     )
 
     this.handleEvent("send_message", ({message}) => 
       this.sendRealtime(message.event, message.payload)
+    )
+
+    this.handleEvent("disconnect", ({}) => 
+      this.disconnectRealtime()
     )
   }
 }
