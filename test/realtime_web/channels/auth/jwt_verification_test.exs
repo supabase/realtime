@@ -18,27 +18,27 @@ defmodule RealtimeWeb.JwtVerificationTest do
   end
 
   test "verify/1 when token is not a string" do
-    assert :error = JwtVerification.verify([], @jwt_secret)
+    assert {:error, :not_a_string} = JwtVerification.verify([], @jwt_secret)
   end
 
   test "verify/1 when token has invalid format" do
     invalid_token = Base.encode64("{}")
 
-    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
+    assert {:error, :token_malformed} = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token header is not a map" do
     invalid_token =
       Base.encode64("[]") <> "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
 
-    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
+    assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token claims is not a map" do
     invalid_token =
       Base.encode64("{}") <> "." <> Base.encode64("[]") <> "." <> Base.encode64("<<\"sig\">>")
 
-    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
+    assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token header does not have typ or alg" do
@@ -46,13 +46,13 @@ defmodule RealtimeWeb.JwtVerificationTest do
       Base.encode64("{\"typ\": \"JWT\"}") <>
         "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
 
-    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
+    assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret)
 
     invalid_token =
       Base.encode64("{\"alg\": \"HS256\"}") <>
         "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
 
-    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
+    assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token header alg is not allowed" do
@@ -60,7 +60,7 @@ defmodule RealtimeWeb.JwtVerificationTest do
       Base.encode64("{\"typ\": \"JWT\", \"alg\": \"ZZ999\"}") <>
         "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
 
-    assert :error = JwtVerification.verify(invalid_token, @jwt_secret)
+    assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token is valid and alg is HS256" do

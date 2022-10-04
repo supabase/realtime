@@ -32,11 +32,12 @@ defmodule RealtimeWeb.JwtVerification do
          {:ok, signer} <- generate_signer(header, secret) do
       JwtAuthToken.verify_and_validate(token, signer)
     else
-      error -> error
+      :error -> {:error, :unknown_error}
+      {:error, _e} = error -> error
     end
   end
 
-  def verify(_token, _secret), do: :error
+  def verify(_token, _secret), do: {:error, :not_a_string}
 
   defp check_header_format(token) do
     case Joken.peek_header(token) do
