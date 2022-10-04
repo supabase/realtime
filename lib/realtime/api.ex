@@ -56,7 +56,7 @@ defmodule Realtime.Api do
       {:error, %Ecto.Changeset{}}
 
   """
-  def create_tenant(attrs \\ %{}) do
+  def create_tenant(attrs) do
     Logger.debug("create_tenant #{inspect(attrs, pretty: true)}")
 
     %Tenant{}
@@ -122,10 +122,6 @@ defmodule Realtime.Api do
   """
   def change_tenant(%Tenant{} = tenant, attrs \\ %{}) do
     Tenant.changeset(tenant, attrs)
-  end
-
-  def get_tenant_by_name(name) do
-    Repo.replica().get_by(Tenant, name: name)
   end
 
   @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
