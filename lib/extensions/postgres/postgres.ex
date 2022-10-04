@@ -14,11 +14,16 @@ defmodule Extensions.Postgres do
     )
 
     case :rpc.call(launch_node, Postgres, :start, [args], 30_000) do
-      {:ok, _pid} ->
-        :ok
+      {:ok, _pid} = ok ->
+        ok
 
-      {_, error} ->
-        Logger.error("Can't start Postgres ext #{inspect(error, pretty: true)}")
+      {:error, {:already_started, _pid}} = error ->
+        Logger.info("Postgres Extention already started on node #{inspect(launch_node)}")
+        error
+
+      error ->
+        Logger.error("Error starting Postgres Extention: #{inspect(error, pretty: true)}")
+        error
     end
   end
 
