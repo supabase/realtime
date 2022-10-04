@@ -1,23 +1,6 @@
 defmodule RealtimeWeb.InspectorLive.Index do
   use RealtimeWeb, :live_view
 
-  defmodule Connection do
-    use Ecto.Schema
-    import Ecto.Changeset
-
-    schema "f" do
-      field(:log_level, :string)
-      field(:token, :string)
-      field(:path, :string)
-      field(:project, :string)
-    end
-
-    def changeset(form, params \\ %{}) do
-      form
-      |> cast(params, [:log_level, :token, :path, :project])
-    end
-  end
-
   defmodule Message do
     use Ecto.Schema
     import Ecto.Changeset
@@ -35,88 +18,35 @@ defmodule RealtimeWeb.InspectorLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    conn_changeset = Connection.changeset(%Connection{})
-    message_changeset = Message.changeset(%Message{})
+    changeset = Message.changeset(%Message{event: "test", payload: ~s({"some":"data"})})
 
     socket =
       socket
+      |> assign(changeset: changeset)
       |> assign(subscribed_state: "Connect")
-      |> assign(conn_changeset: conn_changeset)
-      |> assign(message_changeset: message_changeset)
+      |> assign(subscribed_to: nil)
+      |> assign(:page_title, "Inspector - Supabase Realtime")
 
     {:ok, socket}
   end
 
   @impl true
-  def handle_params(params, _url, socket) do
-    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
+  def handle_params(_params, _url, socket) do
+    {:noreply, socket}
   end
 
   @impl true
-  def handle_event(
-        "validate",
-        %{"_target" => ["connection", "path"], "connection" => conn},
-        socket
-      ) do
-    conn = Map.drop(conn, ["project"])
-
-    conn_changeset = Connection.changeset(%Connection{}, conn)
-
-    socket = socket |> assign(conn_changeset: conn_changeset)
-    {:noreply, socket}
-  end
-
-  def handle_event(
-        "validate",
-        %{"_target" => ["connection", "project"], "connection" => %{"project" => project} = conn},
-        socket
-      ) do
-    ws_url = "wss://#{project}.realtime.supabase.co/socket"
-
-    conn = conn |> Map.put("path", ws_url) |> Map.put("project", project)
-
-    conn_changeset = Connection.changeset(%Connection{}, conn)
-
-    socket = socket |> assign(conn_changeset: conn_changeset)
-    {:noreply, socket}
-  end
-
-  def handle_event("validate", %{"connection" => conn}, socket) do
-    conn_changeset = Connection.changeset(%Connection{}, conn)
-
-    socket = socket |> assign(conn_changeset: conn_changeset)
-    {:noreply, socket}
-  end
-
-  def handle_event("validate", _params, socket) do
-    {:noreply, socket}
-  end
-
-  def handle_event("connect", params, socket) do
-    socket =
-      socket
-      |> assign(subscribed_state: "Connecting...")
-      |> push_event("connect", params)
-
-    {:noreply, socket}
-  end
-
-  def handle_event("subscribed", _params, socket) do
-    {:noreply, assign(socket, subscribed_state: "Connected")}
-  end
-
   def handle_event("send_message", params, socket) do
     {:noreply, push_event(socket, "send_message", params)}
   end
 
-  def handle_event("local_storage", params, socket) do
-    conn_changeset = Connection.changeset(%Connection{}, params)
+  @impl true
+  def handle_info({:subscribed_successfully, state}, socket) do
+    socket =
+      socket
+      |> assign(subscribed_state: state.subscribed_state)
+      |> assign(subscribed_to: state.changeset.changes.path)
 
-    {:noreply, assign(socket, conn_changeset: conn_changeset)}
-  end
-
-  defp apply_action(socket, :index, _params) do
-    socket
-    |> assign(:page_title, "Inspector - Supabase Realtime")
+    {:noreply, socket}
   end
 end

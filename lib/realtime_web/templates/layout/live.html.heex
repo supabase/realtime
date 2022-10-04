@@ -26,24 +26,24 @@
           </defs>
         </svg>
       </a>
-      <p class="rounded-full bg-brand/5 px-2 text-[0.8125rem] font-medium leading-6 text-brand">
+      <p class="rounded-full bg-brand/5 px-2 text-[0.8125rem] font-medium leading-6 text-gray-900">
         Realtime: Multiplayer Edition
       </p>
     </div>
   </div>
 </header>
-<main class="px-4 py-20 sm:px-6 lg:px-8">
-  <div class="mx-auto max-w-5xl">
+<main class="px-4 py-24 sm:px-6 lg:px-8">
+  <div class="mx-auto max-w-6xl">
     <p class="alert alert-info" role="alert"><%= live_flash(@flash, :info) %></p>
     <p class="alert alert-danger" role="alert"><%= live_flash(@flash, :error) %></p>
 
     <%= @inner_content %>
   </div>
 </main>
-<footer class="fixed bottom-0 left-0 z-20 p-4 w-full bg-white border-t border-gray-200 shadow md:flex md:items-center md:justify-between md:p-6 dark:bg-gray-800 dark:border-gray-600">
-    <span class="text-sm text-gray-500 sm:text-center dark:text-gray-400">© 2022 <a href="https://supabase.com/" class="hover:underline">Supabase™</a>
+<footer class="fixed bottom-0 left-0 z-20 p-4 w-full bg-white border-t border-zinc-100 md:flex md:items-center md:justify-between md:p-6">
+    <span class="text-sm text-gray-900 sm:text-center">© 2022 <a href="https://supabase.com/" class="hover:underline">Supabase™</a>
     </span>
-    <ul class="flex flex-wrap items-center mt-3 text-sm text-gray-500 dark:text-gray-400 sm:mt-0">
+    <ul class="flex flex-wrap items-center mt-3 text-sm text-gray-900 sm:mt-0">
         <li>
             <span class="mr-4 md:mr-6">Apache 2.0 License</span>
         </li>
