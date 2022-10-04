@@ -22,8 +22,14 @@ ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
 FROM ${BUILDER_IMAGE} as builder
 
 # install build dependencies
-RUN apt-get update -y && apt-get install -y build-essential git \
-  && apt-get clean && rm -f /var/lib/apt/lists/*_*
+RUN apt-get update -y \
+  && apt-get install curl -y \
+  && apt-get install -y build-essential git \
+  && apt-get clean \
+  && rm -f /var/lib/apt/lists/*_* \
+  && curl -sL https://deb.nodesource.com/setup_10.x | bash - \
+  && apt-get install -y nodejs \
+  && apt-get install -y npm
 
 # prepare build dir
 WORKDIR /app
