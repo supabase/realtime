@@ -24,7 +24,7 @@ defmodule RealtimeWeb.JwtVerificationTest do
   test "verify/1 when token has invalid format" do
     invalid_token = Base.encode64("{}")
 
-    assert {:error, :token_malformed} = JwtVerification.verify(invalid_token, @jwt_secret)
+    assert {:error, :expected_claims_map} = JwtVerification.verify(invalid_token, @jwt_secret)
   end
 
   test "verify/1 when token header is not a map" do

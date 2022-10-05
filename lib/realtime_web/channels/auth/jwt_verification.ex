@@ -32,7 +32,6 @@ defmodule RealtimeWeb.JwtVerification do
          {:ok, signer} <- generate_signer(header, secret) do
       JwtAuthToken.verify_and_validate(token, signer)
     else
-      :error -> {:error, :unknown_error}
       {:error, _e} = error -> error
     end
   end
@@ -42,14 +41,14 @@ defmodule RealtimeWeb.JwtVerification do
   defp check_header_format(token) do
     case Joken.peek_header(token) do
       {:ok, header} when is_map(header) -> {:ok, header}
-      error -> error
+      error -> {:error, :expected_header_map}
     end
   end
 
   defp check_claims_format(token) do
     case Joken.peek_claims(token) do
       {:ok, claims} when is_map(claims) -> {:ok, claims}
-      error -> error
+      error -> {:error, :expected_claims_map}
     end
   end
 
@@ -57,5 +56,5 @@ defmodule RealtimeWeb.JwtVerification do
     {:ok, Joken.Signer.create(alg, jwt_secret)}
   end
 
-  defp generate_signer(_header, _secret), do: :error
+  defp generate_signer(_header, _secret), do: {:error, :error_generating_signer}
 end
