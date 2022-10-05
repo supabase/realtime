@@ -23,9 +23,12 @@ defmodule RealtimeWeb.InspectorLive.Index do
     socket =
       socket
       |> assign(changeset: changeset)
-      |> assign(subscribed_state: "Connect")
-      |> assign(subscribed_to: nil)
-      |> assign(:page_title, "Inspector - Supabase Realtime")
+      |> assign(page_title: "Inspector - Supabase Realtime")
+      |> assign(realtime_connected: false)
+      |> assign(connected_to: nil)
+      |> assign(postgres_subscribed: false)
+      |> assign(presence_subscribed: false)
+      |> assign(broadcast_subscribed: false)
 
     {:ok, socket}
   end
@@ -40,12 +43,29 @@ defmodule RealtimeWeb.InspectorLive.Index do
     {:noreply, push_event(socket, "send_message", params)}
   end
 
-  @impl true
-  def handle_info({:subscribed_successfully, state}, socket) do
+  def handle_event("postgres_subscribed", _params, socket) do
     socket =
       socket
-      |> assign(subscribed_state: state.subscribed_state)
-      |> assign(subscribed_to: state.changeset.changes.path)
+      |> assign(postgres_subscribed: true)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("presence_subscribed", params, socket) do
+    socket =
+      socket
+      |> assign(presence_subscribed: true)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("broadcast_subscribed", %{"path" => path}, socket) do
+    socket =
+      socket
+      |> assign(realtime_connected: true)
+      |> assign(connected_to: path)
+      |> assign(broadcast_subscribed: true)
+      |> push_patch(to: Routes.inspector_index_path(socket, :index))
 
     {:noreply, socket}
   end

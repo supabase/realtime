@@ -16,6 +16,13 @@ Hooks.Payload = {
       params: { log_level: log_level, apikey: token }
       })
 
+  // Hack to confirm Postgres is subscribed
+  this.realtimeSocket.onMessage(message => {
+        if (message.event === 'system' && message.payload.status === 'ok') {
+          this.pushEventTo("#conn_info", "postgres_subscribed", {})
+        }
+      })
+
   // Join the Channel 'any'
   // Channels can be named anything
   // All clients on the same Channel will get messages sent to that Channel
@@ -36,6 +43,7 @@ Hooks.Payload = {
 
   // Listen for all (`*`) `presence` events
   this.channel.on("presence", { event: "*" }, payload => {
+    this.pushEventTo("#conn_info", "presence_subscribed", {})
     let line = 
       `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">PRESENCE</td>
@@ -62,7 +70,7 @@ Hooks.Payload = {
     console.log(`Realtime Channel status: ${status}`)
 
     // Let LiveView know we connected so we can update the button text
-    this.pushEventTo("#conn_component", "subscribed", {})
+    this.pushEventTo("#conn_info", "broadcast_subscribed", { path: path})
     
     // Save params to local storage if `SUBSCRIBED`
     localStorage.setItem("path", path)
@@ -144,7 +152,7 @@ Hooks.Payload = {
       channel: localStorage.getItem("channel")
     }
 
-    this.pushEventTo("#conn_component", "local_storage", params)
+    this.pushEventTo("#conn_form", "local_storage", params)
 
     this.handleEvent("connect", ({connection}) => 
       this.initRealtime(connection.channel, connection.path, connection.log_level, connection.token)
