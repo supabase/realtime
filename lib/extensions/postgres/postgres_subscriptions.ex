@@ -3,7 +3,7 @@ defmodule Extensions.Postgres.Subscriptions do
   This module consolidates subscriptions handling
   """
   require Logger
-  import Postgrex, only: [transaction: 2, query: 3, query!: 3, rollback: 2]
+  import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
 
   @type conn() :: Postgrex.conn()
 
