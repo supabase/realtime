@@ -3,12 +3,12 @@ defmodule Extensions.Postgres.Subscriptions do
   This module consolidates subscriptions handling
   """
   require Logger
-  import Postgrex, only: [transaction: 2, query: 3, query!: 3, rollback: 2]
+  import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
 
   @type conn() :: Postgrex.conn()
 
   @spec create(conn(), String.t(), list(map())) ::
-          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | String.t()}
+          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | atom()}
   def create(conn, publication, params_list) do
     sql = "with sub_tables as (
 		    select
@@ -47,44 +47,12 @@ defmodule Extensions.Postgres.Subscriptions do
 
     transaction(conn, fn conn ->
       params_list
-      |> Enum.map(fn %{
-                       id: id,
-                       claims: claims,
-                       params: params
-                     } ->
-        with [schema, table, filters] <-
-               (case params do
-                  %{"schema" => schema, "table" => table, "filter" => filter} ->
-                    with [col, rest] <- String.split(filter, "=", parts: 2),
-                         [filter_type, value] <- String.split(rest, ".", parts: 2) do
-                      [schema, table, [{col, filter_type, value}]]
-                    else
-                      _ -> []
-                    end
-
-                  %{"schema" => schema, "table" => table} ->
-                    [schema, table, []]
-
-                  %{"schema" => schema} ->
-                    [schema, "*", []]
-
-                  _ ->
-                    []
-                end) do
-          query!(
-            conn,
-            sql,
-            [
-              publication,
-              schema,
-              table,
-              id,
-              claims,
-              filters
-            ]
-          )
+      |> Enum.map(fn %{id: id, claims: claims, params: params} ->
+        with [schema, table, filters] <- parse_subscription_params(params),
+             {:ok, result} <- query(conn, sql, [publication, schema, table, id, claims, filters]) do
+          result
         else
-          _ -> rollback(conn, "malformed postgres params")
+          _ -> rollback(conn, :malformed_subscription_params)
         end
       end)
     end)
@@ -155,6 +123,27 @@ defmodule Extensions.Postgres.Subscriptions do
 
       _ ->
         %{}
+    end
+  end
+
+  defp parse_subscription_params(params) do
+    case params do
+      %{"schema" => schema, "table" => table, "filter" => filter} ->
+        with [col, rest] <- String.split(filter, "=", parts: 2),
+             [filter_type, value] <- String.split(rest, ".", parts: 2) do
+          [schema, table, [{col, filter_type, value}]]
+        else
+          _ -> []
+        end
+
+      %{"schema" => schema, "table" => table} ->
+        [schema, table, []]
+
+      %{"schema" => schema} ->
+        [schema, "*", []]
+
+      _ ->
+        []
     end
   end
 end
