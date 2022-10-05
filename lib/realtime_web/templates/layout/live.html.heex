@@ -44,14 +44,9 @@
     <span class="text-sm text-gray-900 sm:text-center">© 2022 <a href="https://supabase.com/" class="hover:underline">Supabase™</a>
     </span>
     <ul class="flex flex-wrap items-center mt-3 text-sm text-gray-900 sm:mt-0">
-        <li>
-            <span class="mr-4 md:mr-6">Apache 2.0 License</span>
-        </li>
-        <li>
-        <span class="mr-4 md:mr-6"><%= Node.self() %></span>
-        </li>
-        <li>
-            <%= live_render(@socket, RealtimeWeb.TimeLive, id: "server-time") %>
-        </li>
+        <li><span class="mr-4 md:mr-6">Apache 2.0 License</span></li>
+        <li><span class="font-mono mr-4 md:mr-6"><%= Node.self() %></span></li>
+        <li><span class="font-mono mr-4 md:mr-6"><%= System.get_env("FLY_REGION") %></span></li>
+        <li><%= live_render(@socket, RealtimeWeb.TimeLive, id: "server-time") %></li>
     </ul>
 </footer>

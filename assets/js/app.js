@@ -38,7 +38,7 @@ Hooks.Payload = {
   this.channel.on("presence", { event: "*" }, payload => {
     let line = 
       `<tr class="bg-white border-b hover:bg-gray-50">
-        <td class="py-4 px-6">BROADCAST</td>
+        <td class="py-4 px-6">PRESENCE</td>
         <td class="py-4 px-6">${JSON.stringify(payload)}</td>
       </tr>`
     let list = document.querySelector("#plist")
@@ -49,7 +49,7 @@ Hooks.Payload = {
   this.channel.on("postgres_changes", { event: "*", schema: "public" }, payload => {
     let line = 
       `<tr class="bg-white border-b hover:bg-gray-50">
-        <td class="py-4 px-6">BROADCAST</td>
+        <td class="py-4 px-6">POSTGRES</td>
         <td class="py-4 px-6">${JSON.stringify(payload)}</td>
       </tr>`
     let list = document.querySelector("#plist")
