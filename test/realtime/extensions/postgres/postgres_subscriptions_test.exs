@@ -57,7 +57,7 @@ defmodule Realtime.Extensions.PostgresSubscriptionsTest do
       }
     ]
 
-    assert {:error, "malformed postgres params"} =
+    assert {:error, :malformed_postgres_params} =
              S.create(conn, "supabase_realtime_test", params_list)
 
     %Postgrex.Result{rows: [[num]]} =
