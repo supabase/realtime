@@ -16,7 +16,9 @@ defmodule Extensions.Postgres.Migrations do
   def init(args) do
     # applying tenant's migrations
     apply_migrations(args)
-    {:ok, %{}, {:continue, :stop}}
+    # need try to stop this PID
+    {:ok, %{}}
+    # {:ok, %{}, {:continue, :stop}}
   end
 
   @impl true
