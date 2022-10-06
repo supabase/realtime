@@ -10,6 +10,7 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Phoenix.Socket.{V1, Message}
   alias __MODULE__.Endpoint
   alias Extensions.Postgres
+  alias Ecto.Adapters.SQL.Sandbox
 
   @moduletag :capture_log
   @port 4002
@@ -62,7 +63,7 @@ defmodule Realtime.Integration.RtChannelTest do
   end
 
   setup_all do
-    Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, {:shared, self()})
+    Sandbox.mode(Realtime.Repo, {:shared, self()})
     capture_log(fn -> start_supervised!(Endpoint) end)
     start_supervised!({Phoenix.PubSub, name: __MODULE__})
     :ok
