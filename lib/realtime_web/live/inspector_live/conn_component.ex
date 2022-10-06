@@ -115,24 +115,4 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
 
     {:noreply, assign(socket, changeset: changeset)}
   end
-
-  def handle_event("subscribed", _params, socket) do
-    send(
-      self(),
-      {:subscribed_successfully,
-       %{subscribed_state: "Connected", changeset: socket.assigns.changeset}}
-    )
-
-    socket =
-      socket
-      |> assign(subscribed_state: "Connected")
-      |> push_patch(to: Routes.inspector_index_path(socket, :index))
-
-    {:noreply, socket}
-  end
-
-  defp apply_action(socket, :index, _params) do
-    socket
-    |> assign(:page_title, "Connect - Inspector - Supabase Realtime")
-  end
 end
