@@ -65,7 +65,7 @@ defmodule Realtime.Extensions.PostgresTest do
         end)
 
       assert Process.alive?(sup)
-      PartitionSupervisor.stop(Postgres.DynamicSupervisor, sup)
+      Process.exit(sup, :kill)
       Process.sleep(10_000)
       {sup2, _} = :syn.lookup(Extensions.Postgres.Sup, @external_id)
       assert Process.alive?(sup2)
