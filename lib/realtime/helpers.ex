@@ -65,4 +65,16 @@ defmodule Realtime.Helpers do
     to_remove = :binary.last(data)
     :binary.part(data, 0, byte_size(data) - to_remove)
   end
+
+  def decrypt_creds(host, port, name, user, pass) do
+    secure_key = Application.get_env(:realtime, :db_enc_key)
+
+    {
+      decrypt!(host, secure_key),
+      decrypt!(port, secure_key),
+      decrypt!(name, secure_key),
+      decrypt!(user, secure_key),
+      decrypt!(pass, secure_key)
+    }
+  end
 end
