@@ -1,6 +1,6 @@
 <div>
     <.form 
-        id="conn_component"
+        id="conn_form"
         let={f} 
         for={@changeset} 
         phx-change="validate" 
@@ -38,7 +38,7 @@
         </div>
         <div class="mb-4">
             <%= label f, :channel, class: "block text-gray-700 text-sm font-bold mb-2" %>
-            <%= text_input f, :channel, placeholder: "any_name",class: "
+            <%= text_input f, :channel, placeholder: "room_a",class: "
                     my-1
                     block
                     w-full
@@ -52,7 +52,7 @@
         </div>
         <div class="mb-4">
             <%= label f, :log_level, class: "block text-gray-700 text-sm font-bold mb-2" %>
-            <%= text_input f, :log_level, class: "
+            <%= select f, :log_level, ["debug", "info", "warn", "error"], selected: "info", class: "
                     my-1
                     block
                     w-full

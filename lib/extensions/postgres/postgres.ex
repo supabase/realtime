@@ -5,20 +5,25 @@ defmodule Extensions.Postgres do
   alias Extensions.Postgres
   alias Postgres.{Subscriptions, SubscriptionManagerTracker}
 
-  def start_distributed(%{"region" => region} = args) do
+  def start_distributed(%{"region" => region, "id" => tenant} = args) do
     fly_region = Postgres.Regions.aws_to_fly(region)
-    launch_node = launch_node(fly_region, node())
+    launch_node = launch_node(tenant, fly_region, node())
 
     Logger.warning(
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
     case :rpc.call(launch_node, Postgres, :start, [args], 30_000) do
-      {:ok, _pid} ->
-        :ok
+      {:ok, _pid} = ok ->
+        ok
 
-      {_, error} ->
-        Logger.error("Can't start Postgres ext #{inspect(error, pretty: true)}")
+      {:error, {:already_started, _pid}} = error ->
+        Logger.info("Postgres Extention already started on node #{inspect(launch_node)}")
+        error
+
+      error ->
+        Logger.error("Error starting Postgres Extention: #{inspect(error, pretty: true)}")
+        error
     end
   end
 
@@ -43,11 +48,14 @@ defmodule Extensions.Postgres do
         "db_socket_opts" => [addrtype]
       })
 
-    DynamicSupervisor.start_child(Postgres.DynamicSupervisor, %{
-      id: args["id"],
-      start: {Postgres.DynamicSupervisor, :start_link, [args]},
-      restart: :transient
-    })
+    DynamicSupervisor.start_child(
+      {:via, PartitionSupervisor, {Postgres.DynamicSupervisor, self()}},
+      %{
+        id: args["id"],
+        start: {Postgres.WorkerSupervisor, :start_link, [args]},
+        restart: :transient
+      }
+    )
   end
 
   @spec stop(String.t(), timeout()) :: :ok
@@ -73,10 +81,12 @@ defmodule Extensions.Postgres do
     end
   end
 
-  def launch_node(fly_region, default) do
+  def launch_node(tenant, fly_region, default) do
     case :syn.members(Postgres.RegionNodes, fly_region) do
       [_ | _] = regions_nodes ->
-        {_, [node: launch_node]} = Enum.random(regions_nodes)
+        member_count = Enum.count(regions_nodes)
+        index = :erlang.phash2(tenant, member_count)
+        {_, [node: launch_node]} = Enum.at(regions_nodes, index)
         launch_node
 
       _ ->
@@ -86,12 +96,12 @@ defmodule Extensions.Postgres do
   end
 
   def get_or_start_conn(args, retries \\ 5) do
-    Enum.reduce_while(1..retries, nil, fn _, acc ->
+    Enum.reduce_while(1..retries, nil, fn retry, acc ->
       get_manager_conn(args["id"])
       |> case do
         nil ->
           start_distributed(args)
-          Process.sleep(1_000)
+          if retry > 1, do: Process.sleep(1_000)
           {:cont, acc}
 
         {:ok, _pid, _conn} = resp ->

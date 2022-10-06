@@ -188,6 +188,17 @@ defmodule RealtimeWeb.Components do
     """
   end
 
+  attr :class, :string, default: nil
+  attr :rest, :global, include: ~w(disabled form name value)
+
+  slot(:inner_block, required: true)
+
+  def badge(assigns) do
+    ~H"""
+      <div><span class="text-xs font-semibold inline-block uppercase py-[3px] px-[5px] rounded bg-gray-100"><%= render_slot(@inner_block) %></span></div>
+    """
+  end
+
   ## JS Commands
 
   def show(js \\ %JS{}, selector) do

@@ -1,6 +1,5 @@
 defmodule Extensions.Postgres.SubscriptionsChecker do
   @moduledoc false
-  require Logger
   use GenServer
   require Logger
 

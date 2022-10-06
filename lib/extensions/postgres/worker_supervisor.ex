@@ -1,9 +1,9 @@
-defmodule Extensions.Postgres.DynamicSupervisor do
+defmodule Extensions.Postgres.WorkerSupervisor do
   @moduledoc false
   use Supervisor
 
   alias Extensions.Postgres
-  alias Postgres.{ReplicationPoller, SubscriptionManager, SubscriptionsChecker}
+  alias Postgres.{Migrations, ReplicationPoller, SubscriptionManager, SubscriptionsChecker}
 
   def start_link(args) do
     name = [name: {:via, :syn, {Postgres.Sup, args["id"]}}]
@@ -16,6 +16,11 @@ defmodule Extensions.Postgres.DynamicSupervisor do
     tid_args = Map.merge(args, %{"subscribers_tid" => subscribers_tid})
 
     children = [
+      %{
+        id: Migrations,
+        start: {Migrations, :start_link, [args]},
+        restart: :transient
+      },
       %{
         id: ReplicationPoller,
         start: {ReplicationPoller, :start_link, [args]},
