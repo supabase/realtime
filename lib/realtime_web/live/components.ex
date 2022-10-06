@@ -195,7 +195,7 @@ defmodule RealtimeWeb.Components do
 
   def badge(assigns) do
     ~H"""
-      <span class="text-xs font-semibold inline-block uppercase"><%= render_slot(@inner_block) %></span>
+      <div><span class="text-xs font-semibold inline-block uppercase py-[3px] px-[5px] rounded bg-gray-100"><%= render_slot(@inner_block) %></span></div>
     """
   end
 
