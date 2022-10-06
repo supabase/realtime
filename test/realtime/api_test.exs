@@ -5,7 +5,7 @@ defmodule Realtime.ApiTest do
 
   describe "tenants" do
     alias Realtime.Api.{Tenant, Extensions}
-    db_conf = Application.get_env(:realtime, Realtime.Repo)
+    db_conf = Application.compile_env(:realtime, Realtime.Repo)
 
     @valid_attrs %{
       external_id: "external_id",

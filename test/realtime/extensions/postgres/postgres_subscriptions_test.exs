@@ -146,7 +146,7 @@ defmodule Realtime.Extensions.PostgresSubscriptionsTest do
 
   defp create_subscriptions(conn, num) do
     params_list =
-      Enum.reduce(1..num, [], fn i, acc ->
+      Enum.reduce(1..num, [], fn _i, acc ->
         [
           %{
             claims: %{

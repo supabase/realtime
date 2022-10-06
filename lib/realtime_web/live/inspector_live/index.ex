@@ -51,7 +51,7 @@ defmodule RealtimeWeb.InspectorLive.Index do
     {:noreply, socket}
   end
 
-  def handle_event("presence_subscribed", params, socket) do
+  def handle_event("presence_subscribed", _params, socket) do
     socket =
       socket
       |> assign(presence_subscribed: true)
