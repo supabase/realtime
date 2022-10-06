@@ -42,7 +42,7 @@ defmodule Extensions.Postgres.DynamicSupervisor do
     Supervisor.init(children, strategy: :one_for_all, max_restarts: 10, max_seconds: 60)
   end
 
-  @spec apply_migrations(Keyword) :: [integer()]
+  @spec apply_migrations(map()) :: [integer()]
   defp apply_migrations(args) do
     {host, port, name, user, pass} =
       decrypt_creds(
