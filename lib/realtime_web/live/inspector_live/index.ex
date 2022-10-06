@@ -36,22 +36,16 @@ defmodule RealtimeWeb.InspectorLive.Index do
   end
 
   @impl true
-  def handle_params(%{"path" => path} = params, _url, socket) do
-    IO.inspect(params)
-
+  def handle_params(params, _url, socket) do
     changeset = ConnComponent.Connection.changeset(%ConnComponent.Connection{}, params)
 
-    send_update_after(
-      self,
+    send_update(
       RealtimeWeb.InspectorLive.ConnComponent,
-      [id: "conn_modal", changeset: changeset],
-      5_000
+      id: :new_conn,
+      changeset: changeset,
+      url_params: params
     )
 
-    {:noreply, socket}
-  end
-
-  def handle_params(_params, _url, socket) do
     {:noreply, socket}
   end
 
