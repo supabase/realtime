@@ -37,7 +37,8 @@ defmodule Realtime.Api.Tenant do
       :name,
       :external_id,
       :jwt_secret,
-      :max_concurrent_users
+      :max_concurrent_users,
+      :max_events_per_second
     ])
     |> validate_required([
       :external_id,
