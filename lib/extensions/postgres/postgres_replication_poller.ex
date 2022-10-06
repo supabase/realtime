@@ -3,13 +3,13 @@ defmodule Extensions.Postgres.ReplicationPoller do
 
   require Logger
 
-  import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
+  import Realtime.Helpers, only: [cancel_timer: 1, decrypt_creds: 5]
 
   alias Extensions.Postgres
   alias Postgres.Replications
   alias DBConnection.Backoff
 
-  alias Realtime.{MessageDispatcher, PubSub, Repo}
+  alias Realtime.{MessageDispatcher, PubSub}
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
@@ -67,17 +67,10 @@ defmodule Extensions.Postgres.ReplicationPoller do
         %{
           backoff: backoff,
           conn: conn,
-          db_host: db_host,
-          db_port: db_port,
-          db_name: db_name,
-          db_user: db_user,
-          db_pass: db_pass,
-          db_socket_opts: socket_opts,
           slot_name: slot_name
         } = state
       ) do
     try do
-      migrate_tenant(db_host, db_port, db_name, db_user, db_pass, socket_opts)
       Replications.prepare_replication(conn, slot_name)
     catch
       :error, error -> {:error, error}
@@ -273,42 +266,5 @@ defmodule Extensions.Postgres.ReplicationPoller do
       ],
       socket_options: socket_opts
     )
-  end
-
-  def migrate_tenant(host, port, name, user, pass, socket_opts) do
-    {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
-
-    Repo.with_dynamic_repo(
-      [
-        hostname: host,
-        port: port,
-        database: name,
-        password: pass,
-        username: user,
-        socket_options: socket_opts
-      ],
-      fn repo ->
-        Ecto.Migrator.run(
-          Repo,
-          [Ecto.Migrator.migrations_path(Repo, "postgres/migrations")],
-          :up,
-          all: true,
-          prefix: "realtime",
-          dynamic_repo: repo
-        )
-      end
-    )
-  end
-
-  def decrypt_creds(host, port, name, user, pass) do
-    secure_key = Application.get_env(:realtime, :db_enc_key)
-
-    {
-      decrypt!(host, secure_key),
-      decrypt!(port, secure_key),
-      decrypt!(name, secure_key),
-      decrypt!(user, secure_key),
-      decrypt!(pass, secure_key)
-    }
   end
 end
