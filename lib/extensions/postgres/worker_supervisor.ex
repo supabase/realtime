@@ -1,4 +1,4 @@
-defmodule Extensions.Postgres.DynamicSupervisor do
+defmodule Extensions.Postgres.WorkerSupervisor do
   @moduledoc false
   use Supervisor
 

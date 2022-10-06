@@ -48,11 +48,14 @@ defmodule Extensions.Postgres do
         "db_socket_opts" => [addrtype]
       })
 
-    DynamicSupervisor.start_child(Postgres.DynamicSupervisor, %{
-      id: args["id"],
-      start: {Postgres.DynamicSupervisor, :start_link, [args]},
-      restart: :transient
-    })
+    DynamicSupervisor.start_child(
+      {:via, PartitionSupervisor, {Postgres.DynamicSupervisor, self()}},
+      %{
+        id: args["id"],
+        start: {Postgres.WorkerSupervisor, :start_link, [args]},
+        restart: :transient
+      }
+    )
   end
 
   @spec stop(String.t(), timeout()) :: :ok
