@@ -1,6 +1,8 @@
 defmodule RealtimeWeb.InspectorLive.Index do
   use RealtimeWeb, :live_view
 
+  alias RealtimeWeb.InspectorLive.ConnComponent
+
   defmodule Message do
     use Ecto.Schema
     import Ecto.Changeset
@@ -34,7 +36,16 @@ defmodule RealtimeWeb.InspectorLive.Index do
   end
 
   @impl true
-  def handle_params(_params, _url, socket) do
+  def handle_params(params, _url, socket) do
+    changeset = ConnComponent.Connection.changeset(%ConnComponent.Connection{}, params)
+
+    send_update(
+      RealtimeWeb.InspectorLive.ConnComponent,
+      id: :new_conn,
+      changeset: changeset,
+      url_params: params
+    )
+
     {:noreply, socket}
   end
 

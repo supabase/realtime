@@ -11,11 +11,13 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       field(:path, :string)
       field(:project, :string)
       field(:channel, :string)
+      field(:schema, :string)
+      field(:table, :string)
     end
 
     def changeset(form, params \\ %{}) do
       form
-      |> cast(params, [:log_level, :token, :path, :project, :channel])
+      |> cast(params, [:log_level, :token, :path, :project, :channel, :schema, :table])
       |> validate_required([:channel])
     end
   end
@@ -28,18 +30,16 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       socket
       |> assign(subscribed_state: "Connect")
       |> assign(changeset: changeset)
+      |> assign(url_params: %{})
 
     {:ok, socket}
   end
 
   @impl true
-  def update(_assigns, socket) do
-    changeset = Connection.changeset(%Connection{})
-
+  def update(assigns, socket) do
     socket =
       socket
-      |> assign(subscribed_state: "Connect")
-      |> assign(changeset: changeset)
+      |> assign(assigns)
 
     {:ok, socket}
   end
@@ -54,7 +54,14 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
 
     changeset = Connection.changeset(%Connection{}, conn)
 
-    socket = socket |> assign(changeset: changeset)
+    socket =
+      socket
+      |> assign(changeset: changeset)
+      |> push_patch(
+        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, conn),
+        replace: true
+      )
+
     {:noreply, socket}
   end
 
@@ -69,14 +76,28 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
 
     changeset = Connection.changeset(%Connection{}, conn)
 
-    socket = socket |> assign(changeset: changeset)
+    socket =
+      socket
+      |> assign(changeset: changeset)
+      |> push_patch(
+        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, conn),
+        replace: true
+      )
+
     {:noreply, socket}
   end
 
   def handle_event("validate", %{"connection" => conn}, socket) do
     changeset = Connection.changeset(%Connection{}, conn)
 
-    socket = socket |> assign(changeset: changeset)
+    socket =
+      socket
+      |> assign(changeset: changeset)
+      |> push_patch(
+        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, conn),
+        replace: true
+      )
+
     {:noreply, socket}
   end
 
@@ -98,16 +119,38 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
     {:noreply, socket}
   end
 
+  def handle_event("local_storage", _params, %{assigns: %{url_params: url_params}} = socket)
+      when url_params != %{} do
+    {:noreply, socket}
+  end
+
   def handle_event("local_storage", %{"log_level" => nil} = params, socket) do
     params = Map.drop(params, ["log_level"])
     changeset = Connection.changeset(%Connection{}, params)
-    {:noreply, assign(socket, changeset: changeset)}
+
+    socket =
+      socket
+      |> assign(changeset: changeset)
+      |> push_patch(
+        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, params),
+        replace: true
+      )
+
+    {:noreply, socket}
   end
 
   def handle_event("local_storage", params, socket) do
     changeset = Connection.changeset(%Connection{}, params)
 
-    {:noreply, assign(socket, changeset: changeset)}
+    socket =
+      socket
+      |> assign(changeset: changeset)
+      |> push_patch(
+        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, params),
+        replace: true
+      )
+
+    {:noreply, socket}
   end
 
   def handle_event("cancel", params, socket) do
