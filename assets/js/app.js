@@ -10,7 +10,7 @@ import { RealtimeClient } from '@supabase/realtime-js';
 
 let Hooks = {}
 Hooks.Payload = {
-  initRealtime(channelName, path, log_level, token) {
+  initRealtime(channelName, path, log_level, token, schema, table) {
   // Instantiate our client with the Realtime server and params to connect with
   this.realtimeSocket = new RealtimeClient(path, {
       params: { log_level: log_level, apikey: token }
@@ -54,7 +54,7 @@ Hooks.Payload = {
   })
 
   // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
-  this.channel.on("postgres_changes", { event: "*", schema: "public" }, payload => {
+  this.channel.on("postgres_changes", { event: "*", schema: schema, table: table }, payload => {
     let line = 
       `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">POSTGRES</td>
@@ -77,6 +77,8 @@ Hooks.Payload = {
     localStorage.setItem("token", token)
     localStorage.setItem("log_level", log_level)
     localStorage.setItem("channel", channelName)
+    localStorage.setItem("schema", schema)
+    localStorage.setItem("table", table)
 
     // Initiate Presence for a connected user
     // Now when a new user connects and sends a `TRACK` message all clients will receive a message like: 
@@ -149,13 +151,15 @@ Hooks.Payload = {
       log_level: localStorage.getItem("log_level"), 
       token: localStorage.getItem("token"), 
       path: localStorage.getItem("path"),
-      channel: localStorage.getItem("channel")
+      channel: localStorage.getItem("channel"),
+      schema: localStorage.getItem("schema"),
+      table: localStorage.getItem("table")
     }
 
     this.pushEventTo("#conn_form", "local_storage", params)
 
     this.handleEvent("connect", ({connection}) => 
-      this.initRealtime(connection.channel, connection.path, connection.log_level, connection.token)
+      this.initRealtime(connection.channel, connection.path, connection.log_level, connection.token, connection.schema, connection.table)
     )
 
     this.handleEvent("send_message", ({message}) => 

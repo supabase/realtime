@@ -11,11 +11,13 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       field(:path, :string)
       field(:project, :string)
       field(:channel, :string)
+      field(:schema, :string)
+      field(:table, :string)
     end
 
     def changeset(form, params \\ %{}) do
       form
-      |> cast(params, [:log_level, :token, :path, :project, :channel])
+      |> cast(params, [:log_level, :token, :path, :project, :channel, :schema, :table])
       |> validate_required([:channel])
     end
   end
