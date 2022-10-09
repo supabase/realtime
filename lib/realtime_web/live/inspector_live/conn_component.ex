@@ -101,7 +101,9 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
     {:noreply, socket}
   end
 
-  def handle_event("connect", params, socket) do
+  def handle_event("connect", %{"connection" => conn} = params, socket) do
+    send_share_url(conn)
+
     socket =
       socket
       |> assign(subscribed_state: "Connecting...")
@@ -157,5 +159,10 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
     changeset = Connection.changeset(%Connection{}, params)
 
     {:noreply, assign(socket, changeset: changeset)}
+  end
+
+  defp send_share_url(conn) do
+    url = Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, conn)
+    send(self(), {:share_url, url})
   end
 end
