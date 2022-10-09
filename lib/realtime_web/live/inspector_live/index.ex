@@ -31,6 +31,7 @@ defmodule RealtimeWeb.InspectorLive.Index do
       |> assign(postgres_subscribed: false)
       |> assign(presence_subscribed: false)
       |> assign(broadcast_subscribed: false)
+      |> assign(share_url: Routes.inspector_index_path(socket, :new))
 
     {:ok, socket}
   end
@@ -79,5 +80,10 @@ defmodule RealtimeWeb.InspectorLive.Index do
       |> push_patch(to: Routes.inspector_index_path(socket, :index))
 
     {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:share_url, url}, socket) do
+    {:noreply, assign(socket, share_url: url)}
   end
 end
