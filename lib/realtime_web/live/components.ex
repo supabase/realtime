@@ -77,6 +77,7 @@ defmodule RealtimeWeb.Components do
   """
   attr :class, :string, default: nil
   attr :href, :string, default: "#"
+  attr :target, :string, default: ""
   attr :rest, :global, include: ~w(disabled form name value)
 
   slot(:inner_block, required: true)
@@ -86,7 +87,8 @@ defmodule RealtimeWeb.Components do
     <.link
       role="button"
       class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
-      href={@href}>
+      href={@href}
+      target={@target}>
       <%= render_slot(@inner_block) %>
     </.link>
     """

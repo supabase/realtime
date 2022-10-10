@@ -1,8 +1,13 @@
-<div class="mb-5">
-    <.h1>Realtime Inspector</.h1>
-    <p>Use the Realtime Inspector to connect to Supabase Realtime and debug payloads</p>
+<div class="flex flex-row justify-between py-4">
+    <div>
+        <.h1>Realtime Inspector</.h1>
+        <p>Use the Realtime Inspector to connect to Supabase Realtime and debug payloads</p>
+    </div>
+    <div>
+        <.link_button href={@share_url} target="_blank">Share</.link_button>
+    </div>
 </div>
-<div class="pb-8">
+<div class="py-4">
     <.h2>Connection</.h2>
     <%= if @live_action == :new do %>
         <.modal id="conn_modal" show={true}>
@@ -16,7 +21,7 @@
         </.modal>
     <% end %>
     
-    <div id="conn_info" class="my-4">
+    <div id="conn_info" class="mb-5">
         <%= if @broadcast_subscribed do %>
             <p>Connected to <code><%= @connected_to %></code></p>
         <% else %>
