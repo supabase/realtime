@@ -6,11 +6,58 @@ on:
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.semantic.outputs.new_release_published }}
+      version: ${{ steps.semantic.outputs.new_release_version }}
+    steps:
+      - uses: actions/checkout@v3
+      - id: semantic
+        uses: cycjimmy/semantic-release-action@v3
+        with:
+          semantic_version: 18
+          branches: |
+            [
+              {name: 'main', prerelease: true}
+            ]
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PROJECT_ACTION }}
+
   deploy:
     name: Deploy
+    needs:
+      - release
     runs-on: ubuntu-latest
+    if: needs.release.outputs.published == 'true'
     steps:
       - uses: actions/checkout@v2
       - uses: superfly/flyctl-actions@1.1
         with:
           args: "-c deploy/fly/prod.toml deploy"
+
+  upload-docker:
+    name: Upload Docker Image
+    needs:
+      - release
+    runs-on: ubuntu-latest
+    if: needs.release.outputs.published == 'true'
+    steps:
+      - id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: supabase/realtime
+          tags: |
+            type=raw,value=v${{ needs.release.outputs.version }}
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - uses: docker/build-push-action@v3
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
