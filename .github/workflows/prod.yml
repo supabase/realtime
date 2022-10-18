@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+      - rc
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 jobs:
@@ -20,7 +21,11 @@ jobs:
           semantic_version: 18
           branches: |
             [
-              {name: 'main', prerelease: true}
+              'main',
+              {
+                name: 'rc',
+                prerelease: true
+              }
             ]
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PROJECT_ACTION }}
