@@ -2,3 +2,4 @@
 !server
 server/deps
 server/_build
+!docker-entrypoint.sh

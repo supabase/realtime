@@ -2,6 +2,7 @@ version: '3'
 services:
   realtime:
     image: supabase/realtime:latest
+    build: .
     ports:
       - "4000:4000"
     environment:
