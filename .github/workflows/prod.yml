@@ -4,12 +4,24 @@ on:
     branches:
       - main
       - rc
+
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v2
+      - uses: superfly/flyctl-actions@1.1
+        with:
+          args: "-c deploy/fly/prod.toml deploy"
+
   release:
     name: Release
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/rc'
     outputs:
       published: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
@@ -19,35 +31,17 @@ jobs:
         uses: cycjimmy/semantic-release-action@v3
         with:
           semantic_version: 18
-          branches: |
-            [
-              'main',
-              {
-                name: 'rc',
-                prerelease: true
-              }
-            ]
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PROJECT_ACTION }}
-
-  deploy:
-    name: Deploy
-    needs:
-      - release
-    runs-on: ubuntu-latest
-    if: needs.release.outputs.published == 'true'
-    steps:
-      - uses: actions/checkout@v2
-      - uses: superfly/flyctl-actions@1.1
-        with:
-          args: "-c deploy/fly/prod.toml deploy"
 
   upload-docker:
     name: Upload Docker Image
     needs:
       - release
     runs-on: ubuntu-latest
-    if: needs.release.outputs.published == 'true'
+    if: |
+      github.ref == 'refs/heads/rc' &&
+      needs.release.outputs.published == 'true'
     steps:
       - id: meta
         uses: docker/metadata-action@v4
