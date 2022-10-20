@@ -94,6 +94,30 @@ defmodule RealtimeWeb.Components do
   end
 
   @doc """
+  Renders a link as a button.
+  ## Examples
+      <.link_button>Send!</.link_button>
+  """
+  attr :href, :string, default: "#"
+  attr :target, :string, default: ""
+  attr :rest, :global
+
+  slot(:inner_block, required: true)
+
+  def gray_link_button(assigns) do
+    ~H"""
+    <.link
+      role="button"
+      class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
+      href={@href}
+      target={@target}
+      {@rest}>
+      <%= render_slot(@inner_block) %>
+    </.link>
+    """
+  end
+
+  @doc """
   Renders a link as a button, but optionally patches the browser history.
   ## Examples
       <.patch_button>Send!</.link_button>

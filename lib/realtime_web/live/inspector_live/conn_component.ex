@@ -153,7 +153,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   end
 
   def handle_event("local_storage", %{"log_level" => nil} = params, socket) do
-    params = Map.drop(params, ["log_level"]) |> IO.inspect()
+    params = Map.drop(params, ["log_level"])
     changeset = Connection.changeset(%Connection{}, params)
 
     socket =
