@@ -16,17 +16,26 @@ Hooks.Payload = {
       params: { log_level: log_level, apikey: token }
       })
 
-  // Hack to confirm Postgres is subscribed
-  this.realtimeSocket.onMessage(message => {
-        if (message.event === 'system' && message.payload.status === 'ok') {
-          this.pushEventTo("#conn_info", "postgres_subscribed", {})
-        }
-      })
-
   // Join the Channel 'any'
   // Channels can be named anything
   // All clients on the same Channel will get messages sent to that Channel
   this.channel = this.realtimeSocket.channel(channelName, { config: { broadcast: { self: true } } })
+
+  // Hack to confirm Postgres is subscribed
+  // Need to add 'extension' key in the 'payload'
+  this.channel.on("system", {}, payload => {
+    if (payload.message === 'Subscribed to PostgreSQL' && payload.status === 'ok') {
+          this.pushEventTo("#conn_info", "postgres_subscribed", {})
+        }
+
+    let line = 
+    `<tr class="bg-white border-b hover:bg-gray-50">
+      <td class="py-4 px-6">SYSTEM</td>
+      <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+    </tr>`
+    let list = document.querySelector("#plist")
+    list.innerHTML = line + list.innerHTML;
+    })
 
   // Listen for all (`*`) `broadcast` events
   // The event name can by anything
