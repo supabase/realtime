@@ -1,4 +1,4 @@
-<div class="flex flex-row justify-between py-6">
+<div class="flex flex-row justify-between py-4">
     <div>
         <.h1>Realtime Inspector</.h1>
         <p>Use the Realtime Inspector to connect to Supabase Realtime and debug payloads</p>
@@ -7,7 +7,7 @@
         <.link_button href={@share_url} target="_blank">Share</.link_button>
     </div>
 </div>
-<div class="py-6">
+<div class="py-4">
     <.h2>Connection</.h2>
     <%= if @live_action == :new do %>
         <.modal id="conn_modal" show={true}>
@@ -31,7 +31,7 @@
     <.link_button href={Routes.inspector_index_path(@socket, :new)}>New connection</.link_button>
 </div>
 
-<div class="grid grid-cols-1 md:grid-cols-3 gap-12 py-6">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-12 py-4">
     <div>
         <div class="flex flex-row flex-wrap justify-between">
                 <.h3>Broadcast</.h3>
@@ -55,7 +55,7 @@
     </div>
 </div>
 
-<div class="flex flex-row flex-wrap py-6">
+<div class="flex flex-row flex-wrap py-4">
     <aside class="w-full sm:w-1/3 md:w-1/4 pr-2 mb-8">
         <.h3>Broadcast an event</.h3>
         <div class="mb-6">

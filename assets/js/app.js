@@ -144,6 +144,10 @@ Hooks.Payload = {
     this.channel.unsubscribe()
   },
 
+  clearLocalStorage() {
+    localStorage.clear()
+  },
+
   
 
   mounted() {
@@ -168,6 +172,10 @@ Hooks.Payload = {
 
     this.handleEvent("disconnect", ({}) => 
       this.disconnectRealtime()
+    )
+
+    this.handleEvent("clear_local_storage", ({}) => 
+      this.clearLocalStorage()
     )
   }
 }
