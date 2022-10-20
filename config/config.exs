@@ -28,9 +28,16 @@ config :realtime, :phoenix_swagger,
 
 config :realtime, :extensions,
   postgres: %{
+    # rls_poller?
     key: "postgres",
     supervisor: Extensions.Postgres.Supervisor,
     db_settings: Extensions.Postgres.DbSettings
+  },
+  postgres_cdc_stream: %{
+    key: "postgres_cdc_stream",
+    driver: Extensions.PostgresCdcStream,
+    supervisor: Extensions.PostgresCdcStream.Supervisor,
+    db_settings: Extensions.PostgresCdcStream.DbSettings
   }
 
 config :phoenix_swagger, json_library: Jason

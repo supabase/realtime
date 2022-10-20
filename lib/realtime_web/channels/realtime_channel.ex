@@ -7,9 +7,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   require Logger
 
   alias DBConnection.Backoff
-  alias Extensions.Postgres
+  # alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
-  alias Realtime.{GenCounter, RateCounter}
+  alias Realtime.{GenCounter, RateCounter, PostgresCdc}
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
@@ -28,7 +28,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       :jwt_secret,
       :tenant_token,
       :access_token,
-      :channel_name
+      :channel_name,
+      :postgres_cdc_module
     ]
 
     @type t :: %__MODULE__{
@@ -59,7 +60,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{
           assigns: %{
             tenant: tenant,
-            log_level: log_level
+            log_level: log_level,
+            postgres_cdc_module: module
           },
           channel_pid: channel_pid,
           serializer: serializer,
@@ -139,7 +141,9 @@ defmodule RealtimeWeb.RealtimeChannel do
               metadata: {:subscriber_fastlane, transport_pid, serializer, ids, topic, is_new_api}
             ]
 
-            Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
+            # Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
+
+            PostgresCdc.subscribe(module, pg_change_params, tenant, metadata)
 
             pg_change_params
 
@@ -252,7 +256,9 @@ defmodule RealtimeWeb.RealtimeChannel do
             pg_sub_ref: pg_sub_ref,
             pg_change_params: pg_change_params,
             postgres_extension: postgres_extension,
-            channel_name: channel_name
+            channel_name: channel_name,
+            tenant_topic: tenant_topic,
+            postgres_cdc_module: module
           }
         } = socket
       ) do
@@ -261,20 +267,13 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     args = Map.put(postgres_extension, "id", tenant)
 
-    case Postgres.get_or_start_conn(args) do
-      {:ok, manager_pid, conn} ->
-        case Postgres.create_subscription(
-               conn,
-               postgres_extension["publication"],
-               pg_change_params,
-               15_000
-             ) do
+    case PostgresCdc.connect(module, args) do
+      {:ok, response} ->
+        case PostgresCdc.after_connect(module, response) do
           {:ok, _response} ->
-            Endpoint.subscribe("subscription_manager:" <> tenant)
-
-            for %{id: id} <- pg_change_params do
-              send(manager_pid, {:subscribed, {self(), id}})
-            end
+            # for %{id: id} <- pg_change_params do
+            #   send(manager_pid, {:subscribed, {self(), id}})
+            # end
 
             message = "Subscribed to PostgreSQL"
 
