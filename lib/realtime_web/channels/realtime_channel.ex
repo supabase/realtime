@@ -27,7 +27,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       :claims,
       :jwt_secret,
       :tenant_token,
-      :access_token
+      :access_token,
+      :channel_name
     ]
 
     @type t :: %__MODULE__{
@@ -42,7 +43,8 @@ defmodule RealtimeWeb.RealtimeChannel do
             claims: map(),
             jwt_secret: String.t(),
             tenant_token: String.t(),
-            access_token: String.t()
+            access_token: String.t(),
+            channel_name: String.t()
           }
   end
 
@@ -171,7 +173,8 @@ defmodule RealtimeWeb.RealtimeChannel do
          pg_change_params: pg_change_params,
          presence_key: presence_key,
          self_broadcast: !!params["config"]["broadcast"]["self"],
-         tenant_topic: tenant_topic
+         tenant_topic: tenant_topic,
+         channel_name: sub_topic
        })}
     else
       {:error, :too_many_channels} = error ->
@@ -249,7 +252,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             pg_sub_ref: pg_sub_ref,
             pg_change_params: pg_change_params,
             postgres_extension: postgres_extension,
-            tenant_topic: tenant_topic
+            channel_name: channel_name
           }
         } = socket
       ) do
@@ -277,14 +280,14 @@ defmodule RealtimeWeb.RealtimeChannel do
 
             Logger.info(message)
 
-            push_system_message("postgres_changes", socket, "ok", message, tenant_topic)
+            push_system_message("postgres_changes", socket, "ok", message, channel_name)
 
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
           error ->
             message = "Subscribing to PostgreSQL failed: #{inspect(error)}"
 
-            push_system_message("postgres_changes", socket, "error", message, tenant_topic)
+            push_system_message("postgres_changes", socket, "error", message, channel_name)
 
             Logger.error(message)
 
@@ -596,21 +599,21 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp shutdown_response(%{assigns: %{tenant_topic: tenant_topic}} = socket, message)
+  defp shutdown_response(%{assigns: %{channel_name: channel_name}} = socket, message)
        when is_binary(message) do
-    push_system_message("system", socket, "error", message, tenant_topic)
+    push_system_message("system", socket, "error", message, channel_name)
 
     Logger.error(message)
 
     {:stop, :shutdown, socket}
   end
 
-  defp push_system_message(extension, socket, status, message, topic) do
+  defp push_system_message(extension, socket, status, message, channel_name) do
     push(socket, "system", %{
       extension: extension,
       status: status,
       message: message,
-      topic: topic
+      channel: channel_name
     })
   end
 end
