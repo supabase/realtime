@@ -28,10 +28,10 @@ config :realtime, :phoenix_swagger,
 
 config :realtime, :extensions,
   postgres: %{
-    # rls_poller?
-    key: "postgres",
-    supervisor: Extensions.Postgres.Supervisor,
-    db_settings: Extensions.Postgres.DbSettings
+    key: "postgres_cdc_rls",
+    driver: Extensions.PostgresCdcRls,
+    supervisor: Extensions.PostgresCdcRls.Supervisor,
+    db_settings: Extensions.PostgresCdcRls.DbSettings
   },
   postgres_cdc_stream: %{
     key: "postgres_cdc_stream",

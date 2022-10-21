@@ -1,4 +1,4 @@
-defmodule Extensions.Postgres.DbSettings do
+defmodule Extensions.PostgresCdcRls.DbSettings do
   def default() do
     %{
       "poll_interval_ms" => 100,

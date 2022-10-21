@@ -1,19 +1,64 @@
-defmodule Extensions.Postgres do
+defmodule Extensions.PostgresCdcRls do
   @moduledoc false
+  @behaviour Realtime.PostgresCdc
   require Logger
 
-  alias Extensions.Postgres
-  alias Postgres.{Subscriptions, SubscriptionManagerTracker}
+  alias RealtimeWeb.Endpoint
+  alias Realtime.PostgresCdc
+  alias Extensions.PostgresCdcRls, as: Rls
+  alias Rls.{Subscriptions, SubscriptionManagerTracker}
+
+  def handle_connect(args) do
+    Enum.reduce_while(1..5, nil, fn retry, acc ->
+      get_manager_conn(args["id"])
+      |> case do
+        nil ->
+          start_distributed(args)
+          if retry > 1, do: Process.sleep(1_000)
+          {:cont, acc}
+
+        {:ok, pid, conn} ->
+          {:halt, {:ok, {pid, conn}}}
+      end
+    end)
+  end
+
+  def handle_after_connect({manager_pid, conn}, settings, params) do
+    opts = params
+    publication = settings["publication"]
+    conn_node = node(conn)
+
+    if conn_node !== node() do
+      :rpc.call(conn_node, Subscriptions, :create, [conn, publication, opts], 15_000)
+    else
+      Subscriptions.create(conn, publication, opts)
+    end
+    |> case do
+      {:ok, _} = response ->
+        for %{id: id} <- params do
+          send(manager_pid, {:subscribed, {self(), id}})
+        end
+
+        response
+
+      other ->
+        other
+    end
+  end
+
+  def handle_subscribe(_, tenant, metadata) do
+    Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
+  end
 
   def start_distributed(%{"region" => region, "id" => tenant} = args) do
-    fly_region = Postgres.Regions.aws_to_fly(region)
+    fly_region = PostgresCdc.aws_to_fly(region)
     launch_node = launch_node(tenant, fly_region, node())
 
     Logger.warning(
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
     )
 
-    case :rpc.call(launch_node, Postgres, :start, [args], 30_000) do
+    case :rpc.call(launch_node, __MODULE__, :start, [args], 30_000) do
       {:ok, _pid} = ok ->
         ok
 
@@ -31,8 +76,7 @@ defmodule Extensions.Postgres do
   Start db poller.
 
   """
-  @spec start(map()) ::
-          :ok | {:error, :already_started | :reserved}
+  @spec start(map()) :: :ok | {:error, :already_started | :reserved}
   def start(args) do
     addrtype =
       case args["ip_version"] do
@@ -48,11 +92,13 @@ defmodule Extensions.Postgres do
         "db_socket_opts" => [addrtype]
       })
 
+    Logger.debug("Starting postgres stream extension with args: #{inspect(args, pretty: true)}")
+
     DynamicSupervisor.start_child(
-      {:via, PartitionSupervisor, {Postgres.DynamicSupervisor, self()}},
+      {:via, PartitionSupervisor, {Rls.DynamicSupervisor, self()}},
       %{
         id: args["id"],
-        start: {Postgres.WorkerSupervisor, :start_link, [args]},
+        start: {Rls.WorkerSupervisor, :start_link, [args]},
         restart: :transient
       }
     )
@@ -60,7 +106,7 @@ defmodule Extensions.Postgres do
 
   @spec stop(String.t(), timeout()) :: :ok
   def stop(scope, timeout \\ :infinity) do
-    case :syn.lookup(Extensions.Postgres.Sup, scope) do
+    case :syn.lookup(PostgresCdcStream, scope) do
       :undefined ->
         Logger.warning("Database supervisor not found for tenant #{scope}")
 
@@ -82,7 +128,7 @@ defmodule Extensions.Postgres do
   end
 
   def launch_node(tenant, fly_region, default) do
-    case :syn.members(Postgres.RegionNodes, fly_region) do
+    case PostgresCdc.region_nodes(fly_region) do
       [_ | _] = regions_nodes ->
         member_count = Enum.count(regions_nodes)
         index = :erlang.phash2(tenant, member_count)

@@ -1,7 +1,7 @@
-defmodule Extensions.Postgres.Supervisor do
+defmodule Extensions.PostgresCdcRls.Supervisor do
   use Supervisor
 
-  alias Extensions.Postgres
+  alias Extensions.PostgresCdcRls, as: Rls
 
   @spec start_link :: :ignore | {:error, any} | {:ok, pid}
   def start_link() do
@@ -10,17 +10,17 @@ defmodule Extensions.Postgres.Supervisor do
 
   @impl true
   def init(_args) do
-    :syn.add_node_to_scopes([Postgres.Sup])
+    :syn.add_node_to_scopes([PostgresCdcRls])
 
     children = [
       {
         PartitionSupervisor,
-        partitions: 20,
+        partitions: 2,
         child_spec: DynamicSupervisor,
         strategy: :one_for_one,
-        name: Postgres.DynamicSupervisor
+        name: Rls.DynamicSupervisor
       },
-      Postgres.SubscriptionManagerTracker
+      Rls.SubscriptionManagerTracker
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

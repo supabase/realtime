@@ -35,6 +35,8 @@ defmodule RealtimeWeb.UserSocket do
       Logger.metadata(external_id: external_id, project: external_id)
       Logger.put_process_level(self(), log_level)
 
+      # postgres_cdc_driver = "postgres_cdc_rls"
+
       with %Tenant{
              extensions: extensions,
              jwt_secret: jwt_secret,

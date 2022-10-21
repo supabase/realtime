@@ -1,4 +1,4 @@
-defmodule Extensions.Postgres.Replications do
+defmodule Extensions.PostgresCdcRls.Replications do
   require Logger
   import Postgrex, only: [query: 3]
 

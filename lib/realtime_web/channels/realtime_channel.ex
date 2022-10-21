@@ -269,12 +269,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     case PostgresCdc.connect(module, args) do
       {:ok, response} ->
-        case PostgresCdc.after_connect(module, response) do
+        case PostgresCdc.after_connect(module, response, postgres_extension, pg_change_params) do
           {:ok, _response} ->
-            # for %{id: id} <- pg_change_params do
-            #   send(manager_pid, {:subscribed, {self(), id}})
-            # end
-
             message = "Subscribed to PostgreSQL"
 
             Logger.info(message)

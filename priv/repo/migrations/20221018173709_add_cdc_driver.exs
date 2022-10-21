@@ -3,7 +3,7 @@ defmodule Realtime.Repo.Migrations.AddCdcDriver do
 
   def up do
     alter table("tenants") do
-      add(:postgres_cdc_driver, :string, default: "rls_poller")
+      add(:postgres_cdc_driver, :string, default: "postgres_cdc_rls")
     end
   end
 

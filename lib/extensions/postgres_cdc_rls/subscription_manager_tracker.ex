@@ -1,4 +1,4 @@
-defmodule Extensions.Postgres.SubscriptionManagerTracker do
+defmodule Extensions.PostgresCdcRls.SubscriptionManagerTracker do
   use Phoenix.Tracker
   require Logger
 

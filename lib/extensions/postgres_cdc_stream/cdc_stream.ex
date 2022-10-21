@@ -1,7 +1,10 @@
 defmodule Extensions.PostgresCdcStream do
   @moduledoc false
   @behaviour Realtime.PostgresCdc
+
   require Logger
+
+  alias Realtime.PostgresCdc
   alias Extensions.PostgresCdcStream, as: Stream
 
   def handle_connect(opts) do
@@ -19,7 +22,7 @@ defmodule Extensions.PostgresCdcStream do
     end)
   end
 
-  def handle_after_connect(_opts) do
+  def handle_after_connect(_, _, _) do
     {:ok, nil}
   end
 
@@ -43,7 +46,7 @@ defmodule Extensions.PostgresCdcStream do
   end
 
   def start_distributed(%{"region" => region, "id" => tenant} = args) do
-    fly_region = Extensions.Postgres.Regions.aws_to_fly(region)
+    fly_region = PostgresCdc.aws_to_fly(region)
     launch_node = launch_node(tenant, fly_region, node())
 
     Logger.warning(
@@ -65,7 +68,7 @@ defmodule Extensions.PostgresCdcStream do
   end
 
   def launch_node(tenant, fly_region, default) do
-    case Realtime.region_nodes(fly_region) do
+    case PostgresCdc.region_nodes(fly_region) do
       [_ | _] = regions_nodes ->
         member_count = Enum.count(regions_nodes)
         index = :erlang.phash2(tenant, member_count)

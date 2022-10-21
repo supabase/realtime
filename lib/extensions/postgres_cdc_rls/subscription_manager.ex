@@ -1,17 +1,17 @@
-defmodule Extensions.Postgres.SubscriptionManager do
+defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   @moduledoc """
   Handles subscriptions from tenant's database.
   """
   use GenServer
   require Logger
 
-  alias Extensions.Postgres
-  alias Postgres.Subscriptions
+  alias Extensions.PostgresCdcRls, as: Rls
+  alias Rls.Subscriptions
   alias Realtime.Helpers, as: H
 
-  @check_oids_interval 60_000
   @timeout 15_000
   @max_delete_records 1000
+  @check_oids_interval 60_000
 
   defmodule State do
     @moduledoc false
@@ -76,7 +76,7 @@ defmodule Extensions.Postgres.SubscriptionManager do
     }
 
     send(self(), :check_oids)
-    Postgres.track_manager(id, self(), conn_pub)
+    Rls.track_manager(id, self(), conn_pub)
     {:ok, state}
   end
 

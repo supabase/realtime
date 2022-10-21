@@ -2,15 +2,15 @@ defmodule Realtime.PostgresCdc do
   @moduledoc false
 
   def connect(module, opts) do
-    Kernel.apply(module, :handle_connect, [opts])
+    apply(module, :handle_connect, [opts])
   end
 
-  def after_connect(module, opts) do
-    Kernel.apply(module, :handle_after_connect, [opts])
+  def after_connect(module, connect_response, extension, params) do
+    apply(module, :handle_after_connect, [connect_response, extension, params])
   end
 
   def subscribe(module, pg_change_params, tenant, metadata) do
-    Kernel.apply(module, :handle_subscribe, [pg_change_params, tenant, metadata])
+    apply(module, :handle_subscribe, [pg_change_params, tenant, metadata])
   end
 
   def filter_settings(key, extensions) do
@@ -35,7 +35,29 @@ defmodule Realtime.PostgresCdc do
     end
   end
 
-  @callback handle_connect(map()) :: {:ok, pid()} | {:error, any()}
-  @callback handle_after_connect(map()) :: {:ok, any()} | {:error, any()}
-  @callback handle_subscribe(list(), String.t(), map()) :: :ok
+  def aws_to_fly(aws_region) do
+    case aws_region do
+      "us-east-1" -> "iad"
+      "us-west-1" -> "iad"
+      "sa-east-1" -> "gru"
+      "ca-central-1" -> "iad"
+      "ap-southeast-1" -> "sin"
+      "ap-northeast-1" -> "sin"
+      "ap-northeast-2" -> "sin"
+      "ap-southeast-2" -> "sin"
+      "ap-south-1" -> "sin"
+      "eu-west-1" -> "fra"
+      "eu-west-2" -> "fra"
+      "eu-central-1" -> "fra"
+      _ -> nil
+    end
+  end
+
+  def region_nodes(region) do
+    :syn.members(RegionNodes, region)
+  end
+
+  @callback handle_connect(any()) :: {:ok, pid()} | {:error, any()}
+  @callback handle_after_connect(any(), any(), any()) :: {:ok, any()} | {:error, any()}
+  @callback handle_subscribe(any(), any(), any()) :: :ok
 end
