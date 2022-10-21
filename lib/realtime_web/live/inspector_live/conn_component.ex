@@ -6,13 +6,13 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
     import Ecto.Changeset
 
     schema "f" do
-      field(:log_level, :string)
+      field(:log_level, :string, default: "error")
       field(:token, :string)
       field(:path, :string)
       field(:project, :string)
-      field(:channel, :string)
-      field(:schema, :string)
-      field(:table, :string)
+      field(:channel, :string, default: "room_a")
+      field(:schema, :string, default: "public")
+      field(:table, :string, default: "*")
     end
 
     def changeset(form, params \\ %{}) do
@@ -121,8 +121,34 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
     {:noreply, socket}
   end
 
+  def handle_event("clear_local_storage", _params, socket) do
+    socket =
+      socket
+      |> push_event("clear_local_storage", %{})
+      |> push_patch(
+        to: Routes.inspector_index_path(RealtimeWeb.Endpoint, :new),
+        replace: true
+      )
+
+    {:noreply, socket}
+  end
+
   def handle_event("local_storage", _params, %{assigns: %{url_params: url_params}} = socket)
       when url_params != %{} do
+    {:noreply, socket}
+  end
+
+  def handle_event(
+        "local_storage",
+        %{
+          "channel" => nil,
+          "path" => nil,
+          "schema" => nil,
+          "table" => nil,
+          "token" => nil
+        },
+        socket
+      ) do
     {:noreply, socket}
   end
 

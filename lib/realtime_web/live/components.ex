@@ -49,7 +49,7 @@ defmodule RealtimeWeb.Components do
   """
   attr :type, :string, default: nil
   attr :class, :string, default: nil
-  attr :rest, :global, include: ~w(disabled form name value)
+  attr :rest, :global
 
   slot(:inner_block, required: true)
 
@@ -73,12 +73,10 @@ defmodule RealtimeWeb.Components do
   Renders a link as a button.
   ## Examples
       <.link_button>Send!</.link_button>
-      <.button phx-click="go" class="ml-2">Send!</.button>
   """
-  attr :class, :string, default: nil
   attr :href, :string, default: "#"
   attr :target, :string, default: ""
-  attr :rest, :global, include: ~w(disabled form name value)
+  attr :rest, :global
 
   slot(:inner_block, required: true)
 
@@ -88,7 +86,58 @@ defmodule RealtimeWeb.Components do
       role="button"
       class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
       href={@href}
-      target={@target}>
+      target={@target}
+      {@rest}>
+      <%= render_slot(@inner_block) %>
+    </.link>
+    """
+  end
+
+  @doc """
+  Renders a link as a button.
+  ## Examples
+      <.link_button>Send!</.link_button>
+  """
+  attr :href, :string, default: "#"
+  attr :target, :string, default: ""
+  attr :rest, :global
+
+  slot(:inner_block, required: true)
+
+  def gray_link_button(assigns) do
+    ~H"""
+    <.link
+      role="button"
+      class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
+      href={@href}
+      target={@target}
+      {@rest}>
+      <%= render_slot(@inner_block) %>
+    </.link>
+    """
+  end
+
+  @doc """
+  Renders a link as a button, but optionally patches the browser history.
+  ## Examples
+      <.patch_button>Send!</.link_button>
+  """
+  attr :patch, :string, default: "#"
+  attr :replace, :boolean, default: true
+  attr :target, :string, default: ""
+  attr :rest, :global
+
+  slot(:inner_block, required: true)
+
+  def patch_button(assigns) do
+    ~H"""
+    <.link
+      role="button"
+      class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
+      patch={@patch}
+      replace={@replace}
+      target={@target}
+      {@rest}>
       <%= render_slot(@inner_block) %>
     </.link>
     """
@@ -190,14 +239,13 @@ defmodule RealtimeWeb.Components do
     """
   end
 
-  attr :class, :string, default: nil
-  attr :rest, :global, include: ~w(disabled form name value)
+  attr :rest, :global
 
   slot(:inner_block, required: true)
 
   def badge(assigns) do
     ~H"""
-      <div><span class="text-xs font-semibold inline-block uppercase py-[3px] px-[5px] rounded bg-gray-100"><%= render_slot(@inner_block) %></span></div>
+      <div><span class="text-xs font-semibold inline-block uppercase py-[3px] px-[5px] rounded bg-gray-100" {@rest}><%= render_slot(@inner_block) %></span></div>
     """
   end
 

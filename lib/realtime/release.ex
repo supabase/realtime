@@ -4,7 +4,6 @@ defmodule Realtime.Release do
   installed.
   """
   @app :realtime
-  @repos [Realtime.Repo]
 
   def migrate do
     load_app()
@@ -20,7 +19,7 @@ defmodule Realtime.Release do
   end
 
   defp repos do
-    @repos
+    Application.fetch_env!(@app, :ecto_repos)
   end
 
   defp load_app do
