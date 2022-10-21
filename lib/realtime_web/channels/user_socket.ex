@@ -35,19 +35,17 @@ defmodule RealtimeWeb.UserSocket do
       Logger.metadata(external_id: external_id, project: external_id)
       Logger.put_process_level(self(), log_level)
 
-      # postgres_cdc_driver = "postgres_cdc_rls"
-
       with %Tenant{
              extensions: extensions,
              jwt_secret: jwt_secret,
              max_concurrent_users: max_conn_users,
              max_events_per_second: max_events_per_second,
-             postgres_cdc_driver: postgres_cdc_driver
+             postgres_cdc_default: postgres_cdc_default
            } <- Api.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- access_token(params, headers),
            jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec),
-           {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_driver) do
+           {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
         assigns =
           %RealtimeChannel.Assigns{
             claims: claims,
@@ -56,7 +54,7 @@ defmodule RealtimeWeb.UserSocket do
               max_concurrent_users: max_conn_users,
               max_events_per_second: max_events_per_second
             },
-            postgres_extension: PostgresCdc.filter_settings(postgres_cdc_driver, extensions),
+            postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
             postgres_cdc_module: postgres_cdc_module,
             tenant: external_id,
             log_level: log_level,

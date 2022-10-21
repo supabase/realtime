@@ -13,6 +13,10 @@ defmodule Realtime.PostgresCdc do
     apply(module, :handle_subscribe, [pg_change_params, tenant, metadata])
   end
 
+  def stop(module, tenant, timeout \\ 10_000) do
+    apply(module, :handle_stop, [tenant, timeout])
+  end
+
   def filter_settings(key, extensions) do
     [cdc] =
       Enum.filter(extensions, fn e ->

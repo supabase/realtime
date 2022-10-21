@@ -50,6 +50,18 @@ defmodule Extensions.PostgresCdcRls do
     Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
   end
 
+  def handle_stop(tenant, timeout) do
+    case :syn.lookup(PostgresCdcStream, tenant) do
+      :undefined ->
+        Logger.warning("Database supervisor not found for tenant #{tenant}")
+
+      {pid, _} ->
+        DynamicSupervisor.stop(pid, :shutdown, timeout)
+    end
+  end
+
+  ## Internal functions
+
   def start_distributed(%{"region" => region, "id" => tenant} = args) do
     fly_region = PostgresCdc.aws_to_fly(region)
     launch_node = launch_node(tenant, fly_region, node())
@@ -102,17 +114,6 @@ defmodule Extensions.PostgresCdcRls do
         restart: :transient
       }
     )
-  end
-
-  @spec stop(String.t(), timeout()) :: :ok
-  def stop(scope, timeout \\ :infinity) do
-    case :syn.lookup(PostgresCdcStream, scope) do
-      :undefined ->
-        Logger.warning("Database supervisor not found for tenant #{scope}")
-
-      {pid, _} ->
-        DynamicSupervisor.stop(pid, :shutdown, timeout)
-    end
   end
 
   @spec get_manager_conn(String.t()) :: nil | {:ok, pid(), pid()}
