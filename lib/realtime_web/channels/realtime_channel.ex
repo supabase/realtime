@@ -277,22 +277,14 @@ defmodule RealtimeWeb.RealtimeChannel do
 
             Logger.info(message)
 
-            push(socket, "system", %{
-              status: "ok",
-              message: message,
-              topic: tenant_topic
-            })
+            push_system_message("postgres_changes", socket, "ok", message, tenant_topic)
 
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
           error ->
             message = "Subscribing to PostgreSQL failed: #{inspect(error)}"
 
-            push(socket, "system", %{
-              status: "error",
-              message: message,
-              topic: tenant_topic
-            })
+            push_system_message("postgres_changes", socket, "error", message, tenant_topic)
 
             Logger.error(message)
 
@@ -606,14 +598,19 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp shutdown_response(%{assigns: %{tenant_topic: tenant_topic}} = socket, message)
        when is_binary(message) do
-    push(socket, "system", %{
-      status: "error",
-      message: message,
-      topic: tenant_topic
-    })
+    push_system_message("system", socket, "error", message, tenant_topic)
 
     Logger.error(message)
 
     {:stop, :shutdown, socket}
+  end
+
+  defp push_system_message(extension, socket, status, message, topic) do
+    push(socket, "system", %{
+      extension: extension,
+      status: status,
+      message: message,
+      topic: topic
+    })
   end
 end
