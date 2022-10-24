@@ -19,10 +19,17 @@ defmodule Extensions.PostgresCdcStream.Replication do
   def start_link(args) do
     opts = connection_opts(args)
 
+    slot_name =
+      if args["dynamic_slot"] do
+        args["slot_name"] <> "_" <> (System.system_time(:second) |> Integer.to_string())
+      else
+        args["slot_name"]
+      end
+
     init = %{
       tenant: args["id"],
       publication: args["publication"],
-      slot_name: args["slot_name"]
+      slot_name: slot_name
     }
 
     Postgrex.ReplicationConnection.start_link(__MODULE__, init, opts)

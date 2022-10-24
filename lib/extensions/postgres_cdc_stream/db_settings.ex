@@ -4,7 +4,8 @@ defmodule Extensions.PostgresCdcStream.DbSettings do
     %{
       "publication" => "supabase_realtime",
       "slot_name" => "supabase_realtime_replication_slot",
-      "ip_version" => 4
+      "ip_version" => 4,
+      "dynamic_slot" => false
     }
   end
 
