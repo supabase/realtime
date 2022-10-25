@@ -97,9 +97,10 @@ defmodule Realtime.Integration.RtChannelTest do
     assert_receive %Message{
                      event: "system",
                      payload: %{
+                       "channel" => "any",
+                       "extension" => "postgres_changes",
                        "message" => "Subscribed to PostgreSQL",
-                       "status" => "ok",
-                       "topic" => "dev_tenant:any"
+                       "status" => "ok"
                      },
                      ref: nil,
                      topic: "realtime:any"

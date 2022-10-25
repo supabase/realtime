@@ -24,7 +24,7 @@ Hooks.Payload = {
   // Hack to confirm Postgres is subscribed
   // Need to add 'extension' key in the 'payload'
   this.channel.on("system", {}, payload => {
-    if (payload.message === 'Subscribed to PostgreSQL' && payload.status === 'ok') {
+    if (payload.extension === 'postgres_changes' && payload.status === 'ok') {
           this.pushEventTo("#conn_info", "postgres_subscribed", {})
         }
 

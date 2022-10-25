@@ -156,7 +156,14 @@ defmodule Extensions.Postgres.SubscriptionManager do
         q
       end
 
-    {:noreply, %{state | delete_queue: %{ref: check_delete_queue(), queue: q1}}}
+    ref =
+      if :queue.is_empty(q1) do
+        check_delete_queue()
+      else
+        check_delete_queue(1_000)
+      end
+
+    {:noreply, %{state | delete_queue: %{ref: ref, queue: q1}}}
   end
 
   def handle_info(msg, state) do
@@ -178,11 +185,11 @@ defmodule Extensions.Postgres.SubscriptionManager do
     end)
   end
 
-  defp check_delete_queue() do
+  defp check_delete_queue(timeout \\ @timeout) do
     Process.send_after(
       self(),
       :check_delete_queue,
-      @timeout
+      timeout
     )
   end
 
