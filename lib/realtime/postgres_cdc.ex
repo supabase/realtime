@@ -1,6 +1,9 @@
 defmodule Realtime.PostgresCdc do
   @moduledoc false
 
+  @timeout 10_000
+  @extensions Application.compile_env(:realtime, :extensions)
+
   def connect(module, opts) do
     apply(module, :handle_connect, [opts])
   end
@@ -10,11 +13,25 @@ defmodule Realtime.PostgresCdc do
   end
 
   def subscribe(module, pg_change_params, tenant, metadata) do
+    RealtimeWeb.Endpoint.subscribe("postgres_cdc:" <> tenant)
     apply(module, :handle_subscribe, [pg_change_params, tenant, metadata])
   end
 
-  def stop(module, tenant, timeout \\ 10_000) do
+  def stop(module, tenant, timeout \\ @timeout) do
     apply(module, :handle_stop, [tenant, timeout])
+  end
+
+  def stop_all(tenant, timeout \\ @timeout) do
+    avaible_drivers()
+    |> Enum.each(fn module ->
+      stop(module, tenant, timeout)
+    end)
+  end
+
+  def avaible_drivers() do
+    @extensions
+    |> Enum.filter(fn {_, e} -> e.type == :postgres_cdc end)
+    |> Enum.map(fn {_, e} -> e.driver end)
   end
 
   def filter_settings(key, extensions) do
@@ -31,7 +48,7 @@ defmodule Realtime.PostgresCdc do
   end
 
   def driver(tenant_key) do
-    Application.get_env(:realtime, :extensions)
+    @extensions
     |> Enum.filter(fn {_, %{key: key}} -> tenant_key == key end)
     |> case do
       [{_, %{driver: driver}}] -> {:ok, driver}
@@ -64,4 +81,5 @@ defmodule Realtime.PostgresCdc do
   @callback handle_connect(any()) :: {:ok, pid()} | {:error, any()}
   @callback handle_after_connect(any(), any(), any()) :: {:ok, any()} | {:error, any()}
   @callback handle_subscribe(any(), any(), any()) :: :ok
+  @callback handle_stop(any(), any()) :: any()
 end

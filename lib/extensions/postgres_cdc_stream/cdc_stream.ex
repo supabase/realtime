@@ -16,7 +16,7 @@ defmodule Extensions.PostgresCdcStream do
           if retry > 1, do: Process.sleep(1_000)
           {:cont, acc}
 
-        {:ok, pid, _conn} = _resp ->
+        {:ok, pid, _conn} ->
           {:halt, {:ok, pid}}
       end
     end)
@@ -33,9 +33,19 @@ defmodule Extensions.PostgresCdcStream do
     end)
   end
 
+  def handle_stop(tenant, timeout) do
+    case :syn.lookup(PostgresCdcStream, tenant) do
+      :undefined ->
+        Logger.warning("Database supervisor not found for tenant #{tenant}")
+
+      {pid, _} ->
+        DynamicSupervisor.stop(pid, :shutdown, timeout)
+    end
+  end
+
   @spec get_manager_conn(String.t()) :: nil | {:ok, pid(), pid()}
   def get_manager_conn(id) do
-    Phoenix.Tracker.get_by_key(Stream.Tracker, "subscription_manager", id)
+    Phoenix.Tracker.get_by_key(Stream.Tracker, "postgres_cdc_stream", id)
     |> case do
       [] ->
         nil
@@ -117,7 +127,7 @@ defmodule Extensions.PostgresCdcStream do
     Phoenix.Tracker.track(
       Stream.Tracker,
       self(),
-      "subscription_manager",
+      "postgres_cdc_stream",
       id,
       %{
         conn: conn,

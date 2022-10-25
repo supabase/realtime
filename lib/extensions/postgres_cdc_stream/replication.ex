@@ -11,7 +11,8 @@ defmodule Extensions.PostgresCdcStream.Replication do
     Relation,
     Insert,
     Update,
-    Delete
+    Delete,
+    Commit
   }
 
   alias Realtime.Adapters.Changes.{DeletedRecord, NewRecord, UpdatedRecord}
@@ -108,6 +109,10 @@ defmodule Extensions.PostgresCdcStream.Replication do
 
   defp process_message(%Begin{commit_timestamp: ts}, state) do
     %{state | ts: ts}
+  end
+
+  defp process_message(%Commit{}, state) do
+    %{state | ts: nil}
   end
 
   defp process_message(%Insert{} = msg, state) do

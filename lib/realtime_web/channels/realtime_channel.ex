@@ -232,7 +232,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def handle_info(%{event: "subscription_manager_down"}, socket) do
+  def handle_info(%{event: "postgres_cdc_down"}, socket) do
     socket = assign_counter(socket)
     pg_sub_ref = postgres_subscribe()
 

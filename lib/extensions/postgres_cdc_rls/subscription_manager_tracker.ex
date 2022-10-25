@@ -25,8 +25,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManagerTracker do
     for {_topic, {_joins, leaves}} <- diff do
       for {id, _meta} <- leaves do
         Endpoint.local_broadcast(
-          "subscription_manager:" <> id,
-          "subscription_manager_down",
+          "postgres_cdc:" <> id,
+          "postgres_cdc_down",
           nil
         )
       end
