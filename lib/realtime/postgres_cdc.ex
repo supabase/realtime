@@ -22,7 +22,7 @@ defmodule Realtime.PostgresCdc do
   end
 
   def stop_all(tenant, timeout \\ @timeout) do
-    avaible_drivers()
+    available_drivers()
     |> Enum.each(fn module ->
       stop(module, tenant, timeout)
     end)
