@@ -28,7 +28,7 @@ defmodule Realtime.PostgresCdc do
     end)
   end
 
-  def avaible_drivers() do
+  def available_drivers() do
     @extensions
     |> Enum.filter(fn {_, e} -> e.type == :postgres_cdc end)
     |> Enum.map(fn {_, e} -> e.driver end)
