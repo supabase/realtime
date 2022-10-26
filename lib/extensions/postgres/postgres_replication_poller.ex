@@ -58,6 +58,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
       tenant: args["id"]
     }
 
+    Logger.metadata(external_id: state.tenant, project: state.tenant)
+
     {:ok, state, {:continue, :prepare_replication}}
   end
 
@@ -70,12 +72,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
           slot_name: slot_name
         } = state
       ) do
-    try do
-      Replications.prepare_replication(conn, slot_name)
-    catch
-      :error, error -> {:error, error}
-    end
-    |> case do
+    case Replications.prepare_replication(conn, slot_name) do
       {:ok, _} ->
         send(self(), :poll)
         {:noreply, state}
