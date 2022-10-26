@@ -15,7 +15,7 @@ defmodule Extensions.PostgresCdcStream.Supervisor do
     children = [
       {
         PartitionSupervisor,
-        partitions: 2,
+        partitions: 20,
         child_spec: DynamicSupervisor,
         strategy: :one_for_one,
         name: Stream.DynamicSupervisor
