@@ -9,7 +9,7 @@ import { RealtimeClient } from '@supabase/realtime-js';
 // We're using LiveView to handle the Realtime client via LiveView Hooks
 
 let Hooks = {}
-Hooks.Payload = {
+Hooks.payload = {
   initRealtime(channelName, path, log_level, token, schema, table) {
   // Instantiate our client with the Realtime server and params to connect with
   this.realtimeSocket = new RealtimeClient(path, {
@@ -157,8 +157,6 @@ Hooks.Payload = {
     localStorage.clear()
   },
 
-  
-
   mounted() {
     let params = { 
       log_level: localStorage.getItem("log_level"), 
@@ -186,7 +184,21 @@ Hooks.Payload = {
     this.handleEvent("clear_local_storage", ({}) => 
       this.clearLocalStorage()
     )
+
+    
   }
+}
+
+Hooks.latency = {
+  mounted() {
+    this.handleEvent("ping", (params) => 
+      this.pong(params)
+    )
+  },
+
+  pong(params) {
+    this.pushEventTo("#ping", "pong", params)
+  },
 }
 
 let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
