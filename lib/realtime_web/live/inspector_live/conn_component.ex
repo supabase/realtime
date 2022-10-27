@@ -188,6 +188,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
   end
 
   defp send_share_url(conn) do
+    conn = Map.drop(conn, ["token"])
     url = Routes.inspector_index_path(RealtimeWeb.Endpoint, :new, conn)
     send(self(), {:share_url, url})
   end
