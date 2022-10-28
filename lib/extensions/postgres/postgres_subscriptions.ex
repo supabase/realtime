@@ -54,7 +54,7 @@ defmodule Extensions.Postgres.Subscriptions do
           [schema, table, filters] ->
             case query(conn, sql, [publication, schema, table, id, claims, filters]) do
               {:ok, %{num_rows: num} = result} when num > 0 ->
-                {:ok, result}
+                result
 
               _ ->
                 rollback(conn, {:subscription_insert_failed, params})
