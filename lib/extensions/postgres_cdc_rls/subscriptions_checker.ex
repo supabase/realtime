@@ -82,7 +82,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
     new_ref =
       if :ets.info(tid, :size) == 0 do
         Logger.debug("Cancel check_active_pids")
-        Rls.stop(state.id)
+        Rls.handle_stop(state.id, 15_000)
         nil
       else
         check_active_pids()

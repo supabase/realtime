@@ -28,8 +28,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       :jwt_secret,
       :tenant_token,
       :access_token,
-      :channel_name,
-      :postgres_cdc_module
+      :postgres_cdc_module,
+      :channel_name
     ]
 
     @type t :: %__MODULE__{
