@@ -8,7 +8,8 @@ defmodule Extensions.Postgres.SubscriptionManagerTracker do
     pool_opts = [
       name: __MODULE__,
       pubsub_server: Realtime.PubSub,
-      pool_size: 5
+      pool_size: 10,
+      broadcast_period: 1_000
     ]
 
     opts = Keyword.merge(pool_opts, opts)
