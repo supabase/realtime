@@ -8,7 +8,9 @@ defmodule Extensions.Postgres.Subscriptions do
   @type conn() :: Postgrex.conn()
 
   @spec create(conn(), String.t(), list(map())) ::
-          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | atom()}
+          {:ok, Postgrex.Result.t()}
+          | {:error,
+             Exception.t() | :malformed_subscription_params | {:subscription_insert_failed, map()}}
   def create(conn, publication, params_list) do
     sql = "with sub_tables as (
 		    select
