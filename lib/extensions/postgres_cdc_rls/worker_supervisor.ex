@@ -10,7 +10,7 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
   }
 
   def start_link(args) do
-    name = [name: {:via, :syn, {PostgresCdcRls, args["id"]}}]
+    name = [name: {:via, :syn, {Extensions.PostgresCdcRls, args["id"]}}]
     Supervisor.start_link(__MODULE__, args, name)
   end
 

@@ -51,7 +51,7 @@ defmodule Extensions.PostgresCdcRls do
   end
 
   def handle_stop(tenant, timeout) do
-    case :syn.lookup(PostgresCdcStream, tenant) do
+    case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
       :undefined ->
         Logger.warning("Database supervisor not found for tenant #{tenant}")
 

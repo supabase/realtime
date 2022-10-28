@@ -10,7 +10,7 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
 
   @impl true
   def init(_args) do
-    :syn.add_node_to_scopes([PostgresCdcRls])
+    :syn.add_node_to_scopes([Extensions.PostgresCdcRls])
 
     children = [
       {

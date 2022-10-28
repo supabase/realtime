@@ -47,6 +47,7 @@ defmodule Realtime.PostgresCdc do
     cdc.settings
   end
 
+  @spec driver(String.t()) :: {:ok, module()} | {:error, String.t()}
   def driver(tenant_key) do
     @extensions
     |> Enum.filter(fn {_, %{key: key}} -> tenant_key == key end)
