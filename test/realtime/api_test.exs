@@ -15,7 +15,7 @@ defmodule Realtime.ApiTest do
       name: "localhost",
       extensions: [
         %{
-          "type" => "postgres_cdc_rls",
+          "type" => "postgres",
           "settings" => %{
             "db_host" => db_conf[:hostname],
             "db_name" => db_conf[:database],
@@ -29,7 +29,6 @@ defmodule Realtime.ApiTest do
           }
         }
       ],
-      postgres_cdc_default: "postgres_cdc_rls",
       jwt_secret: "new secret",
       max_concurrent_users: 200,
       max_events_per_second: 100

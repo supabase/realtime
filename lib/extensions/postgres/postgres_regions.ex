@@ -1,4 +1,4 @@
-defmodule Extensions.PostgresCdcRls.Regions do
+defmodule Extensions.Postgres.Regions do
   ### AWS REGIONS
   # 'us-east-1', // North Virginia
   # 'us-west-1', // North California

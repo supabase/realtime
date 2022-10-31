@@ -1,7 +1,7 @@
 # This file draws from https://github.com/phoenixframework/phoenix/blob/9941711736c8464b27b40914a4d954ed2b4f5958/lib/phoenix/channel/server.ex
 # License: https://github.com/phoenixframework/phoenix/blob/518a4640a70aa4d1370a64c2280d598e5b928168/LICENSE.md
 
-defmodule Extensions.PostgresCdcStream.MessageDispatcher do
+defmodule Realtime.MessageDispatcher do
   @doc """
   Hook invoked by Phoenix.PubSub dispatch.
   """
@@ -9,11 +9,20 @@ defmodule Extensions.PostgresCdcStream.MessageDispatcher do
   alias Phoenix.Socket.Broadcast
 
   def dispatch([_ | _] = topic_subscriptions, _from, payload) do
+    {sub_ids, payload} = Map.pop(payload, :subscription_ids)
+
     _ =
       Enum.reduce(topic_subscriptions, %{}, fn
         {_pid, {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, is_new_api}},
         cache ->
-          Enum.map(ids, fn {_bin_id, id} -> id end)
+          for {bin_id, id} <- ids, reduce: [] do
+            acc ->
+              if MapSet.member?(sub_ids, bin_id) do
+                [id | acc]
+              else
+                acc
+              end
+          end
           |> case do
             [_ | _] = valid_ids ->
               new_payload =

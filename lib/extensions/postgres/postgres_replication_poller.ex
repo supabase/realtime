@@ -1,14 +1,15 @@
-defmodule Extensions.PostgresCdcRls.ReplicationPoller do
+defmodule Extensions.Postgres.ReplicationPoller do
   use GenServer
 
   require Logger
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt_creds: 5]
 
-  alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
+  alias Extensions.Postgres
+  alias Postgres.Replications
   alias DBConnection.Backoff
 
-  alias Realtime.PubSub
+  alias Realtime.{MessageDispatcher, PubSub}
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,

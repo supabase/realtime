@@ -73,8 +73,7 @@ defmodule Realtime.MixProject do
       {:syn, "~> 3.3.0"},
       {:credo, "~> 1.6.4", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.1.0", only: [:dev], runtime: false},
-      {:benchee, "~> 1.1.0", only: :dev},
-      {:timex, "~> 3.0"}
+      {:benchee, "~> 1.1.0", only: :dev}
     ]
   end
 

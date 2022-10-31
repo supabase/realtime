@@ -7,9 +7,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   require Logger
 
   alias DBConnection.Backoff
-  # alias Extensions.Postgres
+  alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
-  alias Realtime.{GenCounter, RateCounter, PostgresCdc}
+  alias Realtime.{GenCounter, RateCounter}
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
@@ -28,7 +28,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       :jwt_secret,
       :tenant_token,
       :access_token,
-      :postgres_cdc_module,
       :channel_name
     ]
 
@@ -60,8 +59,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{
           assigns: %{
             tenant: tenant,
-            log_level: log_level,
-            postgres_cdc_module: module
+            log_level: log_level
           },
           channel_pid: channel_pid,
           serializer: serializer,
@@ -141,9 +139,7 @@ defmodule RealtimeWeb.RealtimeChannel do
               metadata: {:subscriber_fastlane, transport_pid, serializer, ids, topic, is_new_api}
             ]
 
-            # Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
-
-            PostgresCdc.subscribe(module, pg_change_params, tenant, metadata)
+            Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
 
             pg_change_params
 
@@ -232,7 +228,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def handle_info(%{event: "postgres_cdc_down"}, socket) do
+  def handle_info(%{event: "subscription_manager_down"}, socket) do
     socket = assign_counter(socket)
     pg_sub_ref = postgres_subscribe()
 
@@ -256,9 +252,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             pg_sub_ref: pg_sub_ref,
             pg_change_params: pg_change_params,
             postgres_extension: postgres_extension,
-            channel_name: channel_name,
-            tenant_topic: tenant_topic,
-            postgres_cdc_module: module
+            channel_name: channel_name
           }
         } = socket
       ) do
@@ -267,10 +261,21 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     args = Map.put(postgres_extension, "id", tenant)
 
-    case PostgresCdc.connect(module, args) do
-      {:ok, response} ->
-        case PostgresCdc.after_connect(module, response, postgres_extension, pg_change_params) do
+    case Postgres.get_or_start_conn(args) do
+      {:ok, manager_pid, conn} ->
+        case Postgres.create_subscription(
+               conn,
+               postgres_extension["publication"],
+               pg_change_params,
+               15_000
+             ) do
           {:ok, _response} ->
+            Endpoint.subscribe("subscription_manager:" <> tenant)
+
+            for %{id: id} <- pg_change_params do
+              send(manager_pid, {:subscribed, {self(), id}})
+            end
+
             message = "Subscribed to PostgreSQL"
 
             Logger.info(message)

@@ -1,4 +1,4 @@
-defmodule Extensions.PostgresCdcStream.Tracker do
+defmodule Extensions.Postgres.SubscriptionManagerTracker do
   use Phoenix.Tracker
   require Logger
 
@@ -8,7 +8,8 @@ defmodule Extensions.PostgresCdcStream.Tracker do
     pool_opts = [
       name: __MODULE__,
       pubsub_server: Realtime.PubSub,
-      pool_size: 5
+      pool_size: 10,
+      broadcast_period: 1_000
     ]
 
     opts = Keyword.merge(pool_opts, opts)
@@ -24,8 +25,8 @@ defmodule Extensions.PostgresCdcStream.Tracker do
     for {_topic, {_joins, leaves}} <- diff do
       for {id, _meta} <- leaves do
         Endpoint.local_broadcast(
-          "postgres_cdc:" <> id,
-          "postgres_cdc_down",
+          "subscription_manager:" <> id,
+          "subscription_manager_down",
           nil
         )
       end

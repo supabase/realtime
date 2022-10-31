@@ -1,10 +1,10 @@
-defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
+defmodule Extensions.Postgres.SubscriptionsChecker do
   @moduledoc false
   use GenServer
   require Logger
 
-  alias Extensions.PostgresCdcRls, as: Rls
-  alias Rls.Subscriptions
+  alias Extensions.Postgres
+  alias Postgres.Subscriptions
 
   alias Realtime.Helpers, as: H
 
@@ -82,7 +82,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
     new_ref =
       if :ets.info(tid, :size) == 0 do
         Logger.debug("Cancel check_active_pids")
-        Rls.handle_stop(state.id, 15_000)
+        Postgres.stop(state.id)
         nil
       else
         check_active_pids()

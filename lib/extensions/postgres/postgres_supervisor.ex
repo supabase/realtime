@@ -1,7 +1,7 @@
-defmodule Extensions.PostgresCdcStream.Supervisor do
+defmodule Extensions.Postgres.Supervisor do
   use Supervisor
 
-  alias Extensions.PostgresCdcStream, as: Stream
+  alias Extensions.Postgres
 
   @spec start_link :: :ignore | {:error, any} | {:ok, pid}
   def start_link() do
@@ -10,7 +10,8 @@ defmodule Extensions.PostgresCdcStream.Supervisor do
 
   @impl true
   def init(_args) do
-    :syn.add_node_to_scopes([PostgresCdcStream])
+    :syn.add_node_to_scopes([Postgres.RegionNodes, Postgres.Sup])
+    :syn.join(Postgres.RegionNodes, System.get_env("FLY_REGION"), self(), node: node())
 
     children = [
       {
@@ -18,9 +19,9 @@ defmodule Extensions.PostgresCdcStream.Supervisor do
         partitions: 20,
         child_spec: DynamicSupervisor,
         strategy: :one_for_one,
-        name: Stream.DynamicSupervisor
+        name: Postgres.DynamicSupervisor
       },
-      Stream.Tracker
+      Postgres.SubscriptionManagerTracker
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

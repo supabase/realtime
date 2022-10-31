@@ -1,4 +1,4 @@
-defmodule Extensions.PostgresCdcRls.Migrations do
+defmodule Extensions.Postgres.Migrations do
   @moduledoc false
   use GenServer
 

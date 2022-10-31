@@ -27,16 +27,17 @@ defmodule Realtime.Application do
 
     Registry.start_link(
       keys: :duplicate,
-      name: Realtime.Registry
+      name: Realtime.Registry,
+      partitions: System.schedulers_online()
     )
 
     Registry.start_link(
       keys: :unique,
-      name: Realtime.Registry.Unique
+      name: Realtime.Registry.Unique,
+      partitions: System.schedulers_online()
     )
 
-    :syn.add_node_to_scopes([:users, RegionNodes])
-    :syn.join(RegionNodes, System.get_env("FLY_REGION"), self(), node: node())
+    :syn.add_node_to_scopes([:users])
 
     extensions_supervisors =
       Enum.reduce(Application.get_env(:realtime, :extensions), [], fn

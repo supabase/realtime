@@ -27,19 +27,10 @@ config :realtime, :phoenix_swagger,
   }
 
 config :realtime, :extensions,
-  postgres_cdc_rls: %{
-    type: :postgres_cdc,
-    key: "postgres_cdc_rls",
-    driver: Extensions.PostgresCdcRls,
-    supervisor: Extensions.PostgresCdcRls.Supervisor,
-    db_settings: Extensions.PostgresCdcRls.DbSettings
-  },
-  postgres_cdc_stream: %{
-    type: :postgres_cdc,
-    key: "postgres_cdc_stream",
-    driver: Extensions.PostgresCdcStream,
-    supervisor: Extensions.PostgresCdcStream.Supervisor,
-    db_settings: Extensions.PostgresCdcStream.DbSettings
+  postgres: %{
+    key: "postgres",
+    supervisor: Extensions.Postgres.Supervisor,
+    db_settings: Extensions.Postgres.DbSettings
   }
 
 config :phoenix_swagger, json_library: Jason
