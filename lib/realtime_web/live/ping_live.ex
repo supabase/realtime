@@ -2,6 +2,7 @@ defmodule RealtimeWeb.PingLive do
   use RealtimeWeb, :live_view
 
   def mount(_params, _session, socket) do
+    ping()
     {:ok, assign(socket, :ping, "0 ms")}
   end
 
