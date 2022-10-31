@@ -1,7 +1,7 @@
 # This file draws from https://github.com/phoenixframework/phoenix/blob/9941711736c8464b27b40914a4d954ed2b4f5958/lib/phoenix/channel/server.ex
 # License: https://github.com/phoenixframework/phoenix/blob/518a4640a70aa4d1370a64c2280d598e5b928168/LICENSE.md
 
-defmodule Realtime.MessageDispatcher do
+defmodule Extensions.PostgresCdcRls.MessageDispatcher do
   @doc """
   Hook invoked by Phoenix.PubSub dispatch.
   """

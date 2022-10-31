@@ -5,10 +5,10 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt_creds: 5]
 
-  alias Extensions.PostgresCdcRls.Replications
+  alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
   alias DBConnection.Backoff
 
-  alias Realtime.{MessageDispatcher, PubSub}
+  alias Realtime.PubSub
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
