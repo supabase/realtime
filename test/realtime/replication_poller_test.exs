@@ -1,7 +1,7 @@
 defmodule ReplicationPollerTest do
   use ExUnit.Case
 
-  import Extensions.Postgres.ReplicationPoller, only: [generate_record: 1]
+  import Extensions.PostgresCdcRls.ReplicationPoller, only: [generate_record: 1]
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,

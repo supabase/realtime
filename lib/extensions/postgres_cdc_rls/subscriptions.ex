@@ -1,4 +1,4 @@
-defmodule Extensions.Postgres.Subscriptions do
+defmodule Extensions.PostgresCdcRls.Subscriptions do
   @moduledoc """
   This module consolidates subscriptions handling
   """

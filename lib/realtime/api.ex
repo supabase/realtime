@@ -133,7 +133,7 @@ defmodule Realtime.Api do
     |> repo_replica.preload(:extensions)
   end
 
-  def list_extensions(type \\ "postgres") do
+  def list_extensions(type \\ "postgres_cdc_rls") do
     from(e in Extensions,
       where: e.type == ^type,
       select: e
@@ -142,7 +142,7 @@ defmodule Realtime.Api do
   end
 
   def rename_settings_field(from, to) do
-    for extension <- list_extensions("postgres") do
+    for extension <- list_extensions("postgres_cdc_rls") do
       {value, settings} = Map.pop(extension.settings, from)
       new_settings = Map.put(settings, to, value)
 
