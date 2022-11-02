@@ -33,6 +33,29 @@ defmodule Realtime.Api.Tenant do
 
   @doc false
   def changeset(tenant, attrs) do
+    # TODO: remote after infra update
+    extension_key =
+      if attrs[:extensions] do
+        :extensions
+      else
+        "extensions"
+      end
+
+    attrs =
+      if attrs[extension_key] do
+        ext =
+          Enum.map(attrs[extension_key], fn
+            %{"type" => "postgres"} = e -> %{e | "type" => "postgres_cdc_rls"}
+            e -> e
+          end)
+
+        %{attrs | extension_key => ext}
+      else
+        attrs
+      end
+
+    ###
+
     tenant
     |> cast(attrs, [
       :name,
