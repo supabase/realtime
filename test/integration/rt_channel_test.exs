@@ -9,7 +9,7 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Realtime.Integration.WebsocketClient
   alias Phoenix.Socket.{V1, Message}
   alias __MODULE__.Endpoint
-  alias Extensions.Postgres
+  alias Extensions.PostgresCdcRls, as: Rls
   alias Ecto.Adapters.SQL.Sandbox
 
   @moduletag :capture_log
@@ -107,7 +107,7 @@ defmodule Realtime.Integration.RtChannelTest do
                    },
                    2000
 
-    {:ok, _, conn} = Postgres.get_manager_conn(@external_id)
+    {:ok, _, conn} = Rls.get_manager_conn(@external_id)
     P.query!(conn, "insert into test (details) values ('test')", [])
 
     assert_receive %Message{

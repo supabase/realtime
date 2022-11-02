@@ -1,6 +1,6 @@
-defmodule Realtime.Extensions.PostgresSubscriptionsTest do
+defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
   use RealtimeWeb.ChannelCase
-  alias Extensions.Postgres.Subscriptions, as: S
+  alias Extensions.PostgresCdcRls.Subscriptions, as: S
   alias Postgrex, as: P
 
   setup %{} do

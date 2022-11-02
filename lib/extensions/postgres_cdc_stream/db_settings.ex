@@ -1,15 +1,15 @@
-defmodule Extensions.Postgres.DbSettings do
+defmodule Extensions.PostgresCdcStream.DbSettings do
+  @spec default :: map()
   def default() do
     %{
-      "poll_interval_ms" => 100,
-      "poll_max_changes" => 100,
-      "poll_max_record_bytes" => 1_048_576,
       "publication" => "supabase_realtime",
       "slot_name" => "supabase_realtime_replication_slot",
-      "ip_version" => 4
+      "ip_version" => 4,
+      "dynamic_slot" => false
     }
   end
 
+  @spec required :: [{String.t(), fun(), boolean()}]
   def required() do
     [
       {"region", &is_binary/1, false},

@@ -15,6 +15,7 @@ defmodule Realtime.Api.Tenant do
     field(:name, :string)
     field(:external_id, :string)
     field(:jwt_secret, :string)
+    field(:postgres_cdc_default, :string)
     field(:max_concurrent_users, :integer)
     field(:max_events_per_second, :integer)
     field(:events_per_second_rolling, :float, virtual: true)
@@ -38,7 +39,8 @@ defmodule Realtime.Api.Tenant do
       :external_id,
       :jwt_secret,
       :max_concurrent_users,
-      :max_events_per_second
+      :max_events_per_second,
+      :postgres_cdc_default
     ])
     |> validate_required([
       :external_id,

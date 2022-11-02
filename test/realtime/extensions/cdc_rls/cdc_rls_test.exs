@@ -1,16 +1,18 @@
-defmodule Realtime.Extensions.PostgresTest do
+defmodule Realtime.Extensions.CdcRlsTest do
   use RealtimeWeb.ChannelCase
   use RealtimeWeb.ConnCase
 
   import Mock
-  import Extensions.Postgres.Helpers, only: [filter_postgres_settings: 1]
 
-  alias Extensions.Postgres
-  alias Postgres.SubscriptionManager
+  alias Realtime.PostgresCdc
+  alias Extensions.PostgresCdcRls
+  alias PostgresCdcRls.SubscriptionManager
   alias Realtime.Api
   alias RealtimeWeb.ChannelsAuthorization
   alias Postgrex, as: P
 
+  @cdc "postgres_cdc_rls"
+  @cdc_module Extensions.PostgresCdcRls
   @external_id "dev_tenant"
   @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjQ5OTYzNTc1LCJleHAiOjE5NjU1Mzk1NzV9.v7UZK05KaVQKInBBH_AP5h0jXUEwCCC5qtdj3iaxbNQ"
 
@@ -22,7 +24,8 @@ defmodule Realtime.Extensions.PostgresTest do
       tenant_token: @token,
       jwt_secret: tenant.jwt_secret,
       tenant: tenant.external_id,
-      postgres_extension: filter_postgres_settings(tenant.extensions),
+      postgres_extension: PostgresCdc.filter_settings(@cdc, tenant.extensions),
+      postgres_cdc_module: @cdc_module,
       claims: %{},
       limits: %{
         max_concurrent_users: 1,
@@ -43,7 +46,9 @@ defmodule Realtime.Extensions.PostgresTest do
       {:ok, _, socket} =
         RealtimeWeb.UserSocket
         |> socket("user_id", assigns)
-        |> subscribe_and_join(RealtimeWeb.RealtimeChannel, "realtime:*", %{"user_token" => @token})
+        |> subscribe_and_join(RealtimeWeb.RealtimeChannel, "realtime:my_topic", %{
+          "user_token" => @token
+        })
 
       %{socket: socket, tenant: tenant}
     end
@@ -53,7 +58,7 @@ defmodule Realtime.Extensions.PostgresTest do
     test "Check supervisor crash and respawn" do
       sup =
         Enum.reduce_while(1..30, nil, fn _, acc ->
-          :syn.lookup(Extensions.Postgres.Sup, @external_id)
+          :syn.lookup(Extensions.PostgresCdcRls, @external_id)
           |> case do
             :undefined ->
               Process.sleep(500)
@@ -67,7 +72,7 @@ defmodule Realtime.Extensions.PostgresTest do
       assert Process.alive?(sup)
       Process.exit(sup, :kill)
       Process.sleep(10_000)
-      {sup2, _} = :syn.lookup(Extensions.Postgres.Sup, @external_id)
+      {sup2, _} = :syn.lookup(Extensions.PostgresCdcRls, @external_id)
       assert Process.alive?(sup2)
       assert(sup != sup2)
     end
@@ -75,7 +80,7 @@ defmodule Realtime.Extensions.PostgresTest do
     test "Subscription manager updates oids" do
       {subscriber_manager_pid, conn} =
         Enum.reduce_while(1..25, nil, fn _, acc ->
-          case Postgres.get_manager_conn(@external_id) do
+          case PostgresCdcRls.get_manager_conn(@external_id) do
             nil ->
               Process.sleep(500)
               {:cont, acc}
@@ -101,7 +106,7 @@ defmodule Realtime.Extensions.PostgresTest do
     test "Stop tenant supervisor" do
       sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
-          :syn.lookup(Extensions.Postgres.Sup, @external_id)
+          :syn.lookup(Extensions.PostgresCdcRls, @external_id)
           |> case do
             :undefined ->
               Process.sleep(500)
@@ -113,7 +118,7 @@ defmodule Realtime.Extensions.PostgresTest do
         end)
 
       assert Process.alive?(sup)
-      Postgres.stop(@external_id)
+      PostgresCdc.stop(@cdc_module, @external_id)
       assert Process.alive?(sup) == false
     end
   end

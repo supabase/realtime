@@ -13,6 +13,8 @@ swagger:
 bench.%:
 	MIX_ENV=dev SECURE_CHANNELS=true API_JWT_SECRET=dev METRICS_JWT_SECRET=dev FLY_REGION=fra FLY_ALLOC_ID=123e4567-e89b-12d3-a456-426614174000 DB_ENC_KEY="1234567890123456" ERL_AFLAGS="-kernel shell_history enabled" mix run bench/$*
 
+dev_db:
+	docker-compose -f docker-compose.dbs.yml up -d && mix ecto.migrate --log-migrator-sql
 #########################
 # Docker
 #########################

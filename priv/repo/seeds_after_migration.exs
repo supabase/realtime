@@ -16,7 +16,7 @@ end
   "name" => tenant_name,
   "extensions" => [
     %{
-      "type" => "postgres",
+      "type" => "postgres_cdc_rls",
       "settings" => %{
         "db_host" => db_conf[:hostname],
         "db_name" => db_conf[:database],

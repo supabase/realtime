@@ -3,8 +3,8 @@ defmodule RealtimeWeb.UserSocket do
 
   require Logger
 
-  alias Realtime.Api.Tenant
-  alias Extensions.Postgres.Helpers
+  alias Realtime.{PostgresCdc, Api}
+  alias Api.Tenant
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
   import Realtime.Helpers, only: [decrypt!: 2]
@@ -39,11 +39,13 @@ defmodule RealtimeWeb.UserSocket do
              extensions: extensions,
              jwt_secret: jwt_secret,
              max_concurrent_users: max_conn_users,
-             max_events_per_second: max_events_per_second
-           } <- Realtime.Api.get_tenant_by_external_id(external_id),
+             max_events_per_second: max_events_per_second,
+             postgres_cdc_default: postgres_cdc_default
+           } <- Api.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- access_token(params, headers),
            jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
-           {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec) do
+           {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec),
+           {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
         assigns =
           %RealtimeChannel.Assigns{
             claims: claims,
@@ -52,7 +54,8 @@ defmodule RealtimeWeb.UserSocket do
               max_concurrent_users: max_conn_users,
               max_events_per_second: max_events_per_second
             },
-            postgres_extension: Helpers.filter_postgres_settings(extensions),
+            postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
+            postgres_cdc_module: postgres_cdc_module,
             tenant: external_id,
             log_level: log_level,
             tenant_token: token
