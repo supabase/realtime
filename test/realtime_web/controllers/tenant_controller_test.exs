@@ -14,7 +14,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     "name" => "localhost",
     "extensions" => [
       %{
-        "type" => "postgres",
+        "type" => "postgres_cdc_rls",
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
@@ -28,6 +28,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         }
       }
     ],
+    "postgres_cdc_default" => "postgres_cdc_rls",
     "jwt_secret" => "new secret"
   }
 

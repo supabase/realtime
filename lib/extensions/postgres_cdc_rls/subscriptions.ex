@@ -1,4 +1,4 @@
-defmodule Extensions.Postgres.Subscriptions do
+defmodule Extensions.PostgresCdcRls.Subscriptions do
   @moduledoc """
   This module consolidates subscriptions handling
   """
@@ -8,7 +8,9 @@ defmodule Extensions.Postgres.Subscriptions do
   @type conn() :: Postgrex.conn()
 
   @spec create(conn(), String.t(), list(map())) ::
-          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Result.t() | Exception.t() | atom()}
+          {:ok, Postgrex.Result.t()}
+          | {:error,
+             Exception.t() | :malformed_subscription_params | {:subscription_insert_failed, map()}}
   def create(conn, publication, params_list) do
     sql = "with sub_tables as (
 		    select
@@ -48,11 +50,18 @@ defmodule Extensions.Postgres.Subscriptions do
     transaction(conn, fn conn ->
       params_list
       |> Enum.map(fn %{id: id, claims: claims, params: params} ->
-        with [schema, table, filters] <- parse_subscription_params(params),
-             {:ok, result} <- query(conn, sql, [publication, schema, table, id, claims, filters]) do
-          result
-        else
-          _ -> rollback(conn, :malformed_subscription_params)
+        case parse_subscription_params(params) do
+          [schema, table, filters] ->
+            case query(conn, sql, [publication, schema, table, id, claims, filters]) do
+              {:ok, %{num_rows: num} = result} when num > 0 ->
+                result
+
+              _ ->
+                rollback(conn, {:subscription_insert_failed, params})
+            end
+
+          _ ->
+            rollback(conn, :malformed_subscription_params)
         end
       end)
     end)
@@ -127,6 +136,7 @@ defmodule Extensions.Postgres.Subscriptions do
   end
 
   defp parse_subscription_params(params) do
+    # filter example "body=eq.hey"
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
         with [col, rest] <- String.split(filter, "=", parts: 2),
@@ -141,6 +151,9 @@ defmodule Extensions.Postgres.Subscriptions do
 
       %{"schema" => schema} ->
         [schema, "*", []]
+
+      %{"table" => table} ->
+        ["public", table, []]
 
       _ ->
         []

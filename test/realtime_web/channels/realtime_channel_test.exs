@@ -4,7 +4,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   import Mock
 
-  alias Extensions.Postgres
   alias Phoenix.Socket
   alias RealtimeWeb.{ChannelsAuthorization, Joken.CurrentTime, UserSocket}
 
@@ -23,11 +22,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            authorize_conn: fn _, _ ->
              {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
            end
-         ]},
-        {Postgres, [],
-         [
-           get_or_start_conn: fn _ -> {:ok, self(), self()} end,
-           create_subscription: fn _, _, _, _ -> {:ok, %{}} end
          ]}
       ]) do
         {:ok, %Socket{} = socket} =
@@ -37,7 +31,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
           })
 
         socket = Socket.assign(socket, %{limits: %{max_concurrent_users: 1}})
-
         assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
       end
     end
@@ -49,11 +42,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            authorize_conn: fn _, _ ->
              {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
            end
-         ]},
-        {Postgres, [],
-         [
-           get_or_start_conn: fn _ -> {:ok, self(), self()} end,
-           create_subscription: fn _, _, _, _ -> {:ok, %{}} end
          ]}
       ]) do
         {:ok, %Socket{} = socket} =
@@ -82,11 +70,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            authorize_conn: fn _, _ ->
              {:ok, %{"exp" => Joken.current_time() + 1, "role" => "postgres"}}
            end
-         ]},
-        {Postgres, [],
-         [
-           get_or_start_conn: fn _ -> {:ok, self(), self()} end,
-           create_subscription: fn _, _, _, _ -> {:ok, %{}} end
          ]}
       ]) do
         {:ok, %Socket{} = socket} =
@@ -106,11 +89,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            authorize_conn: fn _, _ ->
              {:ok, %{"exp" => Joken.current_time(), "role" => "postgres"}}
            end
-         ]},
-        {Postgres, [],
-         [
-           get_or_start_conn: fn _ -> {:ok, self(), self()} end,
-           create_subscription: fn _, _, _, _ -> {:ok, %{}} end
          ]}
       ]) do
         {:ok, %Socket{} = socket} =
@@ -129,11 +107,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            authorize_conn: fn _, _ ->
              {:ok, %{"exp" => Joken.current_time() - 1, "role" => "postgres"}}
            end
-         ]},
-        {Postgres, [],
-         [
-           get_or_start_conn: fn _ -> {:ok, self(), self()} end,
-           create_subscription: fn _, _, _, _ -> {:ok, %{}} end
          ]}
       ]) do
         {:ok, %Socket{} = socket} =

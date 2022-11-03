@@ -1,15 +1,14 @@
-defmodule Extensions.Postgres.ReplicationPoller do
+defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   use GenServer
 
   require Logger
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt_creds: 5]
 
-  alias Extensions.Postgres
-  alias Postgres.Replications
+  alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
   alias DBConnection.Backoff
 
-  alias Realtime.{MessageDispatcher, PubSub}
+  alias Realtime.PubSub
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
@@ -58,6 +57,8 @@ defmodule Extensions.Postgres.ReplicationPoller do
       tenant: args["id"]
     }
 
+    Logger.metadata(external_id: state.tenant, project: state.tenant)
+
     {:ok, state, {:continue, :prepare_replication}}
   end
 
@@ -70,12 +71,7 @@ defmodule Extensions.Postgres.ReplicationPoller do
           slot_name: slot_name
         } = state
       ) do
-    try do
-      Replications.prepare_replication(conn, slot_name)
-    catch
-      :error, error -> {:error, error}
-    end
-    |> case do
+    case Replications.prepare_replication(conn, slot_name) do
       {:ok, _} ->
         send(self(), :poll)
         {:noreply, state}
