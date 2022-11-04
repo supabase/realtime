@@ -1,0 +1,121 @@
+<div class="flex flex-row justify-between py-4">
+    <div>
+        <.h1>Realtime Inspector</.h1>
+        <p>Use the Realtime Inspector to connect to Supabase Realtime and debug payloads</p>
+    </div>
+    <div>
+        <.link_button href={@share_url} target="_blank">Share</.link_button>
+    </div>
+</div>
+<div class="py-4">
+    <.h2>Connection</.h2>
+    <%= if @live_action == :new do %>
+        <.modal id="conn_modal" show={true}>
+            <:title>New Connection</:title>
+            <.live_component
+              module={RealtimeWeb.InspectorLive.ConnComponent}
+              id={:new_conn}
+              title={@page_title}
+              action={@live_action}
+            />
+        </.modal>
+    <% end %>
+    
+    <div id="conn_info" class="mb-5">
+        <%= if @broadcast_subscribed do %>
+            <p>Connected to <code><%= @connected_to %></code></p>
+        <% else %>
+            <p>Connect to a Realtime instance first!</p>
+        <% end %>
+    </div>
+    <.link_button href={Routes.inspector_index_path(@socket, :new)}>New connection</.link_button>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-12 py-4">
+    <div>
+        <div class="flex flex-row flex-wrap justify-between">
+                <.h3>Broadcast</.h3>
+                <.badge><%= if @broadcast_subscribed, do: "💚 Subscribed", else: "⚠️ Not subscribed" %></.badge>
+        </div>
+        <p>Broadcast an event and all subscribed clients will receive it.</p>
+    </div>
+    <div>
+        <div class="flex flex-row flex-wrap justify-between">
+                <.h3>Presence</.h3>
+                <.badge><%= if @presence_subscribed, do: "💚 Subscribed", else: "⚠️ Not subscribed" %></.badge>
+        </div>
+        <p>As clients join and leave a Channel all clients will by notified with a `join` or `leave` event.</p>
+    </div>
+    <div>
+        <div class="flex flex-row flex-wrap justify-between">
+                <.h3>Database</.h3>
+                <.badge><%= if @postgres_subscribed, do: "💚 Subscribed", else: "⚠️ Not subscribed" %></.badge>
+        </div>
+        <p>Database changes are also broadcast over your Channel.</p>
+    </div>
+</div>
+
+<div class="flex flex-row flex-wrap py-4">
+    <aside class="w-full sm:w-1/3 md:w-1/4 pr-2 mb-8">
+        <.h3>Broadcast an Event</.h3>
+        <div class="mb-6">
+            <.form 
+                id="message_form"
+                :let={m} 
+                for={@changeset} 
+                class="bg-white rounded mt-4"
+                phx-submit="send_message"
+                >
+                <div class="mb-4">
+                    <%= label m, :event, class: "block text-gray-700 text-sm font-bold mb-2" %>
+                    <%= text_input m, :event, class: "
+                        my-1
+                        block
+                        w-full
+                        rounded-md
+                        border-gray-300
+                        shadow-sm
+                        focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                      " %>
+                    <%= error_tag m, :event %>
+                    <p class="text-gray-600 text-xs italic">Event name</p>
+                </div>
+                <div class="mb-4">
+                    <%= label m, :payload, class: "block text-gray-700 text-sm font-bold mb-2" %>
+                    <%= text_input m, :payload, class: "
+                        my-1
+                        block
+                        w-full
+                        rounded-md
+                        border-gray-300
+                        shadow-sm
+                        focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                      " %>
+                    <%= error_tag m, :payload %>
+                    <p class="text-gray-600 text-xs italic">Message payload</p>
+                </div>
+
+                <%= submit "Send", phx_disable_with: "Sending...", class: "bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none" %>
+            </.form>
+        </div>
+        <div class="mb-6">
+        </div>
+        <div class="mb-6">
+        </div>
+    </aside>
+
+    <div class="w-full sm:w-2/3 md:w-3/4 pt-1 pl-2">
+        <div id="payload" phx-update="ignore" phx-hook="payload" class="overflow-x-auto relative rounded">
+            <table class="table-fixed w-full text-md text-left text-gray-700">
+                <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                    <tr>
+                        <th scope="col" class="w-36 py-3 px-6">Extension</th>
+                        <th scope="col" class="py-3 px-6">Payload</th>
+                    </tr>
+                </thead>
+                <tbody id="plist">
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

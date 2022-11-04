@@ -1,0 +1,18 @@
+version: '3'
+services:
+  realtime:
+    build: .
+    ports:
+      - "4000:4000"
+    environment:
+      DB_HOST: host.docker.internal
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_PORT: 5432
+      PORT: 4000
+      JWT_SECRET: SOMETHING_SUPER_SECRET
+      SECURE_CHANNELS: 'false'
+      APP_NAME: realtime
+      APP_HOST: 127.0.0.1
+      DNS_NODES: ""

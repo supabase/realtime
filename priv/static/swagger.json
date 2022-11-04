@@ -1,0 +1,410 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "definitions": {
+    "ExtensionPostgres": {
+      "properties": {
+        "inserted_at": {
+          "description": "",
+          "example": "2022-02-16T20:41:47",
+          "type": "string"
+        },
+        "settings": {
+          "description": "",
+          "properties": {
+            "db_host": {
+              "example": "some encrypted value",
+              "type": "string"
+            },
+            "db_name": {
+              "example": "some encrypted value",
+              "type": "string"
+            },
+            "db_password": {
+              "example": "some encrypted value",
+              "type": "string"
+            },
+            "db_port": {
+              "example": "some encrypted value",
+              "type": "string"
+            },
+            "db_user": {
+              "example": "some encrypted value",
+              "type": "string"
+            },
+            "poll_interval_ms": {
+              "example": 100,
+              "type": "integer"
+            },
+            "poll_max_changes": {
+              "example": 100,
+              "type": "integer"
+            },
+            "poll_max_record_bytes": {
+              "example": 1048576,
+              "type": "integer"
+            },
+            "publication": {
+              "example": "supabase_realtime",
+              "type": "string"
+            },
+            "region": {
+              "example": "us-east-1",
+              "type": "string"
+            },
+            "slot_name": {
+              "example": "supabase_realtime_replication_slot",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": {
+          "description": "",
+          "example": "postgres",
+          "type": "string"
+        },
+        "updated_at": {
+          "description": "",
+          "example": "2022-02-16T20:41:47",
+          "type": "string"
+        }
+      },
+      "required": [
+        "settings",
+        "type"
+      ],
+      "title": "ExtensionPostgres",
+      "type": "object"
+    },
+    "ExtensionPostgresReq": {
+      "properties": {
+        "settings": {
+          "description": "",
+          "properties": {
+            "db_host": {
+              "example": "127.0.0.1",
+              "required": true,
+              "type": "string"
+            },
+            "db_name": {
+              "example": "postgres",
+              "required": true,
+              "type": "string"
+            },
+            "db_password": {
+              "example": "postgres",
+              "required": true,
+              "type": "string"
+            },
+            "db_port": {
+              "example": "6432",
+              "required": true,
+              "type": "string"
+            },
+            "db_user": {
+              "example": "postgres",
+              "required": true,
+              "type": "string"
+            },
+            "poll_interval_ms": {
+              "default": 100,
+              "example": 100,
+              "type": "integer"
+            },
+            "poll_max_changes": {
+              "default": 100,
+              "example": 100,
+              "type": "integer"
+            },
+            "poll_max_record_bytes": {
+              "default": 1048576,
+              "example": 1048576,
+              "type": "integer"
+            },
+            "publication": {
+              "default": "supabase_realtime",
+              "example": "supabase_realtime",
+              "type": "string"
+            },
+            "region": {
+              "example": "us-east-1",
+              "required": true,
+              "type": "string"
+            },
+            "slot_name": {
+              "default": "supabase_realtime_replication_slot",
+              "example": "supabase_realtime_replication_slot",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": {
+          "description": "",
+          "example": "postgres",
+          "type": "string"
+        }
+      },
+      "required": [
+        "settings",
+        "type"
+      ],
+      "title": "ExtensionPostgresReq",
+      "type": "object"
+    },
+    "Tenant": {
+      "properties": {
+        "extensions": {
+          "description": "",
+          "items": {
+            "$ref": "#/definitions/ExtensionPostgres"
+          },
+          "type": "array"
+        },
+        "external_id": {
+          "description": "",
+          "example": "okumviwlylkmpkoicbrc",
+          "type": "string"
+        },
+        "id": {
+          "description": "",
+          "example": "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19",
+          "type": "string"
+        },
+        "inserted_at": {
+          "description": "",
+          "example": "2022-02-16T20:41:47",
+          "type": "string"
+        },
+        "max_concurrent_users": {
+          "description": "",
+          "example": 10000,
+          "type": "integer"
+        },
+        "name": {
+          "description": "",
+          "example": "tenant1",
+          "type": "string"
+        }
+      },
+      "required": [
+        "extensions"
+      ],
+      "title": "Tenant",
+      "type": "object"
+    },
+    "TenantReq": {
+      "properties": {
+        "extensions": {
+          "description": "",
+          "items": {
+            "$ref": "#/definitions/ExtensionPostgresReq"
+          },
+          "type": "array"
+        },
+        "max_concurrent_users": {
+          "default": 10000,
+          "description": "",
+          "example": 10000,
+          "type": "integer"
+        },
+        "name": {
+          "description": "",
+          "example": "tenant1",
+          "maxLength": 255,
+          "type": "string"
+        }
+      },
+      "required": [
+        "extensions"
+      ],
+      "title": "TenantReq",
+      "type": "object"
+    },
+    "TenantResponse": {
+      "properties": {
+        "data": {
+          "$ref": "#/definitions/Tenant",
+          "description": ""
+        }
+      },
+      "title": "TenantResponse",
+      "type": "object"
+    },
+    "Tenants": {
+      "items": {
+        "$ref": "#/definitions/Tenant"
+      },
+      "title": "Tenants",
+      "type": "array"
+    },
+    "TenantsResponse": {
+      "properties": {
+        "data": {
+          "$ref": "#/definitions/Tenants",
+          "description": ""
+        }
+      },
+      "title": "TenantsResponse",
+      "type": "object"
+    }
+  },
+  "host": "localhost:4000",
+  "info": {
+    "description": "API Documentation for Realtime v1",
+    "termsOfService": "Open for public",
+    "title": "Realtime",
+    "version": "1.0"
+  },
+  "paths": {
+    "/api/tenants": {
+      "get": {
+        "description": "",
+        "operationId": "RealtimeWeb.TenantController.index",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "$ref": "#/definitions/TenantsResponse"
+            }
+          }
+        },
+        "summary": "",
+        "tags": [
+          "Tenants"
+        ]
+      }
+    },
+    "/api/tenants/{external_id}": {
+      "delete": {
+        "description": "Delete a tenant by ID",
+        "operationId": "RealtimeWeb.TenantController.delete",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "type": "string",
+            "x-example": "123e4567-e89b-12d3-a456-426655440000"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "No Content - Deleted Successfully"
+          }
+        },
+        "summary": "",
+        "tags": [
+          "Tenants"
+        ]
+      },
+      "get": {
+        "description": "",
+        "operationId": "RealtimeWeb.TenantController.show",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "type": "string",
+            "x-example": "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "$ref": "#/definitions/TenantResponse"
+            }
+          }
+        },
+        "summary": "",
+        "tags": [
+          "Tenants"
+        ]
+      },
+      "put": {
+        "description": "",
+        "operationId": "RealtimeWeb.TenantController.update",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "maxLength": 255,
+            "name": "external_id",
+            "required": true,
+            "type": "string",
+            "x-example": "72ac258c-8dcd-4f0d-992f-9b6bab5e6d19"
+          },
+          {
+            "description": "",
+            "in": "body",
+            "name": "tenant",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TenantReq"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "schema": {
+              "$ref": "#/definitions/TenantResponse"
+            }
+          }
+        },
+        "summary": "",
+        "tags": [
+          "Tenants"
+        ]
+      }
+    },
+    "/api/tenants/{external_id}/reload": {
+      "post": {
+        "description": "Reload tenant database supervisor",
+        "operationId": "RealtimeWeb.TenantController.reload",
+        "parameters": [
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "type": "string",
+            "x-example": "123e4567-e89b-12d3-a456-426655440000"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "not found"
+          }
+        },
+        "summary": "",
+        "tags": [
+          "Tenants"
+        ]
+      }
+    }
+  },
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "http",
+    "https"
+  ],
+  "swagger": "2.0",
+  "tags": [
+    {
+      "name": "Tenants"
+    }
+  ]
+}
