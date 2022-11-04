@@ -88,8 +88,8 @@ Not yet! Due to the following limitations:
 
 We have set up some simple examples that show how to use this server:
 
-- [Next.js example](https://github.com/supabase/realtime/tree/master/examples/next-js)
-- [NodeJS example](https://github.com/supabase/realtime/tree/master/examples/node-js)
+- [Next.js example](https://github.com/supabase/realtime/tree/main/examples/next-js)
+- [NodeJS example](https://github.com/supabase/realtime/tree/main/examples/node-js)
 
 
 ## Client libraries
