@@ -27,6 +27,7 @@ jobs:
     needs:
       - release
     runs-on: ubuntu-latest
+    if: needs.release.outputs.published == 'true'
     steps:
       - uses: actions/checkout@v2
       - uses: superfly/flyctl-actions@1.1
