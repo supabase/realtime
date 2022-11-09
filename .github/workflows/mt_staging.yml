@@ -1,4 +1,4 @@
-name: MT Deploy staging
+name: MT Deploy Staging
 on:
   push:
     branches:
