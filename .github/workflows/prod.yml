@@ -75,7 +75,7 @@ jobs:
 
   docker_arm_release:
     needs: release
-    runs-on: [arm-runner]
+    runs-on: self-hosted
     if: needs.release.outputs.published == 'true'
     timeout-minutes: 120
     env:
