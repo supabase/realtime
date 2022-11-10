@@ -4,12 +4,9 @@ on:
     branches:
       - rc
 
-env:
-  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 jobs:
   release:
-    name: Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     outputs:
       published: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
@@ -23,23 +20,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PROJECT_ACTION }}
 
   deploy:
-    name: Deploy
-    needs:
-      - release
-    runs-on: ubuntu-latest
+    needs: release
+    runs-on: ubuntu-20.04
     if: needs.release.outputs.published == 'true'
     steps:
       - uses: actions/checkout@v2
       - uses: superfly/flyctl-actions@1.1
         with:
           args: "-c deploy/fly/prod.toml deploy"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-  upload-docker:
-    name: Upload Docker Image
-    needs:
-      - release
-    runs-on: ubuntu-latest
+  docker_x86_release:
+    needs: release
+    runs-on: ubuntu-20.04
     if: needs.release.outputs.published == 'true'
+    timeout-minutes: 120
+    env:
+      arch: amd64
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
     steps:
       - id: meta
         uses: docker/metadata-action@v4
@@ -48,18 +48,11 @@ jobs:
             supabase/realtime
             public.ecr.aws/t3w2s2c9/realtime
           tags: |
-            type=raw,value=v${{ needs.release.outputs.version }}
+            type=raw,value=v${{ needs.release.outputs.version }}_${{ env.arch }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2.1.0
-        with:
-          platforms: amd64,arm64
+      - uses: docker/setup-buildx-action@v2
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2.2.1
-
-      - name: Login to DockerHub
-        uses: docker/login-action@v2
+      - uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
@@ -71,10 +64,90 @@ jobs:
           username: ${{ secrets.PROD_ACCESS_KEY_ID }}
           password: ${{ secrets.PROD_SECRET_ACCESS_KEY }}
 
-      - uses: docker/build-push-action@v3
+      - id: build
+        uses: docker/build-push-action@v3
         with:
           push: true
-          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/${{ env.arch }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  docker_arm_release:
+    needs: release
+    runs-on: [arm-runner]
+    if: needs.release.outputs.published == 'true'
+    timeout-minutes: 120
+    env:
+      arch: arm64
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            supabase/realtime
+            public.ecr.aws/t3w2s2c9/realtime
+          tags: |
+            type=raw,value=v${{ needs.release.outputs.version }}_${{ env.arch }}
+
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login to ECR
+        uses: docker/login-action@v2
+        with:
+          registry: public.ecr.aws
+          username: ${{ secrets.PROD_ACCESS_KEY_ID }}
+          password: ${{ secrets.PROD_SECRET_ACCESS_KEY }}
+
+      - uses: docker/setup-buildx-action@v2
+        with:
+          driver: docker
+          driver-opts: |
+            image=moby/buildkit:master
+            network=host
+
+      - id: build
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/${{ env.arch }}
+          no-cache: true
+
+  merge_manifest:
+    needs: [docker_x86_release, docker_arm_release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v2
+
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Merge multi-arch manifests
+        run: |
+          docker buildx imagetools create -t supabase/realtime:v${{ needs.release.outputs.version }} \
+          supabase/realtime@${{ needs.docker_x86_release.outputs.image_digest }} \
+          supabase/realtime@${{ needs.docker_arm_release.outputs.image_digest }}
+
+      - name: Login to ECR
+        uses: docker/login-action@v2
+        with:
+          registry: public.ecr.aws
+          username: ${{ secrets.PROD_ACCESS_KEY_ID }}
+          password: ${{ secrets.PROD_SECRET_ACCESS_KEY }}
+
+      - name: Mirror to ECR
+        uses: akhilerm/tag-push-action@v2.0.0
+        with:
+          src: docker.io/supabase/realtime:v${{ needs.release.outputs.version }}
+          dst: public.ecr.aws/t3w2s2c9/realtime:v${{ needs.release.outputs.version }}
