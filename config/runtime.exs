@@ -59,6 +59,10 @@ if config_env() != :test do
   port = System.get_env("DB_PORT", "5432")
   queue_target = System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer()
   queue_interval = System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
+  after_connect_query_args = case System.get_env("DB_AFTER_CONNECT_QUERY") do
+    nil -> nil
+    query -> {Postgrex, :query!, [query, []]}
+  end
 
   config :realtime, Realtime.Repo,
     hostname: default_db_host,
@@ -71,7 +75,8 @@ if config_env() != :test do
     queue_interval: queue_interval,
     parameters: [
       application_name: "supabase_mt_realtime"
-    ]
+    ],
+    after_connect: after_connect_query_args
 
   replica_repos = %{
     Realtime.Repo.Replica.FRA => System.get_env("DB_HOST_REPLICA_FRA", default_db_host),
