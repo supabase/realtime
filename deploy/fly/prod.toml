@@ -9,6 +9,8 @@ processes = []
 
 [env]
   DNS_NODES = "realtime-prod.internal"
+  ECTO_IPV6 = true
+  ERL_AFLAGS = "-proto_dist inet6_tcp"
 
 [experimental]
   allowed_public_ports = []
