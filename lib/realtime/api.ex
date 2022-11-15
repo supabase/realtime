@@ -77,6 +77,8 @@ defmodule Realtime.Api do
 
   """
   def update_tenant(%Tenant{} = tenant, attrs) do
+    drop_dist_cache(tenant.external_id)
+
     tenant
     |> Tenant.changeset(attrs)
     |> Repo.update()
@@ -100,6 +102,8 @@ defmodule Realtime.Api do
 
   @spec delete_tenant_by_external_id(String.t()) :: boolean()
   def delete_tenant_by_external_id(id) do
+    drop_dist_cache(id)
+
     from(t in Tenant, where: t.external_id == ^id)
     |> Repo.delete_all()
     |> case do
@@ -131,6 +135,16 @@ defmodule Realtime.Api do
     Tenant
     |> repo_replica.get_by(external_id: external_id)
     |> repo_replica.preload(:extensions)
+  end
+
+  def get_cached_tenant(external_id) do
+    {status, value} =
+      Cachex.fetch(:db_cache, external_id, fn ->
+        get_tenant_by_external_id(external_id)
+      end)
+
+    if status == :commit, do: Cachex.expire(:db_cache, external_id, 60_000)
+    value
   end
 
   def list_extensions(type \\ "postgres_cdc_rls") do
@@ -201,5 +215,13 @@ defmodule Realtime.Api do
     end)
     |> Task.await_many()
     |> List.flatten()
+  end
+
+  def drop_dist_cache(id) do
+    {_, bad_nodes} =
+      [node() | Node.list()]
+      |> :rpc.multicall(Cachex, :del, [:db_cache, id], 10_000)
+
+    if bad_nodes != [], do: Logger.error("Failed to drop cache on nodes: #{inspect(bad_nodes)}")
   end
 end

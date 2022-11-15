@@ -56,6 +56,7 @@ defmodule Realtime.Application do
 
     children =
       [
+        {Cachex, name: :db_cache},
         Realtime.PromEx,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         Realtime.Repo,

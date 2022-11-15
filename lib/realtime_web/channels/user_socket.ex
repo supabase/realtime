@@ -41,7 +41,7 @@ defmodule RealtimeWeb.UserSocket do
              max_concurrent_users: max_conn_users,
              max_events_per_second: max_events_per_second,
              postgres_cdc_default: postgres_cdc_default
-           } <- Api.get_tenant_by_external_id(external_id),
+           } <- Api.get_cached_tenant(external_id),
            token when is_binary(token) <- access_token(params, headers),
            jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec),
