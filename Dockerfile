@@ -15,9 +15,16 @@
 ARG ELIXIR_VERSION=1.14.0
 ARG OTP_VERSION=25.0.4
 ARG DEBIAN_VERSION=bullseye-20220801-slim
+ARG TAILSCALE_VERSION=1.32.2
 
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+
+FROM alpine:latest as tailscale
+WORKDIR /app
+ENV TSFILE=tailscale_${TAILSCALE_VERSION}_amd64.tgz
+RUN wget https://pkgs.tailscale.com/stable/${TSFILE} && tar xzf ${TSFILE} --strip-components=1
+COPY tailscale/wrapper.sh ./
 
 FROM ${BUILDER_IMAGE} as builder
 
@@ -96,9 +103,13 @@ ENV MIX_ENV="prod"
 # Only copy the final release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
 
-USER nobody
+RUN mkdir /tailscale
+COPY --from=tailscale /app/wrapper.sh /tailscale/wrapper.sh
+COPY --from=tailscale /app/tailscaled /tailscale/tailscaled
+COPY --from=tailscale /app/tailscale /tailscale/tailscale
+RUN mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
 
-CMD ["/app/bin/server"]
+CMD ["/tailscale/wrapper.sh"]
 # Appended by flyctl
 ENV ECTO_IPV6 true
 ENV ERL_AFLAGS "-proto_dist inet6_tcp"
