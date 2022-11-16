@@ -12,8 +12,9 @@ import Config
 # config :realtime, RealtimeWeb.Endpoint,
 #   url: [host: "realtime.dev", port: 80]
 
-# Do not print debug messages in production
-config :logger, :warning,
+log_level = System.get_env("LOG_LEVEL", "warning") |> String.to_atom()
+
+config :logger, log_level,
   format: "$time [$level] $message $metadata\n",
   metadata: [:error_code, :file, :pid, :project, :external_id]
 
