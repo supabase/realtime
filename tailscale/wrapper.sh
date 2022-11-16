@@ -11,4 +11,4 @@ if [[ -n "${ENABLE_TAILSCALE}" ]]; then
 fi
 
 echo "Starting Realtime"
-sudo -u nobody /app/bin/server
+sudo -E -u nobody /app/bin/server
