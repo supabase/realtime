@@ -6,7 +6,7 @@ defmodule Extensions.PostgresCdcRls do
   alias RealtimeWeb.Endpoint
   alias Realtime.PostgresCdc
   alias Extensions.PostgresCdcRls, as: Rls
-  alias Rls.{Subscriptions, SubscriptionManagerTracker}
+  alias Rls.Subscriptions
 
   def handle_connect(args) do
     Enum.reduce_while(1..5, nil, fn retry, acc ->
@@ -118,13 +118,13 @@ defmodule Extensions.PostgresCdcRls do
 
   @spec get_manager_conn(String.t()) :: nil | {:ok, pid(), pid()}
   def get_manager_conn(id) do
-    Phoenix.Tracker.get_by_key(SubscriptionManagerTracker, "subscription_manager", id)
+    :syn.lookup(Extensions.PostgresCdcRls, id)
     |> case do
-      [] ->
-        nil
+      {_, %{manager: manager, subs_pool: conn}} ->
+        {:ok, manager, conn}
 
-      [{_, %{manager_pid: pid, conn: conn}}] ->
-        {:ok, pid, conn}
+      _ ->
+        nil
     end
   end
 
@@ -165,12 +165,5 @@ defmodule Extensions.PostgresCdcRls do
     else
       Subscriptions.create(conn, publication, opts)
     end
-  end
-
-  def track_manager(id, pid, conn) do
-    Phoenix.Tracker.track(SubscriptionManagerTracker, self(), "subscription_manager", id, %{
-      conn: conn,
-      manager_pid: pid
-    })
   end
 end

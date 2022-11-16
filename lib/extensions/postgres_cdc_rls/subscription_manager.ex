@@ -56,6 +56,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       "db_port" => port,
       "db_name" => name,
       "db_user" => user,
+      "region" => region,
       "db_password" => pass,
       "db_socket_opts" => socket_opts
     } = args
@@ -76,7 +77,12 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     }
 
     send(self(), :check_oids)
-    Rls.track_manager(id, self(), conn_pub)
+    manager = self()
+
+    :syn.update_registry(Extensions.PostgresCdcRls, id, fn _, _ ->
+      %{manager: manager, subs_pool: conn_pub, region: region}
+    end)
+
     {:ok, state}
   end
 
