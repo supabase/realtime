@@ -109,6 +109,9 @@ COPY --from=tailscale /app/tailscaled /tailscale/tailscaled
 COPY --from=tailscale /app/tailscale /tailscale/tailscale
 RUN mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
 
+COPY limits.sh /app/limits.sh
+ENTRYPOINT ["/app/limits.sh"]
+
 CMD ["/tailscale/wrapper.sh"]
 # Appended by flyctl
 ENV ECTO_IPV6 true
