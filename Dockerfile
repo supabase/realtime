@@ -15,12 +15,12 @@
 ARG ELIXIR_VERSION=1.14.0
 ARG OTP_VERSION=25.0.4
 ARG DEBIAN_VERSION=bullseye-20220801-slim
-ARG TAILSCALE_VERSION=1.32.2
 
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
 
 FROM alpine:latest as tailscale
+ARG TAILSCALE_VERSION=1.32.2
 WORKDIR /app
 ENV TSFILE=tailscale_${TAILSCALE_VERSION}_amd64.tgz
 RUN wget https://pkgs.tailscale.com/stable/${TSFILE} && tar xzf ${TSFILE} --strip-components=1
