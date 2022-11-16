@@ -1,4 +1,7 @@
-#!/bin/sh
+#!/bin/bash
+
+set -x
+set -euo pipefail
 
 if [[ -n "${ENABLE_TAILSCALE}" ]]; then
     echo "Enabling Tailscale"
@@ -7,4 +10,5 @@ if [[ -n "${ENABLE_TAILSCALE}" ]]; then
     /tailscale/tailscale up --authkey=${TAILSCALE_AUTHKEY} --hostname="${TAILSCALE_APP_NAME}" --accept-routes=true
 fi
 
+echo "Starting Realtime"
 sudo -u nobody /app/bin/server
