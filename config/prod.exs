@@ -13,7 +13,7 @@ import Config
 #   url: [host: "realtime.dev", port: 80]
 
 # Do not print debug messages in production
-config :logger, :warning,
+config :logger, :info,
   format: "$time [$level] $message $metadata\n",
   metadata: [:error_code, :file, :pid, :project, :external_id]
 
