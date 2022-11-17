@@ -10,7 +10,8 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
 
   @impl true
   def init(_args) do
-    :syn.add_node_to_scopes([Extensions.PostgresCdcRls])
+    :syn.set_event_handler(Rls.SynHandler)
+    :syn.add_node_to_scopes([Rls])
 
     children = [
       {
@@ -19,8 +20,7 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
         child_spec: DynamicSupervisor,
         strategy: :one_for_one,
         name: Rls.DynamicSupervisor
-      },
-      Rls.SubscriptionManagerTracker
+      }
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
