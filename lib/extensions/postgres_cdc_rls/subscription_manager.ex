@@ -56,7 +56,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       "db_port" => port,
       "db_name" => name,
       "db_user" => user,
-      "region" => region,
       "db_password" => pass,
       "db_socket_opts" => socket_opts
     } = args
@@ -64,6 +63,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1)
     {:ok, conn_pub} = H.connect_db(host, port, name, user, pass, socket_opts)
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
+    Rls.update_meta(id, self(), conn_pub)
 
     state = %State{
       id: id,
@@ -77,12 +77,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     }
 
     send(self(), :check_oids)
-    manager = self()
-
-    :syn.update_registry(Extensions.PostgresCdcRls, id, fn _, _ ->
-      %{manager: manager, subs_pool: conn_pub, region: region}
-    end)
-
     {:ok, state}
   end
 

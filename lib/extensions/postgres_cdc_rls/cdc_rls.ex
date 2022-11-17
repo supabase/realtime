@@ -17,6 +17,10 @@ defmodule Extensions.PostgresCdcRls do
           if retry > 1, do: Process.sleep(1_000)
           {:cont, acc}
 
+        :wait ->
+          Process.sleep(1_000)
+          {:cont, acc}
+
         {:ok, pid, conn} ->
           {:halt, {:ok, {pid, conn}}}
       end
@@ -51,11 +55,11 @@ defmodule Extensions.PostgresCdcRls do
   end
 
   def handle_stop(tenant, timeout) do
-    case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
+    case :syn.whereis_name({__MODULE__, tenant}) do
       :undefined ->
         Logger.warning("Database supervisor not found for tenant #{tenant}")
 
-      {pid, _} ->
+      pid ->
         DynamicSupervisor.stop(pid, :shutdown, timeout)
     end
   end
@@ -116,10 +120,13 @@ defmodule Extensions.PostgresCdcRls do
     )
   end
 
-  @spec get_manager_conn(String.t()) :: nil | {:ok, pid(), pid()}
+  @spec get_manager_conn(String.t()) :: nil | :wait | {:ok, pid(), pid()}
   def get_manager_conn(id) do
-    :syn.lookup(Extensions.PostgresCdcRls, id)
+    :syn.lookup(__MODULE__, id)
     |> case do
+      {_, %{manager: nil, subs_pool: nil}} ->
+        :wait
+
       {_, %{manager: manager, subs_pool: conn}} ->
         {:ok, manager, conn}
 
@@ -142,21 +149,6 @@ defmodule Extensions.PostgresCdcRls do
     end
   end
 
-  def get_or_start_conn(args, retries \\ 5) do
-    Enum.reduce_while(1..retries, nil, fn retry, acc ->
-      get_manager_conn(args["id"])
-      |> case do
-        nil ->
-          start_distributed(args)
-          if retry > 1, do: Process.sleep(1_000)
-          {:cont, acc}
-
-        {:ok, _pid, _conn} = resp ->
-          {:halt, resp}
-      end
-    end)
-  end
-
   def create_subscription(conn, publication, opts, timeout \\ 5_000) do
     conn_node = node(conn)
 
@@ -165,5 +157,21 @@ defmodule Extensions.PostgresCdcRls do
     else
       Subscriptions.create(conn, publication, opts)
     end
+  end
+
+  @spec supervisor_id(String.t(), String.t()) :: {atom(), String.t(), map()}
+  def supervisor_id(tenant, region) do
+    {
+      __MODULE__,
+      tenant,
+      %{region: region, manager: nil, subs_pool: nil}
+    }
+  end
+
+  @spec update_meta(String.t(), pid(), pid()) :: {:ok, {pid(), term()}} | {:error, term()}
+  def update_meta(tenant, manager_pid, subs_pool) do
+    :syn.update_registry(__MODULE__, tenant, fn _, meta ->
+      %{meta | manager: manager_pid, subs_pool: subs_pool}
+    end)
   end
 end
