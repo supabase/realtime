@@ -102,7 +102,7 @@ defmodule Extensions.PostgresCdcRls do
     args =
       Map.merge(args, %{
         "db_socket_opts" => [addrtype],
-        "subs_pool_size" => Map.get(args, "subscriptions_pool", 5)
+        "subs_pool_size" => Map.get(args, "subcriber_pool_size", 5)
       })
 
     Logger.debug("Starting postgres stream extension with args: #{inspect(args, pretty: true)}")
