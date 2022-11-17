@@ -140,7 +140,13 @@ defmodule Realtime.Api do
   def get_cached_tenant(external_id) do
     {status, value} =
       Cachex.fetch(:db_cache, external_id, fn ->
-        get_tenant_by_external_id(external_id)
+        case get_tenant_by_external_id(external_id) do
+          %Tenant{} = tenant ->
+            {:commit, tenant}
+
+          _ ->
+            {:ignore, nil}
+        end
       end)
 
     if status == :commit, do: Cachex.expire(:db_cache, external_id, 60_000)
