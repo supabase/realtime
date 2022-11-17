@@ -1,6 +1,4 @@
 defmodule Realtime.PromEx do
-  alias Realtime.PromEx.Plugins.{OsMon, Phoenix}
-
   @moduledoc """
   Be sure to add the following to finish setting up PromEx:
 
@@ -56,21 +54,20 @@ defmodule Realtime.PromEx do
 
   use PromEx, otp_app: :realtime
 
-  alias PromEx.Plugins
+  alias PromEx.Plugins.{Beam, Ecto}
+  alias Realtime.PromEx.Plugins.{OsMon, Phoenix}
+  alias Realtime.Repo.{Replica}
 
   @impl true
   def plugins do
     poll_rate = Application.get_env(:realtime, :prom_poll_rate)
 
     [
-      # PromEx built in plugins
-      # Plugins.Application,
-      {Plugins.Beam, poll_rate: poll_rate, metric_prefix: [:beam]},
-      {Phoenix, router: RealtimeWeb.Router, poll_rate: poll_rate, metric_prefix: [:phoenix]},
-      # {Plugins.Ecto, poll_rate: poll_rate, metric_prefix: [:ecto]},
-      # Plugins.Oban,
-      # Plugins.PhoenixLiveView
-      {OsMon, poll_rate: poll_rate}
+      {Beam, poll_rate: poll_rate, metric_prefix: [:beam]},
+      # list `Realtime.Repo` in `repos` when decoupled from tenant database migrations
+      {Ecto, repos: [Replica.FRA, Replica.IAD, Replica.SIN], metric_prefix: [:ecto]},
+      {OsMon, poll_rate: poll_rate},
+      {Phoenix, router: RealtimeWeb.Router, poll_rate: poll_rate, metric_prefix: [:phoenix]}
     ]
   end
 
