@@ -138,7 +138,7 @@ defmodule Realtime.Api do
   end
 
   def get_cached_tenant(external_id) do
-    {status, value} =
+    {_status, value} =
       Cachex.fetch(:db_cache, external_id, fn ->
         case get_tenant_by_external_id(external_id) do
           %Tenant{} = tenant ->
@@ -149,7 +149,6 @@ defmodule Realtime.Api do
         end
       end)
 
-    if status == :commit, do: Cachex.expire(:db_cache, external_id, 60_000)
     value
   end
 
@@ -223,7 +222,7 @@ defmodule Realtime.Api do
     |> List.flatten()
   end
 
-  def drop_dist_cache(id) do
+  defp drop_dist_cache(id) do
     {_, bad_nodes} =
       [node() | Node.list()]
       |> :rpc.multicall(Cachex, :del, [:db_cache, id], 10_000)

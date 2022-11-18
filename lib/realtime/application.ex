@@ -6,6 +6,8 @@ defmodule Realtime.Application do
   use Application
   require Logger, warn: false
 
+  import Cachex.Spec, only: [expiration: 1]
+
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
@@ -56,7 +58,7 @@ defmodule Realtime.Application do
 
     children =
       [
-        {Cachex, name: :db_cache},
+        {Cachex, name: :db_cache, expiration: expiration(default: 60_000)},
         Realtime.PromEx,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         Realtime.Repo,
