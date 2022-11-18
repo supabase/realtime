@@ -8,6 +8,7 @@ defmodule Realtime.Repo do
 
   @replicas %{
     "fra" => Realtime.Repo.Replica.FRA,
+    "gru" => Realtime.Repo.Replica.IAD,
     "iad" => Realtime.Repo.Replica.IAD,
     "sin" => Realtime.Repo.Replica.SIN
   }
