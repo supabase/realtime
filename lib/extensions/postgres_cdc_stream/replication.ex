@@ -261,7 +261,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
       )
 
     [
-      host: host,
+      hostname: host,
       database: name,
       username: user,
       password: pass,
