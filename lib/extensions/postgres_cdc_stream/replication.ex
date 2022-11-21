@@ -186,9 +186,13 @@ defmodule Extensions.PostgresCdcStream.Replication do
       [Map.put(e, "event", "*"), Map.put(e, "event", change.type) | acc]
     end)
     |> List.foldl([], fn e, acc ->
-      Enum.reduce(change.record, [e], fn {k, v}, acc ->
-        [Map.put(e, "filter", "#{k}=eq.#{v}") | acc]
-      end) ++ acc
+      if Map.has_key?(change, :record) do
+        Enum.reduce(change.record, [e], fn {k, v}, acc ->
+          [Map.put(e, "filter", "#{k}=eq.#{v}") | acc]
+        end) ++ acc
+      else
+        acc
+      end
     end)
     |> Enum.each(fn params ->
       Phoenix.PubSub.broadcast_from(
