@@ -72,7 +72,7 @@ defmodule Realtime.PostgresCdc do
       "eu-west-2" -> "fra"
       "eu-west-3" -> "fra"
       "eu-central-1" -> "fra"
-      _ -> nil
+      _ -> "fra"
     end
   end
 
