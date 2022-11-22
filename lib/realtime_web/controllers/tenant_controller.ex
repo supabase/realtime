@@ -28,7 +28,7 @@ defmodule RealtimeWeb.TenantController do
 
   def create(conn, %{"tenant" => tenant_params}) do
     with {:ok, %Tenant{} = tenant} <-
-      Api.create_tenant(tenant_params) do
+           Api.create_tenant(tenant_params) do
       Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
 
       conn
