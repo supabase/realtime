@@ -21,6 +21,41 @@ defmodule Realtime.Helpers do
     |> unpad()
   end
 
+  @spec connect_db(
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          list(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
+          {:ok, pid} | {:error, Postgrex.Error.t() | term()}
+  def connect_db(host, port, name, user, pass, socket_opts, pool \\ 5, queue_target \\ 5_000) do
+    secure_key = Application.get_env(:realtime, :db_enc_key)
+
+    host = decrypt!(host, secure_key)
+    port = decrypt!(port, secure_key)
+    name = decrypt!(name, secure_key)
+    pass = decrypt!(pass, secure_key)
+    user = decrypt!(user, secure_key)
+
+    Postgrex.start_link(
+      hostname: host,
+      port: port,
+      database: name,
+      password: pass,
+      username: user,
+      pool_size: pool,
+      queue_target: queue_target,
+      parameters: [
+        application_name: "supabase_realtime"
+      ],
+      socket_options: socket_opts
+    )
+  end
+
   defp pad(data) do
     to_add = 16 - rem(byte_size(data), 16)
     data <> :binary.copy(<<to_add>>, to_add)
@@ -29,5 +64,17 @@ defmodule Realtime.Helpers do
   defp unpad(data) do
     to_remove = :binary.last(data)
     :binary.part(data, 0, byte_size(data) - to_remove)
+  end
+
+  def decrypt_creds(host, port, name, user, pass) do
+    secure_key = Application.get_env(:realtime, :db_enc_key)
+
+    {
+      decrypt!(host, secure_key),
+      decrypt!(port, secure_key),
+      decrypt!(name, secure_key),
+      decrypt!(user, secure_key),
+      decrypt!(pass, secure_key)
+    }
   end
 end

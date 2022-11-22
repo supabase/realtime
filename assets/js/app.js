@@ -1,140 +1,215 @@
-// We need to import the CSS so that webpack will load it.
-// The MiniCssExtractPlugin is used to separate it out into
-// its own CSS file.
-import "../css/app.scss";
+import "../css/app.css"
+import "phoenix_html"
+import {Socket} from "phoenix"
+import {LiveSocket} from "phoenix_live_view"
+import topbar from "../vendor/topbar"
+import { RealtimeClient } from '@supabase/realtime-js';
 
-// webpack automatically bundles all modules in your
-// entry points. Those entry points can be configured
-// in "webpack.config.js".
-//
-// Import deps with the dep name or local files with a relative path, for example:
-//
-//     import {Socket} from "phoenix"
-//     import socket from "./socket"
-//
-import "phoenix_html";
+// LiveView is managing this page because we have Phoenix running
+// We're using LiveView to handle the Realtime client via LiveView Hooks
 
-import { Socket, Presence } from "phoenix";
+let Hooks = {}
+Hooks.payload = {
+  initRealtime(channelName, path, log_level, token, schema, table) {
+  // Instantiate our client with the Realtime server and params to connect with
+  this.realtimeSocket = new RealtimeClient(path, {
+      params: { log_level: log_level, apikey: token }
+      })
 
-function uuidv4() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
-    var r = (Math.random() * 16) | 0,
-      v = c == "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
+  // Join the Channel 'any'
+  // Channels can be named anything
+  // All clients on the same Channel will get messages sent to that Channel
+  this.channel = this.realtimeSocket.channel(channelName, { config: { broadcast: { self: true } } })
 
-console.log("uuidv4()", uuidv4());
+  // Hack to confirm Postgres is subscribed
+  // Need to add 'extension' key in the 'payload'
+  this.channel.on("system", {}, payload => {
+    if (payload.extension === 'postgres_changes' && payload.status === 'ok') {
+          this.pushEventTo("#conn_info", "postgres_subscribed", {})
+        }
 
-let socket = new Socket("/socket", {
-  params: { user_id: uuidv4() },
-});
+    let line = 
+    `<tr class="bg-white border-b hover:bg-gray-50">
+      <td class="py-4 px-6">SYSTEM</td>
+      <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+    </tr>`
+    let list = document.querySelector("#plist")
+    list.innerHTML = line + list.innerHTML;
+    })
 
-let channel = socket.channel("room:lobby", {});
-let presence = new Presence(channel);
+  // Listen for all (`*`) `broadcast` events
+  // The event name can by anything
+  // Match on specific event names to filter for only those types of events and do something with them
+  this.channel.on("broadcast", { event: "*" }, payload => {
+    let line = 
+      `<tr class="bg-white border-b hover:bg-gray-50">
+        <td class="py-4 px-6">BROADCAST</td>
+        <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+      </tr>`
+    let list = document.querySelector("#plist")
+    list.innerHTML = line + list.innerHTML;
+  })
 
+  // Listen for all (`*`) `presence` events
+  this.channel.on("presence", { event: "*" }, payload => {
+    this.pushEventTo("#conn_info", "presence_subscribed", {})
+    let line = 
+      `<tr class="bg-white border-b hover:bg-gray-50">
+        <td class="py-4 px-6">PRESENCE</td>
+        <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+      </tr>`
+    let list = document.querySelector("#plist")
+    list.innerHTML = line + list.innerHTML;
+  })
 
-const totalUsersDom = document.querySelector("#total-users");
-const totalRedDom = document.querySelector("#total-red");
-const totalBlueDom = document.querySelector("#total-blue");
-const currentTeamDom = document.querySelector("#current-team");
-const typingDom = document.querySelector("div[role=presence]");
-function renderOnlineUsers(presence) {
-  let response = "";
-  let totalUsers = 0;
-  let totalRed = 0;
-  let totalBlue = 0;
+  // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
+  this.channel.on("postgres_changes", { event: "*", schema: schema, table: table }, payload => {
+    let line = 
+      `<tr class="bg-white border-b hover:bg-gray-50">
+        <td class="py-4 px-6">POSTGRES</td>
+        <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+      </tr>`
+    let list = document.querySelector("#plist")
+    list.innerHTML = line + list.innerHTML;
+  })
 
-  presence.list((userId, { metas: [first, ...rest] }) => {
-    totalUsers++;
-    if (first.team == 'red') totalRed++;
-    else totalBlue++;
+  // Finally, subscribe to the Channel we just setup
+  this.channel.subscribe(async (status) => {
+  if (status === 'SUBSCRIBED') {
+    console.log(`Realtime Channel status: ${status}`)
+
+    // Let LiveView know we connected so we can update the button text
+    this.pushEventTo("#conn_info", "broadcast_subscribed", { path: path})
     
-    response += `<br>User: <code>${userId}</code> , (typing: ${first.typing})</br>`;
-    if (first.mouse && first.mouse.x)
-      draw(first.color, first.mouse.x, first.mouse.y);
-  });
+    // Save params to local storage if `SUBSCRIBED`
+    localStorage.setItem("path", path)
+    localStorage.setItem("token", token)
+    localStorage.setItem("log_level", log_level)
+    localStorage.setItem("channel", channelName)
+    localStorage.setItem("schema", schema)
+    localStorage.setItem("table", table)
 
-  typingDom.innerHTML = response;
-  totalUsersDom.innerHTML = `<code>${totalUsers}</code>`;
-  totalRedDom.innerHTML = `${totalRed}`;
-  totalBlueDom.innerHTML = `${totalBlue}`;
-}
-presence.onSync(() => renderOnlineUsers(presence));
-
-socket.connect();
-channel.join();
-
-const red = '#EF4444';
-const blue = "#3B82F6";
-const team = Math.random() < 0.5 ? 'red' : 'blue'
-
-let state = {
-  typing: false,
-  color: team == 'red' ? red : blue,
-  team: team,
-  mouse: {
-    x: 0,
-    y: 0,
+    // Initiate Presence for a connected user
+    // Now when a new user connects and sends a `TRACK` message all clients will receive a message like: 
+    // {
+    //     "event":"join",
+    //     "key":"2b88be54-3b41-11ed-9887-1a9e1a785cf8",
+    //     "currentPresences":[
+    //     
+    //     ],
+    //     "newPresences":[
+    //        {
+    //           "name":"realtime_presence_55",
+    //           "t":1968.1000000238419,
+    //           "presence_ref":"Fxd_ZWlhIIfuIwlD"
+    //        }
+    //     ]
+    // }
+    //
+    // And when `TRACK`ed users leave we'll receive an event like:
+    // 
+    // {
+    //     "event":"leave",
+    //     "key":"2b88be54-3b41-11ed-9887-1a9e1a785cf8",
+    //     "currentPresences":[
+    //     
+    //     ],
+    //     "leftPresences":[
+    //        {
+    //           "name":"realtime_presence_55",
+    //           "t":1968.1000000238419,
+    //           "presence_ref":"Fxd_ZWlhIIfuIwlD"
+    //        }
+    //     ]
+    // }
+    const name = 'user_name_' + Math.floor(Math.random() * 100)
+    this.channel.send(
+      {
+        type: 'presence',
+        event: 'TRACK',
+        payload: { name: name, t: performance.now() },
+      })
+      } else {
+        console.log(`Realtime Channel status: ${status}`)
+      }
+    })
   },
-};
-channel.push("broadcast", state);
-currentTeamDom.innerHTML = `${team}`;
 
-// TYPING EXAMPLE
-const TYPING_TIMEOUT = 600;
-var typingTimer;
+  sendRealtime(event, payload) {
+    // Send a `broadcast` message over the Channel
+    // All connected clients will receive this message if they're subscribed 
+    // to `broadcast` events and matching on the `event` name or using `*` to match all event names
+    this.channel.send({
+      type: "broadcast",
+      event: event,
+      payload: payload
+    })
+  },
 
-const userStartsTyping = function () {
-  if (state.typing) return;
-  state = { ...state, typing: true };
-  channel.push("broadcast", state);
-};
+  disconnectRealtime() {
+    // Send a `broadcast` message over the Channel
+    // All connected clients will receive this message if they're subscribed 
+    // to `broadcast` events and matching on the `event` name or using `*` to match all event names
+    this.channel.unsubscribe()
+  },
 
-const userStopsTyping = function () {
-  clearTimeout(typingTimer);
-  state = { ...state, typing: false };
-  channel.push("broadcast", state);
-};
+  clearLocalStorage() {
+    localStorage.clear()
+  },
 
-let textbox = document.querySelector("#typingInput");
-textbox.addEventListener("keydown", () => {
-  userStartsTyping();
-  clearTimeout(typingTimer);
-});
-textbox.addEventListener("keyup", () => {
-  clearTimeout(typingTimer);
-  typingTimer = setTimeout(userStopsTyping, TYPING_TIMEOUT);
-});
-
-/**
- * Drawing example
- */
-var canvas = document.getElementById("imgCanvas");
-var context = canvas.getContext("2d");
-
-window.addEventListener(
-  "mousemove",
-  (e) => {
-    var pos = getMousePosOffset(canvas, e);
-    let x = pos.x;
-    let y = pos.y;
-    if (x > 0 && x < canvas.width && y > 0 && y < canvas.height) {
-      state = { ...state, mouse: { x, y } };
-      channel.push("broadcast", state);
+  mounted() {
+    let params = { 
+      log_level: localStorage.getItem("log_level"), 
+      token: localStorage.getItem("token"), 
+      path: localStorage.getItem("path"),
+      channel: localStorage.getItem("channel"),
+      schema: localStorage.getItem("schema"),
+      table: localStorage.getItem("table")
     }
-  },
-  false
-);
 
-function draw(color, x, y) {
-  context.fillStyle = color;
-  context.fillRect(x, y, 4, 4);
+    this.pushEventTo("#conn_form", "local_storage", params)
+
+    this.handleEvent("connect", ({connection}) => 
+      this.initRealtime(connection.channel, connection.path, connection.log_level, connection.token, connection.schema, connection.table)
+    )
+
+    this.handleEvent("send_message", ({message}) => 
+      this.sendRealtime(message.event, message.payload)
+    )
+
+    this.handleEvent("disconnect", ({}) => 
+      this.disconnectRealtime()
+    )
+
+    this.handleEvent("clear_local_storage", ({}) => 
+      this.clearLocalStorage()
+    )
+
+    
+  }
 }
-function getMousePosOffset(canvas, evt) {
-  var rect = canvas.getBoundingClientRect();
-  return {
-    x: ((evt.clientX - rect.left) / (rect.right - rect.left)) * canvas.width,
-    y: ((evt.clientY - rect.top) / (rect.bottom - rect.top)) * canvas.height,
-  };
+
+Hooks.latency = {
+  mounted() {
+    this.handleEvent("ping", (params) => 
+      this.pong(params)
+    )
+  },
+
+  pong(params) {
+    this.pushEventTo("#ping", "pong", params)
+  },
 }
+
+let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
+let liveSocket = new LiveSocket("/live", Socket, {hooks: Hooks, params: {_csrf_token: csrfToken}})
+
+topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
+window.addEventListener("phx:page-loading-start", info => topbar.show())
+window.addEventListener("phx:page-loading-stop", info => topbar.hide())
+
+liveSocket.connect()
+
+window.liveSocket = liveSocket
+
+

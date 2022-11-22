@@ -15,8 +15,11 @@ defmodule Realtime.Api.Tenant do
     field(:name, :string)
     field(:external_id, :string)
     field(:jwt_secret, :string)
+    field(:postgres_cdc_default, :string)
     field(:max_concurrent_users, :integer)
     field(:max_events_per_second, :integer)
+    field(:events_per_second_rolling, :float, virtual: true)
+    field(:events_per_second_now, :integer, virtual: true)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -30,12 +33,37 @@ defmodule Realtime.Api.Tenant do
 
   @doc false
   def changeset(tenant, attrs) do
+    # TODO: remove after infra update
+    extension_key =
+      if attrs[:extensions] do
+        :extensions
+      else
+        "extensions"
+      end
+
+    attrs =
+      if attrs[extension_key] do
+        ext =
+          Enum.map(attrs[extension_key], fn
+            %{"type" => "postgres"} = e -> %{e | "type" => "postgres_cdc_rls"}
+            e -> e
+          end)
+
+        %{attrs | extension_key => ext}
+      else
+        attrs
+      end
+
+    ###
+
     tenant
     |> cast(attrs, [
       :name,
       :external_id,
       :jwt_secret,
-      :max_concurrent_users
+      :max_concurrent_users,
+      :max_events_per_second,
+      :postgres_cdc_default
     ])
     |> validate_required([
       :external_id,

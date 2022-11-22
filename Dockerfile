@@ -8,29 +8,42 @@
 # This file is based on these images:
 #
 #   - https://hub.docker.com/r/hexpm/elixir/tags - for the build image
-#   - https://hub.docker.com/_/debian?tab=tags&page=1&name=bullseye-20210902-slim - for the release image
+#   - https://hub.docker.com/_/debian?tab=tags&page=1&name=bullseye-20220801-slim - for the release image
 #   - https://pkgs.org/ - resource for finding needed packages
-#   - Ex: hexpm/elixir:1.13.4-erlang-25.0-debian-bullseye-20210902-slim
+#   - Ex: hexpm/elixir:1.14.0-erlang-25.0.4-debian-bullseye-20220801-slim
 #
-ARG ELIXIR_VERSION=1.13.4
-ARG OTP_VERSION=25.0
-ARG DEBIAN_VERSION=bullseye-20210902-slim
+ARG ELIXIR_VERSION=1.14.0
+ARG OTP_VERSION=25.0.4
+ARG DEBIAN_VERSION=bullseye-20220801-slim
 
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
 
+FROM alpine:latest as tailscale
+ARG TAILSCALE_VERSION=1.32.2
+WORKDIR /app
+ENV TSFILE=tailscale_${TAILSCALE_VERSION}_amd64.tgz
+RUN wget https://pkgs.tailscale.com/stable/${TSFILE} && tar xzf ${TSFILE} --strip-components=1
+COPY tailscale/wrapper.sh ./
+
 FROM ${BUILDER_IMAGE} as builder
 
 # install build dependencies
-RUN apt-get update -y && apt-get install -y build-essential git \
-  && apt-get clean && rm -f /var/lib/apt/lists/*_*
+RUN apt-get update -y \
+  && apt-get install curl -y \
+  && apt-get install -y build-essential git \
+  && apt-get clean \
+  && rm -f /var/lib/apt/lists/*_* \
+  && curl -sL https://deb.nodesource.com/setup_10.x | bash - \
+  && apt-get install -y nodejs \
+  && apt-get install -y npm
 
 # prepare build dir
 WORKDIR /app
 
 # install hex + rebar
 RUN mix local.hex --force && \
-  mix local.rebar --force
+    mix local.rebar --force
 
 # set build ENV
 ENV MIX_ENV="prod"
@@ -52,6 +65,12 @@ COPY lib lib
 
 COPY assets assets
 
+# compile assets with esbuild and npm
+RUN cd assets \
+  && npm install \
+  && cd .. \
+  && mix assets.deploy
+
 # Compile the release
 RUN mix compile
 
@@ -65,7 +84,7 @@ RUN mix release
 # the compiled release and other runtime necessities
 FROM ${RUNNER_IMAGE}
 
-RUN apt-get update -y && apt-get install -y libstdc++6 openssl libncurses5 locales \
+RUN apt-get update -y && apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Set the locale
@@ -84,9 +103,16 @@ ENV MIX_ENV="prod"
 # Only copy the final release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
 
-USER nobody
+RUN mkdir /tailscale
+COPY --from=tailscale /app/wrapper.sh /tailscale/wrapper.sh
+COPY --from=tailscale /app/tailscaled /tailscale/tailscaled
+COPY --from=tailscale /app/tailscale /tailscale/tailscale
+RUN mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
 
-CMD ["/app/bin/server"]
+COPY limits.sh /app/limits.sh
+ENTRYPOINT ["/app/limits.sh"]
+
+CMD ["/tailscale/wrapper.sh"]
 # Appended by flyctl
 ENV ECTO_IPV6 true
 ENV ERL_AFLAGS "-proto_dist inet6_tcp"

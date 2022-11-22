@@ -7,12 +7,51 @@ defmodule RealtimeWeb.RealtimeChannel do
   require Logger
 
   alias DBConnection.Backoff
-  alias Extensions.Postgres
+  # alias Extensions.Postgres
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
+  alias Realtime.{GenCounter, RateCounter, PostgresCdc}
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
+  defmodule Assigns do
+    @moduledoc false
+    defstruct [
+      :tenant,
+      :log_level,
+      :rate_counter,
+      :limits,
+      :tenant_topic,
+      :pg_sub_ref,
+      :pg_change_params,
+      :postgres_extension,
+      :claims,
+      :jwt_secret,
+      :tenant_token,
+      :access_token,
+      :postgres_cdc_module,
+      :channel_name
+    ]
+
+    @type t :: %__MODULE__{
+            tenant: String.t(),
+            log_level: atom(),
+            rate_counter: RateCounter.t(),
+            limits: %{max_events_per_second: integer(), max_concurrent_users: integer()},
+            tenant_topic: String.t(),
+            pg_sub_ref: reference() | nil,
+            pg_change_params: map(),
+            postgres_extension: map(),
+            claims: map(),
+            jwt_secret: String.t(),
+            tenant_token: String.t(),
+            access_token: String.t(),
+            channel_name: String.t()
+          }
+  end
+
   @confirm_token_ms_interval 1_000 * 60 * 5
+  @max_join_rate 500
+  @max_user_channels 100
 
   @impl true
   def join(
@@ -20,107 +59,148 @@ defmodule RealtimeWeb.RealtimeChannel do
         params,
         %{
           assigns: %{
-            is_new_api: is_new_api,
-            jwt_secret: jwt_secret,
-            limits: %{max_concurrent_users: max_conn_users},
             tenant: tenant,
-            token: token
+            log_level: log_level,
+            postgres_cdc_module: module
           },
-          transport_pid: pid,
-          serializer: serializer
+          channel_pid: channel_pid,
+          serializer: serializer,
+          transport_pid: transport_pid
         } = socket
       ) do
     Logger.metadata(external_id: tenant, project: tenant)
-    secure_key = Application.get_env(:realtime, :db_enc_key)
+    Logger.put_process_level(self(), log_level)
 
-    with true <- Realtime.UsersCounter.tenant_users(tenant) < max_conn_users,
-         access_token when is_binary(access_token) <-
-           (case params do
-              %{"user_token" => user_token} -> user_token
-              _ -> token
-            end),
-         jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
-         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
-         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         confirm_token_ref <-
-           Process.send_after(
-             self(),
-             :confirm_token,
-             min(@confirm_token_ms_interval, exp_diff * 1_000)
-           ) do
-      Realtime.UsersCounter.add(pid, tenant)
+    socket = socket |> assign_access_token(params) |> assign_counter()
+
+    with :ok <- limit_joins(socket),
+         :ok <- limit_channels(socket),
+         :ok <- limit_max_users(socket),
+         {:ok, claims, confirm_token_ref} <- confirm_token(socket) do
+      Realtime.UsersCounter.add(transport_pid, tenant)
 
       tenant_topic = tenant <> ":" <> sub_topic
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
 
-      id = UUID.uuid1()
+      is_new_api =
+        case params do
+          %{"config" => _} -> true
+          _ -> false
+        end
 
-      postgres_topic = topic_from_config(params)
-      Logger.info("Postgres_topic is " <> postgres_topic)
+      pg_change_params =
+        if is_new_api do
+          send(self(), :sync_presence)
 
-      postgres_config =
-        if postgres_topic != "" || !is_new_api do
-          Endpoint.unsubscribe(topic)
+          params["config"]["postgres_changes"]
+          |> case do
+            [_ | _] = params_list ->
+              params_list
+              |> Enum.map(fn params ->
+                %{
+                  id: UUID.uuid1(),
+                  channel_pid: channel_pid,
+                  claims: claims,
+                  params: params
+                }
+              end)
 
-          metadata = [
-            metadata:
-              {:subscriber_fastlane, pid, serializer, UUID.string_to_binary!(id), topic,
-               is_new_api}
-          ]
+            _ ->
+              []
+          end
+        else
+          params =
+            case String.split(sub_topic, ":", parts: 3) do
+              [schema, table, filter] ->
+                %{"schema" => schema, "table" => table, "filter" => filter}
 
-          Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
+              [schema, table] ->
+                %{"schema" => schema, "table" => table}
 
-          postgres_config =
-            case params["configs"]["realtime"]["filter"] do
-              nil ->
-                case String.split(sub_topic, ":", parts: 3) do
-                  [schema] ->
-                    %{"schema" => schema}
-
-                  [schema, table] ->
-                    %{"schema" => schema, "table" => table}
-
-                  [schema, table, filter] ->
-                    %{"schema" => schema, "table" => table, "filter" => filter}
-                end
-
-              config ->
-                config
+              [schema] ->
+                %{"schema" => schema}
             end
 
-          Logger.debug("Postgres config is #{inspect(postgres_config, pretty: true)}")
-          postgres_config
-        else
-          nil
+          [
+            %{
+              id: UUID.uuid1(),
+              channel_pid: channel_pid,
+              claims: claims,
+              params: params
+            }
+          ]
+        end
+        |> case do
+          [_ | _] = pg_change_params ->
+            ids =
+              for %{id: id, params: params} <- pg_change_params do
+                {UUID.string_to_binary!(id), :erlang.phash2(params)}
+              end
+
+            metadata = [
+              metadata: {:subscriber_fastlane, transport_pid, serializer, ids, topic, is_new_api}
+            ]
+
+            # Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
+
+            PostgresCdc.subscribe(module, pg_change_params, tenant, metadata)
+
+            pg_change_params
+
+          other ->
+            other
         end
 
-      pg_sub_ref =
-        if postgres_config do
-          Process.send_after(self(), :postgres_subscribe, backoff())
-        else
-          nil
-        end
+      Logger.debug("Postgres change params: " <> inspect(pg_change_params, pretty: true))
 
-      Logger.debug("Start channel, #{inspect([id: id], pretty: true)}")
+      if !Enum.empty?(pg_change_params) do
+        send(self(), :postgres_subscribe)
+      end
 
-      send(self(), :sync_presence)
+      Logger.debug("Start channel: " <> inspect(pg_change_params, pretty: true))
 
-      Process.put(:tenant, tenant)
+      presence_key = presence_key(params)
 
       {:ok,
+       %{
+         postgres_changes:
+           Enum.map(pg_change_params, fn %{params: params} ->
+             id = :erlang.phash2(params)
+             Map.put(params, :id, id)
+           end)
+       },
        assign(socket, %{
-         access_token: access_token,
-         claims: claims,
+         ack_broadcast: !!params["config"]["broadcast"]["ack"],
          confirm_token_ref: confirm_token_ref,
-         id: id,
-         pg_sub_ref: pg_sub_ref,
-         postgres_topic: postgres_topic,
-         postgres_config: postgres_config,
-         self_broadcast: is_map(params) && params["self_broadcast"] == true,
-         tenant_topic: tenant_topic
+         is_new_api: is_new_api,
+         pg_sub_ref: nil,
+         pg_change_params: pg_change_params,
+         presence_key: presence_key,
+         self_broadcast: !!params["config"]["broadcast"]["self"],
+         tenant_topic: tenant_topic,
+         channel_name: sub_topic
        })}
     else
+      {:error, :too_many_channels} = error ->
+        error_msg = inspect(error, pretty: true)
+        Logger.warn("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
+      {:error, :too_many_connections} = error ->
+        error_msg = inspect(error, pretty: true)
+        Logger.warn("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
+      {:error, :too_many_joins} = error ->
+        error_msg = inspect(error, pretty: true)
+        Logger.warn("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
+      {:error, [message: "Invalid token", claim: _claim, claim_val: _value]} = error ->
+        error_msg = inspect(error, pretty: true)
+        Logger.warn("Start channel error: #{error_msg}")
+        {:error, %{reason: error_msg}}
+
       error ->
         error_msg = inspect(error, pretty: true)
         Logger.error("Start channel error: #{error_msg}")
@@ -128,95 +208,124 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
+  def handle_info(
+        _any,
+        %{
+          assigns: %{
+            rate_counter: %{avg: avg},
+            limits: %{max_events_per_second: max}
+          }
+        } = socket
+      )
+      when avg > max do
+    message = "Too many messages per second"
+
+    shutdown_response(socket, message)
+  end
+
   @impl true
   def handle_info(:sync_presence, %{assigns: %{tenant_topic: topic}} = socket) do
+    socket = assign_counter(socket)
     push(socket, "presence_state", Presence.list(topic))
-    push(socket, "region", System.get_env("FLY_REGION")) # will remove
+
     {:noreply, socket}
   end
 
+  @impl true
+  def handle_info(%{event: "postgres_cdc_down"}, socket) do
+    socket = assign_counter(socket)
+    pg_sub_ref = postgres_subscribe()
+
+    {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
+  end
+
+  @impl true
   def handle_info(%{event: type, payload: payload}, socket) do
+    socket = assign_counter(socket)
+
     push(socket, type, payload)
     {:noreply, socket}
   end
 
+  @impl true
   def handle_info(
         :postgres_subscribe,
         %{
           assigns: %{
-            id: id,
             tenant: tenant,
             pg_sub_ref: pg_sub_ref,
-            postgres_config: postgres_config,
-            postgres_topic: postgres_topic,
+            pg_change_params: pg_change_params,
             postgres_extension: postgres_extension,
-            claims: claims
+            channel_name: channel_name,
+            tenant_topic: tenant_topic,
+            postgres_cdc_module: module
           }
         } = socket
       ) do
+    socket = assign_counter(socket)
     cancel_timer(pg_sub_ref)
 
-    Postgres.subscribe(
-      tenant,
-      id,
-      postgres_config,
-      claims,
-      self(),
-      postgres_extension
-    )
-    |> case do
-      {:ok, manager_pid} ->
-        Logger.info("Subscribe channel for #{tenant} to #{postgres_topic}")
-        Process.monitor(manager_pid)
-        {:noreply, assign(socket, :pg_sub_ref, nil)}
+    args = Map.put(postgres_extension, "id", tenant)
 
-      :ok ->
-        Logger.warning("Re-subscribe channel for #{tenant}")
-        ref = Process.send_after(self(), :postgres_subscribe, backoff())
-        {:noreply, assign(socket, :pg_sub_ref, ref)}
+    case PostgresCdc.connect(module, args) do
+      {:ok, response} ->
+        case PostgresCdc.after_connect(module, response, postgres_extension, pg_change_params) do
+          {:ok, _response} ->
+            message = "Subscribed to PostgreSQL"
 
-      {:error, error} ->
-        Logger.error(
-          "Failed to subscribe channel for #{tenant} to #{postgres_topic}: #{inspect(error)}"
-        )
+            Logger.info(message)
 
-        {:stop, %{reason: error}, assign(socket, :pg_sub_ref, nil)}
+            push_system_message("postgres_changes", socket, "ok", message, channel_name)
+
+            {:noreply, assign(socket, :pg_sub_ref, nil)}
+
+          error ->
+            message = "Subscribing to PostgreSQL failed: #{inspect(error)}"
+
+            push_system_message("postgres_changes", socket, "error", message, channel_name)
+
+            Logger.error(message)
+
+            {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
+        end
+
+      nil ->
+        Logger.warning("Re-subscribed to PostgreSQL with params: #{inspect(pg_change_params)}")
+        {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
     end
   end
 
-  def handle_info(
-        :confirm_token,
-        %{assigns: %{confirm_token_ref: ref, jwt_secret: jwt_secret, access_token: access_token}} =
-          socket
-      ) do
-    cancel_timer(ref)
+  @impl true
+  def handle_info(:confirm_token, %{assigns: %{pg_change_params: pg_change_params}} = socket) do
+    socket = assign_counter(socket)
 
-    with {:ok, %{"exp" => exp}} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(access_token, jwt_secret),
-         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         confirm_token_ref <-
-           Process.send_after(
-             self(),
-             :confirm_token,
-             min(@confirm_token_ms_interval, exp_diff * 1_000)
-           ) do
-      {:ok, assign(socket, :confirm_token_ref, confirm_token_ref)}
-    else
-      _ -> {:stop, %{reason: "access token has expired"}, socket}
+    case confirm_token(socket) do
+      {:ok, claims, confirm_token_ref} ->
+        pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
+
+        {:noreply,
+         assign(socket, %{
+           confirm_token_ref: confirm_token_ref,
+           pg_change_params: pg_change_params
+         })}
+
+      {:error, error} ->
+        message = "access token has expired: " <> inspect(error, pretty: true)
+
+        shutdown_response(socket, message)
     end
   end
 
   def handle_info(
         {:DOWN, _, :process, _, _reason},
-        %{assigns: %{pg_sub_ref: pg_sub_ref, postgres_config: postgres_config}} = socket
+        %{assigns: %{pg_sub_ref: pg_sub_ref, pg_change_params: pg_change_params}} = socket
       ) do
     cancel_timer(pg_sub_ref)
 
     ref =
-      if postgres_config do
-        Process.send_after(self(), :postgres_subscribe, backoff())
-      else
-        nil
+      case pg_change_params do
+        [_ | _] -> postgres_subscribe()
+        _ -> nil
       end
 
     {:noreply, assign(socket, :pg_sub_ref, ref)}
@@ -227,71 +336,78 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  @impl true
   def handle_in(
-        "access_token",
-        %{"access_token" => refresh_token},
+        _,
+        _,
         %{
           assigns: %{
-            confirm_token_ref: ref,
-            id: id,
-            jwt_secret: jwt_secret,
-            pg_sub_ref: pg_sub_ref,
-            postgres_config: postgres_config
+            rate_counter: %{avg: avg},
+            limits: %{max_events_per_second: max}
           }
         } = socket
       )
+      when avg > max do
+    message = "Too many messages per second"
+
+    shutdown_response(socket, message)
+  end
+
+  def handle_in(
+        "access_token",
+        %{"access_token" => refresh_token},
+        %{assigns: %{pg_sub_ref: pg_sub_ref, pg_change_params: pg_change_params}} = socket
+      )
       when is_binary(refresh_token) do
-    cancel_timer(ref)
+    socket = assign_counter(socket) |> assign(:access_token, refresh_token)
 
-    secure_key = Application.get_env(:realtime, :db_enc_key)
+    case confirm_token(socket) do
+      {:ok, claims, confirm_token_ref} ->
+        cancel_timer(pg_sub_ref)
 
-    with jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
-         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(refresh_token, jwt_secret_dec),
-         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         confirm_token_ref <-
-           Process.send_after(
-             self(),
-             :confirm_token,
-             min(@confirm_token_ms_interval, exp_diff * 1_000)
-           ) do
-      cancel_timer(pg_sub_ref)
+        pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
-      pg_sub_ref =
-        if postgres_config do
-          Process.send_after(self(), :postgres_subscribe, backoff())
-        else
-          nil
-        end
+        pg_sub_ref =
+          case pg_change_params do
+            [_ | _] -> postgres_subscribe()
+            _ -> nil
+          end
 
-      {:noreply,
-       assign(socket, %{
-         access_token: refresh_token,
-         claims: claims,
-         confirm_token_ref: confirm_token_ref,
-         id: id,
-         pg_sub_ref: pg_sub_ref
-       })}
-    else
-      _ -> {:stop, %{reason: "received an invalid access token from client"}, socket}
+        {:noreply,
+         assign(socket, %{
+           confirm_token_ref: confirm_token_ref,
+           pg_change_params: pg_change_params,
+           pg_sub_ref: pg_sub_ref
+         })}
+
+      {:error, error} ->
+        message = "Received an invalid access token from client: " <> inspect(error)
+
+        shutdown_response(socket, message)
     end
   end
 
-  @impl true
-  def handle_in("access_token", _, socket) do
-    {:noreply, socket}
-  end
-
-  def handle_in("broadcast" = type, payload, %{assigns: %{tenant_topic: topic, self_broadcast: self_broadcast}} = socket) do
-    ack = Map.get(payload, "ack", false)
+  def handle_in(
+        "broadcast" = type,
+        payload,
+        %{
+          assigns: %{
+            is_new_api: true,
+            ack_broadcast: ack_broadcast,
+            self_broadcast: self_broadcast,
+            tenant_topic: tenant_topic
+          }
+        } = socket
+      ) do
+    socket = assign_counter(socket)
 
     if self_broadcast do
-      Endpoint.broadcast(topic, type, payload)
+      Endpoint.broadcast(tenant_topic, type, payload)
     else
-      Endpoint.broadcast_from(self(), topic, type, payload)
+      Endpoint.broadcast_from(self(), tenant_topic, type, payload)
     end
 
-    if ack do
+    if ack_broadcast do
       {:reply, :ok, socket}
     else
       {:noreply, socket}
@@ -300,28 +416,41 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_in(
         "presence",
-        %{"event" => "TRACK", "payload" => payload} = msg,
-        %{assigns: %{id: id, tenant_topic: topic}} = socket
+        %{"event" => event} = payload,
+        %{assigns: %{is_new_api: true, presence_key: presence_key, tenant_topic: tenant_topic}} =
+          socket
       ) do
-    case Presence.track(self(), topic, Map.get(msg, "key", id), payload) do
-      {:ok, _} ->
-        :ok
+    socket = assign_counter(socket)
 
-      {:error, {:already_tracked, _, _, _}} ->
-        Presence.update(self(), topic, Map.get(msg, "key", id), payload)
-    end
+    result =
+      event
+      |> String.downcase()
+      |> case do
+        "track" ->
+          payload = Map.get(payload, "payload", %{})
 
-    {:reply, :ok, socket}
+          with {:error, {:already_tracked, _, _, _}} <-
+                 Presence.track(self(), tenant_topic, presence_key, payload),
+               {:ok, _} <- Presence.update(self(), tenant_topic, presence_key, payload) do
+            :ok
+          else
+            {:ok, _} -> :ok
+            {:error, _} -> :error
+          end
+
+        "untrack" ->
+          Presence.untrack(self(), tenant_topic, presence_key)
+
+        _ ->
+          :error
+      end
+
+    {:reply, result, socket}
   end
 
-  def handle_in(
-        "presence",
-        %{"event" => "UNTRACK"} = msg,
-        %{assigns: %{id: id, tenant_topic: topic}} = socket
-      ) do
-    Presence.untrack(self(), topic, Map.get(msg, "key", id))
-
-    {:reply, :ok, socket}
+  def handle_in(_, _, socket) do
+    socket = assign_counter(socket)
+    {:noreply, socket}
   end
 
   @impl true
@@ -331,24 +460,155 @@ defmodule RealtimeWeb.RealtimeChannel do
     :ok
   end
 
-  defp topic_from_config(params) do
-    case params["configs"]["realtime"]["filter"] do
-      %{"schema" => schema, "table" => table, "filter" => filter} ->
-        "#{schema}:#{table}:#{filter}"
+  defp decrypt_jwt_secret(secret) do
+    secure_key = Application.get_env(:realtime, :db_enc_key)
+    decrypt!(secret, secure_key)
+  end
 
-      %{"schema" => schema, "table" => table} ->
-        "#{schema}:#{table}"
+  defp postgres_subscribe(min \\ 1, max \\ 5) do
+    Process.send_after(self(), :postgres_subscribe, backoff(min, max))
+  end
 
-      %{"schema" => schema} ->
-        "#{schema}"
+  defp backoff(min, max) do
+    {wait, _} = Backoff.backoff(%Backoff{type: :rand, min: min * 1000, max: max * 1000})
+    wait
+  end
 
-      _ ->
-        ""
+  def limit_joins(%{assigns: %{tenant: tenant}}) do
+    id = {:limit, :channel_joins, tenant}
+    GenCounter.new(id)
+    RateCounter.new(id, idle_shutdown: :infinity)
+    GenCounter.add(id)
+
+    case RateCounter.get(id) do
+      {:ok, %{avg: avg}} ->
+        if avg < @max_join_rate do
+          :ok
+        else
+          {:error, :too_many_joins}
+        end
+
+      other ->
+        Logger.error("Unexpected error for #{tenant} #{inspect(other)}")
+        {:error, other}
     end
   end
 
-  defp backoff() do
-    {wait, _} = Backoff.backoff(%Backoff{type: :rand, min: 0, max: 5_000})
-    wait
+  def limit_channels(%{assigns: %{tenant: tenant}, transport_pid: pid}) do
+    key = limit_channels_key(tenant)
+
+    if Registry.count_match(Realtime.Registry, key, pid) > @max_user_channels do
+      {:error, :too_many_channels}
+    else
+      Registry.register(Realtime.Registry, limit_channels_key(tenant), pid)
+      :ok
+    end
+  end
+
+  defp limit_channels_key(tenant) do
+    {:limit, :user_channels, tenant}
+  end
+
+  defp limit_max_users(%{
+         assigns: %{limits: %{max_concurrent_users: max_conn_users}, tenant: tenant}
+       }) do
+    conns = Realtime.UsersCounter.tenant_users(tenant)
+
+    if conns < max_conn_users do
+      :ok
+    else
+      {:error, :too_many_connections}
+    end
+  end
+
+  defp assign_counter(%{assigns: %{tenant: tenant}} = socket) do
+    key = {:limit, :tenant_events, tenant}
+
+    GenCounter.new(key)
+    RateCounter.new(key, idle_shutdown: :infinity)
+    GenCounter.add(key)
+    {:ok, rate_counter} = RateCounter.get(key)
+
+    assign(socket, :rate_counter, rate_counter)
+  end
+
+  defp assign_counter(socket) do
+    socket
+  end
+
+  defp presence_key(params) do
+    with key when is_binary(key) <- params["config"]["presence"]["key"],
+         true <- String.length(key) > 0 do
+      key
+    else
+      _ -> UUID.uuid1()
+    end
+  end
+
+  defp assign_access_token(%{assigns: %{tenant_token: _tenant_token}} = socket, %{
+         "user_token" => user_token
+       })
+       when is_binary(user_token) do
+    assign(socket, :access_token, user_token)
+  end
+
+  defp assign_access_token(%{assigns: %{tenant_token: _tenant_token}} = socket, %{
+         "access_token" => user_token
+       })
+       when is_binary(user_token) do
+    assign(socket, :access_token, user_token)
+  end
+
+  defp assign_access_token(%{assigns: %{tenant_token: tenant_token}} = socket, _params)
+       when is_binary(tenant_token) do
+    assign(socket, :access_token, tenant_token)
+  end
+
+  defp confirm_token(%{
+         assigns:
+           %{
+             jwt_secret: jwt_secret,
+             access_token: access_token
+           } = assigns
+       }) do
+    with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
+         {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
+           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
+         exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
+      if ref = assigns[:confirm_token_ref], do: cancel_timer(ref)
+
+      ref =
+        Process.send_after(
+          self(),
+          :confirm_token,
+          min(@confirm_token_ms_interval, exp_diff * 1_000)
+        )
+
+      {:ok, claims, ref}
+    else
+      {:error, e} ->
+        {:error, e}
+
+      e ->
+        {:error, e}
+    end
+  end
+
+  defp shutdown_response(%{assigns: %{channel_name: channel_name}} = socket, message)
+       when is_binary(message) do
+    push_system_message("system", socket, "error", message, channel_name)
+
+    Logger.error(message)
+
+    {:stop, :shutdown, socket}
+  end
+
+  defp push_system_message(extension, socket, status, message, channel_name) do
+    push(socket, "system", %{
+      extension: extension,
+      status: status,
+      message: message,
+      channel: channel_name
+    })
   end
 end

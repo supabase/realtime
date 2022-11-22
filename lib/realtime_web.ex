@@ -42,12 +42,39 @@ defmodule RealtimeWeb do
     end
   end
 
+  def live_view do
+    quote do
+      use Phoenix.LiveView,
+        layout: {RealtimeWeb.LayoutView, "live.html"}
+
+      unquote(view_helpers())
+    end
+  end
+
+  def live_component do
+    quote do
+      use Phoenix.LiveComponent
+
+      unquote(view_helpers())
+    end
+  end
+
+  def component do
+    quote do
+      use Phoenix.Component
+
+      unquote(view_helpers())
+    end
+  end
+
   def router do
     quote do
       use Phoenix.Router
 
       import Plug.Conn
       import Phoenix.Controller
+      import Phoenix.LiveView.Router
+      import Phoenix.LiveDashboard.Router
     end
   end
 
@@ -63,12 +90,18 @@ defmodule RealtimeWeb do
       # Use all HTML functionality (forms, tags, etc)
       use Phoenix.HTML
 
+      import Phoenix.Component
+      import Phoenix.LiveComponent
+
+      import Phoenix.LiveView.Helpers
       # Import basic rendering functionality (render, render_layout, etc)
       import Phoenix.View
 
       import RealtimeWeb.ErrorHelpers
       import RealtimeWeb.Gettext
       alias RealtimeWeb.Router.Helpers, as: Routes
+
+      import RealtimeWeb.Components
     end
   end
 

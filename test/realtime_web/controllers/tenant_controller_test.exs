@@ -14,7 +14,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     "name" => "localhost",
     "extensions" => [
       %{
-        "type" => "postgres",
+        "type" => "postgres_cdc_rls",
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
@@ -28,13 +28,14 @@ defmodule RealtimeWeb.TenantControllerTest do
         }
       }
     ],
+    "postgres_cdc_default" => "postgres_cdc_rls",
     "jwt_secret" => "new secret"
   }
 
   @update_attrs %{
     jwt_secret: "some updated jwt_secret",
     name: "some updated name",
-    max_concurrent_users: 100
+    max_concurrent_users: 200
   }
 
   @invalid_attrs %{external_id: nil, jwt_secret: nil, extensions: [], name: nil}
@@ -69,7 +70,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         assert %{"id" => _id, "external_id" => ^ext_id} = json_response(conn, 201)["data"]
         conn = get(conn, Routes.tenant_path(conn, :show, ext_id))
         assert ^ext_id = json_response(conn, 200)["data"]["external_id"]
-        assert 10000 = json_response(conn, 200)["data"]["max_concurrent_users"]
+        assert 200 = json_response(conn, 200)["data"]["max_concurrent_users"]
       end
     end
 
@@ -106,7 +107,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         assert %{"id" => ^id, "external_id" => ^ext_id} = json_response(conn, 200)["data"]
         conn = get(conn, Routes.tenant_path(conn, :show, ext_id))
         assert "some updated name" = json_response(conn, 200)["data"]["name"]
-        assert 100 = json_response(conn, 200)["data"]["max_concurrent_users"]
+        assert 200 = json_response(conn, 200)["data"]["max_concurrent_users"]
       end
     end
 

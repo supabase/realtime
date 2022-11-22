@@ -7,7 +7,7 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.Api
   alias Realtime.Repo
   alias Realtime.Api.Tenant
-  alias Extensions.Postgres
+  alias Realtime.PostgresCdc
   alias PhoenixSwagger.{Path, Schema}
   alias RealtimeWeb.{UserSocket, Endpoint}
 
@@ -117,7 +117,7 @@ defmodule RealtimeWeb.TenantController do
       fn ->
         if Api.delete_tenant_by_external_id(id) do
           with :ok <- UserSocket.subscribers_id(id) |> Endpoint.broadcast("disconnect", %{}),
-               :ok <- Postgres.stop(id) do
+               :ok <- PostgresCdc.stop_all(id) do
             :ok
           else
             other -> Repo.rollback(other)
@@ -155,7 +155,7 @@ defmodule RealtimeWeb.TenantController do
 
     case Api.get_tenant_by_external_id(tenant_id) do
       %Tenant{} ->
-        Postgres.stop(tenant_id, @stop_timeout)
+        PostgresCdc.stop_all(tenant_id, @stop_timeout)
         send_resp(conn, 204, "")
 
       nil ->

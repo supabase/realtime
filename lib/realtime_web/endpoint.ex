@@ -13,7 +13,8 @@ defmodule RealtimeWeb.Endpoint do
   socket "/socket", RealtimeWeb.UserSocket,
     websocket: [
       connect_info: [:peer_data, :uri, :x_headers],
-      fullsweep_after: 20
+      fullsweep_after: 20,
+      max_frame_size: 8_000_000
     ],
     longpoll: false
 
@@ -27,7 +28,7 @@ defmodule RealtimeWeb.Endpoint do
     at: "/",
     from: :realtime,
     gzip: false,
-    only: ~w(css fonts images js favicon.ico robots.txt)
+    only: ~w(assets fonts images favicon.svg robots.txt)
 
   # plug PromEx.Plug, path: "/metrics", prom_ex_module: Realtime.PromEx
 

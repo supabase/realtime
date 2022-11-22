@@ -25,10 +25,18 @@ defmodule Realtime.Application do
 
     Realtime.PromEx.set_metrics_tags()
 
-    Registry.start_link(keys: :duplicate, name: Realtime.Registry)
-    Registry.start_link(keys: :unique, name: Realtime.Registry.Unique)
+    Registry.start_link(
+      keys: :duplicate,
+      name: Realtime.Registry
+    )
 
-    :syn.add_node_to_scopes([:users])
+    Registry.start_link(
+      keys: :unique,
+      name: Realtime.Registry.Unique
+    )
+
+    :syn.add_node_to_scopes([:users, RegionNodes])
+    :syn.join(RegionNodes, System.get_env("FLY_REGION"), self(), node: node())
 
     extensions_supervisors =
       Enum.reduce(Application.get_env(:realtime, :extensions), [], fn
@@ -53,8 +61,11 @@ defmodule Realtime.Application do
         Realtime.Repo,
         RealtimeWeb.Telemetry,
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
+        Realtime.GenCounter.DynamicSupervisor,
+        Realtime.RateCounter.DynamicSupervisor,
         RealtimeWeb.Endpoint,
-        RealtimeWeb.Presence
+        RealtimeWeb.Presence,
+        {Task.Supervisor, name: Realtime.TaskSupervisor}
       ] ++ extensions_supervisors
 
     children =

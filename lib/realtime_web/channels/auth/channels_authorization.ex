@@ -18,16 +18,22 @@ defmodule RealtimeWeb.ChannelsAuthorization do
 
   def authorize_conn(token, secret) do
     case authorize(token, secret) do
-      # TODO: check necessary fields
-      {:ok, %{"role" => _} = claims} ->
-        {:ok, claims}
+      {:ok, claims} ->
+        required = MapSet.new(["role", "exp"])
+        claims_keys = Map.keys(claims) |> MapSet.new()
+
+        if MapSet.subset?(required, claims_keys) do
+          {:ok, claims}
+        else
+          {:error, "Fields `role` and `exp` are required in JWT"}
+        end
 
       {:error, reason} ->
         {:error, reason}
 
       error ->
-        Logger.error("Undefined error #{inspect(error)}")
-        :error
+        Logger.error("Unknown connection authorization error: #{inspect(error)}")
+        {:error, :unknown}
     end
   end
 end

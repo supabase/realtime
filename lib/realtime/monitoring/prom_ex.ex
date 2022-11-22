@@ -1,4 +1,6 @@
 defmodule Realtime.PromEx do
+  alias Realtime.PromEx.Plugins.{OsMon, Phoenix}
+
   @moduledoc """
   Be sure to add the following to finish setting up PromEx:
 
@@ -64,11 +66,11 @@ defmodule Realtime.PromEx do
       # PromEx built in plugins
       # Plugins.Application,
       {Plugins.Beam, poll_rate: poll_rate, metric_prefix: [:beam]},
-      # {Plugins.Phoenix, router: RealtimeWeb.Router, poll_rate: poll_rate, metric_prefix: [:phoenix]},
+      {Phoenix, router: RealtimeWeb.Router, poll_rate: poll_rate, metric_prefix: [:phoenix]},
       # {Plugins.Ecto, poll_rate: poll_rate, metric_prefix: [:ecto]},
       # Plugins.Oban,
       # Plugins.PhoenixLiveView
-      {Realtime.PromEx.Plugins.OsMon, poll_rate: poll_rate}
+      {OsMon, poll_rate: poll_rate}
     ]
   end
 

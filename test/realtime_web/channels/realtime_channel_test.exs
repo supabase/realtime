@@ -4,7 +4,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   import Mock
 
-  alias Extensions.Postgres
   alias Phoenix.Socket
   alias RealtimeWeb.{ChannelsAuthorization, Joken.CurrentTime, UserSocket}
 
@@ -23,18 +22,15 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            authorize_conn: fn _, _ ->
              {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
            end
-         ]},
-        {Postgres, [],
-         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _, _ -> :ok end]}
+         ]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket"},
+            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
             x_headers: [{"x-api-key", "token123"}]
           })
 
         socket = Socket.assign(socket, %{limits: %{max_concurrent_users: 1}})
-
         assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
       end
     end
@@ -46,23 +42,21 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            authorize_conn: fn _, _ ->
              {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
            end
-         ]},
-        {Postgres, [],
-         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _, _ -> :ok end]}
+         ]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket"},
+            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
             x_headers: [{"x-api-key", "token123"}]
           })
 
         socket_at_capacity = Socket.assign(socket, %{limits: %{max_concurrent_users: 0}})
         socket_over_capacity = Socket.assign(socket, %{limits: %{max_concurrent_users: -1}})
 
-        assert {:error, %{reason: "false"}} =
+        assert {:error, %{reason: "{:error, :too_many_connections}"}} =
                  subscribe_and_join(socket_at_capacity, "realtime:test", %{})
 
-        assert {:error, %{reason: "false"}} =
+        assert {:error, %{reason: "{:error, :too_many_connections}"}} =
                  subscribe_and_join(socket_over_capacity, "realtime:test", %{})
       end
     end
@@ -76,13 +70,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            authorize_conn: fn _, _ ->
              {:ok, %{"exp" => Joken.current_time() + 1, "role" => "postgres"}}
            end
-         ]},
-        {Postgres, [],
-         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _, _ -> :ok end]}
+         ]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket"},
+            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
             x_headers: [{"x-api-key", "token123"}]
           })
 
@@ -97,17 +89,16 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            authorize_conn: fn _, _ ->
              {:ok, %{"exp" => Joken.current_time(), "role" => "postgres"}}
            end
-         ]},
-        {Postgres, [],
-         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _, _ -> :ok end]}
+         ]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket"},
+            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
             x_headers: [{"x-api-key", "token123"}]
           })
 
-        assert {:error, %{reason: "0"}} = subscribe_and_join(socket, "realtime:test", %{})
+        assert {:error, %{reason: "{:error, 0}"}} =
+                 subscribe_and_join(socket, "realtime:test", %{})
       end
 
       with_mocks([
@@ -116,17 +107,16 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            authorize_conn: fn _, _ ->
              {:ok, %{"exp" => Joken.current_time() - 1, "role" => "postgres"}}
            end
-         ]},
-        {Postgres, [],
-         [start_distributed: fn _, _ -> :ok end, subscribe: fn _, _, _, _, _, _ -> :ok end]}
+         ]}
       ]) do
         {:ok, %Socket{} = socket} =
           connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket"},
+            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
             x_headers: [{"x-api-key", "token123"}]
           })
 
-        assert {:error, %{reason: "-1"}} = subscribe_and_join(socket, "realtime:test", %{})
+        assert {:error, %{reason: "{:error, -1}"}} =
+                 subscribe_and_join(socket, "realtime:test", %{})
       end
     end
   end

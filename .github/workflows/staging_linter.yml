@@ -1,8 +1,8 @@
-name: Staging Formatting Checks
+name: MT Staging Formatting Checks
 on:
   pull_request:
     branches:
-      - develop
+      - rc-dev
 jobs:
   format:
     name: Formatting Checks
@@ -15,7 +15,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: 25.x # Define the OTP version [required]
-          elixir-version: 1.13.x # Define the elixir version [required]
+          elixir-version: 1.14.x # Define the elixir version [required]
       - name: Cache Mix
         uses: actions/cache@v1
         with:
