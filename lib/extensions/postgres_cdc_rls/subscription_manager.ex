@@ -57,11 +57,12 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       "db_name" => name,
       "db_user" => user,
       "db_password" => pass,
-      "db_socket_opts" => socket_opts
+      "db_socket_opts" => socket_opts,
+      "subs_pool_size" => subs_pool_size
     } = args
 
     {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1)
-    {:ok, conn_pub} = H.connect_db(host, port, name, user, pass, socket_opts)
+    {:ok, conn_pub} = H.connect_db(host, port, name, user, pass, socket_opts, subs_pool_size)
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
     Rls.update_meta(id, self(), conn_pub)
 
