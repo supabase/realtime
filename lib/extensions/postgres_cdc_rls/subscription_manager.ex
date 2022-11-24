@@ -64,6 +64,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1)
     {:ok, conn_pub} = H.connect_db(host, port, name, user, pass, socket_opts, subs_pool_size)
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
+    Rls.update_meta(id, self(), conn_pub)
 
     state = %State{
       id: id,
@@ -77,7 +78,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     }
 
     send(self(), :check_oids)
-    Rls.track_manager(id, self(), conn_pub)
     {:ok, state}
   end
 

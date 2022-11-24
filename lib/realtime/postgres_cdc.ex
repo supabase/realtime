@@ -70,6 +70,7 @@ defmodule Realtime.PostgresCdc do
       "ap-south-1" -> "sin"
       "eu-west-1" -> "fra"
       "eu-west-2" -> "fra"
+      "eu-west-3" -> "fra"
       "eu-central-1" -> "fra"
       _ -> nil
     end

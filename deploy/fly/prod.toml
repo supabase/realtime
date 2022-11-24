@@ -5,7 +5,7 @@ processes = []
 
 [deploy]
   release_command = "/app/bin/realtime eval Realtime.Release.migrate"
-  strategy = "bluegreen"
+  strategy = "rolling"
 
 [env]
   DNS_NODES = "realtime-prod.internal"
