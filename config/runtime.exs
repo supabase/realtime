@@ -1,5 +1,25 @@
 import Config
 
+# config/runtime.exs is executed for all environments, including
+# during releases. It is executed after compilation and before the
+# system starts, so it is typically used to load production configuration
+# and secrets from environment variables or elsewhere. Do not define
+# any compile-time configuration in here, as it won't be applied.
+# The block below contains prod specific runtime configuration.
+
+# ## Using releases
+#
+# If you use `mix release`, you need to explicitly enable the server
+# by passing the PHX_SERVER=true when you start it:
+#
+#     PHX_SERVER=true bin/realtime_test start
+#
+# Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
+# script that automatically sets the env var above.
+if System.get_env("PHX_SERVER") do
+  config :realtime, RealtimeWeb.Endpoint, server: true
+end
+
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
@@ -13,11 +33,15 @@ if config_env() == :prod do
       raise "APP_NAME not available"
 
   config :realtime, RealtimeWeb.Endpoint,
-    server: true,
-    url: [host: "#{app_name}.fly.dev", port: 80],
+    url: [host: System.get_env("PHX_HOST") || "example.com", port: 443, scheme: "https"],
     http: [
       port: String.to_integer(System.get_env("PORT") || "4000"),
       transport_options: [
+        # Enable IPv6 and bind on all interfaces.
+        # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
+        # See the documentation on https://hexdocs.pm/plug_cowboy/Plug.Cowboy.html
+        # for details about using IPv6 vs IPv4 and loopback vs public addresses.
+        ip: {0, 0, 0, 0, 0, 0, 0, 0},
         max_connections: String.to_integer(System.get_env("MAX_CONNECTIONS") || "16384"),
         num_acceptors: String.to_integer(System.get_env("NUM_ACCEPTORS") || "100"),
         # IMPORTANT: support IPv6 addresses

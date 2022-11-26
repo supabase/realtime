@@ -4,11 +4,13 @@ kill_timeout = 5
 processes = []
 
 [deploy]
-  release_command = "/app/bin/realtime eval Realtime.Release.migrate"
+  release_command = "/app/bin/migrate"
   strategy = "rolling"
 
 [env]
   DNS_NODES = "realtime-staging.internal"
+  PHX_HOST = "realtime-staging.fly.dev"
+  PORT = "8080"
 
 [experimental]
   allowed_public_ports = []
@@ -16,7 +18,7 @@ processes = []
 
 [[services]]
   http_checks = []
-  internal_port = 4000
+  internal_port = 8080
   processes = ["app"]
   protocol = "tcp"
   script_checks = []

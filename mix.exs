@@ -10,7 +10,8 @@ defmodule Realtime.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
-      dialyzer: dialyzer()
+      dialyzer: dialyzer(),
+      releases: releases()
     ]
   end
 
@@ -19,6 +20,15 @@ defmodule Realtime.MixProject do
       plt_add_apps: [:mix],
       plt_core_path: "priv/plts",
       plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
+    ]
+  end
+
+  defp releases() do
+    [
+      realtime: [
+        include_executables_for: [:unix],
+        cookie: "s1ywCkiSbLlwqW1ns8bRzNIC3TwtzMwpV4Y_H5Lf291PbX9y632Fmw=="
+      ]
     ]
   end
 
