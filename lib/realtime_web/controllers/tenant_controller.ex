@@ -27,8 +27,17 @@ defmodule RealtimeWeb.TenantController do
   end
 
   def create(conn, %{"tenant" => tenant_params}) do
+    extensions =
+      Enum.reduce(tenant_params["extensions"], [], fn
+        %{"type" => type, "settings" => settings}, acc ->
+          [%{"type" => type, "settings" => settings} | acc]
+
+        _e, acc ->
+          acc
+      end)
+
     with {:ok, %Tenant{} = tenant} <-
-           Api.create_tenant(tenant_params) do
+           Api.create_tenant(%{tenant_params | "extensions" => extensions}) do
       Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
 
       conn

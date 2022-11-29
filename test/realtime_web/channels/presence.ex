@@ -8,5 +8,5 @@ defmodule RealtimeWeb.Presence do
   use Phoenix.Presence,
     otp_app: :realtime,
     pubsub_server: Realtime.PubSub,
-    pool_size: 10
+    pool_size: :erlang.system_info(:schedulers_online)
 end

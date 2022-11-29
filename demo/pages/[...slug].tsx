@@ -4,10 +4,7 @@ import { useRouter } from 'next/router'
 import { nanoid } from 'nanoid'
 import cloneDeep from 'lodash.clonedeep'
 import throttle from 'lodash.throttle'
-import { getRandomColor, getRandomColors, getRandomUniqueColor } from '../lib/RandomColor'
 import { Badge } from '@supabase/ui'
-
-import { removeFirst } from '../utils'
 import {
   PostgrestResponse,
   REALTIME_LISTEN_TYPES,
@@ -18,8 +15,12 @@ import {
   RealtimeChannelSendResponse,
   RealtimePostgresInsertPayload,
 } from '@supabase/supabase-js'
+
 import supabaseClient from '../client'
 import { Coordinates, Message, Payload, User } from '../types'
+import { removeFirst } from '../utils'
+import { getRandomColor, getRandomColors, getRandomUniqueColor } from '../lib/RandomColor'
+import { sendLog } from '../lib/sendLog'
 
 import Chatbox from '../components/Chatbox'
 import Cursor from '../components/Cursor'
@@ -27,7 +28,6 @@ import Loader from '../components/Loader'
 import Users from '../components/Users'
 import WaitlistPopover from '../components/WaitlistPopover'
 import DarkModeToggle from '../components/DarkModeToggle'
-import { sendLog } from '../lib/sendLog'
 
 const LATENCY_THRESHOLD = 400
 const MAX_ROOM_USERS = 5
@@ -36,19 +36,13 @@ const MAX_EVENTS_PER_SECOND = 10
 const X_THRESHOLD = 25
 const Y_THRESHOLD = 35
 
+// Generate a random user id
 const userId = nanoid()
 
 const Room: NextPage = () => {
   const router = useRouter()
 
   const localColorBackup = getRandomColor()
-
-  const [roomId, setRoomId] = useState<undefined | string>(undefined)
-  const [areMessagesFetched, setAreMessagesFetched] = useState<boolean>(false)
-  const [isInitialStateSynced, setIsInitialStateSynced] = useState<boolean>(false)
-  const [users, setUsers] = useState<{ [key: string]: User }>({})
-  const [messages, setMessages] = useState<Message[]>([])
-  const [latency, setLatency] = useState<number>(0)
 
   const chatboxRef = useRef<any>()
   // [Joshen] Super hacky fix for a really weird bug for onKeyDown
@@ -72,6 +66,13 @@ const Room: NextPage = () => {
   const [message, _setMessage] = useState<string>('')
   const [messagesInTransit, _setMessagesInTransit] = useState<string[]>([])
   const [mousePosition, _setMousePosition] = useState<Coordinates>()
+
+  const [areMessagesFetched, setAreMessagesFetched] = useState<boolean>(false)
+  const [isInitialStateSynced, setIsInitialStateSynced] = useState<boolean>(false)
+  const [latency, setLatency] = useState<number>(0)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [roomId, setRoomId] = useState<undefined | string>(undefined)
+  const [users, setUsers] = useState<{ [key: string]: User }>({})
 
   const setIsTyping = (value: boolean) => {
     isTypingRef.current = value
@@ -138,8 +139,14 @@ const Room: NextPage = () => {
     const slugRoomId = Array.isArray(slug) ? slug[0] : undefined
 
     if (!roomId) {
+      // roomId is undefined when user first attempts to join a room
+
       joinTimestampRef.current = performance.now()
 
+      /* 
+        Client is joining 'rooms' channel to examine existing rooms and their users
+        and then the channel is removed once a room is selected
+      */
       roomChannel = supabaseClient.channel('rooms')
 
       roomChannel
@@ -147,10 +154,12 @@ const Room: NextPage = () => {
           let newRoomId
           const state = roomChannel.presenceState()
 
+          // User attempting to navigate directly to an existing room with users
           if (slugRoomId && slugRoomId in state && state[slugRoomId].length < MAX_ROOM_USERS) {
             newRoomId = slugRoomId
           }
 
+          // User will be assigned an existing room with the fewest users
           if (!newRoomId) {
             const [mostVacantRoomId, users] =
               Object.entries(state).sort(([, a], [, b]) => a.length - b.length)[0] ?? []
@@ -160,18 +169,26 @@ const Room: NextPage = () => {
             }
           }
 
+          // Generate an id if no existing rooms are available
           setRoomId(newRoomId ?? nanoid())
         })
         .subscribe()
     } else {
-      const end = performance.now()
+      // When user has been placed in a room
+
       joinTimestampRef.current &&
         sendLog(
-          `User ${userId} joined Room ${roomId} in ${(end - joinTimestampRef.current).toFixed(
-            1
-          )} ms`
+          `User ${userId} joined Room ${roomId} in ${(
+            performance.now() - joinTimestampRef.current
+          ).toFixed(1)} ms`
         )
 
+      /* 
+        Client is re-joining 'rooms' channel and the user's id will be tracked with Presence.
+
+        Note: Realtime enforces unique channel names per client so the previous 'rooms' channel
+        has already been removed in the cleanup function.
+      */
       roomChannel = supabaseClient.channel('rooms', { config: { presence: { key: roomId } } })
       roomChannel.on(
         REALTIME_LISTEN_TYPES.PRESENCE,
@@ -193,6 +210,7 @@ const Room: NextPage = () => {
         }
       })
 
+      // Get the room's existing messages that were saved to database
       supabaseClient
         .from('messages')
         .select('id, user_id, message')
@@ -206,6 +224,7 @@ const Room: NextPage = () => {
         })
     }
 
+    // Must properly remove subscribed channel
     return () => {
       roomChannel && supabaseClient.removeChannel(roomChannel)
     }
@@ -221,6 +240,7 @@ const Room: NextPage = () => {
     let setMouseEvent: (e: MouseEvent) => void = () => {},
       onKeyDown: (e: KeyboardEvent) => void = () => {}
 
+    // Ping channel is used to calculate roundtrip time from client to server to client
     pingChannel = supabaseClient.channel(`ping:${userId}`, {
       config: { broadcast: { ack: true } },
     })
@@ -255,6 +275,8 @@ const Room: NextPage = () => {
     })
 
     messageChannel = supabaseClient.channel(`chat_messages:${roomId}`)
+
+    // Listen for messages inserted into the database
     messageChannel.on(
       REALTIME_LISTEN_TYPES.POSTGRES_CHANGES,
       {
@@ -307,6 +329,8 @@ const Room: NextPage = () => {
         }
       }
     )
+
+    // Listen for cursor positions from other users in the room
     messageChannel.on(
       REALTIME_LISTEN_TYPES.BROADCAST,
       { event: 'POS' },
@@ -333,6 +357,8 @@ const Room: NextPage = () => {
         })
       }
     )
+
+    // Listen for messages sent by other users directly via Broadcast
     messageChannel.on(
       REALTIME_LISTEN_TYPES.BROADCAST,
       { event: 'MESSAGE' },
@@ -355,6 +381,7 @@ const Room: NextPage = () => {
     )
     messageChannel.subscribe((status: `${REALTIME_SUBSCRIBE_STATES}`) => {
       if (status === REALTIME_SUBSCRIBE_STATES.SUBSCRIBED) {
+        // Lodash throttle will be removed once realtime-js client throttles on the channel level
         const sendMouseBroadcast = throttle(({ x, y }) => {
           messageChannel
             .send({
