@@ -1,17 +1,25 @@
+import { useEffect, useState, useRef, ReactElement } from 'react'
 import type { NextPage } from 'next'
 import { useRouter } from 'next/router'
 import { nanoid } from 'nanoid'
 import cloneDeep from 'lodash.clonedeep'
 import throttle from 'lodash.throttle'
-import { getRandomColor, getRandomColors, getRandomUniqueColor } from './../lib/RandomColor'
-import { useEffect, useState, useRef, ReactElement } from 'react'
+import { getRandomColor, getRandomColors, getRandomUniqueColor } from '../lib/RandomColor'
 import { Badge } from '@supabase/ui'
-import { RealtimeChannel } from '@supabase/realtime-js'
-import { PostgrestResponse } from '@supabase/supabase-js'
 
 import { removeFirst } from '../utils'
-import { supabaseClient, realtimeClient } from '../clients'
-import { Coordinates, DatabaseChange, Message, Payload, User } from '../types'
+import {
+  PostgrestResponse,
+  REALTIME_LISTEN_TYPES,
+  REALTIME_POSTGRES_CHANGES_LISTEN_EVENT,
+  REALTIME_PRESENCE_LISTEN_EVENTS,
+  REALTIME_SUBSCRIBE_STATES,
+  RealtimeChannel,
+  RealtimeChannelSendResponse,
+  RealtimePostgresInsertPayload,
+} from '@supabase/supabase-js'
+import supabaseClient from '../client'
+import { Coordinates, Message, Payload, User } from '../types'
 
 import Chatbox from '../components/Chatbox'
 import Cursor from '../components/Cursor'
@@ -32,22 +40,15 @@ const userId = nanoid()
 
 const Room: NextPage = () => {
   const router = useRouter()
-  const { slug } = router.query
-  const currentRoomId = slug && slug[0]
+
   const localColorBackup = getRandomColor()
 
-  const [validatedRoomId, setValidatedRoomId] = useState<string>()
-  const [userChannel, setUserChannel] = useState<RealtimeChannel>()
-  const [pingChannel, setPingChannel] = useState<RealtimeChannel>()
-  const [messageChannel, setMessageChannel] = useState<RealtimeChannel>()
-
+  const [roomId, setRoomId] = useState<undefined | string>(undefined)
   const [areMessagesFetched, setAreMessagesFetched] = useState<boolean>(false)
   const [isInitialStateSynced, setIsInitialStateSynced] = useState<boolean>(false)
-
   const [users, setUsers] = useState<{ [key: string]: User }>({})
   const [messages, setMessages] = useState<Message[]>([])
   const [latency, setLatency] = useState<number>(0)
-  const [initialUsers, setInitialUsers] = useState<boolean>(false)
 
   const chatboxRef = useRef<any>()
   // [Joshen] Super hacky fix for a really weird bug for onKeyDown
@@ -71,8 +72,6 @@ const Room: NextPage = () => {
   const [message, _setMessage] = useState<string>('')
   const [messagesInTransit, _setMessagesInTransit] = useState<string[]>([])
   const [mousePosition, _setMousePosition] = useState<Coordinates>()
-
-  const [region, setRegion] = useState<string>('')
 
   const setIsTyping = (value: boolean) => {
     isTypingRef.current = value
@@ -99,161 +98,11 @@ const Room: NextPage = () => {
     _setMessagesInTransit(messages)
   }
 
-  // Connect to socket and subscribe to user channel
-  useEffect(() => {
-    joinTimestampRef.current = performance.now()
-    realtimeClient.connect()
+  const mapInitialUsers = (userChannel: RealtimeChannel, roomId: string) => {
+    const state = userChannel.presenceState()
+    const _users = state[roomId]
 
-    // Set up user channel and subscribe
-    const userChannel = realtimeClient.channel('realtime:*', { selfBroadcast: false }) as RealtimeChannel
-    userChannel.on('presence', { event: 'SYNC' }, () => {
-      setIsInitialStateSynced(true)
-    })
-    userChannel.on('region', { event: '*' }, (region: string) => {
-      setRegion(region)
-    })
-
-    userChannel.subscribe().receive('ok', () => {
-      setUserChannel(userChannel)
-    })
-
-    // Separate channel for latency
-    const pingChannel = realtimeClient.channel(`realtime:${userId}`, { selfBroadcast: false }) as RealtimeChannel
-    pingChannel.subscribe().receive('ok', () => setPingChannel(pingChannel))
-
-    return () => {
-      userChannel.unsubscribe()
-      realtimeClient.remove(userChannel)
-      realtimeClient.disconnect()
-    }
-  }, [])
-
-  // Periodically check latency in ms
-  useEffect(() => {
-    if (!pingChannel) return
-    const interval = setInterval(() => {
-      const start = performance.now()
-      pingChannel
-        .send({
-          type: 'broadcast',
-          event: 'PING',
-          ack: true,
-          payload: {},
-        })
-        .then(() => {
-          const end = performance.now()
-          const newLatency: number = end - start
-          if (latency > 0 && latency < LATENCY_THRESHOLD && newLatency >= LATENCY_THRESHOLD) {
-            sendLog(
-              `Roundtrip Latency for User ${userId} surpassed ${LATENCY_THRESHOLD} ms at ${newLatency.toFixed(
-                1
-              )} ms (Region: ${region})`
-            )
-          }
-          setLatency(newLatency)
-        })
-        .catch((err) => console.log('broadcast error', err))
-    }, 1000)
-
-    return () => clearInterval(interval)
-  }, [latency, pingChannel])
-
-  // Determine if current room is valid or generate a new room id
-  useEffect(() => {
-    if (!isInitialStateSynced || !currentRoomId || !userChannel) {
-      return
-    }
-
-    let newRoomId: string | undefined
-    const state = userChannel.presence.state
-    const users = state[currentRoomId]
-
-    if (users?.length < MAX_ROOM_USERS) {
-      newRoomId = currentRoomId
-    } else if (Object.keys(state).length) {
-      const existingRooms: [string, number][] = Object.entries(state).map(([roomId, users]) => [
-        roomId,
-        users.length,
-      ])
-      const sortedRooms = existingRooms.sort((a: any, b: any) => a[1] - b[1])
-      const [existingRoomId, roomCount] = sortedRooms[0]
-
-      if (roomCount < MAX_ROOM_USERS) {
-        newRoomId = existingRoomId
-      }
-    }
-
-    if (!newRoomId) {
-      newRoomId = nanoid()
-    }
-
-    if (!users?.find((user) => user.user_id === userId)) {
-      userChannel
-        .send({
-          type: 'presence',
-          event: 'TRACK',
-          key: newRoomId,
-          payload: { user_id: userId },
-        })
-        .then(() => {
-          router.push(`/${newRoomId}`)
-          setValidatedRoomId(newRoomId)
-        })
-        .catch(() => {})
-    }
-  }, [currentRoomId, router, isInitialStateSynced, userChannel])
-
-  // Fetch chat messages
-  useEffect(() => {
-    if (!validatedRoomId) {
-      return
-    }
-
-    const end = performance.now()
-    joinTimestampRef.current &&
-      sendLog(
-        `User ${userId} joined Room ${validatedRoomId} in ${(
-          end - joinTimestampRef.current
-        ).toFixed(1)} ms (Region: ${region})`
-      )
-
-    supabaseClient
-      .from('messages')
-      .select('id, user_id, message')
-      .filter('room_id', 'eq', validatedRoomId)
-      .order('created_at', { ascending: false })
-      .limit(MAX_DISPLAY_MESSAGES)
-      .then((resp: PostgrestResponse<Message>) => {
-        resp.data && setMessages(resp.data.reverse())
-        setAreMessagesFetched(true)
-        if (chatboxRef.current) chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
-      })
-  }, [validatedRoomId])
-
-  // Continue to sync user presence state after initial state sync
-  useEffect(() => {
-    if (!isInitialStateSynced || !userChannel || !validatedRoomId) {
-      return
-    }
-
-    userChannel.off('presence', { event: 'SYNC' })
-
-    userChannel.on('presence', { event: 'SYNC' }, () => {
-      mapInitialUsers(userChannel, validatedRoomId)
-    })
-
-    setTimeout(() => {
-      mapInitialUsers(userChannel, validatedRoomId)
-    }, 1000)
-  }, [isInitialStateSynced, userChannel, validatedRoomId])
-
-  function mapInitialUsers(userChannel: RealtimeChannel, validatedRoomId: string) {
-    if (initialUsers) return
-
-    const state = userChannel.presence.state
-    const _users = state[validatedRoomId]
-
-    setIsInitialStateSynced(true)
+    if (!_users) return
 
     // Deconflict duplicate colours at the beginning of the browser session
     const colors = Object.keys(usersRef.current).length === 0 ? getRandomColors(_users.length) : []
@@ -280,31 +129,154 @@ const Room: NextPage = () => {
         return updatedUsers
       })
     }
-    setInitialUsers(true)
   }
 
-  // Listen to database changes for chat messages and handle broadcast messages
   useEffect(() => {
-    if (!validatedRoomId) {
-      return
+    let roomChannel: RealtimeChannel
+
+    const { slug } = router.query
+    const slugRoomId = Array.isArray(slug) ? slug[0] : undefined
+
+    if (!roomId) {
+      joinTimestampRef.current = performance.now()
+
+      roomChannel = supabaseClient.channel('rooms')
+
+      roomChannel
+        .on(REALTIME_LISTEN_TYPES.PRESENCE, { event: REALTIME_PRESENCE_LISTEN_EVENTS.SYNC }, () => {
+          let newRoomId
+          const state = roomChannel.presenceState()
+
+          if (slugRoomId && slugRoomId in state && state[slugRoomId].length < MAX_ROOM_USERS) {
+            newRoomId = slugRoomId
+          }
+
+          if (!newRoomId) {
+            const [mostVacantRoomId, users] =
+              Object.entries(state).sort(([, a], [, b]) => a.length - b.length)[0] ?? []
+
+            if (users && users.length < MAX_ROOM_USERS) {
+              newRoomId = mostVacantRoomId
+            }
+          }
+
+          setRoomId(newRoomId ?? nanoid())
+        })
+        .subscribe()
+    } else {
+      const end = performance.now()
+      joinTimestampRef.current &&
+        sendLog(
+          `User ${userId} joined Room ${roomId} in ${(end - joinTimestampRef.current).toFixed(
+            1
+          )} ms`
+        )
+
+      roomChannel = supabaseClient.channel('rooms', { config: { presence: { key: roomId } } })
+      roomChannel.on(
+        REALTIME_LISTEN_TYPES.PRESENCE,
+        { event: REALTIME_PRESENCE_LISTEN_EVENTS.SYNC },
+        () => {
+          setIsInitialStateSynced(true)
+          mapInitialUsers(roomChannel, roomId)
+        }
+      )
+      roomChannel.subscribe(async (status: `${REALTIME_SUBSCRIBE_STATES}`) => {
+        if (status === REALTIME_SUBSCRIBE_STATES.SUBSCRIBED) {
+          const resp: RealtimeChannelSendResponse = await roomChannel.track({ user_id: userId })
+
+          if (resp === 'ok') {
+            router.push(`/${roomId}`)
+          } else {
+            router.push(`/`)
+          }
+        }
+      })
+
+      supabaseClient
+        .from('messages')
+        .select('id, user_id, message')
+        .filter('room_id', 'eq', roomId)
+        .order('created_at', { ascending: false })
+        .limit(MAX_DISPLAY_MESSAGES)
+        .then((resp: PostgrestResponse<Message>) => {
+          resp.data && setMessages(resp.data.reverse())
+          setAreMessagesFetched(true)
+          if (chatboxRef.current) chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
+        })
     }
 
-    const messageChannel = realtimeClient.channel(`realtime:chat_messages:${validatedRoomId}`, { selfBroadcast: false }) as RealtimeChannel
+    return () => {
+      roomChannel && supabaseClient.removeChannel(roomChannel)
+    }
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId])
+
+  useEffect(() => {
+    if (!roomId || !isInitialStateSynced) return
+
+    let pingIntervalId: ReturnType<typeof setInterval> | undefined
+    let messageChannel: RealtimeChannel, pingChannel: RealtimeChannel
+    let setMouseEvent: (e: MouseEvent) => void = () => {},
+      onKeyDown: (e: KeyboardEvent) => void = () => {}
+
+    pingChannel = supabaseClient.channel(`ping:${userId}`, {
+      config: { broadcast: { ack: true } },
+    })
+    pingChannel.subscribe((status: `${REALTIME_SUBSCRIBE_STATES}`) => {
+      if (status === REALTIME_SUBSCRIBE_STATES.SUBSCRIBED) {
+        pingIntervalId = setInterval(async () => {
+          const start = performance.now()
+          const resp = await pingChannel.send({
+            type: 'broadcast',
+            event: 'PING',
+            payload: {},
+          })
+
+          if (resp !== 'ok') {
+            console.log('pingChannel broadcast error')
+            return
+          }
+
+          const end = performance.now()
+
+          const newLatency: number = end - start
+          if (latency > 0 && latency < LATENCY_THRESHOLD && newLatency >= LATENCY_THRESHOLD) {
+            sendLog(
+              `Roundtrip Latency for User ${userId} surpassed ${LATENCY_THRESHOLD} ms at ${newLatency.toFixed(
+                1
+              )} ms`
+            )
+          }
+          setLatency(newLatency)
+        }, 1000)
+      }
+    })
+
+    messageChannel = supabaseClient.channel(`chat_messages:${roomId}`)
     messageChannel.on(
-      'realtime',
+      REALTIME_LISTEN_TYPES.POSTGRES_CHANGES,
       {
-        event: 'INSERT',
+        event: REALTIME_POSTGRES_CHANGES_LISTEN_EVENT.INSERT,
         schema: 'public',
         table: 'messages',
-        filter: `room_id=eq.${validatedRoomId}`,
+        filter: `room_id=eq.${roomId}`,
       },
-      (payload: Payload<DatabaseChange>) => {
-        if (payload.payload.record.user_id === userId && insertMsgTimestampRef.current) {
+      (
+        payload: RealtimePostgresInsertPayload<{
+          id: number
+          created_at: string
+          message: string
+          user_id: string
+          room_id: string
+        }>
+      ) => {
+        if (payload.new.user_id === userId && insertMsgTimestampRef.current) {
           sendLog(
             `Message Latency for User ${userId} from insert to receive was ${(
               performance.now() - insertMsgTimestampRef.current
-            ).toFixed(1)} ms (Region: ${region})`
+            ).toFixed(1)} ms`
           )
           insertMsgTimestampRef.current = undefined
         }
@@ -316,7 +288,7 @@ const Room: NextPage = () => {
             message,
             room_id,
             user_id,
-          }))(payload.payload.record)
+          }))(payload.new)
           messages.push(msg)
 
           if (msg.user_id === userId) {
@@ -335,24 +307,23 @@ const Room: NextPage = () => {
         }
       }
     )
-
     messageChannel.on(
-      'broadcast',
+      REALTIME_LISTEN_TYPES.BROADCAST,
       { event: 'POS' },
       (payload: Payload<{ user_id: string } & Coordinates>) => {
         setUsers((users) => {
-          const userId = payload.payload.user_id
+          const userId = payload!.payload!.user_id
           const existingUser = users[userId]
 
           if (existingUser) {
             const x =
               (payload?.payload?.x ?? 0) - X_THRESHOLD > window.innerWidth
                 ? window.innerWidth - X_THRESHOLD
-                : payload.payload.x
+                : payload?.payload?.x
             const y =
               (payload?.payload?.y ?? 0 - Y_THRESHOLD) > window.innerHeight
                 ? window.innerHeight - Y_THRESHOLD
-                : payload.payload.y
+                : payload?.payload?.y
 
             users[userId] = { ...existingUser, ...{ x, y } }
             users = cloneDeep(users)
@@ -362,19 +333,18 @@ const Room: NextPage = () => {
         })
       }
     )
-
     messageChannel.on(
-      'broadcast',
+      REALTIME_LISTEN_TYPES.BROADCAST,
       { event: 'MESSAGE' },
       (payload: Payload<{ user_id: string; isTyping: boolean; message: string }>) => {
         setUsers((users) => {
-          const userId = payload.payload.user_id
+          const userId = payload!.payload!.user_id
           const existingUser = users[userId]
 
           if (existingUser) {
             users[userId] = {
               ...existingUser,
-              ...{ isTyping: payload.payload.isTyping, message: payload.payload.message },
+              ...{ isTyping: payload?.payload?.isTyping, message: payload?.payload?.message },
             }
             users = cloneDeep(users)
           }
@@ -383,114 +353,109 @@ const Room: NextPage = () => {
         })
       }
     )
+    messageChannel.subscribe((status: `${REALTIME_SUBSCRIBE_STATES}`) => {
+      if (status === REALTIME_SUBSCRIBE_STATES.SUBSCRIBED) {
+        const sendMouseBroadcast = throttle(({ x, y }) => {
+          messageChannel
+            .send({
+              type: 'broadcast',
+              event: 'POS',
+              payload: { user_id: userId, x, y },
+            })
+            .catch(() => {})
+        }, 1000 / MAX_EVENTS_PER_SECOND)
 
-    messageChannel.subscribe().receive('ok', () => setMessageChannel(messageChannel))
+        setMouseEvent = (e: MouseEvent) => {
+          const [x, y] = [e.clientX, e.clientY]
+          sendMouseBroadcast({ x, y })
+          setMousePosition({ x, y })
+        }
 
-    return () => {
-      messageChannel.unsubscribe()
-      realtimeClient.remove(messageChannel)
-      realtimeClient.disconnect()
-    }
-  }, [validatedRoomId])
+        onKeyDown = async (e: KeyboardEvent) => {
+          if (document.activeElement?.id === 'email') return
 
-  // Handle event listeners to broadcast
-  useEffect(() => {
-    if (!messageChannel || !validatedRoomId) {
-      return
-    }
+          // Start typing session
+          if (e.code === 'Enter' || (e.key.length === 1 && !e.metaKey)) {
+            if (!isTypingRef.current) {
+              setIsTyping(true)
+              setIsCancelled(false)
 
-    const sendMouseBroadcast = throttle(({ x, y }) => {
-      messageChannel
-        .send({
-          type: 'broadcast',
-          event: 'POS',
-          payload: { user_id: userId, x, y },
-        })
-        .catch(() => {})
-    }, 1000 / MAX_EVENTS_PER_SECOND)
-
-    const setMouseEvent = (e: MouseEvent) => {
-      const [x, y] = [e.clientX, e.clientY]
-      sendMouseBroadcast({ x, y })
-      setMousePosition({ x, y })
-    }
-
-    const onKeyDown = async (e: KeyboardEvent) => {
-      if (document.activeElement?.id === 'email') return
-
-      // Start typing session
-      if (e.code === 'Enter' || (e.key.length === 1 && !e.metaKey)) {
-        if (!isTypingRef.current) {
-          setIsTyping(true)
-          setIsCancelled(false)
-
-          if (chatInputFix.current) {
-            setMessage('')
-            chatInputFix.current = false
-          } else {
-            setMessage(e.key.length === 1 ? e.key : '')
+              if (chatInputFix.current) {
+                setMessage('')
+                chatInputFix.current = false
+              } else {
+                setMessage(e.key.length === 1 ? e.key : '')
+              }
+              messageChannel
+                .send({
+                  type: 'broadcast',
+                  event: 'MESSAGE',
+                  payload: { user_id: userId, isTyping: true, message: '' },
+                })
+                .catch(() => {})
+            } else if (e.code === 'Enter') {
+              // End typing session and send message
+              setIsTyping(false)
+              messageChannel
+                .send({
+                  type: 'broadcast',
+                  event: 'MESSAGE',
+                  payload: { user_id: userId, isTyping: false, message: messageRef.current },
+                })
+                .catch(() => {})
+              if (messageRef.current) {
+                const updatedMessagesInTransit = (messagesInTransitRef?.current ?? []).concat([
+                  messageRef.current,
+                ])
+                setMessagesInTransit(updatedMessagesInTransit)
+                if (chatboxRef.current) chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
+                insertMsgTimestampRef.current = performance.now()
+                await supabaseClient.from('messages').insert([
+                  {
+                    user_id: userId,
+                    room_id: roomId,
+                    message: messageRef.current,
+                  },
+                ])
+              }
+            }
           }
-          messageChannel
-            .send({
-              type: 'broadcast',
-              event: 'MESSAGE',
-              payload: { user_id: userId, isTyping: true, message: '' },
-            })
-            .catch(() => {})
-        } else if (e.code === 'Enter') {
-          // End typing session and send message
-          setIsTyping(false)
-          messageChannel
-            .send({
-              type: 'broadcast',
-              event: 'MESSAGE',
-              payload: { user_id: userId, isTyping: false, message: messageRef.current },
-            })
-            .catch(() => {})
-          if (messageRef.current) {
-            const updatedMessagesInTransit = (messagesInTransitRef?.current ?? []).concat([
-              messageRef.current,
-            ])
-            setMessagesInTransit(updatedMessagesInTransit)
-            if (chatboxRef.current) chatboxRef.current.scrollIntoView({ behavior: 'smooth' })
-            insertMsgTimestampRef.current = performance.now()
-            await supabaseClient.from('messages').insert([
-              {
-                user_id: userId,
-                room_id: validatedRoomId,
-                message: messageRef.current,
-              },
-            ])
+
+          // End typing session without sending
+          if (e.code === 'Escape' && isTypingRef.current) {
+            setIsTyping(false)
+            setIsCancelled(true)
+            chatInputFix.current = true
+
+            messageChannel
+              .send({
+                type: 'broadcast',
+                event: 'MESSAGE',
+                payload: { user_id: userId, isTyping: false, message: '' },
+              })
+              .catch(() => {})
           }
         }
+
+        window.addEventListener('mousemove', setMouseEvent)
+        window.addEventListener('keydown', onKeyDown)
       }
-
-      // End typing session without sending
-      if (e.code === 'Escape' && isTypingRef.current) {
-        setIsTyping(false)
-        setIsCancelled(true)
-        chatInputFix.current = true
-
-        messageChannel
-          .send({
-            type: 'broadcast',
-            event: 'MESSAGE',
-            payload: { user_id: userId, isTyping: false, message: '' },
-          })
-          .catch(() => {})
-      }
-    }
-
-    window.addEventListener('mousemove', setMouseEvent)
-    window.addEventListener('keydown', onKeyDown)
+    })
 
     return () => {
+      pingIntervalId && clearInterval(pingIntervalId)
+
       window.removeEventListener('mousemove', setMouseEvent)
       window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [messageChannel, validatedRoomId])
 
-  if (!validatedRoomId) {
+      pingChannel && supabaseClient.removeChannel(pingChannel)
+      messageChannel && supabaseClient.removeChannel(messageChannel)
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, isInitialStateSynced])
+
+  if (!roomId) {
     return <Loader />
   }
 

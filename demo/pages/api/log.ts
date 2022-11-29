@@ -1,6 +1,4 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import pino from 'pino'
-import { createPinoBrowserSend, createWriteStream } from 'pino-logflare'
 
 const LOGFLARE_API_KEY = process.env.LOGFLARE_API_KEY || ''
 const LOGFLARE_SOURCE_ID = process.env.LOGFLARE_SOURCE_ID || ''

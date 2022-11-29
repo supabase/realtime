@@ -10,7 +10,7 @@ import {
   IconGitHub,
   IconTwitter,
 } from '@supabase/ui'
-import { supabaseClient } from '../clients'
+import supabaseClient from '../client'
 import { useTheme } from '../lib/ThemeProvider'
 
 interface Props {}
@@ -39,9 +39,7 @@ const WaitlistPopover: FC<Props> = ({}) => {
     setIsSuccess(false)
     setError(undefined)
     setSubmitting(true)
-    const { error } = await supabaseClient
-      .from('waitlist')
-      .insert([{ email: values.email }], { returning: 'minimal' })
+    const { error } = await supabaseClient.from('waitlist').insert([{ email: values.email }])
     if (!error) {
       resetForm()
       setIsSuccess(true)
