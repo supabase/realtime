@@ -62,8 +62,8 @@ defmodule Realtime.Application do
         RealtimeWeb.Telemetry,
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
         Realtime.GenCounter.DynamicSupervisor,
-        Realtime.RateCounter.DynamicSupervisor,
         {Cachex, name: Realtime.RateCounter},
+        Realtime.RateCounter.DynamicSupervisor,
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence,
         {Task.Supervisor, name: Realtime.TaskSupervisor}
