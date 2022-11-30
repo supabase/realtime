@@ -257,7 +257,6 @@ defmodule RealtimeWeb.RealtimeChannel do
             pg_change_params: pg_change_params,
             postgres_extension: postgres_extension,
             channel_name: channel_name,
-            tenant_topic: tenant_topic,
             postgres_cdc_module: module
           }
         } = socket
@@ -356,29 +355,39 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_in(
         "access_token",
         %{"access_token" => refresh_token},
-        %{assigns: %{pg_sub_ref: pg_sub_ref, pg_change_params: pg_change_params}} = socket
+        %{
+          assigns: %{
+            access_token: access_token,
+            pg_sub_ref: pg_sub_ref,
+            pg_change_params: pg_change_params
+          }
+        } = socket
       )
       when is_binary(refresh_token) do
     socket = assign_counter(socket) |> assign(:access_token, refresh_token)
 
     case confirm_token(socket) do
       {:ok, claims, confirm_token_ref} ->
-        cancel_timer(pg_sub_ref)
+        if refresh_token == access_token do
+          {:noreply, assign(socket, :confirm_token_ref, confirm_token_ref)}
+        else
+          cancel_timer(pg_sub_ref)
 
-        pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
+          pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
-        pg_sub_ref =
-          case pg_change_params do
-            [_ | _] -> postgres_subscribe()
-            _ -> nil
-          end
+          pg_sub_ref =
+            case pg_change_params do
+              [_ | _] -> postgres_subscribe()
+              _ -> nil
+            end
 
-        {:noreply,
-         assign(socket, %{
-           confirm_token_ref: confirm_token_ref,
-           pg_change_params: pg_change_params,
-           pg_sub_ref: pg_sub_ref
-         })}
+          {:noreply,
+           assign(socket, %{
+             confirm_token_ref: confirm_token_ref,
+             pg_change_params: pg_change_params,
+             pg_sub_ref: pg_sub_ref
+           })}
+        end
 
       {:error, error} ->
         message = "Received an invalid access token from client: " <> inspect(error)
