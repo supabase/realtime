@@ -1,0 +1,33 @@
+version: '3'
+x-uffizzi:
+  ingress:
+    service: realtime
+    port: 4000
+services:
+  realtime:
+    image: "${APP_IMAGE}"
+    ports:
+      - "4000:4000"
+    environment:
+      DB_HOST: localhost
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_PORT: 5432
+      PORT: 4000
+      JWT_SECRET: SOMETHING_SUPER_SECRET
+      SECURE_CHANNELS: 'false'
+    depends_on:
+      - db
+  db:
+    image: supabase/postgres:14.1.0.77
+    ports:
+      - "5432:5432"
+    volumes:
+    - ./dev/postgres/mnt:/docker-entrypoint-initdb.d/
+    command:
+    - postgres
+    - -c
+    - wal_level=logical
+    environment: 
+      POSTGRES_PASSWORD: postgres
