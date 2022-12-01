@@ -7,7 +7,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   require Logger
 
   alias DBConnection.Backoff
-  # alias Extensions.Postgres
+  alias Phoenix.Tracker.Shard
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
   alias Realtime.{GenCounter, RateCounter, PostgresCdc}
 
@@ -226,7 +226,23 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_info(:sync_presence, %{assigns: %{tenant_topic: topic}} = socket) do
     socket = assign_counter(socket)
-    push(socket, "presence_state", Presence.list(topic))
+
+    presence_list =
+      socket
+      |> presence_list_shard_bypass()
+      |> case do
+        {:ok, [_ | _]} ->
+          Presence.list(topic)
+
+        {:ok, []} ->
+          %{}
+
+        {:error, message} ->
+          Logger.error("Unable to fetch Presence list for topic #{topic}: #{message}")
+          Presence.list(topic)
+      end
+
+    push(socket, "presence_state", presence_list)
 
     {:noreply, socket}
   end
@@ -257,7 +273,6 @@ defmodule RealtimeWeb.RealtimeChannel do
             pg_change_params: pg_change_params,
             postgres_extension: postgres_extension,
             channel_name: channel_name,
-            tenant_topic: tenant_topic,
             postgres_cdc_module: module
           }
         } = socket
@@ -610,5 +625,18 @@ defmodule RealtimeWeb.RealtimeChannel do
       message: message,
       channel: channel_name
     })
+  end
+
+  defp presence_list_shard_bypass(%{assigns: %{tenant_topic: topic}} = _socket) do
+    try do
+      [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
+
+      {:ok,
+       Presence
+       |> Shard.name_for_topic(topic, size)
+       |> Shard.dirty_list(topic)}
+    rescue
+      e -> {:error, Exception.message(e)}
+    end
   end
 end
