@@ -1,4 +1,8 @@
 defmodule RealtimeWeb.Components do
+  @moduledoc """
+  Components for LiveView
+  """
+
   use Phoenix.Component
   alias Phoenix.LiveView.JS
 

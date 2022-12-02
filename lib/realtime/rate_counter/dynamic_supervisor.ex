@@ -1,4 +1,8 @@
 defmodule Realtime.RateCounter.DynamicSupervisor do
+  @moduledoc """
+  Dynamic Supervisor to spin up `RateCounter`s as needed.
+  """
+
   use DynamicSupervisor
 
   @spec start_link(list()) :: {:error, any} | {:ok, pid}
