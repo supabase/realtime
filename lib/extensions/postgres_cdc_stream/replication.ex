@@ -1,4 +1,9 @@
 defmodule Extensions.PostgresCdcStream.Replication do
+  @moduledoc """
+  Subscribes to the Postgres replication slot, decodes write ahead log binary messages
+  and broadcasts them to the `MessageDispatcher`.
+  """
+
   use Postgrex.ReplicationConnection
   require Logger
 
