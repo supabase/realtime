@@ -1,4 +1,8 @@
 defmodule Realtime.PromEx.Plugins.OsMon do
+  @moduledoc """
+  Polls os_mon metrics.
+  """
+
   use PromEx.Plugin
   require Logger
   alias Realtime.OsMetrics

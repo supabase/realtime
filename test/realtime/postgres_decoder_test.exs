@@ -80,7 +80,7 @@ defmodule PostgresDecoderTest do
                95, 116, 121, 112, 101, 0>>
            ) ==
              %Type{
-               id: 32820,
+               id: 32_820,
                namespace: "public",
                name: "example_type"
              }
