@@ -58,7 +58,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       poll_interval_ms: args["poll_interval_ms"],
       poll_ref: make_ref(),
       publication: args["publication"],
-      slot_name: args["slot_name"],
+      slot_name: args["slot_name"] <> "_" <> commit_sha(),
       tenant: args["id"]
     }
 
@@ -267,5 +267,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       ],
       socket_options: socket_opts
     )
+  end
+
+  defp commit_sha() do
+    System.get_env("COMMIT_SHA", "unknown_sha")
   end
 end

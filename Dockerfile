@@ -43,7 +43,7 @@ WORKDIR /app
 
 # install hex + rebar
 RUN mix local.hex --force && \
-    mix local.rebar --force
+  mix local.rebar --force
 
 # set build ENV
 ENV MIX_ENV="prod"
@@ -99,6 +99,11 @@ RUN chown nobody /app
 
 # set runner ENV
 ENV MIX_ENV="prod"
+
+# put commit sha
+# deploy with `flyctl deploy --build-arg COMMIT=$(git rev-parse --short HEAD)`
+ARG COMMIT
+ENV COMMIT_SHA="${COMMIT}"
 
 # Only copy the final release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./

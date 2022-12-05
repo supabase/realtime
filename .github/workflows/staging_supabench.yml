@@ -16,7 +16,7 @@ jobs:
           args: "-c deploy/fly/qa.toml scale count 1"
       - uses: superfly/flyctl-actions@1.1
         with:
-          args: "-c deploy/fly/qa.toml deploy"
+          args: "-c deploy/fly/qa.toml deploy —-build-arg COMMIT=$(git rev-parse --short HEAD)"
       - uses: superfly/flyctl-actions@1.1
         if: always()
         with:
