@@ -18,16 +18,16 @@ defmodule Realtime.RateCounterTest do
 
     test "rate counters shut themselves down when no activity occurs on the GenCounter" do
       term = Ecto.UUID.generate()
-      {:ok, _} = RateCounter.new(term, idle_shutdown: 100)
-      Process.sleep(200)
+      {:ok, _} = RateCounter.new(term, idle_shutdown: 5)
+      Process.sleep(25)
       assert {:error, _term} = RateCounter.get(term)
     end
 
     test "rate counters reset GenCounter to zero after one tick and average the bucket" do
       term = Ecto.UUID.generate()
-      {:ok, _} = RateCounter.new(term, tick: 50)
+      {:ok, _} = RateCounter.new(term, tick: 5)
       :ok = GenCounter.add(term)
-      Process.sleep(100)
+      Process.sleep(10)
 
       assert {:ok,
               %RateCounter{
@@ -37,7 +37,7 @@ defmodule Realtime.RateCounterTest do
                 idle_shutdown: 5000,
                 idle_shutdown_ref: _ref,
                 max_bucket_len: 60,
-                tick: 50,
+                tick: 5,
                 tick_ref: _ref2
               }} = RateCounter.get(term)
     end
@@ -48,17 +48,7 @@ defmodule Realtime.RateCounterTest do
       term = Ecto.UUID.generate()
       {:ok, _} = RateCounter.new(term)
 
-      assert {:ok,
-              %RateCounter{
-                avg: 0.0,
-                bucket: [],
-                id: _id,
-                idle_shutdown: 5000,
-                idle_shutdown_ref: _ref,
-                max_bucket_len: 60,
-                tick: 1000,
-                tick_ref: _ref2
-              }} = RateCounter.get(term)
+      assert {:ok, %RateCounter{}} = RateCounter.get(term)
     end
   end
 end
