@@ -19,6 +19,7 @@ defmodule Realtime.RateCounter do
   @idle_shutdown :timer.seconds(5)
   @tick :timer.seconds(1)
   @max_bucket_len 60
+  @cache __MODULE__
 
   defstruct id: nil,
             avg: 0.0,
@@ -71,9 +72,9 @@ defmodule Realtime.RateCounter do
 
   @spec get(term()) :: {:ok, term()} | {:error, term()}
   def get(term) do
-    case find_worker(term) do
-      {:ok, ref} -> GenServer.call(ref, :get)
-      {:error, err} -> {:error, err}
+    case Cachex.get(@cache, term) do
+      {:ok, nil} -> {:error, :worker_not_found}
+      {:ok, term} -> {:ok, term}
     end
   end
 
@@ -102,12 +103,9 @@ defmodule Realtime.RateCounter do
       idle_shutdown_ref: idle_shutdown_ref
     }
 
-    {:ok, state}
-  end
+    Cachex.put!(@cache, id, state)
 
-  @impl true
-  def handle_call(:get, _from, state) do
-    {:reply, {:ok, state}, state}
+    {:ok, state}
   end
 
   @impl true
@@ -133,6 +131,8 @@ defmodule Realtime.RateCounter do
     state = %{state | bucket: bucket, avg: avg}
     tick(state.tick)
 
+    Cachex.put!(@cache, state.id, state)
+
     {:noreply, state}
   end
 
@@ -140,6 +140,7 @@ defmodule Realtime.RateCounter do
   def handle_info(:idle_shutdown, state) do
     Logger.warning("#{__MODULE__} idle_shutdown reached for: #{inspect(state.id)}")
     GenCounter.stop(state.id)
+    Cachex.del!(@cache, state.id)
     {:stop, :normal, state}
   end
 
@@ -155,13 +156,6 @@ defmodule Realtime.RateCounter do
     case GenCounter.get(id) do
       {:ok, _count} -> :ok
       {:error, :counter_not_found} -> GenCounter.new(id)
-    end
-  end
-
-  defp find_worker(term) do
-    case Registry.lookup(Realtime.Registry.Unique, {__MODULE__, :rate_counter, term}) do
-      [{pid, _}] -> {:ok, pid}
-      _error -> {:error, :worker_not_found}
     end
   end
 end
