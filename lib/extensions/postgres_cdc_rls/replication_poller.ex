@@ -1,4 +1,9 @@
 defmodule Extensions.PostgresCdcRls.ReplicationPoller do
+  @moduledoc """
+  Polls the write ahead log, applies row level sucurity policies for each subscriber
+  and broadcast records to the `MessageDispatcher`.
+  """
+
   use GenServer
 
   require Logger
