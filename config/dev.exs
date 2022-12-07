@@ -15,7 +15,7 @@ config :realtime,
   presence: presence
 
 config :realtime, RealtimeWeb.Endpoint,
-  http: [port: 4000],
+  http: [port: System.get_env("PORT", "4000")],
   debug_errors: true,
   code_reloader: true,
   check_origin: false,
@@ -81,3 +81,15 @@ config :phoenix, :stacktrace_depth, 20
 
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
+
+config :libcluster,
+  topologies: [
+    dev: [
+      strategy: Cluster.Strategy.Epmd,
+      config: [
+        hosts: [:"orange@127.0.0.1", :"pink@127.0.0.1"]
+      ],
+      connect: {:net_kernel, :connect_node, []},
+      disconnect: {:net_kernel, :disconnect_node, []}
+    ]
+  ]
