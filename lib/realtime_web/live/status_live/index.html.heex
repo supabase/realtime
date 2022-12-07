@@ -1,0 +1,15 @@
+<.h1>Supabase Realtime: Multiplayer Edition</.h1>
+<.h2>Cluster Status</.h2>
+<p>Understand the latency between nodes across the Realtime cluster.</p>
+
+<div class="my-5">
+    <div class="grid grid-cols-4 gap-12 py-4">
+    <%= for {from_node, p} <- @pings do %>
+        <div class="p-4 border-2 whitespace-nowrap overflow-hidden">
+            <div>From: <%= from_node %></div>
+            <div>To: <%= p.node %></div>
+            <div><%= p.latency %> ms</div>
+        </div>
+    <% end %>
+    </div>
+</div>
