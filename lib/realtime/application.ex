@@ -66,7 +66,8 @@ defmodule Realtime.Application do
         Realtime.RateCounter.DynamicSupervisor,
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence,
-        {Task.Supervisor, name: Realtime.TaskSupervisor}
+        {Task.Supervisor, name: Realtime.TaskSupervisor},
+        Realtime.Latency
       ] ++ extensions_supervisors
 
     children =
