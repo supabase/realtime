@@ -1,6 +1,8 @@
 defmodule RealtimeWeb.StatusLive.Index do
   use RealtimeWeb, :live_view
 
+  alias Realtime.Latency.Payload
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket), do: RealtimeWeb.Endpoint.subscribe("admin:cluster")
@@ -13,14 +15,9 @@ defmodule RealtimeWeb.StatusLive.Index do
   end
 
   @impl true
-  def handle_info(%Phoenix.Socket.Broadcast{payload: payload}, socket) do
-    payload = %{
-      payload.from_node => %{
-        node: payload.node,
-        latency: payload.latency,
-        response: payload.response
-      }
-    }
+  def handle_info(%Phoenix.Socket.Broadcast{payload: %Payload{} = payload}, socket) do
+    pair = Atom.to_string(payload.from_node) <> "_" <> Atom.to_string(payload.node)
+    payload = %{pair => payload}
 
     pings = Map.merge(socket.assigns.pings, payload)
 
@@ -38,7 +35,8 @@ defmodule RealtimeWeb.StatusLive.Index do
 
   defp default_pings() do
     for n <- all_nodes(), f <- all_nodes(), into: %{} do
-      {n, %{from_node: f, latency: 0, node: "Loading..."}}
+      pair = Atom.to_string(n) <> "_" <> Atom.to_string(f)
+      {pair, %Payload{from_node: f, latency: "Loading...", node: n, timestamp: "Loading..."}}
     end
   end
 end
