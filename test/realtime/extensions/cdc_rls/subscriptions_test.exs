@@ -1,5 +1,7 @@
 defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
   use RealtimeWeb.ChannelCase
+  doctest Extensions.PostgresCdcRls.Subscriptions
+
   alias Extensions.PostgresCdcRls.Subscriptions, as: S
   alias Postgrex, as: P
 
