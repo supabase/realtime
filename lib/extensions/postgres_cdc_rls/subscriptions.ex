@@ -148,11 +148,17 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
       {:ok, ["public", "messages", [{"subject", "eq", "hey"}]]}
 
-  A not supported filter will response with:
+  An unsupported filter will response with an error tuple:
 
       iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=in.hey"}
       iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
       {:error, ~s(Error parsing `filter` params: ["in", "hey"])}
+
+  Catch `undefined` filters:
+
+      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "undefined"}
+      iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
+      {:error, ~s(Error parsing `filter` params: ["undefined"])}
 
   """
 
