@@ -135,8 +135,19 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     end
   end
 
-  defp parse_subscription_params(params) do
-    # filter example "body=eq.hey"
+  @doc """
+  Parses subscription filter parameters into something we can pass into our `create_subscription` query.
+
+  ## Examples
+
+      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=eq.hey"}
+      iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
+      ["public", "messages", [{"subject", "eq", "hey"}]]
+
+  """
+
+  @spec parse_subscription_params(map()) :: list
+  def parse_subscription_params(params) do
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
         with [col, rest] <- String.split(filter, "=", parts: 2),
