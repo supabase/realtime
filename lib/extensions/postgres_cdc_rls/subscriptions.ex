@@ -7,6 +7,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   @type conn() :: Postgrex.conn()
 
+  @filter_types ["eq", "neq", "lt", "lte", "gt", "gte"]
+
   @spec create(conn(), String.t(), list(map())) ::
           {:ok, Postgrex.Result.t()}
           | {:error,
@@ -51,7 +53,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       params_list
       |> Enum.map(fn %{id: id, claims: claims, params: params} ->
         case parse_subscription_params(params) do
-          [schema, table, filters] ->
+          {:ok, [schema, table, filters]} ->
             case query(conn, sql, [publication, schema, table, id, claims, filters]) do
               {:ok, %{num_rows: num} = result} when num > 0 ->
                 result
@@ -60,8 +62,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
                 rollback(conn, {:subscription_insert_failed, params})
             end
 
-          _ ->
-            rollback(conn, :malformed_subscription_params)
+          {:error, reason} ->
+            rollback(conn, reason)
         end
       end)
     end)
@@ -138,36 +140,46 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @doc """
   Parses subscription filter parameters into something we can pass into our `create_subscription` query.
 
+  We currently support the following filters: 'eq', 'neq', 'lt', 'lte', 'gt', 'gte`
+
   ## Examples
 
       iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=eq.hey"}
       iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
-      ["public", "messages", [{"subject", "eq", "hey"}]]
+      {:ok, ["public", "messages", [{"subject", "eq", "hey"}]]}
+
+  A not supported filter will response with:
+
+      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=in.hey"}
+      iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
+      {:error, ~s(Error parsing `filter` params: ["in", "hey"])}
 
   """
 
-  @spec parse_subscription_params(map()) :: list
+  @spec parse_subscription_params(map()) :: {:ok, list} | {:error, binary()}
   def parse_subscription_params(params) do
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
         with [col, rest] <- String.split(filter, "=", parts: 2),
-             [filter_type, value] <- String.split(rest, ".", parts: 2) do
-          [schema, table, [{col, filter_type, value}]]
+             [filter_type, value] when filter_type in @filter_types <-
+               String.split(rest, ".", parts: 2) do
+          {:ok, [schema, table, [{col, filter_type, value}]]}
         else
-          _ -> []
+          e -> {:error, "Error parsing `filter` params: #{inspect(e)}"}
         end
 
       %{"schema" => schema, "table" => table} ->
-        [schema, table, []]
+        {:ok, [schema, table, []]}
 
       %{"schema" => schema} ->
-        [schema, "*", []]
+        {:ok, [schema, "*", []]}
 
       %{"table" => table} ->
-        ["public", table, []]
+        {:ok, ["public", table, []]}
 
       _ ->
-        []
+        {:error,
+         "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to."}
     end
   end
 end

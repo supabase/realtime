@@ -59,7 +59,8 @@ defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
       }
     ]
 
-    assert {:error, :malformed_subscription_params} =
+    assert {:error,
+            "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to."} =
              S.create(conn, "supabase_realtime_test", params_list)
 
     %Postgrex.Result{rows: [[num]]} =
