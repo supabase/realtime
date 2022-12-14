@@ -43,7 +43,7 @@ defmodule Realtime.Integration.RtChannelTest do
         fullsweep_after: 20,
         max_frame_size: 8_000_000
       ],
-      longpoll: false
+      longpoll: true
     )
 
     plug(Plug.Session, @session_config)
