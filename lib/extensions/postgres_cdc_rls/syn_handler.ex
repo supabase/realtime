@@ -44,8 +44,14 @@ defmodule Extensions.PostgresCdcRls.SynHandler do
       end
 
     target = node(stop)
-    Logger.warn("Resolving #{name} conflict, target: #{inspect(target)}")
-    :rpc.call(target, DynamicSupervisor, :stop, [stop, :normal, 15_000])
+
+    Logger.warn(
+      "Resolving #{name} conflict, stop pid #{inspect(stop)} on the node #{inspect(target)}"
+    )
+
+    spawn(fn ->
+      DynamicSupervisor.stop(stop, :shutdown, 15_000)
+    end)
 
     keep
   end
