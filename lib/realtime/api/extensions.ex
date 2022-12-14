@@ -1,4 +1,8 @@
 defmodule Realtime.Api.Extensions do
+  @moduledoc """
+  Schema for Realtime Extension settings.
+  """
+
   use Ecto.Schema
   import Ecto.Changeset
   import Realtime.Helpers, only: [encrypt!: 2]

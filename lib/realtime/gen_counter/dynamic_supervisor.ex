@@ -1,4 +1,8 @@
 defmodule Realtime.GenCounter.DynamicSupervisor do
+  @moduledoc """
+  DynamicSupervisor to spin up `GenCounter`s.
+  """
+
   use DynamicSupervisor
 
   @spec start_link(list()) :: Supervisor.on_start()

@@ -62,10 +62,12 @@ defmodule Realtime.Application do
         RealtimeWeb.Telemetry,
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
         Realtime.GenCounter.DynamicSupervisor,
+        {Cachex, name: Realtime.RateCounter},
         Realtime.RateCounter.DynamicSupervisor,
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence,
-        {Task.Supervisor, name: Realtime.TaskSupervisor}
+        {Task.Supervisor, name: Realtime.TaskSupervisor},
+        Realtime.Latency
       ] ++ extensions_supervisors
 
     children =
