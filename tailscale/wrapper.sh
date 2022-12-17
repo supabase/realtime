@@ -9,6 +9,3 @@ if [ "${ENABLE_TAILSCALE}" = true ]; then
     /tailscale/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock &
     /tailscale/tailscale up --authkey=${TAILSCALE_AUTHKEY} --hostname="${TAILSCALE_APP_NAME}" --accept-routes=true
 fi
-
-echo "Starting Realtime"
-sudo -E -u nobody /app/bin/server
