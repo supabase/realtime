@@ -14,29 +14,24 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
     opts
   end
 
-  def call(conn, _opts) do
-    uri = request_url(conn) |> URI.parse()
+  def call(%Plug.Conn{host: host} = conn, _opts) do
+    {:ok, external_id} = get_external_id(host)
 
     tenant =
-      case String.split(uri.host, ".") do
-        # Should really get this from something more predictible
-        [external_id, _] ->
-          Api.get_tenant_by_external_id(external_id)
-          |> tap(&GenCounter.new(&1.external_id))
-          |> tap(&RateCounter.new(&1.external_id, idle_shutdown: :infinity))
-          |> tap(&GenCounter.add(&1.external_id))
-          |> Api.preload_counters()
+      Api.get_tenant_by_external_id(external_id)
+      |> tap(&GenCounter.new({:limit, :all, &1.external_id}))
+      |> tap(&RateCounter.new({:limit, :all, &1.external_id}, idle_shutdown: :infinity))
+      |> tap(&GenCounter.add({:limit, :all, &1.external_id}))
+      |> Api.preload_counters()
 
-        _ ->
-          nil
-      end
+    assign(conn, :tenant, tenant)
+  end
 
-    if tenant do
-      assign(conn, :tenant, tenant)
-    else
-      Logger.warn("Tenant not found in request url: #{inspect(uri)}")
-
-      conn
+  defp get_external_id(host) do
+    case String.split(host, ".") do
+      [] -> {:error, :tenant_not_found_in_host}
+      [_] -> {:error, :tenant_not_found_in_host}
+      list -> {:ok, Enum.at(list, 0)}
     end
   end
 end
