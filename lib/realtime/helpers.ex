@@ -74,12 +74,11 @@ defmodule Realtime.Helpers do
 
   @spec get_external_id(String.t()) :: {:ok, String.t()} | {:error, atom()}
   def get_external_id(host) when is_binary(host) do
-    case String.split(host, ".", parts: 3) do
+    case String.split(host, ".", parts: 2) do
       [] -> {:error, :tenant_not_found_in_host}
       [_] -> {:error, :tenant_not_found_in_host}
-      [_, _] -> {:error, :tenant_not_found_in_host}
-      ["www", _, _] -> {:error, :tenant_not_found_in_host}
-      [id, _, _] -> {:ok, id}
+      ["www", _] -> {:error, :tenant_not_found_in_host}
+      [id, _] -> {:ok, id}
     end
   end
 
