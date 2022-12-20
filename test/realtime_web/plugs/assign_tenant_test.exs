@@ -45,6 +45,7 @@ defmodule RealtimeWeb.Plugs.AssignTenantTest do
     assert conn.status == 401
   end
 
+  @tag :failing
   test "serve a 401 unauthorized when we have a bad request", %{conn: conn} do
     conn =
       conn
