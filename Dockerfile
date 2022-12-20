@@ -84,7 +84,7 @@ RUN mix release
 # the compiled release and other runtime necessities
 FROM ${RUNNER_IMAGE}
 
-RUN apt-get update -y && apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo \
+RUN apt-get update -y && apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Set the locale
@@ -110,7 +110,7 @@ COPY --from=tailscale /app/tailscale /tailscale/tailscale
 RUN mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
 
 COPY limits.sh /app/limits.sh
-ENTRYPOINT ["/app/limits.sh"]
+ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/app/limits.sh"]
 
 CMD ["sh", "-c", "/tailscale/wrapper.sh && /app/bin/server"]
 # Appended by flyctl
