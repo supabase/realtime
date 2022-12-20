@@ -4,6 +4,7 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
   """
   import Plug.Conn
   import Phoenix.Controller, only: [json: 2]
+  import Realtime.Helpers, only: [get_external_id: 1]
 
   require Logger
 
@@ -36,16 +37,6 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
 
       _e ->
         error_response(conn, "Error assigning tenant")
-    end
-  end
-
-  defp get_external_id(host) do
-    case String.split(host, ".") do
-      [] -> {:error, :tenant_not_found_in_host}
-      [_] -> {:error, :tenant_not_found_in_host}
-      [_, _] -> {:error, :tenant_not_found_in_host}
-      ["www", _, _] -> {:error, :tenant_not_found_in_host}
-      list -> {:ok, Enum.at(list, 0)}
     end
   end
 

@@ -7,7 +7,7 @@ defmodule RealtimeWeb.UserSocket do
   alias Api.Tenant
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
-  import Realtime.Helpers, only: [decrypt!: 2]
+  import Realtime.Helpers, only: [decrypt!: 2, get_external_id: 1]
 
   ## Channels
   channel "realtime:*", RealtimeChannel
@@ -19,7 +19,7 @@ defmodule RealtimeWeb.UserSocket do
     if Application.fetch_env!(:realtime, :secure_channels) do
       %{uri: %{host: host}, x_headers: headers} = connect_info
 
-      [external_id | _] = String.split(host, ".", parts: 2)
+      {:ok, external_id} = get_external_id(host)
 
       log_level =
         params
