@@ -43,15 +43,13 @@ defmodule Extensions.PostgresCdcRls.SynHandler do
           end
       end
 
-    target = node(stop)
-
-    Logger.warn(
-      "Resolving #{name} conflict, stop pid #{inspect(stop)} on the node #{inspect(target)}"
-    )
-
-    spawn(fn ->
-      DynamicSupervisor.stop(stop, :shutdown, 15_000)
-    end)
+    if node() == node(stop) do
+      resp = DynamicSupervisor.stop(stop, :shutdown, 4_000)
+      "Resolving #{name} conflict, stop local pid: #{inspect(stop)}, response: #{inspect(resp)}"
+    else
+      "Resolving #{name} conflict, remote pid: #{inspect(stop)}"
+    end
+    |> Logger.warn()
 
     keep
   end
