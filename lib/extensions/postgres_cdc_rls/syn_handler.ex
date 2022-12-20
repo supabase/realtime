@@ -1,4 +1,7 @@
 defmodule Extensions.PostgresCdcRls.SynHandler do
+  @moduledoc """
+  Custom defined Syn's callbacks
+  """
   require Logger
   alias RealtimeWeb.Endpoint
 
