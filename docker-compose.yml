@@ -37,4 +37,4 @@ services:
       ERL_AFLAGS: -proto_dist inet_tcp
       ENABLE_TAILSCALE: false
       DNS_NODES: "''"
-    command: sh -c "/app/bin/migrate && /app/bin/server"
+    command: sh -c "/app/bin/migrate && /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)' && /app/bin/server"
