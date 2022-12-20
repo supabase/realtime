@@ -16,7 +16,7 @@ defmodule RealtimeWeb.Endpoint do
       fullsweep_after: 20,
       max_frame_size: 8_000_000
     ],
-    longpoll: false
+    longpoll: true
 
   socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
 
