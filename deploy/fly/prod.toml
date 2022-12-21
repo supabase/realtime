@@ -4,7 +4,7 @@ kill_timeout = 5
 processes = []
 
 [deploy]
-  release_command = "/app/bin/realtime eval Realtime.Release.migrate"
+  release_command = "/app/bin/migrate"
   strategy = "rolling"
 
 [env]
