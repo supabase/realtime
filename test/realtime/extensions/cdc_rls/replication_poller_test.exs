@@ -1,7 +1,8 @@
 defmodule ReplicationPollerTest do
   use ExUnit.Case
 
-  import Extensions.PostgresCdcRls.ReplicationPoller, only: [generate_record: 1]
+  alias Extensions.PostgresCdcRls.ReplicationPoller, as: Poller
+  import Poller, only: [generate_record: 1]
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
@@ -283,5 +284,17 @@ defmodule ReplicationPollerTest do
     }
 
     assert expected == generate_record(record)
+  end
+
+  describe "slot_name_suffix" do
+    test "when no SLOT_NAME_SUFFIX" do
+      System.delete_env("SLOT_NAME_SUFFIX")
+      assert Poller.slot_name_suffix() == ""
+    end
+
+    test "when SLOT_NAME_SUFFIX defined" do
+      System.put_env("SLOT_NAME_SUFFIX", "some_val")
+      assert Poller.slot_name_suffix() == "_some_val"
+    end
   end
 end
