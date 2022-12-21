@@ -56,6 +56,32 @@ defmodule Realtime.Helpers do
     )
   end
 
+  @doc """
+  Gets the external id from a host connection string found in the conn.
+
+  ## Examples
+
+      iex> Realtime.Helpers.get_external_id("tenant.realtime.supabase.co")
+      {:ok, "tenant"}
+
+      iex> Realtime.Helpers.get_external_id("tenant.supabase.co")
+      {:ok, "tenant"}
+
+      iex> Realtime.Helpers.get_external_id("www.supabase.co")
+      {:error, :tenant_not_found_in_host}
+
+  """
+
+  @spec get_external_id(String.t()) :: {:ok, String.t()} | {:error, atom()}
+  def get_external_id(host) when is_binary(host) do
+    case String.split(host, ".", parts: 2) do
+      [] -> {:error, :tenant_not_found_in_host}
+      [_] -> {:error, :tenant_not_found_in_host}
+      ["www", _] -> {:error, :tenant_not_found_in_host}
+      [id, _] -> {:ok, id}
+    end
+  end
+
   defp pad(data) do
     to_add = 16 - rem(byte_size(data), 16)
     data <> :binary.copy(<<to_add>>, to_add)

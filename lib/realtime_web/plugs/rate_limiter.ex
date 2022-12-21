@@ -32,7 +32,7 @@ defmodule RealtimeWeb.Plugs.RateLimiter do
       |> put_resp_header("x-rate-limit", Integer.to_string(max))
       |> put_resp_header("x-rate-limit-remaining", Integer.to_string(max - avg))
 
-    if avg > max do
+    if avg >= max do
       conn
       |> put_status(429)
       |> json(%{message: "Too many requests"})
