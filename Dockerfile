@@ -101,9 +101,9 @@ RUN chown nobody /app
 ENV MIX_ENV="prod"
 
 # put commit sha
-# deploy with `flyctl deploy --build-arg COMMIT=$(git rev-parse --short HEAD)`
-ARG COMMIT
-ENV COMMIT_SHA="${COMMIT}"
+# deploy with `flyctl deploy --build-arg SLOT_NAME_SUFFIX=$(git rev-parse --short HEAD)`
+ARG SLOT_NAME_SUFFIX
+ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}"
 
 # Only copy the final release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
