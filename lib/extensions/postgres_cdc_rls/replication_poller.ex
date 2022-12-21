@@ -58,7 +58,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       poll_interval_ms: args["poll_interval_ms"],
       poll_ref: make_ref(),
       publication: args["publication"],
-      slot_name: args["slot_name"],
+      slot_name: args["slot_name"] <> slot_name_suffix(),
       tenant: args["id"]
     }
 
@@ -267,5 +267,16 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       ],
       socket_options: socket_opts
     )
+  end
+
+  def slot_name_suffix() do
+    case System.get_env("SLOT_NAME_SUFFIX") do
+      nil ->
+        ""
+
+      value ->
+        Logger.debug("Using slot name suffix: " <> value)
+        "_" <> value
+    end
   end
 end
