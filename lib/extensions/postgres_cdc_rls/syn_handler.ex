@@ -1,4 +1,7 @@
 defmodule Extensions.PostgresCdcRls.SynHandler do
+  @moduledoc """
+  Custom defined Syn's callbacks
+  """
   require Logger
   alias RealtimeWeb.Endpoint
 
@@ -43,9 +46,13 @@ defmodule Extensions.PostgresCdcRls.SynHandler do
           end
       end
 
-    target = node(stop)
-    Logger.warn("Resolving #{name} conflict, target: #{inspect(target)}")
-    :rpc.call(target, DynamicSupervisor, :stop, [stop, :normal, 15_000])
+    if node() == node(stop) do
+      resp = DynamicSupervisor.stop(stop, :shutdown, 4_000)
+      "Resolving #{name} conflict, stop local pid: #{inspect(stop)}, response: #{inspect(resp)}"
+    else
+      "Resolving #{name} conflict, remote pid: #{inspect(stop)}"
+    end
+    |> Logger.warn()
 
     keep
   end
