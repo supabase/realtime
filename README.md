@@ -153,7 +153,7 @@ NUM_ACCEPTORS              # {string}     Set the number of server processes tha
 DB_QUEUE_TARGET            # {string}     Maximum time to wait for a connection from the pool. Defaults to '5000' or 5 seconds. See for more info: https://hexdocs.pm/db_connection/DBConnection.html#start_link/2-queue-config.
 DB_QUEUE_INTERVAL          # {string}     Interval to wait to check if all connections were checked out under DB_QUEUE_TARGET. If all connections surpassed the target during this interval than the target is doubled. Defaults to '5000' or 5 seconds. See for more info: https://hexdocs.pm/db_connection/DBConnection.html#start_link/2-queue-config.
 DB_POOL_SIZE               # {string}     Sets the number of connections in the database pool. Defaults to '5'.
-SLOT_NAME_SUFFIX           # {string}     If defined, it adds a string to the end of the replication slot, which allows making a random name. May contain lowercase letters, numbers, and the underscore character. Together with `slot_name` should be up to 63 characters long. If the name exceeds this limit, it will be truncated to 63 characters.
+SLOT_NAME_SUFFIX           # {string}     This is appended to the replication slot which allows making a custom slot name. May contain lowercase letters, numbers, and the underscore character. Together with the default `supabase_realtime_replication_slot`, slot name should be up to 64 characters long.
 ```
 
 
