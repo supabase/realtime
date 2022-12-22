@@ -1,4 +1,8 @@
 defmodule Extensions.PostgresCdcStream.Tracker do
+  @moduledoc """
+  Tracks the state of the CDC stream and broadcasts a message to the channel
+  when the stream is down.
+  """
   use Phoenix.Tracker
   require Logger
 

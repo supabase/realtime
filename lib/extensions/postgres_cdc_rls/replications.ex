@@ -1,4 +1,7 @@
 defmodule Extensions.PostgresCdcRls.Replications do
+  @moduledoc """
+  SQL queries that use PostgresCdcRls.ReplicationPoller to create a temporary slot and poll the write-ahead log.
+  """
   require Logger
   import Postgrex, only: [query: 3]
 

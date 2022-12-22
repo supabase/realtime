@@ -2,7 +2,7 @@
 # License: https://github.com/phoenixframework/phoenix/blob/518a4640a70aa4d1370a64c2280d598e5b928168/LICENSE.md
 
 defmodule Extensions.PostgresCdcStream.MessageDispatcher do
-  @doc """
+  @moduledoc """
   Hook invoked by Phoenix.PubSub dispatch.
   """
 

@@ -4,6 +4,9 @@
 require Protocol
 
 defmodule Realtime.Adapters.Changes do
+  @moduledoc """
+  This module provides structures of CDC changes.
+  """
   defmodule(Transaction, do: defstruct([:changes, :commit_timestamp]))
 
   defmodule NewRecord do
