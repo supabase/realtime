@@ -2,7 +2,7 @@ name: MT Staging Formatting Checks
 on:
   pull_request:
     branches:
-      - rc-dev
+      - develop
 jobs:
   format:
     name: Formatting Checks
