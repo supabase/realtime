@@ -31,7 +31,7 @@
 | Broadcast        |          |     ✔    |   Beta   |  
 | Presence         |          |     ✔    |   Beta   |
 
-This repository focuses on version 2 but you can still access the previous version's [code](https://github.com/supabase/realtime/tree/single-tenant-main) and [Docker image](https://hub.docker.com/layers/supabase/realtime/v0.25.1/images/sha256-7fc3731782f80e1f5e8b375bce0ebb223229690da1b73997e44dbb31a16fe885?context=explore). For the latest Docker images go to https://hub.docker.com/r/supabase/realtime.
+This repository focuses on version 2 but you can still access the previous version's [code](https://github.com/supabase/realtime/tree/v1) and [Docker image](https://hub.docker.com/layers/supabase/realtime/v1.0.0/images/sha256-e2766e0e3b0d03f7e9aa1b238286245697d0892c2f6f192fd2995dca32a4446a). For the latest Docker images go to https://hub.docker.com/r/supabase/realtime.
 
 The codebase is under heavy development and the documentation is constantly evolving. Give it a try and let us know what you think by creating an issue. Watch [releases](https://github.com/supabase/realtime/releases) of this repo to get notified of updates. And give us a star if you like it!
 
