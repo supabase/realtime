@@ -1,4 +1,8 @@
 defmodule Extensions.PostgresCdcRls.DbSettings do
+  @moduledoc """
+  Schema callbacks for CDC RLS implementation.
+  """
+
   def default() do
     %{
       "poll_interval_ms" => 100,

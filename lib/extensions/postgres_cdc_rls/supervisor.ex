@@ -1,4 +1,7 @@
 defmodule Extensions.PostgresCdcRls.Supervisor do
+  @moduledoc """
+  Supervisor to spin up the Postgres CDC RLS tree.
+  """
   use Supervisor
 
   alias Extensions.PostgresCdcRls, as: Rls

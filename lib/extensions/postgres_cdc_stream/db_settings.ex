@@ -1,4 +1,8 @@
 defmodule Extensions.PostgresCdcStream.DbSettings do
+  @moduledoc """
+  Schema callbacks for CDC Stream implementation.
+  """
+
   @spec default :: map()
   def default() do
     %{
