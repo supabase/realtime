@@ -1,4 +1,8 @@
 defmodule Realtime.OsMetrics do
+  @moduledoc """
+  This module provides functions to get CPU and RAM usage.
+  """
+
   @spec ram_usage() :: float()
   def ram_usage() do
     mem = :memsup.get_system_memory_data()

@@ -1,4 +1,7 @@
 defmodule Extensions.PostgresCdcStream.Supervisor do
+  @moduledoc """
+  Supervisor to spin up the Postgres CDC Sream tree.
+  """
   use Supervisor
 
   alias Extensions.PostgresCdcStream, as: Stream
