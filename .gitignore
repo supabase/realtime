@@ -1,6 +1,3 @@
-node_modules
-.examples
-
 # The directory Mix will write compiled artifacts to.
 /_build/
 
@@ -25,19 +22,16 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 realtime-*.tar
 
-# If NPM crashes, it generates a log, let's ignore it too.
-npm-debug.log
+# Ignore assets that are produced by build tools.
+/priv/static/assets/
 
-# The directory NPM downloads your dependencies sources to.
-/assets/node_modules/
+# Ignore Dialyzer .plt
+/priv/plts/*
 
-# Since we are building assets from assets/,
-# we ignore priv/static. You may want to comment
-# this depending on your deployment strategy.
-/priv/static/
+node_modules
 
-_build/
-deps/
-server/_build
-server/deps
-.DS_Store
+.supabase
+
+config/prod.secret.exs
+
+demo/.env

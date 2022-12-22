@@ -1,0 +1,16 @@
+name: MT Deploy Staging
+on:
+  push:
+    branches:
+      - rc-dev
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: superfly/flyctl-actions@1.1
+        with:
+          args: "-c deploy/fly/staging.toml deploy --build-arg SLOT_NAME_SUFFIX=${GITHUB_SHA::6}"

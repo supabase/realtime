@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  db:
+    image: supabase/postgres:14.1.0.105
+    container_name: realtime-db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./dev/postgres:/docker-entrypoint-initdb.d/
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf 
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PASSWORD: postgres

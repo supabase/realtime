@@ -1,0 +1,31 @@
+name: MT Supabench
+on:
+  push:
+    branches:
+      - rc-dev
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}      
+jobs:
+  deploy:
+    name: Deploy QA application
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: superfly/flyctl-actions@1.1
+        with:
+          args: "-c deploy/fly/qa.toml scale count 1"
+      - uses: superfly/flyctl-actions@1.1
+        with:
+          args: "-c deploy/fly/qa.toml deploy --build-arg SLOT_NAME_SUFFIX=${GITHUB_SHA::6}"
+      - uses: superfly/flyctl-actions@1.1
+        if: always()
+        with:
+          args: "-c deploy/fly/qa.toml scale count 0"
+      - name: Get PR into variable
+        run: echo "PR_NUM=$(git show -s --format=%s | grep -Po '(?#)[0-9]*')" >> $GITHUB_ENV
+      - name: Start Supabench
+        run: |
+          curl --request POST \
+          --url https://supabench.fly.dev/api/runs \
+          --header 'Authorization: User ${{ secrets.BENCHMARK_JWT }}' \
+          --data '{"benchmark_id":"SyMKxU3TOiWcAvU","name":"PR ${{ env.PR_NUM }}","comment": "https://github.com/supabase/realtime/pull/${{ env.PR_NUM }}", "origin":"rc-dev"}'

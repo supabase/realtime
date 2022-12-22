@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@supabase/realtime-js": "^2.1.0"
+  }
+}

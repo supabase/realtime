@@ -1,0 +1,118 @@
+<div>
+    <.form 
+        id="conn_form"
+        let={f} 
+        for={@changeset} 
+        phx-change="validate" 
+        class="bg-white rounded"
+        phx-submit="connect"
+        phx-target={@myself}
+        >
+        <div class="my-4">
+            <%= label f, :project, class: "block text-gray-700 text-sm font-bold mb-2" %>
+            <%= text_input f, :project, placeholder: "project_ref", class: "
+                    my-1
+                    block
+                    w-full
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  " %>
+            <%= error_tag f, :project %>
+            <p class="text-gray-600 text-xs italic">Supabase platform project `Reference ID` or...</p>
+        </div>
+        <div class="mb-4">
+            <%= label f, :path, class: "block text-gray-700 text-sm font-bold mb-2" %>
+            <%= text_input f, :path, placeholder: "wss://project_ref.supabase.co/realtime/v1", class: "
+                    my-1
+                    block
+                    w-full
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  " %>
+            <%= error_tag f, :path %>
+            <p class="text-gray-600 text-xs italic">The websocket path to connect to</p>
+        </div>
+        <div class="mb-4">
+            <%= label f, :channel, class: "block text-gray-700 text-sm font-bold mb-2" %>
+            <%= text_input f, :channel, placeholder: "room_a",class: "
+                    my-1
+                    block
+                    w-full
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  " %>
+            <%= error_tag f, :channel %>
+            <p class="text-gray-600 text-xs italic">The Channel to connect to</p>
+        </div>
+        <div class="mb-4">
+            <%= label f, :schema, class: "block text-gray-700 text-sm font-bold mb-2" %>
+            <%= text_input f, :schema, placeholder: "public",class: "
+                    my-1
+                    block
+                    w-full
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  " %>
+            <%= error_tag f, :schema %>
+            <p class="text-gray-600 text-xs italic">Listen to changes from tables in this schema</p>
+        </div>
+        <div class="mb-4">
+            <%= label f, :table, class: "block text-gray-700 text-sm font-bold mb-2" %>
+            <%= text_input f, :table, placeholder: "*",class: "
+                    my-1
+                    block
+                    w-full
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  " %>
+            <%= error_tag f, :table %>
+            <p class="text-gray-600 text-xs italic">Listen to changes from this table</p>
+        </div>
+        <div class="mb-4">
+            <%= label f, :log_level, class: "block text-gray-700 text-sm font-bold mb-2" %>
+            <%= select f, :log_level, ["debug", "info", "warn", "error"], selected: "info", class: "
+                    my-1
+                    block
+                    w-full
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  " %>
+            <%= error_tag f, :log_level %>
+            <p class="text-gray-600 text-xs italic">Set the backend log level for this connection</p>
+        </div>
+        <div class="mb-4">
+            <%= label f, :token, class: "block text-gray-700 text-sm font-bold mb-2" %>
+            <%= password_input f, :token, value: (Ecto.Changeset.get_field(@changeset, :token)), class: "
+                    my-1
+                    block
+                    w-full
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  " %>
+            <%= error_tag f, :token %>
+            <p class="text-gray-600 text-xs italic">Your Supabase `anon_key` or Auth user JWT</p>
+        </div>
+        <div class="flex flex-row justify-between items-center py-6">
+            <div>
+                <%= submit (@subscribed_state), class: "bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none" %>
+            </div>
+            <div>
+                <.gray_link_button phx-click="clear_local_storage" phx-target={@myself}>Reset</.gray_link_button>
+            </div>
+        </div>
+    </.form>
+</div>
