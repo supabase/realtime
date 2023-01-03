@@ -73,7 +73,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     socket = socket |> assign_access_token(params) |> assign_counter()
 
-    with nil <- Application.get_env(:realtime, :shutdown),
+    with nil <- Application.get_env(:realtime, :shutdown_in_progress),
          :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket),

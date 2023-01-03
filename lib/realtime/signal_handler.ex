@@ -14,7 +14,7 @@ defmodule Realtime.SignalHandler do
     Logger.warn("#{__MODULE__}: #{inspect(signal)} received")
 
     if signal == :sigterm do
-      Application.put_env(:realtime, :shutdown, true)
+      Application.put_env(:realtime, :shutdown_in_progress, true)
     end
 
     :erl_signal_handler.handle_event(signal, state)
