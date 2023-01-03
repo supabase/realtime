@@ -3,6 +3,11 @@ defmodule Realtime.SignalHandler do
   @behaviour :gen_event
   require Logger
 
+  @spec shutdown_in_progress? :: boolean()
+  def shutdown_in_progress? do
+    !!Application.get_env(:realtime, :shutdown_in_progress)
+  end
+
   @impl true
   def init(_) do
     Logger.info("#{__MODULE__} is being initialized...")
