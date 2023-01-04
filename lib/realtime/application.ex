@@ -23,6 +23,13 @@ defmodule Realtime.Application do
       end
     end
 
+    :ok =
+      :gen_event.swap_sup_handler(
+        :erl_signal_server,
+        {:erl_signal_handler, []},
+        {Realtime.SignalHandler, []}
+      )
+
     Realtime.PromEx.set_metrics_tags()
 
     Registry.start_link(
