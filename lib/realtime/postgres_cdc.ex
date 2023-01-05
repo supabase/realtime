@@ -28,6 +28,7 @@ defmodule Realtime.PostgresCdc do
     end)
   end
 
+  @spec available_drivers :: list
   def available_drivers() do
     @extensions
     |> Enum.filter(fn {_, e} -> e.type == :postgres_cdc end)
@@ -57,26 +58,28 @@ defmodule Realtime.PostgresCdc do
     end
   end
 
-  def aws_to_fly(aws_region) do
+  @spec aws_to_fly(String.t()) :: nil | <<_::24>>
+  def aws_to_fly(aws_region) when is_binary(aws_region) do
     case aws_region do
       "us-east-1" -> "iad"
-      "us-west-1" -> "iad"
+      "us-west-1" -> "sjc"
       "sa-east-1" -> "gru"
       "ca-central-1" -> "iad"
-      "ap-southeast-1" -> "sin"
-      "ap-northeast-1" -> "sin"
-      "ap-northeast-2" -> "sin"
-      "ap-southeast-2" -> "sin"
-      "ap-south-1" -> "sin"
-      "eu-west-1" -> "fra"
-      "eu-west-2" -> "fra"
-      "eu-west-3" -> "fra"
+      "ap-southeast-1" -> "maa"
+      "ap-northeast-1" -> "maa"
+      "ap-northeast-2" -> "maa"
+      "ap-southeast-2" -> "maa"
+      "ap-south-1" -> "maa"
+      "eu-west-1" -> "lhr"
+      "eu-west-2" -> "lhr"
+      "eu-west-3" -> "lhr"
       "eu-central-1" -> "fra"
       _ -> nil
     end
   end
 
-  def region_nodes(region) do
+  @spec region_nodes(String.t()) :: [{pid, any}]
+  def region_nodes(region) when is_binary(region) do
     :syn.members(RegionNodes, region)
   end
 
