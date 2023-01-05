@@ -7,10 +7,13 @@ defmodule Realtime.Repo do
   @pool_size 2
 
   @replicas %{
-    "fra" => Realtime.Repo.Replica.FRA,
+    "sjc" => Realtime.Repo.Replica.IAD,
     "gru" => Realtime.Repo.Replica.IAD,
     "iad" => Realtime.Repo.Replica.IAD,
-    "sin" => Realtime.Repo.Replica.SIN
+    "sin" => Realtime.Repo.Replica.SIN,
+    "maa" => Realtime.Repo.Replica.SIN,
+    "lhr" => Realtime.Repo.Replica.FRA,
+    "fra" => Realtime.Repo.Replica.FRA
   }
 
   def with_dynamic_repo(credentials, callback) do
