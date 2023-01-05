@@ -22,19 +22,17 @@
   </p>
 </p>
 
-
 ## Status
 
-| Features         |    v1    |    v2    |  Status  |
-|------------------|----------|----------|----------|
-| Postgres Changes |     ✔    |     ✔    |    GA    |
-| Broadcast        |          |     ✔    |   Beta   |  
-| Presence         |          |     ✔    |   Beta   |
+| Features         | v1  | v2  | Status |
+| ---------------- | --- | --- | ------ |
+| Postgres Changes | ✔   | ✔   | GA     |
+| Broadcast        |     | ✔   | Beta   |
+| Presence         |     | ✔   | Beta   |
 
 This repository focuses on version 2 but you can still access the previous version's [code](https://github.com/supabase/realtime/tree/v1) and [Docker image](https://hub.docker.com/layers/supabase/realtime/v1.0.0/images/sha256-e2766e0e3b0d03f7e9aa1b238286245697d0892c2f6f192fd2995dca32a4446a). For the latest Docker images go to https://hub.docker.com/r/supabase/realtime.
 
 The codebase is under heavy development and the documentation is constantly evolving. Give it a try and let us know what you think by creating an issue. Watch [releases](https://github.com/supabase/realtime/releases) of this repo to get notified of updates. And give us a star if you like it!
-
 
 ## Overview
 
@@ -50,19 +48,16 @@ For a more detailed overview head over to [Realtime guides](https://supabase.com
 
 ### Does this server guarantee message delivery?
 
-The server does not guarantee that every message will be delivered to your clients so keep that in mind as you're using Realtime. 
-
+The server does not guarantee that every message will be delivered to your clients so keep that in mind as you're using Realtime.
 
 ## Quick start
 
 You can check out the [Multiplayer demo](https://multiplayer.dev) that features Broadcast, Presence and Postgres Changes under the demo directory: https://github.com/supabase/realtime/tree/main/demo.
 
-
 ## Client libraries
 
 - JavaScript: [@supabase/realtime-js](https://github.com/supabase/realtime-js)
 - Dart: [@supabase/realtime-dart](https://github.com/supabase/realtime-dart)
-
 
 ## Server Setup
 
@@ -156,30 +151,28 @@ DB_POOL_SIZE               # {string}     Sets the number of connections in the 
 SLOT_NAME_SUFFIX           # {string}     This is appended to the replication slot which allows making a custom slot name. May contain lowercase letters, numbers, and the underscore character. Together with the default `supabase_realtime_replication_slot`, slot name should be up to 64 characters long.
 ```
 
-
 ## Websocket Connection Authorization
 
 Websocket connections are authorized via symmetric JWT verification. Only supports JWTs signed with the following algorithms:
-  - HS256
-  - HS384
-  - HS512
+
+- HS256
+- HS384
+- HS512
 
 Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
 
-  > e.g. {'iss': 'Issuer', 'nbf': 1610078130}
-  >
-  > Then JWT's "iss" value must equal "Issuer" and "nbf" value must equal 1610078130.
+> e.g. {'iss': 'Issuer', 'nbf': 1610078130}
+>
+> Then JWT's "iss" value must equal "Issuer" and "nbf" value must equal 1610078130.
 
 > **Note:**  
 > JWT expiration is checked automatically. `exp` and `role` (database role) keys are mandatory.
 
 **Authorizing Client Connection**: You can pass in the JWT by following the instructions under the Realtime client lib. For example, refer to the **Usage** section in the [@supabase/realtime-js](https://github.com/supabase/realtime-js) client library.
 
-
 ## License
 
 This repo is licensed under Apache 2.0.
-
 
 ## Credits
 
