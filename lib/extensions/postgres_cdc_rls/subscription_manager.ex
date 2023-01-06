@@ -61,6 +61,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       "subs_pool_size" => subs_pool_size
     } = args
 
+    Logger.metadata(external_id: id, project: id)
+
     {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1)
     {:ok, conn_pub} = H.connect_db(host, port, name, user, pass, socket_opts, subs_pool_size)
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
