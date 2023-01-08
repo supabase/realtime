@@ -79,16 +79,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       Subscriptions.delete_multi(state.conn, ids)
     end
 
-    new_ref =
-      if :ets.info(tid, :size) == 0 do
-        Logger.debug("Cancel check_active_pids")
-        Rls.handle_stop(state.id, 15_000)
-        nil
-      else
-        check_active_pids()
-      end
-
-    {:noreply, %{state | check_active_pids: new_ref}}
+    {:noreply, %{state | check_active_pids: check_active_pids()}}
   end
 
   ## Internal functions
