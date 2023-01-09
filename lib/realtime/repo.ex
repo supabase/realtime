@@ -4,7 +4,7 @@ defmodule Realtime.Repo do
     adapter: Ecto.Adapters.Postgres
 
   @name nil
-  @pool_size 2
+  @pool_size 4
 
   @replicas %{
     "sjc" => Realtime.Repo.Replica.IAD,
