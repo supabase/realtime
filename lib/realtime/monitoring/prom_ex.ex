@@ -1,5 +1,5 @@
 defmodule Realtime.PromEx do
-  alias Realtime.PromEx.Plugins.{OsMon, Phoenix}
+  alias Realtime.PromEx.Plugins.{OsMon, Phoenix, Tenants}
 
   @moduledoc """
   Be sure to add the following to finish setting up PromEx:
@@ -70,7 +70,8 @@ defmodule Realtime.PromEx do
       # {Plugins.Ecto, poll_rate: poll_rate, metric_prefix: [:ecto]},
       # Plugins.Oban,
       # Plugins.PhoenixLiveView
-      {OsMon, poll_rate: poll_rate}
+      {OsMon, poll_rate: poll_rate},
+      {Tenants, poll_rate: poll_rate}
     ]
   end
 
