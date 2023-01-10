@@ -22,7 +22,7 @@ jobs:
         with:
           args: "-c deploy/fly/qa.toml scale count 0"
       - name: Get PR into variable
-        run: echo "PR_NUM=$(git show -s --format=%s | grep -Po '(?#)[0-9]*')" >> $GITHUB_ENV
+        run: echo "PR_NUM=$(git show -s --format=%s | grep -Po '(?<=#)[0-9]*')" >> $GITHUB_ENV
       - name: Start Supabench
         run: |
           curl --request POST \
