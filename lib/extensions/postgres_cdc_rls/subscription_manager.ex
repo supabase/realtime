@@ -179,7 +179,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   def handle_info(:check_no_users, %{subscribers_tid: tid, no_users_ts: ts} = state) do
     H.cancel_timer(state.no_users_ref)
 
-    ts2 =
+    ts_new =
       case {:ets.info(tid, :size), ts != nil && ts + @stop_after < now()} do
         {0, true} ->
           Logger.info("Stop tenant #{state.id} because of no connected users")
@@ -193,7 +193,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
           nil
       end
 
-    {:noreply, %{state | no_users_ts: ts2, no_users_ref: check_no_users()}}
+    {:noreply, %{state | no_users_ts: ts_new, no_users_ref: check_no_users()}}
   end
 
   def handle_info(msg, state) do
