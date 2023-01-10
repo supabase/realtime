@@ -16,8 +16,8 @@ defmodule Realtime.Api.Tenant do
     field(:external_id, :string)
     field(:jwt_secret, :string)
     field(:postgres_cdc_default, :string)
-    field(:max_concurrent_users, :integer)
-    field(:max_events_per_second, :integer)
+    field(:max_concurrent_users, :integer, default: 200)
+    field(:max_events_per_second, :integer, default: 100)
     field(:events_per_second_rolling, :float, virtual: true)
     field(:events_per_second_now, :integer, virtual: true)
 
