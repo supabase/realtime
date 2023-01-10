@@ -40,6 +40,9 @@ defmodule RealtimeWeb.UserSocket do
              jwt_secret: jwt_secret,
              max_concurrent_users: max_conn_users,
              max_events_per_second: max_events_per_second,
+             max_bytes_per_second: max_bytes_per_second,
+             max_joins_per_second: max_joins_per_second,
+             max_channels_per_client: max_channels_per_client,
              postgres_cdc_default: postgres_cdc_default
            } <- Api.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- access_token(params, headers),
@@ -52,7 +55,10 @@ defmodule RealtimeWeb.UserSocket do
             jwt_secret: jwt_secret,
             limits: %{
               max_concurrent_users: max_conn_users,
-              max_events_per_second: max_events_per_second
+              max_events_per_second: max_events_per_second,
+              max_bytes_per_second: max_bytes_per_second,
+              max_joins_per_second: max_joins_per_second,
+              max_channels_per_client: max_channels_per_client
             },
             postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
             postgres_cdc_module: postgres_cdc_module,
