@@ -12,6 +12,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   @timeout 15_000
   @max_delete_records 1000
   @check_oids_interval 60_000
+  @check_no_users_interval 60_000
+  @stop_after 60_000 * 10
 
   defmodule State do
     @moduledoc false
@@ -21,6 +23,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       :subscribers_tid,
       :conn,
       :delete_queue,
+      :no_users_ref,
+      no_users_ts: nil,
       oids: %{},
       check_oid_ref: nil
     ]
@@ -35,7 +39,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
             delete_queue: %{
               ref: reference(),
               queue: :queue.queue()
-            }
+            },
+            no_users_ref: reference(),
+            no_users_ts: non_neg_integer() | nil
           }
   end
 
@@ -76,7 +82,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       delete_queue: %{
         ref: check_delete_queue(),
         queue: :queue.new()
-      }
+      },
+      no_users_ref: check_no_users()
     }
 
     send(self(), :check_oids)
@@ -89,7 +96,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       state.subscribers_tid
       |> :ets.insert({pid, id, Process.monitor(pid)})
 
-    {:noreply, state}
+    {:noreply, %{state | no_users_ts: nil}}
   end
 
   def handle_info(
@@ -169,6 +176,26 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     {:noreply, %{state | delete_queue: %{ref: ref, queue: q1}}}
   end
 
+  def handle_info(:check_no_users, %{subscribers_tid: tid, no_users_ts: ts} = state) do
+    H.cancel_timer(state.no_users_ref)
+
+    ts_new =
+      case {:ets.info(tid, :size), ts != nil && ts + @stop_after < now()} do
+        {0, true} ->
+          Logger.info("Stop tenant #{state.id} because of no connected users")
+          Rls.handle_stop(state.id, 15_000)
+          ts
+
+        {0, false} ->
+          if ts != nil, do: ts, else: now()
+
+        _ ->
+          nil
+      end
+
+    {:noreply, %{state | no_users_ts: ts_new, no_users_ref: check_no_users()}}
+  end
+
   def handle_info(msg, state) do
     Logger.error("Undef msg #{inspect(msg, pretty: true)}")
     {:noreply, state}
@@ -201,6 +228,18 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       self(),
       :check_oids,
       @check_oids_interval
+    )
+  end
+
+  defp now() do
+    System.system_time(:millisecond)
+  end
+
+  defp check_no_users() do
+    Process.send_after(
+      self(),
+      :check_no_users,
+      @check_no_users_interval
     )
   end
 end
