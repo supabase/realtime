@@ -36,7 +36,13 @@ defmodule RealtimeWeb.RealtimeChannel do
             tenant: String.t(),
             log_level: atom(),
             rate_counter: RateCounter.t(),
-            limits: %{max_events_per_second: integer(), max_concurrent_users: integer()},
+            limits: %{
+              max_events_per_second: integer(),
+              max_concurrent_users: integer(),
+              max_bytes_per_second: integer(),
+              max_channels_per_client: integer(),
+              max_joins_per_second: integer()
+            },
             tenant_topic: String.t(),
             pg_sub_ref: reference() | nil,
             pg_change_params: map(),
@@ -50,8 +56,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @confirm_token_ms_interval 1_000 * 60 * 5
-  @max_join_rate 500
-  @max_user_channels 100
 
   @impl true
   def join(
@@ -490,7 +494,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     wait
   end
 
-  def limit_joins(%{assigns: %{tenant: tenant}}) do
+  def limit_joins(%{assigns: %{tenant: tenant, limits: limits}}) do
     id = {:limit, :channel_joins, tenant}
     GenCounter.new(id)
     RateCounter.new(id, idle_shutdown: :infinity)
@@ -498,7 +502,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     case RateCounter.get(id) do
       {:ok, %{avg: avg}} ->
-        if avg < @max_join_rate do
+        if avg < limits.max_joins_per_second do
           :ok
         else
           {:error, :too_many_joins}
@@ -510,10 +514,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def limit_channels(%{assigns: %{tenant: tenant}, transport_pid: pid}) do
+  def limit_channels(%{assigns: %{tenant: tenant, limits: limits}, transport_pid: pid}) do
     key = limit_channels_key(tenant)
 
-    if Registry.count_match(Realtime.Registry, key, pid) > @max_user_channels do
+    if Registry.count_match(Realtime.Registry, key, pid) > limits.max_channels_per_client do
       {:error, :too_many_channels}
     else
       Registry.register(Realtime.Registry, limit_channels_key(tenant), pid)
