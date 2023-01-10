@@ -29,7 +29,10 @@ defmodule Realtime.Extensions.CdcRlsTest do
       claims: %{},
       limits: %{
         max_concurrent_users: 1,
-        max_events_per_second: 100
+        max_events_per_second: 100,
+        max_joins_per_second: 500,
+        max_channels_per_client: 100,
+        max_bytes_per_second: 100_000
       },
       is_new_api: false,
       log_level: :info
