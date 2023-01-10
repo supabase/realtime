@@ -44,6 +44,7 @@ defmodule Extensions.PostgresCdcRls.Migrations do
         database: name,
         password: pass,
         username: user,
+        pool_size: 2,
         socket_options: args["db_socket_opts"]
       ],
       fn repo ->
