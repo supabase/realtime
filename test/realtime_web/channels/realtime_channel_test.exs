@@ -9,6 +9,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   @tenant "dev_tenant"
 
+  @default_limits %{
+    max_concurrent_users: 200,
+    max_events_per_second: 100,
+    max_joins_per_second: 500,
+    max_channels_per_client: 100,
+    max_bytes_per_second: 100_000
+  }
+
   setup do
     {:ok, _pid} = start_supervised(CurrentTime.Mock)
     :ok
@@ -30,7 +38,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
             x_headers: [{"x-api-key", "token123"}]
           })
 
-        socket = Socket.assign(socket, %{limits: %{max_concurrent_users: 1}})
+        socket = Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 1}})
         assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
       end
     end
@@ -50,8 +58,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
             x_headers: [{"x-api-key", "token123"}]
           })
 
-        socket_at_capacity = Socket.assign(socket, %{limits: %{max_concurrent_users: 0}})
-        socket_over_capacity = Socket.assign(socket, %{limits: %{max_concurrent_users: -1}})
+        socket_at_capacity =
+          Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 0}})
+
+        socket_over_capacity =
+          Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: -1}})
 
         assert {:error, %{reason: "{:error, :too_many_connections}"}} =
                  subscribe_and_join(socket_at_capacity, "realtime:test", %{})
