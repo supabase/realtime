@@ -87,7 +87,7 @@ config :libcluster,
     dev: [
       strategy: Cluster.Strategy.Epmd,
       config: [
-        hosts: [:"orange@127.0.0.1", :"pink@127.0.0.1"]
+        # hosts: [:"orange@127.0.0.1", :"pink@127.0.0.1"]
       ],
       connect: {:net_kernel, :connect_node, []},
       disconnect: {:net_kernel, :disconnect_node, []}

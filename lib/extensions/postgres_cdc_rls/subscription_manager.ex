@@ -71,8 +71,15 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1)
     {:ok, conn_pub} = H.connect_db(host, port, name, user, pass, socket_opts, subs_pool_size)
-    {:ok, _} = Subscriptions.maybe_delete_all(conn)
-    Rls.update_meta(id, self(), conn_pub)
+
+    case Rls.update_meta(id, self(), conn_pub) do
+      {:ok, {_, %{manager: pid}}} when pid == self() ->
+        {:ok, _} = Subscriptions.maybe_delete_all(conn)
+
+      r ->
+        Logger.error("Failed to update meta #{inspect(r, pretty: true)}")
+        Rls.handle_stop(id, 15000)
+    end
 
     state = %State{
       id: id,
