@@ -6,16 +6,11 @@ defmodule Extensions.PostgresCdcRls.SynHandler do
   alias RealtimeWeb.Endpoint
 
   def on_process_unregistered(Extensions.PostgresCdcRls, name, _pid, _meta, reason) do
-    Logger.info("PostgresCdcRls terminated: #{inspect(name)} #{node()}")
+    Logger.warn("PostgresCdcRls terminated: #{inspect(name)} #{node()}")
 
-    broadcast_method =
-      if reason == :syn_conflict_resolution do
-        :broadcast
-      else
-        :local_broadcast
-      end
-
-    apply(Endpoint, broadcast_method, ["postgres_cdc:" <> name, "postgres_cdc_down", nil])
+    if reason != :syn_conflict_resolution do
+      Endpoint.local_broadcast("postgres_cdc:" <> name, "postgres_cdc_down", nil)
+    end
   end
 
   def resolve_registry_conflict(
@@ -51,13 +46,15 @@ defmodule Extensions.PostgresCdcRls.SynHandler do
         resp =
           if Process.alive?(stop) do
             try do
-              DynamicSupervisor.stop(stop, :shutdown, 15_000)
+              DynamicSupervisor.stop(stop, :shutdown, 30_000)
             catch
               error, reason -> {:error, {error, reason}}
             end
           else
             :not_alive
           end
+
+        Endpoint.broadcast("postgres_cdc:" <> name, "postgres_cdc_down", nil)
 
         Logger.warn(
           "Resolving #{name} conflict, stop local pid: #{inspect(stop)}, response: #{inspect(resp)}"
