@@ -171,8 +171,16 @@ defmodule Extensions.PostgresCdcRls do
 
   @spec update_meta(String.t(), pid(), pid()) :: {:ok, {pid(), term()}} | {:error, term()}
   def update_meta(tenant, manager_pid, subs_pool) do
-    :syn.update_registry(__MODULE__, tenant, fn _, meta ->
-      %{meta | manager: manager_pid, subs_pool: subs_pool}
+    :syn.update_registry(__MODULE__, tenant, fn pid, meta ->
+      if node(pid) == node(manager_pid) do
+        %{meta | manager: manager_pid, subs_pool: subs_pool}
+      else
+        Logger.error(
+          "Node mismatch for tenant #{tenant} #{inspect(node(pid))} #{inspect(node(manager_pid))}"
+        )
+
+        meta
+      end
     end)
   end
 end
