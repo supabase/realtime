@@ -63,16 +63,16 @@ defmodule Realtime.PostgresCdc do
     case aws_region do
       "us-east-1" -> "iad"
       "us-west-1" -> "sjc"
-      "sa-east-1" -> "gru"
+      "sa-east-1" -> "iad"
       "ca-central-1" -> "iad"
       "ap-southeast-1" -> "sin"
       "ap-northeast-1" -> "sin"
       "ap-northeast-2" -> "sin"
       "ap-southeast-2" -> "sin"
       "ap-south-1" -> "sin"
-      "eu-west-1" -> "lhr"
-      "eu-west-2" -> "lhr"
-      "eu-west-3" -> "lhr"
+      "eu-west-1" -> "fra"
+      "eu-west-2" -> "fra"
+      "eu-west-3" -> "fra"
       "eu-central-1" -> "fra"
       _ -> nil
     end
