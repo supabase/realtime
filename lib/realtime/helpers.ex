@@ -82,16 +82,6 @@ defmodule Realtime.Helpers do
     end
   end
 
-  defp pad(data) do
-    to_add = 16 - rem(byte_size(data), 16)
-    data <> :binary.copy(<<to_add>>, to_add)
-  end
-
-  defp unpad(data) do
-    to_remove = :binary.last(data)
-    :binary.part(data, 0, byte_size(data) - to_remove)
-  end
-
   def decrypt_creds(host, port, name, user, pass) do
     secure_key = Application.get_env(:realtime, :db_enc_key)
 
@@ -102,5 +92,24 @@ defmodule Realtime.Helpers do
       decrypt!(user, secure_key),
       decrypt!(pass, secure_key)
     }
+  end
+
+  def short_node_id() do
+    fly_alloc_id = Application.get_env(:realtime, :fly_alloc_id)
+
+    case String.split(fly_alloc_id, "-", parts: 2) do
+      [short_alloc_id, _] -> short_alloc_id
+      _ -> fly_alloc_id
+    end
+  end
+
+  defp pad(data) do
+    to_add = 16 - rem(byte_size(data), 16)
+    data <> :binary.copy(<<to_add>>, to_add)
+  end
+
+  defp unpad(data) do
+    to_remove = :binary.last(data)
+    :binary.part(data, 0, byte_size(data) - to_remove)
   end
 end
