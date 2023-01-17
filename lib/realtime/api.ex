@@ -4,7 +4,7 @@ defmodule Realtime.Api do
   """
   require Logger
 
-  import Ecto.Query, warn: false, only: [from: 2]
+  import Ecto.Query
 
   alias Realtime.{Repo, Api.Tenant, Api.Extensions, RateCounter, GenCounter}
 
@@ -17,10 +17,21 @@ defmodule Realtime.Api do
       [%Tenant{}, ...]
 
   """
-  def list_tenants do
+  def list_tenants() do
     repo_replica = Repo.replica()
 
     Tenant
+    |> repo_replica.all()
+    |> repo_replica.preload(:extensions)
+  end
+
+  def list_tenants(opts) when is_list(opts) do
+    repo_replica = Repo.replica()
+
+    field = Keyword.get(opts, :order_by, "inserted_at") |> String.to_existing_atom()
+
+    Tenant
+    |> order_by(desc: ^field)
     |> repo_replica.all()
     |> repo_replica.preload(:extensions)
   end
