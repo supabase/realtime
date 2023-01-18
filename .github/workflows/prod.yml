@@ -2,7 +2,7 @@ name: MT Deploy Production
 on:
   push:
     branches:
-      - main
+      - release
 
 jobs:
   release:
