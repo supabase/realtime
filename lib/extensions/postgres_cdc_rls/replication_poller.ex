@@ -43,7 +43,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       backoff:
         Backoff.new(
           backoff_min: 100,
-          backoff_max: 120_000,
+          backoff_max: 5_000,
           backoff_type: :rand_exp
         ),
       conn: conn,
@@ -56,37 +56,21 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       max_changes: args["poll_max_changes"],
       max_record_bytes: args["poll_max_record_bytes"],
       poll_interval_ms: args["poll_interval_ms"],
-      poll_ref: make_ref(),
+      poll_ref: nil,
       publication: args["publication"],
+      retry_ref: nil,
       slot_name: args["slot_name"] <> slot_name_suffix(),
       tenant: args["id"]
     }
 
     Logger.metadata(external_id: state.tenant, project: state.tenant)
 
-    {:ok, state, {:continue, :prepare_replication}}
+    {:ok, state, {:continue, :prepare}}
   end
 
   @impl true
-  def handle_continue(
-        :prepare_replication,
-        %{
-          backoff: backoff,
-          conn: conn,
-          slot_name: slot_name
-        } = state
-      ) do
-    case Replications.prepare_replication(conn, slot_name) do
-      {:ok, _} ->
-        send(self(), :poll)
-        {:noreply, state}
-
-      {:error, error} ->
-        Logger.error("Prepare replication error: #{inspect(error)}")
-        {timeout, backoff} = Backoff.backoff(backoff)
-        Process.sleep(timeout)
-        {:noreply, %{state | backoff: backoff}, {:continue, :prepare_replication}}
-    end
+  def handle_continue(:prepare, state) do
+    {:noreply, prepare_replication(state)}
   end
 
   @impl true
@@ -97,6 +81,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           poll_interval_ms: poll_interval_ms,
           poll_ref: poll_ref,
           publication: publication,
+          retry_ref: retry_ref,
           slot_name: slot_name,
           max_record_bytes: max_record_bytes,
           max_changes: max_changes,
@@ -105,6 +90,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         } = state
       ) do
     cancel_timer(poll_ref)
+    cancel_timer(retry_ref)
 
     try do
       Replications.list_changes(conn, slot_name, publication, max_changes, max_record_bytes)
@@ -167,10 +153,16 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         Logger.error("Error polling replication: #{inspect(reason, pretty: true)}")
 
         {timeout, backoff} = Backoff.backoff(backoff)
-        Process.sleep(timeout)
+        retry_ref = Process.send_after(self(), :retry, timeout)
 
-        {:noreply, %{state | backoff: backoff}, {:continue, :prepare_replication}}
+        {:noreply, %{state | backoff: backoff, retry_ref: retry_ref}}
     end
+  end
+
+  @impl true
+  def handle_info(:retry, %{retry_ref: retry_ref} = state) do
+    cancel_timer(retry_ref)
+    {:noreply, prepare_replication(state)}
   end
 
   def generate_record([
@@ -248,11 +240,22 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   def generate_record(_), do: nil
 
+  def slot_name_suffix() do
+    case System.get_env("SLOT_NAME_SUFFIX") do
+      nil ->
+        ""
+
+      value ->
+        Logger.debug("Using slot name suffix: " <> value)
+        "_" <> value
+    end
+  end
+
   defp convert_errors([_ | _] = errors), do: errors
 
   defp convert_errors(_), do: nil
 
-  def connect_db(host, port, name, user, pass, socket_opts) do
+  defp connect_db(host, port, name, user, pass, socket_opts) do
     {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
 
     Postgrex.start_link(
@@ -269,14 +272,17 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     )
   end
 
-  def slot_name_suffix() do
-    case System.get_env("SLOT_NAME_SUFFIX") do
-      nil ->
-        ""
+  defp prepare_replication(%{backoff: backoff, conn: conn, slot_name: slot_name} = state) do
+    case Replications.prepare_replication(conn, slot_name) do
+      {:ok, _} ->
+        send(self(), :poll)
+        state
 
-      value ->
-        Logger.debug("Using slot name suffix: " <> value)
-        "_" <> value
+      {:error, error} ->
+        Logger.error("Prepare replication error: #{inspect(error)}")
+        {timeout, backoff} = Backoff.backoff(backoff)
+        retry_ref = Process.send_after(self(), :retry, timeout)
+        %{state | backoff: backoff, retry_ref: retry_ref}
     end
   end
 end
