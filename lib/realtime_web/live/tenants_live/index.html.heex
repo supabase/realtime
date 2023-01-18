@@ -6,12 +6,17 @@
     <div class="pr-4 w-full sm:w-full md:w-1/3 lg:w-1/4 xl:w-1/4">
         <.form :let={f} for={@filter_changeset} phx-change="validate" phx-submit="filter_submit">
         <div class="my-4">
-          <.select form={f} field={:sort_by} list={@sort_fields} selected={:inserted_at}></.select>
+            <.select form={f} field={:sort_by} list={@sort_fields} selected={:inserted_at} />
         </div>
         <div class="my-4">
-          <.text_input form={f} field={:search} opts={[phx_change: "validate"]}></.text_input>
+            <.select form={f} field={:order} list={[:desc, :asc]} selected={:desc} />
         </div>
-        <.button type="submit" class="">Submit</.button>
+        <div class="my-4">
+            <.text_input form={f} field={:search} opts={[phx_change: "validate", placeholder: "tenant"]} />
+        </div>
+        <div class="my-4">
+            <.text_input form={f} field={:limit} opts={[phx_change: "validate", placeholder: "limit"]} />
+        </div>
         </.form>
     </div>
 
@@ -23,6 +28,7 @@
                 <div class="flex">
                     <div class="mr-4"><%= t.inserted_at %></div>
                     <div class="mr-4"><%= t.updated_at %></div>
+                    <div class="mr-4"><%= t.max_events_per_second %></div>
                 </div>
             </li>
         <% end %>

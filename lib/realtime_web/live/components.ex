@@ -280,7 +280,7 @@ defmodule RealtimeWeb.Components do
   end
 
   @doc """
-  Renders a label for a form field
+  Renders a text_input for a form field
   """
 
   attr :form, :atom, required: true

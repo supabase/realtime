@@ -13,13 +13,19 @@ defmodule RealtimeWeb.TenantsLive.Index do
     import Ecto.Changeset
 
     schema "f" do
-      field(:sort_by, :string)
+      field(:sort_by, :string, default: "inserted_at")
       field(:search, :string)
+      field(:limit, :integer, default: 50)
+      field(:order, :string, default: "desc")
     end
 
     def changeset(form, params \\ %{}) do
       form
-      |> cast(params, [:sort_by, :search])
+      |> cast(params, [:sort_by, :search, :limit, :order])
+    end
+
+    def apply_changes_form(changeset) do
+      apply_changes(changeset)
     end
   end
 
@@ -37,7 +43,7 @@ defmodule RealtimeWeb.TenantsLive.Index do
     socket =
       socket
       |> assign(defaults)
-      |> assign(tenants: list_tenants())
+      |> assign(tenants: list_tenants(%Filter{}))
       |> assign(sort_fields: sort_fields)
 
     {:ok, socket}
@@ -45,9 +51,21 @@ defmodule RealtimeWeb.TenantsLive.Index do
 
   @impl true
   def handle_params(params, _url, socket) do
+    changeset = Filter.changeset(socket.assigns.filter_changeset, params)
+    form = Filter.apply_changes_form(changeset)
+
     socket =
       socket
-      |> assign(filter_changeset: Filter.changeset(socket.assigns.filter_changeset, params))
+      |> assign(filter_changeset: changeset)
+      |> assign(
+        tenants:
+          Api.list_tenants(
+            search: form.search,
+            order_by: form.sort_by,
+            limit: form.limit,
+            order: form.order
+          )
+      )
 
     {:noreply, socket}
   end
@@ -67,21 +85,7 @@ defmodule RealtimeWeb.TenantsLive.Index do
     {:noreply, socket}
   end
 
-  def handle_event("filter_submit", %{"filter" => filter}, socket) do
-    tenants = list_tenants(order_by: filter["sort_by"])
-
-    socket =
-      socket
-      |> assign(tenants: tenants)
-      |> push_patch(
-        to: Routes.tenants_index_path(RealtimeWeb.Endpoint, :index, filter),
-        replace: true
-      )
-
-    {:noreply, socket}
-  end
-
-  defp list_tenants(opts \\ []) when is_list(opts) do
-    Api.list_tenants(opts) |> Enum.take(10)
+  defp list_tenants(%Filter{} = filter) do
+    filter |> Map.from_struct() |> Enum.into([]) |> Api.list_tenants()
   end
 end
