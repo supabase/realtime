@@ -2,7 +2,7 @@ name: MT Supabench
 on:
   push:
     branches:
-      - develop
+      - main
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}      
 jobs:
@@ -28,4 +28,4 @@ jobs:
           curl --request POST \
           --url https://supabench.fly.dev/api/runs \
           --header 'Authorization: User ${{ secrets.BENCHMARK_JWT }}' \
-          --data '{"benchmark_id":"SyMKxU3TOiWcAvU","name":"PR ${{ env.PR_NUM }}","comment": "https://github.com/supabase/realtime/pull/${{ env.PR_NUM }}", "origin":"develop"}'
+          --data '{"benchmark_id":"SyMKxU3TOiWcAvU","name":"PR ${{ env.PR_NUM }}","comment": "https://github.com/supabase/realtime/pull/${{ env.PR_NUM }}", "origin":"main"}'

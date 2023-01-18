@@ -41,12 +41,14 @@
   </div>
 </main>
 <footer class="fixed bottom-0 left-0 z-20 p-4 w-full bg-white border-t border-zinc-100 md:flex md:items-center md:justify-between md:p-6">
-    <span class="text-sm text-gray-900 sm:text-center">© <a href="https://supabase.com/" class="hover:underline">Supabase Inc</a>
-    </span>
-    <ul class="flex flex-wrap items-center mt-3 text-sm text-gray-900 sm:mt-0">
-        <li><span class="mr-4 md:mr-6">Apache 2.0 License</span></li>
-        <li><span class="font-mono mr-4 md:mr-6"><%= Node.self() %></span></li>
-        <li><span class="font-mono mr-4 md:mr-6"><%= System.get_env("FLY_REGION") %></span></li>
+    <div>
+    <span class="font-mono mr-4 text-sm text-gray-900 sm:text-center">v<%= Application.get_env(:realtime, :version) %></span>
+    <span class="text-sm text-gray-900 sm:text-center">© <a href="https://supabase.com/" class="hover:underline">Supabase Inc</a></span>
+    </div>
+    <ul class="flex flex-wrap items-center mt-3 text-sm text-gray-900">
+        <li><span class="mr-4">Apache 2.0 License</span></li>
+        <li><span class="font-mono mr-4"><%= Realtime.Helpers.short_node_id() %></span></li>
+        <li><span class="font-mono mr-4"><%= System.get_env("FLY_REGION") %></span></li>
         <li><%= live_render(@socket, RealtimeWeb.PingLive, id: "ping") %></li>
     </ul>
 </footer>

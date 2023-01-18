@@ -30,7 +30,7 @@ import WaitlistPopover from '../components/WaitlistPopover'
 import DarkModeToggle from '../components/DarkModeToggle'
 
 const LATENCY_THRESHOLD = 400
-const MAX_ROOM_USERS = 5
+const MAX_ROOM_USERS = 50
 const MAX_DISPLAY_MESSAGES = 50
 const MAX_EVENTS_PER_SECOND = 10
 const X_THRESHOLD = 25

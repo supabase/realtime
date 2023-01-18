@@ -116,7 +116,8 @@ defmodule RealtimeWeb.Router do
         Realtime.Repo,
         Realtime.Repo.Replica.FRA,
         Realtime.Repo.Replica.IAD,
-        Realtime.Repo.Replica.SIN
+        Realtime.Repo.Replica.SIN,
+        Realtime.Repo.Replica.SJC
       ],
       ecto_psql_extras_options: [long_running_queries: [threshold: "200 milliseconds"]],
       metrics: RealtimeWeb.Telemetry
