@@ -2,7 +2,7 @@ name: MT Production Formatting Checks
 on:
   pull_request:
     branches:
-      - main
+      - release
 jobs:
   format:
     name: Formatting Checks
