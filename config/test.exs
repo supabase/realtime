@@ -9,7 +9,8 @@ for repo <- [
       Realtime.Repo,
       Realtime.Repo.Replica.FRA,
       Realtime.Repo.Replica.IAD,
-      Realtime.Repo.Replica.SIN
+      Realtime.Repo.Replica.SIN,
+      Realtime.Repo.Replica.SJC
     ] do
   config :realtime, repo,
     username: "postgres",
