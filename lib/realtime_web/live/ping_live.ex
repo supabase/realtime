@@ -3,7 +3,7 @@ defmodule RealtimeWeb.PingLive do
 
   def mount(_params, _session, socket) do
     ping()
-    {:ok, assign(socket, :ping, "0 ms")}
+    {:ok, assign(socket, :ping, "0.0 ms")}
   end
 
   def render(assigns) do
