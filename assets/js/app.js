@@ -79,7 +79,7 @@ Hooks.payload = {
         <td class="py-4 px-6">${iso_ts.toISOString()}</td>
         <td class="py-4 px-6">
           <div class="pb-3">${JSON.stringify(payload)}</div>
-          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${latency.toFixed(2)} ms</div>
+          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${latency.toFixed(1)} ms</div>
         </td>
       </tr>`
     let list = document.querySelector("#plist")
