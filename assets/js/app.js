@@ -71,16 +71,14 @@ Hooks.payload = {
   this.channel.on("postgres_changes", { event: "*", schema: schema, table: table }, payload => {
     let ts = new Date();
     let payload_ts = Date.parse(payload.commit_timestamp)
-    let latency = ts.getTime() - payload_ts
-    console.log(ts.getTime())
-    console.log(payload_ts)
+    let latency = (ts.getTime() / 1000) - (payload_ts / 1000)
     let line = 
       `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">POSTGRES</td>
         <td class="py-4 px-6">${ts.toISOString()}</td>
         <td class="py-4 px-6">
           <div class="pb-3">${JSON.stringify(payload)}</div>
-          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${latency} ms</div>
+          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${Math.round(latency)} sec</div>
         </td>
       </tr>`
     let list = document.querySelector("#plist")
