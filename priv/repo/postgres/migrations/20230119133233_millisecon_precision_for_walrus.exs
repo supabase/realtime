@@ -163,7 +163,10 @@ defmodule Realtime.Repo.Migrations.MilliseconPrecisionForWalrus do
                       'schema', wal ->> 'schema',
                       'table', wal ->> 'table',
                       'type', action,
-                      'commit_timestamp', (wal ->> 'timestamp'),
+                      'commit_timestamp', to_char(
+                          (wal ->> 'timestamp')::timestamptz,
+                          'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'
+                      ),
                       'columns', (
                           select
                               jsonb_agg(
