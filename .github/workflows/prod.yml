@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: superfly/flyctl-actions@1.1
         with:
-          args: "-c deploy/fly/prod.toml deploy --build-arg SLOT_NAME_SUFFIX=${GITHUB_SHA::6}"
+          args: "-c deploy/fly/prod.toml deploy --build-arg SLOT_NAME_SUFFIX=${GITHUB_SHA::7}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 

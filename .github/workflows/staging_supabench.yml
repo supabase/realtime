@@ -16,7 +16,7 @@ jobs:
           args: "-c deploy/fly/qa.toml scale count 1"
       - uses: superfly/flyctl-actions@1.1
         with:
-          args: "-c deploy/fly/qa.toml deploy --build-arg SLOT_NAME_SUFFIX=${GITHUB_SHA::6}"
+          args: "-c deploy/fly/qa.toml deploy --build-arg SLOT_NAME_SUFFIX=${GITHUB_SHA::7}"
       - uses: superfly/flyctl-actions@1.1
         if: always()
         with:
