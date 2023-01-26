@@ -29,16 +29,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   @impl true
   def init(args) do
-    {:ok, conn} =
-      connect_db(
-        args["db_host"],
-        args["db_port"],
-        args["db_name"],
-        args["db_user"],
-        args["db_password"],
-        args["db_socket_opts"]
-      )
-
     state = %{
       backoff:
         Backoff.new(
@@ -46,7 +36,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           backoff_max: 5_000,
           backoff_type: :rand_exp
         ),
-      conn: conn,
+      conn: nil,
       db_host: args["db_host"],
       db_port: args["db_port"],
       db_name: args["db_name"],
@@ -69,8 +59,28 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   @impl true
-  def handle_continue(:prepare, state) do
-    {:noreply, prepare_replication(state)}
+  def handle_continue(
+        :prepare,
+        %{
+          db_host: db_host,
+          db_port: db_port,
+          db_name: db_name,
+          db_user: db_user,
+          db_pass: db_pass,
+          db_socket_opts: db_socket_opts
+        } = state
+      ) do
+    {:ok, conn} =
+      connect_db(
+        db_host,
+        db_port,
+        db_name,
+        db_user,
+        db_pass,
+        db_socket_opts
+      )
+
+    {:noreply, prepare_replication(%{state | conn: conn})}
   end
 
   @impl true
