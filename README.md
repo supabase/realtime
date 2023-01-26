@@ -151,9 +151,15 @@ DB_POOL_SIZE               # {string}     Sets the number of connections in the 
 SLOT_NAME_SUFFIX           # {string}     This is appended to the replication slot which allows making a custom slot name. May contain lowercase letters, numbers, and the underscore character. Together with the default `supabase_realtime_replication_slot`, slot name should be up to 64 characters long.
 ```
 
-## Websocket Connection Authorization
+## WebSocket URL
 
-Websocket connections are authorized via symmetric JWT verification. Only supports JWTs signed with the following algorithms:
+The WebSocket URL is in the following format for local development: `ws://[external_id].localhost:4000/socket/websocket`
+
+If you're using Supabase's hosted Realtime in production the URL is `wss://[project-ref].supabase.co/realtime/v1/websocket?apikey=[anon-token]&log_level=info&vsn=1.0.0"`
+
+## WebSocket Connection Authorization
+
+WebSocket connections are authorized via symmetric JWT verification. Only supports JWTs signed with the following algorithms:
 
 - HS256
 - HS384
@@ -165,7 +171,7 @@ Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
 >
 > Then JWT's "iss" value must equal "Issuer" and "nbf" value must equal 1610078130.
 
-> **Note:**  
+**Note:**
 > JWT expiration is checked automatically. `exp` and `role` (database role) keys are mandatory.
 
 **Authorizing Client Connection**: You can pass in the JWT by following the instructions under the Realtime client lib. For example, refer to the **Usage** section in the [@supabase/realtime-js](https://github.com/supabase/realtime-js) client library.
