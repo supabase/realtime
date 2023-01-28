@@ -1,4 +1,4 @@
-defmodule Realtime.Repo.Migrations.AddInOpToFilters do
+defmodule Realtime.RLS.Repo.Migrations.AddInOpToFilters do
   use Ecto.Migration
 
   def change do
