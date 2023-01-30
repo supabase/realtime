@@ -3,6 +3,8 @@ defmodule Realtime.UsageLogger do
   Polls certain metrics and logs them for billing purposes.
   """
 
+  require Logger
+
   use GenServer
 
   @poll_every 60_000
@@ -12,7 +14,20 @@ defmodule Realtime.UsageLogger do
   end
 
   def init(_args) do
+    :telemetry.attach(
+      <<"usage-logger">>,
+      [:realtime, :limit, :limited],
+      &Realtime.UsageLogger.handle_event/4,
+      []
+    )
+
     {:ok, []}
+  end
+
+  def handle_event([:realtime, :limit, :limited], measurements, metadata, _config) do
+    Logger.info(
+      "[#{metadata.request_path}] #{metadata.status_code} sent in #{measurements.latency}"
+    )
   end
 
   def handle_info(:poll, state) do
