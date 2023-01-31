@@ -4,6 +4,7 @@ defmodule Realtime.Repo do
     adapter: Ecto.Adapters.Postgres
 
   @replicas %{
+    "sea" => Realtime.Repo.Replica.SJC,
     "sjc" => Realtime.Repo.Replica.SJC,
     "gru" => Realtime.Repo.Replica.IAD,
     "iad" => Realtime.Repo.Replica.IAD,
