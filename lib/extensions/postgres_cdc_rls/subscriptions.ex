@@ -150,9 +150,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   `in` filter:
 
-      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=in.[hidee, ho]"}
+      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=in.(hidee,ho)"}
       iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
-      {:ok, ["public", "messages", [{"subject", "eq", "[hidee, ho]"}]]}
+      {:ok, ["public", "messages", [{"subject", "eq", "(hidee,ho)"}]]}
 
   An unsupported filter will respond with an error tuple:
 
