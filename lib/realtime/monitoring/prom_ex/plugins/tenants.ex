@@ -4,7 +4,7 @@ defmodule Realtime.PromEx.Plugins.Tenants do
   use PromEx.Plugin
   require Logger
 
-  @event_connected [:prom_ex, :plugin, :tenants, :connected]
+  @event_connected [:prom_ex, :plugin, :realtime, :tenants, :connected]
 
   @impl true
   def polling_metrics(opts) do
@@ -22,7 +22,7 @@ defmodule Realtime.PromEx.Plugins.Tenants do
       {__MODULE__, :execute_metrics, []},
       [
         last_value(
-          [:tenants, :connected],
+          [:realtime, :tenants, :connected],
           event_name: @event_connected,
           description: "The total count of connected tenants.",
           measurement: :connected
