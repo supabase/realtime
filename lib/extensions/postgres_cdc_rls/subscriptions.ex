@@ -152,13 +152,13 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
       iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=in.(hidee,ho)"}
       iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
-      {:ok, ["public", "messages", [{"subject", "in", "(hidee,ho)"}]]}
+      {:ok, ["public", "messages", [{"subject", "in", "{hidee,ho}"}]]}
 
   An unsupported filter will respond with an error tuple:
 
-      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=like.hey"}
+      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=bad.hey"}
       iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
-      {:error, ~s(Error parsing `filter` params: ["like", "hey"])}
+      {:error, ~s(Error parsing `filter` params: ["bad", "hey"])}
 
   Catch `undefined` filters:
 
@@ -174,10 +174,26 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
         with [col, rest] <- String.split(filter, "=", parts: 2),
              [filter_type, value] when filter_type in @filter_types <-
-               String.split(rest, ".", parts: 2) do
-          {:ok, [schema, table, [{col, filter_type, value}]]}
+               String.split(rest, ".", parts: 2),
+             {:ok, formatted_value} <-
+               (case filter_type do
+                  "in" ->
+                    if String.at(value, 0) == "(" and String.at(value, -1) == ")" do
+                      {:ok, "{#{String.slice(value, 1..-2)}}"}
+                    else
+                      {:error, "`in` filter value must be wrapped by parentheses"}
+                    end
+
+                  _ ->
+                    {:ok, value}
+                end) do
+          {:ok, [schema, table, [{col, filter_type, formatted_value}]]}
         else
-          e -> {:error, "Error parsing `filter` params: #{inspect(e)}"}
+          {:error, msg} ->
+            {:error, "Error parsing `filter` params: #{msg}"}
+
+          e ->
+            {:error, "Error parsing `filter` params: #{inspect(e)}"}
         end
 
       %{"schema" => schema, "table" => table} ->
