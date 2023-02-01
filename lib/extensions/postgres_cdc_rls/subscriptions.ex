@@ -7,7 +7,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   @type conn() :: Postgrex.conn()
 
-  @filter_types ["eq", "neq", "lt", "lte", "gt", "gte"]
+  @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
 
   @spec create(conn(), String.t(), list(map())) ::
           {:ok, Postgrex.Result.t()}
@@ -140,7 +140,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @doc """
   Parses subscription filter parameters into something we can pass into our `create_subscription` query.
 
-  We currently support the following filters: 'eq', 'neq', 'lt', 'lte', 'gt', 'gte`
+  We currently support the following filters: 'eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in'
 
   ## Examples
 
@@ -148,11 +148,17 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
       {:ok, ["public", "messages", [{"subject", "eq", "hey"}]]}
 
+  `in` filter:
+
+      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=in.[hidee, ho]"}
+      iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
+      {:ok, ["public", "messages", [{"subject", "eq", "[hidee, ho]"}]]}
+
   An unsupported filter will respond with an error tuple:
 
-      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=in.hey"}
+      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=like.hey"}
       iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
-      {:error, ~s(Error parsing `filter` params: ["in", "hey"])}
+      {:error, ~s(Error parsing `filter` params: ["like", "hey"])}
 
   Catch `undefined` filters:
 
