@@ -10,13 +10,21 @@ defmodule Realtime.PromEx.Plugins.Clients do
     poll_rate = Keyword.get(opts, :poll_rate, 5_000)
 
     [
-      metrics(poll_rate)
+      connection_metrics(poll_rate)
     ]
   end
 
-  defp metrics(poll_rate) do
+  @impl true
+  def event_metrics(_opts) do
+    # Event metrics definitions
+    [
+      channel_events()
+    ]
+  end
+
+  defp connection_metrics(poll_rate) do
     Polling.build(
-      :realtime_tenant_events,
+      :realtime_concurrent_connections,
       poll_rate,
       {__MODULE__, :execute_tenant_metrics, []},
       [
@@ -51,5 +59,19 @@ defmodule Realtime.PromEx.Plugins.Clients do
         %{tenant: t}
       )
     end
+  end
+
+  defp channel_events() do
+    Event.build(
+      :realtime_tenant_events,
+      [
+        counter(
+          [:realtime, :channel, :events],
+          event_name: [:realtime, :channel, :event],
+          description: "Count of messages sent on a Realtime Channel for a tenant.",
+          tags: [:tenant]
+        )
+      ]
+    )
   end
 end

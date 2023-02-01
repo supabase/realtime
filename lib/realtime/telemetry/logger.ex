@@ -8,6 +8,7 @@ defmodule Realtime.Telemetry.Logger do
   use GenServer
 
   @events [[:realtime, :connections]]
+  @poll_events [[:realtime, :channel, :event]]
 
   def start_link(args \\ []) do
     GenServer.start_link(__MODULE__, args, name: __MODULE__)
@@ -24,6 +25,9 @@ defmodule Realtime.Telemetry.Logger do
     {:ok, []}
   end
 
+  @doc """
+  Logs billing metrics for a tenant aggregated and emitted by a PromEx metric poller.
+  """
   def handle_event(event, measurements, %{tenant: tenant}, _config) do
     meta = %{project: tenant, measurements: measurements}
     Logger.info(["Billing metrics: ", inspect(event)], meta)
