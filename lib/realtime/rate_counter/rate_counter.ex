@@ -32,7 +32,7 @@ defmodule Realtime.RateCounter do
             idle_shutdown: @idle_shutdown,
             idle_shutdown_ref: nil,
             telemetry: %{
-              event_name: [@app_name] ++ [:rate_counter, :tick],
+              event_name: [@app_name] ++ [:rate_counter],
               measurements: %{sum: 0},
               metadata: %{}
             }
@@ -48,7 +48,7 @@ defmodule Realtime.RateCounter do
           idle_shutdown_ref: reference(),
           telemetry: %{
             emit: false,
-            event_name_prefix: list(),
+            event_name: :telemetry.event_name(),
             measurements: :telemetry.event_measurements(),
             metadata: :telemetry.event_metadata()
           }
