@@ -40,13 +40,13 @@ defmodule Realtime.Tenants do
     nodes
     |> Enum.map(fn node ->
       Task.Supervisor.async({Realtime.TaskSupervisor, node}, fn ->
-        for {_key, name, _external_id} = key <- keys do
+        for key <- keys do
           {_status, response} = Realtime.GenCounter.get(key)
 
           %{
             external_id: tenant.external_id,
             node: node,
-            limiter: name,
+            limiter: key,
             counter: response
           }
         end
