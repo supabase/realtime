@@ -4,6 +4,9 @@ defmodule Realtime.PromEx.Plugins.Tenant do
   use PromEx.Plugin
   require Logger
   alias Realtime.Telemetry
+  alias Realtime.Tenants
+  alias Realtime.UsersCounter
+  alias Realtime.Api
 
   @impl true
   def polling_metrics(opts) do
@@ -47,11 +50,11 @@ defmodule Realtime.PromEx.Plugins.Tenant do
   end
 
   def execute_tenant_metrics() do
-    tenants = :syn.group_names(:users)
+    tenants = Tenants.list_connected_tenants(Node.self())
 
     for t <- tenants do
-      count = Realtime.UsersCounter.tenant_users(Node.self(), t)
-      tenant = Realtime.Api.get_tenant_by_external_id(t)
+      count = UsersCounter.tenant_users(Node.self(), t)
+      tenant = Api.get_tenant_by_external_id(t)
 
       Telemetry.execute(
         [:realtime, :connections],
