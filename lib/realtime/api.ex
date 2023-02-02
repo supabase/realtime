@@ -156,7 +156,7 @@ defmodule Realtime.Api do
   end
 
   def preload_counters(%Tenant{} = tenant) do
-    id = {:limit, :all, tenant.external_id}
+    id = {:limit, :plug, tenant.external_id}
 
     preload_counters(tenant, id)
   end
