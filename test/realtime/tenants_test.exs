@@ -1,10 +1,11 @@
-defmodule Realtime.ApiTest do
+defmodule Realtime.TenantsTest do
   use Realtime.DataCase
 
   import Mock
 
   alias Realtime.Api
-  alias Realtime.{Api, RateCounter, GenCounter}
+  alias Realtime.GenCounter
+  alias Realtime.Tenants
 
   describe "tenants" do
     alias Realtime.Api.{Tenant, Extensions}
@@ -57,7 +58,7 @@ defmodule Realtime.ApiTest do
       with_mocks([
         {GenCounter, [], [get: fn _ -> {:ok, 9} end]}
       ]) do
-        limits = Api.get_tenant_limits(tenant)
+        limits = Tenants.get_tenant_limits(tenant)
         [all] = Enum.filter(limits, fn e -> e.limiter == :all end)
         assert all.counter == 9
         [user_channels] = Enum.filter(limits, fn e -> e.limiter == :user_channels end)
