@@ -39,7 +39,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           tags: [:tenant]
         ),
         last_value(
-          [:realtime, :connections, :limit],
+          [:realtime, :connections, :limit_concurrent],
           event_name: [:realtime, :connections],
           description: "The total count of connected clients for a tenant.",
           measurement: :limit,
@@ -70,16 +70,30 @@ defmodule Realtime.PromEx.Plugins.Tenant do
       [
         sum(
           [:realtime, :channel, :events],
-          event_name: [:realtime, :rate_counter, :tick, :channel],
+          event_name: [:realtime, :rate_counter, :channel, :events],
           measurement: :sum,
           description: "Sum of messages sent on a Realtime Channel.",
           tags: [:tenant]
         ),
         last_value(
-          [:realtime, :channel, :events, :limit],
-          event_name: [:realtime, :rate_counter, :tick, :channel],
+          [:realtime, :channel, :events, :limit_per_second],
+          event_name: [:realtime, :rate_counter, :channel, :events],
           measurement: :limit,
           description: "Rate limit of messages per second sent on a Realtime Channel.",
+          tags: [:tenant]
+        ),
+        sum(
+          [:realtime, :channel, :joins],
+          event_name: [:realtime, :rate_counter, :channel, :events],
+          measurement: :sum,
+          description: "Sum of Realtime Channel joins.",
+          tags: [:tenant]
+        ),
+        last_value(
+          [:realtime, :channel, :joins, :limit_per_second],
+          event_name: [:realtime, :rate_counter, :channel, :events],
+          measurement: :limit,
+          description: "Rate limit of joins per second on a Realtime Channel.",
           tags: [:tenant]
         )
       ]
