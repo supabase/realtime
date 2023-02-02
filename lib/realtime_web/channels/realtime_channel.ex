@@ -541,11 +541,19 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp assign_counter(%{assigns: %{tenant: tenant}} = socket) do
+  defp assign_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
     key = {:limit, :tenant_events, tenant}
 
     GenCounter.new(key)
-    RateCounter.new(key, idle_shutdown: :infinity)
+
+    RateCounter.new(key,
+      idle_shutdown: :infinity,
+      telemetry: %{
+        event_name: [:channel],
+        measurements: %{limit: limits.max_events_per_second},
+        metadata: %{tenant: tenant}
+      }
+    )
 
     {:ok, rate_counter} = RateCounter.get(key)
 
@@ -559,12 +567,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp count(%{assigns: %{tenant: tenant, rate_counter: counter, limits: limits}} = socket) do
     GenCounter.add(counter.id)
     {:ok, rate_counter} = RateCounter.get(counter.id)
-
-    Telemetry.execute(
-      [:realtime, :channel, :event],
-      %{limit: limits.max_events_per_second},
-      %{tenant: tenant}
-    )
 
     assign(socket, :rate_counter, rate_counter)
   end

@@ -1,5 +1,5 @@
 defmodule Realtime.PromEx do
-  alias Realtime.PromEx.Plugins.{OsMon, Phoenix, Tenants, Clients}
+  alias Realtime.PromEx.Plugins.{OsMon, Phoenix, Tenants, Tenant}
 
   import Realtime.Helpers, only: [short_node_id: 0]
 
@@ -74,7 +74,7 @@ defmodule Realtime.PromEx do
       # Plugins.PhoenixLiveView
       {OsMon, poll_rate: poll_rate},
       {Tenants, poll_rate: poll_rate},
-      {Clients, poll_rate: poll_rate}
+      {Tenant, poll_rate: poll_rate}
     ]
   end
 

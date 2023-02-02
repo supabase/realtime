@@ -1,4 +1,4 @@
-defmodule Realtime.PromEx.Plugins.Clients do
+defmodule Realtime.PromEx.Plugins.Tenant do
   @moduledoc false
 
   use PromEx.Plugin
@@ -10,7 +10,7 @@ defmodule Realtime.PromEx.Plugins.Clients do
     poll_rate = Keyword.get(opts, :poll_rate, 5_000)
 
     [
-      connection_metrics(poll_rate)
+      concurrent_connections(poll_rate)
     ]
   end
 
@@ -22,7 +22,7 @@ defmodule Realtime.PromEx.Plugins.Clients do
     ]
   end
 
-  defp connection_metrics(poll_rate) do
+  defp concurrent_connections(poll_rate) do
     Polling.build(
       :realtime_concurrent_connections,
       poll_rate,
@@ -65,10 +65,18 @@ defmodule Realtime.PromEx.Plugins.Clients do
     Event.build(
       :realtime_tenant_events,
       [
-        counter(
+        sum(
           [:realtime, :channel, :events],
-          event_name: [:realtime, :channel, :event],
-          description: "Count of messages sent on a Realtime Channel for a tenant.",
+          event_name: [:realtime, :rate_counter, :tick, :channel],
+          measurement: :sum,
+          description: "Sum of messages sent on a Realtime Channel.",
+          tags: [:tenant]
+        ),
+        last_value(
+          [:realtime, :channel, :events, :limit],
+          event_name: [:realtime, :rate_counter, :tick, :channel],
+          measurement: :limit,
+          description: "Rate limit of messages per second sent on a Realtime Channel.",
           tags: [:tenant]
         )
       ]

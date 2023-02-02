@@ -7,8 +7,7 @@ defmodule Realtime.Telemetry.Logger do
 
   use GenServer
 
-  @events [[:realtime, :connections]]
-  @poll_events [[:realtime, :channel, :event]]
+  @events [[:realtime, :connections], [:realtime, :rate_counter, :tick, :channel]]
 
   def start_link(args \\ []) do
     GenServer.start_link(__MODULE__, args, name: __MODULE__)
@@ -33,7 +32,7 @@ defmodule Realtime.Telemetry.Logger do
     Logger.info(["Billing metrics: ", inspect(event)], meta)
   end
 
-  def handle_event(_event, _measurements, _metadata, _config) do
-    :ok
-  end
+  # def handle_event(_event, _measurements, _metadata, _config) do
+  #  :ok
+  # end
 end
