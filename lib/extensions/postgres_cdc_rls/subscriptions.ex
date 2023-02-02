@@ -175,18 +175,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         with [col, rest] <- String.split(filter, "=", parts: 2),
              [filter_type, value] when filter_type in @filter_types <-
                String.split(rest, ".", parts: 2),
-             {:ok, formatted_value} <-
-               (case filter_type do
-                  "in" ->
-                    if String.at(value, 0) == "(" and String.at(value, -1) == ")" do
-                      {:ok, "{#{String.slice(value, 1..-2)}}"}
-                    else
-                      {:error, "`in` filter value must be wrapped by parentheses"}
-                    end
-
-                  _ ->
-                    {:ok, value}
-                end) do
+             {:ok, formatted_value} <- format_filter_value(filter_type, value) do
           {:ok, [schema, table, [{col, filter_type, formatted_value}]]}
         else
           {:error, msg} ->
@@ -208,6 +197,22 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       _ ->
         {:error,
          "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to."}
+    end
+  end
+
+  defp format_filter_value(filter, value) do
+    case filter do
+      "in" ->
+        case Regex.run(~r/^\((.*)\)$/, value) do
+          nil ->
+            {:error, "`in` filter value must be wrapped by parentheses"}
+
+          [_, new_value] ->
+            {:ok, "{#{new_value}}"}
+        end
+
+      _ ->
+        {:ok, value}
     end
   end
 end
