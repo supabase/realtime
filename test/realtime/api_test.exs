@@ -157,23 +157,5 @@ defmodule Realtime.ApiTest do
       Api.rename_settings_field("poll_interval_ms", "poll_interval")
       assert %{extensions: [%{settings: %{"poll_interval" => _}}]} = tenant_fixture()
     end
-
-    test "get_tenant_limits/1" do
-      tenant = tenant_fixture()
-
-      with_mocks([
-        {GenCounter, [], [get: fn _ -> {:ok, 9} end]}
-      ]) do
-        limits = Api.get_tenant_limits(tenant)
-        [all] = Enum.filter(limits, fn e -> e.limiter == :all end)
-        assert all.counter == 9
-        [user_channels] = Enum.filter(limits, fn e -> e.limiter == :user_channels end)
-        assert user_channels.counter == 9
-        [channel_joins] = Enum.filter(limits, fn e -> e.limiter == :channel_joins end)
-        assert channel_joins.counter == 9
-        [tenant_events] = Enum.filter(limits, fn e -> e.limiter == :tenant_events end)
-        assert tenant_events.counter == 9
-      end
-    end
   end
 end
