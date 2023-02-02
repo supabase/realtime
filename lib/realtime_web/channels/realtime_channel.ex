@@ -497,7 +497,16 @@ defmodule RealtimeWeb.RealtimeChannel do
   def limit_joins(%{assigns: %{tenant: tenant, limits: limits}}) do
     id = {:limit, :channel_joins, tenant}
     GenCounter.new(id)
-    RateCounter.new(id, idle_shutdown: :infinity)
+
+    RateCounter.new(id,
+      idle_shutdown: :infinity,
+      telemetry: %{
+        event_name: [:channel, :joins],
+        measurements: %{limit: limits.max_joins_per_second},
+        metadata: %{tenant: tenant}
+      }
+    )
+
     GenCounter.add(id)
 
     case RateCounter.get(id) do
@@ -549,7 +558,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     RateCounter.new(key,
       idle_shutdown: :infinity,
       telemetry: %{
-        event_name: [:channel],
+        event_name: [:channel, :events],
         measurements: %{limit: limits.max_events_per_second},
         metadata: %{tenant: tenant}
       }

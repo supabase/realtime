@@ -98,15 +98,15 @@ defmodule Realtime.RateCounter do
     max_bucket_len = Keyword.get(args, :max_bucket_len, @max_bucket_len)
     idle_shutdown_ms = Keyword.get(args, :idle_shutdown, @idle_shutdown)
 
-    telemetry = Keyword.get(args, :telemetry)
+    telem_opts = Keyword.get(args, :telemetry)
 
     telemetry =
-      if telemetry,
+      if telem_opts,
         do: %{
           emit: true,
-          event_name: [@app_name] ++ [:rate_counter, :tick] ++ telemetry.event_name,
-          measurements: Map.merge(%{sum: 0}, telemetry.measurements),
-          metadata: Map.merge(%{id: id}, telemetry.metadata)
+          event_name: [@app_name] ++ [:rate_counter] ++ telem_opts.event_name,
+          measurements: Map.merge(%{sum: 0}, telem_opts.measurements),
+          metadata: Map.merge(%{id: id}, telem_opts.metadata)
         },
         else: %{emit: false}
 
@@ -141,7 +141,7 @@ defmodule Realtime.RateCounter do
     {:ok, count} = GenCounter.get(state.id)
     :ok = GenCounter.put(state.id, 0)
 
-    if state.telemetry.emit,
+    if state.telemetry.emit and count > 0,
       do:
         Telemetry.execute(
           state.telemetry.event_name,
