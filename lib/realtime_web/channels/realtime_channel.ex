@@ -9,7 +9,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias DBConnection.Backoff
   alias Phoenix.Tracker.Shard
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
-  alias Realtime.{GenCounter, RateCounter, PostgresCdc, SignalHandler, Telemetry}
+  alias Realtime.{GenCounter, RateCounter, PostgresCdc, SignalHandler}
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
@@ -573,7 +573,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     socket
   end
 
-  defp count(%{assigns: %{tenant: tenant, rate_counter: counter, limits: limits}} = socket) do
+  defp count(%{assigns: %{rate_counter: counter}} = socket) do
     GenCounter.add(counter.id)
     {:ok, rate_counter} = RateCounter.get(counter.id)
 
