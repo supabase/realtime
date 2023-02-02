@@ -23,13 +23,13 @@ defmodule Realtime.Tenants do
   All the keys that we use to create counters and RateLimiters for tenants.
   """
 
-  @spec limiter_keys(Tenant.t()) :: [{:limit, atom(), String.t()}]
+  @spec limiter_keys(Tenant.t()) :: [{atom(), atom(), String.t()}]
   def limiter_keys(%Tenant{} = tenant) do
     [
-      {:limit, :plug, tenant.external_id},
-      {:limit, :user_channels, tenant.external_id},
-      {:limit, :channel_joins, tenant.external_id},
-      {:limit, :tenant_events, tenant.external_id}
+      {:plug, :requests, tenant.external_id},
+      {:channel, :clients_per, tenant.external_id},
+      {:channel, :joins, tenant.external_id},
+      {:channel, :events, tenant.external_id}
     ]
   end
 

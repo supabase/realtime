@@ -495,7 +495,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def limit_joins(%{assigns: %{tenant: tenant, limits: limits}}) do
-    id = {:limit, :channel_joins, tenant}
+    id = {:channel, :joins, tenant}
     GenCounter.new(id)
 
     RateCounter.new(id,
@@ -535,7 +535,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp limit_channels_key(tenant) do
-    {:limit, :user_channels, tenant}
+    {:channel, :clients_per, tenant}
   end
 
   defp limit_max_users(%{
@@ -551,7 +551,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp assign_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
-    key = {:limit, :tenant_events, tenant}
+    key = {:channel, :events, tenant}
 
     GenCounter.new(key)
 
