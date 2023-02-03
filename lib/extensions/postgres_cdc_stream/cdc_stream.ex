@@ -57,7 +57,7 @@ defmodule Extensions.PostgresCdcStream do
 
   def start_distributed(%{"region" => region, "id" => tenant} = args) do
     fly_region = PostgresCdc.aws_to_fly(region)
-    launch_node = launch_node(tenant, fly_region, node())
+    launch_node = PostgresCdc.launch_node(tenant, fly_region, node())
 
     Logger.warning(
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
@@ -74,20 +74,6 @@ defmodule Extensions.PostgresCdcStream do
       error ->
         Logger.error("Error starting Postgres Extention: #{inspect(error, pretty: true)}")
         error
-    end
-  end
-
-  def launch_node(tenant, fly_region, default) do
-    case PostgresCdc.region_nodes(fly_region) do
-      [_ | _] = regions_nodes ->
-        member_count = Enum.count(regions_nodes)
-        index = :erlang.phash2(tenant, member_count)
-        {_, [node: launch_node]} = Enum.at(regions_nodes, index)
-        launch_node
-
-      _ ->
-        Logger.warning("Didn't find launch_node, return default #{inspect(default)}")
-        default
     end
   end
 

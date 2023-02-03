@@ -1,6 +1,8 @@
 defmodule Realtime.PostgresCdc do
   @moduledoc false
 
+  require Logger
+
   @timeout 10_000
   @extensions Application.compile_env(:realtime, :extensions)
 
@@ -83,10 +85,40 @@ defmodule Realtime.PostgresCdc do
   is unstable.
   """
 
-  @spec region_nodes(String.t()) :: [{pid(), [node: atom()]}]
+  @spec region_nodes(String.t()) :: [atom()]
   def region_nodes(region) when is_binary(region) do
     :syn.members(RegionNodes, region)
-    |> Enum.sort_by(fn {_pid, [node: node]} -> node end)
+    |> Enum.map(fn {_pid, [node: node]} -> node end)
+    |> Enum.sort()
+  end
+
+  @doc """
+  Picks the node to launch the Postgres connection on.
+
+  If there are not two nodes in a region the connection is established from
+  the `default` node given.
+  """
+
+  @spec launch_node(String.t(), String.t(), atom()) :: atom()
+  def launch_node(tenant, fly_region, default) do
+    case region_nodes(fly_region) do
+      [node] ->
+        Logger.warning(
+          "Only one region node (#{inspect(node)}) for #{fly_region} using default #{inspect(default)}"
+        )
+
+        default
+
+      [] ->
+        Logger.warning("Zero region nodes for #{fly_region} using #{inspect(default)}")
+        default
+
+      regions_nodes ->
+        member_count = Enum.count(regions_nodes)
+        index = :erlang.phash2(tenant, member_count)
+
+        Enum.at(regions_nodes, index)
+    end
   end
 
   @callback handle_connect(any()) :: {:ok, pid()} | {:error, any()}
