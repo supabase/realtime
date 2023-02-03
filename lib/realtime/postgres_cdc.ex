@@ -78,9 +78,10 @@ defmodule Realtime.PostgresCdc do
     end
   end
 
-  @spec region_nodes(String.t()) :: [{pid, any}]
+  @spec region_nodes(String.t()) :: [{pid(), [node: atom()]}]
   def region_nodes(region) when is_binary(region) do
     :syn.members(RegionNodes, region)
+    |> Enum.sort_by(fn {_pid, [node: node]} -> node end)
   end
 
   @callback handle_connect(any()) :: {:ok, pid()} | {:error, any()}
