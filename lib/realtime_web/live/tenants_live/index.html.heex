@@ -25,10 +25,10 @@
         <%= for t <- @tenants do %>
             <li class="my-4">
                 <span><%= t.external_id %></span>
-                <div class="flex">
-                    <div class="mr-4"><%= t.inserted_at %></div>
-                    <div class="mr-4"><%= t.updated_at %></div>
-                    <div class="mr-4"><%= t.max_events_per_second %></div>
+                <div class="flex flex-wrap">
+                    <%= for {k, v} <- Map.take(t, [:max_events_per_second, :max_concurrent_users, :max_bytes_per_second]) do %>
+                        <div class="mr-4"><%= k %>: <%= v %></div>
+                    <% end %>
                 </div>
             </li>
         <% end %>
