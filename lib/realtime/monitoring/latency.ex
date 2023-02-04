@@ -2,17 +2,22 @@ defmodule Realtime.Latency do
   @moduledoc """
     Measures the latency of the cluster from each node and broadcasts it over PubSub.
   """
+  alias Mix.Tasks.Help
 
   use GenServer
 
   require Logger
+
+  alias Realtime.Helpers
 
   defmodule Payload do
     @moduledoc false
 
     defstruct [
       :from_node,
+      :from_region,
       :node,
+      :region,
       :latency,
       :response,
       :timestamp
@@ -20,7 +25,9 @@ defmodule Realtime.Latency do
 
     @type t :: %__MODULE__{
             node: atom(),
+            region: String.t(),
             from_node: atom(),
+            from_region: String.t(),
             latency: integer(),
             response: {:ok, :pong} | {:badrpc, any()},
             timestamp: DateTime
@@ -89,20 +96,22 @@ defmodule Realtime.Latency do
   def ping(pong_timeout \\ 0, timer_timeout \\ 5_000, yield_timeout \\ 30_000) do
     for n <- [Node.self() | Node.list()] do
       Task.Supervisor.async(Realtime.TaskSupervisor, fn ->
-        {latency, {status, _respose} = reply} =
+        {latency, {status, {_respose, remote_region}} = reply} =
           :timer.tc(fn -> :rpc.call(n, __MODULE__, :pong, [pong_timeout], timer_timeout) end)
 
         latency_ms = latency / 1_000
 
         fly_region = Application.get_env(:realtime, :fly_region)
 
+        short_name = Helpers.short_node_id_from_name(n)
+
         cond do
           status == :badrpc ->
-            Logger.error("Network error: can't connect to node #{n} from #{fly_region}")
+            Logger.error("Network error: can't connect to node #{short_name} from #{fly_region}")
 
           latency_ms > 1_000 ->
             Logger.warn(
-              "Network warning: latency is > #{latency_ms} ms to node #{n} from #{fly_region}"
+              "Network warning: latency is #{latency_ms} ms to node #{short_name} from #{fly_region}"
             )
 
           true ->
@@ -110,8 +119,10 @@ defmodule Realtime.Latency do
         end
 
         payload = %Payload{
-          from_node: Node.self(),
-          node: n,
+          from_node: Helpers.short_node_id_from_name(Node.self()),
+          from_region: fly_region,
+          node: short_name,
+          region: remote_region,
           latency: latency_ms,
           response: reply,
           timestamp: DateTime.utc_now()
@@ -129,15 +140,16 @@ defmodule Realtime.Latency do
   A noop function to call from a remote server.
   """
 
-  @spec pong :: {:ok, :pong}
+  @spec pong :: {:ok, {:pong, String.t()}}
   def pong() do
-    {:ok, :pong}
+    region = System.get_env("FLY_REGION")
+    {:ok, {:pong, region}}
   end
 
-  @spec pong(:infinity | non_neg_integer) :: {:ok, :pong}
+  @spec pong(:infinity | non_neg_integer) :: {:ok, {:pong, String.t()}}
   def pong(latency) when is_integer(latency) do
     Process.sleep(latency)
-    {:ok, :pong}
+    pong()
   end
 
   defp ping_after() do
