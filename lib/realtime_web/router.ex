@@ -50,6 +50,7 @@ defmodule RealtimeWeb.Router do
     end
 
     live "/", AdminLive.Index, :index
+    live "/tenants", TenantsLive.Index, :index
   end
 
   # get "/metrics/:id", RealtimeWeb.TenantMetricsController, :index
