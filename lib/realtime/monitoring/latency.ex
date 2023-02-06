@@ -51,11 +51,6 @@ defmodule Realtime.Latency do
     {:noreply, state}
   end
 
-  def handle_info({_ref, _payload}, state) do
-    Logger.warn("Remote node ping task replied after `yield_many` timeout.")
-    {:noreply, state}
-  end
-
   def handle_info(msg, state) do
     Logger.warn("Unexpected message: #{inspect(msg)}")
     {:noreply, state}
