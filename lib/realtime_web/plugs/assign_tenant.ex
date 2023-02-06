@@ -22,9 +22,9 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
          %Tenant{} = tenant <- Api.get_tenant_by_external_id(external_id) do
       tenant =
         tenant
-        |> tap(&GenCounter.new({:limit, :all, &1.external_id}))
-        |> tap(&RateCounter.new({:limit, :all, &1.external_id}, idle_shutdown: :infinity))
-        |> tap(&GenCounter.add({:limit, :all, &1.external_id}))
+        |> tap(&GenCounter.new({:plug, :requests, &1.external_id}))
+        |> tap(&RateCounter.new({:plug, :requests, &1.external_id}, idle_shutdown: :infinity))
+        |> tap(&GenCounter.add({:plug, :requests, &1.external_id}))
         |> Api.preload_counters()
 
       assign(conn, :tenant, tenant)

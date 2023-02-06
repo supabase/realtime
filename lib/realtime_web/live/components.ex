@@ -5,6 +5,7 @@ defmodule RealtimeWeb.Components do
 
   use Phoenix.Component
   alias Phoenix.LiveView.JS
+  alias Phoenix.HTML.Form
 
   @doc """
   Renders an h1 tag.
@@ -61,11 +62,7 @@ defmodule RealtimeWeb.Components do
     ~H"""
     <button
       type={@type}
-      class={[
-        "phx-submit-loading:opacity-75 rounded-lg bg-zinc-900 hover:bg-zinc-700 py-2 px-3",
-        "text-sm font-semibold leading-6 text-white active:text-white/80",
-        @class
-      ]}
+      class={["bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none", @class]}
       {@rest}
     >
       <%= render_slot(@inner_block) %>
@@ -250,6 +247,80 @@ defmodule RealtimeWeb.Components do
   def badge(assigns) do
     ~H"""
       <div><span class="text-xs font-semibold inline-block uppercase py-[3px] px-[5px] rounded bg-gray-100" {@rest}><%= render_slot(@inner_block) %></span></div>
+    """
+  end
+
+  ## Forms
+
+  @doc """
+  Renders a for field select dropdown.
+  ## Examples
+    <.select form={f} field={:sort_by} list={@sort_fields} selected={:inserted_at}>
+  """
+
+  attr :selected, :atom, required: true
+  attr :form, :atom, required: true
+  attr :field, :atom, required: true
+  attr :list, :list, required: true
+
+  slot(:inner_block, required: false)
+
+  def select(assigns) do
+    ~H"""
+      <%= Form.select @form, @field, @list, selected: @selected, class: "
+      my-1
+      block
+      w-full
+      rounded-md
+      border-gray-300
+      shadow-sm
+      focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+    " %>
+    """
+  end
+
+  @doc """
+  Renders a text_input for a form field
+  """
+
+  attr :form, :atom, required: true
+  attr :field, :atom, required: true
+  attr :opts, :list, required: true
+
+  slot(:inner_block, required: false)
+
+  def text_input(assigns) do
+    class = ~s(
+      my-1
+      block
+      w-full
+      rounded-md
+      border-gray-300
+      shadow-sm
+      focus:border-indigo-300
+      focus:ring
+      focus:ring-indigo-200
+      focus:ring-opacity-50)
+
+    assigns = assign(assigns, :opts, assigns.opts ++ [class: class])
+
+    ~H"""
+      <%= Form.text_input @form, @field, @opts %>
+    """
+  end
+
+  @doc """
+  Renders a label for a form field
+  """
+
+  attr :form, :atom, required: true
+  attr :field, :atom, required: true
+
+  slot(:inner_block, required: false)
+
+  def label(assigns) do
+    ~H"""
+      <%= Form.label @form, @field, class: "block text-gray-700 text-sm font-bold mb-2" %>
     """
   end
 

@@ -3,7 +3,7 @@ defmodule RealtimeWeb.PingLive do
 
   def mount(_params, _session, socket) do
     ping()
-    {:ok, assign(socket, :ping, "0 ms")}
+    {:ok, assign(socket, :ping, "0.0 ms")}
   end
 
   def render(assigns) do
@@ -20,7 +20,11 @@ defmodule RealtimeWeb.PingLive do
 
   def handle_event("pong", %{"ping" => ping}, socket) do
     {:ok, datetime, 0} = DateTime.from_iso8601(ping)
-    pong = DateTime.diff(DateTime.utc_now(), datetime, :millisecond) |> Integer.to_string()
+
+    pong =
+      (DateTime.diff(DateTime.utc_now(), datetime, :microsecond) / 1000)
+      |> Float.round(1)
+      |> Float.to_string()
 
     ping()
     {:noreply, assign(socket, :ping, pong <> " ms")}

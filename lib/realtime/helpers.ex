@@ -103,6 +103,45 @@ defmodule Realtime.Helpers do
     end
   end
 
+  @doc """
+  Gets a short node name from a node name when a node name looks like `realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2`
+
+  ## Examples
+
+      iex> node = Node.self()
+      iex> Realtime.Helpers.short_node_id_from_name(node)
+      "nohost"
+
+      iex> node = :"realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2"
+      iex> Realtime.Helpers.short_node_id_from_name(node)
+      "83c3cfe3"
+
+      iex> node = :"pink@127.0.0.1"
+      iex> Realtime.Helpers.short_node_id_from_name(node)
+      "127.0.0.1"
+
+      iex> node = :"pink@10.0.1.1"
+      iex> Realtime.Helpers.short_node_id_from_name(node)
+      "10.0.1.1"
+
+      iex> node = :"realtime@host.name.internal"
+      iex> Realtime.Helpers.short_node_id_from_name(node)
+      "host.name.internal"
+  """
+
+  @spec short_node_id_from_name(atom()) :: String.t()
+  def short_node_id_from_name(name) when is_atom(name) do
+    [_, host] = name |> Atom.to_string() |> String.split("@", parts: 2)
+
+    case String.split(host, ":", parts: 8) do
+      [_, _, _, _, _, one, two, _] ->
+        one <> two
+
+      _other ->
+        host
+    end
+  end
+
   defp pad(data) do
     to_add = 16 - rem(byte_size(data), 16)
     data <> :binary.copy(<<to_add>>, to_add)

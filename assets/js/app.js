@@ -69,16 +69,17 @@ Hooks.payload = {
 
   // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
   this.channel.on("postgres_changes", { event: "*", schema: schema, table: table }, payload => {
-    let ts = new Date();
+    let ts = performance.now() + performance.timeOrigin
+    let iso_ts = new Date()
     let payload_ts = Date.parse(payload.commit_timestamp)
-    let latency = (ts.getTime() / 1000) - (payload_ts / 1000)
+    let latency = ts - payload_ts
     let line = 
       `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">POSTGRES</td>
-        <td class="py-4 px-6">${ts.toISOString()}</td>
+        <td class="py-4 px-6">${iso_ts.toISOString()}</td>
         <td class="py-4 px-6">
           <div class="pb-3">${JSON.stringify(payload)}</div>
-          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${Math.round(latency)} sec</div>
+          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${latency.toFixed(1)} ms</div>
         </td>
       </tr>`
     let list = document.querySelector("#plist")

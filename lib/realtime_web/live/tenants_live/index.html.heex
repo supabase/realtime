@@ -1,0 +1,37 @@
+<.h1>Supabase Realtime: Multiplayer Edition</.h1>
+<.h2>Tenants</.h2>
+<p>Listing all Supabase Realtime tenants.</p>
+
+<div class="my-5 flex flex-row flex-wrap">
+    <div class="pr-4 w-full sm:w-full md:w-1/3 lg:w-1/4 xl:w-1/4">
+        <.form :let={f} for={@filter_changeset} phx-change="validate" phx-submit="filter_submit">
+        <div class="my-4">
+            <.select form={f} field={:sort_by} list={@sort_fields} selected={:inserted_at} />
+        </div>
+        <div class="my-4">
+            <.select form={f} field={:order} list={[:desc, :asc]} selected={:desc} />
+        </div>
+        <div class="my-4">
+            <.text_input form={f} field={:search} opts={[phx_change: "validate", placeholder: "tenant"]} />
+        </div>
+        <div class="my-4">
+            <.text_input form={f} field={:limit} opts={[phx_change: "validate", placeholder: "limit"]} />
+        </div>
+        </.form>
+    </div>
+
+    <div class="pl-4 w-full sm:w-full md:w-2/3 lg:w-3/4 xl:w-3/4">
+        <ul>
+        <%= for t <- @tenants do %>
+            <li class="my-4">
+                <span><%= t.external_id %></span>
+                <div class="flex flex-wrap">
+                    <%= for {k, v} <- Map.take(t, [:max_events_per_second, :max_concurrent_users, :max_bytes_per_second]) do %>
+                        <div class="mr-4"><%= k %>: <%= v %></div>
+                    <% end %>
+                </div>
+            </li>
+        <% end %>
+        </ul>
+    </div>
+</div>

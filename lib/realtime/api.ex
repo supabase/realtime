@@ -4,7 +4,7 @@ defmodule Realtime.Api do
   """
   require Logger
 
-  import Ecto.Query, warn: false, only: [from: 2]
+  import Ecto.Query
 
   alias Realtime.{Repo, Api.Tenant, Api.Extensions, RateCounter, GenCounter}
 
@@ -17,10 +17,32 @@ defmodule Realtime.Api do
       [%Tenant{}, ...]
 
   """
-  def list_tenants do
+  def list_tenants() do
     repo_replica = Repo.replica()
 
     Tenant
+    |> repo_replica.all()
+    |> repo_replica.preload(:extensions)
+  end
+
+  def list_tenants(opts) when is_list(opts) do
+    repo_replica = Repo.replica()
+
+    field = Keyword.get(opts, :sort_by, "inserted_at") |> String.to_atom()
+    external_id = Keyword.get(opts, :search)
+    limit = Keyword.get(opts, :limit, 50)
+    order = Keyword.get(opts, :order, "desc") |> String.to_atom()
+
+    query =
+      Tenant
+      |> order_by({^order, ^field})
+      |> limit(^limit)
+
+    ilike = "#{external_id}%"
+
+    query = if external_id, do: query |> where([t], ilike(t.external_id, ^ilike)), else: query
+
+    query
     |> repo_replica.all()
     |> repo_replica.preload(:extensions)
   end
@@ -156,7 +178,7 @@ defmodule Realtime.Api do
   end
 
   def preload_counters(%Tenant{} = tenant) do
-    id = {:limit, :all, tenant.external_id}
+    id = {:plug, :requests, tenant.external_id}
 
     preload_counters(tenant, id)
   end
@@ -172,34 +194,5 @@ defmodule Realtime.Api do
     tenant
     |> Map.put(:events_per_second_rolling, avg)
     |> Map.put(:events_per_second_now, current)
-  end
-
-  def get_tenant_limits(%Tenant{} = tenant) do
-    limiter_keys = [
-      {:limit, :all, tenant.external_id},
-      {:limit, :user_channels, tenant.external_id},
-      {:limit, :channel_joins, tenant.external_id},
-      {:limit, :tenant_events, tenant.external_id}
-    ]
-
-    nodes = [Node.self() | Node.list()]
-
-    nodes
-    |> Enum.map(fn node ->
-      Task.Supervisor.async({Realtime.TaskSupervisor, node}, fn ->
-        for {_key, name, _external_id} = key <- limiter_keys do
-          {_status, response} = Realtime.GenCounter.get(key)
-
-          %{
-            external_id: tenant.external_id,
-            node: node,
-            limiter: name,
-            counter: response
-          }
-        end
-      end)
-    end)
-    |> Task.await_many()
-    |> List.flatten()
   end
 end
