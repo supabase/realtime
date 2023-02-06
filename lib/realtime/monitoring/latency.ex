@@ -102,9 +102,9 @@ defmodule Realtime.Latency do
           from_node = Helpers.short_node_id_from_name(Node.self())
 
           case response do
-            {:badrpc, :timeout} ->
+            {:badrpc, reason} ->
               Logger.error(
-                "Network error: can't connect to node #{short_name} from #{fly_region}"
+                "Network error: can't connect to node #{short_name} from #{fly_region} - #{inspect(reason)}"
               )
 
               payload = %Payload{
