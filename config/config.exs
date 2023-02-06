@@ -8,7 +8,8 @@
 import Config
 
 config :realtime,
-  ecto_repos: [Realtime.Repo]
+  ecto_repos: [Realtime.Repo],
+  version: Mix.Project.config()[:version]
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,

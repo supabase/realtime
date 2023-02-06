@@ -15,11 +15,13 @@ defmodule Realtime.RateCounter do
 
   alias Realtime.GenCounter
   alias Realtime.RateCounter
+  alias Realtime.Telemetry
 
   @idle_shutdown :timer.seconds(5)
   @tick :timer.seconds(1)
   @max_bucket_len 60
   @cache __MODULE__
+  @app_name Mix.Project.config()[:app]
 
   defstruct id: nil,
             avg: 0.0,
@@ -28,7 +30,12 @@ defmodule Realtime.RateCounter do
             tick: @tick,
             tick_ref: nil,
             idle_shutdown: @idle_shutdown,
-            idle_shutdown_ref: nil
+            idle_shutdown_ref: nil,
+            telemetry: %{
+              event_name: [@app_name] ++ [:rate_counter],
+              measurements: %{sum: 0},
+              metadata: %{}
+            }
 
   @type t :: %__MODULE__{
           id: term(),
@@ -38,7 +45,13 @@ defmodule Realtime.RateCounter do
           tick: integer(),
           tick_ref: reference(),
           idle_shutdown: integer() | :infinity,
-          idle_shutdown_ref: reference()
+          idle_shutdown_ref: reference(),
+          telemetry: %{
+            emit: false,
+            event_name: :telemetry.event_name(),
+            measurements: :telemetry.event_measurements(),
+            metadata: :telemetry.event_metadata()
+          }
         }
 
   @spec start_link([keyword()]) :: {:ok, pid()} | {:error, {:already_started, pid()}}
@@ -85,6 +98,18 @@ defmodule Realtime.RateCounter do
     max_bucket_len = Keyword.get(args, :max_bucket_len, @max_bucket_len)
     idle_shutdown_ms = Keyword.get(args, :idle_shutdown, @idle_shutdown)
 
+    telem_opts = Keyword.get(args, :telemetry)
+
+    telemetry =
+      if telem_opts,
+        do: %{
+          emit: true,
+          event_name: [@app_name] ++ [:rate_counter] ++ telem_opts.event_name,
+          measurements: Map.merge(%{sum: 0}, telem_opts.measurements),
+          metadata: Map.merge(%{id: id}, telem_opts.metadata)
+        },
+        else: %{emit: false}
+
     Logger.info("Starting #{__MODULE__} for: #{inspect(id)}")
 
     ensure_counter_started(id)
@@ -100,7 +125,8 @@ defmodule Realtime.RateCounter do
       tick_ref: ticker,
       max_bucket_len: max_bucket_len,
       idle_shutdown: idle_shutdown_ms,
-      idle_shutdown_ref: idle_shutdown_ref
+      idle_shutdown_ref: idle_shutdown_ref,
+      telemetry: telemetry
     }
 
     Cachex.put!(@cache, id, state)
@@ -114,6 +140,14 @@ defmodule Realtime.RateCounter do
 
     {:ok, count} = GenCounter.get(state.id)
     :ok = GenCounter.put(state.id, 0)
+
+    if state.telemetry.emit and count > 0,
+      do:
+        Telemetry.execute(
+          state.telemetry.event_name,
+          %{state.telemetry.measurements | sum: count},
+          state.telemetry.metadata
+        )
 
     if is_reference(state.idle_shutdown_ref) and count > 0 do
       Process.cancel_timer(state.idle_shutdown_ref)

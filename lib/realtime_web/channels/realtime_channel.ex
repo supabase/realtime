@@ -230,7 +230,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(:sync_presence, %{assigns: %{tenant_topic: topic}} = socket) do
-    socket = assign_counter(socket)
+    socket = count(socket)
 
     presence_list =
       socket
@@ -254,7 +254,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(%{event: "postgres_cdc_down"}, socket) do
-    socket = assign_counter(socket)
+    socket = count(socket)
     pg_sub_ref = postgres_subscribe()
 
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
@@ -262,7 +262,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(%{event: type, payload: payload}, socket) do
-    socket = assign_counter(socket)
+    socket = count(socket)
 
     push(socket, type, payload)
     {:noreply, socket}
@@ -282,7 +282,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           }
         } = socket
       ) do
-    socket = assign_counter(socket)
+    socket = count(socket)
     cancel_timer(pg_sub_ref)
 
     args = Map.put(postgres_extension, "id", tenant)
@@ -317,7 +317,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(:confirm_token, %{assigns: %{pg_change_params: pg_change_params}} = socket) do
-    socket = assign_counter(socket)
+    socket = count(socket)
 
     case confirm_token(socket) do
       {:ok, claims, confirm_token_ref} ->
@@ -379,7 +379,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{assigns: %{pg_sub_ref: pg_sub_ref, pg_change_params: pg_change_params}} = socket
       )
       when is_binary(refresh_token) do
-    socket = assign_counter(socket) |> assign(:access_token, refresh_token)
+    socket = count(socket) |> assign(:access_token, refresh_token)
 
     case confirm_token(socket) do
       {:ok, claims, confirm_token_ref} ->
@@ -419,7 +419,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           }
         } = socket
       ) do
-    socket = assign_counter(socket)
+    socket = count(socket)
 
     if self_broadcast do
       Endpoint.broadcast(tenant_topic, type, payload)
@@ -440,7 +440,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{assigns: %{is_new_api: true, presence_key: presence_key, tenant_topic: tenant_topic}} =
           socket
       ) do
-    socket = assign_counter(socket)
+    socket = count(socket)
 
     result =
       event
@@ -469,7 +469,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in(_, _, socket) do
-    socket = assign_counter(socket)
+    socket = count(socket)
     {:noreply, socket}
   end
 
@@ -495,9 +495,18 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def limit_joins(%{assigns: %{tenant: tenant, limits: limits}}) do
-    id = {:limit, :channel_joins, tenant}
+    id = {:channel, :joins, tenant}
     GenCounter.new(id)
-    RateCounter.new(id, idle_shutdown: :infinity)
+
+    RateCounter.new(id,
+      idle_shutdown: :infinity,
+      telemetry: %{
+        event_name: [:channel, :joins],
+        measurements: %{limit: limits.max_joins_per_second},
+        metadata: %{tenant: tenant}
+      }
+    )
+
     GenCounter.add(id)
 
     case RateCounter.get(id) do
@@ -526,7 +535,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp limit_channels_key(tenant) do
-    {:limit, :user_channels, tenant}
+    {:channel, :clients_per, tenant}
   end
 
   defp limit_max_users(%{
@@ -541,12 +550,20 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp assign_counter(%{assigns: %{tenant: tenant}} = socket) do
-    key = {:limit, :tenant_events, tenant}
+  defp assign_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
+    key = {:channel, :events, tenant}
 
     GenCounter.new(key)
-    RateCounter.new(key, idle_shutdown: :infinity)
-    GenCounter.add(key)
+
+    RateCounter.new(key,
+      idle_shutdown: :infinity,
+      telemetry: %{
+        event_name: [:channel, :events],
+        measurements: %{limit: limits.max_events_per_second},
+        metadata: %{tenant: tenant}
+      }
+    )
+
     {:ok, rate_counter} = RateCounter.get(key)
 
     assign(socket, :rate_counter, rate_counter)
@@ -554,6 +571,13 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp assign_counter(socket) do
     socket
+  end
+
+  defp count(%{assigns: %{rate_counter: counter}} = socket) do
+    GenCounter.add(counter.id)
+    {:ok, rate_counter} = RateCounter.get(counter.id)
+
+    assign(socket, :rate_counter, rate_counter)
   end
 
   defp presence_key(params) do

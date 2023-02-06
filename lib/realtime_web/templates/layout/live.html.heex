@@ -42,7 +42,7 @@
 </main>
 <footer class="fixed bottom-0 left-0 z-20 p-4 w-full bg-white border-t border-zinc-100 md:flex md:items-center md:justify-between md:p-6">
     <div>
-    <span class="font-mono mr-4 text-sm text-gray-900 sm:text-center">v<%= Mix.Project.config[:version] %></span>
+    <span class="font-mono mr-4 text-sm text-gray-900 sm:text-center">v<%= Application.get_env(:realtime, :version) %></span>
     <span class="text-sm text-gray-900 sm:text-center">© <a href="https://supabase.com/" class="hover:underline">Supabase Inc</a></span>
     </div>
     <ul class="flex flex-wrap items-center mt-3 text-sm text-gray-900">

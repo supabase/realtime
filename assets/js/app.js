@@ -27,10 +27,11 @@ Hooks.payload = {
     if (payload.extension === 'postgres_changes' && payload.status === 'ok') {
           this.pushEventTo("#conn_info", "postgres_subscribed", {})
         }
-
+    let ts = new Date();    
     let line = 
     `<tr class="bg-white border-b hover:bg-gray-50">
       <td class="py-4 px-6">SYSTEM</td>
+      <td class="py-4 px-6">${ts.toISOString()}</td>
       <td class="py-4 px-6">${JSON.stringify(payload)}</td>
     </tr>`
     let list = document.querySelector("#plist")
@@ -41,9 +42,11 @@ Hooks.payload = {
   // The event name can by anything
   // Match on specific event names to filter for only those types of events and do something with them
   this.channel.on("broadcast", { event: "*" }, payload => {
+    let ts = new Date();
     let line = 
       `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">BROADCAST</td>
+        <td class="py-4 px-6">${ts.toISOString()}</td>
         <td class="py-4 px-6">${JSON.stringify(payload)}</td>
       </tr>`
     let list = document.querySelector("#plist")
@@ -53,9 +56,11 @@ Hooks.payload = {
   // Listen for all (`*`) `presence` events
   this.channel.on("presence", { event: "*" }, payload => {
     this.pushEventTo("#conn_info", "presence_subscribed", {})
-    let line = 
+    let ts = new Date();
+    let line =
       `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">PRESENCE</td>
+        <td class="py-4 px-6">${ts.toISOString()}</td>
         <td class="py-4 px-6">${JSON.stringify(payload)}</td>
       </tr>`
     let list = document.querySelector("#plist")
@@ -64,10 +69,18 @@ Hooks.payload = {
 
   // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
   this.channel.on("postgres_changes", { event: "*", schema: schema, table: table }, payload => {
+    let ts = performance.now() + performance.timeOrigin
+    let iso_ts = new Date()
+    let payload_ts = Date.parse(payload.commit_timestamp)
+    let latency = ts - payload_ts
     let line = 
       `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">POSTGRES</td>
-        <td class="py-4 px-6">${JSON.stringify(payload)}</td>
+        <td class="py-4 px-6">${iso_ts.toISOString()}</td>
+        <td class="py-4 px-6">
+          <div class="pb-3">${JSON.stringify(payload)}</div>
+          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${latency.toFixed(1)} ms</div>
+        </td>
       </tr>`
     let list = document.querySelector("#plist")
     list.innerHTML = line + list.innerHTML;
