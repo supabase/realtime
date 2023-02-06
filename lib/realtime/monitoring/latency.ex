@@ -2,7 +2,6 @@ defmodule Realtime.Latency do
   @moduledoc """
     Measures the latency of the cluster from each node and broadcasts it over PubSub.
   """
-  alias Mix.Tasks.Help
 
   use GenServer
 
@@ -25,7 +24,7 @@ defmodule Realtime.Latency do
 
     @type t :: %__MODULE__{
             node: atom(),
-            region: String.t(),
+            region: String.t() | nil,
             from_node: atom(),
             from_region: String.t(),
             latency: integer(),
@@ -48,6 +47,7 @@ defmodule Realtime.Latency do
   def handle_info(:ping, state) do
     ping()
     ping_after()
+
     {:noreply, state}
   end
 
@@ -64,6 +64,7 @@ defmodule Realtime.Latency do
   def handle_cast({:ping, pong_timeout, timer_timeout, yield_timeout}, state) do
     # For testing
     ping(pong_timeout, timer_timeout, yield_timeout)
+
     {:noreply, state}
   end
 
@@ -76,11 +77,11 @@ defmodule Realtime.Latency do
 
   Emulate a healthy remote node:
 
-      iex> [{%Task{}, {:ok, %{response: {:ok, :pong}}}}] = Realtime.Latency.ping()
+      iex> [{%Task{}, {:ok, %{response: {:ok, {:pong, "iad"}}}}}] = Realtime.Latency.ping()
 
   Emulate a slow but healthy remote node:
 
-      iex> [{%Task{}, {:ok, %{response: {:ok, :pong}}}}] = Realtime.Latency.ping(5_000, 10_000, 30_000)
+      iex> [{%Task{}, {:ok, %{response: {:ok, {:pong, "iad"}}}}}] = Realtime.Latency.ping(5_000, 10_000, 30_000)
 
   Emulate an unhealthy remote node:
 
@@ -93,47 +94,68 @@ defmodule Realtime.Latency do
   """
 
   @spec ping :: [{%Task{}, tuple() | nil}]
-  def ping(pong_timeout \\ 0, timer_timeout \\ 5_000, yield_timeout \\ 30_000) do
-    for n <- [Node.self() | Node.list()] do
-      Task.Supervisor.async(Realtime.TaskSupervisor, fn ->
-        {latency, {status, {_respose, remote_region}} = reply} =
-          :timer.tc(fn -> :rpc.call(n, __MODULE__, :pong, [pong_timeout], timer_timeout) end)
+  def ping(pong_timeout \\ 0, timer_timeout \\ 5_000, yield_timeout \\ 5_000) do
+    tasks =
+      for n <- [Node.self() | Node.list()] do
+        Task.Supervisor.async(Realtime.TaskSupervisor, fn ->
+          {latency, response} =
+            :timer.tc(fn -> :rpc.call(n, __MODULE__, :pong, [pong_timeout], timer_timeout) end)
 
-        latency_ms = latency / 1_000
+          latency_ms = latency / 1_000
+          fly_region = Application.get_env(:realtime, :fly_region, "iad")
+          short_name = Helpers.short_node_id_from_name(n)
+          from_node = Helpers.short_node_id_from_name(Node.self())
 
-        fly_region = Application.get_env(:realtime, :fly_region)
+          case response do
+            {:badrpc, :timeout} ->
+              Logger.error(
+                "Network error: can't connect to node #{short_name} from #{fly_region}"
+              )
 
-        short_name = Helpers.short_node_id_from_name(n)
+              payload = %Payload{
+                from_node: from_node,
+                from_region: fly_region,
+                node: short_name,
+                region: nil,
+                latency: latency_ms,
+                response: response,
+                timestamp: DateTime.utc_now()
+              }
 
-        cond do
-          status == :badrpc ->
-            Logger.error("Network error: can't connect to node #{short_name} from #{fly_region}")
+              RealtimeWeb.Endpoint.broadcast("admin:cluster", "pong", payload)
 
-          latency_ms > 1_000 ->
-            Logger.warn(
-              "Network warning: latency is #{latency_ms} ms to node #{short_name} from #{fly_region}"
-            )
+              payload
 
-          true ->
-            :noop
-        end
+            {:ok, {:pong, remote_region}} ->
+              if latency_ms > 1_000,
+                do:
+                  Logger.warn(
+                    "Network warning: latency to #{remote_region} (#{short_name}) from #{fly_region} (#{from_node}) is #{latency_ms} ms"
+                  )
 
-        payload = %Payload{
-          from_node: Helpers.short_node_id_from_name(Node.self()),
-          from_region: fly_region,
-          node: short_name,
-          region: remote_region,
-          latency: latency_ms,
-          response: reply,
-          timestamp: DateTime.utc_now()
-        }
+              payload = %Payload{
+                from_node: from_node,
+                from_region: fly_region,
+                node: short_name,
+                region: remote_region,
+                latency: latency_ms,
+                response: response,
+                timestamp: DateTime.utc_now()
+              }
 
-        RealtimeWeb.Endpoint.broadcast("admin:cluster", "pong", payload)
+              RealtimeWeb.Endpoint.broadcast("admin:cluster", "pong", payload)
 
-        payload
-      end)
+              payload
+          end
+        end)
+      end
+      |> Task.yield_many(yield_timeout)
+
+    for {task, result} <- tasks do
+      unless result, do: Task.shutdown(task, :brutal_kill)
     end
-    |> Task.yield_many(yield_timeout)
+
+    tasks
   end
 
   @doc """
@@ -142,7 +164,7 @@ defmodule Realtime.Latency do
 
   @spec pong :: {:ok, {:pong, String.t()}}
   def pong() do
-    region = System.get_env("FLY_REGION")
+    region = Application.get_env(:realtime, :fly_region, "iad")
     {:ok, {:pong, region}}
   end
 
