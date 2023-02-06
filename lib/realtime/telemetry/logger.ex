@@ -19,7 +19,7 @@ defmodule Realtime.Telemetry.Logger do
 
   def init(_args) do
     :telemetry.attach_many(
-      <<"telemetry-logger">>,
+      "telemetry-logger",
       @events,
       &__MODULE__.handle_event/4,
       []
