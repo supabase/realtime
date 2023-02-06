@@ -108,6 +108,10 @@ defmodule Realtime.Helpers do
 
   ## Examples
 
+      iex> node = Node.self()
+      iex> Realtime.Helpers.short_node_id_from_name(node)
+      "localhost"
+
       iex> node = :"realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2"
       iex> Realtime.Helpers.short_node_id_from_name(node)
       "83c3cfe3"
@@ -125,7 +129,7 @@ defmodule Realtime.Helpers do
   def short_node_id_from_name(name) when is_atom(name) do
     [_, ip] = name |> Atom.to_string() |> String.split("@", parts: 2)
 
-    {:ok, ip} = ip |> String.to_charlist() |> :inet.parse_address()
+    {:ok, ip} = ip |> handle_nohost() |> String.to_charlist() |> :inet.parse_address()
 
     case ip do
       {127, 0, 0, 1} ->
@@ -140,6 +144,11 @@ defmodule Realtime.Helpers do
 
         one <> two
     end
+  end
+
+  defp handle_nohost(ip) do
+    # we get `:nonode@nohost` in tests for `Node.self()`
+    if ip == "nohost", do: "127.0.0.1", else: ip
   end
 
   defp pad(data) do
