@@ -110,7 +110,7 @@ defmodule Realtime.Helpers do
 
       iex> node = Node.self()
       iex> Realtime.Helpers.short_node_id_from_name(node)
-      "localhost"
+      "nohost"
 
       iex> node = :"realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2"
       iex> Realtime.Helpers.short_node_id_from_name(node)
@@ -118,37 +118,28 @@ defmodule Realtime.Helpers do
 
       iex> node = :"pink@127.0.0.1"
       iex> Realtime.Helpers.short_node_id_from_name(node)
-      "localhost"
+      "127.0.0.1"
 
       iex> node = :"pink@10.0.1.1"
       iex> Realtime.Helpers.short_node_id_from_name(node)
       "10.0.1.1"
+
+      iex> node = :"realtime@host.name.internal"
+      iex> Realtime.Helpers.short_node_id_from_name(node)
+      "host.name.internal"
   """
 
   @spec short_node_id_from_name(atom()) :: String.t()
   def short_node_id_from_name(name) when is_atom(name) do
-    [_, ip] = name |> Atom.to_string() |> String.split("@", parts: 2)
+    [_, host] = name |> Atom.to_string() |> String.split("@", parts: 2)
 
-    {:ok, ip} = ip |> handle_nohost() |> String.to_charlist() |> :inet.parse_address()
-
-    case ip do
-      {127, 0, 0, 1} ->
-        "localhost"
-
-      {_, _, _, _} = v4 ->
-        v4 |> :inet.ntoa() |> to_string()
-
-      v6 ->
-        [_, _, _, _, _, one, two, _] =
-          v6 |> :inet.ntoa() |> to_string() |> String.split(":", parts: 8)
-
+    case String.split(host, ":", parts: 8) do
+      [_, _, _, _, _, one, two, _] ->
         one <> two
-    end
-  end
 
-  defp handle_nohost(ip) do
-    # we get `:nonode@nohost` in tests for `Node.self()`
-    if ip == "nohost", do: "127.0.0.1", else: ip
+      _other ->
+        host
+    end
   end
 
   defp pad(data) do
