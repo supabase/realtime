@@ -13,11 +13,9 @@ defmodule Realtime.ContextCache do
            {:commit, {:cached, apply(context, fun, args)}}
          end) do
       {:commit, {:cached, value}} ->
-        IO.inspect("MISS")
         value
 
       {:ok, {:cached, value}} ->
-        IO.inspect("HIT")
         value
     end
   end
