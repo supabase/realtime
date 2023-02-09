@@ -70,6 +70,7 @@ defmodule Realtime.Application do
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
         Realtime.GenCounter.DynamicSupervisor,
         {Cachex, name: Realtime.RateCounter},
+        Realtime.Tenants.Cache,
         Realtime.RateCounter.DynamicSupervisor,
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence,
