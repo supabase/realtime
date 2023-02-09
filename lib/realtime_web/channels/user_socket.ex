@@ -5,6 +5,7 @@ defmodule RealtimeWeb.UserSocket do
 
   alias Realtime.{PostgresCdc, Api}
   alias Api.Tenant
+  alias Realtime.Tenants
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
   import Realtime.Helpers, only: [decrypt!: 2, get_external_id: 1]
@@ -44,7 +45,7 @@ defmodule RealtimeWeb.UserSocket do
              max_joins_per_second: max_joins_per_second,
              max_channels_per_client: max_channels_per_client,
              postgres_cdc_default: postgres_cdc_default
-           } <- Api.get_tenant_by_external_id(external_id),
+           } <- Tenants.Cache.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- access_token(params, headers),
            jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec),
