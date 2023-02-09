@@ -1,8 +1,6 @@
 defmodule Realtime.Tenants.CacheTest do
   use Realtime.DataCase
 
-  import Mock
-
   alias Realtime.Api
   alias Realtime.Tenants
 
