@@ -67,8 +67,8 @@ defmodule Realtime.Helpers do
       iex> Realtime.Helpers.get_external_id("tenant.supabase.co")
       {:ok, "tenant"}
 
-      iex> Realtime.Helpers.get_external_id("www.supabase.co")
-      {:error, :tenant_not_found_in_host}
+      iex> Realtime.Helpers.get_external_id("localhost")
+      {:ok, "localhost"}
 
   """
 
@@ -76,8 +76,7 @@ defmodule Realtime.Helpers do
   def get_external_id(host) when is_binary(host) do
     case String.split(host, ".", parts: 2) do
       [] -> {:error, :tenant_not_found_in_host}
-      [_] -> {:error, :tenant_not_found_in_host}
-      ["www", _] -> {:error, :tenant_not_found_in_host}
+      [id] -> {:ok, id}
       [id, _] -> {:ok, id}
     end
   end
