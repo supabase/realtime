@@ -149,6 +149,17 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
         {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
 
+      {:error,
+       %Postgrex.Error{postgres: %{code: :object_in_use, routine: "ReplicationSlotAcquire"}}} ->
+        Logger.error("Error polling replication: :object_in_use")
+
+        Replications.terminate_backend(conn, slot_name)
+
+        {timeout, backoff} = Backoff.backoff(backoff)
+        retry_ref = Process.send_after(self(), :retry, timeout)
+
+        {:noreply, %{state | backoff: backoff, retry_ref: retry_ref}}
+
       {:error, reason} ->
         Logger.error("Error polling replication: #{inspect(reason, pretty: true)}")
 
