@@ -5,6 +5,7 @@ defmodule Extensions.PostgresCdcRls.Replications do
   require Logger
   import Postgrex, only: [query: 3]
 
+  @spec prepare_replication(pid(), String.t()) :: {:ok, :prepared}
   def prepare_replication(conn, slot_name) do
     query(
       conn,
@@ -21,6 +22,26 @@ defmodule Extensions.PostgresCdcRls.Replications do
         end;",
       [slot_name]
     )
+
+    {:ok, :prepared}
+  end
+
+  @spec terminate_backend(pid(), String.t()) :: {:ok, :terminated} | {:error, :slot_not_found}
+  def terminate_backend(conn, slot_name) do
+    slots =
+      query(conn, "select active_pid from pg_replication_slots where slot_name = $1", [slot_name])
+
+    case slots do
+      {:ok, %Postgrex.Result{rows: rows, num_rows: count}} when count > 0 ->
+        Logger.warn("Replication slot found in use - terminating")
+
+        rows |> List.flatten() |> Enum.each(&query(conn, "select pg_terminate_backend($1)", [&1]))
+
+        {:ok, :terminated}
+
+      {:ok, %Postgrex.Result{num_rows: 0}} ->
+        {:error, :slot_not_found}
+    end
   end
 
   def list_changes(conn, slot_name, publication, max_changes, max_record_bytes) do
