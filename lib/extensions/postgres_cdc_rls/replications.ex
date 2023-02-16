@@ -32,10 +32,10 @@ defmodule Extensions.PostgresCdcRls.Replications do
       query(conn, "select active_pid from pg_replication_slots where slot_name = $1", [slot_name])
 
     case slots do
-      {:ok, %Postgrex.Result{rows: rows, num_rows: count}} when count > 0 ->
+      {:ok, %Postgrex.Result{rows: [[backend]]}} ->
         Logger.warn("Replication slot found in use - terminating")
 
-        rows |> List.flatten() |> Enum.each(&query(conn, "select pg_terminate_backend($1)", [&1]))
+        query(conn, "select pg_terminate_backend($1)", [backend])
 
         {:ok, :terminated}
 
