@@ -46,6 +46,29 @@ defmodule Extensions.PostgresCdcRls.Replications do
     end
   end
 
+  @spec get_pg_stat_activity_diff(pid(), integer()) ::
+          {:ok, integer()} | {:error, Postgrex.Error.t()}
+  def get_pg_stat_activity_diff(conn, db_pid) do
+    query =
+      query(
+        conn,
+        "select
+         extract(
+          epoch from (now() - state_change)
+         )::int as diff
+         from pg_stat_activity where application_name = 'realtime_rls' and pid = $1",
+        [db_pid]
+      )
+
+    case query do
+      {:ok, %{rows: [[diff]]}} ->
+        {:ok, diff}
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
   def list_changes(conn, slot_name, publication, max_changes, max_record_bytes) do
     query(
       conn,
