@@ -59,6 +59,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       poll_ref: nil,
       publication: args["publication"],
       retry_ref: nil,
+      retry_count: 0,
       slot_name: args["slot_name"] <> slot_name_suffix(),
       tenant: args["id"]
     }
@@ -82,6 +83,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           poll_ref: poll_ref,
           publication: publication,
           retry_ref: retry_ref,
+          retry_count: retry_count,
           slot_name: slot_name,
           max_record_bytes: max_record_bytes,
           max_changes: max_changes,
@@ -153,12 +155,24 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
        %Postgrex.Error{postgres: %{code: :object_in_use, routine: "ReplicationSlotAcquire"}}} ->
         Logger.error("Error polling replication: :object_in_use")
 
-        Replications.terminate_backend(conn, slot_name)
+        if retry_count > 3 do
+          case Replications.terminate_backend(conn, slot_name) do
+            {:ok, :terminated} ->
+              Logger.warn("Replication slot in use - terminating")
+
+            {:error, :slot_not_found} ->
+              Logger.warn("Replication slot not found")
+
+            {:error, error} ->
+              Logger.warn("Error terminating backend: #{inspect(error)}")
+          end
+        end
 
         {timeout, backoff} = Backoff.backoff(backoff)
         retry_ref = Process.send_after(self(), :retry, timeout)
 
-        {:noreply, %{state | backoff: backoff, retry_ref: retry_ref}}
+        {:noreply,
+         %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
 
       {:error, reason} ->
         Logger.error("Error polling replication: #{inspect(reason, pretty: true)}")
@@ -166,7 +180,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         {timeout, backoff} = Backoff.backoff(backoff)
         retry_ref = Process.send_after(self(), :retry, timeout)
 
-        {:noreply, %{state | backoff: backoff, retry_ref: retry_ref}}
+        {:noreply,
+         %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
     end
   end
 
@@ -283,7 +298,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     )
   end
 
-  defp prepare_replication(%{backoff: backoff, conn: conn, slot_name: slot_name} = state) do
+  defp prepare_replication(
+         %{backoff: backoff, conn: conn, slot_name: slot_name, retry_count: retry_count} = state
+       ) do
     case Replications.prepare_replication(conn, slot_name) do
       {:ok, _} ->
         send(self(), :poll)
@@ -293,7 +310,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         Logger.error("Prepare replication error: #{inspect(error)}")
         {timeout, backoff} = Backoff.backoff(backoff)
         retry_ref = Process.send_after(self(), :retry, timeout)
-        %{state | backoff: backoff, retry_ref: retry_ref}
+        %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}
     end
   end
 end
