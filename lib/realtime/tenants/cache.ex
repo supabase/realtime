@@ -1,6 +1,6 @@
 defmodule Realtime.Tenants.Cache do
   @moduledoc """
-  Cache for users.
+  Cache for Tenants.
   """
 
   require Cachex.Spec
