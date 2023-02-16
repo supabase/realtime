@@ -21,6 +21,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     UpdatedRecord
   }
 
+  alias Postgrex, as: P
+
   @queue_target 5_000
 
   def start_link(opts) do
@@ -148,6 +150,35 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           end
 
         {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
+
+      {:error, %Postgrex.Error{postgres: %{code: :object_in_use, message: msg}}} ->
+        Logger.error("object_in_use: #{msg}")
+
+        [_, db_pid] = Regex.run(~r/PID\s(\d*)$/, msg)
+        db_pid = String.to_integer(db_pid)
+
+        {:ok, %{rows: [[diff]]}} =
+          P.query(
+            conn,
+            "select
+             extract(
+              epoch from (now() - state_change)
+             )::int as diff
+             from pg_stat_activity where application_name = 'realtime_rls' and pid = $1",
+            [db_pid]
+          )
+
+        # if the poller is stuck for more than 30 seconds, terminate the backend
+        if diff > 30 do
+          Logger.warning("Replication poller is stuck for #{diff} seconds, terminate_backend")
+          P.query(conn, "select pg_terminate_backend($1)", [db_pid])
+        else
+          Logger.warning("Replication poller is stuck for #{diff} seconds, skip")
+        end
+
+        {timeout, backoff} = Backoff.backoff(backoff)
+        retry_ref = Process.send_after(self(), :retry, timeout)
+        {:noreply, %{state | backoff: backoff, retry_ref: retry_ref}}
 
       {:error, reason} ->
         Logger.error("Error polling replication: #{inspect(reason, pretty: true)}")
