@@ -152,8 +152,19 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
 
       {:error,
-       %Postgrex.Error{postgres: %{code: :object_in_use, routine: "ReplicationSlotAcquire"}}} ->
+       %Postgrex.Error{
+         postgres: %{code: :object_in_use, routine: "ReplicationSlotAcquire", message: msg}
+       }} ->
         Logger.error("Error polling replication: :object_in_use")
+
+        [_, db_pid] = Regex.run(~r/PID\s(\d*)$/, msg)
+        db_pid = String.to_integer(db_pid)
+
+        {:ok, diff} = Replications.get_pg_stat_activity_diff(conn, db_pid)
+
+        Logger.warn(
+          "Database PID #{db_pid} found in pg_stat_activity with state_change diff of #{diff}"
+        )
 
         if retry_count > 3 do
           case Replications.terminate_backend(conn, slot_name) do
