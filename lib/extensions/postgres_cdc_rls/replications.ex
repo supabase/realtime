@@ -5,7 +5,8 @@ defmodule Extensions.PostgresCdcRls.Replications do
   require Logger
   import Postgrex, only: [query: 3]
 
-  @spec prepare_replication(pid(), String.t()) :: {:ok, :prepared}
+  @spec prepare_replication(pid(), String.t()) ::
+          {:ok, Postgrex.Result.t()} | {:error, Postgrex.Error.t()}
   def prepare_replication(conn, slot_name) do
     query(
       conn,
@@ -22,11 +23,10 @@ defmodule Extensions.PostgresCdcRls.Replications do
         end;",
       [slot_name]
     )
-
-    {:ok, :prepared}
   end
 
-  @spec terminate_backend(pid(), String.t()) :: {:ok, :terminated} | {:error, :slot_not_found}
+  @spec terminate_backend(pid(), String.t()) ::
+          {:ok, :terminated} | {:error, :slot_not_found | Postgrex.Error.t()}
   def terminate_backend(conn, slot_name) do
     slots =
       query(conn, "select active_pid from pg_replication_slots where slot_name = $1", [slot_name])
@@ -41,6 +41,9 @@ defmodule Extensions.PostgresCdcRls.Replications do
 
       {:ok, %Postgrex.Result{num_rows: 0}} ->
         {:error, :slot_not_found}
+
+      {:error, error} ->
+        {:error, error}
     end
   end
 
