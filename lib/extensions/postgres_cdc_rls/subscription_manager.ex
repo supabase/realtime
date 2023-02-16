@@ -13,7 +13,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   @max_delete_records 1000
   @check_oids_interval 60_000
   @check_no_users_interval 60_000
-  @stop_after 60_000 * 10
+  @stop_after :timer.minutes(10)
 
   defmodule State do
     @moduledoc false
@@ -180,7 +180,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     H.cancel_timer(state.no_users_ref)
 
     ts_new =
-      case {:ets.info(tid, :size), ts != nil && ts + @stop_after < now()} do
+      case {:ets.info(tid, :size), ts != nil && now() - ts >= @stop_after} do
         {0, true} ->
           Logger.info("Stop tenant #{state.id} because of no connected users")
           Rls.handle_stop(state.id, 15_000)
@@ -232,7 +232,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   end
 
   defp now() do
-    System.system_time(:millisecond)
+    System.monotonic_time(:millisecond)
   end
 
   defp check_no_users() do
