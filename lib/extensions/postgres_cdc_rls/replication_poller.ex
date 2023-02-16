@@ -151,10 +151,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
         {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
 
-      {:error,
-       %Postgrex.Error{
-         postgres: %{code: :object_in_use, routine: "ReplicationSlotAcquire", message: msg}
-       }} ->
+      {:error, %Postgrex.Error{postgres: %{code: :object_in_use, message: msg}}} ->
         Logger.error("Error polling replication: :object_in_use")
 
         [_, db_pid] = Regex.run(~r/PID\s(\d*)$/, msg)
