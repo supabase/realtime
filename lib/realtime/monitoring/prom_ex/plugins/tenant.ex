@@ -33,8 +33,15 @@ defmodule Realtime.PromEx.Plugins.Tenant do
         last_value(
           [:realtime, :connections, :connected],
           event_name: [:realtime, :connections],
-          description: "The total count of connected clients for a tenant.",
+          description: "The node total count of connected clients for a tenant.",
           measurement: :connected,
+          tags: [:tenant]
+        ),
+        last_value(
+          [:realtime, :connections, :connected_cluster],
+          event_name: [:realtime, :connections],
+          description: "The cluster total count of connected clients for a tenant.",
+          measurement: :connected_cluster,
           tags: [:tenant]
         ),
         last_value(
@@ -53,11 +60,12 @@ defmodule Realtime.PromEx.Plugins.Tenant do
 
     for t <- tenants do
       count = UsersCounter.tenant_users(Node.self(), t)
+      cluster_count = UsersCounter.tenant_users(t)
       tenant = Tenants.Cache.get_tenant_by_external_id(t)
 
       Telemetry.execute(
         [:realtime, :connections],
-        %{connected: count, limit: tenant.max_concurrent_users},
+        %{connected: count, connected_cluster: cluster_count, limit: tenant.max_concurrent_users},
         %{tenant: t}
       )
     end
