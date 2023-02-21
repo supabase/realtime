@@ -13,15 +13,15 @@ defmodule RealtimeWeb.TenantsLive.Index do
     import Ecto.Changeset
 
     schema "f" do
-      field(:sort_by, :string, default: "inserted_at")
-      field(:search, :string)
+      field(:order_by, :string, default: "inserted_at")
+      field(:search, :string, default: nil)
       field(:limit, :integer, default: 50)
       field(:order, :string, default: "desc")
     end
 
     def changeset(form, params \\ %{}) do
       form
-      |> cast(params, [:sort_by, :search, :limit, :order])
+      |> cast(params, [:order_by, :search, :limit, :order])
     end
 
     def apply_changes_form(changeset) do
@@ -61,7 +61,7 @@ defmodule RealtimeWeb.TenantsLive.Index do
         tenants:
           Api.list_tenants(
             search: form.search,
-            order_by: form.sort_by,
+            order_by: form.order_by,
             limit: form.limit,
             order: form.order
           )

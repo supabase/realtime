@@ -255,7 +255,7 @@ defmodule RealtimeWeb.Components do
   @doc """
   Renders a for field select dropdown.
   ## Examples
-    <.select form={f} field={:sort_by} list={@sort_fields} selected={:inserted_at}>
+    <.select form={f} field={:order_by} list={@sort_fields} selected={:inserted_at}>
   """
 
   attr :selected, :atom, required: true

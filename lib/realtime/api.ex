@@ -28,7 +28,7 @@ defmodule Realtime.Api do
   def list_tenants(opts) when is_list(opts) do
     repo_replica = Repo.replica()
 
-    field = Keyword.get(opts, :sort_by, "inserted_at") |> String.to_atom()
+    field = Keyword.get(opts, :order_by, "inserted_at") |> String.to_atom()
     external_id = Keyword.get(opts, :search)
     limit = Keyword.get(opts, :limit, 50)
     order = Keyword.get(opts, :order, "desc") |> String.to_atom()
