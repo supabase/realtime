@@ -6,7 +6,7 @@
     <div class="pr-4 w-full sm:w-full md:w-1/3 lg:w-1/4 xl:w-1/4">
         <.form :let={f} for={@filter_changeset} phx-change="validate" phx-submit="filter_submit">
         <div class="my-4">
-            <.select form={f} field={:sort_by} list={@sort_fields} selected={:inserted_at} />
+            <.select form={f} field={:order_by} list={@sort_fields} selected={:inserted_at} />
         </div>
         <div class="my-4">
             <.select form={f} field={:order} list={[:desc, :asc]} selected={:desc} />
