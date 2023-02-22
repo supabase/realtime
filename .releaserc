@@ -1,6 +1,6 @@
 {
   "branches": [
-    "release/latest"
+    "releases/latest"
   ],
   "plugins": [
     "@semantic-release/commit-analyzer",
