@@ -9,33 +9,139 @@ defmodule Realtime.Adapters.Postgres.Decoder do
     @moduledoc """
     Different types of logical replication messages from Postgres
     """
-    defmodule(Begin, do: defstruct([:final_lsn, :commit_timestamp, :xid]))
-    defmodule(Commit, do: defstruct([:flags, :lsn, :end_lsn, :commit_timestamp]))
-    defmodule(Origin, do: defstruct([:origin_commit_lsn, :name]))
-    defmodule(Relation, do: defstruct([:id, :namespace, :name, :replica_identity, :columns]))
-    defmodule(Insert, do: defstruct([:relation_id, :tuple_data]))
+    defmodule Begin do
+      @moduledoc """
+      Struct representing the BEGIN message in PostgreSQL's logical decoding output.
 
-    defmodule(Update,
-      do: defstruct([:relation_id, :changed_key_tuple_data, :old_tuple_data, :tuple_data])
-    )
+      * `final_lsn` - The LSN of the commit that this transaction ended at.
+      * `commit_timestamp` - The timestamp of the commit that this transaction ended at.
+      * `xid` - The transaction ID of this transaction.
+      """
+      defstruct [:final_lsn, :commit_timestamp, :xid]
+    end
 
-    defmodule(Delete,
-      do: defstruct([:relation_id, :changed_key_tuple_data, :old_tuple_data])
-    )
+    defmodule Commit do
+      @moduledoc """
+      Struct representing the COMMIT message in PostgreSQL's logical decoding output.
 
-    defmodule(Truncate,
-      do: defstruct([:number_of_relations, :options, :truncated_relations])
-    )
+      * `flags` - Bitmask of flags associated with this commit.
+      * `lsn` - The LSN of the commit.
+      * `end_lsn` - The LSN of the next record in the WAL stream.
+      * `commit_timestamp` - The timestamp of the commit.
+      """
+      defstruct [:flags, :lsn, :end_lsn, :commit_timestamp]
+    end
 
-    defmodule(Type,
-      do: defstruct([:id, :namespace, :name])
-    )
+    defmodule Origin do
+      @moduledoc """
+      Struct representing the ORIGIN message in PostgreSQL's logical decoding output.
 
-    defmodule(Unsupported, do: defstruct([:data]))
+      * `origin_commit_lsn` - The LSN of the commit in the database that the change originated from.
+      * `name` - The name of the origin.
+      """
+      defstruct [:origin_commit_lsn, :name]
+    end
 
-    defmodule(Relation.Column,
-      do: defstruct([:flags, :name, :type, :type_modifier])
-    )
+    defmodule Relation do
+      @moduledoc """
+      Struct representing the RELATION message in PostgreSQL's logical decoding output.
+
+      * `id` - The OID of the relation.
+      * `namespace` - The OID of the namespace that the relation belongs to.
+      * `name` - The name of the relation.
+      * `replica_identity` - The replica identity setting of the relation.
+      * `columns` - A list of columns in the relation.
+      """
+      defstruct [:id, :namespace, :name, :replica_identity, :columns]
+
+      defmodule Column do
+        @moduledoc """
+        Struct representing a column in a relation.
+
+        * `flags` - Bitmask of flags associated with this column.
+        * `name` - The name of the column.
+        * `type` - The OID of the data type of the column.
+        * `type_modifier` - The type modifier of the column.
+        """
+        defstruct [:flags, :name, :type, :type_modifier]
+      end
+    end
+
+    defmodule Insert do
+      @moduledoc """
+      Struct representing the INSERT message in PostgreSQL's logical decoding output.
+
+      * `relation_id` - The OID of the relation that the tuple was inserted into.
+      * `tuple_data` - The data of the inserted tuple.
+      """
+      defstruct [:relation_id, :tuple_data]
+    end
+
+    defmodule Update do
+      @moduledoc """
+      Struct representing the UPDATE message in PostgreSQL's logical decoding output.
+
+      * `relation_id` - The OID of the relation that the tuple was updated in.
+      * `changed_key_tuple_data` - The data of the tuple with the old key values.
+      * `old_tuple_data` - The data of the tuple before the update.
+      * `tuple_data` - The data of the tuple after the update.
+      """
+      defstruct [:relation_id, :changed_key_tuple_data, :old_tuple_data, :tuple_data]
+    end
+
+    defmodule Delete do
+      @moduledoc """
+      Struct representing the DELETE message in PostgreSQL's logical decoding output.
+
+      * `relation_id` - The OID of the relation that the tuple was deleted from.
+      * `changed_key_tuple_data` - The data of the tuple with the old key values.
+      * `old_tuple_data` - The data of the tuple before the delete.
+      """
+      defstruct [:relation_id, :changed_key_tuple_data, :old_tuple_data]
+    end
+
+    defmodule Truncate do
+      @moduledoc """
+      Struct representing the TRUNCATE message in PostgreSQL's logical decoding output.
+
+      * `number_of_relations` - The number of truncated relations.
+      * `options` - Additional options provided when truncating the relations.
+      * `truncated_relations` - List of relations that have been truncated.
+      """
+      defstruct [:number_of_relations, :options, :truncated_relations]
+    end
+
+    defmodule Type do
+      @moduledoc """
+      Struct representing the TYPE message in PostgreSQL's logical decoding output.
+
+      * `id` - The OID of the type.
+      * `namespace` - The namespace of the type.
+      * `name` - The name of the type.
+      """
+      defstruct [:id, :namespace, :name]
+    end
+
+    defmodule Unsupported do
+      @moduledoc """
+      Struct representing an unsupported message in PostgreSQL's logical decoding output.
+
+      * `data` - The raw data of the unsupported message.
+      """
+      defstruct [:data]
+    end
+
+    defmodule Relation.Column do
+      @moduledoc """
+      Struct representing a column in a relation in PostgreSQL's logical decoding output.
+
+      * `flags` - Column flags.
+      * `name` - The name of the column.
+      * `type` - The OID of the column type.
+      * `type_modifier` - The type modifier of the column.
+      """
+      defstruct [:flags, :name, :type, :type_modifier]
+    end
   end
 
   require Logger

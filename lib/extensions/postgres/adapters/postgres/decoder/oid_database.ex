@@ -16,6 +16,8 @@
 #  AND typisdefined -- Ignore undefined types
 
 defmodule Realtime.Adapters.Postgres.OidDatabase do
+  @moduledoc "This module maps a numeric PostgreSQL type ID to a descriptive string."
+
   @doc """
   Maps a numeric PostgreSQL type ID to a descriptive string.
 
