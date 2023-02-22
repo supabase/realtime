@@ -15,7 +15,7 @@ defmodule RealtimeWeb.TenantsLive.Index do
     schema "f" do
       field(:order_by, :string, default: "inserted_at")
       field(:search, :string, default: nil)
-      field(:limit, :integer, default: 50)
+      field(:limit, :integer, default: 10)
       field(:order, :string, default: "desc")
     end
 
