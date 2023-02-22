@@ -152,3 +152,18 @@ jobs:
           dst: |
             public.ecr.aws/supabase/realtime:v${{ needs.release.outputs.version }}
             ghcr.io/supabase/realtime:v${{ needs.release.outputs.version }}
+
+  update-branch-name:
+    needs: [release, docker_x86_release, docker_arm_release, merge_manifest]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v2
+        with:
+          ref: refs/heads/main
+      - name: Update branch name
+        run: |
+          git branch -m releases/latest releases/v${{ needs.release.outputs.version }}
+          git push origin HEAD:releases/latest
+          git branch releases/latest
+          git push
