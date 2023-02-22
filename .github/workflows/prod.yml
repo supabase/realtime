@@ -160,10 +160,12 @@ jobs:
       - name: Checkout branch
         uses: actions/checkout@v2
         with:
-          ref: refs/heads/main
+          ref: refs/heads/releases/latest
       - name: Update branch name
         run: |
           git branch -m releases/latest releases/v${{ needs.release.outputs.version }}
-          git push origin HEAD:releases/latest
+          git push origin HEAD:releases/v${{ needs.release.outputs.version }}
+          git checkout main
+          git push origin --delete releases/latest
           git branch releases/latest
-          git push
+          git push origin HEAD:releases/latest
