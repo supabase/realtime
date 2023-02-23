@@ -19,7 +19,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PROJECT_ACTION }}
 
   deploy:
-    needs: release
     runs-on: ubuntu-20.04
     if: needs.release.outputs.published == 'true'
     steps:
@@ -166,5 +165,5 @@ jobs:
           git push origin HEAD:releases/v${{ needs.release.outputs.version }}
           git checkout -b main
           git push origin --delete releases/latest
-          git branch releases/latest
+          git branch releases/latest main
           git push origin HEAD:releases/latest
