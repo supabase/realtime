@@ -3,7 +3,7 @@ on:
   push:
     branches:
       - 'releases/latest'
-
+jobs:
   release:
     runs-on: ubuntu-20.04
     outputs:
