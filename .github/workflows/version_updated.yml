@@ -1,0 +1,27 @@
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - 'releases/latest'
+
+name: Default Checks
+
+jobs:
+  versions_updated:
+    name: Versions Updated
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Verify Versions Updated
+        uses: tj-actions/verify-changed-files@v13
+        id: verify_changed_files
+        with:
+          files: |
+             mix.exs
+      - name: Fail Unless Versions Updated
+        id: fail_if_changed
+        if: steps.verify_changed_files.outputs.files_changed == 'true'
+        run: |
+              echo "::error ::Please update the mix.exs version"
+              exit 1
