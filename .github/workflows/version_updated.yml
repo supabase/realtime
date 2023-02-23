@@ -5,7 +5,7 @@ on:
       - 'main'
       - 'releases/latest'
 
-name: Default
+name: Default Checks
 
 jobs:
   versions_updated:
