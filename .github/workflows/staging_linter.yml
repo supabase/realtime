@@ -1,4 +1,4 @@
-name: MT Staging Formatting Checks
+name: Staging Formatting Checks
 on:
   pull_request:
     branches:

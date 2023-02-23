@@ -1,4 +1,4 @@
-name: MT Production Formatting Checks
+name: Production Formatting Checks
 on:
   pull_request:
     branches:
