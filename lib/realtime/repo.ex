@@ -10,6 +10,7 @@ defmodule Realtime.Repo do
     "iad" => Realtime.Repo.Replica.IAD,
     "sin" => Realtime.Repo.Replica.SIN,
     "maa" => Realtime.Repo.Replica.SIN,
+    "syd" => Realtime.Repo.Replica.SIN,
     "lhr" => Realtime.Repo.Replica.FRA,
     "fra" => Realtime.Repo.Replica.FRA
   }
