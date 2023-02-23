@@ -1,4 +1,4 @@
-name: MT Supabench
+name: Supabench
 on:
   push:
     branches:

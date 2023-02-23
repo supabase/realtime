@@ -1,4 +1,4 @@
-name: MT Deploy Production
+name: Deploy Production
 on:
   push:
     branches:
