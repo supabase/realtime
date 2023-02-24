@@ -1,42 +1,11 @@
-defmodule Realtime.RLS.Repo.Migrations.AddQuotedRegtypesBackwardCompatibilitySupport do
+defmodule Realtime.Extensions.Rls.Repo.Migrations.MillisecondPrecisionForWalrus do
+  @moduledoc false
+
   use Ecto.Migration
 
   def change do
     execute("
-      create or replace function realtime.is_visible_through_filters(columns realtime.wal_column[], filters realtime.user_defined_filter[])
-            returns bool
-            language sql
-            immutable
-        as $$
-        /*
-        Should the record be visible (true) or filtered out (false) after *filters* are applied
-        */
-            select
-                -- Default to allowed when no filters present
-                coalesce(
-                    sum(
-                        realtime.check_equality_op(
-                            op:=f.op,
-                            type_:=coalesce(
-                                col.type_oid::regtype, -- null when wal2json version <= 2.4
-                                col.type_name::regtype
-                            ),
-                            -- cast jsonb to text
-                            val_1:=col.value #>> '{}',
-                            val_2:=f.value
-                        )::int
-                    ) = count(1),
-                    true
-                )
-            from
-                unnest(filters) f
-                join unnest(columns) col
-                    on f.column_name = col.name;
-        $$;
-    ")
-
-    execute("
-    create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
+      create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
           returns setof realtime.wal_rls
           language plpgsql
           volatile
@@ -198,7 +167,7 @@ defmodule Realtime.RLS.Repo.Migrations.AddQuotedRegtypesBackwardCompatibilitySup
                       'type', action,
                       'commit_timestamp', to_char(
                           (wal ->> 'timestamp')::timestamptz,
-                          'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'
+                          'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'
                       ),
                       'columns', (
                           select
@@ -222,43 +191,43 @@ defmodule Realtime.RLS.Repo.Migrations.AddQuotedRegtypesBackwardCompatibilitySup
                   -- Add \"record\" key for insert and update
                   || case
                       when action in ('INSERT', 'UPDATE') then
-                          case
-                              when error_record_exceeds_max_size then
-                                  jsonb_build_object(
-                                      'record',
-                                      (
-                                          select jsonb_object_agg((c).name, (c).value)
-                                          from unnest(columns) c
-                                          where (c).is_selectable and (octet_length((c).value::text) <= 64)
-                                      )
-                                  )
-                              else
-                                  jsonb_build_object(
-                                      'record',
-                                      (select jsonb_object_agg((c).name, (c).value) from unnest(columns) c where (c).is_selectable)
-                                  )
-                          end
+                          jsonb_build_object(
+                              'record',
+                              (
+                                  select jsonb_object_agg((c).name, (c).value)
+                                  from unnest(columns) c
+                                  where
+                                      (c).is_selectable
+                                      and ( not error_record_exceeds_max_size or (octet_length((c).value::text) <= 64))
+                              )
+                          )
                       else '{}'::jsonb
                   end
                   -- Add \"old_record\" key for update and delete
                   || case
-                      when action in ('UPDATE', 'DELETE') then
-                          case
-                              when error_record_exceeds_max_size then
-                                  jsonb_build_object(
-                                      'old_record',
-                                      (
-                                          select jsonb_object_agg((c).name, (c).value)
-                                          from unnest(old_columns) c
-                                          where (c).is_selectable and (octet_length((c).value::text) <= 64)
-                                      )
+                      when action = 'UPDATE' then
+                          jsonb_build_object(
+                                  'old_record',
+                                  (
+                                      select jsonb_object_agg((c).name, (c).value)
+                                      from unnest(old_columns) c
+                                      where
+                                          (c).is_selectable
+                                          and ( not error_record_exceeds_max_size or (octet_length((c).value::text) <= 64))
                                   )
-                              else
-                                  jsonb_build_object(
-                                      'old_record',
-                                      (select jsonb_object_agg((c).name, (c).value) from unnest(old_columns) c where (c).is_selectable)
-                                  )
-                          end
+                              )
+                      when action = 'DELETE' then
+                          jsonb_build_object(
+                              'old_record',
+                              (
+                                  select jsonb_object_agg((c).name, (c).value)
+                                  from unnest(old_columns) c
+                                  where
+                                      (c).is_selectable
+                                      and ( not error_record_exceeds_max_size or (octet_length((c).value::text) <= 64))
+                                      and ( not is_rls_enabled or (c).is_pkey ) -- if RLS enabled, we can't secure deletes so filter to pkey
+                              )
+                          )
                       else '{}'::jsonb
                   end;
 
@@ -281,7 +250,10 @@ defmodule Realtime.RLS.Repo.Migrations.AddQuotedRegtypesBackwardCompatibilitySup
                           where
                               subs.entity = entity_
                               and subs.claims_role = working_role
-                              and realtime.is_visible_through_filters(columns, subs.filters)
+                              and (
+                                  realtime.is_visible_through_filters(columns, subs.filters)
+                                  or action = 'DELETE'
+                              )
                   ) loop
 
                       if not is_rls_enabled or action = 'DELETE' then
@@ -317,7 +289,7 @@ defmodule Realtime.RLS.Repo.Migrations.AddQuotedRegtypesBackwardCompatibilitySup
 
           perform set_config('role', null, true);
       end;
-    $$;
+      $$;
     ")
   end
 end

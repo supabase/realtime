@@ -13,6 +13,8 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
 
   @impl true
   def init(_args) do
+    load_migrations_modules()
+
     :syn.set_event_handler(Rls.SynHandler)
     :syn.add_node_to_scopes([Rls])
 
@@ -27,5 +29,15 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp load_migrations_modules() do
+    {:ok, modules} = :application.get_key(:realtime, :modules)
+
+    modules
+    |> Enum.filter(
+      &String.starts_with?(to_string(&1), "Elixir.Realtime.Extensions.Rls.Repo.Migrations")
+    )
+    |> Enum.each(&Code.ensure_loaded!/1)
   end
 end

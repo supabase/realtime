@@ -1,4 +1,6 @@
-defmodule Realtime.RLS.Repo.Migrations.AddOutputForDataLessThanEqual64BytesWhenPayloadTooLarge do
+defmodule Realtime.Extensions.Rls.Repo.Migrations.EnableFilteringOnDeleteRecord do
+  @moduledoc false
+
   use Ecto.Migration
 
   def change do
@@ -11,6 +13,7 @@ defmodule Realtime.RLS.Repo.Migrations.AddOutputForDataLessThanEqual64BytesWhenP
       declare
           -- Regclass of the table e.g. public.notes
           entity_ regclass = (quote_ident(wal ->> 'schema') || '.' || quote_ident(wal ->> 'table'))::regclass;
+
           -- I, U, D, T: insert, update ...
           action realtime.action = (
               case wal ->> 'action'
@@ -20,23 +23,29 @@ defmodule Realtime.RLS.Repo.Migrations.AddOutputForDataLessThanEqual64BytesWhenP
                   else 'ERROR'
               end
           );
+
           -- Is row level security enabled for the table
           is_rls_enabled bool = relrowsecurity from pg_class where oid = entity_;
+
           subscriptions realtime.subscription[] = array_agg(subs)
               from
                   realtime.subscription subs
               where
                   subs.entity = entity_;
+
           -- Subscription vars
           roles regrole[] = array_agg(distinct us.claims_role)
               from
                   unnest(subscriptions) us;
+
           working_role regrole;
           claimed_role regrole;
           claims jsonb;
+
           subscription_id uuid;
           subscription_has_access bool;
           visible_to_subscription_ids uuid[] = '{}';
+
           -- structured info for wal's columns
           columns realtime.wal_column[];
           -- previous identity values for update/delete
@@ -58,7 +67,10 @@ defmodule Realtime.RLS.Repo.Migrations.AddOutputForDataLessThanEqual64BytesWhenP
                       x->>'typeoid',
                       realtime.cast(
                           (x->'value') #>> '{}',
-                          (x->>'typeoid')::regtype
+                          coalesce(
+                              (x->>'typeoid')::regtype, -- null when wal2json version <= 2.4
+                              (x->>'type')::regtype
+                          )
                       ),
                       (pks ->> 'name') is not null,
                       true
@@ -77,7 +89,10 @@ defmodule Realtime.RLS.Repo.Migrations.AddOutputForDataLessThanEqual64BytesWhenP
                       x->>'typeoid',
                       realtime.cast(
                           (x->'value') #>> '{}',
-                          (x->>'typeoid')::regtype
+                          coalesce(
+                              (x->>'typeoid')::regtype, -- null when wal2json version <= 2.4
+                              (x->>'type')::regtype
+                          )
                       ),
                       (pks ->> 'name') is not null,
                       true
@@ -176,43 +191,43 @@ defmodule Realtime.RLS.Repo.Migrations.AddOutputForDataLessThanEqual64BytesWhenP
                   -- Add \"record\" key for insert and update
                   || case
                       when action in ('INSERT', 'UPDATE') then
-                          case
-                              when error_record_exceeds_max_size then
-                                  jsonb_build_object(
-                                      'record',
-                                      (
-                                          select jsonb_object_agg((c).name, (c).value)
-                                          from unnest(columns) c
-                                          where (c).is_selectable and (octet_length((c).value::text) <= 64)
-                                      )
-                                  )
-                              else
-                                  jsonb_build_object(
-                                      'record',
-                                      (select jsonb_object_agg((c).name, (c).value) from unnest(columns) c where (c).is_selectable)
-                                  )
-                          end
+                          jsonb_build_object(
+                              'record',
+                              (
+                                  select jsonb_object_agg((c).name, (c).value)
+                                  from unnest(columns) c
+                                  where
+                                      (c).is_selectable
+                                      and ( not error_record_exceeds_max_size or (octet_length((c).value::text) <= 64))
+                              )
+                          )
                       else '{}'::jsonb
                   end
                   -- Add \"old_record\" key for update and delete
                   || case
-                      when action in ('UPDATE', 'DELETE') then
-                          case
-                              when error_record_exceeds_max_size then
-                                  jsonb_build_object(
-                                      'old_record',
-                                      (
-                                          select jsonb_object_agg((c).name, (c).value)
-                                          from unnest(old_columns) c
-                                          where (c).is_selectable and (octet_length((c).value::text) <= 64)
-                                      )
+                      when action = 'UPDATE' then
+                          jsonb_build_object(
+                                  'old_record',
+                                  (
+                                      select jsonb_object_agg((c).name, (c).value)
+                                      from unnest(old_columns) c
+                                      where
+                                          (c).is_selectable
+                                          and ( not error_record_exceeds_max_size or (octet_length((c).value::text) <= 64))
                                   )
-                              else
-                                  jsonb_build_object(
-                                      'old_record',
-                                      (select jsonb_object_agg((c).name, (c).value) from unnest(old_columns) c where (c).is_selectable)
-                                  )
-                          end
+                              )
+                      when action = 'DELETE' then
+                          jsonb_build_object(
+                              'old_record',
+                              (
+                                  select jsonb_object_agg((c).name, (c).value)
+                                  from unnest(old_columns) c
+                                  where
+                                      (c).is_selectable
+                                      and ( not error_record_exceeds_max_size or (octet_length((c).value::text) <= 64))
+                                      and ( not is_rls_enabled or (c).is_pkey ) -- if RLS enabled, we can't secure deletes so filter to pkey
+                              )
+                          )
                       else '{}'::jsonb
                   end;
 
@@ -235,7 +250,10 @@ defmodule Realtime.RLS.Repo.Migrations.AddOutputForDataLessThanEqual64BytesWhenP
                           where
                               subs.entity = entity_
                               and subs.claims_role = working_role
-                              and realtime.is_visible_through_filters(columns, subs.filters)
+                              and (
+                                  realtime.is_visible_through_filters(columns, subs.filters)
+                                  or action = 'DELETE'
+                              )
                   ) loop
 
                       if not is_rls_enabled or action = 'DELETE' then
