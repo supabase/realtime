@@ -10,5 +10,11 @@ if [ "${ENABLE_TAILSCALE-}" = true ]; then
     /tailscale/tailscale up --authkey=${TAILSCALE_AUTHKEY} --hostname="${TAILSCALE_APP_NAME}" --accept-routes=true
 fi
 
+echo "Adding new entry to hosts file"
+
+IPADDR=$(curl ${ECS_CONTAINER_METADATA_URI} | jq -r '.Networks[0].IPv4Addresses[0]')
+echo -e "${IPADDR}\tfly-local-6pn" >> /etc/hosts
+echo "Added fly alias hostname for ${IPADDR}"
+
 echo "Starting Realtime"
 sudo -E -u nobody /app/bin/server

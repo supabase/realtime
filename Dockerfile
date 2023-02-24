@@ -118,6 +118,12 @@ ENV RLIMIT_NOFILE 100000
 COPY limits.sh /app/limits.sh
 ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/app/limits.sh"]
 
+# install build dependencies
+RUN apt-get update -y \
+  && apt-get install curl jq -y \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
 CMD ["/tailscale/wrapper.sh"]
 # Appended by flyctl
 ENV ECTO_IPV6 true
