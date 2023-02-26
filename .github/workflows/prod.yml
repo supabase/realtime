@@ -162,7 +162,3 @@ jobs:
         run: |
           git branch -m releases/latest releases/v${{ needs.release.outputs.version }}
           git push origin HEAD:releases/v${{ needs.release.outputs.version }}
-          git checkout -b main
-          git push origin --delete releases/latest
-          git branch releases/latest main
-          git push origin HEAD:releases/latest
