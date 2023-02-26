@@ -160,5 +160,5 @@ jobs:
           ref: refs/heads/releases/latest
       - name: Update branch name
         run: |
-          git branch -m releases/latest releases/v${{ needs.release.outputs.version }}
+          git branch -m main releases/v${{ needs.release.outputs.version }}
           git push origin HEAD:releases/v${{ needs.release.outputs.version }}
