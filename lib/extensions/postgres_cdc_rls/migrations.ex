@@ -33,7 +33,8 @@ defmodule Extensions.PostgresCdcRls.Migrations do
     UpdateApplyRlsFunctionToPassThroughDeleteEventsOnFilter,
     MillisecondPrecisionForWalrus,
     AddInOpToFilters,
-    EnableFilteringOnDeleteRecord
+    EnableFilteringOnDeleteRecord,
+    UpdateSubscriptionCheckFiltersForInFilterNonTextTypes
   }
 
   alias Realtime.Helpers, as: H
@@ -65,7 +66,8 @@ defmodule Extensions.PostgresCdcRls.Migrations do
     {20_220_916_233_421, UpdateApplyRlsFunctionToPassThroughDeleteEventsOnFilter},
     {20_230_119_133_233, MillisecondPrecisionForWalrus},
     {20_230_128_025_114, AddInOpToFilters},
-    {20_230_128_025_212, EnableFilteringOnDeleteRecord}
+    {20_230_128_025_212, EnableFilteringOnDeleteRecord},
+    {20_230_227_211_149, UpdateSubscriptionCheckFiltersForInFilterNonTextTypes}
   ]
 
   @spec start_link(GenServer.options()) :: GenServer.on_start()
