@@ -31,7 +31,7 @@ jobs:
       - name: Run main database migrations
         run: mix ecto.migrate --log-migrator-sql
       - name: Run database tenant migrations
-        run: mix ecto.migrate --migrations-path priv/repo/postgres/migrations
+        run: mix ecto.migrate --migrations-path lib/extensions/postgres_cdc_rls/repo/migrations
       - name: Run format check
         run: mix format --check-formatted
       - name: Credo checks

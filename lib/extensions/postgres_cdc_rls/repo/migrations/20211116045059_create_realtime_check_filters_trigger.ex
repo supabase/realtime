@@ -1,8 +1,10 @@
-defmodule Realtime.Repo.Migrations.UpdateRealtimeSubscriptionCheckFiltersFunctionSecurity do
+defmodule Realtime.Extensions.Rls.Repo.Migrations.CreateRealtimeCheckFiltersTrigger do
+  @moduledoc false
+
   use Ecto.Migration
 
   def change do
-    execute "create or replace function realtime.subscription_check_filters()
+    execute("create function realtime.subscription_check_filters()
       returns trigger
       language plpgsql
     as $$
@@ -22,7 +24,7 @@ defmodule Realtime.Repo.Migrations.UpdateRealtimeSubscriptionCheckFiltersFunctio
           (quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass = new.entity
           and pg_catalog.has_column_privilege('authenticated', new.entity, c.column_name, 'SELECT');
       filter realtime.user_defined_filter;
-      col_type regtype;
+      col_type text;
     begin
       for filter in select * from unnest(new.filters) loop
         -- Filtered column is valid
@@ -36,12 +38,12 @@ defmodule Realtime.Repo.Migrations.UpdateRealtimeSubscriptionCheckFiltersFunctio
           from pg_catalog.pg_attribute
           where attrelid = new.entity
             and attname = filter.column_name
-        );
+        )::text;
         if col_type is null then
           raise exception 'failed to lookup type for column %', filter.column_name;
         end if;
         -- raises an exception if value is not coercable to type
-        perform realtime.cast(filter.value, col_type);
+        perform format('select %s::%I', filter.value, col_type);
       end loop;
 
       -- Apply consistent order to filters so the unique constraint on
@@ -53,6 +55,11 @@ defmodule Realtime.Repo.Migrations.UpdateRealtimeSubscriptionCheckFiltersFunctio
 
       return new;
     end;
-    $$;"
+    $$;")
+
+    execute("create trigger tr_check_filters
+    before insert or update on realtime.subscription
+    for each row
+    execute function realtime.subscription_check_filters();")
   end
 end

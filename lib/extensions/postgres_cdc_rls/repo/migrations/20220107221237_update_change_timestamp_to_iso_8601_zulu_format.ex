@@ -1,90 +1,11 @@
-defmodule Realtime.Repo.Migrations.EnableGenericSubscriptionClaims do
+defmodule Realtime.Extensions.Rls.Repo.Migrations.UpdateChangeTimestampToIso8601ZuluFormat do
+  @moduledoc false
+
   use Ecto.Migration
 
   def change do
-    execute "truncate table realtime.subscription restart identity"
-
-    execute "alter table realtime.subscription
-      drop constraint subscription_entity_user_id_filters_key cascade,
-      drop column email cascade,
-      drop column created_at cascade"
-
-    execute "alter table realtime.subscription rename user_id to subscription_id"
-
-    execute "create function realtime.to_regrole(role_name text)
-      returns regrole
-      immutable
-      language sql
-      -- required to allow use in generated clause
-      as $$ select role_name::regrole $$;"
-
-    execute "alter table realtime.subscription
-      add column claims jsonb not null,
-      add column claims_role regrole not null generated always as (realtime.to_regrole(claims ->> 'role')) stored,
-      add column created_at timestamp not null default timezone('utc', now())"
-
-    execute "create unique index subscription_subscription_id_entity_filters_key on realtime.subscription (subscription_id, entity, filters)"
-
-    execute "revoke usage on schema realtime from authenticated;"
-    execute "revoke all on realtime.subscription from authenticated;"
-
-    execute "create or replace function realtime.subscription_check_filters()
-      returns trigger
-      language plpgsql
-      as $$
-        /*
-          Validates that the user defined filters for a subscription:
-            - refer to valid columns that the claimed role may access
-            - values are coercable to the correct column type
-        */
-      declare
-        col_names text[] = coalesce(
-            array_agg(c.column_name order by c.ordinal_position),
-            '{}'::text[]
-          )
-          from
-            information_schema.columns c
-          where
-            format('%I.%I', c.table_schema, c.table_name)::regclass = new.entity
-            and pg_catalog.has_column_privilege((new.claims ->> 'role'), new.entity, c.column_name, 'SELECT');
-        filter realtime.user_defined_filter;
-        col_type regtype;
-      begin
-        for filter in select * from unnest(new.filters) loop
-          -- Filtered column is valid
-          if not filter.column_name = any(col_names) then
-            raise exception 'invalid column for filter %', filter.column_name;
-          end if;
-
-          -- Type is sanitized and safe for string interpolation
-          col_type = (
-            select atttypid::regtype
-            from pg_catalog.pg_attribute
-            where attrelid = new.entity
-              and attname = filter.column_name
-          );
-          if col_type is null then
-            raise exception 'failed to lookup type for column %', filter.column_name;
-          end if;
-          -- raises an exception if value is not coercable to type
-          perform realtime.cast(filter.value, col_type);
-        end loop;
-
-        -- Apply consistent order to filters so the unique constraint on
-        -- (subscription_id, entity, filters) can't be tricked by a different filter order
-        new.filters = coalesce(
-          array_agg(f order by f.column_name, f.op, f.value),
-          '{}'
-        ) from unnest(new.filters) f;
-
-        return new;
-      end;
-    $$;"
-
-    execute "alter type realtime.wal_rls rename attribute users to subscription_ids cascade;"
-
-    execute "drop function realtime.apply_rls(jsonb, integer);"
-    execute "create function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
+    execute(
+      "create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
       returns setof realtime.wal_rls
       language plpgsql
       volatile
@@ -220,7 +141,10 @@ defmodule Realtime.Repo.Migrations.EnableGenericSubscriptionClaims do
               'schema', wal ->> 'schema',
               'table', wal ->> 'table',
               'type', action,
-              'commit_timestamp', (wal ->> 'timestamp')::text::timestamp with time zone,
+              'commit_timestamp', to_char(
+                (wal ->> 'timestamp')::timestamptz,
+                'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'
+              ),
               'columns', (
                 select
                   jsonb_agg(
@@ -317,5 +241,6 @@ defmodule Realtime.Repo.Migrations.EnableGenericSubscriptionClaims do
         perform set_config('role', null, true);
       end;
       $$;"
+    )
   end
 end

@@ -1,14 +1,16 @@
-defmodule Realtime.Repo.Migrations.UpdateSubscriptionCheckFiltersFunctionDynamicTableName do
+defmodule Realtime.Extensions.Rls.Repo.Migrations.UpdateRealtimeSubscriptionCheckFiltersFunctionSecurity do
+  @moduledoc false
+
   use Ecto.Migration
 
   def change do
-    execute "create or replace function realtime.subscription_check_filters()
+    execute("create or replace function realtime.subscription_check_filters()
       returns trigger
       language plpgsql
     as $$
     /*
     Validates that the user defined filters for a subscription:
-    - refer to valid columns that the claimed role may access
+    - refer to valid columns that 'authenticated' may access
     - values are coercable to the correct column type
     */
     declare
@@ -16,16 +18,11 @@ defmodule Realtime.Repo.Migrations.UpdateSubscriptionCheckFiltersFunctionDynamic
         array_agg(c.column_name order by c.ordinal_position),
         '{}'::text[]
       )
-      from
-        information_schema.columns c
-      where
-        format('%I.%I', c.table_schema, c.table_name)::regclass = new.entity
-        and pg_catalog.has_column_privilege(
-          (new.claims ->> 'role'),
-          format('%I.%I', c.table_schema, c.table_name)::regclass,
-          c.column_name,
-          'SELECT'
-        );
+        from
+          information_schema.columns c
+        where
+          (quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass = new.entity
+          and pg_catalog.has_column_privilege('authenticated', new.entity, c.column_name, 'SELECT');
       filter realtime.user_defined_filter;
       col_type regtype;
     begin
@@ -50,14 +47,14 @@ defmodule Realtime.Repo.Migrations.UpdateSubscriptionCheckFiltersFunctionDynamic
       end loop;
 
       -- Apply consistent order to filters so the unique constraint on
-      -- (subscription_id, entity, filters) can't be tricked by a different filter order
+      -- (user_id, entity, filters) can't be tricked by a different filter order
       new.filters = coalesce(
         array_agg(f order by f.column_name, f.op, f.value),
         '{}'
       ) from unnest(new.filters) f;
 
-    return new;
-  end;
-  $$;"
+      return new;
+    end;
+    $$;")
   end
 end
