@@ -35,8 +35,7 @@ RUN apt-get update -y \
   && apt-get clean \
   && rm -f /var/lib/apt/lists/*_* \
   && curl -sL https://deb.nodesource.com/setup_18.x | bash - \
-  && apt-get install -y nodejs \
-  && apt-get install -y npm
+  && apt-get install -y nodejs
 
 # prepare build dir
 WORKDIR /app
