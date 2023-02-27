@@ -1,8 +1,10 @@
-defmodule Realtime.Repo.Migrations.CreateRealtimeQuoteWal2jsonFunction do
+defmodule Realtime.Extensions.Rls.Repo.Migrations.CreateRealtimeQuoteWal2jsonFunction do
+  @moduledoc false
+
   use Ecto.Migration
 
   def change do
-    execute "create function realtime.quote_wal2json(entity regclass)
+    execute("create function realtime.quote_wal2json(entity regclass)
       returns text
       language sql
       immutable
@@ -36,6 +38,6 @@ defmodule Realtime.Repo.Migrations.CreateRealtimeQuoteWal2jsonFunction do
           on pc.relnamespace = nsp.oid
       where
         pc.oid = entity
-    $$;"
+    $$;")
   end
 end

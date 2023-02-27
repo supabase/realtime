@@ -34,9 +34,8 @@ RUN apt-get update -y \
   && apt-get install -y build-essential git \
   && apt-get clean \
   && rm -f /var/lib/apt/lists/*_* \
-  && curl -sL https://deb.nodesource.com/setup_10.x | bash - \
-  && apt-get install -y nodejs \
-  && apt-get install -y npm
+  && curl -sL https://deb.nodesource.com/setup_18.x | bash - \
+  && apt-get install -y nodejs
 
 # prepare build dir
 WORKDIR /app

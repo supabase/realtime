@@ -1,16 +1,10 @@
-defmodule Realtime.Repo.Migrations.CreateRealtimeBuildPreparedStatementSqlFunction do
+defmodule Realtime.Extensions.Rls.Repo.Migrations.UpdateRealtimeBuildPreparedStatementSqlFunctionForCompatibilityWithAllTypes do
+  @moduledoc false
+
   use Ecto.Migration
 
   def change do
-    execute "create type realtime.wal_column as (
-      name text,
-      type text,
-      value jsonb,
-      is_pkey boolean,
-      is_selectable boolean
-    );"
-
-    execute "create function realtime.build_prepared_statement_sql(
+    execute("create or replace function realtime.build_prepared_statement_sql(
       prepared_statement_name text,
       entity regclass,
       columns realtime.wal_column[]
@@ -34,7 +28,7 @@ defmodule Realtime.Repo.Migrations.CreateRealtimeBuildPreparedStatementSqlFuncti
           from
             ' || entity || '
           where
-            ' || string_agg(quote_ident(pkc.name) || '=' || quote_nullable(pkc.value) , ' and ') || '
+            ' || string_agg(quote_ident(pkc.name) || '=' || quote_nullable(pkc.value #>> '{}') , ' and ') || '
         )'
       from
         unnest(columns) pkc
@@ -42,6 +36,6 @@ defmodule Realtime.Repo.Migrations.CreateRealtimeBuildPreparedStatementSqlFuncti
         pkc.is_pkey
       group by
         entity
-    $$;"
+    $$;")
   end
 end

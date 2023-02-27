@@ -1,8 +1,11 @@
-defmodule Realtime.Repo.Migrations.CreateRealtimeIsVisibleThroughFiltersFunction do
+defmodule Realtime.Extensions.Rls.Repo.Migrations.CreateRealtimeIsVisibleThroughFiltersFunction do
+  @moduledoc false
+
   use Ecto.Migration
 
   def change do
-    execute "create function realtime.is_visible_through_filters(columns realtime.wal_column[], filters realtime.user_defined_filter[])
+    execute(
+      "create function realtime.is_visible_through_filters(columns realtime.wal_column[], filters realtime.user_defined_filter[])
       returns bool
       language sql
       immutable
@@ -29,5 +32,6 @@ defmodule Realtime.Repo.Migrations.CreateRealtimeIsVisibleThroughFiltersFunction
       join unnest(columns) col
           on f.column_name = col.name;
     $$;"
+    )
   end
 end
