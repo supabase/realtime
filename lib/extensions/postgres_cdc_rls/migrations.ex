@@ -34,7 +34,8 @@ defmodule Extensions.PostgresCdcRls.Migrations do
     MillisecondPrecisionForWalrus,
     AddInOpToFilters,
     EnableFilteringOnDeleteRecord,
-    UpdateSubscriptionCheckFiltersForInFilterNonTextTypes
+    UpdateSubscriptionCheckFiltersForInFilterNonTextTypes,
+    ConvertCommitTimestampToUtc
   }
 
   alias Realtime.Helpers, as: H
@@ -67,7 +68,8 @@ defmodule Extensions.PostgresCdcRls.Migrations do
     {20_230_119_133_233, MillisecondPrecisionForWalrus},
     {20_230_128_025_114, AddInOpToFilters},
     {20_230_128_025_212, EnableFilteringOnDeleteRecord},
-    {20_230_227_211_149, UpdateSubscriptionCheckFiltersForInFilterNonTextTypes}
+    {20_230_227_211_149, UpdateSubscriptionCheckFiltersForInFilterNonTextTypes},
+    {20_230_228_184_745, ConvertCommitTimestampToUtc}
   ]
 
   @spec start_link(GenServer.options()) :: GenServer.on_start()
