@@ -23,7 +23,7 @@ jobs:
 
       - name: Fail Unless Versions Updated
         id: fail_unless_changed
-        if: steps.changed-files-specific.outputs.any_changed == 'false'
+        if: steps.verify_changed_files.outputs.any_changed == 'false'
         run: |
               echo "::error ::Please update the mix.exs version"
               exit 1
