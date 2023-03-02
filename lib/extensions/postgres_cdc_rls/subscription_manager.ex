@@ -94,7 +94,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   def handle_info({:subscribed, {pid, id}}, state) do
     true =
       state.subscribers_tid
-      |> :ets.insert({pid, id, Process.monitor(pid)})
+      |> :ets.insert({pid, id, Process.monitor(pid), node(pid)})
 
     {:noreply, %{state | no_users_ts: nil}}
   end
@@ -114,7 +114,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
           Logger.warning("Found new oids #{inspect(new_oids, pretty: true)}")
           Subscriptions.delete_all(conn)
 
-          fn {pid, _id, ref}, _acc ->
+          fn {pid, _id, ref, _node}, _acc ->
             Process.demonitor(ref, [:flush])
             send(pid, :postgres_subscribe)
           end
@@ -136,7 +136,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
           q
 
         values ->
-          for {_pid, id, _ref} <- values, reduce: q do
+          for {_pid, id, _ref, _node} <- values, reduce: q do
             acc ->
               UUID.string_to_binary!(id)
               |> :queue.in(acc)
@@ -151,7 +151,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     q1 =
       if !:queue.is_empty(q) do
-        {ids, q1} = queue_take(q, @max_delete_records)
+        {ids, q1} = H.queue_take(q, @max_delete_records)
         Logger.debug("delete sub id #{inspect(ids)}")
 
         case Subscriptions.delete_multi(state.conn, ids) do
@@ -202,18 +202,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   end
 
   ## Internal functions
-
-  def queue_take(q, count) do
-    Enum.reduce_while(0..count, {[], q}, fn _, {items, queue} ->
-      case :queue.out(queue) do
-        {{:value, item}, new_q} ->
-          {:cont, {[item | items], new_q}}
-
-        {:empty, new_q} ->
-          {:halt, {items, new_q}}
-      end
-    end)
-  end
 
   defp check_delete_queue(timeout \\ @timeout) do
     Process.send_after(
