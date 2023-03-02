@@ -13,15 +13,17 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
       - name: Verify Versions Updated
-        uses: tj-actions/verify-changed-files@v13
+        uses: tj-actions/changed-files@v35
         id: verify_changed_files
         with:
           files: |
              mix.exs
+
       - name: Fail Unless Versions Updated
         id: fail_unless_changed
-        if: steps.verify_changed_files.outputs.files_changed == 'false'
+        if: steps.changed-files-specific.outputs.any_changed == 'false'
         run: |
               echo "::error ::Please update the mix.exs version"
               exit 1
