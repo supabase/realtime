@@ -53,22 +53,23 @@ defmodule Realtime.TenantsTest do
         keys = Tenants.limiter_keys(tenant)
         limits = Tenants.get_tenant_limits(tenant, keys)
 
-        [all] = Enum.filter(limits, fn e -> e.limiter == {:plug, :requests, "external_id"} end)
+        [all] =
+          Enum.filter(limits, fn e -> e.limiter == Tenants.requests_per_second_key(tenant) end)
 
         assert all.counter == 9
 
         [user_channels] =
-          Enum.filter(limits, fn e -> e.limiter == {:channel, :clients_per, "external_id"} end)
+          Enum.filter(limits, fn e -> e.limiter == Tenants.channels_per_client_key(tenant) end)
 
         assert user_channels.counter == 9
 
         [channel_joins] =
-          Enum.filter(limits, fn e -> e.limiter == {:channel, :joins, "external_id"} end)
+          Enum.filter(limits, fn e -> e.limiter == Tenants.joins_per_second_key() end)
 
         assert channel_joins.counter == 9
 
         [tenant_events] =
-          Enum.filter(limits, fn e -> e.limiter == {:channel, :events, "external_id"} end)
+          Enum.filter(limits, fn e -> e.limiter == Tenants.events_per_second_key(tenant) end)
 
         assert tenant_events.counter == 9
       end

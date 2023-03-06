@@ -12,8 +12,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
   alias DBConnection.Backoff
-
   alias Realtime.PubSub
+  alias Realtime.GenCounter
+  alias Realtime.Tenants
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
@@ -120,6 +121,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         end)
         |> Enum.reverse()
         |> Enum.each(fn change ->
+          # Remove when ready
+          # GenCounter.add(Tenants.events_per_second_key(tenant))
+
           Phoenix.PubSub.broadcast_from(
             PubSub,
             self(),
