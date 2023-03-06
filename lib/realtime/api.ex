@@ -6,7 +6,7 @@ defmodule Realtime.Api do
 
   import Ecto.Query
 
-  alias Realtime.{Repo, Api.Tenant, Api.Extensions, RateCounter, GenCounter}
+  alias Realtime.{Repo, Api.Tenant, Api.Extensions, RateCounter, GenCounter, Tenants}
 
   @doc """
   Returns the list of tenants.
@@ -178,7 +178,7 @@ defmodule Realtime.Api do
   end
 
   def preload_counters(%Tenant{} = tenant) do
-    id = {:plug, :requests, tenant.external_id}
+    id = Tenants.requests_per_second_key(tenant)
 
     preload_counters(tenant, id)
   end

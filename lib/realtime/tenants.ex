@@ -29,11 +29,59 @@ defmodule Realtime.Tenants do
   @spec limiter_keys(Tenant.t()) :: [{atom(), atom(), String.t()}]
   def limiter_keys(%Tenant{} = tenant) do
     [
-      {:plug, :requests, tenant.external_id},
-      {:channel, :clients_per, tenant.external_id},
-      {:channel, :joins, tenant.external_id},
-      {:channel, :events, tenant.external_id}
+      requests_per_second_key(tenant),
+      channels_per_client_key(tenant),
+      joins_per_second_key(tenant),
+      events_per_second_key(tenant)
     ]
+  end
+
+  @doc """
+  The GenCounter key to use for counting requests through Plug.
+  """
+
+  @spec requests_per_second_key(Tenant.t() | String.t()) :: {:plug, :requests, String.t()}
+  def requests_per_second_key(%Tenant{} = tenant) do
+    {:plug, :requests, tenant.external_id}
+  end
+
+  @doc """
+  The GenCounter key to use for counting RealtimeChannel joins.
+  """
+
+  @spec joins_per_second_key(Tenant.t() | String.t()) :: {:channel, :joins, String.t()}
+  def joins_per_second_key(tenant) when is_binary(tenant) do
+    {:channel, :joins, tenant}
+  end
+
+  def joins_per_second_key(%Tenant{} = tenant) do
+    {:channel, :joins, tenant.external_id}
+  end
+
+  @doc """
+  The GenCounter key to use to limit the amount of clients connected to the same same channel.
+  """
+
+  @spec channels_per_client_key(Tenant.t() | String.t()) :: {:channel, :clients_per, String.t()}
+  def channels_per_client_key(tenant) when is_binary(tenant) do
+    {:channel, :clients_per, tenant}
+  end
+
+  def channels_per_client_key(%Tenant{} = tenant) do
+    {:channel, :clients_per, tenant.external_id}
+  end
+
+  @doc """
+  The GenCounter key to use when counting events for RealtimeChannel events.
+  """
+
+  @spec events_per_second_key(Tenant.t() | String.t()) :: {:channel, :events, String.t()}
+  def events_per_second_key(tenant) when is_binary(tenant) do
+    {:channel, :events, tenant}
+  end
+
+  def events_per_second_key(%Tenant{} = tenant) do
+    {:channel, :events, tenant.external_id}
   end
 
   @spec get_tenant_limits(Realtime.Api.Tenant.t(), maybe_improper_list) :: list
