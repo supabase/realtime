@@ -121,9 +121,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         end)
         |> Enum.reverse()
         |> Enum.each(fn change ->
-          # Remove when ready
-          # GenCounter.add(Tenants.events_per_second_key(tenant))
-
           Phoenix.PubSub.broadcast_from(
             PubSub,
             self(),
