@@ -58,8 +58,17 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
               {:ok, %{num_rows: num} = result} when num > 0 ->
                 result
 
-              _ ->
-                rollback(conn, {:subscription_insert_failed, params})
+              {:ok, _} ->
+                rollback(
+                  conn,
+                  "Subscription insert failed with 0 rows. Check that tables are part of publication #{publication} and subscription params are correct: #{inspect(params)}"
+                )
+
+              {:error, exception} ->
+                rollback(
+                  conn,
+                  "Subscription insert failed with error: #{Exception.message(exception)}. Check that tables are part of publication #{publication} and subscription params are correct: #{inspect(params)}"
+                )
             end
 
           {:error, reason} ->
