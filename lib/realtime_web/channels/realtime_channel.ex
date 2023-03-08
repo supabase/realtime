@@ -281,7 +281,6 @@ defmodule RealtimeWeb.RealtimeChannel do
           }
         } = socket
       ) do
-    socket = count(socket)
     cancel_timer(pg_sub_ref)
 
     args = Map.put(postgres_extension, "id", tenant)
