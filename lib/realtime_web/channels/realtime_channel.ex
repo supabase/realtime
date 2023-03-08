@@ -317,8 +317,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(:confirm_token, %{assigns: %{pg_change_params: pg_change_params}} = socket) do
-    socket = count(socket)
-
     case confirm_token(socket) do
       {:ok, claims, confirm_token_ref} ->
         pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
@@ -379,7 +377,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{assigns: %{pg_sub_ref: pg_sub_ref, pg_change_params: pg_change_params}} = socket
       )
       when is_binary(refresh_token) do
-    socket = count(socket) |> assign(:access_token, refresh_token)
+    socket = socket |> assign(:access_token, refresh_token)
 
     case confirm_token(socket) do
       {:ok, claims, confirm_token_ref} ->
