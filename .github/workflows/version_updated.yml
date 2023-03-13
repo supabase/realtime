@@ -2,7 +2,7 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
     branches:
-      - 'releases/latest'
+      - 'main'
 
 name: Default Checks
 
