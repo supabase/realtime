@@ -44,8 +44,7 @@ defmodule ReplicationPollerTest do
       type: "INSERT",
       subscription_ids: MapSet.new([@subscription_id]),
       record: %{"details" => "test", "id" => 12, "user_id" => 1},
-      errors: nil,
-      num_subs: 1
+      errors: nil
     }
 
     assert expected == generate_record(record)
@@ -77,8 +76,7 @@ defmodule ReplicationPollerTest do
       subscription_ids: MapSet.new([@subscription_id]),
       old_record: %{"id" => 12},
       record: %{"details" => "test1", "id" => 12, "user_id" => 1},
-      errors: nil,
-      num_subs: 1
+      errors: nil
     }
 
     assert expected == generate_record(record)
@@ -108,8 +106,7 @@ defmodule ReplicationPollerTest do
       type: "DELETE",
       subscription_ids: MapSet.new([@subscription_id]),
       old_record: %{"id" => 15},
-      errors: nil,
-      num_subs: 1
+      errors: nil
     }
 
     assert expected == generate_record(record)
@@ -139,8 +136,7 @@ defmodule ReplicationPollerTest do
       type: "INSERT",
       subscription_ids: MapSet.new([@subscription_id]),
       record: %{"details" => "test", "id" => 12, "user_id" => 1},
-      errors: ["Error 413: Payload Too Large"],
-      num_subs: 1
+      errors: ["Error 413: Payload Too Large"]
     }
 
     assert expected == generate_record(record)
@@ -167,8 +163,7 @@ defmodule ReplicationPollerTest do
       type: "INSERT",
       subscription_ids: MapSet.new([@subscription_id]),
       record: %{},
-      errors: ["Error..."],
-      num_subs: 1
+      errors: ["Error..."]
     }
 
     assert expected == generate_record(record)
@@ -200,8 +195,7 @@ defmodule ReplicationPollerTest do
       subscription_ids: MapSet.new([@subscription_id]),
       old_record: %{"details" => "prev test", "id" => 12, "user_id" => 1},
       record: %{"details" => "test", "id" => 12, "user_id" => 1},
-      errors: ["Error 413: Payload Too Large"],
-      num_subs: 1
+      errors: ["Error 413: Payload Too Large"]
     }
 
     assert expected == generate_record(record)
@@ -229,8 +223,7 @@ defmodule ReplicationPollerTest do
       subscription_ids: MapSet.new([@subscription_id]),
       old_record: %{},
       record: %{},
-      errors: ["Error..."],
-      num_subs: 1
+      errors: ["Error..."]
     }
 
     assert expected == generate_record(record)
@@ -260,8 +253,7 @@ defmodule ReplicationPollerTest do
       type: "DELETE",
       subscription_ids: MapSet.new([@subscription_id]),
       old_record: %{"details" => "test", "id" => 12, "user_id" => 1},
-      errors: ["Error 413: Payload Too Large"],
-      num_subs: 1
+      errors: ["Error 413: Payload Too Large"]
     }
 
     assert expected == generate_record(record)
@@ -288,8 +280,7 @@ defmodule ReplicationPollerTest do
       type: "DELETE",
       subscription_ids: MapSet.new([@subscription_id]),
       old_record: %{},
-      errors: ["Error..."],
-      num_subs: 1
+      errors: ["Error..."]
     }
 
     assert expected == generate_record(record)

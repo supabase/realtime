@@ -19,7 +19,6 @@ defmodule Realtime.Adapters.Changes do
       :table,
       :record,
       :subscription_ids,
-      :num_subs,
       :type
     ]
   end
@@ -35,7 +34,6 @@ defmodule Realtime.Adapters.Changes do
       :old_record,
       :record,
       :subscription_ids,
-      :num_subs,
       :type
     ]
   end
@@ -50,7 +48,6 @@ defmodule Realtime.Adapters.Changes do
       :table,
       :old_record,
       :subscription_ids,
-      :num_subs,
       :type
     ]
   end

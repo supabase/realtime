@@ -13,9 +13,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
   alias DBConnection.Backoff
   alias Realtime.PubSub
-  alias Realtime.GenCounter
-  alias Realtime.Tenants
-  alias Realtime.RateCounter
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
@@ -42,7 +39,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       )
 
     tenant = args["id"]
-    rate_counter = start_rate_counter(tenant)
 
     state = %{
       backoff:
@@ -66,8 +62,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       retry_ref: nil,
       retry_count: 0,
       slot_name: args["slot_name"] <> slot_name_suffix(),
-      tenant: tenant,
-      rate_counter: rate_counter
+      tenant: tenant
     }
 
     Logger.metadata(external_id: tenant, project: tenant)
@@ -127,8 +122,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         end)
         |> Enum.reverse()
         |> Enum.each(fn change ->
-          count(change, tenant)
-
           Phoenix.PubSub.broadcast_from(
             PubSub,
             self(),
@@ -228,7 +221,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       table: table,
       type: type,
       subscription_ids: MapSet.new(subscription_ids),
-      num_subs: length(subscription_ids),
       record: Map.get(wal, "record", %{})
     }
   end
@@ -253,7 +245,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       table: table,
       type: type,
       subscription_ids: MapSet.new(subscription_ids),
-      num_subs: length(subscription_ids),
       old_record: Map.get(wal, "old_record", %{}),
       record: Map.get(wal, "record", %{})
     }
@@ -279,7 +270,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       table: table,
       type: type,
       subscription_ids: MapSet.new(subscription_ids),
-      num_subs: length(subscription_ids),
       old_record: Map.get(wal, "old_record", %{})
     }
   end
@@ -332,26 +322,5 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         retry_ref = Process.send_after(self(), :retry, timeout)
         %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}
     end
-  end
-
-  defp count(%{num_subs: count} = record, tenant) do
-    Tenants.db_events_per_second_key(tenant)
-    |> GenCounter.add(count)
-
-    record
-  end
-
-  defp start_rate_counter(tenant) do
-    key = Tenants.db_events_per_second_key(tenant)
-    GenCounter.new(key)
-
-    RateCounter.new(key,
-      idle_shutdown: :infinity,
-      telemetry: %{
-        event_name: [:channel, :db_events],
-        measurements: %{},
-        metadata: %{tenant: tenant}
-      }
-    )
   end
 end
