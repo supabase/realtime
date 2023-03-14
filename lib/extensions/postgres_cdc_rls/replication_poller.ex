@@ -13,8 +13,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
   alias DBConnection.Backoff
   alias Realtime.PubSub
-  alias Realtime.GenCounter
-  alias Realtime.Tenants
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
@@ -40,6 +38,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         args["db_socket_opts"]
       )
 
+    tenant = args["id"]
+
     state = %{
       backoff:
         Backoff.new(
@@ -62,10 +62,10 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       retry_ref: nil,
       retry_count: 0,
       slot_name: args["slot_name"] <> slot_name_suffix(),
-      tenant: args["id"]
+      tenant: tenant
     }
 
-    Logger.metadata(external_id: state.tenant, project: state.tenant)
+    Logger.metadata(external_id: tenant, project: tenant)
 
     {:ok, state, {:continue, :prepare}}
   end
@@ -105,7 +105,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       {:ok,
        %Postgrex.Result{
          columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"] = columns,
-         rows: [_ | _] = rows
+         rows: [_ | _] = rows,
+         num_rows: rows_count
        }} ->
         Enum.reduce(rows, [], fn row, acc ->
           columns
@@ -130,7 +131,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           )
         end)
 
-        {:ok, length(rows)}
+        {:ok, rows_count}
 
       {:ok, _} ->
         {:ok, 0}

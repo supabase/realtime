@@ -77,6 +77,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     socket = socket |> assign_access_token(params) |> assign_counter()
 
+    start_db_rate_counter(tenant)
+
     with false <- SignalHandler.shutdown_in_progress?(),
          :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
@@ -142,8 +144,11 @@ defmodule RealtimeWeb.RealtimeChannel do
                 {UUID.string_to_binary!(id), :erlang.phash2(params)}
               end
 
+            IO.inspect(topic, label: "CHANNEL TOPIC")
+
             metadata = [
-              metadata: {:subscriber_fastlane, transport_pid, serializer, ids, topic, is_new_api}
+              metadata:
+                {:subscriber_fastlane, transport_pid, serializer, ids, topic, tenant, is_new_api}
             ]
 
             # Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
@@ -659,5 +664,19 @@ defmodule RealtimeWeb.RealtimeChannel do
     rescue
       e -> {:error, Exception.message(e)}
     end
+  end
+
+  defp start_db_rate_counter(tenant) do
+    key = Tenants.db_events_per_second_key(tenant)
+    GenCounter.new(key)
+
+    RateCounter.new(key,
+      idle_shutdown: :infinity,
+      telemetry: %{
+        event_name: [:channel, :db_events],
+        measurements: %{},
+        metadata: %{tenant: tenant}
+      }
+    )
   end
 end
