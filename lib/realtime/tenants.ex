@@ -84,6 +84,19 @@ defmodule Realtime.Tenants do
     {:channel, :events, tenant.external_id}
   end
 
+  @doc """
+  The GenCounter key to use when counting events for RealtimeChannel events.
+  """
+
+  @spec db_events_per_second_key(Tenant.t() | String.t()) :: {:channel, :db_events, String.t()}
+  def db_events_per_second_key(tenant) when is_binary(tenant) do
+    {:channel, :db_events, tenant}
+  end
+
+  def db_events_per_second_key(%Tenant{} = tenant) do
+    {:channel, :db_events, tenant.external_id}
+  end
+
   @spec get_tenant_limits(Realtime.Api.Tenant.t(), maybe_improper_list) :: list
   def get_tenant_limits(%Tenant{} = tenant, keys) when is_list(keys) do
     nodes = [Node.self() | Node.list()]
