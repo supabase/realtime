@@ -127,7 +127,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         end)
         |> Enum.reverse()
         |> Enum.each(fn change ->
-          IO.inspect(change, label: "CHANGE")
           count(change, tenant)
 
           Phoenix.PubSub.broadcast_from(
