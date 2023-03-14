@@ -24,9 +24,9 @@ processes = []
   protocol = "tcp"
   script_checks = []
   [services.concurrency]
-   # should match ranch.info
-    hard_limit = 16384
-    soft_limit = 16384
+   # should match :ranch.info max_connections * num_acceptors
+    hard_limit = 100000
+    soft_limit = 100000
     type = "connections"
 
   [[services.ports]]
