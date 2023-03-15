@@ -20,7 +20,8 @@ defmodule Realtime.PromEx.Plugins.Tenant do
   def event_metrics(_opts) do
     # Event metrics definitions
     [
-      channel_events()
+      channel_events(),
+      replication_metrics()
     ]
   end
 
@@ -71,9 +72,28 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     end
   end
 
+  defp replication_metrics() do
+    Event.build(
+      :realtime_tenant_replication_event_metrics,
+      [
+        distribution(
+          [:realtime, :replication, :poller, :query, :duration],
+          event_name: [:realtime, :replication, :poller, :query, :stop],
+          measurement: :duration,
+          description: "Duration of the logical replication slot polling query for Realtime RLS.",
+          tags: [:tenant],
+          unit: {:native, :millisecond},
+          reporter_options: [
+            buckets: [125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000]
+          ]
+        )
+      ]
+    )
+  end
+
   defp channel_events() do
     Event.build(
-      :realtime_tenant_events,
+      :realtime_tenant_channel_event_metrics,
       [
         sum(
           [:realtime, :channel, :events],
