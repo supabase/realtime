@@ -96,9 +96,24 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     cancel_timer(retry_ref)
 
     try do
-      Replications.list_changes(conn, slot_name, publication, max_changes, max_record_bytes)
+      {time, response} =
+        :timer.tc(Replications, :list_changes, [
+          conn,
+          slot_name,
+          publication,
+          max_changes,
+          max_record_bytes
+        ])
+
+      Realtime.Telemetry.execute(
+        [:realtime, :replication, :poller, :query, :stop],
+        %{duration: time},
+        %{tenant: tenant}
+      )
+
+      response
     catch
-      :error, reason ->
+      {:error, reason} ->
         {:error, reason}
     end
     |> case do
