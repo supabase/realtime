@@ -144,8 +144,6 @@ defmodule RealtimeWeb.RealtimeChannel do
                 {UUID.string_to_binary!(id), :erlang.phash2(params)}
               end
 
-            IO.inspect(topic, label: "CHANNEL TOPIC")
-
             metadata = [
               metadata:
                 {:subscriber_fastlane, transport_pid, serializer, ids, topic, tenant, is_new_api}
