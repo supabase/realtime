@@ -636,7 +636,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     })
   end
 
-  defp presence_dirty_list(topic) do
+  def presence_dirty_list(topic) do
     [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
 
     Presence
