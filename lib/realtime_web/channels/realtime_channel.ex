@@ -235,22 +235,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_info(:sync_presence, %{assigns: %{tenant_topic: topic}} = socket) do
     socket = count(socket)
 
-    presence_list =
-      socket
-      |> presence_list_shard_bypass()
-      |> case do
-        {:ok, [_ | _]} ->
-          Presence.list(topic)
-
-        {:ok, []} ->
-          %{}
-
-        {:error, message} ->
-          Logger.error("Unable to fetch Presence list for topic #{topic}: #{message}")
-          Presence.list(topic)
-      end
-
-    push(socket, "presence_state", presence_list)
+    push(socket, "presence_state", presence_dirty_list(topic))
 
     {:noreply, socket}
   end
@@ -651,17 +636,13 @@ defmodule RealtimeWeb.RealtimeChannel do
     })
   end
 
-  defp presence_list_shard_bypass(%{assigns: %{tenant_topic: topic}} = _socket) do
-    try do
-      [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
+  defp presence_dirty_list(topic) do
+    [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
 
-      {:ok,
-       Presence
-       |> Shard.name_for_topic(topic, size)
-       |> Shard.dirty_list(topic)}
-    rescue
-      e -> {:error, Exception.message(e)}
-    end
+    Presence
+    |> Shard.name_for_topic(topic, size)
+    |> Shard.dirty_list(topic)
+    |> Phoenix.Presence.group()
   end
 
   defp start_db_rate_counter(tenant) do
