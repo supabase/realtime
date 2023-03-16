@@ -82,7 +82,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           measurement: :duration,
           description: "Duration of the logical replication slot polling query for Realtime RLS.",
           tags: [:tenant],
-          unit: {:native, :millisecond},
+          unit: {:microsecond, :millisecond},
           reporter_options: [
             buckets: [125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000]
           ]
