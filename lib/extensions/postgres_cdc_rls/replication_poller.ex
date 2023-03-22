@@ -10,15 +10,17 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt_creds: 5]
 
-  alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
+  alias Extensions.PostgresCdcRls.Replications
   alias DBConnection.Backoff
-  alias Realtime.PubSub
+  alias Realtime.{MessageDispatcher, PubSub}
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
     NewRecord,
     UpdatedRecord
   }
+
+  alias Phoenix.Socket.Broadcast
 
   @queue_target 5_000
 
@@ -141,7 +143,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
             PubSub,
             self(),
             "realtime:postgres:" <> tenant,
-            change,
+            %Broadcast{payload: change},
             MessageDispatcher
           )
         end)

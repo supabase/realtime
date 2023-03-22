@@ -7,9 +7,19 @@ defmodule RealtimeWeb.RealtimeChannel do
   require Logger
 
   alias DBConnection.Backoff
+  alias Phoenix.Socket.Broadcast
   alias Phoenix.Tracker.Shard
-  alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
-  alias Realtime.{GenCounter, RateCounter, PostgresCdc, SignalHandler, Tenants}
+  alias RealtimeWeb.{ChannelsAuthorization, Presence}
+
+  alias Realtime.{
+    GenCounter,
+    MessageDispatcher,
+    PostgresCdc,
+    PubSub,
+    RateCounter,
+    SignalHandler,
+    Tenants
+  }
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
@@ -43,6 +53,7 @@ defmodule RealtimeWeb.RealtimeChannel do
               max_channels_per_client: integer(),
               max_joins_per_second: integer()
             },
+            tenant: String.t(),
             tenant_topic: String.t(),
             pg_sub_ref: reference() | nil,
             pg_change_params: map(),
@@ -87,7 +98,12 @@ defmodule RealtimeWeb.RealtimeChannel do
       Realtime.UsersCounter.add(transport_pid, tenant)
 
       tenant_topic = tenant <> ":" <> sub_topic
-      RealtimeWeb.Endpoint.subscribe(tenant_topic)
+
+      metadata = [
+        metadata: {:broadcast_fastlane, transport_pid, serializer, tenant}
+      ]
+
+      RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata)
 
       is_new_api =
         case params do
@@ -146,7 +162,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
             metadata = [
               metadata:
-                {:subscriber_fastlane, transport_pid, serializer, ids, topic, tenant, is_new_api}
+                {:db_change_fastlane, transport_pid, serializer, ids, topic, tenant, is_new_api}
             ]
 
             # Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
@@ -241,18 +257,19 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
+  def handle_info(%Broadcast{event: "presence_diff", payload: payload}, socket) do
+    new_socket = count(socket)
+
+    push(new_socket, "presence_diff", payload)
+
+    {:noreply, new_socket}
+  end
+
+  @impl true
   def handle_info(%{event: "postgres_cdc_down"}, socket) do
     pg_sub_ref = postgres_subscribe()
 
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
-  end
-
-  @impl true
-  def handle_info(%{event: type, payload: payload}, socket) do
-    socket = count(socket)
-
-    push(socket, type, payload)
-    {:noreply, socket}
   end
 
   @impl true
@@ -335,11 +352,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, assign(socket, :pg_sub_ref, ref)}
   end
 
-  def handle_info(other, socket) do
-    Logger.error("Undefined msg #{inspect(other, pretty: true)}")
-    {:noreply, socket}
-  end
-
   @impl true
   def handle_in(
         _,
@@ -400,15 +412,28 @@ defmodule RealtimeWeb.RealtimeChannel do
             ack_broadcast: ack_broadcast,
             self_broadcast: self_broadcast,
             tenant_topic: tenant_topic
-          }
+          },
+          topic: topic
         } = socket
       ) do
     socket = count(socket)
+    message = %Broadcast{topic: topic, event: type, payload: payload}
 
     if self_broadcast do
-      Endpoint.broadcast(tenant_topic, type, payload)
+      Phoenix.PubSub.broadcast(
+        PubSub,
+        tenant_topic,
+        message,
+        MessageDispatcher
+      )
     else
-      Endpoint.broadcast_from(self(), tenant_topic, type, payload)
+      Phoenix.PubSub.broadcast_from(
+        PubSub,
+        self(),
+        tenant_topic,
+        message,
+        MessageDispatcher
+      )
     end
 
     if ack_broadcast do
@@ -450,11 +475,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       end
 
     {:reply, result, socket}
-  end
-
-  def handle_in(_, _, socket) do
-    socket = count(socket)
-    {:noreply, socket}
   end
 
   @impl true

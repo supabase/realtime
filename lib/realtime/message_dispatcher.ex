@@ -1,7 +1,4 @@
-# This file draws from https://github.com/phoenixframework/phoenix/blob/9941711736c8464b27b40914a4d954ed2b4f5958/lib/phoenix/channel/server.ex
-# License: https://github.com/phoenixframework/phoenix/blob/518a4640a70aa4d1370a64c2280d598e5b928168/LICENSE.md
-
-defmodule Extensions.PostgresCdcRls.MessageDispatcher do
+defmodule Realtime.MessageDispatcher do
   @moduledoc """
   Hook invoked by Phoenix.PubSub dispatch.
   """
@@ -10,13 +7,17 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
   alias Realtime.Tenants
   alias Realtime.GenCounter
 
-  def dispatch([_ | _] = topic_subscriptions, _from, payload) do
-    {sub_ids, payload} = Map.pop(payload, :subscription_ids)
+  def dispatch(
+        [_ | _] = topic_subscriptions,
+        _from,
+        %Broadcast{payload: payload} = msg
+      ) do
+    {sub_ids, new_payload} = Map.pop(payload, :subscription_ids)
 
     _ =
       Enum.reduce(topic_subscriptions, %{}, fn
         {_pid,
-         {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, tenant, is_new_api}},
+         {:db_change_fastlane, fastlane_pid, serializer, ids, join_topic, tenant, is_new_api}},
         cache ->
           for {bin_id, id} <- ids, reduce: [] do
             acc ->
@@ -28,27 +29,31 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
           end
           |> case do
             [_ | _] = valid_ids ->
-              new_payload =
+              new_msg =
                 if is_new_api do
                   %Broadcast{
                     topic: join_topic,
                     event: "postgres_changes",
-                    payload: %{ids: valid_ids, data: payload}
+                    payload: %{ids: valid_ids, data: new_payload}
                   }
                 else
                   %Broadcast{
                     topic: join_topic,
-                    event: payload.type,
-                    payload: payload
+                    event: new_payload.type,
+                    payload: new_payload
                   }
                 end
 
-              count(tenant)
-              broadcast_message(cache, fastlane_pid, new_payload, serializer)
+              db_event_count(tenant)
+              broadcast_message(cache, fastlane_pid, new_msg, serializer)
 
             _ ->
               cache
           end
+
+        {_pid, {:broadcast_fastlane, fastlane_pid, serializer, tenant}}, cache ->
+          broadcast_event_count(tenant)
+          broadcast_message(cache, fastlane_pid, msg, serializer)
       end)
 
     :ok
@@ -67,8 +72,13 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
     end
   end
 
-  defp count(tenant) do
+  defp db_event_count(tenant) do
     Tenants.db_events_per_second_key(tenant)
+    |> GenCounter.add()
+  end
+
+  defp broadcast_event_count(tenant) do
+    Tenants.events_per_second_key(tenant)
     |> GenCounter.add()
   end
 end

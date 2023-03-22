@@ -10,6 +10,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
   alias Extensions.PostgresCdcStream, as: Stream
   alias Realtime.Helpers, as: H
   alias Realtime.Adapters.Postgres.Decoder
+  alias Realtime.MessageDispatcher
 
   alias Decoder.Messages.{
     Begin,
@@ -205,7 +206,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
         self(),
         Stream.topic(tenant, params),
         change,
-        Stream.MessageDispatcher
+        MessageDispatcher
       )
     end)
   end
