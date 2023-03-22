@@ -5,7 +5,6 @@ defmodule RealtimeWeb.TenantController do
   require Logger
 
   alias Realtime.Api
-  alias Realtime.Repo
   alias Realtime.Api.Tenant
   alias Realtime.PostgresCdc
   alias RealtimeWeb.{Endpoint, UserSocket}
@@ -170,35 +169,23 @@ defmodule RealtimeWeb.TenantController do
     ],
     responses: %{
       204 => EmptyResponse.response(),
-      403 => EmptyResponse.response(),
-      503 => EmptyResponse.response()
+      403 => EmptyResponse.response()
     }
   )
 
   def delete(conn, %{"tenant_id" => id}) do
     Logger.metadata(external_id: id, project: id)
 
-    Repo.transaction(
-      fn ->
-        if Api.delete_tenant_by_external_id(id) do
-          with :ok <- UserSocket.subscribers_id(id) |> Endpoint.broadcast("disconnect", %{}),
-               :ok <- PostgresCdc.stop_all(id) do
-            :ok
-          else
-            other -> Repo.rollback(other)
-          end
-        end
-      end,
-      timeout: @stop_timeout
-    )
-    |> case do
-      {:error, reason} ->
-        Logger.error("Can't remove tenant #{inspect(reason)}")
-        send_resp(conn, 503, "")
+    case Api.delete_tenant_by_external_id(id) do
+      true ->
+        id |> UserSocket.subscribers_id() |> Endpoint.broadcast("disconnect", %{})
+        Task.async(fn -> PostgresCdc.stop_all(id) end)
 
-      _ ->
-        send_resp(conn, 204, "")
+      false ->
+        Logger.error("Tenant #{id} does not exist")
     end
+
+    send_resp(conn, 204, "")
   end
 
   operation(:reload,
