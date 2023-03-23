@@ -3,8 +3,6 @@ defmodule Realtime.PromEx do
 
   import Realtime.Helpers, only: [short_node_id: 0]
 
-  import Realtime.Helpers, only: [short_node_id: 0]
-
   @moduledoc """
   Be sure to add the following to finish setting up PromEx:
 
