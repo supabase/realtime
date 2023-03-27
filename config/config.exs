@@ -74,7 +74,6 @@ config :logger, :console,
 config :phoenix, :json_library, Jason
 
 config :logflare_logger_backend,
-  url: "https://api.logflare.app",
   flush_interval: 1_000,
   max_batch_size: 50,
   metadata: :all
