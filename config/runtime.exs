@@ -1,5 +1,8 @@
 import Config
 
+config :logflare_logger_backend,
+  url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
+
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
