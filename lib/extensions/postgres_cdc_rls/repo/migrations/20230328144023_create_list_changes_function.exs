@@ -1,9 +1,11 @@
 defmodule Realtime.Extensions.Rls.Repo.Migrations.CreateListChangesFunction do
+  @moduledoc false
+
   use Ecto.Migration
 
   def change do
     execute(
-      "create or replace function list_changes(publication name, slot_name name, max_changes int, max_record_bytes int)
+      "create or replace function realtime.list_changes(publication name, slot_name name, max_changes int, max_record_bytes int)
       returns setof realtime.wal_rls
       language sql
       set log_min_messages to 'fatal'
