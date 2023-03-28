@@ -36,7 +36,8 @@ defmodule Extensions.PostgresCdcRls.Migrations do
     EnableFilteringOnDeleteRecord,
     UpdateSubscriptionCheckFiltersForInFilterNonTextTypes,
     ConvertCommitTimestampToUtc,
-    OutputFullRecordWhenUnchangedToast
+    OutputFullRecordWhenUnchangedToast,
+    CreateListChangesFunction
   }
 
   alias Realtime.Helpers, as: H
