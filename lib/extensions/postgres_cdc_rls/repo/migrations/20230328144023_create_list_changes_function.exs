@@ -2,7 +2,8 @@ defmodule Realtime.Extensions.Rls.Repo.Migrations.CreateListChangesFunction do
   use Ecto.Migration
 
   def change do
-    execute("create or replace function list_changes(publication name, slot_name name, max_changes int, max_record_bytes int)
+    execute(
+      "create or replace function list_changes(publication name, slot_name name, max_changes int, max_record_bytes int)
       returns setof realtime.wal_rls
       language sql
       set log_min_messages to 'fatal'
@@ -62,6 +63,7 @@ defmodule Realtime.Extensions.Rls.Repo.Migrations.CreateListChangesFunction do
       where
         w2j.w2j_add_tables <> ''
         and xyz.subscription_ids[1] is not null
-    $$;")
+    $$;"
+    )
   end
 end
