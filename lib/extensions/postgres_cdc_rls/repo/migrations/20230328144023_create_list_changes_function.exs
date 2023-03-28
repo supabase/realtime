@@ -1,4 +1,4 @@
-defmodule Realtime.Repo.Migrations.AddLimitsFieldsToTenants do
+defmodule Realtime.Extensions.Rls.Repo.Migrations.CreateListChangesFunction do
   use Ecto.Migration
 
   def change do
