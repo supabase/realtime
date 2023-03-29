@@ -75,29 +75,6 @@ defmodule RealtimeWeb.Router do
     get "/ping", PingController, :ping
   end
 
-  scope "/api/swagger" do
-    forward "/", PhoenixSwagger.Plug.SwaggerUI,
-      otp_app: :realtime,
-      swagger_file: "swagger.json"
-  end
-
-  def swagger_info do
-    %{
-      schemes: ["http", "https"],
-      info: %{
-        version: "1.0",
-        title: "Realtime",
-        description: "API Documentation for Realtime v1",
-        termsOfService: "Open for public"
-      },
-      consumes: ["application/json"],
-      produces: ["application/json"],
-      tags: [
-        %{name: "Tenants"}
-      ]
-    }
-  end
-
   # Enables LiveDashboard only for development
   #
   # If you want to use the LiveDashboard in production, you should put

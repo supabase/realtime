@@ -19,14 +19,6 @@ config :realtime, RealtimeWeb.Endpoint,
   pubsub_server: Realtime.PubSub,
   live_view: [signing_salt: "wUMBeR8j"]
 
-config :realtime, :phoenix_swagger,
-  swagger_files: %{
-    "priv/static/swagger.json" => [
-      router: RealtimeWeb.Router,
-      endpoint: RealtimeWeb.Endpoint
-    ]
-  }
-
 config :realtime, :extensions,
   postgres_cdc_rls: %{
     type: :postgres_cdc,
@@ -42,8 +34,6 @@ config :realtime, :extensions,
     supervisor: Extensions.PostgresCdcStream.Supervisor,
     db_settings: Extensions.PostgresCdcStream.DbSettings
   }
-
-config :phoenix_swagger, json_library: Jason
 
 config :esbuild,
   version: "0.14.29",

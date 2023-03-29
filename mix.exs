@@ -62,7 +62,6 @@ defmodule Realtime.MixProject do
       {:prom_ex, "~> 1.7.1"},
       {:mock, "~> 0.3.7", only: :test},
       {:joken, "~> 2.5.0"},
-      {:phoenix_swagger, "~> 0.8.3"},
       {:ex_json_schema, "~> 0.7.1"},
       {:recon, "~> 2.5.2"},
       {:mint, "~> 1.4"},
