@@ -96,7 +96,7 @@ defmodule RealtimeWeb.TenantController do
         example:
           "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
       ],
-      id: [in: :path, description: "External ID", type: :string]
+      tenant_id: [in: :path, description: "Tenant ID", type: :string]
     ],
     responses: %{
       200 => TenantResponse.response(),
@@ -105,7 +105,7 @@ defmodule RealtimeWeb.TenantController do
     }
   )
 
-  def show(conn, %{"id" => id}) do
+  def show(conn, %{"tenant_id" => id}) do
     Logger.metadata(external_id: id, project: id)
 
     id
@@ -132,7 +132,7 @@ defmodule RealtimeWeb.TenantController do
         example:
           "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
       ],
-      id: [in: :path, description: "External ID", type: :string]
+      tenant_id: [in: :path, description: "Tenant ID", type: :string]
     ],
     request_body: TenantParams.params(),
     responses: %{
@@ -141,7 +141,7 @@ defmodule RealtimeWeb.TenantController do
     }
   )
 
-  def update(conn, %{"id" => id, "tenant" => tenant_params}) do
+  def update(conn, %{"tenant_id" => id, "tenant" => tenant_params}) do
     Logger.metadata(external_id: id, project: id)
 
     case Api.get_tenant_by_external_id(id) do
@@ -166,7 +166,7 @@ defmodule RealtimeWeb.TenantController do
         example:
           "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
       ],
-      id: [in: :path, description: "External ID", type: :string]
+      tenant_id: [in: :path, description: "Tenant ID", type: :string]
     ],
     responses: %{
       204 => EmptyResponse.response(),
@@ -175,7 +175,7 @@ defmodule RealtimeWeb.TenantController do
     }
   )
 
-  def delete(conn, %{"id" => id}) do
+  def delete(conn, %{"tenant_id" => id}) do
     Logger.metadata(external_id: id, project: id)
 
     Repo.transaction(
@@ -212,7 +212,7 @@ defmodule RealtimeWeb.TenantController do
         example:
           "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
       ],
-      tenant_id: [in: :path, description: "External ID", type: :string]
+      tenant_id: [in: :path, description: "Tenant ID", type: :string]
     ],
     responses: %{
       204 => EmptyResponse.response(),

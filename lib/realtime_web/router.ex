@@ -77,9 +77,8 @@ defmodule RealtimeWeb.Router do
   scope "/api", RealtimeWeb do
     pipe_through :api
 
-    resources "/tenants", TenantController, except: [:edit, :new] do
-      post "/reload", TenantController, :reload, as: :reload
-    end
+    resources "/tenants", TenantController, param: "tenant_id", except: [:edit, :new]
+    post "/tenants/:tenant_id/reload", TenantController, :reload
   end
 
   scope "/api", RealtimeWeb do
