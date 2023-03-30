@@ -82,6 +82,9 @@ config :phoenix, :stacktrace_depth, 20
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
 
+# Disable caching to ensure the rendered spec is refreshed
+config :open_api_spex, :cache_adapter, OpenApiSpex.Plug.NoneCache
+
 config :libcluster,
   topologies: [
     dev: [

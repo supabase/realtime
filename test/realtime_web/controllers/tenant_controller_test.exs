@@ -147,16 +147,16 @@ defmodule RealtimeWeb.TenantControllerTest do
         {ChannelsAuthorization, [], authorize: fn _, _ -> {:ok, %{}} end},
         {Api, [], get_tenant_by_external_id: fn _ -> %Tenant{} end}
       ] do
-        Routes.tenant_reload_path(conn, :reload, @external_id)
-        %{status: status} = post(conn, Routes.tenant_reload_path(conn, :reload, @external_id))
+        Routes.tenant_path(conn, :reload, @external_id)
+        %{status: status} = post(conn, Routes.tenant_path(conn, :reload, @external_id))
         assert status == 204
       end
     end
 
     test "reload when tenant does not exist", %{conn: conn} do
       with_mock ChannelsAuthorization, authorize: fn _, _ -> {:ok, %{}} end do
-        Routes.tenant_reload_path(conn, :reload, @external_id)
-        %{status: status} = post(conn, Routes.tenant_reload_path(conn, :reload, @external_id))
+        Routes.tenant_path(conn, :reload, @external_id)
+        %{status: status} = post(conn, Routes.tenant_path(conn, :reload, @external_id))
         assert status == 404
       end
     end

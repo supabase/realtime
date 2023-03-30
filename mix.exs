@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.10.1",
+      version: "2.10.2",
       elixir: "~> 1.14.0",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -62,7 +62,6 @@ defmodule Realtime.MixProject do
       {:prom_ex, "~> 1.7.1"},
       {:mock, "~> 0.3.7", only: :test},
       {:joken, "~> 2.5.0"},
-      {:phoenix_swagger, "~> 0.8.3"},
       {:ex_json_schema, "~> 0.7.1"},
       {:recon, "~> 2.5.2"},
       {:mint, "~> 1.4"},
@@ -74,7 +73,8 @@ defmodule Realtime.MixProject do
       {:dialyxir, "~> 1.1.0", only: [:dev], runtime: false},
       {:benchee, "~> 1.1.0", only: :dev},
       {:timex, "~> 3.0"},
-      {:cachex, "~> 3.4.0"}
+      {:cachex, "~> 3.4.0"},
+      {:open_api_spex, "~> 3.16"}
     ]
   end
 
