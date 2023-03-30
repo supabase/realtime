@@ -36,7 +36,8 @@ defmodule Extensions.PostgresCdcRls.Migrations do
     EnableFilteringOnDeleteRecord,
     UpdateSubscriptionCheckFiltersForInFilterNonTextTypes,
     ConvertCommitTimestampToUtc,
-    OutputFullRecordWhenUnchangedToast
+    OutputFullRecordWhenUnchangedToast,
+    CreateListChangesFunction
   }
 
   alias Realtime.Helpers, as: H
@@ -71,7 +72,8 @@ defmodule Extensions.PostgresCdcRls.Migrations do
     {20_230_128_025_212, EnableFilteringOnDeleteRecord},
     {20_230_227_211_149, UpdateSubscriptionCheckFiltersForInFilterNonTextTypes},
     {20_230_228_184_745, ConvertCommitTimestampToUtc},
-    {20_230_308_225_145, OutputFullRecordWhenUnchangedToast}
+    {20_230_308_225_145, OutputFullRecordWhenUnchangedToast},
+    {20_230_328_144_023, CreateListChangesFunction}
   ]
 
   @spec start_link(GenServer.options()) :: GenServer.on_start()
