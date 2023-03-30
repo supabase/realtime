@@ -63,6 +63,8 @@ config :logger, :console,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+config :open_api_spex, :cache_adapter, OpenApiSpex.Plug.PersistentTermCache
+
 config :logflare_logger_backend,
   flush_interval: 1_000,
   max_batch_size: 50,

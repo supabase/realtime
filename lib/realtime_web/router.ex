@@ -33,6 +33,10 @@ defmodule RealtimeWeb.Router do
     plug :check_auth, :metrics_jwt_secret
   end
 
+  pipeline :openapi do
+    plug(OpenApiSpex.Plug.PutApiSpec, module: RealtimeWeb.ApiSpec)
+  end
+
   scope "/", RealtimeWeb do
     pipe_through :browser
 
@@ -40,6 +44,11 @@ defmodule RealtimeWeb.Router do
     live "/inspector", InspectorLive.Index, :index
     live "/inspector/new", InspectorLive.Index, :new
     live "/status", StatusLive.Index, :index
+  end
+
+  scope "/swaggerui" do
+    pipe_through(:browser)
+    get("/", OpenApiSpex.Plug.SwaggerUI, path: "/api/openapi")
   end
 
   scope "/admin", RealtimeWeb do
@@ -53,18 +62,22 @@ defmodule RealtimeWeb.Router do
     live "/tenants", TenantsLive.Index, :index
   end
 
-  # get "/metrics/:id", RealtimeWeb.TenantMetricsController, :index
-
   scope "/metrics", RealtimeWeb do
     pipe_through :metrics
 
     get "/", MetricsController, :index
   end
 
+  scope "/api" do
+    pipe_through :openapi
+
+    get "/openapi", OpenApiSpex.Plug.RenderSpec, []
+  end
+
   scope "/api", RealtimeWeb do
     pipe_through :api
 
-    resources "/tenants", TenantController do
+    resources "/tenants", TenantController, except: [:edit, :new] do
       post "/reload", TenantController, :reload, as: :reload
     end
   end

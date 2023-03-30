@@ -1,5 +1,6 @@
 defmodule RealtimeWeb.TenantController do
   use RealtimeWeb, :controller
+  use OpenApiSpex.ControllerSpecs
 
   require Logger
 
@@ -7,16 +8,61 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.Repo
   alias Realtime.Api.Tenant
   alias Realtime.PostgresCdc
-  alias RealtimeWeb.{UserSocket, Endpoint}
+  alias RealtimeWeb.{Endpoint, UserSocket}
+
+  alias RealtimeWeb.OpenApiSchemas.{
+    EmptyResponse,
+    NotFoundResponse,
+    TenantResponse,
+    TenantResponseList,
+    TenantParams
+  }
 
   @stop_timeout 10_000
 
   action_fallback(RealtimeWeb.FallbackController)
 
+  operation(:index,
+    summary: "List tenants",
+    parameters: [
+      authorization: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ]
+    ],
+    responses: %{
+      200 => TenantResponseList.response(),
+      403 => EmptyResponse.response()
+    }
+  )
+
   def index(conn, _params) do
     tenants = Api.list_tenants()
     render(conn, "index.json", tenants: tenants)
   end
+
+  operation(:create,
+    summary: "Create tenant",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ]
+    ],
+    request_body: TenantParams.params(),
+    responses: %{
+      200 => TenantResponse.response(),
+      403 => EmptyResponse.response()
+    }
+  )
 
   def create(conn, %{"tenant" => tenant_params}) do
     extensions =
@@ -39,6 +85,26 @@ defmodule RealtimeWeb.TenantController do
     end
   end
 
+  operation(:show,
+    summary: "Fetch tenant",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ],
+      id: [in: :path, description: "External ID", type: :string]
+    ],
+    responses: %{
+      200 => TenantResponse.response(),
+      403 => EmptyResponse.response(),
+      404 => NotFoundResponse.response()
+    }
+  )
+
   def show(conn, %{"id" => id}) do
     Logger.metadata(external_id: id, project: id)
 
@@ -55,6 +121,26 @@ defmodule RealtimeWeb.TenantController do
     end
   end
 
+  operation(:update,
+    summary: "Create or update tenant",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ],
+      id: [in: :path, description: "External ID", type: :string]
+    ],
+    request_body: TenantParams.params(),
+    responses: %{
+      200 => TenantResponse.response(),
+      403 => EmptyResponse.response()
+    }
+  )
+
   def update(conn, %{"id" => id, "tenant" => tenant_params}) do
     Logger.metadata(external_id: id, project: id)
 
@@ -68,6 +154,26 @@ defmodule RealtimeWeb.TenantController do
         end
     end
   end
+
+  operation(:delete,
+    summary: "Delete tenant",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ],
+      id: [in: :path, description: "External ID", type: :string]
+    ],
+    responses: %{
+      204 => EmptyResponse.response(),
+      403 => EmptyResponse.response(),
+      503 => EmptyResponse.response()
+    }
+  )
 
   def delete(conn, %{"id" => id}) do
     Logger.metadata(external_id: id, project: id)
@@ -94,6 +200,26 @@ defmodule RealtimeWeb.TenantController do
         send_resp(conn, 204, "")
     end
   end
+
+  operation(:reload,
+    summary: "Reload tenant",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ],
+      tenant_id: [in: :path, description: "External ID", type: :string]
+    ],
+    responses: %{
+      204 => EmptyResponse.response(),
+      403 => EmptyResponse.response(),
+      404 => NotFoundResponse.response()
+    }
+  )
 
   def reload(conn, %{"tenant_id" => tenant_id}) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
