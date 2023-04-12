@@ -92,9 +92,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
   @impl true
   def handle_info({:subscribed, {pid, id}}, state) do
-    true =
-      state.subscribers_tid
-      |> :ets.insert({pid, id, Process.monitor(pid), node(pid)})
+    case :ets.match(state.subscribers_tid, {pid, id, :"$1", :_}) do
+      [] ->
+        state.subscribers_tid
+        |> :ets.insert({pid, id, Process.monitor(pid), node(pid)})
+
+      _ ->
+        :ok
+    end
 
     {:noreply, %{state | no_users_ts: nil}}
   end

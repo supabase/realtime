@@ -13,8 +13,6 @@ defmodule SubscriptionsCheckerTest do
 
     :ets.insert(tid, test_data)
 
-    result = Checker.subscribers_by_node(tid)
-
     assert Checker.subscribers_by_node(tid) == %{
              node1: MapSet.new([:pid1]),
              node2: MapSet.new([:pid2])
