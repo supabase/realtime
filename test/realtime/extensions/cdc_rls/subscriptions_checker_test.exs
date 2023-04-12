@@ -13,8 +13,6 @@ defmodule SubscriptionsCheckerTest do
 
     :ets.insert(tid, test_data)
 
-    result = Checker.subscribers_by_node(tid)
-
     assert Checker.subscribers_by_node(tid) == %{
              node1: MapSet.new([:pid1]),
              node2: MapSet.new([:pid2])
@@ -58,8 +56,8 @@ defmodule SubscriptionsCheckerTest do
       :ets.insert(tid, test_data)
 
       assert Checker.pop_not_alive_pids([:pid1], tid) == [
-               UUID.string_to_binary!(uuid1),
-               UUID.string_to_binary!(uuid2)
+               UUID.string_to_binary!(uuid2),
+               UUID.string_to_binary!(uuid1)
              ]
 
       assert :ets.tab2list(tid) == [{:pid2, "uuid", :ref, :node2}]
