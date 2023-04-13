@@ -7,8 +7,7 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
   alias Rls.{
     Migrations,
     ReplicationPoller,
-    SubscriptionManager,
-    SubscriptionsChecker
+    SubscriptionManager
   }
 
   def start_link(args) do
@@ -37,11 +36,6 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
       %{
         id: SubscriptionManager,
         start: {SubscriptionManager, :start_link, [tid_args]},
-        restart: :transient
-      },
-      %{
-        id: SubscriptionsChecker,
-        start: {SubscriptionsChecker, :start_link, [tid_args]},
         restart: :transient
       }
     ]
