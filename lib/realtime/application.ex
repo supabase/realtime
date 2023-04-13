@@ -76,7 +76,7 @@ defmodule Realtime.Application do
         RealtimeWeb.Presence,
         {Task.Supervisor, name: Realtime.TaskSupervisor},
         Realtime.Latency,
-        # Realtime.Telemetry.Logger
+        Realtime.Telemetry.Logger
       ] ++ extensions_supervisors
 
     children =
