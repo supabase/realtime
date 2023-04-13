@@ -162,7 +162,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         Logger.debug("delete sub id #{inspect(ids)}")
 
         case Subscriptions.delete_multi(state.conn, ids) do
-          {:ok, %{rows: rows}} ->
+          {:ok, %{rows: [_ | _] = rows}} ->
             case ids -- List.flatten(rows) do
               [] ->
                 Logger.debug("delete subscriptions from the queue success")
@@ -176,8 +176,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
                 :queue.from_list(remaining_ids) |> :queue.join(q1)
             end
 
-          {:error, reason} ->
-            Logger.error("delete subscriptions from the queue failed: #{inspect(reason)}")
+          other ->
+            Logger.error("delete subscriptions from the queue failed: #{inspect(other)}")
             q
         end
       else
