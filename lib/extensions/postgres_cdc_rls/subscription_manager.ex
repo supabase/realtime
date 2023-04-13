@@ -10,7 +10,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   alias Realtime.Helpers, as: H
 
   @timeout 15_000
-  @max_delete_records 1000
+  @max_delete_records 500
   @check_oids_interval 60_000
   @check_no_users_interval 60_000
   @stop_after 60_000 * 10
@@ -125,6 +125,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
           end
           |> :ets.foldl([], state.subscribers_tid)
 
+          :ets.delete_all_objects(state.subscribers_tid)
+
           new_oids
       end
 
@@ -160,8 +162,19 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         Logger.debug("delete sub id #{inspect(ids)}")
 
         case Subscriptions.delete_multi(state.conn, ids) do
-          {:ok, _} ->
-            q1
+          {:ok, %{rows: rows}} ->
+            case ids -- List.flatten(rows) do
+              [] ->
+                Logger.debug("delete subscriptions from the queue success")
+                q1
+
+              remaining_ids ->
+                Logger.warn(
+                  "not all subscriptions were deleted from the queue: #{inspect(length(remaining_ids))}"
+                )
+
+                :queue.from_list(remaining_ids) |> :queue.join(q1)
+            end
 
           {:error, reason} ->
             Logger.error("delete subscriptions from the queue failed: #{inspect(reason)}")
@@ -175,7 +188,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       if :queue.is_empty(q1) do
         check_delete_queue()
       else
-        check_delete_queue(1_000)
+        check_delete_queue(500)
       end
 
     {:noreply, %{state | delete_queue: %{ref: ref, queue: q1}}}

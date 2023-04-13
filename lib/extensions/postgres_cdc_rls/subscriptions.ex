@@ -96,7 +96,10 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
           {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
   def delete_multi(conn, ids) do
     Logger.debug("Delete multi ids subscriptions")
-    sql = "delete from realtime.subscription where subscription_id = ANY($1::uuid[])"
+
+    sql =
+      "delete from realtime.subscription where subscription_id = ANY($1::uuid[]) returning subscription_id"
+
     query(conn, sql, [ids])
   end
 
