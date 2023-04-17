@@ -320,21 +320,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_info(
-        {:DOWN, _, :process, _, _reason},
-        %{assigns: %{pg_sub_ref: pg_sub_ref, pg_change_params: pg_change_params}} = socket
-      ) do
-    cancel_timer(pg_sub_ref)
-
-    ref =
-      case pg_change_params do
-        [_ | _] -> postgres_subscribe()
-        _ -> nil
-      end
-
-    {:noreply, assign(socket, :pg_sub_ref, ref)}
-  end
-
   def handle_info(other, socket) do
     Logger.error("Undefined msg #{inspect(other, pretty: true)}")
     {:noreply, socket}
