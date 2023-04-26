@@ -9,3 +9,6 @@
 
 ## Tweak GC to run more often
 ##-env ERL_FULLSWEEP_AFTER 10
+
+## Limit process heap for all procs to 1000 MB
++hmax 1000000000
