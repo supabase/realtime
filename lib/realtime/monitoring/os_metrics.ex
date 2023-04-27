@@ -6,7 +6,7 @@ defmodule Realtime.OsMetrics do
   @spec ram_usage() :: float()
   def ram_usage() do
     mem = :memsup.get_system_memory_data()
-    free_mem = if Mix.env() == :dev, do: mem[:free_memory], else: mem[:available_memory]
+    free_mem = if Mix.env() in [:dev, :test], do: mem[:free_memory], else: mem[:available_memory]
     100 - free_mem / mem[:total_memory] * 100
   end
 
