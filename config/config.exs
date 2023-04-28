@@ -70,26 +70,6 @@ config :logflare_logger_backend,
   max_batch_size: 50,
   metadata: :all
 
-config :libcluster,
-  debug: false,
-  topologies: [
-    default: [
-      # The selected clustering strategy. Required.
-      strategy: Cluster.Strategy.Epmd,
-      # Configuration for the provided strategy. Optional.
-      # config: [hosts: [:"a@127.0.0.1", :"b@127.0.0.1"]],
-      # The function to use for connecting nodes. The node
-      # name will be appended to the argument list. Optional
-      connect: {:net_kernel, :connect_node, []},
-      # The function to use for disconnecting nodes. The node
-      # name will be appended to the argument list. Optional
-      disconnect: {:erlang, :disconnect_node, []},
-      # The function to use for listing nodes.
-      # This function must return a list of node names. Optional
-      list_nodes: {:erlang, :nodes, [:connected]}
-    ]
-  ]
-
 config :phoenix, :filter_parameters, ["apikey"]
 
 # Import environment specific config. This must remain at the bottom

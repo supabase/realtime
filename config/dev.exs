@@ -84,15 +84,3 @@ config :phoenix, :plug_init_mode, :runtime
 
 # Disable caching to ensure the rendered spec is refreshed
 config :open_api_spex, :cache_adapter, OpenApiSpex.Plug.NoneCache
-
-config :libcluster,
-  topologies: [
-    dev: [
-      strategy: Cluster.Strategy.Epmd,
-      config: [
-        hosts: [:"orange@127.0.0.1", :"pink@127.0.0.1"]
-      ],
-      connect: {:net_kernel, :connect_node, []},
-      disconnect: {:net_kernel, :disconnect_node, []}
-    ]
-  ]

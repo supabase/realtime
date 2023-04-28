@@ -3,6 +3,13 @@ import Config
 config :logflare_logger_backend,
   url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 
+app_name = System.get_env("FLY_APP_NAME", "")
+default_db_host = System.get_env("DB_HOST", "localhost")
+username = System.get_env("DB_USER", "postgres")
+password = System.get_env("DB_PASSWORD", "postgres")
+database = System.get_env("DB_NAME", "postgres")
+port = System.get_env("DB_PORT", "5432")
+
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
@@ -11,9 +18,9 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
-  app_name =
-    System.get_env("FLY_APP_NAME") ||
-      raise "APP_NAME not available"
+  if app_name == "" do
+    raise "APP_NAME not available"
+  end
 
   config :realtime, RealtimeWeb.Endpoint,
     server: true,
@@ -33,19 +40,6 @@ if config_env() == :prod do
     ],
     check_origin: false,
     secret_key_base: secret_key_base
-
-  config :libcluster,
-    debug: false,
-    topologies: [
-      fly6pn: [
-        strategy: Cluster.Strategy.DNSPoll,
-        config: [
-          polling_interval: 5_000,
-          query: System.get_env("DNS_NODES"),
-          node_basename: app_name
-        ]
-      ]
-    ]
 end
 
 if config_env() != :test do
@@ -59,11 +53,6 @@ if config_env() != :test do
     fly_alloc_id: System.get_env("FLY_ALLOC_ID"),
     prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer()
 
-  default_db_host = System.get_env("DB_HOST", "localhost")
-  username = System.get_env("DB_USER", "postgres")
-  password = System.get_env("DB_PASSWORD", "postgres")
-  database = System.get_env("DB_NAME", "postgres")
-  port = System.get_env("DB_PORT", "5432")
   queue_target = System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer()
   queue_interval = System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
 
@@ -110,6 +99,73 @@ if config_env() != :test do
       ]
   end
 end
+
+default_cluster_strategy =
+  config_env()
+  |> case do
+    :prod -> "DNS"
+    _ -> "EPMD"
+  end
+
+cluster_topologies =
+  System.get_env("CLUSTER_STRATEGIES", default_cluster_strategy)
+  |> String.upcase()
+  |> String.split(",")
+  |> Enum.reduce([], fn strategy, acc ->
+    strategy
+    |> String.trim()
+    |> case do
+      "DNS" ->
+        [
+          fly6pn: [
+            strategy: Cluster.Strategy.DNSPoll,
+            config: [
+              polling_interval: 5_000,
+              query: System.get_env("DNS_NODES"),
+              node_basename: app_name
+            ]
+          ]
+        ] ++ acc
+
+      "POSTGRES" ->
+        [
+          postgres: [
+            strategy: Realtime.Cluster.Strategy.Postgres,
+            config: [
+              hostname: default_db_host,
+              username: username,
+              password: password,
+              database: database,
+              port: port,
+              parameters: [
+                application_name: "cluster_node_#{node()}"
+              ],
+              heartbeat_interval: 5_000,
+              node_timeout: 15_000
+            ]
+          ]
+        ] ++ acc
+
+      "EPMD" ->
+        [
+          dev: [
+            strategy: Cluster.Strategy.Epmd,
+            config: [
+              hosts: [:"orange@127.0.0.1", :"pink@127.0.0.1"]
+            ],
+            connect: {:net_kernel, :connect_node, []},
+            disconnect: {:net_kernel, :disconnect_node, []}
+          ]
+        ] ++ acc
+
+      _ ->
+        acc
+    end
+  end)
+
+config :libcluster,
+  debug: false,
+  topologies: cluster_topologies
 
 if System.get_env("LOGS_ENGINE") == "logflare" do
   if !System.get_env("LOGFLARE_API_KEY") or !System.get_env("LOGFLARE_SOURCE_ID") do
