@@ -71,11 +71,11 @@ defmodule RealtimeWeb.InspectorLive.Index do
     {:noreply, socket}
   end
 
-  def handle_event("broadcast_subscribed", %{"path" => path}, socket) do
+  def handle_event("broadcast_subscribed", %{"host" => host}, socket) do
     socket =
       socket
       |> assign(realtime_connected: true)
-      |> assign(connected_to: path)
+      |> assign(connected_to: host)
       |> assign(broadcast_subscribed: true)
       |> push_patch(to: Routes.inspector_index_path(socket, :index))
 
