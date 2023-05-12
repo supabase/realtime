@@ -24,6 +24,8 @@ defmodule RealtimeWeb do
       import Plug.Conn
       import RealtimeWeb.Gettext
       alias RealtimeWeb.Router.Helpers, as: Routes
+
+      unquote(verified_routes())
     end
   end
 
@@ -39,6 +41,8 @@ defmodule RealtimeWeb do
 
       # Include shared imports and aliases for views
       unquote(view_helpers())
+
+      unquote(verified_routes())
     end
   end
 
@@ -110,5 +114,14 @@ defmodule RealtimeWeb do
   """
   defmacro __using__(which) when is_atom(which) do
     apply(__MODULE__, which, [])
+  end
+
+  def verified_routes do
+    quote do
+      use Phoenix.VerifiedRoutes,
+        endpoint: RealtimeWeb.Endpoint,
+        router: RealtimeWeb.Router,
+        statics: RealtimeWeb.static_paths()
+    end
   end
 end
