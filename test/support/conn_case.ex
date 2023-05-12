@@ -25,6 +25,8 @@ defmodule RealtimeWeb.ConnCase do
       import Phoenix.ConnTest
       alias RealtimeWeb.Router.Helpers, as: Routes
 
+      use RealtimeWeb, :verified_routes
+
       # The default endpoint for testing
       @endpoint RealtimeWeb.Endpoint
     end

@@ -32,38 +32,38 @@ defmodule RealtimeWeb do
   def view do
     quote do
       use Phoenix.View,
-        root: "lib/realtime_web/templates",
+      root: "lib/realtime_web/templates",
         namespace: RealtimeWeb
 
-      # Import convenience functions from controllers
-      import Phoenix.Controller,
+        # Import convenience functions from controllers
+        import Phoenix.Controller,
         only: [get_flash: 1, get_flash: 2, view_module: 1, view_template: 1]
 
-      # Include shared imports and aliases for views
-      unquote(view_helpers())
+        # Include shared imports and aliases for views
+        unquote(view_helpers())
 
-      unquote(verified_routes())
+        unquote(verified_routes())
+      end
     end
-  end
 
-  def live_view do
-    quote do
-      use Phoenix.LiveView,
+    def live_view do
+      quote do
+        use Phoenix.LiveView,
         layout: {RealtimeWeb.LayoutView, "live.html"}
 
-      unquote(view_helpers())
+        unquote(view_helpers())
+      end
     end
-  end
 
-  def live_component do
-    quote do
-      use Phoenix.LiveComponent
+    def live_component do
+      quote do
+        use Phoenix.LiveComponent
 
-      unquote(view_helpers())
+        unquote(view_helpers())
+      end
     end
-  end
 
-  def component do
+    def component do
     quote do
       use Phoenix.Component
 
@@ -119,9 +119,11 @@ defmodule RealtimeWeb do
   def verified_routes do
     quote do
       use Phoenix.VerifiedRoutes,
-        endpoint: RealtimeWeb.Endpoint,
-        router: RealtimeWeb.Router,
-        statics: RealtimeWeb.static_paths()
+      endpoint: RealtimeWeb.Endpoint,
+      router: RealtimeWeb.Router,
+      statics: RealtimeWeb.static_paths()
     end
   end
+
+  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
 end
