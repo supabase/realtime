@@ -49,7 +49,7 @@ defmodule RealtimeWeb do
     def live_view do
       quote do
         use Phoenix.LiveView,
-        layout: {RealtimeWeb.LayoutView, "live.html"}
+        layout: {RealtimeWeb.LayoutView, :live}
 
         unquote(view_helpers())
       end
