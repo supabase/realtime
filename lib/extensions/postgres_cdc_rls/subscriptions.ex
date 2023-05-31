@@ -9,11 +9,11 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
 
-  @spec create(conn(), String.t(), list(map())) ::
+  @spec create(conn(), String.t(), [map()], pid(), pid()) ::
           {:ok, Postgrex.Result.t()}
           | {:error,
              Exception.t() | :malformed_subscription_params | {:subscription_insert_failed, map()}}
-  def create(conn, publication, params_list) do
+  def create(conn, publication, params_list, manager, caller) do
     sql = "with sub_tables as (
 		    select
 			    rr.entity
@@ -56,6 +56,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
           {:ok, [schema, table, filters]} ->
             case query(conn, sql, [publication, schema, table, id, claims, filters]) do
               {:ok, %{num_rows: num} = result} when num > 0 ->
+                send(manager, {:subscribed, {caller, id}})
                 result
 
               {:ok, _} ->
