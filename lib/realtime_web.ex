@@ -17,6 +17,8 @@ defmodule RealtimeWeb do
   and import those modules here.
   """
 
+  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
+
   def controller do
     quote do
       use Phoenix.Controller, namespace: RealtimeWeb
@@ -24,6 +26,8 @@ defmodule RealtimeWeb do
       import Plug.Conn
       import RealtimeWeb.Gettext
       alias RealtimeWeb.Router.Helpers, as: Routes
+
+      unquote(verified_routes())
     end
   end
 
@@ -45,7 +49,7 @@ defmodule RealtimeWeb do
   def live_view do
     quote do
       use Phoenix.LiveView,
-        layout: {RealtimeWeb.LayoutView, "live.html"}
+        layout: {RealtimeWeb.LayoutView, :live}
 
       unquote(view_helpers())
     end
@@ -102,6 +106,8 @@ defmodule RealtimeWeb do
       alias RealtimeWeb.Router.Helpers, as: Routes
 
       import RealtimeWeb.Components
+
+      unquote(verified_routes())
     end
   end
 
@@ -110,5 +116,14 @@ defmodule RealtimeWeb do
   """
   defmacro __using__(which) when is_atom(which) do
     apply(__MODULE__, which, [])
+  end
+
+  def verified_routes do
+    quote do
+      use Phoenix.VerifiedRoutes,
+        endpoint: RealtimeWeb.Endpoint,
+        router: RealtimeWeb.Router,
+        statics: RealtimeWeb.static_paths()
+    end
   end
 end
