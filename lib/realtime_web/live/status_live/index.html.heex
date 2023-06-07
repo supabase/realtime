@@ -3,14 +3,14 @@
 <p>Understand the latency between nodes across the Realtime cluster.</p>
 
 <div class="my-5">
-    <div class="grid grid-cols-4 gap-12 py-4">
+  <div class="grid grid-cols-4 gap-12 py-4">
     <%= for {_pair, p} <- @pings do %>
-        <div class="p-4 border-2 whitespace-nowrap overflow-hidden">
-            <div>From: <%= p.from_region %> - <%= p.from_node %></div>
-            <div>To: <%= p.region %> - <%= p.node %></div>
-            <div><%= p.latency %> ms</div>
-            <div><%= p.timestamp %></div>
-        </div>
+      <div class="p-4 border-2 whitespace-nowrap overflow-hidden">
+        <div>From: <%= p.from_region %> - <%= p.from_node %></div>
+        <div>To: <%= p.region %> - <%= p.node %></div>
+        <div><%= p.latency %> ms</div>
+        <div><%= p.timestamp %></div>
+      </div>
     <% end %>
-    </div>
+  </div>
 </div>
