@@ -17,6 +17,8 @@ defmodule RealtimeWeb do
   and import those modules here.
   """
 
+  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
+
   def controller do
     quote do
       use Phoenix.Controller, namespace: RealtimeWeb
@@ -41,8 +43,6 @@ defmodule RealtimeWeb do
 
       # Include shared imports and aliases for views
       unquote(view_helpers())
-
-      unquote(verified_routes())
     end
   end
 
@@ -106,6 +106,8 @@ defmodule RealtimeWeb do
       alias RealtimeWeb.Router.Helpers, as: Routes
 
       import RealtimeWeb.Components
+
+      unquote(verified_routes())
     end
   end
 
@@ -124,6 +126,4 @@ defmodule RealtimeWeb do
         statics: RealtimeWeb.static_paths()
     end
   end
-
-  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
 end
