@@ -28,25 +28,20 @@ defmodule Extensions.PostgresCdcRls do
   end
 
   def handle_after_connect({manager_pid, conn}, settings, params) do
-    opts = params
     publication = settings["publication"]
+    opts = [conn, publication, params, manager_pid, self()]
     conn_node = node(conn)
 
     if conn_node !== node() do
-      :rpc.call(conn_node, Subscriptions, :create, [conn, publication, opts], 15_000)
+      :rpc.call(
+        conn_node,
+        Subscriptions,
+        :create,
+        opts,
+        15_000
+      )
     else
-      Subscriptions.create(conn, publication, opts)
-    end
-    |> case do
-      {:ok, _} = response ->
-        for %{id: id} <- params do
-          send(manager_pid, {:subscribed, {self(), id}})
-        end
-
-        response
-
-      other ->
-        other
+      apply(Subscriptions, :create, opts)
     end
   end
 
@@ -133,16 +128,6 @@ defmodule Extensions.PostgresCdcRls do
 
       _ ->
         nil
-    end
-  end
-
-  def create_subscription(conn, publication, opts, timeout \\ 5_000) do
-    conn_node = node(conn)
-
-    if conn_node !== node() do
-      :rpc.call(conn_node, Subscriptions, :create, [conn, publication, opts], timeout)
-    else
-      Subscriptions.create(conn, publication, opts)
     end
   end
 
