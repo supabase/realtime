@@ -345,6 +345,15 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_in(
         "access_token",
         %{"access_token" => refresh_token},
+        %{access_token: access_token} = socket
+      )
+      when refresh_token == access_token do
+    {:noreply, socket}
+  end
+
+  def handle_in(
+        "access_token",
+        %{"access_token" => refresh_token},
         %{assigns: %{pg_sub_ref: pg_sub_ref, pg_change_params: pg_change_params}} = socket
       )
       when is_binary(refresh_token) do
