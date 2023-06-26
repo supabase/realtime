@@ -12,23 +12,21 @@ let Hooks = {};
 Hooks.payload = {
   initRealtime(channelName, host, log_level, token, schema, table, bearer) {
     // Instantiate our client with the Realtime server and params to connect with
-
+    {
+    }
     const opts = {
       realtime: {
         params: {
           log_level: log_level,
-          apikey: token,
         },
       },
     };
 
-    if (bearer != "") {
-      opts.realtime.headers = {
-        apikey: `Bearer ${bearer}`,
-      };
-    }
-
     this.realtimeSocket = createClient(host, token, opts);
+
+    if (bearer != "") {
+      this.realtimeSocket.realtime.accessToken = bearer;
+    }
 
     // Join the Channel 'any'
     // Channels can be named anything
