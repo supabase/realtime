@@ -16,7 +16,9 @@ defmodule RealtimeWeb.Components do
 
   def h1(assigns) do
     ~H"""
-    <h1 class="mb-5 flex items-center text-2xl font-semibold leading-6 text-brand"><%= render_slot(@inner_block) %></h1>
+    <h1 class="mb-5 flex items-center text-2xl font-semibold leading-6 text-brand">
+      <%= render_slot(@inner_block) %>
+    </h1>
     """
   end
 
@@ -29,7 +31,9 @@ defmodule RealtimeWeb.Components do
 
   def h2(assigns) do
     ~H"""
-    <h2 class="mb-5 flex items-center text-lg font-semibold leading-6 text-brand"><%= render_slot(@inner_block) %></h2>
+    <h2 class="mb-5 flex items-center text-lg font-semibold leading-6 text-brand">
+      <%= render_slot(@inner_block) %>
+    </h2>
     """
   end
 
@@ -42,7 +46,9 @@ defmodule RealtimeWeb.Components do
 
   def h3(assigns) do
     ~H"""
-    <h3 class="mb-5 flex items-center text-lg font-semibold leading-6 text-brand"><%= render_slot(@inner_block) %></h3>
+    <h3 class="mb-5 flex items-center text-lg font-semibold leading-6 text-brand">
+      <%= render_slot(@inner_block) %>
+    </h3>
     """
   end
 
@@ -62,7 +68,10 @@ defmodule RealtimeWeb.Components do
     ~H"""
     <button
       type={@type}
-      class={["bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none", @class]}
+      class={[
+        "bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none",
+        @class
+      ]}
       {@rest}
     >
       <%= render_slot(@inner_block) %>
@@ -88,7 +97,8 @@ defmodule RealtimeWeb.Components do
       class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
       href={@href}
       target={@target}
-      {@rest}>
+      {@rest}
+    >
       <%= render_slot(@inner_block) %>
     </.link>
     """
@@ -112,7 +122,8 @@ defmodule RealtimeWeb.Components do
       class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
       href={@href}
       target={@target}
-      {@rest}>
+      {@rest}
+    >
       <%= render_slot(@inner_block) %>
     </.link>
     """
@@ -138,7 +149,8 @@ defmodule RealtimeWeb.Components do
       patch={@patch}
       replace={@replace}
       target={@target}
-      {@rest}>
+      {@rest}
+    >
       <%= render_slot(@inner_block) %>
     </.link>
     """
@@ -246,7 +258,14 @@ defmodule RealtimeWeb.Components do
 
   def badge(assigns) do
     ~H"""
-      <div><span class="text-xs font-semibold inline-block uppercase py-[3px] px-[5px] rounded bg-gray-100" {@rest}><%= render_slot(@inner_block) %></span></div>
+    <div>
+      <span
+        class="text-xs font-semibold inline-block uppercase py-[3px] px-[5px] rounded bg-gray-100"
+        {@rest}
+      >
+        <%= render_slot(@inner_block) %>
+      </span>
+    </div>
     """
   end
 
@@ -267,7 +286,7 @@ defmodule RealtimeWeb.Components do
 
   def select(assigns) do
     ~H"""
-      <%= Form.select @form, @field, @list, selected: @selected, class: "
+    <%= Form.select(@form, @field, @list, selected: @selected, class: "
       my-1
       block
       w-full
@@ -275,7 +294,7 @@ defmodule RealtimeWeb.Components do
       border-gray-300
       shadow-sm
       focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
-    " %>
+    ") %>
     """
   end
 
@@ -305,7 +324,7 @@ defmodule RealtimeWeb.Components do
     assigns = assign(assigns, :opts, assigns.opts ++ [class: class])
 
     ~H"""
-      <%= Form.text_input @form, @field, @opts %>
+    <%= Form.text_input(@form, @field, @opts) %>
     """
   end
 
@@ -320,7 +339,7 @@ defmodule RealtimeWeb.Components do
 
   def label(assigns) do
     ~H"""
-      <%= Form.label @form, @field, class: "block text-gray-700 text-sm font-bold mb-2" %>
+    <%= Form.label(@form, @field, class: "block text-gray-700 text-sm font-bold mb-2") %>
     """
   end
 

@@ -50,7 +50,7 @@ if config_env() != :test do
     metrics_jwt_secret: System.get_env("METRICS_JWT_SECRET"),
     db_enc_key: System.get_env("DB_ENC_KEY"),
     fly_region: System.get_env("FLY_REGION"),
-    fly_alloc_id: System.get_env("FLY_ALLOC_ID"),
+    fly_alloc_id: System.get_env("FLY_ALLOC_ID", ""),
     prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer()
 
   queue_target = System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer()
