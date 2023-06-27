@@ -1,7 +1,15 @@
+# fly.toml app configuration file generated for realtime-staging on 2023-06-27T07:39:20-07:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
 app = "realtime-staging"
+primary_region = "lhr"
 kill_signal = "SIGTERM"
-kill_timeout = 5
-processes = []
+kill_timeout = "5s"
+
+[experimental]
+  auto_rollback = true
 
 [deploy]
   release_command = "/app/bin/migrate"
@@ -10,49 +18,42 @@ processes = []
 [env]
   DNS_NODES = "realtime-staging.internal"
   ERL_CRASH_DUMP = "/data/erl_crash.dump"
-  ERL_CRASH_DUMP_SECONDS = 30
+  ERL_CRASH_DUMP_SECONDS = "30"
 
-[experimental]
-  allowed_public_ports = []
-  auto_rollback = true
-
-[mounts]
-  source="data_vol"
-  destination="/data"
+[[mounts]]
+  source = "data_vol_machines"
+  destination = "/data"
+  processes = ["app"]
 
 [[services]]
+  protocol = "tcp"
   internal_port = 4000
   processes = ["app"]
-  protocol = "tcp"
-  script_checks = []
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
   [services.concurrency]
-   # should match ranch.info
+    type = "connections"
     hard_limit = 16384
     soft_limit = 16384
-    type = "connections"
-
-  [[services.ports]]
-    force_https = true
-    handlers = ["http"]
-    port = 80
-
-  [[services.ports]]
-    handlers = ["tls", "http"]
-    port = 443
 
   [[services.tcp_checks]]
-    grace_period = "30s"
     interval = "15s"
-    restart_limit = 6
     timeout = "2s"
+    grace_period = "30s"
+    restart_limit = 6
 
   [[services.http_checks]]
-    interval = 10000
+    interval = "10s"
+    timeout = "2s"
     grace_period = "5s"
+    restart_limit = 0
     method = "get"
     path = "/"
     protocol = "http"
-    restart_limit = 0
-    timeout = 2000
-    tls_skip_verify = false
-    [services.http_checks.headers]
