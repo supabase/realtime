@@ -23,8 +23,8 @@
       <p class="text-gray-600 text-xs italic">Supabase platform project `Reference ID` or...</p>
     </div>
     <div class="mb-4">
-      <%= label(f, :path, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= text_input(f, :path, placeholder: "wss://project_ref.supabase.co/realtime/v1", class: "
+      <%= label(f, :host, class: "block text-gray-700 text-sm font-bold mb-2") %>
+      <%= text_input(f, :host, placeholder: "https://project_ref.supabase.co", class: "
                     my-1
                     block
                     w-full
@@ -33,8 +33,8 @@
                     shadow-sm
                     focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
                   ") %>
-      <%= error_tag(f, :path) %>
-      <p class="text-gray-600 text-xs italic">The websocket path to connect to</p>
+      <%= error_tag(f, :host) %>
+      <p class="text-gray-600 text-xs italic">The host to connect to</p>
     </div>
     <div class="mb-4">
       <%= label(f, :channel, class: "block text-gray-700 text-sm font-bold mb-2") %>
@@ -94,7 +94,7 @@
     </div>
     <div class="mb-4">
       <%= label(f, :token, class: "block text-gray-700 text-sm font-bold mb-2") %>
-      <%= password_input(f, :token, value: Ecto.Changeset.get_field(@changeset, :token), class: "
+      <%= text_input(f, :token, value: Ecto.Changeset.get_field(@changeset, :token), class: "
                     my-1
                     block
                     w-full
@@ -104,7 +104,23 @@
                     focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
                   ") %>
       <%= error_tag(f, :token) %>
-      <p class="text-gray-600 text-xs italic">Your Supabase `anon_key` or Auth user JWT</p>
+      <p class="text-gray-600 text-xs italic">Your Supabase `anon` or `service_role` key</p>
+    </div>
+    <div class="mb-4">
+      <%= label(f, :bearer, class: "block text-gray-700 text-sm font-bold mb-2") %>
+      <%= text_input(f, :bearer, value: Ecto.Changeset.get_field(@changeset, :bearer), class: "
+                    my-1
+                    block
+                    w-full
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  ") %>
+      <%= error_tag(f, :bearer) %>
+      <p class="text-gray-600 text-xs italic">
+        An Auth user JWT optionally signed with custom claims
+      </p>
     </div>
     <div class="flex flex-row justify-between items-center py-6">
       <div>
