@@ -25,7 +25,7 @@ Hooks.payload = {
     this.realtimeSocket = createClient(host, token, opts);
 
     if (bearer != "") {
-      this.realtimeSocket.realtime.accessToken = bearer;
+      this.realtimeSocket.realtime.setAuth(bearer);
     }
 
     // Join the Channel 'any'
