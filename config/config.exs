@@ -45,7 +45,7 @@ config :esbuild,
   ]
 
 config :tailwind,
-  version: "3.1.8",
+  version: "3.3.2",
   default: [
     args: ~w(
       --config=tailwind.config.js
