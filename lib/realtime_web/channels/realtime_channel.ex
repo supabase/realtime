@@ -29,7 +29,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       :tenant_token,
       :access_token,
       :postgres_cdc_module,
-      :channel_name
+      :channel_name,
+      :enable_abac
     ]
 
     @type t :: %__MODULE__{

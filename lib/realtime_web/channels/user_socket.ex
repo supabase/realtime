@@ -44,7 +44,8 @@ defmodule RealtimeWeb.UserSocket do
              max_bytes_per_second: max_bytes_per_second,
              max_joins_per_second: max_joins_per_second,
              max_channels_per_client: max_channels_per_client,
-             postgres_cdc_default: postgres_cdc_default
+             postgres_cdc_default: postgres_cdc_default,
+             enable_abac: enable_abac
            } <- Tenants.Cache.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- access_token(params, headers),
            jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
@@ -65,7 +66,8 @@ defmodule RealtimeWeb.UserSocket do
             postgres_cdc_module: postgres_cdc_module,
             tenant: external_id,
             log_level: log_level,
-            tenant_token: token
+            tenant_token: token,
+            enable_abac: enable_abac
           }
           |> Map.from_struct()
 
