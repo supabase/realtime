@@ -10,6 +10,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Phoenix.Tracker.Shard
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
   alias Realtime.{GenCounter, RateCounter, PostgresCdc, SignalHandler, Tenants}
+  alias Realtime.Tenants.Manager
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
@@ -66,7 +67,8 @@ defmodule RealtimeWeb.RealtimeChannel do
           assigns: %{
             tenant: tenant,
             log_level: log_level,
-            postgres_cdc_module: module
+            postgres_cdc_module: module,
+            enable_abac: enable_abac
           },
           channel_pid: channel_pid,
           serializer: serializer,
@@ -85,6 +87,9 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket) do
+      # TODO start pool if pg_change_params uses postgres_changes also
+      if enable_abac, do: Process.send_after(self(), :start_pool, 0)
+
       Realtime.UsersCounter.add(transport_pid, tenant)
 
       tenant_topic = tenant <> ":" <> sub_topic
@@ -258,6 +263,24 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(
+        :start_pool,
+        %{
+          assigns: %{
+            tenant: tenant,
+            postgres_extension: postgres_extension
+          }
+        } = socket
+      ) do
+    conn_pool =
+      postgres_extension
+      |> connection_args(tenant)
+      |> Manager.start_pool()
+
+    {:noreply, assign(socket, :conn_pool, conn_pool)}
+  end
+
+  @impl true
+  def handle_info(
         :postgres_subscribe,
         %{
           assigns: %{
@@ -272,7 +295,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       ) do
     cancel_timer(pg_sub_ref)
 
-    args = Map.put(postgres_extension, "id", tenant)
+    args = connection_args(postgres_extension, tenant)
 
     case PostgresCdc.connect(module, args) do
       {:ok, response} ->
@@ -658,5 +681,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         metadata: %{tenant: tenant}
       }
     )
+  end
+
+  defp connection_args(postgres_extension, tenant) do
+    Map.put(postgres_extension, "id", tenant)
   end
 end
