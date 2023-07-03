@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
-      - uses: superfly/flyctl-actions@1.1
+      - uses: superfly/flyctl-actions@1.4
         with:
           args: "-c deploy/fly/prod.toml deploy --build-arg SLOT_NAME_SUFFIX=${GITHUB_SHA::7}"
         env:
