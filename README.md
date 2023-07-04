@@ -171,10 +171,217 @@ Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
 >
 > Then JWT's "iss" value must equal "Issuer" and "nbf" value must equal 1610078130.
 
-**Note:**
+> **Note:**
 > JWT expiration is checked automatically. `exp` and `role` (database role) keys are mandatory.
 
 **Authorizing Client Connection**: You can pass in the JWT by following the instructions under the Realtime client lib. For example, refer to the **Usage** section in the [@supabase/realtime-js](https://github.com/supabase/realtime-js) client library.
+
+## Attribute-based Channel Authorization
+
+Realtime supports attribute-based access control, otherwise known as ABAC.
+
+If the `enable_abac` field on a `tenant` record is `true` then Realtime will attempt to run the function `public.realtime_abac_by_channel` on the tenant database to get the ABAC rules payload for a Channel.
+
+The `public.realtime_abac_by_channel` funtion takes one string arument of the Channel name and returns a JSON document in the shape of an `attribute` record. Attribute records have only 3 keys: `name`, `roles` and `attrs`.
+
+```json
+{
+  "attrs": [],
+  "name": "my-feature",
+  "roles": ["read", "write", "etc"]
+}
+```
+
+To express features of features and assign a granular `roles` we simply nest `attribute` records inside themselves in the `attrs` key.
+
+> **Note**  
+> Realtime will always expect the ABAC function to be called: `public.realtime_abac_by_channel`
+
+### Parent and Child Attributes
+
+When applying attribute roles in the code base we access an attribute with a specific path and only `roles` at that path are applied.
+
+For simplicity, Realtime does not attempt to apply parent `roles` to children attributes or vice versa.
+
+### Enabling ABAC
+
+We can enable ABAC for a tenant in a backwards compatible way by creating a `public.realtime_abac_by_channel` function which returns an `attribute` record expressing Realtime features as they are by default:
+
+```sql
+CREATE OR REPLACE FUNCTION public.realtime_abac_by_channel(channel_name text)
+  RETURNS jsonb AS
+$$
+DECLARE
+  result jsonb;
+BEGIN
+  result := jsonb_build_object(
+    'attrs', jsonb_build_array(
+      jsonb_build_object(
+        'attrs', jsonb_build_array(),
+        'name', 'postgres_changes',
+        'roles', jsonb_build_array('read')
+      ),
+      jsonb_build_object(
+        'attrs', jsonb_build_array(),
+        'name', 'presence',
+        'roles', jsonb_build_array('read', 'write')
+      ),
+      jsonb_build_object(
+        'attrs', jsonb_build_array(),
+        'name', 'broadcast',
+        'roles', jsonb_build_array('read', 'write')
+      )
+    ),
+    'name', channel_name,
+    'roles', jsonb_build_array()
+  );
+
+  RETURN result;
+END;
+$$
+LANGUAGE plpgsql;
+```
+
+The query:
+
+```sql
+select public.realtime_abac_by_channel('my-team-channel');
+```
+
+Should return:
+
+```json
+{
+  "attrs": [
+    {
+      "attrs": [],
+      "name": "postgres_changes",
+      "roles": ["read"]
+    },
+    {
+      "attrs": [],
+      "name": "presence",
+      "roles": ["read", "write"]
+    },
+    {
+      "attrs": [],
+      "name": "broadcast",
+      "roles": ["read", "write"]
+    }
+  ],
+  "name": "my-team-channel",
+  "roles": []
+}
+```
+
+### ABAC + RLS
+
+The `public.realtime_abac_by_channel` function is called in the context of the client JWT used when connecting to Realtime.
+
+ABAC rules can be enforced by RLS if you create an RLS policy which filters results of tables used in the `public.realtime_abac_by_channel` function query.
+
+Assuming a `channel_membership` table in the `public` schema with a `user_id` field we can create an RLS policy to filter results of queries accessing the `public.channel_membership` table by `user_id`:
+
+```sql
+create policy "Join channels where user is member"
+  on realtime.channels
+  to authenticated
+  using (channel_name in (select public.channel_membership where user_id = auth.uid());
+```
+
+Then we can define the `public.realtime_abac_by_channel` funtion to query that table and return the expected `attribute` record as JSON:
+
+```sql
+CREATE OR REPLACE FUNCTION public.realtime_abac_by_channel(channel_name text)
+  RETURNS jsonb AS
+$$
+DECLARE
+  result jsonb;
+BEGIN
+  result := select `TODO HELP`;
+
+  RETURN result;
+END;
+$$
+LANGUAGE plpgsql;
+```
+
+### Examples
+
+Cannot subscribe to a Channel:
+
+```sql
+select public.realtime_abac_by_channel('private-channel');
+```
+
+```json
+null
+```
+
+Can subscribe to a Channel but not do anything:
+
+```sql
+select public.realtime_abac_by_channel('private-channel');
+```
+
+```json
+{
+  "attrs": [],
+  "name": "private-channel",
+  "roles": []
+}
+```
+
+Can subscribe to a Channel but only `read` Broadcast messages:
+
+```sql
+select public.realtime_abac_by_channel('only-listen-channel');
+```
+
+```json
+{
+  "attrs": [
+    {
+      "attrs": [],
+      "name": "broadcast",
+      "roles": ["read"]
+    }
+  ],
+  "name": "only-listen-channel",
+  "roles": []
+}
+```
+
+Can subscribe to database changes but only allow certain filters to be used:
+
+```sql
+select public.realtime_abac_by_channel('my-team-chat-channel');
+```
+
+```json
+{
+  "attrs": [
+    {
+      "attrs": [
+        {
+          "attrs": [],
+          "name": "id=eq.1",
+          "roles": ["read"]
+        },
+        {
+          "attrs": [],
+          "name": "rank=lt.10",
+          "roles": ["read"]
+        }
+      ],
+      "name": "postgres_changes",
+      "roles": ["read"]
+    }
+  ],
+  "name": "my-team-chat-channel",
+  "roles": []
+}
+```
 
 ## License
 
