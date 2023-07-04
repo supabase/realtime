@@ -31,7 +31,7 @@ defmodule Realtime.Tenants.Manager do
     args =
       Map.merge(args, %{
         "db_socket_opts" => [addrtype(args)],
-        "pool_size" => Map.get(args, "subcriber_pool_size", 5)
+        "pool_size" => Map.get(args, "subscriber_pool_size", 5)
       })
 
     Logger.debug(
