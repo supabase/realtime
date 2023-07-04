@@ -117,9 +117,9 @@ defmodule RealtimeWeb.ChannelsAbac do
                   "features" => [
                     %{
                       "name" => "postgres_changes",
-                      "attrs" => ["read"],
+                      "roles" => ["read"],
                       "features" => [
-                        %{"name" => "id=eq.1", "attrs" => ["read"], "features" => []},
+                        %{"name" => "id=eq.1", "attrs" => ["read"], "features" => [] "meta" => %{}},
                         %{"name" => "rank=lt.10", "attrs" => ["read"], "features" => []}
                       ]
                     }
@@ -150,4 +150,56 @@ defmodule RealtimeWeb.ChannelsAbac do
       ]
     }
   end
+
+  def stas_abac() do
+    %{
+      "attrs" => [
+        %{
+          "name" => "realtime",
+          "roles" => [],
+          "attrs" => [
+            %{
+              "name" => "channels",
+              "roles" => [],
+              "attrs" => [
+                %{
+                  "name" => "my-team-channel",
+                  "roles" => ["read", "write"],
+                  "attrs" => [
+                    %{
+                      "name" => "postgres_changes",
+                      "roles" => ["read"],
+                      "attrs" => [
+                        %{"name" => "id=eq.1", "roles" => ["read"], "attrs" => []},
+                        %{"name" => "rank=lt.10", "roles" => ["read"], "attrs" => []}
+                      ]
+                    }
+                  ]
+                },
+                %{
+                  "name" => "my-people-presences",
+                  "roles" => ["read", "write"],
+                  "attrs" => [
+                    %{"name" => "presence", "roles" => ["read", "write"], "attrs" => []}
+                  ]
+                },
+                %{
+                  "name" => "my-channel-update-counters",
+                  "roles" => ["read"],
+                  "attrs" => [
+                    %{
+                      "name" => "broadcast",
+                      "roles" => ["read"],
+                      "attrs" => []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  end
+
 end
