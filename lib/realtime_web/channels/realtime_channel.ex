@@ -91,10 +91,14 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket) do
-      # TODO start pool if pg_change_params uses postgres_changes also
-      # TODO start pool distributed
+      # Setup Channel
+      if enable_abac do
+        # TODO start pool if pg_change_params uses postgres_changes also
+        # TODO start pool distributed
 
-      if enable_abac, do: Process.send_after(self(), :start_pool, 0)
+        send(self(), :start_pool)
+        send(self(), :request_abac)
+      end
 
       Realtime.UsersCounter.add(transport_pid, tenant)
 
@@ -282,8 +286,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> connection_args(tenant)
       |> Manager.start_pool()
 
-    Process.send_after(self(), :request_abac, 0)
-
     {:noreply, assign(socket, :conn_pool, conn_pool)}
   end
 
@@ -462,7 +464,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     case ChannelsAbac.get_rules(abac_rules, type) do
       %{"attrs" => ["read"]} ->
-        {:reply, {:error, %{reason: "You can't do that!"}}, socket}
+        error_response(socket, type, "You can't do that!")
 
       %{"attrs" => ["read", "write"]} ->
         if self_broadcast do
@@ -480,37 +482,49 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in(
-        "presence",
+        "presence" = type,
         %{"event" => event} = payload,
-        %{assigns: %{is_new_api: true, presence_key: presence_key, tenant_topic: tenant_topic}} =
-          socket
+        %{
+          assigns: %{
+            is_new_api: true,
+            presence_key: presence_key,
+            tenant_topic: tenant_topic,
+            abac_rules: abac_rules
+          }
+        } = socket
       ) do
     socket = count(socket)
 
-    result =
-      event
-      |> String.downcase()
-      |> case do
-        "track" ->
-          payload = Map.get(payload, "payload", %{})
+    case ChannelsAbac.get_rules(abac_rules, type) do
+      %{"attrs" => ["read", "write"]} ->
+        result =
+          event
+          |> String.downcase()
+          |> case do
+            "track" ->
+              payload = Map.get(payload, "payload", %{})
 
-          with {:error, {:already_tracked, _, _, _}} <-
-                 Presence.track(self(), tenant_topic, presence_key, payload),
-               {:ok, _} <- Presence.update(self(), tenant_topic, presence_key, payload) do
-            :ok
-          else
-            {:ok, _} -> :ok
-            {:error, _} -> :error
+              with {:error, {:already_tracked, _, _, _}} <-
+                     Presence.track(self(), tenant_topic, presence_key, payload),
+                   {:ok, _} <- Presence.update(self(), tenant_topic, presence_key, payload) do
+                :ok
+              else
+                {:ok, _} -> :ok
+                {:error, _} -> :error
+              end
+
+            "untrack" ->
+              Presence.untrack(self(), tenant_topic, presence_key)
+
+            _ ->
+              :error
           end
 
-        "untrack" ->
-          Presence.untrack(self(), tenant_topic, presence_key)
+        {:reply, result, socket}
 
-        _ ->
-          :error
-      end
-
-    {:reply, result, socket}
+      _else ->
+        error_response(socket, type, "You can't do that!")
+    end
   end
 
   def handle_in(_, _, socket) do
@@ -686,6 +700,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     Logger.error(message)
 
     {:stop, :shutdown, socket}
+  end
+
+  defp error_response(%{assigns: %{channel_name: channel_name}} = socket, extention, message) do
+    push_system_message(extention, socket, "error", message, channel_name)
+
+    {:reply, {:error, %{reason: message}}, socket}
   end
 
   defp push_system_message(extension, socket, status, message, channel_name) do
