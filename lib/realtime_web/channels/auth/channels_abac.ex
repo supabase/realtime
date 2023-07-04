@@ -1,23 +1,43 @@
 defmodule RealtimeWeb.ChannelsAbac do
+  @doc """
+  Get the abac rules for all features and subfeatures of the Realtime product.
+
+  ## Examples
+
+  Realtime:
+      iex> %{"name" => "realtime"} = RealtimeWeb.ChannelsAbac.example_abac_one() |> RealtimeWeb.ChannelsAbac.get_realtime_rules()
+  """
   def get_realtime_rules(abac) do
     abac
     |> Map.get("features")
-    |> Enum.filter(&(&1["name"] == "realtime"))
+    |> Enum.find(&(&1["name"] == "realtime"))
   end
+
+  @doc """
+  Get abac rules for a Realtime Channel.
+
+  ## Examples
+
+  Realtime:
+      iex> channel_name = "my-channel-update-counters"
+      iex> realtime_rules = RealtimeWeb.ChannelsAbac.example_abac_one() |> RealtimeWeb.ChannelsAbac.get_realtime_rules()
+      iex> %{"name" => "my-channel-update-counters"} = RealtimeWeb.ChannelsAbac.get_channel_rules(realtime_rules, channel_name)
+  """
 
   def get_channel_rules(realtime_rules, channel_name) do
     realtime_rules
     |> Map.get("features")
-    |> Enum.filter(&(&1["name"] == "channels"))
+    |> Enum.find(&(&1["name"] == "channels"))
+    |> Map.get("features")
     |> Enum.find(&(&1["name"] == channel_name))
   end
 
   @doc """
-  Get the abac rules for Broadcast.
+  Get the abac rules for a Realtime Channel event.
 
   ## Examples
 
-  Broadcast attrs:
+  Broadcast:
 
       iex> channel_rules = %{
       ...>"name" => "my-channel-update-counters",
@@ -30,13 +50,13 @@ defmodule RealtimeWeb.ChannelsAbac do
       ...>    }
       ...>  ]
       ...>}
-      iex> %{"attrs" => ["read"]} = RealtimeWeb.ChannelsAbac.get_broadcast_rules(channel_rules)
+      iex> %{"attrs" => ["read"]} = RealtimeWeb.ChannelsAbac.get_rules(channel_rules, "broadcast")
   """
 
-  def get_broadcast_rules(channel_rules) do
+  def get_rules(channel_rules, event) do
     channel_rules
     |> Map.get("features")
-    |> Enum.find(&(&1["name"] == "broadcast"))
+    |> Enum.find(&(&1["name"] == event))
   end
 
   @doc """

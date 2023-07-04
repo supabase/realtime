@@ -93,6 +93,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, claims, confirm_token_ref} <- confirm_token(socket) do
       # TODO start pool if pg_change_params uses postgres_changes also
       # TODO start pool distributed
+
       if enable_abac, do: Process.send_after(self(), :start_pool, 0)
 
       Realtime.UsersCounter.add(transport_pid, tenant)
@@ -286,12 +287,26 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, assign(socket, :conn_pool, conn_pool)}
   end
 
-  def handle_info(:request_abac, %{assigns: %{conn_pool: _conn_pool}} = socket) do
+  def handle_info(
+        :request_abac,
+        %{assigns: %{conn_pool: _conn_pool, channel_name: channel_name}} = socket
+      ) do
     # TODO get abac stuff from tenant db here
 
-    rules = ChannelsAbac.example_abac_one() |> ChannelsAbac.get_realtime_rules()
+    rules =
+      ChannelsAbac.example_abac_one()
+      |> ChannelsAbac.get_realtime_rules()
+      |> ChannelsAbac.get_channel_rules(channel_name)
 
-    {:noreply, assign(socket, :abac_rules, rules)}
+    case rules do
+      nil ->
+        message = "ABAC is enabled and no rules for Channel found"
+
+        shutdown_response(socket, message)
+
+      rules ->
+        {:noreply, assign(socket, :abac_rules, rules)}
+    end
   end
 
   @impl true
@@ -438,22 +453,29 @@ defmodule RealtimeWeb.RealtimeChannel do
             is_new_api: true,
             ack_broadcast: ack_broadcast,
             self_broadcast: self_broadcast,
-            tenant_topic: tenant_topic
+            tenant_topic: tenant_topic,
+            abac_rules: abac_rules
           }
         } = socket
       ) do
     socket = count(socket)
 
-    if self_broadcast do
-      Endpoint.broadcast(tenant_topic, type, payload)
-    else
-      Endpoint.broadcast_from(self(), tenant_topic, type, payload)
-    end
+    case ChannelsAbac.get_rules(abac_rules, type) do
+      %{"attrs" => ["read"]} ->
+        {:reply, {:error, %{reason: "You can't do that!"}}, socket}
 
-    if ack_broadcast do
-      {:reply, :ok, socket}
-    else
-      {:noreply, socket}
+      %{"attrs" => ["read", "write"]} ->
+        if self_broadcast do
+          Endpoint.broadcast(tenant_topic, type, payload)
+        else
+          Endpoint.broadcast_from(self(), tenant_topic, type, payload)
+        end
+
+        if ack_broadcast do
+          {:reply, :ok, socket}
+        else
+          {:noreply, socket}
+        end
     end
   end
 
