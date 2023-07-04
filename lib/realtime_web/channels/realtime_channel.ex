@@ -523,7 +523,11 @@ defmodule RealtimeWeb.RealtimeChannel do
         {:reply, result, socket}
 
       _else ->
-        error_response(socket, type, ~s(Expected Presence ABAC `attrs` of: ["read", "write"]))
+        error_response(
+          socket,
+          type,
+          ~s(Expected Presence ABAC `attrs` to match: ["read", "write"])
+        )
     end
   end
 
