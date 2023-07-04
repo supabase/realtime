@@ -295,6 +295,19 @@ defmodule RealtimeWeb.RealtimeChannel do
       ) do
     # TODO get abac stuff from tenant db here
 
+    # sql = """
+    # select realtime.abac_for_channel(#{channel_name})
+    # """
+
+    # rules =
+    #  Postgrex.transaction(pid, fn conn_pool ->
+    #    Postgrex.query!(conn, "SET LOCAL ROLE #{role}", [])
+    #    Postgrex.query!(conn, "SET request.jwt.claims = '#{json_claims}'", [])
+    #    Postgrex.query!(conn, "SET request.jwt.claims.user_metadata.id = '#{user_id}'", [])
+    #
+    #    Postgrex.query!(conn, sql, params)
+    #  end)
+
     rules =
       ChannelsAbac.example_abac_one()
       |> ChannelsAbac.get_realtime_rules()
