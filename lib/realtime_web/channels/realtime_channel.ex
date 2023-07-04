@@ -464,7 +464,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     case ChannelsAbac.get_rules(abac_rules, type) do
       %{"attrs" => ["read"]} ->
-        error_response(socket, type, "You can't do that!")
+        error_response(socket, type, ~s(Expected Broadcast ABAC `attrs` to include: "write"))
 
       %{"attrs" => ["read", "write"]} ->
         if self_broadcast do
