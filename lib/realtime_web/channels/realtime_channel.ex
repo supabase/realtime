@@ -11,6 +11,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.{ChannelsAuthorization, Endpoint, Presence}
   alias Realtime.{GenCounter, RateCounter, PostgresCdc, SignalHandler, Tenants}
   alias Realtime.Tenants.Manager
+  alias RealtimeWeb.ChannelsAbac
 
   import Realtime.Helpers, only: [cancel_timer: 1, decrypt!: 2]
 
@@ -31,7 +32,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       :access_token,
       :postgres_cdc_module,
       :channel_name,
-      :enable_abac
+      :enable_abac,
+      :abac_rules
     ]
 
     @type t :: %__MODULE__{
@@ -53,7 +55,9 @@ defmodule RealtimeWeb.RealtimeChannel do
             jwt_secret: String.t(),
             tenant_token: String.t(),
             access_token: String.t(),
-            channel_name: String.t()
+            channel_name: String.t(),
+            enable_abac: boolean(),
+            abac_rules: map()
           }
   end
 
@@ -88,6 +92,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_max_users(socket),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket) do
       # TODO start pool if pg_change_params uses postgres_changes also
+      # TODO start pool distributed
       if enable_abac, do: Process.send_after(self(), :start_pool, 0)
 
       Realtime.UsersCounter.add(transport_pid, tenant)
@@ -276,7 +281,17 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> connection_args(tenant)
       |> Manager.start_pool()
 
+    Process.send_after(self(), :request_abac, 0)
+
     {:noreply, assign(socket, :conn_pool, conn_pool)}
+  end
+
+  def handle_info(:request_abac, %{assigns: %{conn_pool: _conn_pool}} = socket) do
+    # TODO get abac stuff from tenant db here
+
+    rules = ChannelsAbac.example_abac_one() |> ChannelsAbac.get_realtime_rules()
+
+    {:noreply, assign(socket, :abac_rules, rules)}
   end
 
   @impl true
