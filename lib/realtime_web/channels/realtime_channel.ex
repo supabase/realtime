@@ -300,13 +300,21 @@ defmodule RealtimeWeb.RealtimeChannel do
     # """
 
     # rules =
-    #  Postgrex.transaction(pid, fn conn_pool ->
-    #    Postgrex.query!(conn, "SET LOCAL ROLE #{role}", [])
-    #    Postgrex.query!(conn, "SET request.jwt.claims = '#{json_claims}'", [])
-    #    Postgrex.query!(conn, "SET request.jwt.claims.user_metadata.id = '#{user_id}'", [])
+    # def do_query(pid, claims, fun, channel) do
+    #   role = claims["role"]
+    #   sub = claims["sub"]
     #
-    #    Postgrex.query!(conn, sql, params)
-    #  end)
+    #   query = """
+    #   select #{fun}('#{channel}')::jsonb)
+    #   """
+    #
+    #   Postgrex.transaction(pid, fn conn ->
+    #     Postgrex.query!(conn, "SET LOCAL ROLE #{role}", [])
+    #     Postgrex.query!(conn, "SET request.jwt.claim.sub = '#{sub}'", [])
+    #     Postgrex.query!(conn, "SET search_path = public", [])
+    #     Postgrex.query!(conn, query, [])
+    #   end)
+    # end
 
     rules =
       ChannelsAbac.example_abac_one()
