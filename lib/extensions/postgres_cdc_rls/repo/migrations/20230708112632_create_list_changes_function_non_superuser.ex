@@ -7,10 +7,10 @@ defmodule Realtime.Extensions.Rls.Repo.Migrations.CreateListChangesFunction do
     execute("DO $dyn$
 BEGIN
     IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+    ELSE
         EXECUTE 'create or replace function realtime.list_changes(publication name, slot_name name, max_changes int, max_record_bytes int)
           returns setof realtime.wal_rls
           language sql
-          set log_min_messages to ''fatal''
         as $$
           with pub as (
             select
@@ -68,7 +68,6 @@ BEGIN
             w2j.w2j_add_tables <> ''''
             and xyz.subscription_ids[1] is not null
         $$;';
-    ELSE
     END IF;
 END $dyn$;")
   end
