@@ -52,7 +52,8 @@ defmodule Realtime.Helpers do
       parameters: [
         application_name: "supabase_realtime"
       ],
-      socket_options: socket_opts
+      socket_options: socket_opts,
+      ssl: true
     )
   end
 

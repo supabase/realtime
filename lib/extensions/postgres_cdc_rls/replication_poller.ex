@@ -319,7 +319,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       parameters: [
         application_name: "realtime_rls"
       ],
-      socket_options: socket_opts
+      socket_options: socket_opts,
+      ssl: true
     )
   end
 
