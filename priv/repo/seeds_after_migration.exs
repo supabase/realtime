@@ -27,7 +27,8 @@ end
         "poll_max_changes" => 100,
         "poll_max_record_bytes" => 1_048_576,
         "publication" => publication,
-        "region" => "us-east-1"
+        "region" => "us-east-1",
+        "ssl_enforced" => false
       }
     }
   ],

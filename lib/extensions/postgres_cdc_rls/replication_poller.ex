@@ -8,7 +8,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   require Logger
 
-  import Realtime.Helpers, only: [cancel_timer: 1, decrypt_creds: 5]
+  import Realtime.Helpers,
+    only: [cancel_timer: 1, decrypt_creds: 5, default_ssl_param: 1, maybe_enforce_ssl_config: 2]
 
   alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
   alias DBConnection.Backoff
@@ -28,6 +29,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   @impl true
   def init(args) do
+    ssl_enforced = default_ssl_param(args)
+
     {:ok, conn} =
       connect_db(
         args["db_host"],
@@ -35,7 +38,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         args["db_name"],
         args["db_user"],
         args["db_password"],
-        args["db_socket_opts"]
+        args["db_socket_opts"],
+        ssl_enforced
       )
 
     tenant = args["id"]
@@ -306,10 +310,10 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   defp convert_errors(_), do: nil
 
-  defp connect_db(host, port, name, user, pass, socket_opts) do
+  defp connect_db(host, port, name, user, pass, socket_opts, ssl_enforced) do
     {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
 
-    Postgrex.start_link(
+    [
       hostname: host,
       port: port,
       database: name,
@@ -320,7 +324,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         application_name: "realtime_rls"
       ],
       socket_options: socket_opts
-    )
+    ]
+    |> maybe_enforce_ssl_config(ssl_enforced)
+    |> Postgrex.start_link()
   end
 
   defp prepare_replication(

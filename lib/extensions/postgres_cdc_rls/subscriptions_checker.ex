@@ -49,7 +49,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
     Logger.metadata(external_id: id, project: id)
 
-    {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1)
+    ssl_enforced = H.default_ssl_param(args)
+
+    {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1, 5_000, ssl_enforced)
 
     state = %State{
       id: id,

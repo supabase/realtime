@@ -107,7 +107,7 @@ defmodule Extensions.PostgresCdcRls.Migrations do
            "db_user" => db_user,
            "db_password" => db_password,
            "db_socket_opts" => db_socket_opts
-         } = _args
+         } = args
        ) do
     {host, port, name, user, pass} =
       H.decrypt_creds(
@@ -118,26 +118,27 @@ defmodule Extensions.PostgresCdcRls.Migrations do
         db_password
       )
 
-    Repo.with_dynamic_repo(
-      [
-        hostname: host,
-        port: port,
-        database: name,
-        password: pass,
-        username: user,
-        pool_size: 2,
-        socket_options: db_socket_opts
-      ],
-      fn repo ->
-        Ecto.Migrator.run(
-          Repo,
-          @migrations,
-          :up,
-          all: true,
-          prefix: "realtime",
-          dynamic_repo: repo
-        )
-      end
-    )
+    ssl_enforced = H.default_ssl_param(args)
+
+    [
+      hostname: host,
+      port: port,
+      database: name,
+      password: pass,
+      username: user,
+      pool_size: 2,
+      socket_options: db_socket_opts
+    ]
+    |> H.maybe_enforce_ssl_config(ssl_enforced)
+    |> Repo.with_dynamic_repo(fn repo ->
+      Ecto.Migrator.run(
+        Repo,
+        @migrations,
+        :up,
+        all: true,
+        prefix: "realtime",
+        dynamic_repo: repo
+      )
+    end)
   end
 end

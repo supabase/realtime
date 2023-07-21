@@ -29,10 +29,21 @@ defmodule Realtime.Helpers do
           String.t(),
           list(),
           non_neg_integer(),
-          non_neg_integer()
+          non_neg_integer(),
+          boolean()
         ) ::
           {:ok, pid} | {:error, Postgrex.Error.t() | term()}
-  def connect_db(host, port, name, user, pass, socket_opts, pool \\ 5, queue_target \\ 5_000) do
+  def connect_db(
+        host,
+        port,
+        name,
+        user,
+        pass,
+        socket_opts,
+        pool \\ 5,
+        queue_target \\ 5_000,
+        ssl_enforced \\ true
+      ) do
     secure_key = Application.get_env(:realtime, :db_enc_key)
 
     host = decrypt!(host, secure_key)
@@ -41,7 +52,7 @@ defmodule Realtime.Helpers do
     pass = decrypt!(pass, secure_key)
     user = decrypt!(user, secure_key)
 
-    Postgrex.start_link(
+    [
       hostname: host,
       port: port,
       database: name,
@@ -53,7 +64,33 @@ defmodule Realtime.Helpers do
         application_name: "supabase_realtime"
       ],
       socket_options: socket_opts
-    )
+    ]
+    |> maybe_enforce_ssl_config(ssl_enforced)
+    |> Postgrex.start_link()
+  end
+
+  @spec default_ssl_param(map) :: boolean
+  def default_ssl_param(%{"ssl_enforced" => ssl_enforced}) when is_boolean(ssl_enforced),
+    do: ssl_enforced
+
+  def default_ssl_param(_), do: true
+
+  @spec maybe_enforce_ssl_config(maybe_improper_list, boolean()) :: maybe_improper_list
+  def maybe_enforce_ssl_config(db_config, ssl_enforced)
+      when is_list(db_config) and is_boolean(ssl_enforced) do
+    if ssl_enforced do
+      enforce_ssl_config(db_config)
+    else
+      db_config
+    end
+  end
+
+  def maybe_enforce_ssl_config(db_config, _) do
+    enforce_ssl_config(db_config)
+  end
+
+  defp enforce_ssl_config(db_config) when is_list(db_config) do
+    db_config ++ [ssl: true, ssl_opts: [verify: :verify_none]]
   end
 
   @doc """
