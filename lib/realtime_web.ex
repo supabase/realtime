@@ -84,7 +84,7 @@ defmodule RealtimeWeb do
 
   def channel do
     quote do
-      use Phoenix.Channel
+      use Phoenix.Channel, log_join: :info, log_handle_in: :info
       import RealtimeWeb.Gettext
     end
   end
