@@ -11,13 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: superfly/flyctl-actions@1.1
+      - uses: superfly/flyctl-actions@1.4
         with:
           args: "-c deploy/fly/qa.toml scale count 1"
-      - uses: superfly/flyctl-actions@1.1
+      - uses: superfly/flyctl-actions@1.4
         with:
           args: "-c deploy/fly/qa.toml deploy --build-arg SLOT_NAME_SUFFIX=${GITHUB_SHA::7}"
-      - uses: superfly/flyctl-actions@1.1
+      - uses: superfly/flyctl-actions@1.4
         if: always()
         with:
           args: "-c deploy/fly/qa.toml scale count 0"
