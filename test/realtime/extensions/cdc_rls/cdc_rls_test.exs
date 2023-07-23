@@ -22,6 +22,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
     assigns = %{
       tenant_token: @token,
+      jwt_signing_method: tenant.jwt_signing_method,
       jwt_secret: tenant.jwt_secret,
       tenant: tenant.external_id,
       postgres_extension: PostgresCdc.filter_settings(@cdc, tenant.extensions),

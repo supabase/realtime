@@ -25,6 +25,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       :pg_change_params,
       :postgres_extension,
       :claims,
+      :jwt_signing_method,
       :jwt_secret,
       :tenant_token,
       :access_token,
@@ -48,6 +49,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             pg_change_params: map(),
             postgres_extension: map(),
             claims: map(),
+            jwt_signing_method: String.t(),
             jwt_secret: String.t(),
             tenant_token: String.t(),
             access_token: String.t(),
@@ -596,8 +598,9 @@ defmodule RealtimeWeb.RealtimeChannel do
            } = assigns
        }) do
     with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
+         jwt_signing_method <- Application.get_env(:realtime, :api_jwt_signing_method),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
-           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
+           ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_signing_method),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
       if ref = assigns[:confirm_token_ref], do: cancel_timer(ref)
 

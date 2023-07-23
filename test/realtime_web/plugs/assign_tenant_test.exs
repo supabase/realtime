@@ -23,6 +23,7 @@ defmodule RealtimeWeb.Plugs.AssignTenantTest do
       }
     ],
     "postgres_cdc_default" => "postgres_cdc_rls",
+    "jwt_signing_method" => "HS256",
     "jwt_secret" => "new secret"
   }
 
