@@ -232,8 +232,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def handle_info(:sync_presence, %{assigns: %{tenant_topic: topic}} = socket) do
-    socket = count(socket)
+  def handle_info(:sync_presence = msg, %{assigns: %{tenant_topic: topic}} = socket) do
+    socket = socket |> count() |> maybe_log_handle_info(msg)
 
     push(socket, "presence_state", presence_dirty_list(topic))
 
@@ -248,8 +248,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def handle_info(%{event: type, payload: payload}, socket) do
-    socket = count(socket)
+  def handle_info(%{event: type, payload: payload} = msg, socket) do
+    socket = socket |> count() |> maybe_log_handle_info(msg)
 
     push(socket, type, payload)
     {:noreply, socket}
@@ -320,8 +320,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_info(other, socket) do
-    Logger.error("Undefined msg #{inspect(other, pretty: true)}")
+  def handle_info(msg, socket) do
+    Logger.error("HANDLE_INFO message not handled: #{inspect(msg, pretty: true)}")
     {:noreply, socket}
   end
 
@@ -558,6 +558,20 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:ok, rate_counter} = RateCounter.get(counter.id)
 
     assign(socket, :rate_counter, rate_counter)
+  end
+
+  defp maybe_log_handle_info(
+         %{assigns: %{log_level: log_level, channel_name: channel_name}} = socket,
+         msg
+       ) do
+    if Logger.compare_levels(log_level, :error) == :lt,
+      do:
+        Logger.log(
+          log_level,
+          "HANDLE_INFO INCOMING ON " <> channel_name <> " message: " <> inspect(msg)
+        )
+
+    socket
   end
 
   defp presence_key(params) do

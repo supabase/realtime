@@ -103,7 +103,7 @@ Hooks.payload = {
     );
 
     // Finally, subscribe to the Channel we just setup
-    this.channel.subscribe(async (status) => {
+    this.channel.subscribe(async (status, error) => {
       if (status === "SUBSCRIBED") {
         console.log(`Realtime Channel status: ${status}`);
 
@@ -159,7 +159,8 @@ Hooks.payload = {
           payload: { name: name, t: performance.now() },
         });
       } else {
-        console.log(`Realtime Channel status: ${status}`);
+        console.error(`Realtime Channel error status: ${status}`);
+        console.error(`Realtime Channel error: ${error}`);
       }
     });
   },
