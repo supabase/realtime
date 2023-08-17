@@ -13,6 +13,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       field(:channel, :string, default: "room_a")
       field(:schema, :string, default: "public")
       field(:table, :string, default: "*")
+      field(:filter, :string)
       field(:bearer, :string)
     end
 
