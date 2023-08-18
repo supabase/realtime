@@ -80,7 +80,9 @@ Hooks.payload = {
 
     // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
     let postgres_changes_opts = { event: "*", schema: schema, table: table };
-    postgres_changes_opts = filter != "" ? { ...postgres_changes_opts, filter: filter } : postgres_changes_opts;
+    if (filter !== "") {
+      postgres_changes_opts.filter = filter;
+    }
     this.channel.on("postgres_changes", postgres_changes_opts, (payload) => {
       let ts = performance.now() + performance.timeOrigin;
       let iso_ts = new Date();
@@ -113,6 +115,7 @@ Hooks.payload = {
         localStorage.setItem("channel", channelName);
         localStorage.setItem("schema", schema);
         localStorage.setItem("table", table);
+        localStorage.setItem("filter", filter);
         localStorage.setItem("bearer", bearer);
 
         // Initiate Presence for a connected user
@@ -191,6 +194,7 @@ Hooks.payload = {
       channel: localStorage.getItem("channel"),
       schema: localStorage.getItem("schema"),
       table: localStorage.getItem("table"),
+      filter: localStorage.getItem("filter"),
       bearer: localStorage.getItem("bearer"),
     };
 

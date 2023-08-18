@@ -19,7 +19,17 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
 
     def changeset(form, params \\ %{}) do
       form
-      |> cast(params, [:log_level, :token, :host, :project, :channel, :schema, :table, :bearer])
+      |> cast(params, [
+        :log_level,
+        :token,
+        :host,
+        :project,
+        :channel,
+        :schema,
+        :table,
+        :filter,
+        :bearer
+      ])
       |> validate_required([:channel])
     end
   end
@@ -148,6 +158,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
           "schema" => nil,
           "table" => nil,
           "token" => nil,
+          "filter" => nil,
           "bearer" => nil
         },
         socket
