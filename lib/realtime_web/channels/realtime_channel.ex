@@ -354,6 +354,15 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_in(
         "access_token",
         %{"access_token" => refresh_token},
+        %{assigns: %{access_token: _access_token}} = socket
+      )
+      when is_nil(refresh_token) do
+    {:noreply, socket}
+  end
+
+  def handle_in(
+        "access_token",
+        %{"access_token" => refresh_token},
         %{
           assigns: %{
             access_token: _access_token,
