@@ -79,6 +79,20 @@
       <p class="text-gray-600 text-xs italic">Listen to changes from this table</p>
     </div>
     <div class="mb-4">
+      <%= label(f, :filter, class: "block text-gray-700 text-sm font-bold mb-2") %>
+      <%= text_input(f, :filter, placeholder: "body=eq.hey", class: "
+                    my-1
+                    block
+                    w-full
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  ") %>
+      <%= error_tag(f, :filter) %>
+      <p class="text-gray-600 text-xs italic">Match records with a filter</p>
+    </div>
+    <div class="mb-4">
       <%= label(f, :log_level, class: "block text-gray-700 text-sm font-bold mb-2") %>
       <%= select(f, :log_level, ["debug", "info", "warn", "error"], selected: "info", class: "
                     my-1

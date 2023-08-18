@@ -13,12 +13,23 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       field(:channel, :string, default: "room_a")
       field(:schema, :string, default: "public")
       field(:table, :string, default: "*")
+      field(:filter, :string)
       field(:bearer, :string)
     end
 
     def changeset(form, params \\ %{}) do
       form
-      |> cast(params, [:log_level, :token, :host, :project, :channel, :schema, :table, :bearer])
+      |> cast(params, [
+        :log_level,
+        :token,
+        :host,
+        :project,
+        :channel,
+        :schema,
+        :table,
+        :filter,
+        :bearer
+      ])
       |> validate_required([:channel])
     end
   end
@@ -147,6 +158,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
           "schema" => nil,
           "table" => nil,
           "token" => nil,
+          "filter" => nil,
           "bearer" => nil
         },
         socket

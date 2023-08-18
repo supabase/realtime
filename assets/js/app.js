@@ -10,7 +10,7 @@ import { createClient } from "@supabase/supabase-js";
 
 let Hooks = {};
 Hooks.payload = {
-  initRealtime(channelName, host, log_level, token, schema, table, bearer) {
+  initRealtime(channelName, host, log_level, token, schema, table, filter, bearer) {
     // Instantiate our client with the Realtime server and params to connect with
     {
     }
@@ -79,28 +79,26 @@ Hooks.payload = {
     });
 
     // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
-    this.channel.on(
-      "postgres_changes",
-      { event: "*", schema: schema, table: table },
-      (payload) => {
-        let ts = performance.now() + performance.timeOrigin;
-        let iso_ts = new Date();
-        let payload_ts = Date.parse(payload.commit_timestamp);
-        let latency = ts - payload_ts;
-        let line = `<tr class="bg-white border-b hover:bg-gray-50">
+    let postgres_changes_opts = { event: "*", schema: schema, table: table };
+    if (filter !== "") {
+      postgres_changes_opts.filter = filter;
+    }
+    this.channel.on("postgres_changes", postgres_changes_opts, (payload) => {
+      let ts = performance.now() + performance.timeOrigin;
+      let iso_ts = new Date();
+      let payload_ts = Date.parse(payload.commit_timestamp);
+      let latency = ts - payload_ts;
+      let line = `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">POSTGRES</td>
         <td class="py-4 px-6">${iso_ts.toISOString()}</td>
         <td class="py-4 px-6">
           <div class="pb-3">${JSON.stringify(payload)}</div>
-          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${latency.toFixed(
-            1
-          )} ms</div>
+          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${latency.toFixed(1)} ms</div>
         </td>
       </tr>`;
-        let list = document.querySelector("#plist");
-        list.innerHTML = line + list.innerHTML;
-      }
-    );
+      let list = document.querySelector("#plist");
+      list.innerHTML = line + list.innerHTML;
+    });
 
     // Finally, subscribe to the Channel we just setup
     this.channel.subscribe(async (status, error) => {
@@ -117,6 +115,7 @@ Hooks.payload = {
         localStorage.setItem("channel", channelName);
         localStorage.setItem("schema", schema);
         localStorage.setItem("table", table);
+        localStorage.setItem("filter", filter);
         localStorage.setItem("bearer", bearer);
 
         // Initiate Presence for a connected user
@@ -195,6 +194,7 @@ Hooks.payload = {
       channel: localStorage.getItem("channel"),
       schema: localStorage.getItem("schema"),
       table: localStorage.getItem("table"),
+      filter: localStorage.getItem("filter"),
       bearer: localStorage.getItem("bearer"),
     };
 
@@ -208,13 +208,12 @@ Hooks.payload = {
         connection.token,
         connection.schema,
         connection.table,
+        connection.filter,
         connection.bearer
       )
     );
 
-    this.handleEvent("send_message", ({ message }) =>
-      this.sendRealtime(message.event, message.payload)
-    );
+    this.handleEvent("send_message", ({ message }) => this.sendRealtime(message.event, message.payload));
 
     this.handleEvent("disconnect", ({}) => this.disconnectRealtime());
 
@@ -232,9 +231,7 @@ Hooks.latency = {
   },
 };
 
-let csrfToken = document
-  .querySelector("meta[name='csrf-token']")
-  .getAttribute("content");
+let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 let liveSocket = new LiveSocket("/live", Socket, {
   hooks: Hooks,
   params: { _csrf_token: csrfToken },
