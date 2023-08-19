@@ -2,11 +2,18 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   use RealtimeWeb.ConnCase, async: false
 
   import Mock
-  alias RealtimeWeb.JwtVerification
+
+  alias Realtime.RateCounter
+  alias Realtime.Tenants
   alias RealtimeWeb.Endpoint
+  alias RealtimeWeb.JwtVerification
+
   setup [:create_tenant]
 
   setup %{conn: conn, tenant: tenant} do
+    start_supervised(Realtime.RateCounter.DynamicSupervisor)
+    start_supervised(Realtime.GenCounter.DynamicSupervisor)
+
     new_conn =
       conn
       |> put_req_header("accept", "application/json")
@@ -51,11 +58,19 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         assert_called(Endpoint.broadcast_from(:_, topic_2, "broadcast", payload_2))
 
         assert conn.status == 202
+
+        # Wait for counters to increment
+        :timer.sleep(1000)
+        {:ok, rate_counter} = RateCounter.get(Tenants.requests_per_second_key(tenant))
+        assert rate_counter.avg != 0.0
       end
     end
 
     test "returns 422 when batch of messages includes badly formed messages", %{conn: conn} do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mocks [
+        {JwtVerification, [], verify: fn _token, _secret -> {:ok, %{}} end},
+        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end}
+      ] do
         conn =
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
             "messages" => [
@@ -81,6 +96,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
                    ]
                  }
                }
+
+        assert_not_called(Endpoint.broadcast_from(:_, :_, :_, :_))
 
         assert conn.status == 422
       end

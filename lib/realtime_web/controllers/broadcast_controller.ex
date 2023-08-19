@@ -1,7 +1,8 @@
 defmodule RealtimeWeb.BroadcastController do
   use RealtimeWeb, :controller
   alias RealtimeWeb.Endpoint
-
+  alias Realtime.GenCounter
+  alias Realtime.Tenants
   action_fallback(RealtimeWeb.FallbackController)
 
   defmodule Payload do
@@ -28,19 +29,17 @@ defmodule RealtimeWeb.BroadcastController do
     end
   end
 
-  def broadcast(%{assigns: %{tenant: %{external_id: tenant}}} = conn, attrs) do
+  def broadcast(%{assigns: %{tenant: tenant}} = conn, attrs) do
     with %Ecto.Changeset{valid?: true} = changeset <- Payload.changeset(%Payload{}, attrs),
-         %Ecto.Changeset{changes: %{messages: messages}} <- changeset do
+         %Ecto.Changeset{changes: %{messages: messages}} <- changeset,
+         requests_per_second_key <- Tenants.requests_per_second_key(tenant) do
       for %{changes: %{topic: sub_topic, payload: payload}} <- messages do
-        Task.Supervisor.async(Realtime.TaskSupervisor, fn ->
-          tenant_topic = "#{tenant}:#{sub_topic}"
-          Endpoint.broadcast_from(self(), tenant_topic, "broadcast", payload)
-        end)
+        tenant_topic = "#{tenant.external_id}:#{sub_topic}"
+        Endpoint.broadcast_from(self(), tenant_topic, "broadcast", payload)
+        GenCounter.add(requests_per_second_key)
       end
 
-      conn
-      |> put_status(202)
-      |> text("")
+      send_resp(conn, :accepted, "")
     end
   end
 end
