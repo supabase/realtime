@@ -85,6 +85,7 @@ defmodule RealtimeWeb.Router do
     pipe_through :tenant_api
 
     get "/ping", PingController, :ping
+    post "/broadcast", BroadcastController, :broadcast
   end
 
   # Enables LiveDashboard only for development

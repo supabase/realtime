@@ -21,4 +21,11 @@ defmodule RealtimeWeb.FallbackController do
     |> put_view(RealtimeWeb.ErrorView)
     |> render(:"404")
   end
+
+  def call(conn, %Ecto.Changeset{valid?: false} = changeset) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(RealtimeWeb.ChangesetView)
+    |> render("error.json", changeset: changeset)
+  end
 end
