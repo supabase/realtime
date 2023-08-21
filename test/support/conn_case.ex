@@ -21,7 +21,7 @@ defmodule RealtimeWeb.ConnCase do
   defmodule Generators do
     def tenant_fixture(override \\ %{}) do
       create_attrs = %{
-        "external_id" => "external_id",
+        "external_id" => rand_string(),
         "name" => "localhost",
         "extensions" => [
           %{

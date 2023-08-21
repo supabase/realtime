@@ -128,4 +128,12 @@ defmodule Realtime.Tenants do
     |> repo_replica.get_by(external_id: external_id)
     |> repo_replica.preload(:extensions)
   end
+
+  @doc """
+  Builds a PubSub topic from a tenant and a sub-topic.
+  """
+  @spec tenant_topic(Tenant.t(), String.t()) :: String.t()
+  def tenant_topic(%Tenant{external_id: external_id}, sub_topic) do
+    "#{external_id}:#{sub_topic}"
+  end
 end

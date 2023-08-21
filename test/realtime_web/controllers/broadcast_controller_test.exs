@@ -19,20 +19,18 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       conn =
         conn
         |> put_req_header("accept", "application/json")
-        |> put_req_header("x-api-key", @token)
+        |> put_req_header("authorization", "Bearer #{@token}")
         |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
 
       {:ok, conn: conn, tenant: tenant}
     end
 
     test "returns 202 when batch of messages is broadcasted", %{conn: conn, tenant: tenant} do
-      with_mocks [
-        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end}
-      ] do
-        sub_topic_1 = "sub_topic"
-        sub_topic_2 = "sub_topic"
-        topic_1 = tenant.external_id <> ":" <> sub_topic_1
-        topic_2 = tenant.external_id <> ":" <> sub_topic_2
+      with_mock Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end do
+        sub_topic_1 = "sub_topic_1"
+        sub_topic_2 = "sub_topic_2"
+        topic_1 = Tenants.tenant_topic(tenant, sub_topic_1)
+        topic_2 = Tenants.tenant_topic(tenant, sub_topic_2)
 
         payload_1 = %{"data" => "data"}
         payload_2 = %{"data" => "data"}
@@ -60,13 +58,17 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         :timer.sleep(1000)
         {:ok, rate_counter} = RateCounter.get(Tenants.requests_per_second_key(tenant))
         assert rate_counter.avg != 0.0
+
+        {:ok, rate_counter} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        assert rate_counter.avg != 0.0
       end
     end
 
-    test "returns 422 when batch of messages includes badly formed messages", %{conn: conn} do
-      with_mocks [
-        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end}
-      ] do
+    test "returns 422 when batch of messages includes badly formed messages", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      with_mock Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end do
         conn =
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
             "messages" => [
@@ -96,6 +98,14 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         assert_not_called(Endpoint.broadcast_from(:_, :_, :_, :_))
 
         assert conn.status == 422
+
+        # Wait for counters to increment
+        :timer.sleep(1000)
+        {:ok, rate_counter} = RateCounter.get(Tenants.requests_per_second_key(tenant))
+        assert rate_counter.avg != 0.0
+
+        {:ok, rate_counter} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        assert rate_counter.avg == 0.0
       end
     end
   end

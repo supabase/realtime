@@ -1,42 +1,47 @@
 defmodule RealtimeWeb.BroadcastController do
   use RealtimeWeb, :controller
-  alias RealtimeWeb.Endpoint
+  use OpenApiSpex.ControllerSpecs
+
   alias Realtime.GenCounter
   alias Realtime.Tenants
+  alias Realtime.Tenants.BatchBroadcast
+  alias RealtimeWeb.Endpoint
+
+  alias RealtimeWeb.OpenApiSchemas.EmptyResponse
+  alias RealtimeWeb.OpenApiSchemas.TenantBatchParams
+  alias RealtimeWeb.OpenApiSchemas.UnprocessableEntityResponse
+
   action_fallback(RealtimeWeb.FallbackController)
 
-  defmodule Payload do
-    use Ecto.Schema
-    import Ecto.Changeset
-
-    embedded_schema do
-      embeds_many :messages, Message do
-        field(:topic, :string)
-        field(:payload, :map)
-      end
-    end
-
-    def changeset(payload, attrs) do
-      payload
-      |> cast(attrs, [])
-      |> cast_embed(:messages, required: true, with: &message_changeset/2)
-    end
-
-    def message_changeset(message, attrs) do
-      message
-      |> cast(attrs, [:topic, :payload])
-      |> validate_required([:topic, :payload])
-    end
-  end
+  operation(:broadcast,
+    summary: "Broadcasts a batch of messages",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ]
+    ],
+    request_body: TenantBatchParams.params(),
+    responses: %{
+      202 => EmptyResponse.response(),
+      403 => EmptyResponse.response(),
+      422 => UnprocessableEntityResponse.response()
+    }
+  )
 
   def broadcast(%{assigns: %{tenant: tenant}} = conn, attrs) do
-    with %Ecto.Changeset{valid?: true} = changeset <- Payload.changeset(%Payload{}, attrs),
+    with %Ecto.Changeset{valid?: true} = changeset <-
+           BatchBroadcast.changeset(%BatchBroadcast{}, attrs),
          %Ecto.Changeset{changes: %{messages: messages}} <- changeset,
-         requests_per_second_key <- Tenants.requests_per_second_key(tenant) do
+         events_per_second_key <- Tenants.events_per_second_key(tenant) do
       for %{changes: %{topic: sub_topic, payload: payload}} <- messages do
-        tenant_topic = "#{tenant.external_id}:#{sub_topic}"
+        tenant_topic = Tenants.tenant_topic(tenant, sub_topic)
         Endpoint.broadcast_from(self(), tenant_topic, "broadcast", payload)
-        GenCounter.add(requests_per_second_key)
+        GenCounter.add(events_per_second_key)
       end
 
       send_resp(conn, :accepted, "")

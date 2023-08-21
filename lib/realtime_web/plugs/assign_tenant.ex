@@ -23,8 +23,7 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
          %Tenant{} = tenant <- Api.get_tenant_by_external_id(external_id) do
       tenant =
         tenant
-        |> tap(&GenCounter.new(Tenants.requests_per_second_key(&1)))
-        |> tap(&RateCounter.new(Tenants.requests_per_second_key(&1), idle_shutdown: :infinity))
+        |> tap(&initialize_counters/1)
         |> tap(&GenCounter.add(Tenants.requests_per_second_key(&1)))
         |> Api.preload_counters()
 
@@ -46,5 +45,12 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
     |> put_status(401)
     |> json(%{message: message})
     |> halt()
+  end
+
+  defp initialize_counters(tenant) do
+    GenCounter.new(Tenants.requests_per_second_key(tenant))
+    GenCounter.new(Tenants.events_per_second_key(tenant))
+    RateCounter.new(Tenants.requests_per_second_key(tenant), idle_shutdown: :infinity)
+    RateCounter.new(Tenants.events_per_second_key(tenant), idle_shutdown: :infinity)
   end
 end
