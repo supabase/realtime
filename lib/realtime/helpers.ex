@@ -204,6 +204,30 @@ defmodule Realtime.Helpers do
     end)
   end
 
+  def rebalance do
+    Enum.reduce(:syn.group_names(:users), 0, fn tenant, acc ->
+      case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
+        {p, %{region: region}} ->
+          region = Realtime.PostgresCdc.aws_to_fly(region)
+          t_node = Realtime.PostgresCdc.launch_node(tenant, region, :a)
+          reg = t_node == node(p)
+
+          if !reg do
+            # credo:disable-for-next-line
+            IO.inspect({tenant, region, t_node, reg})
+            Extensions.PostgresCdcRls.handle_stop(tenant, 5_000)
+            Process.sleep(1500)
+            acc + 1
+          else
+            acc
+          end
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
   defp pad(data) do
     to_add = 16 - rem(byte_size(data), 16)
     data <> :binary.copy(<<to_add>>, to_add)
