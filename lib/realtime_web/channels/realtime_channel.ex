@@ -159,13 +159,13 @@ defmodule RealtimeWeb.RealtimeChannel do
             other
         end
 
-      Logger.debug("Postgres change params: " <> inspect(pg_change_params, pretty: true))
+      Logger.debug("Postgres change params: " <> inspect(pg_change_params))
 
       if !Enum.empty?(pg_change_params) do
         send(self(), :postgres_subscribe)
       end
 
-      Logger.debug("Start channel: " <> inspect(pg_change_params, pretty: true))
+      Logger.debug("Start channel: " <> inspect(pg_change_params))
 
       presence_key = presence_key(params)
 
@@ -190,28 +190,28 @@ defmodule RealtimeWeb.RealtimeChannel do
        })}
     else
       {:error, :too_many_channels} = error ->
-        error_msg = inspect(error, pretty: true)
-        Logger.warn("Start channel error: #{error_msg}")
+        error_msg = inspect(error)
+        Logger.warn("Start channel error: " <> error_msg)
         {:error, %{reason: error_msg}}
 
       {:error, :too_many_connections} = error ->
-        error_msg = inspect(error, pretty: true)
-        Logger.warn("Start channel error: #{error_msg}")
+        error_msg = inspect(error)
+        Logger.warn("Start channel error: " <> error_msg)
         {:error, %{reason: error_msg}}
 
       {:error, :too_many_joins} = error ->
-        error_msg = inspect(error, pretty: true)
-        Logger.warn("Start channel error: #{error_msg}")
+        error_msg = inspect(error)
+        Logger.warn("Start channel error: " <> error_msg)
         {:error, %{reason: error_msg}}
 
       {:error, [message: "Invalid token", claim: _claim, claim_val: _value]} = error ->
-        error_msg = inspect(error, pretty: true)
-        Logger.warn("Start channel error: #{error_msg}")
+        error_msg = inspect(error)
+        Logger.warn("Start channel error: " <> error_msg)
         {:error, %{reason: error_msg}}
 
       error ->
-        error_msg = inspect(error, pretty: true)
-        Logger.error("Start channel error: #{error_msg}")
+        error_msg = inspect(error)
+        Logger.error("Start channel error: " <> error_msg)
         {:error, %{reason: error_msg}}
     end
   end
@@ -286,7 +286,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
           error ->
-            message = "Subscribing to PostgreSQL failed: #{inspect(error)}"
+            message = "Subscribing to PostgreSQL failed: " <> inspect(error)
 
             push_system_message("postgres_changes", socket, "error", message, channel_name)
 
@@ -296,7 +296,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         end
 
       nil ->
-        Logger.warning("Re-subscribed to PostgreSQL with params: #{inspect(pg_change_params)}")
+        Logger.warning("Re-subscribed to PostgreSQL with params: " <> inspect(pg_change_params))
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
     end
   end
@@ -314,14 +314,14 @@ defmodule RealtimeWeb.RealtimeChannel do
          })}
 
       {:error, error} ->
-        message = "access token has expired: " <> inspect(error, pretty: true)
+        message = "access token has expired: " <> inspect(error)
 
         shutdown_response(socket, message)
     end
   end
 
   def handle_info(msg, socket) do
-    Logger.error("HANDLE_INFO message not handled: #{inspect(msg, pretty: true)}")
+    Logger.error("HANDLE_INFO message not handled: " <> inspect(msg))
     {:noreply, socket}
   end
 
@@ -348,6 +348,15 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{assigns: %{access_token: access_token}} = socket
       )
       when refresh_token == access_token do
+    {:noreply, socket}
+  end
+
+  def handle_in(
+        "access_token",
+        %{"access_token" => refresh_token},
+        %{assigns: %{access_token: _access_token}} = socket
+      )
+      when is_nil(refresh_token) do
     {:noreply, socket}
   end
 
@@ -452,14 +461,21 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:reply, result, socket}
   end
 
-  def handle_in(_, _, socket) do
+  def handle_in(type, payload, socket) do
     socket = count(socket)
+
+    # Log info here so that bad messages from clients won't flood Logflare
+    # Can subscribe to a Channel with `log_level` `info` to see these messages
+    Logger.info(
+      "Unexpected message from client of type `#{type}` with payload: " <> inspect(payload)
+    )
+
     {:noreply, socket}
   end
 
   @impl true
   def terminate(reason, _state) do
-    Logger.debug(%{terminate: reason})
+    Logger.debug("Channel terminated with reason: " <> inspect(reason))
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
     :ok
   end
@@ -502,7 +518,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         end
 
       other ->
-        Logger.error("Unexpected error for #{tenant} #{inspect(other)}")
+        Logger.error("Unexpected error for #{tenant}: " <> inspect(other))
         {:error, other}
     end
   end
@@ -636,7 +652,7 @@ defmodule RealtimeWeb.RealtimeChannel do
        when is_binary(message) do
     push_system_message("system", socket, "error", message, channel_name)
 
-    Logger.error(message)
+    Logger.error("Channel shutting down with message: " <> message)
 
     {:stop, :shutdown, socket}
   end
