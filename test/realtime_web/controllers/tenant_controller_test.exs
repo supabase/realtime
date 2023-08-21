@@ -154,7 +154,6 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   defp create_tenant(_) do
-    tenant = RealtimeWeb.ConnCase.tenant_fixture()
-    %{tenant: tenant}
+    %{tenant: tenant_fixture()}
   end
 end

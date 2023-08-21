@@ -6,30 +6,27 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias RealtimeWeb.Endpoint
-  alias RealtimeWeb.JwtVerification
 
-  setup [:create_tenant]
-
-  setup %{conn: conn, tenant: tenant} do
-    start_supervised(Realtime.RateCounter.DynamicSupervisor)
-    start_supervised(Realtime.GenCounter.DynamicSupervisor)
-
-    new_conn =
-      conn
-      |> put_req_header("accept", "application/json")
-      |> put_req_header(
-        "authorization",
-        "Bearer auth_token"
-      )
-      |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
-
-    {:ok, conn: new_conn}
-  end
+  @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE1MTYyMzkwMjIsInJvbGUiOiJmb28iLCJleHAiOiJiYXIifQ.Ret2CevUozCsPhpgW2FMeFL7RooLgoOvfQzNpLBj5ak"
 
   describe "broadcast" do
+    setup %{conn: conn} do
+      start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
+      start_supervised(Realtime.RateCounter.DynamicSupervisor)
+      start_supervised(Realtime.GenCounter.DynamicSupervisor)
+      tenant = tenant_fixture()
+
+      conn =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("x-api-key", @token)
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+
+      {:ok, conn: conn, tenant: tenant}
+    end
+
     test "returns 202 when batch of messages is broadcasted", %{conn: conn, tenant: tenant} do
       with_mocks [
-        {JwtVerification, [], verify: fn _token, _secret -> {:ok, %{}} end},
         {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end}
       ] do
         sub_topic_1 = "sub_topic"
@@ -68,7 +65,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
     test "returns 422 when batch of messages includes badly formed messages", %{conn: conn} do
       with_mocks [
-        {JwtVerification, [], verify: fn _token, _secret -> {:ok, %{}} end},
         {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end}
       ] do
         conn =
@@ -104,7 +100,29 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     end
   end
 
-  defp create_tenant(_context) do
-    %{tenant: tenant_fixture()}
+  describe "unauthorized" do
+    test "invalid token returns 401", %{conn: conn} do
+      tenant = tenant_fixture()
+
+      conn =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("x-api-key", "potato")
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+
+      conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{})
+      assert conn.status == 401
+    end
+
+    test "invalid tenant returns 401", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("x-api-key", "potato")
+        |> then(&%{&1 | host: "potato.supabase.com"})
+
+      conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{})
+      assert conn.status == 401
+    end
   end
 end
