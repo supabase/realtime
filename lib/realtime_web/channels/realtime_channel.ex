@@ -233,7 +233,10 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(:sync_presence = msg, %{assigns: %{tenant_topic: topic}} = socket) do
-    socket = socket |> count() |> maybe_log_handle_info(msg)
+    # TODO: don't use Presence unless client explicitly wants to use Presence
+    # TODO: count these again when that happens
+
+    socket = socket |> maybe_log_handle_info(msg)
 
     push(socket, "presence_state", presence_dirty_list(topic))
 
@@ -250,15 +253,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_info(%{event: type, payload: payload} = msg, socket) do
     socket = socket |> count() |> maybe_log_handle_info(msg)
-
-    push(socket, type, payload)
-    {:noreply, socket}
-  end
-
-  def handle_info(%{event: "presence_state" = type, payload: payload} = msg, socket) do
-    # TODO: don't use Presence in a RealtimeChannel if client does not want it
-    # Don't count Presence state because we bill for things we're counting and we're using Presence even if people don't want to
-    socket = socket |> maybe_log_handle_info(msg)
 
     push(socket, type, payload)
     {:noreply, socket}
