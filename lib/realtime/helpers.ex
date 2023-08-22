@@ -204,19 +204,25 @@ defmodule Realtime.Helpers do
     end)
   end
 
-  def rebalance do
+  def rebalance() do
     Enum.reduce(:syn.group_names(:users), 0, fn tenant, acc ->
       case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
-        {p, %{region: region}} ->
+        {pid, %{region: region}} ->
           region = Realtime.PostgresCdc.aws_to_fly(region)
-          t_node = Realtime.PostgresCdc.launch_node(tenant, region, :a)
-          reg = t_node == node(p)
+          launch_node = Realtime.PostgresCdc.launch_node(tenant, region, false)
 
-          if !reg do
-            # credo:disable-for-next-line
-            IO.inspect({tenant, region, t_node, reg})
-            Extensions.PostgresCdcRls.handle_stop(tenant, 5_000)
-            Process.sleep(1500)
+          if launch_node && launch_node != node(pid) do
+            try do
+              Extensions.PostgresCdcRls.handle_stop(tenant, 5_000)
+              # credo:disable-for-next-line
+              IO.inspect({"Stopped", tenant, region})
+            catch
+              kind, reason -> 
+                # credo:disable-for-next-line
+                IO.inspect({"Failed to stop", tenant, kind, reason})
+            end            
+            
+            Process.sleep(1_500)
             acc + 1
           else
             acc
