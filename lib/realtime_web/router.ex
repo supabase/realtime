@@ -25,6 +25,10 @@ defmodule RealtimeWeb.Router do
     plug RealtimeWeb.Plugs.RateLimiter
   end
 
+  pipeline :secure_tenant_api do
+    plug RealtimeWeb.AuthTenant
+  end
+
   pipeline :dashboard_admin do
     plug :dashboard_basic_auth
   end
@@ -85,6 +89,12 @@ defmodule RealtimeWeb.Router do
     pipe_through :tenant_api
 
     get "/ping", PingController, :ping
+  end
+
+  scope "/api", RealtimeWeb do
+    pipe_through [:tenant_api, :secure_tenant_api]
+
+    post "/broadcast", BroadcastController, :broadcast
   end
 
   # Enables LiveDashboard only for development

@@ -20,7 +20,7 @@ defmodule RealtimeWeb.ChannelsAuthorization do
     case authorize(token, secret) do
       {:ok, claims} ->
         required = MapSet.new(["role", "exp"])
-        claims_keys = Map.keys(claims) |> MapSet.new()
+        claims_keys = claims |> Map.keys() |> MapSet.new()
 
         if MapSet.subset?(required, claims_keys) do
           {:ok, claims}

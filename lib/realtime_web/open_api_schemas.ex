@@ -5,6 +5,29 @@ defmodule RealtimeWeb.OpenApiSchemas do
 
   alias OpenApiSpex.Schema
 
+  defmodule TenantBatchParams do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{
+        messages: %Schema{
+          type: :array,
+          items: %Schema{
+            type: :object,
+            properties: %{
+              topic: %Schema{type: :string},
+              payload: %Schema{type: :object}
+            }
+          }
+        }
+      }
+    })
+
+    def params(), do: {"Tenant Batch Params", "application/json", __MODULE__}
+  end
+
   defmodule TenantParams do
     @moduledoc false
     require OpenApiSpex
@@ -228,5 +251,27 @@ defmodule RealtimeWeb.OpenApiSchemas do
     })
 
     def response(), do: {"Not Found", "application/json", __MODULE__}
+  end
+
+  defmodule UnprocessableEntityResponse do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{
+        error: %Schema{
+          type: :object,
+          properties: %{
+            messages: %Schema{
+              type: :array,
+              items: %Schema{type: :object}
+            }
+          }
+        }
+      }
+    })
+
+    def response(), do: {"Unprocessable Entity", "application/json", __MODULE__}
   end
 end

@@ -8,9 +8,14 @@ defmodule RealtimeWeb.TenantControllerTest do
   alias Realtime.Api.Tenant
   alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
 
-  @external_id "test_external_id"
+  @update_attrs %{
+    jwt_secret: "some updated jwt_secret",
+    name: "some updated name",
+    max_concurrent_users: 200
+  }
 
-  @create_attrs %{
+  @default_tenant_attrs %{
+    "external_id" => "external_id",
     "name" => "localhost",
     "extensions" => [
       %{
@@ -32,21 +37,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     "jwt_secret" => "new secret"
   }
 
-  @update_attrs %{
-    jwt_secret: "some updated jwt_secret",
-    name: "some updated name",
-    max_concurrent_users: 200
-  }
-
   @invalid_attrs %{external_id: nil, jwt_secret: nil, extensions: [], name: nil}
-
-  def fixture(:tenant) do
-    {:ok, tenant} =
-      Map.put(@create_attrs, "external_id", @external_id)
-      |> Api.create_tenant()
-
-    tenant
-  end
 
   setup %{conn: conn} do
     Application.put_env(:realtime, :db_enc_key, "1234567890123456")
@@ -65,8 +56,8 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant" do
     test "renders tenant when data is valid", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
-        ext_id = @external_id
-        conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @create_attrs)
+        ext_id = @default_tenant_attrs["external_id"]
+        conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @default_tenant_attrs)
         assert %{"id" => _id, "external_id" => ^ext_id} = json_response(conn, 201)["data"]
         conn = get(conn, Routes.tenant_path(conn, :show, ext_id))
         assert ^ext_id = json_response(conn, 200)["data"]["external_id"]
@@ -76,8 +67,8 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "encrypt creds", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
-        ext_id = @external_id
-        conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @create_attrs)
+        ext_id = @default_tenant_attrs["external_id"]
+        conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @default_tenant_attrs)
         [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
         sec_key = Application.get_env(:realtime, :db_enc_key)
         assert encrypt!("127.0.0.1", sec_key) == settings["db_host"]
@@ -147,23 +138,22 @@ defmodule RealtimeWeb.TenantControllerTest do
         {ChannelsAuthorization, [], authorize: fn _, _ -> {:ok, %{}} end},
         {Api, [], get_tenant_by_external_id: fn _ -> %Tenant{} end}
       ] do
-        Routes.tenant_path(conn, :reload, @external_id)
-        %{status: status} = post(conn, Routes.tenant_path(conn, :reload, @external_id))
+        Routes.tenant_path(conn, :reload, "external_id")
+        %{status: status} = post(conn, Routes.tenant_path(conn, :reload, "external_id"))
         assert status == 204
       end
     end
 
     test "reload when tenant does not exist", %{conn: conn} do
       with_mock ChannelsAuthorization, authorize: fn _, _ -> {:ok, %{}} end do
-        Routes.tenant_path(conn, :reload, @external_id)
-        %{status: status} = post(conn, Routes.tenant_path(conn, :reload, @external_id))
+        Routes.tenant_path(conn, :reload, "wrong_external_id")
+        %{status: status} = post(conn, Routes.tenant_path(conn, :reload, "wrong_external_id"))
         assert status == 404
       end
     end
   end
 
   defp create_tenant(_) do
-    tenant = fixture(:tenant)
-    %{tenant: tenant}
+    %{tenant: tenant_fixture()}
   end
 end
