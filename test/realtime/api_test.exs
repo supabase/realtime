@@ -31,6 +31,7 @@ defmodule Realtime.ApiTest do
       ],
       postgres_cdc_default: "postgres_cdc_rls",
       jwt_secret: "new secret",
+      jwt_signing_method: "HS256",
       max_concurrent_users: 200,
       max_events_per_second: 100
     }

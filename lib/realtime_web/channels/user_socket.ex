@@ -38,6 +38,7 @@ defmodule RealtimeWeb.UserSocket do
 
       with %Tenant{
              extensions: extensions,
+             jwt_signing_method: jwt_signing_method,
              jwt_secret: jwt_secret,
              max_concurrent_users: max_conn_users,
              max_events_per_second: max_events_per_second,
@@ -48,11 +49,12 @@ defmodule RealtimeWeb.UserSocket do
            } <- Tenants.Cache.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- access_token(params, headers),
            jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
-           {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec),
+           {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_signing_method),
            {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
         assigns =
           %RealtimeChannel.Assigns{
             claims: claims,
+            jwt_signing_method: jwt_signing_method,
             jwt_secret: jwt_secret,
             limits: %{
               max_concurrent_users: max_conn_users,

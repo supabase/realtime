@@ -62,7 +62,7 @@ defmodule Realtime.MixProject do
       {:uuid, "~> 1.1.8"},
       {:prom_ex, "~> 1.8.0"},
       {:mock, "~> 0.3.7", only: :test},
-      {:joken, "~> 2.5.0"},
+      {:joken, "~> 2.6.0"},
       {:ex_json_schema, "~> 0.7.1"},
       {:recon, "~> 2.5.2"},
       {:mint, "~> 1.4"},

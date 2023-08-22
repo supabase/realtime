@@ -6,6 +6,7 @@ defmodule RealtimeWeb.ChannelsAuthorizationTest do
   alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
 
   @secret ""
+  @signing_method "HS256"
 
   test "authorize/1 when token is authorized" do
     input_token = "\n token %20 1 %20 2 %20 3   "
@@ -16,17 +17,17 @@ defmodule RealtimeWeb.ChannelsAuthorizationTest do
         assert token == expected_token
         {:ok, %{}}
       end do
-      assert {:ok, %{}} = ChannelsAuthorization.authorize(input_token, @secret)
+      assert {:ok, %{}} = ChannelsAuthorization.authorize(input_token, @secret, @signing_method)
     end
   end
 
   test "authorize/1 when token is unauthorized" do
     with_mock JwtVerification, verify: fn _token, _secret -> :error end do
-      assert :error = ChannelsAuthorization.authorize("bad_token", @secret)
+      assert :error = ChannelsAuthorization.authorize("bad_token", @secret, @signing_method)
     end
   end
 
   test "authorize/1 when token is not a string" do
-    assert :error = ChannelsAuthorization.authorize([], @secret)
+    assert :error = ChannelsAuthorization.authorize([], @secret, @signing_method)
   end
 end

@@ -13,6 +13,7 @@ Repo.transaction(fn ->
   |> Tenant.changeset(%{
     "name" => tenant_name,
     "external_id" => tenant_name,
+    "jwt_signing_method" => "HS256",
     "jwt_secret" => "super-secret-jwt-token-with-at-least-32-characters-long",
     "extensions" => [
       %{

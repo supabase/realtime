@@ -3,7 +3,7 @@ defmodule RealtimeWeb.Router do
 
   require Logger
 
-  import RealtimeWeb.ChannelsAuthorization, only: [authorize: 2]
+  import RealtimeWeb.ChannelsAuthorization, only: [authorize: 3]
 
   pipeline :browser do
     plug :accepts, ["html"]
@@ -16,7 +16,7 @@ defmodule RealtimeWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
-    plug :check_auth, :api_jwt_secret
+    plug :check_auth, %{"secret_key" => :api_jwt_secret, ":signing_method" => :api_jwt_signing_method}
   end
 
   pipeline :tenant_api do
@@ -30,7 +30,7 @@ defmodule RealtimeWeb.Router do
   end
 
   pipeline :metrics do
-    plug :check_auth, :metrics_jwt_secret
+    plug :check_auth, %{"secret_key" => :metrics_jwt_secret, ":signing_method" => :metrics_jwt_signing_method}
   end
 
   pipeline :openapi do
@@ -113,11 +113,12 @@ defmodule RealtimeWeb.Router do
       metrics: RealtimeWeb.Telemetry
   end
 
-  defp check_auth(conn, secret_key) do
+  defp check_auth(conn, %{"secret_key" => secret_key, "signing_method" => signing_method}) do
     secret = Application.fetch_env!(:realtime, secret_key)
+    signing_method = Application.fetch_env!(:realtime, signing_method)
 
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
-         {:ok, _claims} <- authorize(token, secret) do
+         {:ok, _claims} <- authorize(token, secret, signing_method) do
       conn
     else
       _ ->

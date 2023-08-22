@@ -30,6 +30,7 @@ defmodule Realtime.TenantsTest do
         }
       ],
       postgres_cdc_default: "postgres_cdc_rls",
+      jwt_signing_method: "HS256",
       jwt_secret: "new secret",
       max_concurrent_users: 200,
       max_events_per_second: 100
