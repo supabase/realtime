@@ -25,6 +25,13 @@ defmodule Realtime.Api do
     |> repo_replica.preload(:extensions)
   end
 
+  @doc """
+  Returns list of tenants with filter options:
+  * order_by
+  * search external id
+  * limit
+  * ordering (desc / asc)
+  """
   def list_tenants(opts) when is_list(opts) do
     repo_replica = Repo.replica()
 
