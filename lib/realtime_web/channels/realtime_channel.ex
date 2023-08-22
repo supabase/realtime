@@ -255,6 +255,15 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  def handle_info(%{event: "presence_state" = type, payload: payload} = msg, socket) do
+    # TODO: don't use Presence in a RealtimeChannel if client does not want it
+    # Don't count Presence state because we bill for things we're counting and we're using Presence even if people don't want to
+    socket = socket |> maybe_log_handle_info(msg)
+
+    push(socket, type, payload)
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_info(
         :postgres_subscribe,
