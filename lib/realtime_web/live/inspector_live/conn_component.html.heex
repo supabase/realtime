@@ -9,6 +9,48 @@
     phx-target={@myself}
   >
     <div class="my-4">
+      <%= label(f, :enable_broadcast, class: "block text-gray-700 text-sm font-bold mb-2") %>
+      <%= checkbox(f, :enable_broadcast, disabled: true, class: "
+                    disabled:opacity-50
+                    my-1
+                    block
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  ") %>
+      <%= error_tag(f, :enable_broadcast) %>
+      <p class="text-gray-600 text-xs italic">
+        Broadcast is always enabled when successfully connected to a Channel
+      </p>
+    </div>
+    <div class="mb-4">
+      <%= label(f, :enable_presence, class: "block text-gray-700 text-sm font-bold mb-2") %>
+      <%= checkbox(f, :enable_presence, class: "
+                    my-1
+                    block
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  ") %>
+      <%= error_tag(f, :enable_presence) %>
+      <p class="text-gray-600 text-xs italic">Enable Presence on this Channel</p>
+    </div>
+    <div class="mb-4">
+      <%= label(f, :enable_db_changes, class: "block text-gray-700 text-sm font-bold mb-2") %>
+      <%= checkbox(f, :enable_db_changes, class: "
+                    my-1
+                    block
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  ") %>
+      <%= error_tag(f, :enable_db_changes) %>
+      <p class="text-gray-600 text-xs italic">Enable Database Changes on this Channel</p>
+    </div>
+    <div class="mb-4">
       <%= label(f, :project, class: "block text-gray-700 text-sm font-bold mb-2") %>
       <%= text_input(f, :project, placeholder: "project_ref", class: "
                     my-1

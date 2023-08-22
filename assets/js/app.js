@@ -10,7 +10,18 @@ import { createClient } from "@supabase/supabase-js";
 
 let Hooks = {};
 Hooks.payload = {
-  initRealtime(channelName, host, log_level, token, schema, table, filter, bearer) {
+  initRealtime(
+    channelName,
+    host,
+    log_level,
+    token,
+    schema,
+    table,
+    filter,
+    bearer,
+    enable_presence,
+    enable_db_changes
+  ) {
     // Instantiate our client with the Realtime server and params to connect with
     {
     }
@@ -66,39 +77,47 @@ Hooks.payload = {
     });
 
     // Listen for all (`*`) `presence` events
-    this.channel.on("presence", { event: "*" }, (payload) => {
-      this.pushEventTo("#conn_info", "presence_subscribed", {});
-      let ts = new Date();
-      let line = `<tr class="bg-white border-b hover:bg-gray-50">
+    if (enable_presence === "true") {
+      console.log("enable_presence", enable_presence);
+
+      this.channel.on("presence", { event: "*" }, (payload) => {
+        this.pushEventTo("#conn_info", "presence_subscribed", {});
+        let ts = new Date();
+        let line = `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">PRESENCE</td>
         <td class="py-4 px-6">${ts.toISOString()}</td>
         <td class="py-4 px-6">${JSON.stringify(payload)}</td>
       </tr>`;
-      let list = document.querySelector("#plist");
-      list.innerHTML = line + list.innerHTML;
-    });
+        let list = document.querySelector("#plist");
+        list.innerHTML = line + list.innerHTML;
+      });
+    }
 
     // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
-    let postgres_changes_opts = { event: "*", schema: schema, table: table };
-    if (filter !== "") {
-      postgres_changes_opts.filter = filter;
-    }
-    this.channel.on("postgres_changes", postgres_changes_opts, (payload) => {
-      let ts = performance.now() + performance.timeOrigin;
-      let iso_ts = new Date();
-      let payload_ts = Date.parse(payload.commit_timestamp);
-      let latency = ts - payload_ts;
-      let line = `<tr class="bg-white border-b hover:bg-gray-50">
+    if (enable_db_changes === "true") {
+      let postgres_changes_opts = { event: "*", schema: schema, table: table };
+      if (filter !== "") {
+        postgres_changes_opts.filter = filter;
+      }
+      this.channel.on("postgres_changes", postgres_changes_opts, (payload) => {
+        let ts = performance.now() + performance.timeOrigin;
+        let iso_ts = new Date();
+        let payload_ts = Date.parse(payload.commit_timestamp);
+        let latency = ts - payload_ts;
+        let line = `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">POSTGRES</td>
         <td class="py-4 px-6">${iso_ts.toISOString()}</td>
         <td class="py-4 px-6">
           <div class="pb-3">${JSON.stringify(payload)}</div>
-          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${latency.toFixed(1)} ms</div>
+          <div class="pt-3 border-t hover:bg-gray-50">Latency: ${latency.toFixed(
+            1
+          )} ms</div>
         </td>
       </tr>`;
-      let list = document.querySelector("#plist");
-      list.innerHTML = line + list.innerHTML;
-    });
+        let list = document.querySelector("#plist");
+        list.innerHTML = line + list.innerHTML;
+      });
+    }
 
     // Finally, subscribe to the Channel we just setup
     this.channel.subscribe(async (status, error) => {
@@ -117,6 +136,8 @@ Hooks.payload = {
         localStorage.setItem("table", table);
         localStorage.setItem("filter", filter);
         localStorage.setItem("bearer", bearer);
+        localStorage.setItem("enable_presence", enable_presence);
+        localStorage.setItem("enable_db_changes", enable_db_changes);
 
         // Initiate Presence for a connected user
         // Now when a new user connects and sends a `TRACK` message all clients will receive a message like:
@@ -151,12 +172,14 @@ Hooks.payload = {
         //        }
         //     ]
         // }
-        const name = "user_name_" + Math.floor(Math.random() * 100);
-        this.channel.send({
-          type: "presence",
-          event: "TRACK",
-          payload: { name: name, t: performance.now() },
-        });
+        if (enable_presence === "true") {
+          const name = "user_name_" + Math.floor(Math.random() * 100);
+          this.channel.send({
+            type: "presence",
+            event: "TRACK",
+            payload: { name: name, t: performance.now() },
+          });
+        }
       } else {
         console.error(`Realtime Channel error status: ${status}`);
         console.error(`Realtime Channel error: ${error}`);
@@ -196,6 +219,8 @@ Hooks.payload = {
       table: localStorage.getItem("table"),
       filter: localStorage.getItem("filter"),
       bearer: localStorage.getItem("bearer"),
+      enable_presence: localStorage.getItem("enable_presence"),
+      enable_db_changes: localStorage.getItem("enable_db_changes"),
     };
 
     this.pushEventTo("#conn_form", "local_storage", params);
@@ -209,11 +234,15 @@ Hooks.payload = {
         connection.schema,
         connection.table,
         connection.filter,
-        connection.bearer
+        connection.bearer,
+        connection.enable_presence,
+        connection.enable_db_changes
       )
     );
 
-    this.handleEvent("send_message", ({ message }) => this.sendRealtime(message.event, message.payload));
+    this.handleEvent("send_message", ({ message }) =>
+      this.sendRealtime(message.event, message.payload)
+    );
 
     this.handleEvent("disconnect", ({}) => this.disconnectRealtime());
 
@@ -231,7 +260,10 @@ Hooks.latency = {
   },
 };
 
-let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
+let csrfToken = document
+  .querySelector("meta[name='csrf-token']")
+  .getAttribute("content");
+
 let liveSocket = new LiveSocket("/live", Socket, {
   hooks: Hooks,
   params: { _csrf_token: csrfToken },
