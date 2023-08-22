@@ -15,6 +15,9 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
       field(:table, :string, default: "*")
       field(:filter, :string)
       field(:bearer, :string)
+      field(:enable_broadcast, :boolean, default: true)
+      field(:enable_presence, :boolean, default: false)
+      field(:enable_db_changes, :boolean, default: false)
     end
 
     def changeset(form, params \\ %{}) do
@@ -28,7 +31,10 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
         :schema,
         :table,
         :filter,
-        :bearer
+        :bearer,
+        :enable_broadcast,
+        :enable_presence,
+        :enable_db_changes
       ])
       |> validate_required([:channel])
     end
@@ -159,7 +165,9 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
           "table" => nil,
           "token" => nil,
           "filter" => nil,
-          "bearer" => nil
+          "bearer" => nil,
+          "enable_presence" => nil,
+          "enable_db_changes" => nil
         },
         socket
       ) do
