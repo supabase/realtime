@@ -217,11 +217,11 @@ defmodule Realtime.Helpers do
               # credo:disable-for-next-line
               IO.inspect({"Stopped", tenant, region})
             catch
-              kind, reason -> 
+              kind, reason ->
                 # credo:disable-for-next-line
                 IO.inspect({"Failed to stop", tenant, kind, reason})
-            end            
-            
+            end
+
             Process.sleep(1_500)
             acc + 1
           else
