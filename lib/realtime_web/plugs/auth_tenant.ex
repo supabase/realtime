@@ -26,9 +26,19 @@ defmodule RealtimeWeb.AuthTenant do
   def call(conn, _opts), do: unauthorized(conn)
 
   defp access_token(conn) do
-    case get_req_header(conn, "authorization") do
-      ["Bearer " <> token] -> token
-      _ -> nil
+    authorization = get_req_header(conn, "authorization")
+    apikey = get_req_header(conn, "apikey")
+
+    cond do
+      authorization != [] && match?(["Bearer " <> _], authorization) ->
+        ["Bearer " <> token] = authorization
+        token
+
+      apikey != [] ->
+        hd(apikey)
+
+      true ->
+        nil
     end
   end
 
