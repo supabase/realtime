@@ -1,16 +1,32 @@
 defmodule RealtimeWeb.ApiSpec do
   @moduledoc false
 
-  alias OpenApiSpex.{Components, Info, OpenApi, Paths, SecurityScheme, Server}
-  alias RealtimeWeb.{Endpoint, Router}
+  alias OpenApiSpex.Components
+  alias OpenApiSpex.Info
+  alias OpenApiSpex.OpenApi
+  alias OpenApiSpex.Paths
+  alias OpenApiSpex.SecurityScheme
+  alias OpenApiSpex.Server
+  alias OpenApiSpex.ServerVariable
+
+  alias RealtimeWeb.Router
 
   @behaviour OpenApi
 
   @impl OpenApi
   def spec do
+    url =
+      case Mix.env() do
+        :prod -> "https://{tenant}.supabase.co/realtime/v1"
+        _ -> "http://{tenant}.localhost:4000/"
+      end
+
     %OpenApi{
       servers: [
-        Server.from_endpoint(Endpoint)
+        %Server{
+          url: url,
+          variables: %{"tenant" => %ServerVariable{default: "tenant"}}
+        }
       ],
       info: %Info{
         title: to_string(Application.spec(:realtime, :description)),
