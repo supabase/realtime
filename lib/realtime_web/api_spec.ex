@@ -15,10 +15,16 @@ defmodule RealtimeWeb.ApiSpec do
 
   @impl OpenApi
   def spec do
+    url =
+      case Mix.env() do
+        :prod -> "https://{tenant}.supabase.co/realtime/v1"
+        _ -> "http://{tenant}.localhost:4000/"
+      end
+
     %OpenApi{
       servers: [
         %Server{
-          url: "https://{tenant}.supabase.co/realtime/v1",
+          url: url,
           variables: %{"tenant" => %ServerVariable{default: "tenant"}}
         }
       ],
