@@ -8,23 +8,19 @@ defmodule Extensions.PostgresCdcRls do
   alias Extensions.PostgresCdcRls, as: Rls
   alias Rls.Subscriptions
 
+  @spec handle_connect(map()) :: {:ok, {pid(), pid()}} | nil
   def handle_connect(args) do
-    Enum.reduce_while(1..5, nil, fn retry, acc ->
-      get_manager_conn(args["id"])
-      |> case do
-        nil ->
-          start_distributed(args)
-          if retry > 1, do: Process.sleep(1_000)
-          {:cont, acc}
+    case get_manager_conn(args["id"]) do
+      nil ->
+        start_distributed(args)
+        nil
 
-        :wait ->
-          Process.sleep(1_000)
-          {:cont, acc}
+      :wait ->
+        nil
 
-        {:ok, pid, conn} ->
-          {:halt, {:ok, {pid, conn}}}
-      end
-    end)
+      {:ok, pid, conn} ->
+        {:ok, {pid, conn}}
+    end
   end
 
   def handle_after_connect({manager_pid, conn}, settings, params) do
