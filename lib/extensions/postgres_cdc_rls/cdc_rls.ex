@@ -1,5 +1,8 @@
 defmodule Extensions.PostgresCdcRls do
-  @moduledoc false
+  @moduledoc """
+  Callbacks for initiating a Postgres connection and creating a Realtime subscription for database changes.
+  """
+
   @behaviour Realtime.PostgresCdc
   require Logger
 
