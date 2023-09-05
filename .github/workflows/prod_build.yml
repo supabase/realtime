@@ -85,11 +85,11 @@ jobs:
             network=host
 
       - id: build
-        uses: docker/build-push-action@v3, latest_arm
+        uses: docker/build-push-action@v3
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}, latest_${{ env.arch }}
           platforms: linux/${{ env.arch }}
           no-cache: true
 
