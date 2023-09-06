@@ -118,4 +118,38 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       end
     end
   end
+
+  describe "checks tenant db connectivity" do
+    setup_with_mocks([
+      {ChannelsAuthorization, [],
+       [
+         authorize_conn: fn _, _ ->
+           {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
+         end
+       ]}
+    ]) do
+      :ok
+    end
+
+    test "successful connection proceeds with join" do
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+    end
+
+    test "unsuccessful connection halts join" do
+      tenant = tenant_fixture()
+
+      conn_opts = [
+        connect_info: %{
+          uri: %{host: "#{tenant.external_id}.localhost:4000/socket/websocket", query: ""},
+          x_headers: [{"x-api-key", "token123"}]
+        }
+      ]
+
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts)
+
+      assert {:error, %{reason: "{:error, :tenant_database_unavailable}"}} =
+               subscribe_and_join(socket, "realtime:test", %{})
+    end
+  end
 end

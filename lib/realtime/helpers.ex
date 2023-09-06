@@ -21,6 +21,32 @@ defmodule Realtime.Helpers do
     |> unpad()
   end
 
+  @spec connect_db(%{
+          :host => binary,
+          :name => binary,
+          :pass => binary,
+          :pool => non_neg_integer,
+          :port => binary,
+          :queue_target => non_neg_integer,
+          :socket_opts => list,
+          :ssl_enforced => boolean,
+          :user => binary,
+          optional(any) => any
+        }) :: {:error, any} | {:ok, pid}
+  def connect_db(%{
+        host: host,
+        port: port,
+        name: name,
+        user: user,
+        pass: pass,
+        socket_opts: socket_opts,
+        pool: pool,
+        queue_target: queue_target,
+        ssl_enforced: ssl_enforced
+      }) do
+    connect_db(host, port, name, user, pass, socket_opts, pool, queue_target, ssl_enforced)
+  end
+
   @spec connect_db(
           String.t(),
           String.t(),
