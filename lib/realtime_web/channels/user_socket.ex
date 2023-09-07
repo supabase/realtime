@@ -11,14 +11,14 @@ defmodule RealtimeWeb.UserSocket do
   import Realtime.Helpers, only: [decrypt!: 2, get_external_id: 1]
 
   ## Channels
-  channel "realtime:*", RealtimeChannel
+  channel("realtime:*", RealtimeChannel)
 
   @default_log_level "error"
 
   @impl true
-  def connect(params, socket, connect_info) do
+  def connect(params, socket, opts) do
     if Application.fetch_env!(:realtime, :secure_channels) do
-      %{uri: %{host: host}, x_headers: headers} = connect_info
+      %{uri: %{host: host}, x_headers: headers} = opts
 
       {:ok, external_id} = get_external_id(host)
 
