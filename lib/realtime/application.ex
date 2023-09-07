@@ -63,6 +63,7 @@ defmodule Realtime.Application do
 
     children =
       [
+        Realtime.ErlSysMon,
         Realtime.PromEx,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         Realtime.Repo,
