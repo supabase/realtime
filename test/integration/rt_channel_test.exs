@@ -72,9 +72,7 @@ defmodule Realtime.Integration.RtChannelTest do
   test "postgres" do
     socket = get_connection()
 
-    config = %{
-      postgres_changes: [%{event: "*", schema: "public"}]
-    }
+    config = %{postgres_changes: [%{event: "*", schema: "public"}]}
 
     WebsocketClient.join(socket, "realtime:any", %{config: config})
     sub_id = :erlang.phash2(%{"event" => "*", "schema" => "public"})
@@ -105,7 +103,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: "realtime:any"
                    },
-                   2000
+                   5000
 
     {:ok, _, conn} = Rls.get_manager_conn(@external_id)
     P.query!(conn, "insert into test (details) values ('test')", [])

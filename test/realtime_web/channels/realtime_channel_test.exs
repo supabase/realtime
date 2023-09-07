@@ -17,6 +17,13 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     max_bytes_per_second: 100_000
   }
 
+  @default_conn_opts [
+    connect_info: %{
+      uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
+      x_headers: [{"x-api-key", "token123"}]
+    }
+  ]
+
   setup do
     {:ok, _pid} = start_supervised(CurrentTime.Mock)
     :ok
@@ -32,11 +39,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]}
       ]) do
-        {:ok, %Socket{} = socket} =
-          connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
-            x_headers: [{"x-api-key", "token123"}]
-          })
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
         socket = Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 1}})
         assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
@@ -52,11 +55,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]}
       ]) do
-        {:ok, %Socket{} = socket} =
-          connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
-            x_headers: [{"x-api-key", "token123"}]
-          })
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
         socket_at_capacity =
           Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 0}})
@@ -83,11 +82,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]}
       ]) do
-        {:ok, %Socket{} = socket} =
-          connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
-            x_headers: [{"x-api-key", "token123"}]
-          })
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
         assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
       end
@@ -102,11 +97,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]}
       ]) do
-        {:ok, %Socket{} = socket} =
-          connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
-            x_headers: [{"x-api-key", "token123"}]
-          })
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
         assert {:error, %{reason: "{:error, 0}"}} =
                  subscribe_and_join(socket, "realtime:test", %{})
@@ -120,11 +111,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]}
       ]) do
-        {:ok, %Socket{} = socket} =
-          connect(UserSocket, %{}, %{
-            uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
-            x_headers: [{"x-api-key", "token123"}]
-          })
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
         assert {:error, %{reason: "{:error, -1}"}} =
                  subscribe_and_join(socket, "realtime:test", %{})
