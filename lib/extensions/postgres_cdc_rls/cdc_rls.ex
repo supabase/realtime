@@ -61,11 +61,11 @@ defmodule Extensions.PostgresCdcRls do
   ## Internal functions
 
   def start_distributed(%{"region" => region, "id" => tenant} = args) do
-    fly_region = PostgresCdc.aws_to_fly(region)
-    launch_node = PostgresCdc.launch_node(tenant, fly_region, node())
+    platform_region = PostgresCdc.platform_region_translator(region)
+    launch_node = PostgresCdc.launch_node(tenant, platform_region, node())
 
     Logger.warning(
-      "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, fly_region: fly_region)}"
+      "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, platform_region: platform_region)}"
     )
 
     case :rpc.call(launch_node, __MODULE__, :start, [args], 30_000) do

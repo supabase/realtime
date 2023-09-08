@@ -6,7 +6,13 @@ defmodule Realtime.Api do
 
   import Ecto.Query
 
-  alias Realtime.{Repo, Api.Tenant, Api.Extensions, RateCounter, GenCounter, Tenants}
+  alias Realtime.Repo
+  alias Realtime.Repo.Replica
+  alias Realtime.Api.Tenant
+  alias Realtime.Api.Extensions
+  alias Realtime.RateCounter
+  alias Realtime.GenCounter
+  alias Realtime.Tenants
 
   @doc """
   Returns the list of tenants.
@@ -18,7 +24,7 @@ defmodule Realtime.Api do
 
   """
   def list_tenants() do
-    repo_replica = Repo.replica()
+    repo_replica = Replica.replica()
 
     Tenant
     |> repo_replica.all()
@@ -33,7 +39,7 @@ defmodule Realtime.Api do
   * ordering (desc / asc)
   """
   def list_tenants(opts) when is_list(opts) do
-    repo_replica = Repo.replica()
+    repo_replica = Replica.replica()
 
     field = Keyword.get(opts, :order_by, "inserted_at") |> String.to_atom()
     external_id = Keyword.get(opts, :search)
@@ -71,7 +77,7 @@ defmodule Realtime.Api do
       ** (Ecto.NoResultsError)
 
   """
-  def get_tenant!(id), do: Repo.replica().get!(Tenant, id)
+  def get_tenant!(id), do: Replica.replica().get!(Tenant, id)
 
   @doc """
   Creates a tenant.
@@ -155,7 +161,7 @@ defmodule Realtime.Api do
 
   @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
   def get_tenant_by_external_id(external_id) do
-    repo_replica = Repo.replica()
+    repo_replica = Replica.replica()
 
     Tenant
     |> repo_replica.get_by(external_id: external_id)
@@ -167,7 +173,7 @@ defmodule Realtime.Api do
       where: e.type == ^type,
       select: e
     )
-    |> Repo.replica().all()
+    |> Replica.replica().all()
   end
 
   def rename_settings_field(from, to) do

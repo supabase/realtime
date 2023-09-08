@@ -204,34 +204,38 @@ defmodule Realtime.Helpers do
     end)
   end
 
+  @doc """
+  Ensures connected users are connected to the closest region by killing and restart the connection process.
+  """
   def rebalance() do
     Enum.reduce(:syn.group_names(:users), 0, fn tenant, acc ->
       case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
         {pid, %{region: region}} ->
-          region = Realtime.PostgresCdc.aws_to_fly(region)
-          launch_node = Realtime.PostgresCdc.launch_node(tenant, region, false)
+          platform_region = Realtime.PostgresCdc.platform_region_translator(region)
+          launch_node = Realtime.PostgresCdc.launch_node(tenant, platform_region, false)
+          current_node = node(pid)
 
-          if launch_node && launch_node != node(pid) do
-            try do
-              Extensions.PostgresCdcRls.handle_stop(tenant, 5_000)
-              # credo:disable-for-next-line
-              IO.inspect({"Stopped", tenant, region})
-            catch
-              kind, reason ->
-                # credo:disable-for-next-line
-                IO.inspect({"Failed to stop", tenant, kind, reason})
-            end
-
-            Process.sleep(1_500)
-            acc + 1
-          else
-            acc
+          case launch_node do
+            ^current_node -> acc
+            _ -> stop_user_tenant_process(tenant, platform_region, acc)
           end
 
         _ ->
           acc
       end
     end)
+  end
+
+  defp stop_user_tenant_process(tenant, platform_region, acc) do
+    Extensions.PostgresCdcRls.handle_stop(tenant, 5_000)
+    # credo:disable-for-next-line
+    IO.inspect({"Stopped", tenant, platform_region})
+    Process.sleep(1_500)
+    acc + 1
+  catch
+    kind, reason ->
+      # credo:disable-for-next-line
+      IO.inspect({"Failed to stop", tenant, kind, reason})
   end
 
   defp pad(data) do

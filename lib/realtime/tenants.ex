@@ -4,8 +4,7 @@ defmodule Realtime.Tenants do
   """
 
   require Logger
-
-  alias Realtime.Repo
+  alias Realtime.Repo.Replica
   alias Realtime.Api.Tenant
 
   @doc """
@@ -122,7 +121,7 @@ defmodule Realtime.Tenants do
 
   @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
   def get_tenant_by_external_id(external_id) do
-    repo_replica = Repo.replica()
+    repo_replica = Replica.replica()
 
     Tenant
     |> repo_replica.get_by(external_id: external_id)

@@ -60,23 +60,35 @@ defmodule Realtime.PostgresCdc do
     end
   end
 
-  @spec aws_to_fly(String.t()) :: nil | <<_::24>>
-  def aws_to_fly(aws_region) when is_binary(aws_region) do
-    case aws_region do
-      "us-east-1" -> "iad"
-      "us-west-1" -> "sea"
-      "sa-east-1" -> "iad"
-      "ca-central-1" -> "iad"
-      "ap-southeast-1" -> "syd"
-      "ap-northeast-1" -> "syd"
-      "ap-northeast-2" -> "syd"
-      "ap-southeast-2" -> "syd"
-      "ap-south-1" -> "syd"
-      "eu-west-1" -> "lhr"
-      "eu-west-2" -> "lhr"
-      "eu-west-3" -> "lhr"
-      "eu-central-1" -> "lhr"
-      _ -> nil
+  @doc """
+  Translates a region from a platform to another
+
+  If the platform is `:fly` then the region is translated from an AWS region to a Fly region
+  If the platform is `:aws` then the region is not translated
+  """
+  @spec platform_region_translator(String.t()) :: nil | binary()
+  def platform_region_translator(aws_region) when is_binary(aws_region) do
+    platform = Application.get_env(:realtime, :platform)
+
+    if platform == :fly do
+      case aws_region do
+        "us-east-1" -> "iad"
+        "us-west-1" -> "sea"
+        "sa-east-1" -> "iad"
+        "ca-central-1" -> "iad"
+        "ap-southeast-1" -> "syd"
+        "ap-northeast-1" -> "syd"
+        "ap-northeast-2" -> "syd"
+        "ap-southeast-2" -> "syd"
+        "ap-south-1" -> "syd"
+        "eu-west-1" -> "lhr"
+        "eu-west-2" -> "lhr"
+        "eu-west-3" -> "lhr"
+        "eu-central-1" -> "lhr"
+        _ -> nil
+      end
+    else
+      aws_region
     end
   end
 

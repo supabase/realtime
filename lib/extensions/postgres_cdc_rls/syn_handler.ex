@@ -19,15 +19,15 @@ defmodule Extensions.PostgresCdcRls.SynHandler do
         {pid1, %{region: region}, time1},
         {pid2, _, time2}
       ) do
-    fly_region = Realtime.PostgresCdc.aws_to_fly(region)
+    platform_region = Realtime.PostgresCdc.platform_region_translator(region)
 
-    fly_region_nodes =
-      :syn.members(RegionNodes, fly_region)
+    platform_region_nodes =
+      :syn.members(RegionNodes, platform_region)
       |> Enum.map(fn {_, [node: node]} -> node end)
 
     {keep, stop} =
       Enum.filter([pid1, pid2], fn pid ->
-        Enum.member?(fly_region_nodes, node(pid))
+        Enum.member?(platform_region_nodes, node(pid))
       end)
       |> case do
         [pid] ->
