@@ -18,10 +18,10 @@ defmodule Realtime.Repo.Replica do
 
   @replicas_aws %{
     "ap-southeast-1" => Realtime.Repo.Replica.Singapore,
-    "ap-southeast-2" => Realtime.Repo.Replica.Sydney,
-    "eu-west-1" => Realtime.Repo.Replica.Ireland,
+    "ap-southeast-2" => Realtime.Repo.Replica.Singapore,
     "eu-west-2" => Realtime.Repo.Replica.London,
-    "us-east-1" => Realtime.Repo.Replica.NorthVirginia
+    "us-east-1" => Realtime.Repo.Replica.NorthVirginia,
+    "us-west-2" => Realtime.Repo.Replica.Oregon
   }
 
   @ast (quote do
@@ -30,6 +30,7 @@ defmodule Realtime.Repo.Replica do
             adapter: Ecto.Adapters.Postgres,
             read_only: true
         end)
+
   @doc """
   Returns the replica repo module for the region specified in config/runtime.exs.
   """

@@ -12,10 +12,9 @@ for repo <- [
       Realtime.Repo.Replica.SIN,
       Realtime.Repo.Replica.SJC,
       Realtime.Repo.Replica.Singapore,
-      Realtime.Repo.Replica.Sydney,
-      Realtime.Repo.Replica.Ireland,
       Realtime.Repo.Replica.London,
-      Realtime.Repo.Replica.NorthVirginia
+      Realtime.Repo.Replica.NorthVirginia,
+      Realtime.Repo.Replica.Oregon
     ] do
   config :realtime, repo,
     username: "postgres",

@@ -84,14 +84,10 @@ if config_env() != :test do
     Realtime.Repo.Replica.IAD => System.get_env("DB_HOST_REPLICA_IAD", default_db_host),
     Realtime.Repo.Replica.SIN => System.get_env("DB_HOST_REPLICA_SIN", default_db_host),
     Realtime.Repo.Replica.SJC => System.get_env("DB_HOST_REPLICA_SJC", default_db_host),
-    Realtime.Repo.Replica.Singapore =>
-      System.get_env("DB_HOST_REPLICA_AP_SOUTH_EAST_1", default_db_host),
-    Realtime.Repo.Replica.Sydney =>
-      System.get_env("DB_HOST_REPLICA_AP_SOUTH_EAST_2", default_db_host),
-    Realtime.Repo.Replica.Ireland => System.get_env("DB_HOST_REPLICA_EU_WEST_1", default_db_host),
-    Realtime.Repo.Replica.London => System.get_env("DB_HOST_REPLICA_EU_WEST_1", default_db_host),
-    Realtime.Repo.Replica.NorthVirginia =>
-      System.get_env("DB_HOST_REPLICA_AP_EAST_1", default_db_host),
+    Realtime.Repo.Replica.Singapore => System.get_env("DB_HOST_REPLICA_SIN", default_db_host),
+    Realtime.Repo.Replica.London => System.get_env("DB_HOST_REPLICA_FRA", default_db_host),
+    Realtime.Repo.Replica.NorthVirginia => System.get_env("DB_HOST_REPLICA_IAD", default_db_host),
+    Realtime.Repo.Replica.Oregon => System.get_env("DB_HOST_REPLICA_SJC", default_db_host),
     Realtime.Repo.Replica.Local => default_db_host
   }
 
