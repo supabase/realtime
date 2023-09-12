@@ -11,4 +11,5 @@ if [ "${ENABLE_TAILSCALE-}" = true ]; then
 fi
 
 echo "Starting Realtime"
+sudo -E -u nobody /app/bin/eval Realtime.Release.migrate
 sudo -E -u nobody /app/bin/server
