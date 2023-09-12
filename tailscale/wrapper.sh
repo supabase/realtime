@@ -12,7 +12,7 @@ fi
 
 echo "Starting Realtime"
 
-if [ "${AWS_EXECUTION_ENV}" = "AWS_ECS_FARGATE" ]; then
+if [ "${AWS_EXECUTION_ENV:=none}" = "AWS_ECS_FARGATE" ]; then
     echo "Running migrations"
     sudo -E -u nobody /app/bin/migrate
 fi
