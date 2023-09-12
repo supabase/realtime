@@ -43,23 +43,8 @@ defmodule Realtime.Application do
     )
 
     :syn.add_node_to_scopes([:users, RegionNodes])
-    :syn.join(RegionNodes, System.get_env("FLY_REGION"), self(), node: node())
-
-    extensions_supervisors =
-      Enum.reduce(Application.get_env(:realtime, :extensions), [], fn
-        {_, %{supervisor: name}}, acc ->
-          [
-            %{
-              id: name,
-              start: {name, :start_link, []},
-              restart: :transient
-            }
-            | acc
-          ]
-
-        _, acc ->
-          acc
-      end)
+    region = Application.get_env(:realtime, :region)
+    :syn.join(RegionNodes, region, self(), node: node())
 
     children =
       [
@@ -78,17 +63,33 @@ defmodule Realtime.Application do
         {Task.Supervisor, name: Realtime.TaskSupervisor},
         Realtime.Latency,
         Realtime.Telemetry.Logger
-      ] ++ extensions_supervisors
+      ] ++ extensions_supervisors()
 
     children =
-      case Realtime.Repo.replica() do
+      case Realtime.Repo.Replica.replica() do
         Realtime.Repo -> children
-        replica_repo -> List.insert_at(children, 2, replica_repo)
+        replica -> List.insert_at(children, 2, replica)
       end
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Realtime.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  defp extensions_supervisors() do
+    Enum.reduce(Application.get_env(:realtime, :extensions), [], fn
+      {_, %{supervisor: name}}, acc ->
+        opts = %{
+          id: name,
+          start: {name, :start_link, []},
+          restart: :transient
+        }
+
+        [opts | acc]
+
+      _, acc ->
+        acc
+    end)
   end
 end

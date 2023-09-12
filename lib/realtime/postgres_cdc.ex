@@ -60,9 +60,36 @@ defmodule Realtime.PostgresCdc do
     end
   end
 
-  @spec aws_to_fly(String.t()) :: nil | <<_::24>>
-  def aws_to_fly(aws_region) when is_binary(aws_region) do
-    case aws_region do
+  @doc """
+  Translates a region from a platform to the closest Supabase tenant region
+  """
+  @spec platform_region_translator(String.t()) :: nil | binary()
+  def platform_region_translator(tenant_region) when is_binary(tenant_region) do
+    platform = Application.get_env(:realtime, :platform)
+    region_mapping(platform, tenant_region)
+  end
+
+  defp region_mapping(:aws, tenant_region) do
+    case tenant_region do
+      "us-west-1" -> "us-west-1"
+      "us-east-1" -> "us-east-1"
+      "sa-east-1" -> "us-east-1"
+      "ca-central-1" -> "us-east-1"
+      "ap-southeast-1" -> "ap-southeast-1"
+      "ap-northeast-1" -> "ap-southeast-1"
+      "ap-northeast-2" -> "ap-southeast-1"
+      "ap-southeast-2" -> "ap-southeast-2"
+      "ap-south-1" -> "ap-southeast-2"
+      "eu-west-1" -> "eu-west-2"
+      "eu-west-2" -> "eu-west-2"
+      "eu-west-3" -> "eu-west-2"
+      "eu-central-1" -> "eu-west-2"
+      _ -> nil
+    end
+  end
+
+  defp region_mapping(:fly, tenant_region) do
+    case tenant_region do
       "us-east-1" -> "iad"
       "us-west-1" -> "sea"
       "sa-east-1" -> "iad"
@@ -79,6 +106,8 @@ defmodule Realtime.PostgresCdc do
       _ -> nil
     end
   end
+
+  defp region_mapping(_, tenant_region), do: tenant_region
 
   @doc """
   Lists the nodes in a region. Sorts by node name in case the list order

@@ -43,15 +43,18 @@ if config_env() == :prod do
 end
 
 if config_env() != :test do
+  platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws, else: :fly
+
   config :realtime,
     secure_channels: System.get_env("SECURE_CHANNELS", "true") == "true",
     jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
     api_jwt_secret: System.get_env("API_JWT_SECRET"),
     metrics_jwt_secret: System.get_env("METRICS_JWT_SECRET"),
     db_enc_key: System.get_env("DB_ENC_KEY"),
-    fly_region: System.get_env("FLY_REGION"),
+    region: System.get_env("FLY_REGION") || System.get_env("REGION"),
     fly_alloc_id: System.get_env("FLY_ALLOC_ID", ""),
-    prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer()
+    prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer(),
+    platform: platform
 
   queue_target = System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer()
   queue_interval = System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
@@ -80,7 +83,12 @@ if config_env() != :test do
     Realtime.Repo.Replica.FRA => System.get_env("DB_HOST_REPLICA_FRA", default_db_host),
     Realtime.Repo.Replica.IAD => System.get_env("DB_HOST_REPLICA_IAD", default_db_host),
     Realtime.Repo.Replica.SIN => System.get_env("DB_HOST_REPLICA_SIN", default_db_host),
-    Realtime.Repo.Replica.SJC => System.get_env("DB_HOST_REPLICA_SJC", default_db_host)
+    Realtime.Repo.Replica.SJC => System.get_env("DB_HOST_REPLICA_SJC", default_db_host),
+    Realtime.Repo.Replica.Singapore => System.get_env("DB_HOST_REPLICA_SIN", default_db_host),
+    Realtime.Repo.Replica.London => System.get_env("DB_HOST_REPLICA_FRA", default_db_host),
+    Realtime.Repo.Replica.NorthVirginia => System.get_env("DB_HOST_REPLICA_IAD", default_db_host),
+    Realtime.Repo.Replica.Oregon => System.get_env("DB_HOST_REPLICA_SJC", default_db_host),
+    Realtime.Repo.Replica.Local => default_db_host
   }
 
   # username, password, database, and port must match primary credentials
