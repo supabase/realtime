@@ -72,11 +72,11 @@ defmodule Realtime.Latency do
 
   Emulate a healthy remote node:
 
-      iex> [{%Task{}, {:ok, %{response: {:ok, {:pong, "iad"}}}}}] = Realtime.Latency.ping()
+      iex> [{%Task{}, {:ok, %{response: {:ok, {:pong, "not_set"}}}}}] = Realtime.Latency.ping()
 
   Emulate a slow but healthy remote node:
 
-      iex> [{%Task{}, {:ok, %{response: {:ok, {:pong, "iad"}}}}}] = Realtime.Latency.ping(5_000, 10_000, 30_000)
+      iex> [{%Task{}, {:ok, %{response: {:ok, {:pong, "not_set"}}}}}] = Realtime.Latency.ping(5_000, 10_000, 30_000)
 
   Emulate an unhealthy remote node:
 
@@ -97,19 +97,19 @@ defmodule Realtime.Latency do
             :timer.tc(fn -> :rpc.call(n, __MODULE__, :pong, [pong_timeout], timer_timeout) end)
 
           latency_ms = latency / 1_000
-          fly_region = Application.get_env(:realtime, :fly_region, "iad")
+          region = Application.get_env(:realtime, :region, "not_set")
           short_name = Helpers.short_node_id_from_name(n)
           from_node = Helpers.short_node_id_from_name(Node.self())
 
           case response do
             {:badrpc, reason} ->
               Logger.error(
-                "Network error: can't connect to node #{short_name} from #{fly_region} - #{inspect(reason)}"
+                "Network error: can't connect to node #{short_name} from #{region} - #{inspect(reason)}"
               )
 
               payload = %Payload{
                 from_node: from_node,
-                from_region: fly_region,
+                from_region: region,
                 node: short_name,
                 region: nil,
                 latency: latency_ms,
@@ -125,12 +125,12 @@ defmodule Realtime.Latency do
               if latency_ms > 1_000,
                 do:
                   Logger.warn(
-                    "Network warning: latency to #{remote_region} (#{short_name}) from #{fly_region} (#{from_node}) is #{latency_ms} ms"
+                    "Network warning: latency to #{remote_region} (#{short_name}) from #{region} (#{from_node}) is #{latency_ms} ms"
                   )
 
               payload = %Payload{
                 from_node: from_node,
-                from_region: fly_region,
+                from_region: region,
                 node: short_name,
                 region: remote_region,
                 latency: latency_ms,
@@ -159,7 +159,7 @@ defmodule Realtime.Latency do
 
   @spec pong :: {:ok, {:pong, String.t()}}
   def pong() do
-    region = Application.get_env(:realtime, :fly_region, "iad")
+    region = Application.get_env(:realtime, :region, "not_set")
     {:ok, {:pong, region}}
   end
 
