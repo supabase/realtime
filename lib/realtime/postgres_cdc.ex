@@ -71,7 +71,8 @@ defmodule Realtime.PostgresCdc do
 
   defp region_mapping(:aws, tenant_region) do
     case tenant_region do
-      "us-west-1" -> "us-west-1"
+      "us-west-1" -> "us-west-2"
+      "us-west-2" -> "us-west-2"
       "us-east-1" -> "us-east-1"
       "sa-east-1" -> "us-east-1"
       "ca-central-1" -> "us-east-1"
