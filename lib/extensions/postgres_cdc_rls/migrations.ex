@@ -5,6 +5,7 @@ defmodule Extensions.PostgresCdcRls.Migrations do
 
   use GenServer
 
+  require Logger
   alias Realtime.Repo
 
   alias Realtime.Extensions.Rls.Repo.Migrations.{
@@ -131,6 +132,8 @@ defmodule Extensions.PostgresCdcRls.Migrations do
     ]
     |> H.maybe_enforce_ssl_config(ssl_enforced)
     |> Repo.with_dynamic_repo(fn repo ->
+      Logger.info("Applying migrations to #{host}")
+
       Ecto.Migrator.run(
         Repo,
         @migrations,
