@@ -141,7 +141,7 @@ defmodule Realtime.PromEx do
     [_, node_host] = node() |> Atom.to_string() |> String.split("@")
 
     metrics_tags = %{
-      region: Application.get_env(:realtime, :fly_region),
+      region: Application.get_env(:realtime, :region),
       node_host: node_host,
       short_alloc_id: short_node_id()
     }
