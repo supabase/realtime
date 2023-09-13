@@ -22,15 +22,14 @@ defmodule Realtime.Cluster.Strategy.Postgres do
   def start_link(args), do: GenServer.start_link(__MODULE__, args)
 
   def init([state]) do
-    opts =
-      [
-        hostname: Keyword.fetch!(state.config, :hostname),
-        username: Keyword.fetch!(state.config, :username),
-        password: Keyword.fetch!(state.config, :password),
-        database: Keyword.fetch!(state.config, :database),
-        port: Keyword.fetch!(state.config, :port),
-        parameters: Keyword.fetch!(state.config, :parameters)
-      ]
+    opts = [
+      hostname: Keyword.fetch!(state.config, :hostname),
+      username: Keyword.fetch!(state.config, :username),
+      password: Keyword.fetch!(state.config, :password),
+      database: Keyword.fetch!(state.config, :database),
+      port: Keyword.fetch!(state.config, :port),
+      parameters: Keyword.fetch!(state.config, :parameters)
+    ]
 
     new_config =
       state.config
