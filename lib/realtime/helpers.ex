@@ -130,15 +130,6 @@ defmodule Realtime.Helpers do
     }
   end
 
-  def short_node_id() do
-    fly_alloc_id = Application.get_env(:realtime, :fly_alloc_id)
-
-    case String.split(fly_alloc_id, "-", parts: 2) do
-      [short_alloc_id, _] -> short_alloc_id
-      _ -> fly_alloc_id
-    end
-  end
-
   @doc """
   Gets a short node name from a node name when a node name looks like `realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2`
 
