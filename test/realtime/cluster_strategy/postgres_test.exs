@@ -17,12 +17,14 @@ defmodule Realtime.Cluster.Strategy.PostgresTest do
 
   test "notify cluster after start" do
     state = libcluster_state()
+    channel_name = Keyword.fetch!(state.config, :channel_name)
+
     Postgres.start_link([state])
 
     {:ok, conn_notif} = PN.start_link(state.meta.opts.())
-    PN.listen(conn_notif, "realtime_cluster")
+    PN.listen(conn_notif, channel_name)
     node = "#{node()}"
-    assert_receive {:notification, _, _, "realtime_cluster", ^node}
+    assert_receive {:notification, _, _, channel_name, ^node}
   end
 
   defp libcluster_state() do
@@ -52,7 +54,8 @@ defmodule Realtime.Cluster.Strategy.PostgresTest do
         application_name: "#{node()}"
       ],
       heartbeat_interval: 5_000,
-      node_timeout: 15_000
+      node_timeout: 15_000,
+      channel_name: "test_channel_name"
     ]
   end
 end
