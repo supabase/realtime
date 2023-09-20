@@ -28,13 +28,13 @@ defmodule Realtime.Cluster.Strategy.Postgres do
       password: Keyword.fetch!(state.config, :password),
       database: Keyword.fetch!(state.config, :database),
       port: Keyword.fetch!(state.config, :port),
-      parameters: Keyword.fetch!(state.config, :parameters)
+      parameters: Keyword.fetch!(state.config, :parameters),
+      channel_name: Keyword.fetch!(state.config, :channel_name)
     ]
 
     new_config =
       state.config
       |> Keyword.put_new(:heartbeat_interval, 5_000)
-      |> Keyword.put_new(:channel_name, "realtime_cluster")
       |> Keyword.delete(:url)
 
     meta = %{
@@ -83,11 +83,8 @@ defmodule Realtime.Cluster.Strategy.Postgres do
       Logger.debug(topology, "Trying to connect to node: #{node}")
 
       case Strategy.connect_nodes(topology, state.connect, state.list_nodes, [node]) do
-        :ok ->
-          Logger.debug(topology, "Connected to node: #{node}")
-
-        {:error, _} ->
-          Logger.error(topology, "Failed to connect to node: #{node}")
+        :ok -> Logger.debug(topology, "Connected to node: #{node}")
+        {:error, _} -> Logger.error(topology, "Failed to connect to node: #{node}")
       end
     end
 
