@@ -1,5 +1,7 @@
 defmodule Realtime.UsersCounter do
-  @moduledoc false
+  @moduledoc """
+  Counts of connected clients for a tenant across the whole cluser or for a single node.
+  """
   require Logger
 
   @spec add(pid(), String.t()) :: :ok
