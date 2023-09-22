@@ -94,30 +94,21 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     cancel_timer(poll_ref)
     cancel_timer(retry_ref)
 
-    broadcast_count =
-      conn
-      |> list_changes_with_telemetry(
-        slot_name,
-        publication,
-        max_changes,
-        max_record_bytes,
-        tenant
-      )
-      |> handle_list_changes_result(tenant)
+    with args <- [conn, slot_name, publication, max_changes, max_record_bytes],
+         {time, list_changes} <- :timer.tc(Replications, :list_changes, args),
+         _ <- record_list_changes_telemetry(time, tenant),
+         {:ok, row_count} <- handle_list_changes_result(list_changes, tenant),
+         backoff <- Backoff.reset(backoff) do
+      pool_ref =
+        if row_count == 0 do
+          send(self(), :poll)
+          nil
+        else
+          Process.send_after(self(), :poll, poll_interval_ms)
+        end
 
-    case broadcast_count do
-      {:ok, 0} ->
-        backoff = Backoff.reset(backoff)
-        send(self(), :poll)
-
-        {:noreply, %{state | backoff: backoff, poll_ref: nil}}
-
-      {:ok, _} ->
-        backoff = Backoff.reset(backoff)
-        poll_ref = Process.send_after(self(), :poll, poll_interval_ms)
-
-        {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
-
+      {:noreply, %{state | backoff: backoff, poll_ref: pool_ref}}
+    else
       {:error, %Postgrex.Error{postgres: %{code: :object_in_use, message: msg}}} ->
         Logger.error("Error polling replication: :object_in_use")
 
@@ -209,33 +200,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     end
   end
 
-  defp list_changes_with_telemetry(
-         conn,
-         slot_name,
-         publication,
-         max_changes,
-         max_record_bytes,
-         tenant
-       ) do
-    args = [
-      conn,
-      slot_name,
-      publication,
-      max_changes,
-      max_record_bytes
-    ]
-
-    {time, response} = :timer.tc(Replications, :list_changes, args)
-
+  defp record_list_changes_telemetry(time, tenant) do
     Realtime.Telemetry.execute(
       [:realtime, :replication, :poller, :query, :stop],
       %{duration: time},
       %{tenant: tenant}
     )
-
-    response
-  catch
-    {:error, reason} -> {:error, reason}
   end
 
   defp handle_list_changes_result(
