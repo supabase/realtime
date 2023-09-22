@@ -11,15 +11,15 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   import Realtime.Helpers,
     only: [cancel_timer: 1, decrypt_creds: 5, default_ssl_param: 1, maybe_enforce_ssl_config: 2]
 
-  alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
   alias DBConnection.Backoff
-  alias Realtime.PubSub
 
-  alias Realtime.Adapters.Changes.{
-    DeletedRecord,
-    NewRecord,
-    UpdatedRecord
-  }
+  alias Extensions.PostgresCdcRls.MessageDispatcher
+  alias Extensions.PostgresCdcRls.Replications
+
+  alias Realtime.Adapters.Changes.DeletedRecord
+  alias Realtime.Adapters.Changes.NewRecord
+  alias Realtime.Adapters.Changes.UpdatedRecord
+  alias Realtime.PubSub
 
   @queue_target 5_000
 
@@ -45,12 +45,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     tenant = args["id"]
 
     state = %{
-      backoff:
-        Backoff.new(
-          backoff_min: 100,
-          backoff_max: 5_000,
-          backoff_type: :rand_exp
-        ),
+      backoff: Backoff.new(backoff_min: 100, backoff_max: 5_000, backoff_type: :rand_exp),
       conn: conn,
       db_host: args["db_host"],
       db_port: args["db_port"],
@@ -99,76 +94,27 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     cancel_timer(poll_ref)
     cancel_timer(retry_ref)
 
-    try do
-      {time, response} =
-        :timer.tc(Replications, :list_changes, [
-          conn,
-          slot_name,
-          publication,
-          max_changes,
-          max_record_bytes
-        ])
-
-      Realtime.Telemetry.execute(
-        [:realtime, :replication, :poller, :query, :stop],
-        %{duration: time},
-        %{tenant: tenant}
+    broadcast_count =
+      conn
+      |> list_changes_with_telemetry(
+        slot_name,
+        publication,
+        max_changes,
+        max_record_bytes,
+        tenant
       )
+      |> handle_list_changes_result(tenant)
 
-      response
-    catch
-      {:error, reason} ->
-        {:error, reason}
-    end
-    |> case do
-      {:ok,
-       %Postgrex.Result{
-         columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"] = columns,
-         rows: [_ | _] = rows,
-         num_rows: rows_count
-       }} ->
-        Enum.reduce(rows, [], fn row, acc ->
-          columns
-          |> Enum.zip(row)
-          |> generate_record()
-          |> case do
-            nil ->
-              acc
+    case broadcast_count do
+      {:ok, 0} ->
+        backoff = Backoff.reset(backoff)
+        send(self(), :poll)
 
-            record_struct ->
-              [record_struct | acc]
-          end
-        end)
-        |> Enum.reverse()
-        |> Enum.each(fn change ->
-          Phoenix.PubSub.broadcast_from(
-            PubSub,
-            self(),
-            "realtime:postgres:" <> tenant,
-            change,
-            MessageDispatcher
-          )
-        end)
-
-        {:ok, rows_count}
+        {:noreply, %{state | backoff: backoff, poll_ref: nil}}
 
       {:ok, _} ->
-        {:ok, 0}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-    |> case do
-      {:ok, rows_num} ->
         backoff = Backoff.reset(backoff)
-
-        poll_ref =
-          if rows_num > 0 do
-            send(self(), :poll)
-            nil
-          else
-            Process.send_after(self(), :poll, poll_interval_ms)
-          end
+        poll_ref = Process.send_after(self(), :poll, poll_interval_ms)
 
         {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
 
@@ -186,14 +132,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
         if retry_count > 3 do
           case Replications.terminate_backend(conn, slot_name) do
-            {:ok, :terminated} ->
-              Logger.warn("Replication slot in use - terminating")
-
-            {:error, :slot_not_found} ->
-              Logger.warn("Replication slot not found")
-
-            {:error, error} ->
-              Logger.warn("Error terminating backend: #{inspect(error)}")
+            {:ok, :terminated} -> Logger.warn("Replication slot in use - terminating")
+            {:error, :slot_not_found} -> Logger.warn("Replication slot not found")
+            {:error, error} -> Logger.warn("Error terminating backend: #{inspect(error)}")
           end
         end
 
@@ -219,6 +160,114 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     cancel_timer(retry_ref)
     {:noreply, prepare_replication(state)}
   end
+
+  def slot_name_suffix() do
+    case System.get_env("SLOT_NAME_SUFFIX") do
+      nil ->
+        ""
+
+      value ->
+        Logger.debug("Using slot name suffix: " <> value)
+        "_" <> value
+    end
+  end
+
+  defp convert_errors([_ | _] = errors), do: errors
+
+  defp convert_errors(_), do: nil
+
+  defp connect_db(host, port, name, user, pass, socket_opts, ssl_enforced) do
+    {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
+
+    [
+      hostname: host,
+      port: port,
+      database: name,
+      password: pass,
+      username: user,
+      queue_target: @queue_target,
+      parameters: [application_name: "realtime_rls"],
+      socket_options: socket_opts
+    ]
+    |> maybe_enforce_ssl_config(ssl_enforced)
+    |> Postgrex.start_link()
+  end
+
+  defp prepare_replication(
+         %{backoff: backoff, conn: conn, slot_name: slot_name, retry_count: retry_count} = state
+       ) do
+    case Replications.prepare_replication(conn, slot_name) do
+      {:ok, _} ->
+        send(self(), :poll)
+        state
+
+      {:error, error} ->
+        Logger.error("Prepare replication error: #{inspect(error)}")
+        {timeout, backoff} = Backoff.backoff(backoff)
+        retry_ref = Process.send_after(self(), :retry, timeout)
+        %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}
+    end
+  end
+
+  defp list_changes_with_telemetry(
+         conn,
+         slot_name,
+         publication,
+         max_changes,
+         max_record_bytes,
+         tenant
+       ) do
+    args = [
+      conn,
+      slot_name,
+      publication,
+      max_changes,
+      max_record_bytes
+    ]
+
+    {time, response} = :timer.tc(Replications, :list_changes, args)
+
+    Realtime.Telemetry.execute(
+      [:realtime, :replication, :poller, :query, :stop],
+      %{duration: time},
+      %{tenant: tenant}
+    )
+
+    response
+  catch
+    {:error, reason} -> {:error, reason}
+  end
+
+  defp handle_list_changes_result(
+         {:ok,
+          %Postgrex.Result{
+            columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"] = columns,
+            rows: [_ | _] = rows,
+            num_rows: rows_count
+          }},
+         tenant
+       ) do
+    rows
+    |> Enum.reduce([], fn row, acc ->
+      columns
+      |> Enum.zip(row)
+      |> generate_record()
+      |> then(fn
+        nil -> acc
+        record_struct -> [record_struct | acc]
+      end)
+    end)
+    |> Enum.reverse()
+    |> Enum.each(fn change ->
+      topic = "realtime:postgres:" <> tenant
+      Phoenix.PubSub.broadcast_from(PubSub, self(), topic, change, MessageDispatcher)
+    end)
+
+    {:ok, rows_count}
+  end
+
+  defp handle_list_changes_result({:ok, _}, _), do: {:ok, 0}
+  defp handle_list_changes_result({:error, reason}, _), do: {:error, reason}
 
   def generate_record([
         {"wal",
@@ -294,54 +343,4 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   def generate_record(_), do: nil
-
-  def slot_name_suffix() do
-    case System.get_env("SLOT_NAME_SUFFIX") do
-      nil ->
-        ""
-
-      value ->
-        Logger.debug("Using slot name suffix: " <> value)
-        "_" <> value
-    end
-  end
-
-  defp convert_errors([_ | _] = errors), do: errors
-
-  defp convert_errors(_), do: nil
-
-  defp connect_db(host, port, name, user, pass, socket_opts, ssl_enforced) do
-    {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
-
-    [
-      hostname: host,
-      port: port,
-      database: name,
-      password: pass,
-      username: user,
-      queue_target: @queue_target,
-      parameters: [
-        application_name: "realtime_rls"
-      ],
-      socket_options: socket_opts
-    ]
-    |> maybe_enforce_ssl_config(ssl_enforced)
-    |> Postgrex.start_link()
-  end
-
-  defp prepare_replication(
-         %{backoff: backoff, conn: conn, slot_name: slot_name, retry_count: retry_count} = state
-       ) do
-    case Replications.prepare_replication(conn, slot_name) do
-      {:ok, _} ->
-        send(self(), :poll)
-        state
-
-      {:error, error} ->
-        Logger.error("Prepare replication error: #{inspect(error)}")
-        {timeout, backoff} = Backoff.backoff(backoff)
-        retry_ref = Process.send_after(self(), :retry, timeout)
-        %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}
-    end
-  end
 end
