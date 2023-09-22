@@ -27,6 +27,8 @@ defmodule Generators do
       "jwt_secret" => "new secret"
     }
 
+    override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
+
     {:ok, tenant} =
       create_attrs
       |> Map.merge(override)

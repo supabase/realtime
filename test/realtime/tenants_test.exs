@@ -3,47 +3,10 @@ defmodule Realtime.TenantsTest do
 
   import Mock
 
-  alias Realtime.Api
   alias Realtime.GenCounter
   alias Realtime.Tenants
 
   describe "tenants" do
-    db_conf = Application.compile_env(:realtime, Realtime.Repo)
-
-    @valid_attrs %{
-      external_id: "external_id",
-      name: "localhost",
-      extensions: [
-        %{
-          "type" => "postgres_cdc_rls",
-          "settings" => %{
-            "db_host" => db_conf[:hostname],
-            "db_name" => db_conf[:database],
-            "db_user" => db_conf[:username],
-            "db_password" => db_conf[:password],
-            "db_port" => "5432",
-            "poll_interval" => 100,
-            "poll_max_changes" => 100,
-            "poll_max_record_bytes" => 1_048_576,
-            "region" => "us-east-1"
-          }
-        }
-      ],
-      postgres_cdc_default: "postgres_cdc_rls",
-      jwt_secret: "new secret",
-      max_concurrent_users: 200,
-      max_events_per_second: 100
-    }
-
-    def tenant_fixture(attrs \\ %{}) do
-      {:ok, tenant} =
-        attrs
-        |> Enum.into(@valid_attrs)
-        |> Api.create_tenant()
-
-      tenant
-    end
-
     test "get_tenant_limits/1" do
       tenant = tenant_fixture()
 

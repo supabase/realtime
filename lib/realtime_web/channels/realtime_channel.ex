@@ -45,7 +45,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     with false <- SignalHandler.shutdown_in_progress?(),
          %{extensions: extensions} <- Tenants.get_tenant_by_external_id(tenant),
-         :ok <- check_tenant_connection(extensions),
          :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket),
@@ -624,43 +623,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     Enum.map(pg_change_params, fn %{params: params} ->
       id = :erlang.phash2(params)
       Map.put(params, :id, id)
-    end)
-  end
-
-  defp check_tenant_connection(extensions) do
-    extensions
-    |> Enum.map(fn %{settings: settings} ->
-      ssl_enforced = Helpers.default_ssl_param(settings)
-
-      host = settings["db_host"]
-      port = settings["db_port"]
-      name = settings["db_name"]
-      user = settings["db_user"]
-      password = settings["db_password"]
-      socket_opts = settings["db_socket_opts"]
-
-      opts = %{
-        host: host,
-        port: port,
-        name: name,
-        user: user,
-        pass: password,
-        socket_opts: socket_opts,
-        pool: 1,
-        queue_target: 1000,
-        ssl_enforced: ssl_enforced
-      }
-
-      with {:ok, conn} <- Helpers.connect_db(opts),
-           {:ok, _} <- Postgrex.query(conn, "SELECT 1", []) do
-        Process.exit(conn, :normal)
-        :ok
-      end
-    end)
-    |> Enum.any?(fn res -> res == :ok end)
-    |> then(fn
-      true -> :ok
-      false -> {:error, :tenant_database_unavailable}
     end)
   end
 

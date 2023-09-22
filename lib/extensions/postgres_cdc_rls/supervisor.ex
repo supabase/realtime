@@ -4,7 +4,7 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
   """
   use Supervisor
 
-  alias Extensions.PostgresCdcRls, as: Rls
+  alias Extensions.PostgresCdcRls
 
   @spec start_link :: :ignore | {:error, any} | {:ok, pid}
   def start_link() do
@@ -15,8 +15,8 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
   def init(_args) do
     load_migrations_modules()
 
-    :syn.set_event_handler(Rls.SynHandler)
-    :syn.add_node_to_scopes([Rls])
+    :syn.set_event_handler(Realtime.SynHandler)
+    :syn.add_node_to_scopes([PostgresCdcRls])
 
     children = [
       {
@@ -24,7 +24,7 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
         partitions: 20,
         child_spec: DynamicSupervisor,
         strategy: :one_for_one,
-        name: Rls.DynamicSupervisor
+        name: PostgresCdcRls.DynamicSupervisor
       }
     ]
 

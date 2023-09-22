@@ -156,13 +156,4 @@ defmodule Realtime.ApiTest do
       assert %{extensions: [%{settings: %{"poll_interval" => _}}]} = tenant
     end
   end
-
-  defp tenant_fixture(attrs) do
-    {:ok, tenant} =
-      attrs
-      |> Enum.into(@valid_attrs)
-      |> Api.create_tenant()
-
-    tenant
-  end
 end
