@@ -8,24 +8,16 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   require Logger
 
-  import Realtime.Helpers,
-    only: [cancel_timer: 1, decrypt_creds: 5, default_ssl_param: 1, maybe_enforce_ssl_config: 2]
+  import Realtime.Helpers, only: [cancel_timer: 1, default_ssl_param: 1, connect_db: 10]
 
   alias DBConnection.Backoff
-
-  alias Extensions.PostgresCdcRls.MessageDispatcher
-  alias Extensions.PostgresCdcRls.Replications
-
-  alias Realtime.Adapters.Changes.DeletedRecord
-  alias Realtime.Adapters.Changes.NewRecord
-  alias Realtime.Adapters.Changes.UpdatedRecord
+  alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
+  alias Realtime.Adapters.Changes.{DeletedRecord, NewRecord, UpdatedRecord}
   alias Realtime.PubSub
 
   @queue_target 5_000
 
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts)
-  end
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
   @impl true
   def init(args) do
@@ -39,7 +31,10 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         args["db_user"],
         args["db_password"],
         args["db_socket_opts"],
-        ssl_enforced
+        1,
+        @queue_target,
+        ssl_enforced,
+        "realtime_rls"
       )
 
     tenant = args["id"]
@@ -94,21 +89,24 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     cancel_timer(poll_ref)
     cancel_timer(retry_ref)
 
-    with args <- [conn, slot_name, publication, max_changes, max_record_bytes],
-         {time, list_changes} <- :timer.tc(Replications, :list_changes, args),
-         _ <- record_list_changes_telemetry(time, tenant),
-         {:ok, row_count} <- handle_list_changes_result(list_changes, tenant),
-         backoff <- Backoff.reset(backoff) do
-      pool_ref =
-        if row_count == 0 do
-          send(self(), :poll)
-          nil
-        else
-          Process.send_after(self(), :poll, poll_interval_ms)
-        end
+    args = [conn, slot_name, publication, max_changes, max_record_bytes]
+    {time, list_changes} = :timer.tc(Replications, :list_changes, args)
+    record_list_changes_telemetry(time, tenant)
 
-      {:noreply, %{state | backoff: backoff, poll_ref: pool_ref}}
-    else
+    case handle_list_changes_result(list_changes, tenant) do
+      {:ok, row_count} ->
+        Backoff.reset(backoff)
+
+        pool_ref =
+          if row_count > 0 do
+            send(self(), :poll)
+            nil
+          else
+            Process.send_after(self(), :poll, poll_interval_ms)
+          end
+
+        {:noreply, %{state | backoff: backoff, poll_ref: pool_ref}}
+
       {:error, %Postgrex.Error{postgres: %{code: :object_in_use, message: msg}}} ->
         Logger.error("Error polling replication: :object_in_use")
 
@@ -167,23 +165,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   defp convert_errors(_), do: nil
 
-  defp connect_db(host, port, name, user, pass, socket_opts, ssl_enforced) do
-    {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
-
-    [
-      hostname: host,
-      port: port,
-      database: name,
-      password: pass,
-      username: user,
-      queue_target: @queue_target,
-      parameters: [application_name: "realtime_rls"],
-      socket_options: socket_opts
-    ]
-    |> maybe_enforce_ssl_config(ssl_enforced)
-    |> Postgrex.start_link()
-  end
-
   defp prepare_replication(
          %{backoff: backoff, conn: conn, slot_name: slot_name, retry_count: retry_count} = state
        ) do
@@ -217,21 +198,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           }},
          tenant
        ) do
-    rows
-    |> Enum.reduce([], fn row, acc ->
-      columns
-      |> Enum.zip(row)
-      |> generate_record()
-      |> then(fn
-        nil -> acc
-        record_struct -> [record_struct | acc]
-      end)
-    end)
-    |> Enum.reverse()
-    |> Enum.each(fn change ->
+    for row <- rows,
+        change <- columns |> Enum.zip(row) |> generate_record() |> List.wrap() do
       topic = "realtime:postgres:" <> tenant
       Phoenix.PubSub.broadcast_from(PubSub, self(), topic, change, MessageDispatcher)
-    end)
+    end
 
     {:ok, rows_count}
   end

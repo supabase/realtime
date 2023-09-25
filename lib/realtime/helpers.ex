@@ -30,7 +30,8 @@ defmodule Realtime.Helpers do
           list(),
           non_neg_integer(),
           non_neg_integer(),
-          boolean()
+          boolean(),
+          String.t()
         ) ::
           {:ok, pid} | {:error, Postgrex.Error.t() | term()}
   def connect_db(
@@ -42,15 +43,10 @@ defmodule Realtime.Helpers do
         socket_opts,
         pool \\ 5,
         queue_target \\ 5_000,
-        ssl_enforced \\ true
+        ssl_enforced \\ true,
+        application_name \\ "supabase_realtime"
       ) do
-    secure_key = Application.get_env(:realtime, :db_enc_key)
-
-    host = decrypt!(host, secure_key)
-    port = decrypt!(port, secure_key)
-    name = decrypt!(name, secure_key)
-    pass = decrypt!(pass, secure_key)
-    user = decrypt!(user, secure_key)
+    {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
 
     [
       hostname: host,
@@ -61,7 +57,7 @@ defmodule Realtime.Helpers do
       pool_size: pool,
       queue_target: queue_target,
       parameters: [
-        application_name: "supabase_realtime"
+        application_name: application_name
       ],
       socket_options: socket_opts
     ]
