@@ -24,4 +24,16 @@ defmodule RealtimeWeb.TenantView do
       inserted_at: tenant.inserted_at
     }
   end
+
+  def render("health.json", %{
+        healthy: healthy,
+        db_connected: db_connected,
+        concurrent_users: conncurrent_users
+      }) do
+    %{
+      db_connected: db_connected,
+      healthy: healthy,
+      conncurrent_users: conncurrent_users
+    }
+  end
 end

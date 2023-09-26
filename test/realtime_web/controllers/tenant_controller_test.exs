@@ -153,6 +153,16 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
   end
 
+  describe "health check tenant" do
+    test "health check when tenant does not exist", %{conn: conn} do
+      with_mock ChannelsAuthorization, authorize: fn _, _ -> {:ok, %{}} end do
+        Routes.tenant_path(conn, :reload, "wrong_external_id")
+        %{status: status} = get(conn, Routes.tenant_path(conn, :health, "wrong_external_id"))
+        assert status == 404
+      end
+    end
+  end
+
   defp create_tenant(_) do
     %{tenant: tenant_fixture()}
   end

@@ -50,6 +50,10 @@ defmodule Realtime.PostgresCdc do
     cdc.settings
   end
 
+  @doc """
+  Gets the extension module for a tenant.
+  """
+
   @spec driver(String.t()) :: {:ok, module()} | {:error, String.t()}
   def driver(tenant_key) do
     @extensions
