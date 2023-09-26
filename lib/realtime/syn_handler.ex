@@ -7,9 +7,10 @@ defmodule Realtime.SynHandler do
 
   def on_process_unregistered(mod, name, _pid, _meta, reason) do
     Logger.warn("#{mod} terminated: #{inspect(name)} #{node()}")
+    topic = topic(mod)
 
     if reason != :syn_conflict_resolution do
-      Endpoint.local_broadcast("postgres_cdc:" <> name, "postgres_cdc_down", nil)
+      Endpoint.local_broadcast(topic <> ":" <> name, topic <> "_down", nil)
     end
   end
 
@@ -39,7 +40,7 @@ defmodule Realtime.SynHandler do
       end)
 
     if node() == node(stop) do
-      spawn(fn -> resolve_conflict(stop, name) end)
+      spawn(fn -> resolve_conflict(mod, stop, name) end)
     else
       Logger.warn("Resolving #{name} conflict, remote pid: #{inspect(stop)}")
     end
@@ -47,7 +48,7 @@ defmodule Realtime.SynHandler do
     keep
   end
 
-  defp resolve_conflict(stop, name) do
+  defp resolve_conflict(mod, stop, name) do
     resp =
       if Process.alive?(stop) do
         try do
@@ -59,10 +60,19 @@ defmodule Realtime.SynHandler do
         :not_alive
       end
 
-    Endpoint.broadcast("postgres_cdc:" <> name, "postgres_cdc_down", nil)
+    topic = topic(mod)
+    Endpoint.broadcast(topic <> ":" <> name, topic <> "_down", nil)
 
     Logger.warn(
       "Resolving #{name} conflict, stop local pid: #{inspect(stop)}, response: #{inspect(resp)}"
     )
+  end
+
+  defp topic(mod) do
+    mod
+    |> Macro.underscore()
+    |> String.split("/")
+    |> Enum.take(-1)
+    |> hd()
   end
 end

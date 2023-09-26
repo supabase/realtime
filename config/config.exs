@@ -29,7 +29,7 @@ config :realtime, :extensions,
   },
   postgres_cdc_stream: %{
     type: :postgres_cdc,
-    key: "postgres_cdc_stream",
+    key: "postgres_cdc_rls_stream",
     driver: Extensions.PostgresCdcStream,
     supervisor: Extensions.PostgresCdcStream.Supervisor,
     db_settings: Extensions.PostgresCdcStream.DbSettings

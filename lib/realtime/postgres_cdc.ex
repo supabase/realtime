@@ -15,7 +15,7 @@ defmodule Realtime.PostgresCdc do
   end
 
   def subscribe(module, pg_change_params, tenant, metadata) do
-    RealtimeWeb.Endpoint.subscribe("postgres_cdc:" <> tenant)
+    RealtimeWeb.Endpoint.subscribe("postgres_cdc_rls:" <> tenant)
     apply(module, :handle_subscribe, [pg_change_params, tenant, metadata])
   end
 

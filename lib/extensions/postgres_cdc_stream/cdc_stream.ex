@@ -43,7 +43,7 @@ defmodule Extensions.PostgresCdcStream do
 
   @spec get_manager_conn(String.t()) :: {:error, nil} | {:ok, pid(), pid()}
   def get_manager_conn(id) do
-    case Phoenix.Tracker.get_by_key(Stream.Tracker, "postgres_cdc_stream", id) do
+    case Phoenix.Tracker.get_by_key(Stream.Tracker, "postgres_cdc_rls_stream", id) do
       [] -> nil
       [{_, %{manager_pid: pid, conn: conn}}] -> {:ok, pid, conn}
     end
@@ -103,7 +103,7 @@ defmodule Extensions.PostgresCdcStream do
     Phoenix.Tracker.track(
       Stream.Tracker,
       self(),
-      "postgres_cdc_stream",
+      "postgres_cdc_rls_stream",
       id,
       %{
         conn: conn,
