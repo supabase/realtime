@@ -1,4 +1,5 @@
 defmodule RealtimeWeb.BroadcastController do
+  require Logger
   use RealtimeWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
@@ -42,6 +43,7 @@ defmodule RealtimeWeb.BroadcastController do
         tenant_topic = Tenants.tenant_topic(tenant, sub_topic)
         Endpoint.broadcast_from(self(), tenant_topic, "broadcast", payload)
         GenCounter.add(events_per_second_key)
+        Logger.info("Broadcasted message to using HTTP API: " <> tenant_topic)
       end
 
       send_resp(conn, :accepted, "")
