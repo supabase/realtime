@@ -34,23 +34,42 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         payload_1 = %{"data" => "data"}
         payload_2 = %{"data" => "data"}
+        event_1 = "event_1"
+        event_2 = "event_2"
 
         conn =
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
             "messages" => [
               %{
                 "topic" => sub_topic_1,
-                "payload" => payload_2
+                "payload" => payload_2,
+                "event" => event_1
               },
               %{
                 "topic" => sub_topic_2,
-                "payload" => payload_2
+                "payload" => payload_2,
+                "event" => event_2
               }
             ]
           })
 
-        assert_called(Endpoint.broadcast_from(:_, topic_1, "broadcast", payload_1))
-        assert_called(Endpoint.broadcast_from(:_, topic_2, "broadcast", payload_2))
+        assert_called(
+          Endpoint.broadcast_from(
+            :_,
+            topic_1,
+            "broadcast",
+            %{"payload" => Map.merge(payload_1, %{"event" => event_1})}
+          )
+        )
+
+        assert_called(
+          Endpoint.broadcast_from(
+            :_,
+            topic_2,
+            "broadcast",
+            %{"payload" => Map.merge(payload_2, %{"event" => event_2})}
+          )
+        )
 
         assert conn.status == 202
 
@@ -80,7 +99,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
               },
               %{
                 "topic" => "topic",
-                "payload" => %{"data" => "data"}
+                "payload" => %{"data" => "data"},
+                "event" => "event"
               }
             ]
           })
@@ -88,8 +108,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         assert Jason.decode!(conn.resp_body) == %{
                  "errors" => %{
                    "messages" => [
-                     %{"payload" => ["can't be blank"]},
-                     %{"topic" => ["can't be blank"]},
+                     %{"payload" => ["can't be blank"], "event" => ["can't be blank"]},
+                     %{"topic" => ["can't be blank"], "event" => ["can't be blank"]},
                      %{}
                    ]
                  }
