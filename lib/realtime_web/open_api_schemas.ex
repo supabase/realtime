@@ -18,7 +18,8 @@ defmodule RealtimeWeb.OpenApiSchemas do
             type: :object,
             properties: %{
               topic: %Schema{type: :string},
-              payload: %Schema{type: :object}
+              payload: %Schema{type: :object},
+              event: %Schema{type: :object}
             }
           }
         }
@@ -273,5 +274,27 @@ defmodule RealtimeWeb.OpenApiSchemas do
     })
 
     def response(), do: {"Unprocessable Entity", "application/json", __MODULE__}
+  end
+
+  defmodule TooManyRequestsResponse do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{
+        error: %Schema{
+          type: :object,
+          properties: %{
+            messages: %Schema{
+              type: :array,
+              items: %Schema{type: :object}
+            }
+          }
+        }
+      }
+    })
+
+    def response(), do: {"Too Many Requests", "application/json", __MODULE__}
   end
 end
