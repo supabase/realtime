@@ -3,6 +3,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
   import Mock
 
+  alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias RealtimeWeb.Endpoint
@@ -127,6 +128,70 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         {:ok, rate_counter} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert rate_counter.avg == 0.0
       end
+    end
+  end
+
+  describe "too many requests" do
+    setup %{conn: conn} do
+      start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
+      start_supervised(Realtime.RateCounter.DynamicSupervisor)
+      start_supervised(Realtime.GenCounter.DynamicSupervisor)
+
+      tenant = tenant_fixture(%{"max_events_per_second" => 1})
+      GenCounter.new(Tenants.events_per_second_key(tenant.external_id))
+
+      conn =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+
+      {:ok, conn: conn, tenant: tenant}
+    end
+
+    test "batch will exceed rate limit", %{conn: conn, tenant: tenant} do
+      conn =
+        post(conn, Routes.broadcast_path(conn, :broadcast), %{
+          "messages" =>
+            Stream.repeatedly(fn ->
+              %{
+                "topic" => Tenants.tenant_topic(tenant, "sub_topic"),
+                "payload" => %{"data" => "data"},
+                "event" => "event"
+              }
+            end)
+            |> Enum.take(10)
+        })
+
+      assert conn.status == 429
+
+      assert conn.resp_body ==
+               Jason.encode!(%{
+                 message: "Too many messages to broadcast, please reduce the batch size"
+               })
+    end
+
+    test "user has hit the rate limit", %{conn: conn, tenant: tenant} do
+      GenCounter.put(Tenants.events_per_second_key(tenant.external_id), 10)
+      Process.sleep(500)
+
+      conn =
+        post(conn, Routes.broadcast_path(conn, :broadcast), %{
+          "messages" => [
+            %{
+              "topic" => Tenants.tenant_topic(tenant, "sub_topic"),
+              "payload" => %{"data" => "data"},
+              "event" => "event"
+            }
+          ]
+        })
+
+      assert conn.status == 429
+
+      assert conn.resp_body ==
+               Jason.encode!(%{
+                 message: "You have exceeded your rate limit"
+               })
     end
   end
 
