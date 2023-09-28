@@ -5,10 +5,8 @@ defmodule Realtime.Tenants do
 
   require Logger
   alias Realtime.Repo.Replica
-  alias Realtime.Api.Tenant
   alias Realtime.Api
-  alias Realtime.UsersCounter
-  alias Realtime.PostgresCdc
+  alias Realtime.{Api.Tenant, PostgresCdc, UsersCounter}
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
