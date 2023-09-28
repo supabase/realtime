@@ -40,14 +40,14 @@ defmodule Realtime.Tenants do
   @spec get_manager_conn(:atom, %Tenant{}) ::
           {:error, nil} | {:error, :wait} | {:ok, pid(), pid()}
   def get_manager_conn(module, %Tenant{external_id: external_id}) do
-    case :syn.lookup(module, external_id) do
-      {_, %{manager: nil, subs_pool: nil}} ->
+    case module.get_manager_conn(external_id) do
+      :wait ->
         {:error, :wait}
 
-      {_, %{manager: manager, subs_pool: conn}} ->
+      {:ok, manager, conn} ->
         {:ok, manager, conn}
 
-      _ ->
+      nil ->
         {:error, nil}
     end
   end
