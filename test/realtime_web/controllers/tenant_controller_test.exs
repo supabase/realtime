@@ -1,4 +1,5 @@
 defmodule RealtimeWeb.TenantControllerTest do
+  alias Realtime.UsersCounter
   use RealtimeWeb.ConnCase
 
   import Mock
@@ -7,6 +8,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
+  alias Realtime.PostgresCdc
 
   @update_attrs %{
     jwt_secret: "some updated jwt_secret",
@@ -166,12 +168,49 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "healthy tenant with 0 client connections", %{
       conn: conn,
-      tenant: %Tenant{id: id, external_id: ext_id} = _tenant
+      tenant: %Tenant{external_id: ext_id}
     } do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
         assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
+      end
+    end
+
+    test "unhealthy tenant with 1 client connections", %{
+      conn: conn,
+      tenant: %Tenant{external_id: ext_id}
+    } do
+      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+        # Fake adding a connected client here
+        # No connection to the tenant database
+        UsersCounter.add(self(), ext_id)
+
+        conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
+        data = json_response(conn, 200)["data"]
+
+        assert %{"healthy" => false, "db_connected" => false, "connected_cluster" => 1} = data
+      end
+    end
+
+    test "healthy tenant with 1 client connection", %{
+      conn: conn,
+      tenant: %Tenant{external_id: ext_id} = tenant
+    } do
+      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+        # Fake adding a connected client here
+        UsersCounter.add(self(), ext_id)
+
+        # Fake a db connection
+        {:ok, mod} = PostgresCdc.driver(tenant.postgres_cdc_default)
+        :syn.add_node_to_scopes([mod])
+        :syn.register(mod, ext_id, self(), %{region: nil, manager: nil, subs_pool: nil})
+        mod.update_meta(ext_id, self(), self())
+
+        conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
+        data = json_response(conn, 200)["data"]
+
+        assert %{"healthy" => true, "db_connected" => true, "connected_cluster" => 1} = data
       end
     end
   end
