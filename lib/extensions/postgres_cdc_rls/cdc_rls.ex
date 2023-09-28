@@ -14,11 +14,11 @@ defmodule Extensions.PostgresCdcRls do
   @spec handle_connect(map()) :: {:ok, {pid(), pid()}} | nil
   def handle_connect(args) do
     case get_manager_conn(args["id"]) do
-      nil ->
+      {:error, nil} ->
         start_distributed(args)
         nil
 
-      :wait ->
+      {:error, :wait} ->
         nil
 
       {:ok, pid, conn} ->
@@ -115,18 +115,18 @@ defmodule Extensions.PostgresCdcRls do
     )
   end
 
-  @spec get_manager_conn(String.t()) :: nil | :wait | {:ok, pid(), pid()}
+  @spec get_manager_conn(String.t()) :: {:error, nil | :wait} | {:ok, pid(), pid()}
   def get_manager_conn(id) do
     :syn.lookup(__MODULE__, id)
     |> case do
       {_, %{manager: nil, subs_pool: nil}} ->
-        :wait
+        {:error, :wait}
 
       {_, %{manager: manager, subs_pool: conn}} ->
         {:ok, manager, conn}
 
       _ ->
-        nil
+        {:error, nil}
     end
   end
 

@@ -35,19 +35,9 @@ defmodule Realtime.Tenants do
       {:error, nil}
   """
 
-  @spec get_manager_conn(:atom, %Tenant{}) ::
-          {:error, nil} | {:error, :wait} | {:ok, pid(), pid()}
+  @spec get_manager_conn(:atom, %Tenant{}) :: {:error, :wait | nil} | {:ok, pid(), pid()}
   def get_manager_conn(module, %Tenant{external_id: external_id}) do
-    case module.get_manager_conn(external_id) do
-      :wait ->
-        {:error, :wait}
-
-      {:ok, manager, conn} ->
-        {:ok, manager, conn}
-
-      nil ->
-        {:error, nil}
-    end
+    module.get_manager_conn(external_id)
   end
 
   @doc """
