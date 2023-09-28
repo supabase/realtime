@@ -7,6 +7,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
   embedded_schema do
     embeds_many :messages, Message do
+      field(:event, :string)
       field(:topic, :string)
       field(:payload, :map)
     end
@@ -20,7 +21,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
   def message_changeset(message, attrs) do
     message
-    |> cast(attrs, [:topic, :payload])
-    |> validate_required([:topic, :payload])
+    |> cast(attrs, [:topic, :payload, :event])
+    |> validate_required([:topic, :payload, :event])
   end
 end

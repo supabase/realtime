@@ -2,6 +2,8 @@ defmodule RealtimeWeb.AuthTenant do
   @moduledoc """
   Authorization plug to ensure that only authorized clients can connect to the their tenant's endpoints.
   """
+  require Logger
+
   import Plug.Conn
   import Realtime.Helpers
 
@@ -17,6 +19,7 @@ defmodule RealtimeWeb.AuthTenant do
          token when is_binary(token) <- access_token(conn),
          jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
          {:ok, _claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec) do
+      Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
       conn
     else
       _ -> unauthorized(conn)
