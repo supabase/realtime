@@ -11,7 +11,7 @@ defmodule Extensions.PostgresCdcStream do
     Enum.reduce_while(1..5, nil, fn retry, acc ->
       get_manager_conn(opts["id"])
       |> case do
-        nil ->
+        {:error, nil} ->
           start_distributed(opts)
           if retry > 1, do: Process.sleep(1_000)
           {:cont, acc}
@@ -43,12 +43,12 @@ defmodule Extensions.PostgresCdcStream do
     end
   end
 
-  @spec get_manager_conn(String.t()) :: nil | {:ok, pid(), pid()}
+  @spec get_manager_conn(String.t()) :: {:error, nil} | {:ok, pid(), pid()}
   def get_manager_conn(id) do
     Phoenix.Tracker.get_by_key(Stream.Tracker, "postgres_cdc_stream", id)
     |> case do
       [] ->
-        nil
+        {:error, nil}
 
       [{_, %{manager_pid: pid, conn: conn}}] ->
         {:ok, pid, conn}

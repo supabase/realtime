@@ -6,6 +6,7 @@ defmodule RealtimeWeb.TenantController do
 
   alias Realtime.Api
   alias Realtime.Api.Tenant
+  alias Realtime.Tenants
   alias Realtime.PostgresCdc
   alias RealtimeWeb.{Endpoint, UserSocket}
 
@@ -14,7 +15,8 @@ defmodule RealtimeWeb.TenantController do
     NotFoundResponse,
     TenantResponse,
     TenantResponseList,
-    TenantParams
+    TenantParams,
+    TenantHealthResponse
   }
 
   @stop_timeout 10_000
@@ -222,6 +224,48 @@ defmodule RealtimeWeb.TenantController do
         conn
         |> put_status(404)
         |> render("not_found.json", tenant: nil)
+    end
+  end
+
+  operation(:health,
+    summary: "Tenant health",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ],
+      tenant_id: [in: :path, description: "Tenant ID", type: :string]
+    ],
+    responses: %{
+      200 => TenantHealthResponse.response(),
+      403 => EmptyResponse.response(),
+      404 => NotFoundResponse.response()
+    }
+  )
+
+  def health(conn, %{"tenant_id" => tenant_id}) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+
+    case Tenants.health_check(tenant_id) do
+      {:ok, response} ->
+        json(conn, %{data: response})
+
+      {:error, %{healthy: false} = response} ->
+        json(conn, %{data: response})
+
+      {:error, :tenant_not_found} ->
+        conn
+        |> put_status(404)
+        |> render("not_found.json", tenant: nil)
+
+      {:error, message} when is_binary(message) ->
+        conn
+        |> put_status(422)
+        |> json(%{errors: [message]})
     end
   end
 end

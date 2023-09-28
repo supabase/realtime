@@ -5,7 +5,8 @@ defmodule Realtime.Tenants do
 
   require Logger
   alias Realtime.Repo.Replica
-  alias Realtime.Api.Tenant
+  alias Realtime.Api
+  alias Realtime.{Api.Tenant, PostgresCdc, UsersCounter}
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
@@ -19,6 +20,66 @@ defmodule Realtime.Tenants do
   @spec list_connected_tenants(atom()) :: [String.t()]
   def list_connected_tenants(node) do
     :syn.group_names(:users, node)
+  end
+
+  @doc """
+  Gets the database connection pid of the SubscriptionManager `manager` and the
+  Postgrex connection pool `subs_pool`.
+
+  When this function returns `:wait` the  database connection tree is starting and the
+  caller should not try to start the database connection tree again.
+
+  ## Examples
+
+      iex> get_manager_conn(Extensions.PostgresCdcRls, "not_started_external_id")
+      {:error, nil}
+  """
+
+  @spec get_manager_conn(:atom, %Tenant{}) :: {:error, :wait | nil} | {:ok, pid(), pid()}
+  def get_manager_conn(module, %Tenant{external_id: external_id}) do
+    module.get_manager_conn(external_id)
+  end
+
+  @doc """
+  Checks if a tenant is healthy. A tenant is healthy if:
+  - Tenant has no db connection and zero client connetions
+  - Teantn has a db connection and >0 client connections
+
+  A tenant is not healthy if a tenant has client connections and no database connection.
+
+  ## Examples
+
+      iex> health_check("not_healthy_external_id")
+      {:error, %{healthy: false, db_connected: false, connected_cluster: 10}}
+  """
+
+  @spec health_check(binary) ::
+          {:error,
+           :tenant_not_found
+           | String.t()
+           | %{connected_cluster: pos_integer, db_connected: false, healthy: false}}
+          | {:ok, %{connected_cluster: non_neg_integer, db_connected: true, healthy: true}}
+  def health_check(external_id) when is_binary(external_id) do
+    with %Tenant{} = tenant <- Api.get_tenant_by_external_id(external_id),
+         {:ok, module} <- PostgresCdc.driver(tenant.postgres_cdc_default),
+         {:error, _} <- get_manager_conn(module, tenant),
+         connected_cluster when connected_cluster > 0 <- UsersCounter.tenant_users(external_id) do
+      {:error, %{healthy: false, db_connected: false, connected_cluster: connected_cluster}}
+    else
+      nil ->
+        {:error, :tenant_not_found}
+
+      {:error, _mod} ->
+        {:error, "Bad value for tenant field `postgres_cdc_default`"}
+
+      {:ok, _manager, _subs_pool} ->
+        connected_cluster = UsersCounter.tenant_users(external_id)
+
+        {:ok, %{healthy: true, db_connected: true, connected_cluster: connected_cluster}}
+
+      connected_cluster when is_integer(connected_cluster) ->
+        {:ok, %{healthy: true, db_connected: false, connected_cluster: connected_cluster}}
+    end
   end
 
   @doc """

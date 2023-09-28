@@ -204,6 +204,48 @@ defmodule RealtimeWeb.OpenApiSchemas do
     })
   end
 
+  defmodule TenantHealthResponseValue do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{
+        healthy: %Schema{type: :boolean, description: "Tenant is healthy or not"},
+        db_connected: %Schema{
+          type: :boolean,
+          description: "Indicates if Realtime has an active connection to the tenant database"
+        },
+        connected_cluster: %Schema{
+          type: :integer,
+          description:
+            "The count of currently connected clients for a tenant on the Realtime cluster"
+        }
+      },
+      required: [
+        :external_id,
+        :jwt_secret
+      ],
+      example: %{
+        healthy: true,
+        db_connected: true,
+        connected_cluser: 10
+      }
+    })
+  end
+
+  defmodule TenantHealthResponse do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{data: TenantHealthResponseValue}
+    })
+
+    def response(), do: {"Tenant Response", "application/json", __MODULE__}
+  end
+
   defmodule TenantResponse do
     @moduledoc false
     require OpenApiSpex
