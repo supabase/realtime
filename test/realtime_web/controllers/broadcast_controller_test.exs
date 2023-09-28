@@ -27,7 +27,12 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     end
 
     test "returns 202 when batch of messages is broadcasted", %{conn: conn, tenant: tenant} do
-      with_mock Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end do
+      events_key = Tenants.events_per_second_key(tenant)
+
+      with_mocks [
+        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
+        {GenCounter, [:passthrough], add: fn _ -> :ok end}
+      ] do
         sub_topic_1 = "sub_topic_1"
         sub_topic_2 = "sub_topic_2"
         topic_1 = Tenants.tenant_topic(tenant, sub_topic_1)
@@ -41,26 +46,17 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         conn =
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
             "messages" => [
-              %{
-                "topic" => sub_topic_1,
-                "payload" => payload_2,
-                "event" => event_1
-              },
-              %{
-                "topic" => sub_topic_2,
-                "payload" => payload_2,
-                "event" => event_2
-              }
+              %{"topic" => sub_topic_1, "payload" => payload_2, "event" => event_1},
+              %{"topic" => sub_topic_2, "payload" => payload_2, "event" => event_2}
             ]
           })
 
         assert_called(
-          Endpoint.broadcast_from(
-            :_,
-            topic_1,
-            "broadcast",
-            %{"payload" => Map.merge(payload_1, %{"event" => event_1})}
-          )
+          Endpoint.broadcast_from(:_, topic_1, "broadcast", %{
+            "payload" => payload_1,
+            "event" => event_1,
+            "type" => "broadcast"
+          })
         )
 
         assert_called(
@@ -68,19 +64,12 @@ defmodule RealtimeWeb.BroadcastControllerTest do
             :_,
             topic_2,
             "broadcast",
-            %{"payload" => Map.merge(payload_2, %{"event" => event_2})}
+            %{"payload" => payload_2, "event" => event_2, "type" => "broadcast"}
           )
         )
 
+        assert_called_exactly(GenCounter.add(events_key), 2)
         assert conn.status == 202
-
-        # Wait for counters to increment
-        :timer.sleep(1000)
-        {:ok, rate_counter} = RateCounter.get(Tenants.requests_per_second_key(tenant))
-        assert rate_counter.avg != 0.0
-
-        {:ok, rate_counter} = RateCounter.get(Tenants.events_per_second_key(tenant))
-        assert rate_counter.avg != 0.0
       end
     end
 
@@ -172,26 +161,35 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     end
 
     test "user has hit the rate limit", %{conn: conn, tenant: tenant} do
-      GenCounter.put(Tenants.events_per_second_key(tenant.external_id), 10)
-      Process.sleep(500)
+      events_key = Tenants.events_per_second_key(tenant)
+      requests_key = Tenants.requests_per_second_key(tenant)
 
-      conn =
-        post(conn, Routes.broadcast_path(conn, :broadcast), %{
-          "messages" => [
-            %{
-              "topic" => Tenants.tenant_topic(tenant, "sub_topic"),
-              "payload" => %{"data" => "data"},
-              "event" => "event"
-            }
-          ]
-        })
+      with_mocks [
+        {RateCounter, [], new: fn _, _ -> :ok end},
+        {RateCounter, [],
+         get: fn
+           ^requests_key -> {:ok, %RateCounter{avg: 0}}
+           ^events_key -> {:ok, %RateCounter{avg: 10}}
+         end}
+      ] do
+        conn =
+          post(conn, Routes.broadcast_path(conn, :broadcast), %{
+            "messages" => [
+              %{
+                "topic" => Tenants.tenant_topic(tenant, "sub_topic"),
+                "payload" => %{"data" => "data"},
+                "event" => "event"
+              }
+            ]
+          })
 
-      assert conn.status == 429
+        assert conn.status == 429
 
-      assert conn.resp_body ==
-               Jason.encode!(%{
-                 message: "You have exceeded your rate limit"
-               })
+        assert conn.resp_body ==
+                 Jason.encode!(%{
+                   message: "You have exceeded your rate limit"
+                 })
+      end
     end
   end
 

@@ -43,5 +43,5 @@ config :realtime,
 config :joken,
   current_time_adapter: RealtimeWeb.Joken.CurrentTime.Mock
 
-# Print only warnings and errors during test
-config :logger, level: :warn
+# Print only errors during test
+config :logger, level: :error

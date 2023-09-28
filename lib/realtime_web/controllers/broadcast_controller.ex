@@ -45,7 +45,7 @@ defmodule RealtimeWeb.BroadcastController do
          :ok <- check_rate_limit(events_per_second_key, tenant, length(messages)) do
       for %{changes: %{topic: sub_topic, payload: payload, event: event}} <- messages do
         tenant_topic = Tenants.tenant_topic(tenant, sub_topic)
-        payload = %{"payload" => Map.merge(payload, %{"event" => event})}
+        payload = %{"payload" => payload, "event" => event, "type" => "broadcast"}
 
         Endpoint.broadcast_from(self(), tenant_topic, "broadcast", payload)
 
