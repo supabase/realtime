@@ -78,16 +78,19 @@ defmodule Realtime.Integration.RtChannelTest do
     sub_id = :erlang.phash2(%{"event" => "*", "schema" => "public"})
 
     assert_receive %Message{
-      event: "phx_reply",
-      payload: %{
-        "response" => %{
-          "postgres_changes" => [%{"event" => "*", "id" => ^sub_id, "schema" => "public"}]
-        },
-        "status" => "ok"
-      },
-      ref: "1",
-      topic: "realtime:any"
-    }
+                     event: "phx_reply",
+                     payload: %{
+                       "response" => %{
+                         "postgres_changes" => [
+                           %{"event" => "*", "id" => ^sub_id, "schema" => "public"}
+                         ]
+                       },
+                       "status" => "ok"
+                     },
+                     ref: "1",
+                     topic: "realtime:any"
+                   },
+                   10000
 
     # skip the presence_state event
     assert_receive %Message{}

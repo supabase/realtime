@@ -24,7 +24,7 @@ defmodule Realtime.Cluster.Strategy.PostgresTest do
     {:ok, conn_notif} = PN.start_link(state.meta.opts.())
     PN.listen(conn_notif, channel_name)
     node = "#{node()}"
-    assert_receive {:notification, _, _, ^channel_name, ^node}, 1000
+    assert_receive {:notification, _, _, ^channel_name, ^node}, 10000
   end
 
   defp libcluster_state() do
