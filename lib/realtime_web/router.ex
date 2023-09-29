@@ -19,6 +19,10 @@ defmodule RealtimeWeb.Router do
     plug(:check_auth, :api_jwt_secret)
   end
 
+  pipeline :open_cors do
+    plug(Corsica, origins: "*")
+  end
+
   pipeline :tenant_api do
     plug(:accepts, ["json"])
     plug(RealtimeWeb.Plugs.AssignTenant)
@@ -93,7 +97,7 @@ defmodule RealtimeWeb.Router do
   end
 
   scope "/api", RealtimeWeb do
-    pipe_through([:tenant_api, :secure_tenant_api])
+    pipe_through([:open_cors, :tenant_api, :secure_tenant_api])
 
     post("/broadcast", BroadcastController, :broadcast)
   end
