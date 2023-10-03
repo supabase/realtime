@@ -141,6 +141,19 @@ defmodule RealtimeWeb.OpenApiSchemas do
           type: :number,
           description: "Maximum connected concurrent clients"
         },
+        max_channels_per_client: %Schema{
+          type: :number,
+          description: "Maximum channels per connected client"
+        },
+        max_events_per_second: %Schema{
+          type: :number,
+          description:
+            "Maximum number of events, or messages, that all connected clients are permitted to send"
+        },
+        max_joins_per_second: %Schema{
+          type: :number,
+          description: "Maximum number of channel joins permitted for all connected clients"
+        },
         inserted_at: %Schema{type: :string, format: "date-time", description: "Insert timestamp"},
         extensions: %Schema{
           type: :array,
@@ -177,6 +190,9 @@ defmodule RealtimeWeb.OpenApiSchemas do
         external_id: "tenant-1",
         name: "First Tenant",
         max_concurrent_users: 1000,
+        max_channels_per_client: 100,
+        max_events_per_second: 100,
+        max_joins_per_second: 100,
         inserted_at: "2023-01-01T00:00:00Z",
         extensions: [
           %{

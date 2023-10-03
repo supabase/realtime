@@ -17,11 +17,14 @@ defmodule RealtimeWeb.TenantView do
   def render("tenant.json", %{tenant: tenant}) do
     %{
       id: tenant.id,
+      external_id: tenant.external_id,
       name: tenant.name,
       max_concurrent_users: tenant.max_concurrent_users,
-      external_id: tenant.external_id,
-      extensions: tenant.extensions,
-      inserted_at: tenant.inserted_at
+      max_channels_per_client: tenant.max_channels_per_client,
+      max_events_per_second: tenant.max_events_per_second,
+      max_joins_per_second: tenant.max_joins_per_second,
+      inserted_at: tenant.inserted_at,
+      extensions: tenant.extensions
     }
   end
 end

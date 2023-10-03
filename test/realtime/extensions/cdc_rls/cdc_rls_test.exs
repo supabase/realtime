@@ -30,7 +30,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       limits: %{
         max_concurrent_users: 1,
         max_events_per_second: 100,
-        max_joins_per_second: 500,
+        max_joins_per_second: 100,
         max_channels_per_client: 100,
         max_bytes_per_second: 100_000
       },

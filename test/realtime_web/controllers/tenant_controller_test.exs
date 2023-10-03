@@ -13,7 +13,10 @@ defmodule RealtimeWeb.TenantControllerTest do
   @update_attrs %{
     jwt_secret: "some updated jwt_secret",
     name: "some updated name",
-    max_concurrent_users: 200
+    max_concurrent_users: 300,
+    max_channels_per_client: 150,
+    max_events_per_second: 250,
+    max_joins_per_second: 50
   }
 
   @default_tenant_attrs %{
@@ -64,6 +67,9 @@ defmodule RealtimeWeb.TenantControllerTest do
         conn = get(conn, Routes.tenant_path(conn, :show, ext_id))
         assert ^ext_id = json_response(conn, 200)["data"]["external_id"]
         assert 200 = json_response(conn, 200)["data"]["max_concurrent_users"]
+        assert 100 = json_response(conn, 200)["data"]["max_channels_per_client"]
+        assert 100 = json_response(conn, 200)["data"]["max_events_per_second"]
+        assert 100 = json_response(conn, 200)["data"]["max_joins_per_second"]
       end
     end
 
@@ -100,7 +106,10 @@ defmodule RealtimeWeb.TenantControllerTest do
         assert %{"id" => ^id, "external_id" => ^ext_id} = json_response(conn, 200)["data"]
         conn = get(conn, Routes.tenant_path(conn, :show, ext_id))
         assert "some updated name" = json_response(conn, 200)["data"]["name"]
-        assert 200 = json_response(conn, 200)["data"]["max_concurrent_users"]
+        assert 300 = json_response(conn, 200)["data"]["max_concurrent_users"]
+        assert 150 = json_response(conn, 200)["data"]["max_channels_per_client"]
+        assert 250 = json_response(conn, 200)["data"]["max_events_per_second"]
+        assert 50 = json_response(conn, 200)["data"]["max_joins_per_second"]
       end
     end
 
