@@ -25,7 +25,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   ]
 
   setup do
-    {:ok, _pid} = start_supervised(CurrentTime.Mock)
+    start_supervised!(CurrentTime.Mock)
     :ok
   end
 

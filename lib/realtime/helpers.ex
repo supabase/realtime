@@ -224,8 +224,8 @@ defmodule Realtime.Helpers do
     Enum.reduce(:syn.group_names(:users), 0, fn tenant, acc ->
       case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
         {pid, %{region: region}} ->
-          platform_region = Realtime.PostgresCdc.platform_region_translator(region)
-          launch_node = Realtime.PostgresCdc.launch_node(tenant, platform_region, false)
+          platform_region = Realtime.Nodes.platform_region_translator(region)
+          launch_node = Realtime.Nodes.launch_node(tenant, platform_region, false)
           current_node = node(pid)
 
           case launch_node do

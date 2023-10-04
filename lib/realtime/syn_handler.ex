@@ -15,7 +15,7 @@ defmodule Realtime.SynHandler do
   end
 
   def resolve_registry_conflict(mod, name, {pid1, %{region: region}, time1}, {pid2, _, time2}) do
-    platform_region = Realtime.PostgresCdc.platform_region_translator(region)
+    platform_region = Realtime.Nodes.platform_region_translator(region)
 
     platform_region_nodes =
       RegionNodes

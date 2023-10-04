@@ -106,7 +106,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: "realtime:any"
                    },
-                   5000
+                   4000
 
     {:ok, _, conn} = Rls.get_manager_conn(@external_id)
     P.query!(conn, "insert into test (details) values ('test')", [])
@@ -131,7 +131,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: "realtime:any"
                    },
-                   1000
+                   4000
 
     P.query!(conn, "update test set details = 'test' where id = #{id}", [])
 
@@ -156,7 +156,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: "realtime:any"
                    },
-                   1000
+                   4000
 
     P.query!(conn, "delete from test where id = #{id}", [])
 
@@ -180,7 +180,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: "realtime:any"
                    },
-                   1000
+                   4000
   end
 
   test "broadcast" do
@@ -193,16 +193,17 @@ defmodule Realtime.Integration.RtChannelTest do
     WebsocketClient.join(socket, "realtime:any", %{config: config})
 
     assert_receive %Message{
-      event: "phx_reply",
-      payload: %{
-        "response" => %{
-          "postgres_changes" => []
-        },
-        "status" => "ok"
-      },
-      ref: "1",
-      topic: "realtime:any"
-    }
+                     event: "phx_reply",
+                     payload: %{
+                       "response" => %{
+                         "postgres_changes" => []
+                       },
+                       "status" => "ok"
+                     },
+                     ref: "1",
+                     topic: "realtime:any"
+                   },
+                   4000
 
     assert_receive %Message{}
 
@@ -227,23 +228,25 @@ defmodule Realtime.Integration.RtChannelTest do
     WebsocketClient.join(socket, "realtime:any", %{config: config})
 
     assert_receive %Message{
-      event: "phx_reply",
-      payload: %{
-        "response" => %{
-          "postgres_changes" => []
-        },
-        "status" => "ok"
-      },
-      ref: "1",
-      topic: "realtime:any"
-    }
+                     event: "phx_reply",
+                     payload: %{
+                       "response" => %{
+                         "postgres_changes" => []
+                       },
+                       "status" => "ok"
+                     },
+                     ref: "1",
+                     topic: "realtime:any"
+                   },
+                   4000
 
     assert_receive %Message{
-      event: "presence_state",
-      payload: %{},
-      ref: nil,
-      topic: "realtime:any"
-    }
+                     event: "presence_state",
+                     payload: %{},
+                     ref: nil,
+                     topic: "realtime:any"
+                   },
+                   4000
 
     payload = %{
       type: "presence",

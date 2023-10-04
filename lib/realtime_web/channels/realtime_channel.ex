@@ -17,6 +17,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.RateCounter
   alias Realtime.SignalHandler
   alias Realtime.Tenants
+  alias Realtime.Tenants.Check
 
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.Endpoint
@@ -44,7 +45,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     start_db_rate_counter(tenant)
 
     with false <- SignalHandler.shutdown_in_progress?(),
-         %{extensions: extensions} <- Tenants.get_tenant_by_external_id(tenant),
+         :ok <- Check.connection_status(tenant),
          :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket),
