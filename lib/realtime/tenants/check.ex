@@ -13,8 +13,10 @@ defmodule Realtime.Tenants.Check do
 
         case :rpc.call(node, __MODULE__, :set_status, [tenant_id]) do
           :ok ->
-            {_, res} = get_status(tenant_id)
-            res
+            case get_status(tenant_id) do
+              {_, %{healthy?: true}} -> :ok
+              {_, res} -> res
+            end
 
           error ->
             error

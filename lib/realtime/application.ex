@@ -42,11 +42,6 @@ defmodule Realtime.Application do
       name: Realtime.Registry.Unique
     )
 
-    Registry.start_link(
-      keys: :unique,
-      name: Realtime.Registry.Tenant
-    )
-
     :syn.add_node_to_scopes([:users, RegionNodes])
     region = Application.get_env(:realtime, :region)
     :syn.join(RegionNodes, region, self(), node: node())

@@ -397,7 +397,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         {:error, :too_many_joins}
 
       other ->
-        Logger.error("Unexpected error for " <> tenant <> ": " <> inspect(other))
+        Logger.error("Unexpected error: " <> inspect(other))
+
         {:error, other}
     end
   end

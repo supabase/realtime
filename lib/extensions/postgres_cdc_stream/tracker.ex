@@ -28,8 +28,8 @@ defmodule Extensions.PostgresCdcStream.Tracker do
     for {_topic, {_joins, leaves}} <- diff do
       for {id, _meta} <- leaves do
         Endpoint.local_broadcast(
-          "postgres_cdc_rls:" <> id,
-          "postgres_cdc_rls_down",
+          "postgres_cdc:" <> id,
+          "postgres_cdc_down",
           nil
         )
       end

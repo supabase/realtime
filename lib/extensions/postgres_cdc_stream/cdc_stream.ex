@@ -8,8 +8,9 @@ defmodule Extensions.PostgresCdcStream do
 
   def handle_connect(opts) do
     Enum.reduce_while(1..5, nil, fn retry, acc ->
-      case get_manager_conn(opts["id"]) do
-        nil ->
+      get_manager_conn(opts["id"])
+      |> case do
+        {:error, nil} ->
           start_distributed(opts)
           if retry > 1, do: Process.sleep(1_000)
           {:cont, acc}
@@ -20,12 +21,13 @@ defmodule Extensions.PostgresCdcStream do
     end)
   end
 
-  def handle_after_connect(_, _, _), do: {:ok, nil}
+  def handle_after_connect(_, _, _) do
+    {:ok, nil}
+  end
 
   def handle_subscribe(pg_change_params, tenant, metadata) do
     Enum.each(pg_change_params, fn e ->
-      tenant
-      |> topic(e.params)
+      topic(tenant, e.params)
       |> RealtimeWeb.Endpoint.subscribe(metadata)
     end)
   end
@@ -40,10 +42,11 @@ defmodule Extensions.PostgresCdcStream do
     end
   end
 
-  @spec get_manager_conn(String.t()) :: nil | {:ok, pid(), pid()}
+  @spec get_manager_conn(String.t()) :: {:error, nil} | {:ok, pid(), pid()}
   def get_manager_conn(id) do
-    case Phoenix.Tracker.get_by_key(Stream.Tracker, "postgres_cdc_rls_stream", id) do
-      [] -> nil
+    Phoenix.Tracker.get_by_key(Stream.Tracker, "postgres_cdc_stream", id)
+    |> case do
+      [] -> {:error, nil}
       [{_, %{manager_pid: pid, conn: conn}}] -> {:ok, pid, conn}
     end
   end
@@ -74,23 +77,27 @@ defmodule Extensions.PostgresCdcStream do
   def start(args) do
     addrtype =
       case args["ip_version"] do
-        6 -> :inet6
-        _ -> :inet
+        6 ->
+          :inet6
+
+        _ ->
+          :inet
       end
 
-    args = Map.merge(args, %{"db_socket_opts" => [addrtype]})
+    args =
+      Map.merge(args, %{
+        "db_socket_opts" => [addrtype]
+      })
 
     Logger.debug("Starting postgres stream extension with args: #{inspect(args, pretty: true)}")
 
-    opts = %{
-      id: args["id"],
-      start: {Stream.WorkerSupervisor, :start_link, [args]},
-      restart: :transient
-    }
-
     DynamicSupervisor.start_child(
       {:via, PartitionSupervisor, {Stream.DynamicSupervisor, self()}},
-      opts
+      %{
+        id: args["id"],
+        start: {Stream.WorkerSupervisor, :start_link, [args]},
+        restart: :transient
+      }
     )
   end
 
@@ -102,7 +109,7 @@ defmodule Extensions.PostgresCdcStream do
     Phoenix.Tracker.track(
       Stream.Tracker,
       self(),
-      "postgres_cdc_rls_stream",
+      "postgres_cdc_stream",
       id,
       %{
         conn: conn,
