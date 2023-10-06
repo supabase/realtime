@@ -1,6 +1,6 @@
 defmodule Realtime.UsersCounter do
   @moduledoc """
-  Counts of connected clients for a tenant across the whole cluser or for a single node.
+  Counts of connected clients for a tenant across the whole cluster or for a single node.
   """
   require Logger
 

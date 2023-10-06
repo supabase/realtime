@@ -245,7 +245,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       example: %{
         healthy: true,
         db_connected: true,
-        connected_cluser: 10
+        connected_cluster: 10
       }
     })
   end
