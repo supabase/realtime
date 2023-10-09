@@ -63,7 +63,7 @@ defmodule Realtime.Application do
         {Task.Supervisor, name: Realtime.TaskSupervisor},
         Realtime.Latency,
         Realtime.Telemetry.Logger,
-        Realtime.Tenants.Check
+        Realtime.Tenants.Connect
       ] ++ extensions_supervisors()
 
     children =
