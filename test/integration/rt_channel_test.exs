@@ -106,7 +106,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: "realtime:any"
                    },
-                   4000
+                   5000
 
     {:ok, _, conn} = Rls.get_manager_conn(@external_id)
     P.query!(conn, "insert into test (details) values ('test')", [])

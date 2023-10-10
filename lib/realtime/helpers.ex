@@ -3,6 +3,11 @@ defmodule Realtime.Helpers do
   This module includes helper functions for different contexts that can't be union in one module.
   """
 
+  alias Realtime.Api.Tenant
+  alias Realtime.PostgresCdc
+
+  require Logger
+
   @spec cancel_timer(reference() | nil) :: non_neg_integer() | false | :ok | nil
   def cancel_timer(nil), do: nil
   def cancel_timer(ref), do: Process.cancel_timer(ref)
@@ -89,6 +94,51 @@ defmodule Realtime.Helpers do
     ]
     |> maybe_enforce_ssl_config(ssl_enforced)
     |> Postgrex.start_link()
+  end
+
+  @cdc "postgres_cdc_rls"
+  @doc """
+  Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
+  """
+  @spec check_tenant_connection(Tenant.t()) :: {:error, atom()} | {:ok, pid()}
+  def check_tenant_connection(nil), do: {:error, :tenant_not_found}
+
+  def check_tenant_connection(tenant) do
+    tenant
+    |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
+    |> then(fn settings ->
+      ssl_enforced = default_ssl_param(settings)
+
+      host = settings["db_host"]
+      port = settings["db_port"]
+      name = settings["db_name"]
+      user = settings["db_user"]
+      password = settings["db_password"]
+      socket_opts = settings["db_socket_opts"]
+
+      opts = %{
+        host: host,
+        port: port,
+        name: name,
+        user: user,
+        pass: password,
+        socket_opts: socket_opts,
+        pool: 1,
+        queue_target: 1000,
+        ssl_enforced: ssl_enforced
+      }
+
+      with {:ok, conn} <- connect_db(opts) do
+        case Postgrex.query(conn, "SELECT 1", []) do
+          {:ok, _} ->
+            {:ok, conn}
+
+          {:error, e} ->
+            Logger.error("Error connecting to tenant database: #{inspect(e)}")
+            {:error, :tenant_database_unavailable}
+        end
+      end
+    end)
   end
 
   @spec default_ssl_param(map) :: boolean

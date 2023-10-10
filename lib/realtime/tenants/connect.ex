@@ -7,10 +7,7 @@ defmodule Realtime.Tenants.Connect do
   require Logger
 
   alias Realtime.Helpers
-  alias Realtime.PostgresCdc
   alias Realtime.Tenants
-
-  @cdc "postgres_cdc_rls"
 
   @spec connection_status(binary()) :: {:ok, DBConnection.t()} | {:error, term()}
   def connection_status(tenant_id) do
@@ -44,8 +41,11 @@ defmodule Realtime.Tenants.Connect do
   end
 
   def handle_cast({:set_status, tenant_id}, state) do
-    res = check_tenant_connection(tenant_id)
-    :ok = update_syn_with_conn_check(res, tenant_id)
+    with tenant when not is_nil(tenant) <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
+         res <- Helpers.check_tenant_connection(tenant) do
+      update_syn_with_conn_check(res, tenant_id)
+    end
+
     {:noreply, state}
   end
 
@@ -81,50 +81,6 @@ defmodule Realtime.Tenants.Connect do
       {:error, error} ->
         Logger.error("Error connecting to tenant database: #{inspect(error)}")
         :ok
-    end
-  end
-
-  defp check_tenant_connection(tenant_id) do
-    tenant = Realtime.Tenants.get_tenant_by_external_id(tenant_id)
-
-    if is_nil(tenant) do
-      {:error, :tenant_not_found}
-    else
-      tenant
-      |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
-      |> then(fn settings ->
-        ssl_enforced = Helpers.default_ssl_param(settings)
-
-        host = settings["db_host"]
-        port = settings["db_port"]
-        name = settings["db_name"]
-        user = settings["db_user"]
-        password = settings["db_password"]
-        socket_opts = settings["db_socket_opts"]
-
-        opts = %{
-          host: host,
-          port: port,
-          name: name,
-          user: user,
-          pass: password,
-          socket_opts: socket_opts,
-          pool: 1,
-          queue_target: 1000,
-          ssl_enforced: ssl_enforced
-        }
-
-        with {:ok, conn} <- Helpers.connect_db(opts) do
-          case Postgrex.query(conn, "SELECT 1", []) do
-            {:ok, _} ->
-              {:ok, conn}
-
-            {:error, e} ->
-              Logger.error("Error connecting to tenant database: #{inspect(e)}")
-              {:error, :tenant_database_unavailable}
-          end
-        end
-      end)
     end
   end
 end
