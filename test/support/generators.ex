@@ -11,15 +11,16 @@ defmodule Generators do
         %{
           "type" => "postgres_cdc_rls",
           "settings" => %{
-            "db_host" => "127.0.0.1",
+            "db_host" => "localhost",
             "db_name" => "postgres",
             "db_user" => "postgres",
             "db_password" => "postgres",
-            "db_port" => "6432",
+            "db_port" => "5432",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
-            "region" => "us-east-1"
+            "region" => "us-east-1",
+            "ssl_enforced" => false
           }
         }
       ],
