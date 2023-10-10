@@ -54,12 +54,12 @@ defmodule Realtime.Tenants.Connect do
   defp call_external_node(tenant_id) do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant),
-         :ok <- :erpc.call(node, __MODULE__, :set_status, [tenant_id], 1000) do
+         :ok <- :erpc.call(node, __MODULE__, :set_status, [tenant_id], 2000) do
       get_status(tenant_id)
     end
   end
 
-  defp set_status_backoff(tenant_id, times \\ 3, backoff \\ 500)
+  defp set_status_backoff(tenant_id, times \\ 3, backoff \\ 300)
   defp set_status_backoff(_, 0, _), do: {:error, :tenant_database_unavailable}
 
   defp set_status_backoff(tenant_id, times, backoff) do
