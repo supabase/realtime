@@ -1,4 +1,7 @@
 defmodule Realtime.Tenants.Connect do
+  @moduledoc """
+  This module is responsible for attempting to connect to a tenant's database and store the DBConnection in a Syn registry.
+  """
   use GenServer
 
   require Logger
@@ -46,15 +49,17 @@ defmodule Realtime.Tenants.Connect do
     {:noreply, state}
   end
 
+  ## Private functions
+
   defp call_external_node(tenant_id) do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant),
-         :ok <- :rpc.call(node, __MODULE__, :set_status, [tenant_id]) do
+         :ok <- :erpc.call(node, __MODULE__, :set_status, [tenant_id], 1000) do
       get_status(tenant_id)
     end
   end
 
-  defp set_status_backoff(tenant_id, times \\ 5, backoff \\ 500)
+  defp set_status_backoff(tenant_id, times \\ 3, backoff \\ 500)
   defp set_status_backoff(_, 0, _), do: {:error, :tenant_database_unavailable}
 
   defp set_status_backoff(tenant_id, times, backoff) do
@@ -70,8 +75,12 @@ defmodule Realtime.Tenants.Connect do
 
   defp update_syn_with_conn_check(res, tenant_id) do
     case res do
-      {:ok, conn} -> :syn.register(__MODULE__, tenant_id, self(), %{conn: conn})
-      {:error, _} -> :syn.register(__MODULE__, tenant_id, self(), %{conn: nil})
+      {:ok, conn} ->
+        :syn.register(__MODULE__, tenant_id, self(), %{conn: conn})
+
+      {:error, error} ->
+        Logger.error("Error connecting to tenant database: #{inspect(error)}")
+        :ok
     end
   end
 
