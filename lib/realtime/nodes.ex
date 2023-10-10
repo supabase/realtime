@@ -4,17 +4,30 @@ defmodule Realtime.Nodes do
   """
   require Logger
   alias Realtime.Tenants
+  alias Realtime.Api.Tenant
+
+  @doc """
+  Gets the node to launch the Postgres connection on for a tenant id.
+  """
+  @spec get_node_for_tenant_id(String.t()) :: node()
+  def get_node_for_tenant_id(tenant_id) do
+    with tenant when not is_nil(tenant) <- Tenants.get_tenant_by_external_id(tenant_id),
+         {:ok, node} <- get_node_for_tenant(tenant) do
+      node
+    end
+  end
 
   @doc """
   Gets the node to launch the Postgres connection on for a tenant.
   """
-  @spec get_node_for_tenant_id(String.t()) :: node()
-  def get_node_for_tenant_id(tenant_id) do
-    with %{extensions: extensions} <- Tenants.get_tenant_by_external_id(tenant_id),
-         region <- get_region(extensions),
+  @spec get_node_for_tenant(Tenant.t()) :: {:ok, node()} | {:error, term()}
+  def get_node_for_tenant(nil), do: {:error, :tenant_not_found}
+
+  def get_node_for_tenant(%Tenant{extensions: extensions, external_id: tenant_id}) do
+    with region <- get_region(extensions),
          tenant_region <- platform_region_translator(region),
          node <- launch_node(tenant_id, tenant_region, node()) do
-      node
+      {:ok, node}
     end
   end
 

@@ -5,26 +5,16 @@ defmodule Realtime.Tenants.Connect do
 
   alias Realtime.Helpers
   alias Realtime.PostgresCdc
+  alias Realtime.Tenants
 
   @cdc "postgres_cdc_rls"
 
   @spec connection_status(binary()) :: {:ok, DBConnection.t()} | {:error, term()}
   def connection_status(tenant_id) do
     case get_status(tenant_id) do
-      :undefined ->
-        :ok
-        node = Realtime.Nodes.get_node_for_tenant_id(tenant_id)
-
-        case :rpc.call(node, __MODULE__, :set_status, [tenant_id]) do
-          :ok -> get_status(tenant_id)
-          error -> error
-        end
-
-      {:ok, conn} ->
-        {:ok, conn}
-
-      _ ->
-        {:error, :tenant_database_unavailable}
+      :undefined -> call_external_node(tenant_id)
+      {:ok, conn} -> {:ok, conn}
+      _ -> {:error, :tenant_database_unavailable}
     end
   end
 
@@ -40,12 +30,11 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
-  end
+  def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
 
   def init(state), do: {:ok, state, {:continue, :setup_syn}}
 
+  ## GenServer callbacks
   def handle_continue(:setup_syn, state) do
     :ok = :syn.add_node_to_scopes([__MODULE__])
     {:noreply, state}
@@ -55,6 +44,14 @@ defmodule Realtime.Tenants.Connect do
     res = check_tenant_connection(tenant_id)
     :ok = update_syn_with_conn_check(res, tenant_id)
     {:noreply, state}
+  end
+
+  defp call_external_node(tenant_id) do
+    with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
+         {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant),
+         :ok <- :rpc.call(node, __MODULE__, :set_status, [tenant_id]) do
+      get_status(tenant_id)
+    end
   end
 
   defp set_status_backoff(tenant_id, times \\ 5, backoff \\ 500)
