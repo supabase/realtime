@@ -32,8 +32,8 @@ defmodule Realtime.Tenants.Connect do
     spec = {__MODULE__, tenant_id: tenant_id}
 
     case DynamicSupervisor.start_child(supervisor, spec) do
-      {:ok, pid} -> GenServer.call(pid, :get_status)
-      {:error, {:already_started, pid}} -> GenServer.call(pid, :get_status)
+      {:ok, _} -> get_status(tenant_id)
+      {:error, {:already_started, _}} -> get_status(tenant_id)
       _ -> {:error, :tenant_database_unavailable}
     end
   end
@@ -64,10 +64,6 @@ defmodule Realtime.Tenants.Connect do
   end
 
   @impl GenServer
-  def handle_call(:get_status, _, %{tenant_id: tenant_id} = state),
-    do: {:reply, get_status(tenant_id), state}
-
-  @impl GenServer
   def handle_info(
         {:DOWN, db_conn_reference, _, _, _},
         %{db_conn_reference: db_conn_reference} = state
@@ -87,9 +83,8 @@ defmodule Realtime.Tenants.Connect do
 
   defp call_external_node(tenant_id) do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
-         {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant),
-         :ok <- :erpc.call(node, __MODULE__, :connect, [tenant_id], 5000) do
-      get_status(tenant_id)
+         {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
+      :erpc.call(node, __MODULE__, :connect, [tenant_id], 5000)
     end
   end
 end
