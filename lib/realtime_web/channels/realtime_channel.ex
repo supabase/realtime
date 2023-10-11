@@ -45,7 +45,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     start_db_rate_counter(tenant)
 
     with false <- SignalHandler.shutdown_in_progress?(),
-         {:ok, _} <- Connect.connection_status(tenant),
+         {:ok, _} <- Connect.lookup_or_start_connection(tenant),
          :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket),
