@@ -122,11 +122,9 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   describe "checks tenant db connectivity" do
     setup_with_mocks([
       {ChannelsAuthorization, [],
-       [
-         authorize_conn: fn _, _ ->
-           {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
-         end
-       ]}
+       authorize_conn: fn _, _ ->
+         {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
+       end}
     ]) do
       :ok
     end
@@ -137,7 +135,25 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
 
     test "unsuccessful connection halts join" do
-      tenant = tenant_fixture()
+      extensions = [
+        %{
+          "type" => "postgres_cdc_rls",
+          "settings" => %{
+            "db_host" => "127.0.0.1",
+            "db_name" => "false",
+            "db_user" => "false",
+            "db_password" => "false",
+            "db_port" => "5432",
+            "poll_interval" => 100,
+            "poll_max_changes" => 100,
+            "poll_max_record_bytes" => 1_048_576,
+            "region" => "us-east-1",
+            "ssl_enforced" => false
+          }
+        }
+      ]
+
+      tenant = tenant_fixture(%{"extensions" => extensions})
 
       conn_opts = [
         connect_info: %{
