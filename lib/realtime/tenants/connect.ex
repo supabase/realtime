@@ -9,8 +9,11 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Helpers
   alias Realtime.Tenants
 
-  defstruct reference_tenant_id_mapping: %{}
+  defstruct tenant_id: nil, db_conn_reference: nil
 
+  @doc """
+  Returns the database connection for a tenant. If the tenant is not connected, it will attempt to connect to the tenant's database.
+  """
   @spec connection_status(binary()) :: {:ok, DBConnection.t()} | {:error, term()}
   def connection_status(tenant_id) do
     case get_status(tenant_id) do
@@ -20,48 +23,57 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  def set_status(tenant_id) do
-    :ok = GenServer.cast(__MODULE__, {:set_status, tenant_id})
-    set_status_backoff(tenant_id)
+  @doc """
+  Connects to a tenant's database and stores the DBConnection in the process :syn metadata
+  """
+  @spec connect(binary()) :: {:ok, DBConnection.t()} | {:error, term()}
+  def connect(tenant_id) do
+    supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, self()}}
+    spec = {__MODULE__, tenant_id: tenant_id}
+
+    case DynamicSupervisor.start_child(supervisor, spec) do
+      {:ok, pid} -> GenServer.call(pid, :get_status)
+      {:error, {:already_started, pid}} -> GenServer.call(pid, :get_status)
+      _ -> {:error, :tenant_database_unavailable}
+    end
   end
 
-  def start_link(_opts), do: GenServer.start_link(__MODULE__, %__MODULE__{}, name: __MODULE__)
-
-  def init(state), do: {:ok, state, {:continue, :setup_syn}}
+  def start_link(tenant_id: tenant_id) do
+    name = {__MODULE__, tenant_id, %{conn: nil}}
+    GenServer.start_link(__MODULE__, %__MODULE__{tenant_id: tenant_id}, name: {:via, :syn, name})
+  end
 
   ## GenServer callbacks
-
-  def handle_continue(:setup_syn, state) do
-    :ok = :syn.add_node_to_scopes([__MODULE__])
-    {:noreply, state}
-  end
-
-  def handle_cast({:set_status, tenant_id}, state) do
+  # Needs to be done on init/1 to guarantee the GenServer only starts if we are able to connect to the database
+  @impl GenServer
+  def init(%{tenant_id: tenant_id} = state) do
     with tenant when not is_nil(tenant) <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          res <- Helpers.check_tenant_connection(tenant) do
       case res do
         {:ok, conn} ->
-          ref = Process.monitor(conn)
+          :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
+          state = %{state | db_conn_reference: Process.monitor(conn)}
 
-          state =
-            Map.update(state, :reference_tenant_id_mapping, %{}, fn map ->
-              Map.put(map, ref, tenant_id)
-            end)
-
-          :syn.register(__MODULE__, tenant_id, self(), %{conn: conn})
-          {:noreply, state}
+          {:ok, state}
 
         {:error, error} ->
           Logger.error("Error connecting to tenant database: #{inspect(error)}")
-          {:noreply, state}
+          {:stop, :normal, state}
       end
     end
   end
 
-  def handle_info({:DOWN, ref, _, _, _}, state) do
-    tenant_id = state |> Map.from_struct() |> get_in([:reference_tenant_id_mapping, ref])
-    :syn.unregister(__MODULE__, tenant_id)
-    {:noreply, state}
+  @impl GenServer
+  def handle_call(:get_status, _, %{tenant_id: tenant_id} = state),
+    do: {:reply, get_status(tenant_id), state}
+
+  @impl GenServer
+  def handle_info(
+        {:DOWN, db_conn_reference, _, _, _},
+        %{db_conn_reference: db_conn_reference} = state
+      ) do
+    Logger.info("Database connection has been terminated")
+    {:stop, :normal, state}
   end
 
   ## Private functions
@@ -76,22 +88,8 @@ defmodule Realtime.Tenants.Connect do
   defp call_external_node(tenant_id) do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant),
-         :ok <- :erpc.call(node, __MODULE__, :set_status, [tenant_id], 3000) do
+         :ok <- :erpc.call(node, __MODULE__, :connect, [tenant_id], 5000) do
       get_status(tenant_id)
-    end
-  end
-
-  defp set_status_backoff(tenant_id, times \\ 5, backoff \\ 500)
-  defp set_status_backoff(_, 0, _), do: {:error, :tenant_database_unavailable}
-
-  defp set_status_backoff(tenant_id, times, backoff) do
-    case get_status(tenant_id) do
-      :undefined ->
-        :timer.sleep(backoff)
-        set_status_backoff(tenant_id, times - 1, backoff)
-
-      _ ->
-        :ok
     end
   end
 end

@@ -112,75 +112,72 @@ defmodule Realtime.Integration.RtChannelTest do
     P.query!(conn, "insert into test (details) values ('test')", [])
 
     assert_receive %Message{
-                     event: "postgres_changes",
-                     payload: %{
-                       "data" => %{
-                         "columns" => [
-                           %{"name" => "id", "type" => "int4"},
-                           %{"name" => "details", "type" => "text"}
-                         ],
-                         "commit_timestamp" => _ts,
-                         "errors" => nil,
-                         "record" => %{"details" => "test", "id" => id},
-                         "schema" => "public",
-                         "table" => "test",
-                         "type" => "INSERT"
-                       },
-                       "ids" => [^sub_id]
-                     },
-                     ref: nil,
-                     topic: "realtime:any"
-                   },
-                   4000
+      event: "postgres_changes",
+      payload: %{
+        "data" => %{
+          "columns" => [
+            %{"name" => "id", "type" => "int4"},
+            %{"name" => "details", "type" => "text"}
+          ],
+          "commit_timestamp" => _ts,
+          "errors" => nil,
+          "record" => %{"details" => "test", "id" => id},
+          "schema" => "public",
+          "table" => "test",
+          "type" => "INSERT"
+        },
+        "ids" => [^sub_id]
+      },
+      ref: nil,
+      topic: "realtime:any"
+    }
 
     P.query!(conn, "update test set details = 'test' where id = #{id}", [])
 
     assert_receive %Message{
-                     event: "postgres_changes",
-                     payload: %{
-                       "data" => %{
-                         "columns" => [
-                           %{"name" => "id", "type" => "int4"},
-                           %{"name" => "details", "type" => "text"}
-                         ],
-                         "commit_timestamp" => _ts,
-                         "errors" => nil,
-                         "old_record" => %{"id" => ^id},
-                         "record" => %{"details" => "test", "id" => ^id},
-                         "schema" => "public",
-                         "table" => "test",
-                         "type" => "UPDATE"
-                       },
-                       "ids" => [^sub_id]
-                     },
-                     ref: nil,
-                     topic: "realtime:any"
-                   },
-                   4000
+      event: "postgres_changes",
+      payload: %{
+        "data" => %{
+          "columns" => [
+            %{"name" => "id", "type" => "int4"},
+            %{"name" => "details", "type" => "text"}
+          ],
+          "commit_timestamp" => _ts,
+          "errors" => nil,
+          "old_record" => %{"id" => ^id},
+          "record" => %{"details" => "test", "id" => ^id},
+          "schema" => "public",
+          "table" => "test",
+          "type" => "UPDATE"
+        },
+        "ids" => [^sub_id]
+      },
+      ref: nil,
+      topic: "realtime:any"
+    }
 
     P.query!(conn, "delete from test where id = #{id}", [])
 
     assert_receive %Message{
-                     event: "postgres_changes",
-                     payload: %{
-                       "data" => %{
-                         "columns" => [
-                           %{"name" => "id", "type" => "int4"},
-                           %{"name" => "details", "type" => "text"}
-                         ],
-                         "commit_timestamp" => _ts,
-                         "errors" => nil,
-                         "old_record" => %{"id" => ^id},
-                         "schema" => "public",
-                         "table" => "test",
-                         "type" => "DELETE"
-                       },
-                       "ids" => [^sub_id]
-                     },
-                     ref: nil,
-                     topic: "realtime:any"
-                   },
-                   4000
+      event: "postgres_changes",
+      payload: %{
+        "data" => %{
+          "columns" => [
+            %{"name" => "id", "type" => "int4"},
+            %{"name" => "details", "type" => "text"}
+          ],
+          "commit_timestamp" => _ts,
+          "errors" => nil,
+          "old_record" => %{"id" => ^id},
+          "schema" => "public",
+          "table" => "test",
+          "type" => "DELETE"
+        },
+        "ids" => [^sub_id]
+      },
+      ref: nil,
+      topic: "realtime:any"
+    }
   end
 
   test "broadcast" do
@@ -193,17 +190,16 @@ defmodule Realtime.Integration.RtChannelTest do
     WebsocketClient.join(socket, "realtime:any", %{config: config})
 
     assert_receive %Message{
-                     event: "phx_reply",
-                     payload: %{
-                       "response" => %{
-                         "postgres_changes" => []
-                       },
-                       "status" => "ok"
-                     },
-                     ref: "1",
-                     topic: "realtime:any"
-                   },
-                   4000
+      event: "phx_reply",
+      payload: %{
+        "response" => %{
+          "postgres_changes" => []
+        },
+        "status" => "ok"
+      },
+      ref: "1",
+      topic: "realtime:any"
+    }
 
     assert_receive %Message{}
 
@@ -228,25 +224,23 @@ defmodule Realtime.Integration.RtChannelTest do
     WebsocketClient.join(socket, "realtime:any", %{config: config})
 
     assert_receive %Message{
-                     event: "phx_reply",
-                     payload: %{
-                       "response" => %{
-                         "postgres_changes" => []
-                       },
-                       "status" => "ok"
-                     },
-                     ref: "1",
-                     topic: "realtime:any"
-                   },
-                   4000
+      event: "phx_reply",
+      payload: %{
+        "response" => %{
+          "postgres_changes" => []
+        },
+        "status" => "ok"
+      },
+      ref: "1",
+      topic: "realtime:any"
+    }
 
     assert_receive %Message{
-                     event: "presence_state",
-                     payload: %{},
-                     ref: nil,
-                     topic: "realtime:any"
-                   },
-                   4000
+      event: "presence_state",
+      payload: %{},
+      ref: nil,
+      topic: "realtime:any"
+    }
 
     payload = %{
       type: "presence",
