@@ -2,7 +2,6 @@ defmodule Realtime.PostgresCdc do
   @moduledoc false
 
   require Logger
-
   @timeout 10_000
   @extensions Application.compile_env(:realtime, :extensions)
 
@@ -15,7 +14,7 @@ defmodule Realtime.PostgresCdc do
   end
 
   def subscribe(module, pg_change_params, tenant, metadata) do
-    RealtimeWeb.Endpoint.subscribe("postgres_cdc:" <> tenant)
+    RealtimeWeb.Endpoint.subscribe("postgres_cdc_rls:" <> tenant)
     apply(module, :handle_subscribe, [pg_change_params, tenant, metadata])
   end
 
@@ -61,97 +60,6 @@ defmodule Realtime.PostgresCdc do
     |> case do
       [{_, %{driver: driver}}] -> {:ok, driver}
       _ -> {:error, "No driver found for key #{tenant_key}"}
-    end
-  end
-
-  @doc """
-  Translates a region from a platform to the closest Supabase tenant region
-  """
-  @spec platform_region_translator(String.t()) :: nil | binary()
-  def platform_region_translator(tenant_region) when is_binary(tenant_region) do
-    platform = Application.get_env(:realtime, :platform)
-    region_mapping(platform, tenant_region)
-  end
-
-  defp region_mapping(:aws, tenant_region) do
-    case tenant_region do
-      "us-west-1" -> "us-west-1"
-      "us-west-2" -> "us-west-1"
-      "us-east-1" -> "us-east-1"
-      "sa-east-1" -> "us-east-1"
-      "ca-central-1" -> "us-east-1"
-      "ap-southeast-1" -> "ap-southeast-1"
-      "ap-northeast-1" -> "ap-southeast-1"
-      "ap-northeast-2" -> "ap-southeast-1"
-      "ap-southeast-2" -> "ap-southeast-2"
-      "ap-south-1" -> "ap-southeast-1"
-      "eu-west-1" -> "eu-west-2"
-      "eu-west-2" -> "eu-west-2"
-      "eu-west-3" -> "eu-west-2"
-      "eu-central-1" -> "eu-west-2"
-      _ -> nil
-    end
-  end
-
-  defp region_mapping(:fly, tenant_region) do
-    case tenant_region do
-      "us-east-1" -> "iad"
-      "us-west-1" -> "sea"
-      "sa-east-1" -> "iad"
-      "ca-central-1" -> "iad"
-      "ap-southeast-1" -> "syd"
-      "ap-northeast-1" -> "syd"
-      "ap-northeast-2" -> "syd"
-      "ap-southeast-2" -> "syd"
-      "ap-south-1" -> "syd"
-      "eu-west-1" -> "lhr"
-      "eu-west-2" -> "lhr"
-      "eu-west-3" -> "lhr"
-      "eu-central-1" -> "lhr"
-      _ -> nil
-    end
-  end
-
-  defp region_mapping(_, tenant_region), do: tenant_region
-
-  @doc """
-  Lists the nodes in a region. Sorts by node name in case the list order
-  is unstable.
-  """
-
-  @spec region_nodes(String.t()) :: [atom()]
-  def region_nodes(region) when is_binary(region) do
-    :syn.members(RegionNodes, region)
-    |> Enum.map(fn {_pid, [node: node]} -> node end)
-    |> Enum.sort()
-  end
-
-  @doc """
-  Picks the node to launch the Postgres connection on.
-
-  If there are not two nodes in a region the connection is established from
-  the `default` node given.
-  """
-
-  @spec launch_node(String.t(), String.t(), atom()) :: atom()
-  def launch_node(tenant, fly_region, default) do
-    case region_nodes(fly_region) do
-      [node] ->
-        Logger.warning(
-          "Only one region node (#{inspect(node)}) for #{fly_region} using default #{inspect(default)}"
-        )
-
-        default
-
-      [] ->
-        Logger.warning("Zero region nodes for #{fly_region} using #{inspect(default)}")
-        default
-
-      regions_nodes ->
-        member_count = Enum.count(regions_nodes)
-        index = :erlang.phash2(tenant, member_count)
-
-        Enum.at(regions_nodes, index)
     end
   end
 

@@ -42,7 +42,8 @@ defmodule Realtime.Application do
       name: Realtime.Registry.Unique
     )
 
-    :syn.add_node_to_scopes([:users, RegionNodes])
+    :ok = :syn.add_node_to_scopes([Realtime.Tenants.Connect])
+    :ok = :syn.add_node_to_scopes([:users, RegionNodes])
     region = Application.get_env(:realtime, :region)
     :syn.join(RegionNodes, region, self(), node: node())
 
@@ -62,7 +63,11 @@ defmodule Realtime.Application do
         RealtimeWeb.Presence,
         {Task.Supervisor, name: Realtime.TaskSupervisor},
         Realtime.Latency,
-        Realtime.Telemetry.Logger
+        Realtime.Telemetry.Logger,
+        {PartitionSupervisor,
+         child_spec: DynamicSupervisor,
+         strategy: :one_for_one,
+         name: Realtime.Tenants.Connect.DynamicSupervisor}
       ] ++ extensions_supervisors()
 
     children =

@@ -3,6 +3,11 @@ defmodule Realtime.Helpers do
   This module includes helper functions for different contexts that can't be union in one module.
   """
 
+  alias Realtime.Api.Tenant
+  alias Realtime.PostgresCdc
+
+  require Logger
+
   @spec cancel_timer(reference() | nil) :: non_neg_integer() | false | :ok | nil
   def cancel_timer(nil), do: nil
   def cancel_timer(ref), do: Process.cancel_timer(ref)
@@ -19,6 +24,32 @@ defmodule Realtime.Helpers do
     :aes_128_ecb
     |> :crypto.crypto_one_time(secret_key, crypto_text, false)
     |> unpad()
+  end
+
+  @spec connect_db(%{
+          :host => binary,
+          :name => binary,
+          :pass => binary,
+          :pool => non_neg_integer,
+          :port => binary,
+          :queue_target => non_neg_integer,
+          :socket_opts => list,
+          :ssl_enforced => boolean,
+          :user => binary,
+          optional(any) => any
+        }) :: {:error, any} | {:ok, pid}
+  def connect_db(%{
+        host: host,
+        port: port,
+        name: name,
+        user: user,
+        pass: pass,
+        socket_opts: socket_opts,
+        pool: pool,
+        queue_target: queue_target,
+        ssl_enforced: ssl_enforced
+      }) do
+    connect_db(host, port, name, user, pass, socket_opts, pool, queue_target, ssl_enforced)
   end
 
   @spec connect_db(
@@ -63,6 +94,51 @@ defmodule Realtime.Helpers do
     ]
     |> maybe_enforce_ssl_config(ssl_enforced)
     |> Postgrex.start_link()
+  end
+
+  @cdc "postgres_cdc_rls"
+  @doc """
+  Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
+  """
+  @spec check_tenant_connection(Tenant.t()) :: {:error, atom()} | {:ok, pid()}
+  def check_tenant_connection(nil), do: {:error, :tenant_not_found}
+
+  def check_tenant_connection(tenant) do
+    tenant
+    |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
+    |> then(fn settings ->
+      ssl_enforced = default_ssl_param(settings)
+
+      host = settings["db_host"]
+      port = settings["db_port"]
+      name = settings["db_name"]
+      user = settings["db_user"]
+      password = settings["db_password"]
+      socket_opts = settings["db_socket_opts"]
+
+      opts = %{
+        host: host,
+        port: port,
+        name: name,
+        user: user,
+        pass: password,
+        socket_opts: socket_opts,
+        pool: 1,
+        queue_target: 1000,
+        ssl_enforced: ssl_enforced
+      }
+
+      with {:ok, conn} <- connect_db(opts) do
+        case Postgrex.query(conn, "SELECT 1", []) do
+          {:ok, _} ->
+            {:ok, conn}
+
+          {:error, e} ->
+            Logger.error("Error connecting to tenant database: #{inspect(e)}")
+            {:error, :tenant_database_unavailable}
+        end
+      end
+    end)
   end
 
   @spec default_ssl_param(map) :: boolean
@@ -198,8 +274,8 @@ defmodule Realtime.Helpers do
     Enum.reduce(:syn.group_names(:users), 0, fn tenant, acc ->
       case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
         {pid, %{region: region}} ->
-          platform_region = Realtime.PostgresCdc.platform_region_translator(region)
-          launch_node = Realtime.PostgresCdc.launch_node(tenant, platform_region, false)
+          platform_region = Realtime.Nodes.platform_region_translator(region)
+          launch_node = Realtime.Nodes.launch_node(tenant, platform_region, false)
           current_node = node(pid)
 
           case launch_node do

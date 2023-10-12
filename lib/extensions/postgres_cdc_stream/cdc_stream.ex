@@ -4,7 +4,6 @@ defmodule Extensions.PostgresCdcStream do
 
   require Logger
 
-  alias Realtime.PostgresCdc
   alias Extensions.PostgresCdcStream, as: Stream
 
   def handle_connect(opts) do
@@ -47,17 +46,14 @@ defmodule Extensions.PostgresCdcStream do
   def get_manager_conn(id) do
     Phoenix.Tracker.get_by_key(Stream.Tracker, "postgres_cdc_stream", id)
     |> case do
-      [] ->
-        {:error, nil}
-
-      [{_, %{manager_pid: pid, conn: conn}}] ->
-        {:ok, pid, conn}
+      [] -> {:error, nil}
+      [{_, %{manager_pid: pid, conn: conn}}] -> {:ok, pid, conn}
     end
   end
 
   def start_distributed(%{"region" => region, "id" => tenant} = args) do
-    platform_region = PostgresCdc.platform_region_translator(region)
-    launch_node = PostgresCdc.launch_node(tenant, platform_region, node())
+    platform_region = Realtime.Nodes.platform_region_translator(region)
+    launch_node = Realtime.Nodes.launch_node(tenant, platform_region, node())
 
     Logger.warning(
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, platform_region: platform_region)}"

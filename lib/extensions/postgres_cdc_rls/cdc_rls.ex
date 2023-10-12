@@ -7,7 +7,6 @@ defmodule Extensions.PostgresCdcRls do
   require Logger
 
   alias RealtimeWeb.Endpoint
-  alias Realtime.PostgresCdc
   alias Extensions.PostgresCdcRls, as: Rls
   alias Rls.Subscriptions
 
@@ -61,8 +60,8 @@ defmodule Extensions.PostgresCdcRls do
   ## Internal functions
 
   def start_distributed(%{"region" => region, "id" => tenant} = args) do
-    platform_region = PostgresCdc.platform_region_translator(region)
-    launch_node = PostgresCdc.launch_node(tenant, platform_region, node())
+    platform_region = Realtime.Nodes.platform_region_translator(region)
+    launch_node = Realtime.Nodes.launch_node(tenant, platform_region, node())
 
     Logger.warning(
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, platform_region: platform_region)}"

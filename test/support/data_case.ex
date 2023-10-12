@@ -23,6 +23,7 @@ defmodule Realtime.DataCase do
       import Ecto.Changeset
       import Ecto.Query
       import Realtime.DataCase
+      import Generators
     end
   end
 
