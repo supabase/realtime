@@ -3,19 +3,7 @@ defmodule Realtime.Nodes do
   Handles common needs for :syn module operations
   """
   require Logger
-  alias Realtime.Tenants
   alias Realtime.Api.Tenant
-
-  @doc """
-  Gets the node to launch the Postgres connection on for a tenant id.
-  """
-  @spec get_node_for_tenant_id(String.t()) :: node()
-  def get_node_for_tenant_id(tenant_id) do
-    with tenant when not is_nil(tenant) <- Tenants.get_tenant_by_external_id(tenant_id),
-         {:ok, node} <- get_node_for_tenant(tenant) do
-      node
-    end
-  end
 
   @doc """
   Gets the node to launch the Postgres connection on for a tenant.
@@ -124,7 +112,7 @@ defmodule Realtime.Nodes do
         member_count = Enum.count(regions_nodes)
         index = :erlang.phash2(tenant_id, member_count)
 
-        Enum.at(regions_nodes, index)
+        Enum.fetch!(regions_nodes, index)
     end
   end
 end
