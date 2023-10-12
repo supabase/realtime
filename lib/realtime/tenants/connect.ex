@@ -20,7 +20,6 @@ defmodule Realtime.Tenants.Connect do
       {:ok, conn} -> {:ok, conn}
       {:error, :tenant_database_unavailable} -> call_external_node(tenant_id)
       {:error, :initializing} -> {:error, :tenant_database_unavailable}
-      _ -> {:error, :tenant_database_unavailable}
     end
   end
 

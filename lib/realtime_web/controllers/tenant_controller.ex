@@ -261,11 +261,6 @@ defmodule RealtimeWeb.TenantController do
         conn
         |> put_status(404)
         |> render("not_found.json", tenant: nil)
-
-      {:error, message} when is_binary(message) ->
-        conn
-        |> put_status(422)
-        |> json(%{errors: [message]})
     end
   end
 end
