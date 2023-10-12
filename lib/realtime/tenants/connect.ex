@@ -17,9 +17,23 @@ defmodule Realtime.Tenants.Connect do
   @spec lookup_or_start_connection(binary()) :: {:ok, DBConnection.t()} | {:error, term()}
   def lookup_or_start_connection(tenant_id) do
     case get_status(tenant_id) do
-      :undefined -> call_external_node(tenant_id)
       {:ok, conn} -> {:ok, conn}
-      _ -> {:error, :tenant_database_unavailable}
+      {:error, :tenant_database_unavailable} -> call_external_node(tenant_id)
+      {:error, :initializing} -> {:error, :tenant_database_unavailable}
+    end
+  end
+
+  @doc """
+  Returns the database connection pid from :syn if it exists.
+  """
+
+  @spec get_status(binary()) ::
+          {:ok, DBConnection.t()} | {:error, :tenant_database_unavailable | :initializing}
+  def get_status(tenant_id) do
+    case :syn.lookup(__MODULE__, tenant_id) do
+      {_, %{conn: conn}} when not is_nil(conn) -> {:ok, conn}
+      {_, %{conn: nil}} -> {:error, :initializing}
+      _error -> {:error, :tenant_database_unavailable}
     end
   end
 
@@ -73,13 +87,6 @@ defmodule Realtime.Tenants.Connect do
   end
 
   ## Private functions
-
-  defp get_status(tenant_id) do
-    case :syn.lookup(__MODULE__, tenant_id) do
-      {_, %{conn: conn}} when not is_nil(conn) -> {:ok, conn}
-      error -> error
-    end
-  end
 
   defp call_external_node(tenant_id) do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),

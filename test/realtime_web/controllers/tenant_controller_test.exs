@@ -211,10 +211,11 @@ defmodule RealtimeWeb.TenantControllerTest do
         UsersCounter.add(self(), ext_id)
 
         # Fake a db connection
-        {:ok, mod} = PostgresCdc.driver(tenant.postgres_cdc_default)
-        :syn.add_node_to_scopes([mod])
-        :syn.register(mod, ext_id, self(), %{region: nil, manager: nil, subs_pool: nil})
-        mod.update_meta(ext_id, self(), self())
+        :syn.register(Realtime.Tenants.Connect, ext_id, self(), %{conn: nil})
+
+        :syn.update_registry(Realtime.Tenants.Connect, ext_id, fn _pid, meta ->
+          %{meta | conn: conn}
+        end)
 
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
