@@ -8,7 +8,6 @@ defmodule RealtimeWeb.TenantControllerTest do
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
-  alias Realtime.PostgresCdc
 
   @update_attrs %{
     jwt_secret: "some updated jwt_secret",
@@ -204,7 +203,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "healthy tenant with 1 client connection", %{
       conn: conn,
-      tenant: %Tenant{external_id: ext_id} = tenant
+      tenant: %Tenant{external_id: ext_id}
     } do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
         # Fake adding a connected client here

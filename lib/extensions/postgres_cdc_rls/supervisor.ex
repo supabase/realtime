@@ -35,9 +35,7 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
     {:ok, modules} = :application.get_key(:realtime, :modules)
 
     modules
-    |> Enum.filter(
-      &String.starts_with?(to_string(&1), "Elixir.Realtime.Extensions.Rls.Repo.Migrations")
-    )
+    |> Enum.filter(&String.starts_with?(to_string(&1), "Elixir.Realtime.Tenants.Migrations"))
     |> Enum.each(&Code.ensure_loaded!/1)
   end
 end
