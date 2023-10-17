@@ -1,6 +1,8 @@
 defmodule Realtime.Tenants.ConnectTest do
   use Realtime.DataCase, async: false
+
   alias Realtime.Tenants.Connect
+  alias Realtime.UsersCounter
 
   describe "lookup_or_start_connection/1" do
     setup do
@@ -49,6 +51,52 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "if tenant does not exist, returns error" do
       assert Connect.lookup_or_start_connection("none") == {:error, :tenant_not_found}
+    end
+
+    test "if no users are connected to a tenant channel, stop the connection", %{
+      tenant: %{external_id: tenant_id}
+    } do
+      {:ok, db_conn} =
+        Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 50)
+
+      # Not enough time has passed, connection still alive
+      :timer.sleep(100)
+      assert {_, %{conn: _}} = :syn.lookup(Connect, tenant_id)
+
+      # Enough time has passed, connection stopped
+      :timer.sleep(1000)
+      assert :undefined = :syn.lookup(Connect, tenant_id)
+      refute Process.alive?(db_conn)
+    end
+
+    test "if users are connected to a tenant channel, keep the connection", %{
+      tenant: %{external_id: tenant_id}
+    } do
+      UsersCounter.add(self(), tenant_id)
+
+      {:ok, db_conn} =
+        Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
+
+      assert {pid, %{conn: conn_pid}} = :syn.lookup(Connect, tenant_id)
+      :timer.sleep(300)
+      assert {^pid, %{conn: ^conn_pid}} = :syn.lookup(Connect, tenant_id)
+      assert Process.alive?(db_conn)
+    end
+
+    test "connection is killed after user leaving", %{
+      tenant: %{external_id: tenant_id}
+    } do
+      UsersCounter.add(self(), tenant_id)
+
+      {:ok, db_conn} =
+        Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
+
+      assert {_pid, %{conn: _conn_pid}} = :syn.lookup(Connect, tenant_id)
+      :timer.sleep(300)
+      :syn.leave(:users, tenant_id, self())
+      :timer.sleep(300)
+      assert :undefined = :syn.lookup(Connect, tenant_id)
+      refute Process.alive?(db_conn)
     end
   end
 end
