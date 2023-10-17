@@ -2,17 +2,18 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
   @moduledoc false
   use Supervisor
 
-  alias Extensions.PostgresCdcRls, as: Rls
+  alias Extensions.PostgresCdcRls
 
-  alias Rls.{
-    Migrations,
+  alias PostgresCdcRls.{
     ReplicationPoller,
     SubscriptionManager,
     SubscriptionsChecker
   }
 
+  alias Realtime.Tenants.Migrations
+
   def start_link(args) do
-    name = Rls.supervisor_id(args["id"], args["region"])
+    name = PostgresCdcRls.supervisor_id(args["id"], args["region"])
     Supervisor.start_link(__MODULE__, args, name: {:via, :syn, name})
   end
 
