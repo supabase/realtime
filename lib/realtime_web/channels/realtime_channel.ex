@@ -581,12 +581,13 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp pg_change_params(false, params, channel_pid, claims, sub_topic) do
-    case String.split(sub_topic, ":", parts: 3) do
-      [schema, table, filter] -> %{"schema" => schema, "table" => table, "filter" => filter}
-      [schema, table] -> %{"schema" => schema, "table" => table}
-      [schema] -> %{"schema" => schema}
-    end
+  defp pg_change_params(false, _, channel_pid, claims, sub_topic) do
+    params =
+      case String.split(sub_topic, ":", parts: 3) do
+        [schema, table, filter] -> %{"schema" => schema, "table" => table, "filter" => filter}
+        [schema, table] -> %{"schema" => schema, "table" => table}
+        [schema] -> %{"schema" => schema}
+      end
 
     [
       %{

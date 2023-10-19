@@ -62,7 +62,39 @@ defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
     ]
 
     assert {:error,
-            "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to."} =
+            "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: %{}"} =
+             S.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+    params_list = [
+      %{
+        claims: %{
+          "role" => "anon"
+        },
+        id: UUID.uuid1(),
+        params: %{
+          "user_token" => "potato"
+        }
+      }
+    ]
+
+    assert {:error,
+            "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: <redacted>"} =
+             S.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+    params_list = [
+      %{
+        claims: %{
+          "role" => "anon"
+        },
+        id: UUID.uuid1(),
+        params: %{
+          "auth_token" => "potato"
+        }
+      }
+    ]
+
+    assert {:error,
+            "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: <redacted>"} =
              S.create(conn, "supabase_realtime_test", params_list, self(), self())
 
     %Postgrex.Result{rows: [[num]]} =
