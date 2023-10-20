@@ -38,7 +38,8 @@ defmodule Realtime.Tenants.Migrations do
     UpdateSubscriptionCheckFiltersForInFilterNonTextTypes,
     ConvertCommitTimestampToUtc,
     OutputFullRecordWhenUnchangedToast,
-    CreateListChangesFunction
+    CreateListChangesFunction,
+    CreateChannels
   }
 
   alias Realtime.Helpers, as: H
@@ -74,7 +75,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_230_227_211_149, UpdateSubscriptionCheckFiltersForInFilterNonTextTypes},
     {20_230_228_184_745, ConvertCommitTimestampToUtc},
     {20_230_308_225_145, OutputFullRecordWhenUnchangedToast},
-    {20_230_328_144_023, CreateListChangesFunction}
+    {20_230_328_144_023, CreateListChangesFunction},
+    {20_231_018_144_023, CreateChannels}
   ]
 
   @spec start_link(GenServer.options()) :: GenServer.on_start()

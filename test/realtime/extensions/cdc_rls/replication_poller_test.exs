@@ -294,7 +294,7 @@ defmodule ReplicationPollerTest do
     end
 
     test "uses Application.get_env/2 with key :slot_name_suffix" do
-      slot_name_suffix = Generators.rand_string()
+      slot_name_suffix = Generators.random_string()
       Application.put_env(:realtime, :slot_name_suffix, slot_name_suffix)
       assert Poller.slot_name_suffix() == "_" <> slot_name_suffix
     end
