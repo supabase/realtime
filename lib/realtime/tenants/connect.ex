@@ -81,6 +81,8 @@ defmodule Realtime.Tenants.Connect do
   # Needs to be done on init/1 to guarantee the GenServer only starts if we are able to connect to the database
   @impl GenServer
   def init(%{tenant_id: tenant_id} = state) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+
     with tenant when not is_nil(tenant) <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          res <- Helpers.check_tenant_connection(tenant) do
       case res do
