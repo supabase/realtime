@@ -2,23 +2,33 @@ defmodule Realtime.Tenants.Connect do
   @moduledoc """
   This module is responsible for attempting to connect to a tenant's database and store the DBConnection in a Syn registry.
   """
-  use GenServer
+  use GenServer, restart: :transient
 
   require Logger
 
   alias Realtime.Helpers
   alias Realtime.Tenants
+  alias Realtime.UsersCounter
 
-  defstruct tenant_id: nil, db_conn_reference: nil
+  @erpc_timeout_default 5000
+  @check_connected_user_interval_default 1000
+  @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
+
+  defstruct tenant_id: nil,
+            db_conn_reference: nil,
+            db_conn_pid: nil,
+            check_connected_user_interval: nil,
+            connected_users_bucket: [1]
 
   @doc """
   Returns the database connection for a tenant. If the tenant is not connected, it will attempt to connect to the tenant's database.
   """
-  @spec lookup_or_start_connection(binary()) :: {:ok, DBConnection.t()} | {:error, term()}
-  def lookup_or_start_connection(tenant_id) do
+  @spec lookup_or_start_connection(binary(), keyword()) ::
+          {:ok, DBConnection.t()} | {:error, term()}
+  def lookup_or_start_connection(tenant_id, opts \\ []) do
     case get_status(tenant_id) do
       {:ok, conn} -> {:ok, conn}
-      {:error, :tenant_database_unavailable} -> call_external_node(tenant_id)
+      {:error, :tenant_database_unavailable} -> call_external_node(tenant_id, opts)
       {:error, :initializing} -> {:error, :tenant_database_unavailable}
     end
   end
@@ -26,7 +36,6 @@ defmodule Realtime.Tenants.Connect do
   @doc """
   Returns the database connection pid from :syn if it exists.
   """
-
   @spec get_status(binary()) ::
           {:ok, DBConnection.t()} | {:error, :tenant_database_unavailable | :initializing}
   def get_status(tenant_id) do
@@ -40,10 +49,10 @@ defmodule Realtime.Tenants.Connect do
   @doc """
   Connects to a tenant's database and stores the DBConnection in the process :syn metadata
   """
-  @spec connect(binary()) :: {:ok, DBConnection.t()} | {:error, term()}
-  def connect(tenant_id) do
+  @spec connect(binary(), keyword()) :: {:ok, DBConnection.t()} | {:error, term()}
+  def connect(tenant_id, opts \\ []) do
     supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, self()}}
-    spec = {__MODULE__, tenant_id: tenant_id}
+    spec = {__MODULE__, [tenant_id: tenant_id] ++ opts}
 
     case DynamicSupervisor.start_child(supervisor, spec) do
       {:ok, _} -> get_status(tenant_id)
@@ -52,9 +61,20 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  def start_link(tenant_id: tenant_id) do
+  def start_link(opts) do
+    tenant_id = Keyword.get(opts, :tenant_id)
+
+    check_connected_user_interval =
+      Keyword.get(opts, :check_connected_user_interval, @check_connected_user_interval_default)
+
     name = {__MODULE__, tenant_id, %{conn: nil}}
-    GenServer.start_link(__MODULE__, %__MODULE__{tenant_id: tenant_id}, name: {:via, :syn, name})
+
+    state = %__MODULE__{
+      tenant_id: tenant_id,
+      check_connected_user_interval: check_connected_user_interval
+    }
+
+    GenServer.start_link(__MODULE__, state, name: {:via, :syn, name})
   end
 
   ## GenServer callbacks
@@ -66,15 +86,50 @@ defmodule Realtime.Tenants.Connect do
       case res do
         {:ok, conn} ->
           :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
-          state = %{state | db_conn_reference: Process.monitor(conn)}
+          state = %{state | db_conn_reference: Process.monitor(conn), db_conn_pid: conn}
 
-          {:ok, state}
+          {:ok, state, {:continue, :setup_connected_users}}
 
         {:error, error} ->
           Logger.error("Error connecting to tenant database: #{inspect(error)}")
           {:stop, :normal}
       end
     end
+  end
+
+  @impl GenServer
+  def handle_continue(
+        :setup_connected_users,
+        %{
+          check_connected_user_interval: check_connected_user_interval,
+          connected_users_bucket: connected_users_bucket
+        } = state
+      ) do
+    send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_info(
+        :check_connected_users,
+        %{
+          tenant_id: tenant_id,
+          check_connected_user_interval: check_connected_user_interval,
+          connected_users_bucket: connected_users_bucket
+        } = state
+      ) do
+    connected_users_bucket =
+      tenant_id
+      |> update_connected_users_bucket(connected_users_bucket)
+      |> send_connected_user_check_message(check_connected_user_interval)
+
+    {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
+  end
+
+  def handle_info(:shutdown, %{db_conn_pid: db_conn_pid} = state) do
+    Logger.info("Tenant has no connected users, database connection will be terminated")
+    :ok = GenServer.stop(db_conn_pid)
+    {:stop, :normal, state}
   end
 
   @impl GenServer
@@ -88,10 +143,28 @@ defmodule Realtime.Tenants.Connect do
 
   ## Private functions
 
-  defp call_external_node(tenant_id) do
+  defp call_external_node(tenant_id, opts) do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
-      :erpc.call(node, __MODULE__, :connect, [tenant_id], 5000)
+      :erpc.call(node, __MODULE__, :connect, [tenant_id, opts], @erpc_timeout_default)
     end
+  end
+
+  defp update_connected_users_bucket(tenant_id, connected_users_bucket) do
+    connected_users_bucket
+    |> then(&(&1 ++ [UsersCounter.tenant_users(tenant_id)]))
+    |> Enum.take(-6)
+  end
+
+  defp send_connected_user_check_message(
+         @connected_users_bucket_shutdown,
+         check_connected_user_interval
+       ) do
+    Process.send_after(self(), :shutdown, check_connected_user_interval)
+  end
+
+  defp send_connected_user_check_message(connected_users_bucket, check_connected_user_interval) do
+    Process.send_after(self(), :check_connected_users, check_connected_user_interval)
+    connected_users_bucket
   end
 end
