@@ -11,7 +11,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.UsersCounter
 
   @erpc_timeout_default 5000
-  @check_connected_user_interval_default 1000
+  @check_connected_user_interval_default 50_000
   @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
 
   defstruct tenant_id: nil,
