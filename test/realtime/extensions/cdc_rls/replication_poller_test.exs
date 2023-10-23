@@ -287,14 +287,21 @@ defmodule ReplicationPollerTest do
   end
 
   describe "slot_name_suffix" do
-    test "when no SLOT_NAME_SUFFIX" do
-      System.delete_env("SLOT_NAME_SUFFIX")
-      assert Poller.slot_name_suffix() == ""
+    setup do
+      slot_name_suffix = Application.get_env(:realtime, :slot_name_suffix)
+
+      on_exit(fn -> Application.put_env(:realtime, :slot_name_suffix, slot_name_suffix) end)
     end
 
-    test "when SLOT_NAME_SUFFIX defined" do
-      System.put_env("SLOT_NAME_SUFFIX", "some_val")
-      assert Poller.slot_name_suffix() == "_some_val"
+    test "uses Application.get_env/2 with key :slot_name_suffix" do
+      slot_name_suffix = Generators.rand_string()
+      Application.put_env(:realtime, :slot_name_suffix, slot_name_suffix)
+      assert Poller.slot_name_suffix() == "_" <> slot_name_suffix
+    end
+
+    test "defaults to project version" do
+      version = Mix.Project.config()[:version] |> String.replace(".", "_")
+      assert Poller.slot_name_suffix() == "_" <> version
     end
   end
 end

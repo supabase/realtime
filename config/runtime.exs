@@ -1,5 +1,7 @@
 import Config
 
+version = Mix.Project.config()[:version] |> String.replace(".", "_") |> String.downcase()
+
 config :logflare_logger_backend,
   url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 
@@ -9,6 +11,9 @@ username = System.get_env("DB_USER", "postgres")
 password = System.get_env("DB_PASSWORD", "postgres")
 database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
+slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX", version)
+
+config :realtime, slot_name_suffix: slot_name_suffix
 
 if config_env() == :prod do
   secret_key_base =

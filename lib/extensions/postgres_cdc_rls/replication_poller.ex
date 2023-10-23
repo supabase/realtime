@@ -151,14 +151,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   def slot_name_suffix() do
-    case System.get_env("SLOT_NAME_SUFFIX") do
-      nil ->
-        ""
-
-      value ->
-        Logger.debug("Using slot name suffix: " <> value)
-        "_" <> value
-    end
+    slot_name_suffix = Application.get_env(:realtime, :slot_name_suffix)
+    "_" <> slot_name_suffix
   end
 
   defp convert_errors([_ | _] = errors), do: errors
