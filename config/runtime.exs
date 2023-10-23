@@ -1,7 +1,5 @@
 import Config
 
-version = Mix.Project.config()[:version] |> String.replace(".", "_") |> String.downcase()
-
 config :logflare_logger_backend,
   url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 
@@ -11,9 +9,7 @@ username = System.get_env("DB_USER", "postgres")
 password = System.get_env("DB_PASSWORD", "postgres")
 database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
-slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX", version)
-
-config :realtime, slot_name_suffix: slot_name_suffix
+slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
 
 if config_env() == :prod do
   secret_key_base =
@@ -59,7 +55,8 @@ if config_env() != :test do
     region: System.get_env("FLY_REGION") || System.get_env("REGION"),
     fly_alloc_id: System.get_env("FLY_ALLOC_ID", ""),
     prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer(),
-    platform: platform
+    platform: platform,
+    slot_name_suffix: slot_name_suffix
 
   queue_target = System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer()
   queue_interval = System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
