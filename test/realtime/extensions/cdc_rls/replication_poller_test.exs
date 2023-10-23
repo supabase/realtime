@@ -299,9 +299,8 @@ defmodule ReplicationPollerTest do
       assert Poller.slot_name_suffix() == "_" <> slot_name_suffix
     end
 
-    test "defaults to project version" do
-      version = Mix.Project.config()[:version] |> String.replace(".", "_")
-      assert Poller.slot_name_suffix() == "_" <> version
+    test "defaults to no suffix" do
+      assert Poller.slot_name_suffix() == ""
     end
   end
 end
