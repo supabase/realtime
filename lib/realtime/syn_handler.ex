@@ -5,13 +5,26 @@ defmodule Realtime.SynHandler do
   require Logger
   alias RealtimeWeb.Endpoint
 
-  def on_process_unregistered(mod, name, _pid, _meta, reason) do
-    Logger.warn("#{mod} terminated: #{inspect(name)} #{node()}")
-    topic = topic(mod)
+  @doc """
+  When processes registered with :syn are unregistered, either manually or by stopping, this
+  callback is invoked.
 
-    if reason != :syn_conflict_resolution do
-      Endpoint.local_broadcast(topic <> ":" <> name, topic <> "_down", nil)
+  Other processes can subscribe to these events via PubSub to respond to them.
+
+  We want to log conflict resolutions to know when more than one process on the cluster
+  was started, and subsequently stopped because :syn handled the conflict.
+  """
+  def on_process_unregistered(mod, name, _pid, _meta, reason) do
+    case reason do
+      :syn_conflict_resolution ->
+        Logger.warn("#{mod} terminated: #{inspect(name)} #{node()}")
+
+      _ ->
+        topic = topic(mod)
+        Endpoint.local_broadcast(topic <> ":" <> name, topic <> "_down", nil)
     end
+
+    :ok
   end
 
   def resolve_registry_conflict(mod, name, {pid1, %{region: region}, time1}, {pid2, _, time2}) do
