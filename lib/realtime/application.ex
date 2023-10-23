@@ -42,6 +42,7 @@ defmodule Realtime.Application do
       name: Realtime.Registry.Unique
     )
 
+    :syn.set_event_handler(Realtime.SynHandler)
     :ok = :syn.add_node_to_scopes([Realtime.Tenants.Connect])
     :ok = :syn.add_node_to_scopes([:users, RegionNodes])
     region = Application.get_env(:realtime, :region)
