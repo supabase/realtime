@@ -15,7 +15,6 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
   def init(_args) do
     load_migrations_modules()
 
-    :syn.set_event_handler(Realtime.SynHandler)
     :syn.add_node_to_scopes([PostgresCdcRls])
 
     children = [

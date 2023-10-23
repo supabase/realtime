@@ -59,8 +59,7 @@ if config_env() != :test do
     region: System.get_env("FLY_REGION") || System.get_env("REGION"),
     fly_alloc_id: System.get_env("FLY_ALLOC_ID", ""),
     prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer(),
-    platform: platform,
-    slot_name_suffix: slot_name_suffix
+    platform: platform
 
   queue_target = System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer()
   queue_interval = System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
