@@ -38,4 +38,22 @@ defmodule Realtime.TenantsTest do
       end
     end
   end
+
+  describe "suspend_tenant_by_external_id/1" do
+    test "sets suspend flag to true" do
+      tenant = tenant_fixture()
+      {:ok, tenant} = Tenants.suspend_tenant_by_external_id(tenant.external_id)
+
+      assert tenant.suspend == true
+    end
+  end
+
+  describe "unsuspend_tenant_by_external_id/1" do
+    test "sets suspend flag to true" do
+      tenant = tenant_fixture(suspend: true)
+      {:ok, tenant} = Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
+
+      assert tenant.suspend == false
+    end
+  end
 end
