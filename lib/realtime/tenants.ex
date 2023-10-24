@@ -4,8 +4,12 @@ defmodule Realtime.Tenants do
   """
 
   require Logger
+  alias Realtime.Api.Tenant
+  alias Realtime.Tenants.Connect
+  alias Realtime.Repo
   alias Realtime.Repo.Replica
-  alias Realtime.{Api.Tenant, UsersCounter, Tenants}
+  alias Realtime.Tenants.Cache
+  alias Realtime.UsersCounter
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
@@ -32,7 +36,7 @@ defmodule Realtime.Tenants do
 
   @spec get_health_conn(%Tenant{}) :: {:error, term()} | {:ok, pid()}
   def get_health_conn(%Tenant{external_id: external_id}) do
-    case Tenants.Connect.get_status(external_id) do
+    case Connect.get_status(external_id) do
       {:ok, conn} -> {:ok, conn}
       {:error, reason} -> {:error, reason}
     end
@@ -58,7 +62,7 @@ defmodule Realtime.Tenants do
            | %{connected_cluster: pos_integer, db_connected: false, healthy: false}}
           | {:ok, %{connected_cluster: non_neg_integer, db_connected: true, healthy: true}}
   def health_check(external_id) when is_binary(external_id) do
-    with %Tenant{} = tenant <- Tenants.Cache.get_tenant_by_external_id(external_id),
+    with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(external_id),
          {:error, _} <- get_health_conn(tenant),
          connected_cluster when connected_cluster > 0 <- UsersCounter.tenant_users(external_id) do
       {:error, %{healthy: false, db_connected: false, connected_cluster: connected_cluster}}
@@ -189,5 +193,27 @@ defmodule Realtime.Tenants do
   @spec tenant_topic(Tenant.t(), String.t()) :: String.t()
   def tenant_topic(%Tenant{external_id: external_id}, sub_topic) do
     "#{external_id}:#{sub_topic}"
+  end
+
+  @doc """
+  Sets tenant as suspended. New connections won't be accepted
+  """
+  @spec suspend_tenant_by_external_id(String.t()) :: {:ok, Tenant.t()} | {:error, term()}
+  def suspend_tenant_by_external_id(external_id) do
+    external_id
+    |> Cache.get_tenant_by_external_id()
+    |> Tenant.changeset(%{suspend: true})
+    |> Repo.update()
+  end
+
+  @doc """
+  Sets tenant as unsuspended. New connections will be accepted
+  """
+  @spec unsuspend_tenant_by_external_id(String.t()) :: {:ok, Tenant.t()} | {:error, term()}
+  def unsuspend_tenant_by_external_id(external_id) do
+    external_id
+    |> Cache.get_tenant_by_external_id()
+    |> Tenant.changeset(%{suspend: false})
+    |> Repo.update()
   end
 end

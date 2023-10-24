@@ -6,6 +6,7 @@ defmodule Realtime.Tenants.Connect do
 
   require Logger
 
+  alias Realtime.Api.Tenant
   alias Realtime.Helpers
   alias Realtime.Tenants
   alias Realtime.UsersCounter
@@ -147,6 +148,7 @@ defmodule Realtime.Tenants.Connect do
 
   defp call_external_node(tenant_id, opts) do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
+         :ok <- tenant_suspended?(tenant),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
       :erpc.call(node, __MODULE__, :connect, [tenant_id, opts], @erpc_timeout_default)
     end
@@ -169,4 +171,7 @@ defmodule Realtime.Tenants.Connect do
     Process.send_after(self(), :check_connected_users, check_connected_user_interval)
     connected_users_bucket
   end
+
+  defp tenant_suspended?(%Tenant{suspend: true}), do: {:error, :tenant_suspended}
+  defp tenant_suspended?(_), do: :ok
 end

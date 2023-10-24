@@ -98,5 +98,11 @@ defmodule Realtime.Tenants.ConnectTest do
       assert :undefined = :syn.lookup(Connect, tenant_id)
       refute Process.alive?(db_conn)
     end
+
+    test "error if tenant is suspended" do
+      tenant = tenant_fixture(suspend: true)
+
+      assert {:error, :tenant_suspended} == Connect.lookup_or_start_connection(tenant.external_id)
+    end
   end
 end
