@@ -5,7 +5,7 @@ defmodule Realtime.Repo do
 
   def with_dynamic_repo(config, callback) do
     default_dynamic_repo = get_dynamic_repo()
-    {:ok, repo} = [name: nil, pool_size: 1] |> Keyword.merge(config) |> Realtime.Repo.start_link()
+    {:ok, repo} = [name: nil, pool_size: 2] |> Keyword.merge(config) |> Realtime.Repo.start_link()
 
     try do
       Realtime.Repo.put_dynamic_repo(repo)

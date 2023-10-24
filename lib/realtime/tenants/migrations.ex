@@ -127,6 +127,7 @@ defmodule Realtime.Tenants.Migrations do
       database: name,
       password: pass,
       username: user,
+      pool_size: 2,
       socket_options: db_socket_opts
     ]
     |> H.maybe_enforce_ssl_config(ssl_enforced)
