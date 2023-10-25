@@ -3,7 +3,7 @@ defmodule Realtime.Tenants.Migrations do
   Run Realtime database migrations for tenant's database.
   """
 
-  use GenServer
+  use GenServer, restart: :transient
 
   require Logger
   alias Realtime.Repo
@@ -87,11 +87,8 @@ defmodule Realtime.Tenants.Migrations do
   @impl true
   def init(%{"id" => id} = args) do
     Logger.metadata(external_id: id, project: id)
-    # applying tenant's migrations
     apply_migrations(args)
-    # need try to stop this PID
-    {:ok, %{}}
-    # {:ok, %{}, {:continue, :stop}}
+    {:ok, %{}, {:continue, :stop}}
   end
 
   @impl true
