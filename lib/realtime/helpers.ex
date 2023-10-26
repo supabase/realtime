@@ -89,6 +89,8 @@ defmodule Realtime.Helpers do
         ssl_enforced \\ true,
         application_name \\ "supabase_realtime"
       ) do
+    Logger.metadata(application_name: application_name)
+
     {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
 
     [
