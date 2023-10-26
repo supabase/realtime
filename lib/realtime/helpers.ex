@@ -47,9 +47,21 @@ defmodule Realtime.Helpers do
         socket_opts: socket_opts,
         pool: pool,
         queue_target: queue_target,
-        ssl_enforced: ssl_enforced
+        ssl_enforced: ssl_enforced,
+        application_name: application_name
       }) do
-    connect_db(host, port, name, user, pass, socket_opts, pool, queue_target, ssl_enforced)
+    connect_db(
+      host,
+      port,
+      name,
+      user,
+      pass,
+      socket_opts,
+      pool,
+      queue_target,
+      ssl_enforced,
+      application_name
+    )
   end
 
   @spec connect_db(
@@ -100,10 +112,10 @@ defmodule Realtime.Helpers do
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
   """
-  @spec check_tenant_connection(Tenant.t()) :: {:error, atom()} | {:ok, pid()}
-  def check_tenant_connection(nil), do: {:error, :tenant_not_found}
+  @spec check_tenant_connection(Tenant.t(), binary()) :: {:error, atom()} | {:ok, pid()}
+  def check_tenant_connection(nil, _), do: {:error, :tenant_not_found}
 
-  def check_tenant_connection(tenant) do
+  def check_tenant_connection(tenant, application_name) do
     tenant
     |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
     |> then(fn settings ->
@@ -125,7 +137,8 @@ defmodule Realtime.Helpers do
         socket_opts: socket_opts,
         pool: 1,
         queue_target: 1000,
-        ssl_enforced: ssl_enforced
+        ssl_enforced: ssl_enforced,
+        application_name: application_name
       }
 
       with {:ok, conn} <- connect_db(opts) do
