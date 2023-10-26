@@ -71,10 +71,33 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     ssl_enforced = H.default_ssl_param(args)
 
-    {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1, 5_000, ssl_enforced)
+    {:ok, conn} =
+      H.connect_db(
+        host,
+        port,
+        name,
+        user,
+        pass,
+        socket_opts,
+        1,
+        5_000,
+        ssl_enforced,
+        "realtime_subscription_manager"
+      )
 
     {:ok, conn_pub} =
-      H.connect_db(host, port, name, user, pass, socket_opts, subs_pool_size, 5_000, ssl_enforced)
+      H.connect_db(
+        host,
+        port,
+        name,
+        user,
+        pass,
+        socket_opts,
+        subs_pool_size,
+        5_000,
+        ssl_enforced,
+        "realtime_subscription_manager_pub"
+      )
 
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
     Rls.update_meta(id, self(), conn_pub)

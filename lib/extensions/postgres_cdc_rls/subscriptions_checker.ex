@@ -51,7 +51,19 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
     ssl_enforced = H.default_ssl_param(args)
 
-    {:ok, conn} = H.connect_db(host, port, name, user, pass, socket_opts, 1, 5_000, ssl_enforced)
+    {:ok, conn} =
+      H.connect_db(
+        host,
+        port,
+        name,
+        user,
+        pass,
+        socket_opts,
+        1,
+        5_000,
+        ssl_enforced,
+        "realtime_subscription_checker"
+      )
 
     state = %State{
       id: id,
