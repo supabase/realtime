@@ -89,6 +89,8 @@ defmodule Realtime.Helpers do
         ssl_enforced \\ true,
         application_name \\ "supabase_realtime"
       ) do
+    Logger.metadata(application_name: application_name)
+    metadata = Logger.metadata()
     {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
 
     [
@@ -102,7 +104,11 @@ defmodule Realtime.Helpers do
       parameters: [
         application_name: application_name
       ],
-      socket_options: socket_opts
+      socket_options: socket_opts,
+      configure: fn args ->
+        Logger.metadata(metadata)
+        args
+      end
     ]
     |> maybe_enforce_ssl_config(ssl_enforced)
     |> Postgrex.start_link()

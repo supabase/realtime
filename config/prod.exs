@@ -15,7 +15,7 @@ import Config
 # Do not print debug messages in production
 config :logger, :warning,
   format: "$time [$level] $message $metadata\n",
-  metadata: [:error_code, :file, :pid, :project, :external_id]
+  metadata: [:error_code, :file, :pid, :project, :external_id, :application_name]
 
 # ## SSL Support
 #
