@@ -132,13 +132,13 @@ defmodule Realtime.Tenants.Connect do
 
   def handle_info(:shutdown, %{db_conn_pid: db_conn_pid} = state) do
     Logger.info("Tenant has no connected users, database connection will be terminated")
-    :ok = GenServer.stop(db_conn_pid, :normal)
+    :ok = GenServer.stop(db_conn_pid, :normal, 1000)
     {:stop, :normal, state}
   end
 
   def handle_info(:suspend, %{db_conn_pid: db_conn_pid} = state) do
-    Logger.warn("Tenant was suspended, database connection will be terminated")
-    :ok = GenServer.stop(db_conn_pid, :normal)
+    Logger.warning("Tenant was suspended, database connection will be terminated")
+    :ok = GenServer.stop(db_conn_pid, :normal, 1000)
     {:stop, :normal, state}
   end
 
