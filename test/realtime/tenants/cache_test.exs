@@ -4,42 +4,13 @@ defmodule Realtime.Tenants.CacheTest do
   alias Realtime.Api
   alias Realtime.Tenants
 
-  @db_conf Application.compile_env(:realtime, Realtime.Repo)
-
   setup do
-    params = %{
-      external_id: "external_id",
-      name: "localhost",
-      extensions: [
-        %{
-          "type" => "postgres_cdc_rls",
-          "settings" => %{
-            "db_host" => @db_conf[:hostname],
-            "db_name" => @db_conf[:database],
-            "db_user" => @db_conf[:username],
-            "db_password" => @db_conf[:password],
-            "db_port" => "5432",
-            "poll_interval" => 100,
-            "poll_max_changes" => 100,
-            "poll_max_record_bytes" => 1_048_576,
-            "region" => "us-east-1"
-          }
-        }
-      ],
-      postgres_cdc_default: "postgres_cdc_rls",
-      jwt_secret: "new secret",
-      max_concurrent_users: 200,
-      max_events_per_second: 100
-    }
-
-    {:ok, tenant} = Api.create_tenant(params)
-
-    %{tenant: tenant}
+    %{tenant: tenant_fixture()}
   end
 
   describe "get_tenant_by_external_id/1" do
     test "tenants cache returns a cached result", %{tenant: tenant} do
-      external_id = "external_id"
+      external_id = tenant.external_id
 
       assert %Api.Tenant{name: "localhost"} = Tenants.Cache.get_tenant_by_external_id(external_id)
 
@@ -48,6 +19,23 @@ defmodule Realtime.Tenants.CacheTest do
       assert %Api.Tenant{name: "new name"} = Tenants.get_tenant_by_external_id(external_id)
 
       assert %Api.Tenant{name: "localhost"} = Tenants.Cache.get_tenant_by_external_id(external_id)
+    end
+  end
+
+  describe "invalidate_tenant_cache/1" do
+    test "invalidates the cache given a tenant_id", %{tenant: tenant} do
+      external_id = tenant.external_id
+      assert %Api.Tenant{suspend: false} = Tenants.Cache.get_tenant_by_external_id(external_id)
+
+      # Update a tenant
+      tenant |> Realtime.Api.Tenant.changeset(%{suspend: true}) |> Realtime.Repo.update!()
+
+      # Cache showing old value
+      assert %Api.Tenant{suspend: false} = Tenants.Cache.get_tenant_by_external_id(external_id)
+
+      # Invalidate cache
+      Tenants.Cache.invalidate_tenant_cache(external_id)
+      assert %Api.Tenant{suspend: true} = Tenants.Cache.get_tenant_by_external_id(external_id)
     end
   end
 end

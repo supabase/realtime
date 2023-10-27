@@ -203,7 +203,11 @@ defmodule Realtime.Tenants do
     external_id
     |> Cache.get_tenant_by_external_id()
     |> Tenant.changeset(%{suspend: true})
-    |> Repo.update()
+    |> Repo.update!()
+    |> tap(fn _ ->
+      Cache.invalidate_tenant_cache(external_id)
+      Phoenix.PubSub.broadcast(Realtime.PubSub, "tenant:operations:#{external_id}", :suspend)
+    end)
   end
 
   @doc """
@@ -214,6 +218,10 @@ defmodule Realtime.Tenants do
     external_id
     |> Cache.get_tenant_by_external_id()
     |> Tenant.changeset(%{suspend: false})
-    |> Repo.update()
+    |> Repo.update!()
+    |> tap(fn _ ->
+      Cache.invalidate_tenant_cache(external_id)
+      Phoenix.PubSub.broadcast(Realtime.PubSub, "tenant:operations:#{external_id}", :unsuspend)
+    end)
   end
 end
