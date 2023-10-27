@@ -308,6 +308,33 @@ defmodule Realtime.Helpers do
     end)
   end
 
+  @doc """
+  Kills all connections to a tenant database in the current node
+  """
+  @spec kill_connections_to_tenant_id(String.t(), atom()) :: :ok
+  def kill_connections_to_tenant_id(tenant_id, reason) do
+    Enum.each(Process.list(), fn pid ->
+      case Process.info(pid)[:dictionary] do
+        [_, "$initial_call": {:supervisor, DBConnection.ConnectionPool.Pool, _}] ->
+          state = :sys.get_state(pid, 5000)
+
+          case elem(state, 11) do
+            {pid, _, Postgrex.Protocol, opts} ->
+              if opts[:hostname] == "db.#{tenant_id}.supabase.co" do
+                IO.puts("Killing #{inspect(pid)}")
+                Process.exit(pid, reason)
+              end
+
+            _ ->
+              nil
+          end
+
+        _ ->
+          nil
+      end
+    end)
+  end
+
   defp stop_user_tenant_process(tenant, platform_region, acc) do
     Extensions.PostgresCdcRls.handle_stop(tenant, 5_000)
     # credo:disable-for-next-line
