@@ -308,7 +308,11 @@ defmodule Realtime.Helpers do
     end)
   end
 
-  def kill_connections_to_tenant_id(tenant_id) do
+  @doc """
+  Kills all connections to a tenant database in the current node
+  """
+  @spec kill_connections_to_tenant_id(String.t(), atom()) :: :ok
+  def kill_connections_to_tenant_id(tenant_id, reason) do
     Enum.each(Process.list(), fn pid ->
       case Process.info(pid)[:dictionary] do
         [_, "$initial_call": {:supervisor, DBConnection.ConnectionPool.Pool, _}] ->
@@ -318,7 +322,7 @@ defmodule Realtime.Helpers do
             {pid, _, Postgrex.Protocol, opts} ->
               if opts[:hostname] == "db.#{tenant_id}.supabase.co" do
                 IO.puts("Killing #{inspect(pid)}")
-                Process.exit(pid, :normal)
+                Process.exit(pid, reason)
               end
 
             _ ->
