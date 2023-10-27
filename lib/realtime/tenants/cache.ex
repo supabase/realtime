@@ -2,7 +2,6 @@ defmodule Realtime.Tenants.Cache do
   @moduledoc """
   Cache for Tenants.
   """
-
   require Cachex.Spec
 
   alias Realtime.Tenants

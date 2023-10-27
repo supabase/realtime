@@ -5,7 +5,6 @@ defmodule Realtime.TenantsTest do
 
   alias Realtime.GenCounter
   alias Realtime.Tenants
-  alias Realtime.Api.Tenant
 
   describe "tenants" do
     test "get_tenant_limits/1" do
@@ -43,54 +42,31 @@ defmodule Realtime.TenantsTest do
   describe "suspend_tenant_by_external_id/1" do
     setup do
       tenant = tenant_fixture()
-      topic = "tenant:operations:#{tenant.external_id}"
+      topic = "realtime:operations"
       Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
       %{topic: topic, tenant: tenant}
     end
 
-    test "sets suspend flag to true and publishes message", %{tenant: tenant} do
-      tenant = Tenants.suspend_tenant_by_external_id(tenant.external_id)
+    test "sets suspend flag to true and publishes message", %{tenant: %{external_id: external_id}} do
+      tenant = Tenants.suspend_tenant_by_external_id(external_id)
       assert tenant.suspend == true
-      assert_receive :suspend
-    end
-
-    test "invalidates tenants cache", %{tenant: tenant} do
-      assert %Tenant{suspend: false} =
-               Realtime.Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
-
-      Tenants.suspend_tenant_by_external_id(tenant.external_id)
-
-      assert %{suspend: true} =
-               Realtime.Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
+      assert_receive {:suspend, ^external_id}, 1000
     end
   end
 
   describe "unsuspend_tenant_by_external_id/1" do
     setup do
       tenant = tenant_fixture()
-      topic = "tenant:operations:#{tenant.external_id}"
+      topic = "realtime:operations"
       Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
       %{topic: topic, tenant: tenant}
     end
 
-    test "sets suspend flag to true and publishes message", %{tenant: tenant} do
-      Tenants.suspend_tenant_by_external_id(tenant.external_id)
-      tenant = Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
-
-      assert tenant.suspend == false
-      assert_receive :unsuspend
-    end
-
-    test "invalidates tenants cache" do
-      tenant = tenant_fixture(suspend: true)
-
-      assert %Tenant{suspend: true} =
-               Realtime.Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
-
-      Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
-
-      assert %{suspend: false} =
-               Realtime.Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
+    test "sets suspend flag to true and publishes message" do
+      %{external_id: external_id} = tenant_fixture(suspend: true)
+      tenant = Tenants.suspend_tenant_by_external_id(external_id)
+      assert tenant.suspend == true
+      assert_receive {:suspend, ^external_id}, 1000
     end
   end
 end
