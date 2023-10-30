@@ -2,7 +2,6 @@ defmodule Realtime.Tenants.Cache do
   @moduledoc """
   Cache for Tenants.
   """
-
   require Cachex.Spec
 
   alias Realtime.Tenants
@@ -16,6 +15,10 @@ defmodule Realtime.Tenants.Cache do
   end
 
   def get_tenant_by_external_id(keyword), do: apply_repo_fun(__ENV__.function, [keyword])
+
+  def invalidate_tenant_cache(tenant_id) do
+    Cachex.del(__MODULE__, {{:get_tenant_by_external_id, 1}, [tenant_id]})
+  end
 
   defp apply_repo_fun(arg1, arg2) do
     Realtime.ContextCache.apply_fun(Tenants, arg1, arg2)
