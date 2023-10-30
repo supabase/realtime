@@ -311,7 +311,7 @@ defmodule Realtime.Helpers do
   @doc """
   Kills all connections to a tenant database in all connected nodes
   """
-  @spec kill_connections_to_tenant_id(String.t(), atom()) :: :ok
+  @spec kill_connections_to_tenant_id_in_all_nodes(String.t(), atom()) :: :ok
   def kill_connections_to_tenant_id_in_all_nodes(tenant_id, reason) do
     Enum.each(Node.list(), fn node ->
       :erpc.call(node, __MODULE__, :kill_connections_to_tenant_id, [tenant_id, reason], 5000)
