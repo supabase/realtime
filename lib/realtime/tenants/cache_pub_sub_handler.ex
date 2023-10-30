@@ -1,4 +1,7 @@
 defmodule Realtime.Tenants.CachePubSubHandler do
+  @moduledoc """
+  Process that listens to PubSub messages and triggers tenant cache invalidation.
+  """
   use GenServer
 
   require Logger
@@ -16,7 +19,8 @@ defmodule Realtime.Tenants.CachePubSubHandler do
   end
 
   @impl true
-  def handle_info({_, tenant_id}, state) do
+  def handle_info({action, tenant_id}, state)
+      when action in [:suspend_tenant, :unsuspend_tenant] do
     Logger.warn("Triggering cache invalidation", external_id: tenant_id)
     Cache.invalidate_tenant_cache(tenant_id)
     {:noreply, state}

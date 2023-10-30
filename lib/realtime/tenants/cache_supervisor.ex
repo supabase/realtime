@@ -1,7 +1,9 @@
 defmodule Realtime.Tenants.CacheSupervisor do
+  @moduledoc """
+  Supervisor for Tenants Cache and Operational processes
+  """
   use Supervisor
 
-  alias Phoenix.PubSub
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.CachePubSubHandler
 
@@ -12,15 +14,10 @@ defmodule Realtime.Tenants.CacheSupervisor do
   @impl true
   def init(_init_arg) do
     children = [
-      {CachePubSubHandler, topics: ["realtime:operations"]},
+      {CachePubSubHandler, topics: ["realtime:operations:suspend_tenant"]},
       Cache
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
-  end
-
-  def handle_info({_, tenant_id}, state) do
-    Cache.invalidate_tenant_cache(tenant_id)
-    {:noreply, state}
   end
 end

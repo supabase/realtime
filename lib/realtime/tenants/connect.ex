@@ -90,7 +90,13 @@ defmodule Realtime.Tenants.Connect do
         {:ok, conn} ->
           :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
           state = %{state | db_conn_reference: Process.monitor(conn), db_conn_pid: conn}
-          :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations")
+
+          :ok =
+            Phoenix.PubSub.subscribe(
+              Realtime.PubSub,
+              "realtime:operations:suspend_tenant"
+            )
+
           {:ok, state, {:continue, :setup_connected_users}}
 
         {:error, error} ->
@@ -136,14 +142,14 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :normal, state}
   end
 
-  def handle_info({:suspend, _}, %{db_conn_pid: db_conn_pid} = state) do
+  def handle_info({:suspend_tenant, _}, %{db_conn_pid: db_conn_pid} = state) do
     Logger.warning("Tenant was suspended, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 1000)
     {:stop, :normal, state}
   end
 
   # Ignore unsuspend messages to avoid handle_info unmatched functions
-  def handle_info({:unsuspend, _}, state) do
+  def handle_info({:unsuspend_tenant, _}, state) do
     {:noreply, state}
   end
 

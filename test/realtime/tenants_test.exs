@@ -42,7 +42,7 @@ defmodule Realtime.TenantsTest do
   describe "suspend_tenant_by_external_id/1" do
     setup do
       tenant = tenant_fixture()
-      topic = "realtime:operations"
+      topic = "realtime:operations:suspend_tenant"
       Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
       %{topic: topic, tenant: tenant}
     end
@@ -50,23 +50,23 @@ defmodule Realtime.TenantsTest do
     test "sets suspend flag to true and publishes message", %{tenant: %{external_id: external_id}} do
       tenant = Tenants.suspend_tenant_by_external_id(external_id)
       assert tenant.suspend == true
-      assert_receive {:suspend, ^external_id}, 1000
+      assert_receive {:suspend_tenant, ^external_id}, 1000
     end
   end
 
   describe "unsuspend_tenant_by_external_id/1" do
     setup do
       tenant = tenant_fixture()
-      topic = "realtime:operations"
+      topic = "realtime:operations:suspend_tenant"
       Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
       %{topic: topic, tenant: tenant}
     end
 
-    test "sets suspend flag to true and publishes message" do
+    test "sets suspend flag to false and publishes message" do
       %{external_id: external_id} = tenant_fixture(suspend: true)
-      tenant = Tenants.suspend_tenant_by_external_id(external_id)
-      assert tenant.suspend == true
-      assert_receive {:suspend, ^external_id}, 1000
+      tenant = Tenants.unsuspend_tenant_by_external_id(external_id)
+      assert tenant.suspend == false
+      assert_receive {:unsuspend_tenant, ^external_id}, 1000
     end
   end
 end

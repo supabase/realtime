@@ -13,13 +13,17 @@ defmodule Realtime.Tenants.CacheSupervisorTest do
     assert %Tenant{suspend: false} = Cache.get_tenant_by_external_id(external_id)
 
     # Update a tenant
-    tenant |> Realtime.Api.Tenant.changeset(%{suspend: true}) |> Realtime.Repo.update!()
+    tenant |> Tenant.changeset(%{suspend: true}) |> Realtime.Repo.update!()
 
     # Cache showing old value
     assert %Tenant{suspend: false} = Cache.get_tenant_by_external_id(external_id)
 
     # PubSub message
-    Phoenix.PubSub.broadcast(Realtime.PubSub, "realtime:operations", {:suspend, external_id})
+    Phoenix.PubSub.broadcast(
+      Realtime.PubSub,
+      "realtime:operations:suspend_tenant",
+      {:suspend_tenant, external_id}
+    )
 
     :timer.sleep(500)
     assert %Tenant{suspend: true} = Cache.get_tenant_by_external_id(external_id)
