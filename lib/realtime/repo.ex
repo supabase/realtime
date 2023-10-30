@@ -15,4 +15,48 @@ defmodule Realtime.Repo do
       Supervisor.stop(repo)
     end
   end
+
+  @doc """
+  Converts a Postgrex.Result into a given struct
+  """
+  @spec pg_result_to_struct(Postgrex.Result.t(), module()) :: [struct()]
+  def pg_result_to_struct(%Postgrex.Result{rows: rows, columns: columns}, struct) do
+    Enum.map(rows, fn row ->
+      columns
+      |> Enum.zip(row)
+      |> Enum.map(fn {k, v} -> {String.to_existing_atom(k), v} end)
+      |> Map.new()
+      |> then(&struct(struct, &1))
+    end)
+  end
+
+  @doc """
+  Creates an insert query from a given changeset
+  """
+  @spec insert_query_from_changeset(Ecto.Changeset.t()) :: {String.t(), [any()]}
+  def insert_query_from_changeset(changeset) do
+    schema = changeset.data.__struct__
+    source = schema.__schema__(:source)
+    prefix = schema.__schema__(:prefix)
+    acc = %{header: [], rows: []}
+
+    %{header: header, rows: rows} =
+      Enum.reduce(changeset.changes, acc, fn {field, row}, %{header: header, rows: rows} ->
+        %{
+          header: [Atom.to_string(field) | header],
+          rows: [row | rows]
+        }
+      end)
+
+    table = "\"#{prefix}\".\"#{source}\""
+    header = "(#{header |> Enum.map(&"\"#{&1}\"") |> Enum.join(",")})"
+
+    arg_index =
+      rows
+      |> Enum.with_index(1)
+      |> Enum.map(fn {_, index} -> "$#{index}" end)
+      |> Enum.join(",")
+
+    {"INSERT INTO #{table} #{header} VALUES (#{arg_index})", rows}
+  end
 end
