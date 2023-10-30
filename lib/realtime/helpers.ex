@@ -314,7 +314,7 @@ defmodule Realtime.Helpers do
   @spec kill_connections_to_tenant_id_in_all_nodes(String.t(), atom()) :: :ok
   def kill_connections_to_tenant_id_in_all_nodes(tenant_id, reason) do
     Task.async_stream(
-      Node.list(),
+      Node.list() ++ [node()],
       fn node ->
         :erpc.call(node, __MODULE__, :kill_connections_to_tenant_id, [tenant_id, reason], 5000)
       end,
