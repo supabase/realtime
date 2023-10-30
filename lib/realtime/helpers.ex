@@ -309,6 +309,16 @@ defmodule Realtime.Helpers do
   end
 
   @doc """
+  Kills all connections to a tenant database in all connected nodes
+  """
+  @spec kill_connections_to_tenant_id(String.t(), atom()) :: :ok
+  def kill_connections_to_tenant_id_in_all_nodes(tenant_id, reason) do
+    Enum.each(Node.list(), fn node ->
+      :erpc.call(node, __MODULE__, :kill_connections_to_tenant_id, [tenant_id, reason], 5000)
+    end)
+  end
+
+  @doc """
   Kills all connections to a tenant database in the current node
   """
   @spec kill_connections_to_tenant_id(String.t(), atom()) :: :ok
@@ -323,7 +333,7 @@ defmodule Realtime.Helpers do
           case elem(state, 11) do
             {pid, _, Postgrex.Protocol, opts} ->
               if opts[:hostname] == "db.#{tenant_id}.supabase.co" do
-                Logger.warn(
+                Logger.warning(
                   "Killing connection " <> inspect(pid) <> "with reason " <> inspect(reason)
                 )
 
