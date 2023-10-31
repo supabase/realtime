@@ -147,7 +147,9 @@ defmodule Realtime.Tenants.ConnectTest do
         })
 
       Enum.each(1..10, fn _ ->
-        Task.start(fn -> Connect.lookup_or_start_connection(tenant.external_id) end)
+        Task.start(fn ->
+          Connect.lookup_or_start_connection(tenant.external_id, erpc_timeout: 10000)
+        end)
       end)
 
       send(check_db_connections_created(self(), tenant.external_id), :check)
