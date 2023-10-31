@@ -123,5 +123,67 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
     end
+
+    test "properly handles of failing calls by avoid creating too many connections" do
+      tenant =
+        tenant_fixture(%{
+          extensions: [
+            %{
+              "type" => "postgres_cdc_rls",
+              "settings" => %{
+                "db_host" => "localhost",
+                "db_name" => "postgres",
+                "db_user" => "postgres",
+                "db_password" => "postgres",
+                "db_port" => "5432",
+                "poll_interval" => 100,
+                "poll_max_changes" => 100,
+                "poll_max_record_bytes" => 1_048_576,
+                "region" => "us-east-1",
+                "ssl_enforced" => true
+              }
+            }
+          ]
+        })
+
+      Enum.each(1..10, fn _ ->
+        Task.start(fn ->
+          Connect.lookup_or_start_connection(tenant.external_id, erpc_timeout: 10000)
+        end)
+      end)
+
+      send(check_db_connections_created(self(), tenant.external_id), :check)
+      :timer.sleep(4000)
+      refute_receive :too_many_connections
+    end
+  end
+
+  defp check_db_connections_created(test_pid, tenant_id) do
+    spawn(fn ->
+      receive do
+        :check ->
+          Process.list()
+          |> Enum.map(&Process.info/1)
+          |> Enum.reject(fn info -> is_nil(info) end)
+          |> Enum.map(fn info -> Keyword.get(info, :dictionary, []) end)
+          |> Enum.map(fn dict ->
+            {Keyword.get(dict, :"$logger_metadata$", %{}),
+             Keyword.get(dict, :"$initial_call", {})}
+          end)
+          |> Enum.reject(fn {metadata, _} -> Map.get(metadata, :external_id) != tenant_id end)
+          |> Enum.filter(fn {_, init} -> init == {DBConnection.Connection, :init, 1} end)
+          |> Enum.count()
+          |> then(fn count ->
+            if count > 1,
+              do: send(test_pid, :too_many_connections),
+              else:
+                Process.send_after(
+                  check_db_connections_created(test_pid, tenant_id),
+                  :check,
+                  100
+                )
+          end)
+      end
+    end)
   end
 end

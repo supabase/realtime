@@ -153,6 +153,7 @@ defmodule Realtime.Helpers do
             {:ok, conn}
 
           {:error, e} ->
+            Process.exit(conn, :kill)
             Logger.error("Error connecting to tenant database: #{inspect(e)}")
             {:error, :tenant_database_unavailable}
         end

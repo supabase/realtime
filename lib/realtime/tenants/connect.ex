@@ -1,6 +1,10 @@
 defmodule Realtime.Tenants.Connect do
   @moduledoc """
   This module is responsible for attempting to connect to a tenant's database and store the DBConnection in a Syn registry.
+
+  ## Options
+  * `:check_connected_user_interval` - The interval in milliseconds to check if there are any connected users to a tenant channel. If there are no connected users, the connection will be stopped.
+  * `:erpc_timeout` - The timeout in milliseconds for the `:erpc` calls to the tenant's database.
   """
   use GenServer, restart: :transient
 
@@ -164,10 +168,12 @@ defmodule Realtime.Tenants.Connect do
   ## Private functions
 
   defp call_external_node(tenant_id, opts) do
+    erpc_timeout = Keyword.get(opts, :erpc_timeout, @erpc_timeout_default)
+
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
-      :erpc.call(node, __MODULE__, :connect, [tenant_id, opts], @erpc_timeout_default)
+      :erpc.call(node, __MODULE__, :connect, [tenant_id, opts], erpc_timeout)
     end
   end
 
