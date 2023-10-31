@@ -32,10 +32,20 @@ FROM ${BUILDER_IMAGE} as builder
 RUN apt-get update -y \
   && apt-get install curl -y \
   && apt-get install -y build-essential git \
-  && apt-get clean \
-  && rm -f /var/lib/apt/lists/*_* \
-  && curl -sL https://deb.nodesource.com/setup_18.x | bash - \
-  && apt-get install -y nodejs
+  && apt-get clean
+
+# install npm
+RUN set -uex; \
+    apt-get update; \
+    apt-get install -y ca-certificates curl gnupg; \
+    mkdir -p /etc/apt/keyrings; \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+    NODE_MAJOR=18; \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
+     > /etc/apt/sources.list.d/nodesource.list; \
+    apt-get -qy update; \
+    apt-get -qy install nodejs;
 
 # prepare build dir
 WORKDIR /app
