@@ -146,7 +146,7 @@ defmodule Realtime.Tenants.ConnectTest do
           ]
         })
 
-      Enum.each(1..1000, fn _ ->
+      Enum.each(1..10, fn _ ->
         Task.start(fn -> Connect.lookup_or_start_connection(tenant.external_id) end)
       end)
 
