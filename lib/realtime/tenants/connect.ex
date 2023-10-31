@@ -102,6 +102,10 @@ defmodule Realtime.Tenants.Connect do
         {:error, error} ->
           Logger.error("Error connecting to tenant database: #{inspect(error)}")
           {:stop, :normal}
+
+        error ->
+          Logger.error("Error connecting to tenant database: #{inspect(error)}")
+          {:stop, :normal}
       end
     end
   end

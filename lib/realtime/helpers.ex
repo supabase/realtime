@@ -152,8 +152,12 @@ defmodule Realtime.Helpers do
           {:ok, _} ->
             {:ok, conn}
 
-          {:error, e} ->
-            Logger.error("Error connecting to tenant database: #{inspect(e)}")
+          {:error, error} ->
+            Logger.error("Error connecting to tenant database: #{inspect(error)}")
+            {:error, :tenant_database_unavailable}
+
+          error ->
+            Logger.error("Error connecting to tenant database: #{inspect(error)}")
             {:error, :tenant_database_unavailable}
         end
       end
