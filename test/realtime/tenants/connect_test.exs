@@ -153,7 +153,7 @@ defmodule Realtime.Tenants.ConnectTest do
       end)
 
       send(check_db_connections_created(self(), tenant.external_id), :check)
-      :timer.sleep(4000)
+      :timer.sleep(5000)
       refute_receive :too_many_connections
     end
   end
@@ -162,27 +162,20 @@ defmodule Realtime.Tenants.ConnectTest do
     spawn(fn ->
       receive do
         :check ->
-          Process.list()
-          |> Enum.map(&Process.info/1)
-          |> Enum.reject(fn info -> is_nil(info) end)
-          |> Enum.map(fn info -> Keyword.get(info, :dictionary, []) end)
-          |> Enum.map(fn dict ->
-            {Keyword.get(dict, :"$logger_metadata$", %{}),
-             Keyword.get(dict, :"$initial_call", {})}
-          end)
-          |> Enum.reject(fn {metadata, _} -> Map.get(metadata, :external_id) != tenant_id end)
-          |> Enum.filter(fn {_, init} -> init == {DBConnection.Connection, :init, 1} end)
-          |> Enum.count()
-          |> then(fn count ->
-            if count > 1,
-              do: send(test_pid, :too_many_connections),
-              else:
-                Process.send_after(
-                  check_db_connections_created(test_pid, tenant_id),
-                  :check,
-                  100
-                )
-          end)
+          processes =
+            for pid <- Process.list(),
+                info = Process.info(pid),
+                dict = Keyword.get(info, :dictionary, []),
+                match?({DBConnection.Connection, :init, 1}, dict[:"$initial_call"]),
+                Keyword.get(dict, :"$logger_metadata$")[:external_id] == tenant_id do
+              pid
+            end
+
+          Process.send_after(check_db_connections_created(test_pid, tenant_id), :check, 100)
+
+          if length(processes) > 1 do
+            send(test_pid, :too_many_connections)
+          end
       end
     end)
   end
