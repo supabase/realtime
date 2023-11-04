@@ -87,7 +87,7 @@ defmodule Realtime.Helpers do
         pool \\ 5,
         queue_target \\ 5_000,
         ssl_enforced \\ true,
-        application_name \\ "supabase_realtime"
+        application_name \\ "realtime_supabase"
       ) do
     Logger.metadata(application_name: application_name)
     metadata = Logger.metadata()

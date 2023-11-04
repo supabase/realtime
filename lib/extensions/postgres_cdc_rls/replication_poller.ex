@@ -21,6 +21,10 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   @impl true
   def init(args) do
+    tenant = args["id"]
+
+    Logger.metadata(external_id: tenant, project: tenant)
+
     ssl_enforced = default_ssl_param(args)
 
     {:ok, conn} =
@@ -36,8 +40,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         ssl_enforced,
         "realtime_rls"
       )
-
-    tenant = args["id"]
 
     state = %{
       backoff: Backoff.new(backoff_min: 100, backoff_max: 5_000, backoff_type: :rand_exp),
@@ -58,8 +60,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       slot_name: args["slot_name"] <> slot_name_suffix(),
       tenant: tenant
     }
-
-    Logger.metadata(external_id: tenant, project: tenant)
 
     {:ok, state, {:continue, :prepare}}
   end
