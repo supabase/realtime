@@ -18,7 +18,7 @@ defmodule Realtime.Tenants.Connect do
   @erpc_timeout_default 5000
   @check_connected_user_interval_default 50_000
   @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
-  @application_name "supabase_realtime_connect"
+  @application_name "realtime_connect"
   defstruct tenant_id: nil,
             db_conn_reference: nil,
             db_conn_pid: nil,
