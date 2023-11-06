@@ -313,7 +313,7 @@ defmodule Realtime.Helpers do
   Kills all connections to a tenant database in all connected nodes
   """
   @spec kill_connections_to_tenant_id_in_all_nodes(String.t(), atom()) :: list()
-  def kill_connections_to_tenant_id_in_all_nodes(tenant_id, reason) do
+  def kill_connections_to_tenant_id_in_all_nodes(tenant_id, reason \\ :normal) do
     [node() | Node.list()]
     |> Task.async_stream(
       fn node ->
@@ -331,29 +331,22 @@ defmodule Realtime.Helpers do
   def kill_connections_to_tenant_id(tenant_id, reason) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    Enum.each(Process.list(), fn pid ->
-      case Process.info(pid)[:dictionary] do
-        [_, "$initial_call": {:supervisor, DBConnection.ConnectionPool.Pool, _}] ->
-          state = :sys.get_state(pid, 5000)
-
-          case elem(state, 11) do
-            {pid, _, Postgrex.Protocol, opts} ->
-              if opts[:hostname] == "db.#{tenant_id}.supabase.co" do
-                Logger.warning(
-                  "Killing connection " <> inspect(pid) <> "with reason " <> inspect(reason)
-                )
-
-                Process.exit(pid, reason)
-              end
-
-            _ ->
-              nil
-          end
-
-        _ ->
-          nil
+    pids_to_kill =
+      for pid <- Process.list(),
+          info = Process.info(pid),
+          dict = Keyword.get(info, :dictionary, []),
+          match?({DBConnection.Connection, :init, 1}, dict[:"$initial_call"]),
+          Keyword.get(dict, :"$logger_metadata$")[:external_id] == tenant_id,
+          links = Keyword.get(info, :links) do
+        links
+        |> Enum.filter(&is_pid/1)
+        |> Enum.filter(fn pid ->
+          pid |> Process.info() |> Keyword.get(:dictionary, []) |> Keyword.get(:"$initial_call") ==
+            {:supervisor, DBConnection.ConnectionPool.Pool, 1}
+        end)
       end
-    end)
+
+    Enum.each(pids_to_kill, &Process.exit(&1, reason))
   end
 
   defp stop_user_tenant_process(tenant, platform_region, acc) do
