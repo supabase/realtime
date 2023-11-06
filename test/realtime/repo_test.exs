@@ -1,8 +1,9 @@
 defmodule Realtime.RepoTest do
   use Realtime.DataCase, async: false
   alias Realtime.Repo
+  alias Realtime.Api.Channel
 
-  describe "with_dynamic_repo" do
+  describe "with_dynamic_repo/2" do
     test "starts a repo with the given config and kills it in the end of the command" do
       test_pid = self()
 
@@ -143,5 +144,37 @@ defmodule Realtime.RepoTest do
       username: user,
       ssl_enforced: ssl_enforced
     ]
+  end
+
+  describe "pg_result_to_struct/2" do
+    test "converts Postgrex.Result to struct" do
+      timestamp = NaiveDateTime.utc_now()
+
+      result = %Postgrex.Result{
+        columns: ["id", "name", "updated_at", "inserted_at"],
+        rows: [[1, "foo", timestamp, timestamp], [2, "bar", timestamp, timestamp]]
+      }
+
+      expected = [
+        %Channel{id: 1, name: "foo", updated_at: timestamp, inserted_at: timestamp},
+        %Channel{id: 2, name: "bar", updated_at: timestamp, inserted_at: timestamp}
+      ]
+
+      assert Repo.pg_result_to_struct(result, Channel) == expected
+    end
+  end
+
+  describe "insert_query_from_changeset/1" do
+    test "returns insert query from changeset" do
+      changeset = Channel.changeset(%Channel{}, %{name: "foo"})
+      inserted_at = changeset.changes.inserted_at
+      updated_at = changeset.changes.updated_at
+
+      expected =
+        {"INSERT INTO \"realtime\".\"channels\" (\"updated_at\",\"name\",\"inserted_at\") VALUES ($1,$2,$3)",
+         [updated_at, "foo", inserted_at]}
+
+      assert Repo.insert_query_from_changeset(changeset) == expected
+    end
   end
 end

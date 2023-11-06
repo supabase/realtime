@@ -5,7 +5,7 @@ defmodule Generators do
 
   def tenant_fixture(override \\ %{}) do
     create_attrs = %{
-      "external_id" => rand_string(),
+      "external_id" => random_string(),
       "name" => "localhost",
       "extensions" => [
         %{
@@ -38,7 +38,7 @@ defmodule Generators do
     tenant
   end
 
-  def rand_string(length \\ 10) do
+  def random_string(length \\ 10) do
     length
     |> :crypto.strong_rand_bytes()
     |> Base.encode32()
