@@ -20,14 +20,8 @@ defmodule Realtime.Repo do
   Converts a Postgrex.Result into a given struct
   """
   @spec pg_result_to_struct(Postgrex.Result.t(), module()) :: [struct()]
-  def pg_result_to_struct(%Postgrex.Result{rows: rows, columns: columns}, struct) do
-    Enum.map(rows, fn row ->
-      columns
-      |> Enum.zip(row)
-      |> Enum.map(fn {k, v} -> {String.to_existing_atom(k), v} end)
-      |> Map.new()
-      |> then(&struct(struct, &1))
-    end)
+  def pg_result_to_struct(%Postgrex.Result{rows: rows, columns: columns} = res, struct) do
+    Enum.map(rows, &Realtime.Repo.load(struct, Enum.zip(columns, &1)))
   end
 
   @doc """

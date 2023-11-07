@@ -148,16 +148,35 @@ defmodule Realtime.RepoTest do
 
   describe "pg_result_to_struct/2" do
     test "converts Postgrex.Result to struct" do
-      timestamp = NaiveDateTime.utc_now()
+      timestamp = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
       result = %Postgrex.Result{
         columns: ["id", "name", "updated_at", "inserted_at"],
         rows: [[1, "foo", timestamp, timestamp], [2, "bar", timestamp, timestamp]]
       }
 
+      metadata = %Ecto.Schema.Metadata{
+        prefix: Channel.__schema__(:prefix),
+        schema: Channel,
+        source: Channel.__schema__(:source),
+        state: :loaded
+      }
+
       expected = [
-        %Channel{id: 1, name: "foo", updated_at: timestamp, inserted_at: timestamp},
-        %Channel{id: 2, name: "bar", updated_at: timestamp, inserted_at: timestamp}
+        %Channel{
+          __meta__: metadata,
+          id: 1,
+          name: "foo",
+          updated_at: timestamp,
+          inserted_at: timestamp
+        },
+        %Channel{
+          __meta__: metadata,
+          id: 2,
+          name: "bar",
+          updated_at: timestamp,
+          inserted_at: timestamp
+        }
       ]
 
       assert Repo.pg_result_to_struct(result, Channel) == expected
