@@ -9,31 +9,33 @@ defmodule Realtime.Channels do
   import Ecto.Query
 
   @doc """
+  Lists all channels in the tenant database using a given DBConnection
+  """
+  @spec list_channels(DBConnection.conn()) :: {:error, any()} | {:ok, [struct()]}
+  def list_channels(conn) do
+    Repo.all(conn, Channel, Channel)
+  end
+
+  @doc """
   Creates a channel in the tenant database using a given DBConnection
   """
-  @spec create_channel(map(), DBConnection.t()) :: :ok
-  def create_channel(attrs, db_conection) do
+  @spec create_channel(map(), DBConnection.conn()) :: {:ok, Channel.t()} | {:error, any()}
+  def create_channel(attrs, conn) do
     channel = Channel.changeset(%Channel{}, attrs)
     {query, args} = Repo.insert_query_from_changeset(channel)
 
-    Postgrex.query!(db_conection, query, args)
-    :ok
+    conn
+    |> Postgrex.query(query, args)
+    |> Repo.result_to_single_struct(Channel)
   end
 
   @doc """
   Fetches a channel by name from the tenant database using a given DBConnection
   """
-  @spec get_channel_by_name(DBConnection.t(), String.t()) :: Channel.t() | nil
-  def get_channel_by_name(db_conection, name) do
+  @spec get_channel_by_name(String.t(), DBConnection.conn()) ::
+          {:ok, Channel.t()} | {:ok, nil} | {:error, any()}
+  def get_channel_by_name(name, conn) do
     query = from c in Channel, where: c.name == ^name
-    {query, args} = Repo.to_sql(:all, query)
-
-    with res <- Postgrex.query!(db_conection, query, args),
-         [channel] <- Repo.pg_result_to_struct(res, Channel) do
-      channel
-    else
-      [] -> nil
-      _ -> raise "Multiple channels with the same name"
-    end
+    Repo.one(conn, query, Channel)
   end
 end

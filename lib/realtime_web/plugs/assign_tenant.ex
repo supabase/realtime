@@ -32,6 +32,9 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
       {:error, :tenant_not_found_in_host} ->
         error_response(conn, "Tenant not found in host")
 
+      {:error, :tenant_database_unavailable} ->
+        error_response(conn, "Tenant database not available")
+
       nil ->
         error_response(conn, "Tenant not found in database")
 

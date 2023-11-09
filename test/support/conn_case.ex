@@ -21,9 +21,11 @@ defmodule RealtimeWeb.ConnCase do
   using do
     quote do
       # Import conveniences for testing with connections
-      import Plug.Conn
-      import Phoenix.ConnTest
       import Generators
+      import Phoenix.ConnTest
+      import Plug.Conn
+      import Realtime.DataCase
+
       alias RealtimeWeb.Router.Helpers, as: Routes
 
       use RealtimeWeb, :verified_routes

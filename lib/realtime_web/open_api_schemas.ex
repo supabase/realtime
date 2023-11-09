@@ -224,6 +224,28 @@ defmodule RealtimeWeb.OpenApiSchemas do
     })
   end
 
+  defmodule ChannelResponseValue do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{
+        id: %Schema{type: :integer, description: "Channel ID"},
+        name: %Schema{type: :string, description: "Channel Name"},
+        inserted_at: %Schema{type: :string, format: "date-time", description: "Insert timestamp"},
+        updated_at: %Schema{type: :string, format: "date-time", description: "Update timestamp"}
+      },
+      required: [:id, :name, :inserted_at, :updated_at],
+      example: %{
+        id: 1,
+        name: "channel-1",
+        inserted_at: "2023-01-01T00:00:00Z",
+        updated_at: "2023-01-01T00:00:00Z"
+      }
+    })
+  end
+
   defmodule TenantHealthResponseValue do
     @moduledoc false
     require OpenApiSpex
@@ -285,6 +307,30 @@ defmodule RealtimeWeb.OpenApiSchemas do
     OpenApiSpex.schema(%{
       type: :object,
       properties: %{data: %Schema{type: :array, items: TenantResponseValue}}
+    })
+
+    def response(), do: {"Tenant List Response", "application/json", __MODULE__}
+  end
+
+  defmodule ChannelResponse do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{data: ChannelResponseValue}
+    })
+
+    def response(), do: {"Tenant Response", "application/json", __MODULE__}
+  end
+
+  defmodule ChannelResponseList do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{data: %Schema{type: :array, items: ChannelResponseValue}}
     })
 
     def response(), do: {"Tenant List Response", "application/json", __MODULE__}
