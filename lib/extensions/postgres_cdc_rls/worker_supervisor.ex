@@ -47,6 +47,6 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
       }
     ]
 
-    Supervisor.init(children, strategy: :one_for_all, max_restarts: 10, max_seconds: 60)
+    Supervisor.init(children, strategy: :rest_for_one, max_restarts: 10, max_seconds: 60)
   end
 end
