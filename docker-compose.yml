@@ -8,7 +8,7 @@ services:
       - "5432:5432"
     volumes:
       - ./dev/postgres:/docker-entrypoint-initdb.d/
-    command: postgres -c config_file=/etc/postgresql/postgresql.conf 
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_HOST: /var/run/postgresql
       POSTGRES_PASSWORD: postgres
@@ -37,4 +37,38 @@ services:
       ERL_AFLAGS: -proto_dist inet_tcp
       ENABLE_TAILSCALE: "false"
       DNS_NODES: "''"
-    command: sh -c "/app/bin/migrate && /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)' && /app/bin/server"
+      ENABLE_ERL_CRASH_DUMP: true
+      ERL_CRASH_DUMP_FOLDER: /tmp
+      ERL_CRASH_DUMP_FILE_NAME: erl_crash.dump
+      ERL_CRASH_DUMP_S3_ENDPOINT: http://minio:9000
+      ERL_CRASH_DUMP_S3_REGION: us-east-1
+      ERL_CRASH_DUMP_S3_BUCKET: realtime
+      ERL_CRASH_DUMP_S3_KEY: minio-access-key
+      ERL_CRASH_DUMP_S3_SECRET: minio-secret-key
+      ERL_CRASH_DUMP_S3_HOST: minio
+      ERL_CRASH_DUMP_S3_PORT: 9000
+      ERL_CRASH_DUMP_S3_SSL: false
+      command: sh -c "/app/bin/migrate && /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)' && /app/bin/server"
+
+  minio:
+    image: minio/minio
+    container_name: realtime-minio
+    ports:
+      - "9000:9000"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    command: server /data
+
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set realtime-minio http://minio:9000 minio minio123;
+      mc admin user add realtime-minio user minio-secret-key;
+      mc admin user svcacct add --access-key minio-access-key --secret-key minio-secret-key realtime-minio user;
+      mc mb realtime-minio/realtime;
+      mc admin policy attach realtime-minio readwrite --user user
+      "
