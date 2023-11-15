@@ -130,7 +130,8 @@ defmodule Realtime.Tenants.Migrations do
       socket_options: db_socket_opts,
       parameters: [
         application_name: "realtime_migrations"
-      ]
+      ],
+      backoff_type: :stop
     ]
     |> H.maybe_enforce_ssl_config(ssl_enforced)
     |> Repo.with_dynamic_repo(fn repo ->
