@@ -146,40 +146,81 @@ defmodule Realtime.RepoTest do
     ]
   end
 
-  describe "pg_result_to_struct/2" do
+  describe "result_to_single_struct/2" do
     test "converts Postgrex.Result to struct" do
       timestamp = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
-      result = %Postgrex.Result{
-        columns: ["id", "name", "updated_at", "inserted_at"],
-        rows: [[1, "foo", timestamp, timestamp], [2, "bar", timestamp, timestamp]]
-      }
+      result =
+        {:ok,
+         %Postgrex.Result{
+           columns: ["id", "name", "updated_at", "inserted_at"],
+           rows: [[1, "foo", timestamp, timestamp]]
+         }}
 
-      metadata = %Ecto.Schema.Metadata{
-        prefix: Channel.__schema__(:prefix),
-        schema: Channel,
-        source: Channel.__schema__(:source),
-        state: :loaded
-      }
+      metadata = metadata()
 
-      expected = [
-        %Channel{
-          __meta__: metadata,
-          id: 1,
-          name: "foo",
-          updated_at: timestamp,
-          inserted_at: timestamp
-        },
-        %Channel{
-          __meta__: metadata,
-          id: 2,
-          name: "bar",
-          updated_at: timestamp,
-          inserted_at: timestamp
-        }
-      ]
+      assert {:ok,
+              %Channel{
+                __meta__: ^metadata,
+                id: 1,
+                name: "foo",
+                updated_at: ^timestamp,
+                inserted_at: ^timestamp
+              }} = Repo.result_to_single_struct(result, Channel)
+    end
 
-      assert Repo.pg_result_to_struct(result, Channel) == expected
+    test "no results returns nil" do
+      result =
+        {:ok, %Postgrex.Result{columns: ["id", "name", "updated_at", "inserted_at"], rows: []}}
+
+      assert {:ok, nil} = Repo.result_to_single_struct(result, Channel)
+    end
+
+    test "Postgrex.Result with more than one row will return error" do
+      timestamp = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+      result =
+        {:ok,
+         %Postgrex.Result{
+           columns: ["id", "name", "updated_at", "inserted_at"],
+           rows: [[1, "foo", timestamp, timestamp], [2, "bar", timestamp, timestamp]]
+         }}
+
+      assert_raise RuntimeError, "expected at most one result but got 2 in result", fn ->
+        Repo.result_to_single_struct(result, Channel)
+      end
+    end
+  end
+
+  describe "result_to_structs/2" do
+    test "converts Postgrex.Result to struct" do
+      timestamp = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+      result =
+        {:ok,
+         %Postgrex.Result{
+           columns: ["id", "name", "updated_at", "inserted_at"],
+           rows: [[1, "foo", timestamp, timestamp], [2, "bar", timestamp, timestamp]]
+         }}
+
+      assert {:ok,
+              [
+                %Channel{
+                  id: 1,
+                  name: "foo",
+                  updated_at: ^timestamp,
+                  inserted_at: ^timestamp
+                } = channel_1,
+                %Channel{
+                  id: 2,
+                  name: "bar",
+                  updated_at: ^timestamp,
+                  inserted_at: ^timestamp
+                } = channel_2
+              ]} = Repo.result_to_structs(result, Channel)
+
+      assert :loaded = Ecto.get_meta(channel_1, :state)
+      assert :loaded = Ecto.get_meta(channel_2, :state)
     end
   end
 
@@ -190,10 +231,19 @@ defmodule Realtime.RepoTest do
       updated_at = changeset.changes.updated_at
 
       expected =
-        {"INSERT INTO \"realtime\".\"channels\" (\"updated_at\",\"name\",\"inserted_at\") VALUES ($1,$2,$3)",
+        {"INSERT INTO \"realtime\".\"channels\" (\"updated_at\",\"name\",\"inserted_at\") VALUES ($1,$2,$3) RETURNING *",
          [updated_at, "foo", inserted_at]}
 
       assert Repo.insert_query_from_changeset(changeset) == expected
     end
+  end
+
+  defp metadata do
+    %Ecto.Schema.Metadata{
+      prefix: Channel.__schema__(:prefix),
+      schema: Channel,
+      source: Channel.__schema__(:source),
+      state: :loaded
+    }
   end
 end

@@ -4,6 +4,7 @@ defmodule Realtime.Api.Channel do
   """
   use Ecto.Schema
   import Ecto.Changeset
+  @derive {Jason.Encoder, only: [:name, :inserted_at, :updated_at, :id]}
 
   @type t :: %__MODULE__{}
 

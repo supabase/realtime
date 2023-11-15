@@ -3,6 +3,7 @@ defmodule Generators do
   Data genarators for tests.
   """
 
+  @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
     create_attrs = %{
       "external_id" => random_string(),
@@ -36,6 +37,20 @@ defmodule Generators do
       |> Realtime.Api.create_tenant()
 
     tenant
+  end
+
+  @spec channel_fixture(binary(), map()) :: Realtime.Api.Channel.t()
+  def channel_fixture(tenant, override \\ %{}) do
+    {:ok, conn} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    create_attrs = %{"name" => random_string()}
+    override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
+
+    {:ok, channel} =
+      create_attrs
+      |> Map.merge(override)
+      |> Realtime.Channels.create_channel(conn)
+
+    channel
   end
 
   def random_string(length \\ 10) do

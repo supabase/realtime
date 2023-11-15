@@ -50,4 +50,6 @@ defmodule Realtime.DataCase do
       end)
     end)
   end
+
+  def truncate_table(db_conn, table), do: Postgrex.query!(db_conn, "TRUNCATE TABLE #{table}", [])
 end
