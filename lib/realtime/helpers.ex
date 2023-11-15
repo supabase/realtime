@@ -105,6 +105,7 @@ defmodule Realtime.Helpers do
         application_name: application_name
       ],
       socket_options: socket_opts,
+      backoff_type: :stop,
       configure: fn args ->
         Logger.metadata(metadata)
         args
