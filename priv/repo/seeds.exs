@@ -2,7 +2,9 @@ alias Realtime.{Api.Tenant, Repo}
 import Ecto.Adapters.SQL, only: [query: 3]
 
 tenant_name = "realtime-dev"
-default_db_host = if Mix.env() in [:dev, :test], do: "localhost", else: "host.docker.internal"
+
+env = if :ets.whereis(Mix.State) != :undefined, do: Mix.env(), else: :prod
+default_db_host = if env in [:dev, :test], do: "localhost", else: "host.docker.internal"
 
 Repo.transaction(fn ->
   case Repo.get_by(Tenant, external_id: tenant_name) do
@@ -36,7 +38,7 @@ Repo.transaction(fn ->
   |> Repo.insert!()
 end)
 
-if Mix.env() in [:dev, :test] do
+if env in [:dev, :test] do
   publication = "supabase_realtime"
 
   {:ok, _} =
