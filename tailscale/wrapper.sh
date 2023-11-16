@@ -52,7 +52,6 @@ function upload_crash_dump_to_s3 {
 }
 
 if [ "${ENABLE_ERL_CRASH_DUMP-}" = true ]; then
-    echo "trap?"
     trap upload_crash_dump_to_s3 SIGINT SIGTERM SIGKILL EXIT
 fi
 
