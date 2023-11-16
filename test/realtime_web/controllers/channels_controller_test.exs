@@ -51,4 +51,23 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       assert res == expected
     end
   end
+
+  describe "show" do
+    test "lists tenant channels", %{conn: conn, tenant: tenant} do
+      [channel | _] =
+        Stream.repeatedly(fn -> channel_fixture(tenant) end)
+        |> Enum.take(10)
+
+      expected = channel |> Jason.encode!() |> Jason.decode!()
+
+      conn = get(conn, ~p"/api/channels/#{channel.id}")
+      res = json_response(conn, 200)
+      assert res == expected
+    end
+
+    test "returns not found if id doesn't exist", %{conn: conn} do
+      conn = get(conn, ~p"/api/channels/0")
+      assert json_response(conn, 404) == %{"message" => "Not found"}
+    end
+  end
 end
