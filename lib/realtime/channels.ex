@@ -17,6 +17,15 @@ defmodule Realtime.Channels do
   end
 
   @doc """
+  Fetches a channel by id from the tenant database using a given DBConnection
+  """
+  @spec get_channel_by_id(binary(), DBConnection.conn()) :: {:ok, Channel.t()} | {:error, any()}
+  def get_channel_by_id(id, conn) do
+    query = from c in Channel, where: c.id == ^id
+    Repo.one(conn, query, Channel)
+  end
+
+  @doc """
   Creates a channel in the tenant database using a given DBConnection
   """
   @spec create_channel(map(), DBConnection.conn()) :: {:ok, Channel.t()} | {:error, any()}

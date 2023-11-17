@@ -17,7 +17,7 @@ defmodule RealtimeWeb.FallbackController do
     conn
     |> put_status(:not_found)
     |> put_view(RealtimeWeb.ErrorView)
-    |> render(:"404")
+    |> render("error.json", message: "Not found")
   end
 
   def call(conn, {:error, status, message}) when is_atom(status) and is_binary(message) do

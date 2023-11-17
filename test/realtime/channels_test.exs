@@ -17,32 +17,44 @@ defmodule Realtime.ChannelsTest do
     {:ok, conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
     truncate_table(conn, "realtime.channels")
 
-    %{db_conn: conn, tenant: tenant}
+    %{conn: conn, tenant: tenant}
   end
 
   describe "list/1" do
-    test "list channels in tenant database", %{db_conn: db_conn, tenant: tenant} do
+    test "list channels in tenant database", %{conn: conn, tenant: tenant} do
       channels = Stream.repeatedly(fn -> channel_fixture(tenant) end) |> Enum.take(10)
-      assert {:ok, ^channels} = Channels.list_channels(db_conn)
+      assert {:ok, ^channels} = Channels.list_channels(conn)
+    end
+  end
+
+  describe "get_channel_by_id/2" do
+    test "fetches correct channel", %{tenant: tenant, conn: conn} do
+      [channel | _] = Stream.repeatedly(fn -> channel_fixture(tenant) end) |> Enum.take(10)
+      {:ok, res} = Channels.get_channel_by_id(channel.id, conn)
+      assert channel == res
+    end
+
+    test "nil if channel does not exist", %{conn: conn} do
+      assert {:ok, nil} = Channels.get_channel_by_id(0, conn)
     end
   end
 
   describe "create/2" do
-    test "creates channel in tenant database", %{db_conn: db_conn} do
+    test "creates channel in tenant database", %{conn: conn} do
       name = random_string()
-      assert {:ok, %Channel{name: ^name}} = Channels.create_channel(%{name: name}, db_conn)
+      assert {:ok, %Channel{name: ^name}} = Channels.create_channel(%{name: name}, conn)
     end
   end
 
   describe "get_channel_by_name/2" do
-    test "fetches correct channel", %{db_conn: db_conn} do
+    test "fetches correct channel", %{conn: conn} do
       name = random_string()
-      {:ok, channel} = Channels.create_channel(%{name: name}, db_conn)
-      assert {:ok, ^channel} = Channels.get_channel_by_name(name, db_conn)
+      {:ok, channel} = Channels.create_channel(%{name: name}, conn)
+      assert {:ok, ^channel} = Channels.get_channel_by_name(name, conn)
     end
 
-    test "nil if channel does not exist", %{db_conn: db_conn} do
-      assert {:ok, nil} == Channels.get_channel_by_name(random_string(), db_conn)
+    test "nil if channel does not exist", %{conn: conn} do
+      assert {:ok, nil} == Channels.get_channel_by_name(random_string(), conn)
     end
   end
 end
