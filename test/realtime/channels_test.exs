@@ -44,6 +44,11 @@ defmodule Realtime.ChannelsTest do
       name = random_string()
       assert {:ok, %Channel{name: ^name}} = Channels.create_channel(%{name: name}, conn)
     end
+
+    test "no channel name has error changeset", %{conn: conn} do
+      assert %Ecto.Changeset{valid?: false, errors: errors} = Channels.create_channel(%{}, conn)
+      assert ^errors = [name: {"can't be blank", [validation: :required]}]
+    end
   end
 
   describe "get_channel_by_name/2" do

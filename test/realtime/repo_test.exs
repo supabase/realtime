@@ -1,7 +1,18 @@
 defmodule Realtime.RepoTest do
   use Realtime.DataCase, async: false
-  alias Realtime.Repo
+
+  import Ecto.Query
+
   alias Realtime.Api.Channel
+  alias Realtime.Repo
+  alias Realtime.Tenants.Connect
+
+  setup do
+    tenant = tenant_fixture()
+    {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    truncate_table(conn, "realtime.channels")
+    %{conn: conn, tenant: tenant}
+  end
 
   describe "with_dynamic_repo/2" do
     test "starts a repo with the given config and kills it in the end of the command" do
@@ -114,36 +125,57 @@ defmodule Realtime.RepoTest do
     end
   end
 
-  defp db_config() do
-    tenant = tenant_fixture()
+  describe "all/3" do
+    test "fetches multiple entries and loads a given struct", %{conn: conn, tenant: tenant} do
+      channel_1 = channel_fixture(tenant)
+      channel_2 = channel_fixture(tenant)
 
-    %{
-      "db_host" => db_host,
-      "db_name" => db_name,
-      "db_password" => db_password,
-      "db_port" => db_port,
-      "db_user" => db_user
-    } = args = tenant.extensions |> hd() |> then(& &1.settings)
+      assert {:ok, [^channel_1, ^channel_2]} = Repo.all(conn, Channel, Channel)
+    end
+  end
 
-    {host, port, name, user, pass} =
-      Realtime.Helpers.decrypt_creds(
-        db_host,
-        db_port,
-        db_name,
-        db_user,
-        db_password
-      )
+  describe "one/3" do
+    test "fetches one entry and loads a given struct", %{conn: conn, tenant: tenant} do
+      channel_1 = channel_fixture(tenant)
+      _channel_2 = channel_fixture(tenant)
+      query = from c in Channel, where: c.id == ^channel_1.id
+      assert {:ok, ^channel_1} = Repo.one(conn, query, Channel)
+    end
 
-    ssl_enforced = Realtime.Helpers.default_ssl_param(args)
+    test "raises exception on multiple results", %{conn: conn, tenant: tenant} do
+      _channel_1 = channel_fixture(tenant)
+      _channel_2 = channel_fixture(tenant)
 
-    [
-      hostname: host,
-      port: port,
-      database: name,
-      password: pass,
-      username: user,
-      ssl_enforced: ssl_enforced
-    ]
+      assert_raise RuntimeError, "expected at most one result but got 2 in result", fn ->
+        Repo.one(conn, Channel, Channel)
+      end
+    end
+
+    test "if not found, returns nil", %{conn: conn} do
+      query = from c in Channel, where: c.name == "potato"
+      assert {:ok, nil} = Repo.one(conn, query, Channel)
+    end
+  end
+
+  describe "insert/3" do
+    test "inserts a new entry with a given changeset and returns struct", %{conn: conn} do
+      changeset = Channel.changeset(%Channel{}, %{name: "foo"})
+      assert {:ok, channel} = Repo.insert(conn, changeset, Channel)
+      assert is_struct(channel, Channel)
+    end
+
+    test "returns changeset if changeset is invalid", %{conn: conn} do
+      changeset = Channel.changeset(%Channel{}, %{})
+      res = Repo.insert(conn, changeset, Channel)
+      assert is_struct(res, Ecto.Changeset)
+      assert res.valid? == false
+    end
+
+    test "returns an error on Postgrex error", %{conn: conn} do
+      changeset = Channel.changeset(%Channel{}, %{name: "foo"})
+      assert {:ok, _} = Repo.insert(conn, changeset, Channel)
+      assert {:error, _} = Repo.insert(conn, changeset, Channel)
+    end
   end
 
   describe "result_to_single_struct/2" do
@@ -236,6 +268,38 @@ defmodule Realtime.RepoTest do
 
       assert Repo.insert_query_from_changeset(changeset) == expected
     end
+  end
+
+  defp db_config() do
+    tenant = tenant_fixture()
+
+    %{
+      "db_host" => db_host,
+      "db_name" => db_name,
+      "db_password" => db_password,
+      "db_port" => db_port,
+      "db_user" => db_user
+    } = args = tenant.extensions |> hd() |> then(& &1.settings)
+
+    {host, port, name, user, pass} =
+      Realtime.Helpers.decrypt_creds(
+        db_host,
+        db_port,
+        db_name,
+        db_user,
+        db_password
+      )
+
+    ssl_enforced = Realtime.Helpers.default_ssl_param(args)
+
+    [
+      hostname: host,
+      port: port,
+      database: name,
+      password: pass,
+      username: user,
+      ssl_enforced: ssl_enforced
+    ]
   end
 
   defp metadata do

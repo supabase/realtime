@@ -4,6 +4,7 @@ defmodule RealtimeWeb.ChannelsController do
 
   alias Realtime.Channels
   alias Realtime.Tenants.Connect
+  alias RealtimeWeb.OpenApiSchemas.ChannelParams
   alias RealtimeWeb.OpenApiSchemas.ChannelResponse
   alias RealtimeWeb.OpenApiSchemas.ChannelResponseList
   alias RealtimeWeb.OpenApiSchemas.NotFoundResponse
@@ -66,6 +67,34 @@ defmodule RealtimeWeb.ChannelsController do
     else
       {:ok, nil} -> {:error, :not_found}
       error -> error
+    end
+  end
+
+  operation(:create,
+    summary: "Create user channel",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ]
+    ],
+    request_body: ChannelParams.params(),
+    responses: %{
+      201 => ChannelResponse.response(),
+      404 => NotFoundResponse.response()
+    }
+  )
+
+  def create(%{assigns: %{tenant: tenant}} = conn, params) do
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
+         {:ok, channel} <- Channels.create_channel(params, db_conn) do
+      conn
+      |> put_status(:created)
+      |> json(channel)
     end
   end
 end
