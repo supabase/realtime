@@ -350,6 +350,26 @@ defmodule Realtime.Helpers do
     Enum.each(pids_to_kill, &Process.exit(&1, reason))
   end
 
+  @doc """
+  Kills all Ecto.Migration.Runner processes that are linked only to Ecto.MigratorSupervisor
+  """
+  @spec dirty_terminate_runners :: list()
+  def dirty_terminate_runners() do
+    Ecto.MigratorSupervisor
+    |> DynamicSupervisor.which_children()
+    |> Enum.reduce([], fn
+      {_, pid, :worker, [Ecto.Migration.Runner]}, acc ->
+        if length(Process.info(pid)[:links]) < 2 do
+          [{pid, Agent.stop(pid, :normal, 5_000)} | acc]
+        else
+          acc
+        end
+
+      _, acc ->
+        acc
+    end)
+  end
+
   defp stop_user_tenant_process(tenant, platform_region, acc) do
     Extensions.PostgresCdcRls.handle_stop(tenant, 5_000)
     # credo:disable-for-next-line

@@ -89,8 +89,17 @@ defmodule Realtime.Tenants.Migrations do
   @impl true
   def init(%{"id" => id} = args) do
     Logger.metadata(external_id: id, project: id)
-    apply_migrations(args)
-    {:ok, %{}, {:continue, :stop}}
+
+    case apply_migrations(args) do
+      {:ok, migrations} ->
+        Logger.debug("Migrations applied successfully #{inspect(migrations)}")
+        {:ok, %{}, {:continue, :stop}}
+
+      {:error, error} ->
+        runners = H.dirty_terminate_runners()
+        Logger.error("Migrations failed, terminated runners: #{inspect(runners)}")
+        {:stop, error}
+    end
   end
 
   @impl true
@@ -98,7 +107,7 @@ defmodule Realtime.Tenants.Migrations do
     {:stop, :normal, %{}}
   end
 
-  @spec apply_migrations(map()) :: [integer()]
+  @spec apply_migrations(map()) :: {:ok, [integer()]} | {:error, any()}
   defp apply_migrations(
          %{
            "db_host" => db_host,
@@ -137,14 +146,21 @@ defmodule Realtime.Tenants.Migrations do
     |> Repo.with_dynamic_repo(fn repo ->
       Logger.info("Applying migrations to #{host}")
 
-      Ecto.Migrator.run(
-        Repo,
-        @migrations,
-        :up,
-        all: true,
-        prefix: "realtime",
-        dynamic_repo: repo
-      )
+      try do
+        res =
+          Ecto.Migrator.run(
+            Repo,
+            @migrations,
+            :up,
+            all: true,
+            prefix: "realtime",
+            dynamic_repo: repo
+          )
+
+        {:ok, res}
+      rescue
+        error -> {:error, error}
+      end
     end)
   end
 end
