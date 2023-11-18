@@ -44,4 +44,14 @@ defmodule Realtime.Channels do
     query = from c in Channel, where: c.name == ^name
     Repo.one(conn, query, Channel)
   end
+
+  @doc """
+  Deletes a channel by id from the tenant database using a given DBConnection
+  """
+  @spec delete_channel_by_id(binary(), DBConnection.conn()) ::
+          {:ok, Channel.t()} | {:error, any()}
+  def delete_channel_by_id(id, conn) do
+    query = from c in Channel, where: c.id == ^id
+    Repo.del(conn, query)
+  end
 end

@@ -84,4 +84,17 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       assert json_response(conn, 422) == %{"errors" => %{"name" => ["can't be blank"]}}
     end
   end
+
+  describe "delete" do
+    test "deletes a channel", %{conn: conn, tenant: tenant} do
+      channel = channel_fixture(tenant)
+      conn = delete(conn, ~p"/api/channels/#{channel.id}")
+      assert conn.status == 202
+    end
+
+    test "returns not found if id doesn't exist", %{conn: conn} do
+      conn = delete(conn, ~p"/api/channels/0")
+      assert conn.status == 202
+    end
+  end
 end

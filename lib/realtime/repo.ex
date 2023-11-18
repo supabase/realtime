@@ -52,32 +52,35 @@ defmodule Realtime.Repo do
   end
 
   @doc """
-  Converts a Postgrex.Result into a given struct
+  Deletes all records for a given query and converts them into a given struct
   """
-  @spec result_to_single_struct({:ok, Postgrex.Result.t()} | {:error, any()}, module()) ::
-          {:ok, struct()} | {:ok, nil} | {:error, any()}
-  def result_to_single_struct({:ok, %Postgrex.Result{rows: [row], columns: columns}}, struct) do
+  @spec del(DBConnection.conn(), Ecto.Queryable.t()) ::
+          {:ok, non_neg_integer()} | {:error, any()}
+  def del(conn, query) do
+    with {:ok, %Postgrex.Result{num_rows: rows}} <- run_delete_query(conn, query) do
+      {:ok, rows}
+    end
+  rescue
+    error -> {:error, error}
+  end
+
+  defp result_to_single_struct({:ok, %Postgrex.Result{rows: [row], columns: columns}}, struct) do
     {:ok, load(struct, Enum.zip(columns, row))}
   end
 
-  def result_to_single_struct({:ok, %Postgrex.Result{rows: []}}, _),
+  defp result_to_single_struct({:ok, %Postgrex.Result{rows: []}}, _),
     do: {:ok, nil}
 
-  def result_to_single_struct({:ok, %Postgrex.Result{rows: rows}}, _),
+  defp result_to_single_struct({:ok, %Postgrex.Result{rows: rows}}, _),
     do: raise("expected at most one result but got #{length(rows)} in result")
 
-  def result_to_single_struct({:error, _} = error, _), do: error
+  defp result_to_single_struct({:error, _} = error, _), do: error
 
-  @doc """
-  Converts a Postgrex.Result into a given struct
-  """
-  @spec result_to_structs({:ok, Postgrex.Result.t()} | {:error, any()}, module()) ::
-          {:ok, list(struct())} | {:error, any()}
-  def result_to_structs({:ok, %Postgrex.Result{rows: rows, columns: columns}}, struct) do
-    {:ok, Enum.map(rows, &Realtime.Repo.load(struct, Enum.zip(columns, &1)))}
+  defp result_to_structs({:ok, %Postgrex.Result{rows: rows, columns: columns}}, struct) do
+    {:ok, Enum.map(rows, &load(struct, Enum.zip(columns, &1)))}
   end
 
-  def result_to_structs({:error, _} = error, _), do: error
+  defp result_to_structs({:error, _} = error, _), do: error
 
   @doc """
   Creates an insert query from a given changeset
@@ -86,7 +89,7 @@ defmodule Realtime.Repo do
           {:ok, {String.t(), [any()]}} | {:error, Ecto.Changeset.t()}
   def insert_query_from_changeset(%{valid?: false} = changeset), do: {:error, changeset}
 
-  def insert_query_from_changeset(changeset) do
+  defp insert_query_from_changeset(changeset) do
     schema = changeset.data.__struct__
     source = schema.__schema__(:source)
     prefix = schema.__schema__(:prefix)
@@ -114,6 +117,11 @@ defmodule Realtime.Repo do
 
   defp run_all_query(conn, query) do
     {query, args} = __MODULE__.to_sql(:all, query)
+    Postgrex.query(conn, query, args)
+  end
+
+  defp run_delete_query(conn, query) do
+    {query, args} = __MODULE__.to_sql(:delete_all, query)
     Postgrex.query(conn, query, args)
   end
 end
