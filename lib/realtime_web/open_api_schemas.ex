@@ -5,6 +5,24 @@ defmodule RealtimeWeb.OpenApiSchemas do
 
   alias OpenApiSpex.Schema
 
+  defmodule ChannelParams do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{
+        name: %Schema{
+          type: :string,
+          description: "Channel Name",
+          example: "channel-1"
+        }
+      }
+    })
+
+    def params(), do: {"Channel Params", "application/json", __MODULE__}
+  end
+
   defmodule TenantBatchParams do
     @moduledoc false
     require OpenApiSpex

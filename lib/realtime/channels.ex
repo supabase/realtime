@@ -31,11 +31,8 @@ defmodule Realtime.Channels do
   @spec create_channel(map(), DBConnection.conn()) :: {:ok, Channel.t()} | {:error, any()}
   def create_channel(attrs, conn) do
     channel = Channel.changeset(%Channel{}, attrs)
-    {query, args} = Repo.insert_query_from_changeset(channel)
 
-    conn
-    |> Postgrex.query(query, args)
-    |> Repo.result_to_single_struct(Channel)
+    Repo.insert(conn, channel, Channel)
   end
 
   @doc """

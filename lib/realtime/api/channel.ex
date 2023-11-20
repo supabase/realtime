@@ -17,9 +17,9 @@ defmodule Realtime.Api.Channel do
   def changeset(channel, attrs) do
     channel
     |> cast(attrs, [:name, :inserted_at, :updated_at])
+    |> validate_required([:name])
     |> put_timestamp(:updated_at)
     |> maybe_put_timestamp(:inserted_at)
-    |> validate_required([:name])
   end
 
   defp put_timestamp(changeset, field) do

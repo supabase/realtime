@@ -39,12 +39,25 @@ defmodule Realtime.Repo do
   end
 
   @doc """
+  Inserts a given changeset into the database and converts the result into a given struct
+  """
+  @spec insert(DBConnection.conn(), Ecto.Changeset.t(), module()) ::
+          {:ok, struct()} | {:error, any()} | Ecto.Changeset.t()
+  def insert(conn, changeset, result_struct) do
+    with {:ok, {query, args}} <- insert_query_from_changeset(changeset) do
+      conn
+      |> Postgrex.query(query, args)
+      |> result_to_single_struct(result_struct)
+    end
+  end
+
+  @doc """
   Converts a Postgrex.Result into a given struct
   """
   @spec result_to_single_struct({:ok, Postgrex.Result.t()} | {:error, any()}, module()) ::
           {:ok, struct()} | {:ok, nil} | {:error, any()}
   def result_to_single_struct({:ok, %Postgrex.Result{rows: [row], columns: columns}}, struct) do
-    {:ok, Realtime.Repo.load(struct, Enum.zip(columns, row))}
+    {:ok, load(struct, Enum.zip(columns, row))}
   end
 
   def result_to_single_struct({:ok, %Postgrex.Result{rows: []}}, _),
@@ -69,7 +82,10 @@ defmodule Realtime.Repo do
   @doc """
   Creates an insert query from a given changeset
   """
-  @spec insert_query_from_changeset(Ecto.Changeset.t()) :: {String.t(), [any()]}
+  @spec insert_query_from_changeset(Ecto.Changeset.t()) ::
+          {:ok, {String.t(), [any()]}} | {:error, Ecto.Changeset.t()}
+  def insert_query_from_changeset(%{valid?: false} = changeset), do: {:error, changeset}
+
   def insert_query_from_changeset(changeset) do
     schema = changeset.data.__struct__
     source = schema.__schema__(:source)
@@ -93,7 +109,7 @@ defmodule Realtime.Repo do
       |> Enum.map(fn {_, index} -> "$#{index}" end)
       |> Enum.join(",")
 
-    {"INSERT INTO #{table} #{header} VALUES (#{arg_index}) RETURNING *", rows}
+    {:ok, {"INSERT INTO #{table} #{header} VALUES (#{arg_index}) RETURNING *", rows}}
   end
 
   defp run_all_query(conn, query) do
