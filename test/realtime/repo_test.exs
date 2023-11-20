@@ -160,15 +160,13 @@ defmodule Realtime.RepoTest do
   describe "insert/3" do
     test "inserts a new entry with a given changeset and returns struct", %{conn: conn} do
       changeset = Channel.changeset(%Channel{}, %{name: "foo"})
-      assert {:ok, channel} = Repo.insert(conn, changeset, Channel)
-      assert is_struct(channel, Channel)
+      assert {:ok, %Channel{}} = Repo.insert(conn, changeset, Channel)
     end
 
     test "returns changeset if changeset is invalid", %{conn: conn} do
       changeset = Channel.changeset(%Channel{}, %{})
       res = Repo.insert(conn, changeset, Channel)
-      assert is_struct(res, Ecto.Changeset)
-      assert res.valid? == false
+      assert {:error, %Ecto.Changeset{valid?: false}} = res
     end
 
     test "returns an error on Postgrex error", %{conn: conn} do
@@ -266,7 +264,8 @@ defmodule Realtime.RepoTest do
         {"INSERT INTO \"realtime\".\"channels\" (\"updated_at\",\"name\",\"inserted_at\") VALUES ($1,$2,$3) RETURNING *",
          [updated_at, "foo", inserted_at]}
 
-      assert Repo.insert_query_from_changeset(changeset) == expected
+      {:ok, res} = Repo.insert_query_from_changeset(changeset)
+      assert res == expected
     end
   end
 
