@@ -184,11 +184,13 @@ defmodule Realtime.RepoTest do
       assert {:ok, 3} = Repo.del(conn, Channel)
     end
 
-    test "handles error on wrong delete", %{conn: conn} do
+    test "raises error on bad queries", %{conn: conn} do
       # wrong id type
       query = from c in Channel, where: c.id == "potato"
-      assert {:error, error} = Repo.del(conn, query)
-      assert is_struct(error, Ecto.QueryError)
+
+      assert_raise Ecto.QueryError, fn ->
+        Repo.del(conn, query)
+      end
     end
   end
 

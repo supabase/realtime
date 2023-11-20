@@ -94,7 +94,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
 
     test "returns not found if id doesn't exist", %{conn: conn} do
       conn = delete(conn, ~p"/api/channels/0")
-      assert conn.status == 202
+      assert conn.status == 404
     end
   end
 end
