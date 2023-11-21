@@ -31,7 +31,7 @@ function upload_crash_dump_to_s3 {
     if [ -f "${ERL_CRASH_DUMP_FOLDER:-tmp}/${ERL_CRASH_DUMP_FILE_NAME:-erl_crash.dump}" ]; then
         mv ${ERL_CRASH_DUMP_FOLDER:-tmp}/${ERL_CRASH_DUMP_FILE_NAME:-erl_crash.dump} $filePath
 
-        resource="/${bucket}${filePath}"
+        resource="/${bucket}/realtime/crash_dumps${filePath}"
 
         contentType="application/octet-stream"
         dateValue=$(date -R)
