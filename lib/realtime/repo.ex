@@ -79,7 +79,7 @@ defmodule Realtime.Repo do
 
   defp result_to_single_struct({:error, _} = error, _), do: error
 
-  defp result_to_single_struct({:ok, %Postgrex.Result{rows: []}}, _), do: {:ok, nil}
+  defp result_to_single_struct({:ok, %Postgrex.Result{rows: []}}, _), do: {:error, :not_found}
 
   defp result_to_single_struct({:ok, %Postgrex.Result{rows: [row], columns: columns}}, struct) do
     {:ok, load(struct, Enum.zip(columns, row))}

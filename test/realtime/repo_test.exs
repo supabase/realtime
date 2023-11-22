@@ -153,9 +153,9 @@ defmodule Realtime.RepoTest do
       end
     end
 
-    test "if not found, returns nil", %{conn: conn} do
+    test "if not found, returns not found error", %{conn: conn} do
       query = from c in Channel, where: c.name == "potato"
-      assert {:ok, nil} = Repo.one(conn, query, Channel)
+      assert {:error, :not_found} = Repo.one(conn, query, Channel)
     end
   end
 

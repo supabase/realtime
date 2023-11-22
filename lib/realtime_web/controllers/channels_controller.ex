@@ -126,11 +126,8 @@ defmodule RealtimeWeb.ChannelsController do
 
   def delete(%{assigns: %{tenant: tenant}} = conn, %{"id" => id}) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
-         {:ok, 1} <- Channels.delete_channel_by_id(id, db_conn) do
+         :ok <- Channels.delete_channel_by_id(id, db_conn) do
       send_resp(conn, :accepted, "")
-    else
-      {:ok, 0} -> {:error, :not_found}
-      error -> error
     end
   end
 
