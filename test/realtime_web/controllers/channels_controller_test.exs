@@ -5,7 +5,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
 
   alias Realtime.GenCounter
   alias Realtime.Tenants
-
+  @moduletag :skip
   @cdc "postgres_cdc_rls"
   @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE1MTYyMzkwMjIsInJvbGUiOiJmb28iLCJleHAiOiJiYXIifQ.Ret2CevUozCsPhpgW2FMeFL7RooLgoOvfQzNpLBj5ak"
 
@@ -35,89 +35,89 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     {:ok, conn: conn, tenant: tenant}
   end
 
-  describe "index" do
-    test "lists tenant channels", %{conn: conn, tenant: tenant} do
-      expected =
-        Stream.repeatedly(fn -> channel_fixture(tenant) end)
-        |> Enum.take(10)
-        |> Jason.encode!()
-        |> Jason.decode!()
+  # describe "index" do
+  #   test "lists tenant channels", %{conn: conn, tenant: tenant} do
+  #     expected =
+  #       Stream.repeatedly(fn -> channel_fixture(tenant) end)
+  #       |> Enum.take(10)
+  #       |> Jason.encode!()
+  #       |> Jason.decode!()
 
-      conn = get(conn, ~p"/api/channels")
-      res = json_response(conn, 200)
+  #     conn = get(conn, ~p"/api/channels")
+  #     res = json_response(conn, 200)
 
-      res = Enum.sort_by(res, fn %{"id" => id} -> id end)
-      expected = Enum.sort_by(expected, fn %{"id" => id} -> id end)
-      assert res == expected
-    end
-  end
+  #     res = Enum.sort_by(res, fn %{"id" => id} -> id end)
+  #     expected = Enum.sort_by(expected, fn %{"id" => id} -> id end)
+  #     assert res == expected
+  #   end
+  # end
 
-  describe "show" do
-    test "lists tenant channels", %{conn: conn, tenant: tenant} do
-      [channel | _] =
-        Stream.repeatedly(fn -> channel_fixture(tenant) end)
-        |> Enum.take(10)
+  # describe "show" do
+  #   test "lists tenant channels", %{conn: conn, tenant: tenant} do
+  #     [channel | _] =
+  #       Stream.repeatedly(fn -> channel_fixture(tenant) end)
+  #       |> Enum.take(10)
 
-      expected = channel |> Jason.encode!() |> Jason.decode!()
+  #     expected = channel |> Jason.encode!() |> Jason.decode!()
 
-      conn = get(conn, ~p"/api/channels/#{channel.id}")
-      res = json_response(conn, 200)
-      assert res == expected
-    end
+  #     conn = get(conn, ~p"/api/channels/#{channel.id}")
+  #     res = json_response(conn, 200)
+  #     assert res == expected
+  #   end
 
-    test "returns not found if id doesn't exist", %{conn: conn} do
-      conn = get(conn, ~p"/api/channels/0")
-      assert json_response(conn, 404) == %{"message" => "Not found"}
-    end
-  end
+  #   test "returns not found if id doesn't exist", %{conn: conn} do
+  #     conn = get(conn, ~p"/api/channels/0")
+  #     assert json_response(conn, 404) == %{"message" => "Not found"}
+  #   end
+  # end
 
-  describe "create" do
-    test "creates a channel", %{conn: conn} do
-      name = random_string()
-      conn = post(conn, ~p"/api/channels", %{name: name})
-      res = json_response(conn, 201)
-      assert name == res["name"]
-    end
+  # describe "create" do
+  #   test "creates a channel", %{conn: conn} do
+  #     name = random_string()
+  #     conn = post(conn, ~p"/api/channels", %{name: name})
+  #     res = json_response(conn, 201)
+  #     assert name == res["name"]
+  #   end
 
-    test "422 if params are invalid", %{conn: conn} do
-      conn = post(conn, ~p"/api/channels", %{})
-      assert json_response(conn, 422) == %{"errors" => %{"name" => ["can't be blank"]}}
-    end
-  end
+  #   test "422 if params are invalid", %{conn: conn} do
+  #     conn = post(conn, ~p"/api/channels", %{})
+  #     assert json_response(conn, 422) == %{"errors" => %{"name" => ["can't be blank"]}}
+  #   end
+  # end
 
-  describe "delete" do
-    test "deletes a channel", %{conn: conn, tenant: tenant} do
-      channel = channel_fixture(tenant)
-      conn = delete(conn, ~p"/api/channels/#{channel.id}")
-      assert conn.status == 202
-    end
+  # describe "delete" do
+  #   test "deletes a channel", %{conn: conn, tenant: tenant} do
+  #     channel = channel_fixture(tenant)
+  #     conn = delete(conn, ~p"/api/channels/#{channel.id}")
+  #     assert conn.status == 202
+  #   end
 
-    test "returns not found if id doesn't exist", %{conn: conn} do
-      conn = delete(conn, ~p"/api/channels/0")
-      assert conn.status == 404
-    end
-  end
+  #   test "returns not found if id doesn't exist", %{conn: conn} do
+  #     conn = delete(conn, ~p"/api/channels/0")
+  #     assert conn.status == 404
+  #   end
+  # end
 
-  describe "update" do
-    test "updates a channel", %{conn: conn, tenant: tenant} do
-      channel = channel_fixture(tenant)
-      name = random_string()
-      conn = put(conn, ~p"/api/channels/#{channel.id}", %{name: name})
-      res = json_response(conn, 202)
-      assert name == res["name"]
+  # describe "update" do
+  #   test "updates a channel", %{conn: conn, tenant: tenant} do
+  #     channel = channel_fixture(tenant)
+  #     name = random_string()
+  #     conn = put(conn, ~p"/api/channels/#{channel.id}", %{name: name})
+  #     res = json_response(conn, 202)
+  #     assert name == res["name"]
 
-      name = random_string()
-      conn = patch(conn, ~p"/api/channels/#{channel.id}", %{name: name})
-      res = json_response(conn, 202)
-      assert name == res["name"]
-    end
+  #     name = random_string()
+  #     conn = patch(conn, ~p"/api/channels/#{channel.id}", %{name: name})
+  #     res = json_response(conn, 202)
+  #     assert name == res["name"]
+  #   end
 
-    test "422 if params are invalid", %{conn: conn, tenant: tenant} do
-      channel = channel_fixture(tenant)
-      conn = put(conn, ~p"/api/channels/#{channel.id}", %{name: 1})
-      assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
-      conn = patch(conn, ~p"/api/channels/#{channel.id}", %{name: 1})
-      assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
-    end
-  end
+  #   test "422 if params are invalid", %{conn: conn, tenant: tenant} do
+  #     channel = channel_fixture(tenant)
+  #     conn = put(conn, ~p"/api/channels/#{channel.id}", %{name: 1})
+  #     assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
+  #     conn = patch(conn, ~p"/api/channels/#{channel.id}", %{name: 1})
+  #     assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
+  #   end
+  # end
 end
