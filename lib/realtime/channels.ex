@@ -54,4 +54,19 @@ defmodule Realtime.Channels do
     query = from c in Channel, where: c.id == ^id
     Repo.del(conn, query)
   end
+
+  @doc """
+  Updates a channel by id from the tenant database using a given DBConnection
+  """
+  @spec update_channel_by_id(binary(), map(), DBConnection.conn()) ::
+          {:ok, Channel.t()} | {:error, any()}
+  def update_channel_by_id(id, attrs, conn) do
+    with {:ok, channel} when not is_nil(channel) <- get_channel_by_id(id, conn),
+         channel <- Channel.changeset(channel, attrs) do
+      Repo.update(conn, channel, Channel)
+    else
+      {:ok, nil} -> {:error, :not_found}
+      error -> error
+    end
+  end
 end

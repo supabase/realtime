@@ -194,6 +194,32 @@ defmodule Realtime.RepoTest do
     end
   end
 
+  describe "update/3" do
+    test "inserts a new entry with a given changeset and returns struct", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      channel = channel_fixture(tenant)
+      changeset = Channel.changeset(channel, %{name: "foo"})
+      assert {:ok, %Channel{}} = Repo.update(conn, changeset, Channel)
+    end
+
+    test "returns changeset if changeset is invalid", %{conn: conn, tenant: tenant} do
+      channel = channel_fixture(tenant)
+      changeset = Channel.changeset(channel, %{name: 0})
+      res = Repo.update(conn, changeset, Channel)
+      assert {:error, %Ecto.Changeset{valid?: false}} = res
+    end
+
+    test "returns an error on Postgrex error", %{conn: conn, tenant: tenant} do
+      channel = channel_fixture(tenant)
+      channel_to_update = channel_fixture(tenant)
+
+      changeset = Channel.changeset(channel_to_update, %{name: channel.name})
+      assert {:error, _} = Repo.update(conn, changeset, Channel)
+    end
+  end
+
   defp db_config() do
     tenant = tenant_fixture()
 

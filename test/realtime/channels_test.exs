@@ -76,4 +76,18 @@ defmodule Realtime.ChannelsTest do
       assert {:ok, 0} = Channels.delete_channel_by_id(0, conn)
     end
   end
+
+  describe "update_channel_by_id/2" do
+    test "update correct channel", %{conn: conn, tenant: tenant} do
+      name = random_string()
+      [channel | _] = Stream.repeatedly(fn -> channel_fixture(tenant) end) |> Enum.take(10)
+      assert {:ok, channel} = Channels.update_channel_by_id(channel.id, %{name: name}, conn)
+      {:ok, channel} = Channels.get_channel_by_id(channel.id, conn)
+      assert name == channel.name
+    end
+
+    test "nil if channel does not exist", %{conn: conn} do
+      assert {:error, :not_found} = Channels.update_channel_by_id(0, %{name: ""}, conn)
+    end
+  end
 end
