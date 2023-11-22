@@ -3,6 +3,8 @@ defmodule Realtime.Repo do
     otp_app: :realtime,
     adapter: Ecto.Adapters.Postgres
 
+  import Ecto.Query
+
   def with_dynamic_repo(config, callback) do
     default_dynamic_repo = get_dynamic_repo()
     {:ok, repo} = [name: nil, pool_size: 2] |> Keyword.merge(config) |> Realtime.Repo.start_link()
@@ -62,23 +64,36 @@ defmodule Realtime.Repo do
     end
   end
 
+  @doc """
+  Updates an entry based on the changeset and returns the updated entry
+  """
+  @spec update(DBConnection.conn(), Ecto.Changeset.t(), module()) ::
+          {:ok, struct()} | {:error, any()} | Ecto.Changeset.t()
+  def update(conn, changeset, result_struct) do
+    with {:ok, {query, args}} <- update_query_from_changeset(changeset) do
+      conn
+      |> Postgrex.query(query, args)
+      |> result_to_single_struct(result_struct)
+    end
+  end
+
+  defp result_to_single_struct({:error, _} = error, _), do: error
+
+  defp result_to_single_struct({:ok, %Postgrex.Result{rows: []}}, _), do: {:error, :not_found}
+
   defp result_to_single_struct({:ok, %Postgrex.Result{rows: [row], columns: columns}}, struct) do
     {:ok, load(struct, Enum.zip(columns, row))}
   end
 
-  defp result_to_single_struct({:ok, %Postgrex.Result{rows: []}}, _),
-    do: {:ok, nil}
+  defp result_to_single_struct({:ok, %Postgrex.Result{num_rows: num_rows}}, _) do
+    raise("expected at most one result but got #{num_rows} in result")
+  end
 
-  defp result_to_single_struct({:ok, %Postgrex.Result{rows: rows}}, _),
-    do: raise("expected at most one result but got #{length(rows)} in result")
-
-  defp result_to_single_struct({:error, _} = error, _), do: error
+  defp result_to_structs({:error, _} = error, _), do: error
 
   defp result_to_structs({:ok, %Postgrex.Result{rows: rows, columns: columns}}, struct) do
     {:ok, Enum.map(rows, &load(struct, Enum.zip(columns, &1)))}
   end
-
-  defp result_to_structs({:error, _} = error, _), do: error
 
   defp insert_query_from_changeset(%{valid?: false} = changeset), do: {:error, changeset}
 
@@ -108,13 +123,22 @@ defmodule Realtime.Repo do
     {:ok, {"INSERT INTO #{table} #{header} VALUES (#{arg_index}) RETURNING *", rows}}
   end
 
+  defp update_query_from_changeset(%{valid?: false} = changeset), do: {:error, changeset}
+
+  defp update_query_from_changeset(changeset) do
+    %Ecto.Changeset{data: %{id: id, __struct__: struct}, changes: changes} = changeset
+    changes = Keyword.new(changes)
+    query = from(c in struct, where: c.id == ^id, select: c, update: [set: ^changes])
+    {:ok, to_sql(:update_all, query)}
+  end
+
   defp run_all_query(conn, query) do
-    {query, args} = __MODULE__.to_sql(:all, query)
+    {query, args} = to_sql(:all, query)
     Postgrex.query(conn, query, args)
   end
 
   defp run_delete_query(conn, query) do
-    {query, args} = __MODULE__.to_sql(:delete_all, query)
+    {query, args} = to_sql(:delete_all, query)
     Postgrex.query(conn, query, args)
   end
 end

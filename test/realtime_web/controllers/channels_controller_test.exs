@@ -97,4 +97,27 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       assert conn.status == 404
     end
   end
+
+  describe "update" do
+    test "updates a channel", %{conn: conn, tenant: tenant} do
+      channel = channel_fixture(tenant)
+      name = random_string()
+      conn = put(conn, ~p"/api/channels/#{channel.id}", %{name: name})
+      res = json_response(conn, 202)
+      assert name == res["name"]
+
+      name = random_string()
+      conn = patch(conn, ~p"/api/channels/#{channel.id}", %{name: name})
+      res = json_response(conn, 202)
+      assert name == res["name"]
+    end
+
+    test "422 if params are invalid", %{conn: conn, tenant: tenant} do
+      channel = channel_fixture(tenant)
+      conn = put(conn, ~p"/api/channels/#{channel.id}", %{name: 1})
+      assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
+      conn = patch(conn, ~p"/api/channels/#{channel.id}", %{name: 1})
+      assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
+    end
+  end
 end

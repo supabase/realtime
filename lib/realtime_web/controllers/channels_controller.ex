@@ -126,11 +126,43 @@ defmodule RealtimeWeb.ChannelsController do
 
   def delete(%{assigns: %{tenant: tenant}} = conn, %{"id" => id}) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
-         {:ok, 1} <- Channels.delete_channel_by_id(id, db_conn) do
+         :ok <- Channels.delete_channel_by_id(id, db_conn) do
       send_resp(conn, :accepted, "")
-    else
-      {:ok, 0} -> {:error, :not_found}
-      error -> error
+    end
+  end
+
+  operation(:update,
+    summary: "Update user channel",
+    parameters: [
+      id: [
+        in: :path,
+        name: "id",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example: "1"
+      ],
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ]
+    ],
+    request_body: ChannelParams.params(),
+    responses: %{
+      201 => ChannelResponse.response(),
+      404 => NotFoundResponse.response()
+    }
+  )
+
+  def update(%{assigns: %{tenant: tenant}} = conn, %{"id" => id} = params) do
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
+         {:ok, channel} <- Channels.update_channel_by_id(id, params, db_conn) do
+      conn
+      |> put_status(:accepted)
+      |> json(channel)
     end
   end
 end
