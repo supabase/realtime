@@ -85,8 +85,8 @@ defmodule Realtime.Repo do
     {:ok, load(struct, Enum.zip(columns, row))}
   end
 
-  defp result_to_single_struct({:ok, %Postgrex.Result{rows: rows}}, _) do
-    raise("expected at most one result but got #{length(rows)} in result")
+  defp result_to_single_struct({:ok, %Postgrex.Result{num_rows: num_rows}}, _) do
+    raise("expected at most one result but got #{num_rows} in result")
   end
 
   defp result_to_structs({:error, _} = error, _), do: error

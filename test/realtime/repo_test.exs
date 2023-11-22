@@ -195,7 +195,7 @@ defmodule Realtime.RepoTest do
   end
 
   describe "update/3" do
-    test "inserts a new entry with a given changeset and returns struct", %{
+    test "updates a new entry with a given changeset and returns struct", %{
       conn: conn,
       tenant: tenant
     } do
