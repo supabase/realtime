@@ -15,8 +15,6 @@ export ERL_CRASH_DUMP=/tmp/erl_crash.dump
 function upload_crash_dump_to_s3 {
     EXIT_CODE=${?:-0}
     bucket=$ERL_CRASH_DUMP_S3_BUCKET
-    s3Key=$ERL_CRASH_DUMP_S3_KEY
-    s3Secret=$ERL_CRASH_DUMP_S3_SECRET
     s3Host=$ERL_CRASH_DUMP_S3_HOST
     s3Port=$ERL_CRASH_DUMP_S3_PORT
 
@@ -24,6 +22,9 @@ function upload_crash_dump_to_s3 {
         response=$(curl -s http://169.254.170.2$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI)
         s3Key=$(echo "$response" | grep -o '"AccessKeyId": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"')
         s3Secret=$(echo "$response" | grep -o '"SecretAccessKey": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"')
+    else
+        s3Key=$ERL_CRASH_DUMP_S3_KEY
+        s3Secret=$ERL_CRASH_DUMP_S3_SECRET
     fi
 
     filePath=${ERL_CRASH_DUMP_FOLDER:-tmp}/$(date +%s)_${ERL_CRASH_DUMP_FILE_NAME:-erl_crash.dump}
