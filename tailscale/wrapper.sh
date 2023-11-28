@@ -40,7 +40,7 @@ function upload_crash_dump_to_s3 {
 
         signature=$(echo -en ${stringToSign} | openssl sha1 -hmac ${s3Secret} -binary | base64)
 
-        if [ "${S3_USE_HTTPS:-}" = true ]; then
+        if [ "${ERL_CRASH_DUMP_S3_SSL:-}" = true ]; then
             protocol="https"
         else
             protocol="http"
