@@ -26,6 +26,8 @@ defmodule RealtimeWeb.ChannelCase do
 
       # The default endpoint for testing
       @endpoint RealtimeWeb.Endpoint
+      def truncate_table(db_conn, table),
+        do: Postgrex.query!(db_conn, "TRUNCATE TABLE #{table}", [])
     end
   end
 

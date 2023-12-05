@@ -5,9 +5,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   import Mock
 
   alias Phoenix.Socket
-  alias RealtimeWeb.{ChannelsAuthorization, Joken.CurrentTime, UserSocket}
 
-  @tenant "dev_tenant"
+  alias Realtime.Tenants
+
+  alias RealtimeWeb.ChannelsAuthorization
+  alias RealtimeWeb.Joken.CurrentTime
+  alias RealtimeWeb.UserSocket
 
   @default_limits %{
     max_concurrent_users: 200,
@@ -17,120 +20,100 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     max_bytes_per_second: 100_000
   }
 
-  @default_conn_opts [
-    connect_info: %{
-      uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
-      x_headers: [{"x-api-key", "token123"}]
-    }
-  ]
-
-  setup do
+  setup context do
     start_supervised!(CurrentTime.Mock)
+    tenant = tenant_fixture()
+    settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
+    settings = Map.put(settings, "id", tenant.external_id)
+    settings = Map.put(settings, "db_socket_opts", [:inet])
+
+    start_supervised!({Tenants.Migrations, settings})
+    {:ok, conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    truncate_table(conn, "realtime.channels")
+
+    case context do
+      %{rls: policy} ->
+        create_rls_policy(conn, policy)
+
+        on_exit(fn ->
+          Postgrex.query!(conn, "drop policy #{policy} on realtime.channels", [])
+        end)
+
+      _ ->
+        :ok
+    end
+
+    %{tenant: tenant_fixture(), conn: conn}
+  end
+
+  setup_with_mocks [
+    {
+      ChannelsAuthorization,
+      [],
+      [
+        authorize_conn: fn _, _ ->
+          {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
+        end
+      ]
+    }
+  ] do
     :ok
   end
 
   describe "maximum number of connected clients per tenant" do
-    test "not reached" do
-      with_mocks([
-        {ChannelsAuthorization, [],
-         [
-           authorize_conn: fn _, _ ->
-             {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
-           end
-         ]}
-      ]) do
-        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+    test "not reached", %{tenant: tenant} do
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant))
 
-        socket = Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 1}})
-        assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
-      end
+      socket = Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 1}})
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "reached" do
-      with_mocks([
-        {ChannelsAuthorization, [],
-         [
-           authorize_conn: fn _, _ ->
-             {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
-           end
-         ]}
-      ]) do
-        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+    test "reached", %{tenant: tenant} do
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant))
 
-        socket_at_capacity =
-          Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 0}})
+      socket_at_capacity =
+        Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 0}})
 
-        socket_over_capacity =
-          Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: -1}})
+      socket_over_capacity =
+        Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: -1}})
 
-        assert {:error, %{reason: "{:error, :too_many_connections}"}} =
-                 subscribe_and_join(socket_at_capacity, "realtime:test", %{})
+      assert {:error, %{reason: "{:error, :too_many_connections}"}} =
+               subscribe_and_join(socket_at_capacity, "realtime:test", %{})
 
-        assert {:error, %{reason: "{:error, :too_many_connections}"}} =
-                 subscribe_and_join(socket_over_capacity, "realtime:test", %{})
-      end
+      assert {:error, %{reason: "{:error, :too_many_connections}"}} =
+               subscribe_and_join(socket_over_capacity, "realtime:test", %{})
     end
   end
 
   describe "token expiration" do
-    test "valid" do
-      with_mocks([
-        {ChannelsAuthorization, [],
-         [
-           authorize_conn: fn _, _ ->
-             {:ok, %{"exp" => Joken.current_time() + 1, "role" => "postgres"}}
-           end
-         ]}
-      ]) do
-        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
-
-        assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
-      end
+    test "valid", %{tenant: tenant} do
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant))
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "invalid" do
-      with_mocks([
-        {ChannelsAuthorization, [],
-         [
-           authorize_conn: fn _, _ ->
-             {:ok, %{"exp" => Joken.current_time(), "role" => "postgres"}}
-           end
-         ]}
-      ]) do
-        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+    test_with_mock "token about to expire", %{tenant: tenant}, ChannelsAuthorization, [],
+      authorize_conn: fn _, _ ->
+        {:ok, %{"exp" => Joken.current_time(), "role" => "postgres"}}
+      end do
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant))
 
-        assert {:error, %{reason: "{:error, 0}"}} =
-                 subscribe_and_join(socket, "realtime:test", %{})
-      end
+      assert {:error, %{reason: "{:error, 0}"}} = subscribe_and_join(socket, "realtime:test", %{})
+    end
 
-      with_mocks([
-        {ChannelsAuthorization, [],
-         [
-           authorize_conn: fn _, _ ->
-             {:ok, %{"exp" => Joken.current_time() - 1, "role" => "postgres"}}
-           end
-         ]}
-      ]) do
-        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+    test_with_mock "token that has expired", %{tenant: tenant}, ChannelsAuthorization, [],
+      authorize_conn: fn _, _ ->
+        {:ok, %{"exp" => Joken.current_time() - 1, "role" => "postgres"}}
+      end do
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant))
 
-        assert {:error, %{reason: "{:error, -1}"}} =
-                 subscribe_and_join(socket, "realtime:test", %{})
-      end
+      assert {:error, %{reason: "{:error, -1}"}} =
+               subscribe_and_join(socket, "realtime:test", %{})
     end
   end
 
   describe "checks tenant db connectivity" do
-    setup_with_mocks([
-      {ChannelsAuthorization, [],
-       authorize_conn: fn _, _ ->
-         {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
-       end}
-    ]) do
-      :ok
-    end
-
-    test "successful connection proceeds with join" do
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+    test "successful connection proceeds with join", %{tenant: tenant} do
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant))
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
@@ -155,17 +138,80 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       tenant = tenant_fixture(%{"extensions" => extensions})
 
-      conn_opts = [
-        connect_info: %{
-          uri: %{host: "#{tenant.external_id}.localhost:4000/socket/websocket", query: ""},
-          x_headers: [{"x-api-key", "token123"}]
-        }
-      ]
-
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant))
 
       assert {:error, %{reason: "{:error, :tenant_database_unavailable}"}} =
                subscribe_and_join(socket, "realtime:test", %{})
     end
+  end
+
+  describe "check authorization on connect" do
+    @tag role: "authenticated", rls: :select_authenticated_role
+    test_with_mock "authenticated user has read permissions",
+                   %{tenant: tenant, role: role},
+                   ChannelsAuthorization,
+                   [],
+                   authorize_conn: fn _, _ ->
+                     {:ok,
+                      %{
+                        "exp" => Joken.current_time() + 1_000,
+                        "role" => role,
+                        "sub" => random_string()
+                      }}
+                   end do
+      channel_name = random_string()
+      channel_fixture(tenant, %{"name" => channel_name})
+      params = %{"config" => %{"channel" => channel_name, "public" => true}}
+
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant))
+
+      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", params)
+      assert %{read: true} = socket.assigns.permissions
+    end
+
+    @tag role: "anon", rls: :select_authenticated_role
+    test_with_mock "anon user has no read permissions",
+                   %{tenant: tenant, role: role},
+                   ChannelsAuthorization,
+                   [],
+                   authorize_conn: fn _, _ ->
+                     {:ok,
+                      %{
+                        "exp" => Joken.current_time() + 1_000,
+                        "role" => role,
+                        "sub" => random_string()
+                      }}
+                   end do
+      channel_name = random_string()
+      channel_fixture(tenant, %{"name" => channel_name})
+      params = %{"config" => %{"channel" => channel_name, "public" => true}}
+
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant))
+
+      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", params)
+      assert %{read: false} = socket.assigns.permissions
+    end
+  end
+
+  defp conn_opts(tenant) do
+    [
+      connect_info: %{
+        uri: %{host: "#{tenant.external_id}.localhost:4000/socket/websocket", query: ""},
+        x_headers: [{"x-api-key", "token123"}]
+      }
+    ]
+  end
+
+  defp create_rls_policy(conn, :select_authenticated_role) do
+    Postgrex.query!(
+      conn,
+      """
+      create policy select_authenticated_role
+      on realtime.channels for select
+      to authenticated
+      using ( realtime.channel_name() = name );
+      """,
+      []
+    )
   end
 end

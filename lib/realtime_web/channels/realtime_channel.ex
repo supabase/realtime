@@ -45,12 +45,14 @@ defmodule RealtimeWeb.RealtimeChannel do
     start_db_rate_counter(tenant)
 
     with false <- SignalHandler.shutdown_in_progress?(),
-         {:ok, _} <- Connect.lookup_or_start_connection(tenant),
+         {:ok, claims, confirm_token_ref} <- confirm_token(socket),
+         {:ok, conn} <- Connect.lookup_or_start_connection(tenant),
          :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket),
-         {:ok, claims, confirm_token_ref} <- confirm_token(socket),
-         is_new_api <- is_new_api(params) do
+         is_new_api <- is_new_api(params),
+         check_params <- set_check_params(socket, params),
+         {:ok, socket} <- check_conn_authorization(socket, conn, check_params) do
       Realtime.UsersCounter.add(transport_pid, tenant)
 
       tenant_topic = tenant <> ":" <> sub_topic
@@ -510,7 +512,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       interval = min(@confirm_token_ms_interval, exp_diff * 1_000)
       ref = Process.send_after(self(), :confirm_token, interval)
-
       {:ok, claims, ref}
     else
       {:error, e} -> {:error, e}
@@ -646,5 +647,23 @@ defmodule RealtimeWeb.RealtimeChannel do
     error_msg = inspect(error)
     Logger.error("Start channel error: " <> error_msg)
     {:error, %{reason: error_msg}}
+  end
+
+  defp set_check_params(socket, %{"config" => %{"public" => true}} = params) do
+    %{
+      channel_name: params["config"]["channel"],
+      headers: socket.assigns.headers,
+      jwt: socket.assigns.access_token,
+      claims: socket.assigns.claims,
+      role: Map.get(socket.assigns.claims, "role")
+    }
+  end
+
+  defp set_check_params(_, _params), do: nil
+
+  defp check_conn_authorization(socket, _, nil), do: {:ok, socket}
+
+  defp check_conn_authorization(socket, conn, check_params) do
+    Tenants.Authorization.get_authorizations(socket, conn, check_params)
   end
 end
