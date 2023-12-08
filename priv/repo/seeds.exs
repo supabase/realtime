@@ -24,7 +24,7 @@ Repo.transaction(fn ->
         "settings" => %{
           "db_name" => System.get_env("DB_NAME", "postgres"),
           "db_host" => System.get_env("DB_HOST", default_db_host),
-          "db_user" => System.get_env("DB_USER", "postgres"),
+          "db_user" => System.get_env("DB_USER", "supabase_admin"),
           "db_password" => System.get_env("DB_PASSWORD", "postgres"),
           "db_port" => System.get_env("DB_PORT", "5432"),
           "region" => "us-east-1",

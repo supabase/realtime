@@ -12,7 +12,7 @@ defmodule RealtimeWeb.Plugs.AssignTenantTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "postgres",
+          "db_user" => "supabase_admin",
           "db_password" => "postgres",
           "db_port" => "6432",
           "poll_interval" => 100,

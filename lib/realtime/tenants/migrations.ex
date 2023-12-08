@@ -39,7 +39,8 @@ defmodule Realtime.Tenants.Migrations do
     ConvertCommitTimestampToUtc,
     OutputFullRecordWhenUnchangedToast,
     CreateListChangesFunction,
-    CreateChannels
+    CreateChannels,
+    CreateConfig
   }
 
   alias Realtime.Helpers, as: H
@@ -76,7 +77,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_230_228_184_745, ConvertCommitTimestampToUtc},
     {20_230_308_225_145, OutputFullRecordWhenUnchangedToast},
     {20_230_328_144_023, CreateListChangesFunction},
-    {20_231_018_144_023, CreateChannels}
+    {20_231_018_144_023, CreateChannels},
+    {20_231_204_144_023, CreateConfig}
   ]
 
   @spec start_link(GenServer.options()) :: GenServer.on_start()

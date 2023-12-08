@@ -6,6 +6,7 @@ defmodule Realtime.Helpers do
   alias Realtime.Api.Tenant
   alias Realtime.PostgresCdc
   alias Realtime.Rpc
+  import Phoenix.Socket, only: [assign: 3]
   require Logger
 
   @spec cancel_timer(reference() | nil) :: non_neg_integer() | false | :ok | nil
@@ -126,7 +127,7 @@ defmodule Realtime.Helpers do
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
   """
   @spec check_tenant_connection(Tenant.t(), binary()) :: {:error, atom()} | {:ok, pid()}
-  def check_tenant_connection(nil, _), do: {:error, :tenant_not_found}
+  def check_tenant_connection(nil, _, _), do: {:error, :tenant_not_found}
 
   def check_tenant_connection(tenant, application_name) do
     tenant
@@ -165,6 +166,61 @@ defmodule Realtime.Helpers do
             Logger.error("Error connecting to tenant database: #{inspect(e)}")
             {:error, :tenant_database_unavailable}
         end
+      end
+    end)
+  end
+
+  def check_connection(socket, conn, params) do
+    with {:ok, {:ok, permissions}} <- get_permissions_for_connection(conn, params) do
+      {:ok, assign(socket, :permissions, permissions)}
+    else
+      {:error, _} -> {:error, :unauthorized}
+    end
+  end
+
+  defp get_permissions_for_connection(conn, params) do
+    %{
+      channel_name: channel_name,
+      headers: headers,
+      jwt: jwt,
+      claims: %{
+        claims: claims,
+        sub: sub,
+        role: role
+      },
+      role: role
+    } = params
+
+    Postgrex.transaction(conn, fn conn ->
+      Postgrex.query!(
+        conn,
+        """
+        SELECT
+         set_config('role', $1, true),
+         set_config('realtime.channel_name', $2, true),
+         set_config('request.jwt.claim.role', $3, true),
+         set_config('request.jwt', $4, true),
+         set_config('request.jwt.claim.sub', $5, true),
+         set_config('request.jwt.claims', $6, true),
+         set_config('request.headers', $7, true)
+        """,
+        [role, channel_name, role, jwt, sub, claims, headers]
+      )
+
+      case Postgrex.query(conn, "SELECT name from realtime.channels", [], mode: :savepoint) do
+        {:ok, %{num_rows: 0}} ->
+          {:ok, %{read: false}}
+
+        {:ok, _} ->
+          {:ok, %{read: true}}
+
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}} = error} ->
+          Logger.error("Error getting permissions for connection: #{inspect(error)}")
+          {:ok, %{read: false}}
+
+        {:error, error} ->
+          Logger.error("Error getting permissions for connection: #{inspect(error)}")
+          {:error, error}
       end
     end)
   end
