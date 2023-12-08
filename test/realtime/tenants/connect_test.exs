@@ -133,7 +133,7 @@ defmodule Realtime.Tenants.ConnectTest do
               "settings" => %{
                 "db_host" => "localhost",
                 "db_name" => "postgres",
-                "db_user" => "postgres",
+                "db_user" => "supabase_admin",
                 "db_password" => "postgres",
                 "db_port" => "5432",
                 "poll_interval" => 100,

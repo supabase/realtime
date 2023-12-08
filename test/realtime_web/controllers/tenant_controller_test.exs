@@ -27,7 +27,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "postgres",
+          "db_user" => "supabase_admin",
           "db_password" => "postgres",
           "db_port" => "6432",
           "poll_interval" => 100,
@@ -80,7 +80,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         sec_key = Application.get_env(:realtime, :db_enc_key)
         assert encrypt!("127.0.0.1", sec_key) == settings["db_host"]
         assert encrypt!("postgres", sec_key) == settings["db_name"]
-        assert encrypt!("postgres", sec_key) == settings["db_user"]
+        assert encrypt!("supabase_admin", sec_key) == settings["db_user"]
         assert encrypt!("postgres", sec_key) == settings["db_password"]
       end
     end
