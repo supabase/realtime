@@ -143,7 +143,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
             "db_name" => "false",
             "db_user" => "false",
             "db_password" => "false",
-            "db_port" => "5432",
+            "db_port" => "5433",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,

@@ -22,7 +22,7 @@ defmodule Realtime.ApiTest do
           "db_name" => @db_conf[:database],
           "db_user" => @db_conf[:username],
           "db_password" => @db_conf[:password],
-          "db_port" => "5432",
+          "db_port" => "5433",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
           "poll_max_record_bytes" => 1_048_576,
