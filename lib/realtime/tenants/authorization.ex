@@ -4,22 +4,32 @@ defmodule Realtime.Tenants.Authorization do
 
   require Logger
 
+  @type params :: %{
+          :channel_name => binary(),
+          :claims => map(),
+          :headers => keyword({binary(), binary()}),
+          :jwt => map(),
+          :role => binary()
+        }
+
+  @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), DBConnection.t(), params()) ::
+          {:error, :unauthorized} | {:ok, Socket | Conn}
   def get_authorizations(%Socket{} = socket, db_conn, params) do
-    with {:ok, {:ok, permissions}} <- get_permissions_for_connection(db_conn, params) do
-      {:ok, Socket.assign(socket, :permissions, permissions)}
-    else
-      {:error, _} -> {:error, :unauthorized}
+    case get_permissions_for_connection(db_conn, params) do
+      {:ok, permissions} -> {:ok, Socket.assign(socket, :permissions, permissions)}
+      _ -> {:error, :unauthorized}
     end
   end
 
   def get_authorizations(%Conn{} = conn, db_conn, params) do
-    with {:ok, {:ok, permissions}} <- get_permissions_for_connection(db_conn, params) do
-      {:ok, Conn.assign(conn, :permissions, permissions)}
-    else
-      {:error, _} -> {:error, :unauthorized}
+    case get_permissions_for_connection(db_conn, params) do
+      {:ok, permissions} -> {:ok, Conn.assign(conn, :permissions, permissions)}
+      _ -> {:error, :unauthorized}
     end
   end
 
+  @spec get_permissions_for_connection(DBConnection.conn(), map()) ::
+          {:ok, map()} | {:error, any()}
   defp get_permissions_for_connection(conn, params) do
     %{
       channel_name: channel_name,

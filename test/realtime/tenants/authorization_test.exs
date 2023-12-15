@@ -59,7 +59,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
       {:ok, conn} =
         Authorization.get_authorizations(Phoenix.ConnTest.build_conn(), db_conn, params)
 
-      assert %{read: true} = conn.assigns.permissions
+      assert {:ok, %{read: true}} = conn.assigns.permissions
     end
 
     @tag role: "anon", rls: :select_authenticated_role
@@ -81,7 +81,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
       {:ok, conn} =
         Authorization.get_authorizations(Phoenix.ConnTest.build_conn(), db_conn, params)
 
-      assert %{read: false} = conn.assigns.permissions
+      assert {:ok, %{read: false}} = conn.assigns.permissions
     end
   end
 
@@ -109,7 +109,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
           params
         )
 
-      assert %{read: true} = conn.assigns.permissions
+      assert {:ok, %{read: true}} = conn.assigns.permissions
     end
 
     @tag role: "anon", rls: :select_authenticated_role
@@ -135,7 +135,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
           params
         )
 
-      assert %{read: false} = conn.assigns.permissions
+      assert {:ok, %{read: false}} = conn.assigns.permissions
     end
   end
 
