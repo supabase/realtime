@@ -4,8 +4,6 @@ defmodule Realtime.Tenants.Migrations.EnableChannelsRls do
   use Ecto.Migration
 
   def change do
-    execute("""
-    ALTER TABLE realtime.channels ENABLE row level security;
-    """)
+    execute("ALTER TABLE realtime.channels ENABLE row level security")
   end
 end
