@@ -144,6 +144,7 @@ TAILSCALE_APP_NAME         # {string}      Name of the Tailscale app.
 TAILSCALE_AUTHKEY          # {string}      Auth key for the Tailscape app.
 DNS_NODES                  # {string}      Node name used when running server in a cluster.
 MAX_CONNECTIONS            # {string}     Set the soft maximum for WebSocket connections. Defaults to '16384'.
+MAX_HEADER_LENGTH          # {string}      Set the maximum header length for connections (in bytes). Defaults to '4096'.
 NUM_ACCEPTORS              # {string}     Set the number of server processes that will relay incoming WebSocket connection requests. Defaults to '100'.
 DB_QUEUE_TARGET            # {string}     Maximum time to wait for a connection from the pool. Defaults to '5000' or 5 seconds. See for more info: https://hexdocs.pm/db_connection/DBConnection.html#start_link/2-queue-config.
 DB_QUEUE_INTERVAL          # {string}     Interval to wait to check if all connections were checked out under DB_QUEUE_TARGET. If all connections surpassed the target during this interval than the target is doubled. Defaults to '5000' or 5 seconds. See for more info: https://hexdocs.pm/db_connection/DBConnection.html#start_link/2-queue-config.
