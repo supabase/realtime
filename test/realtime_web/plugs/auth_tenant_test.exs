@@ -63,5 +63,15 @@ defmodule RealtimeWeb.AuthTenantTest do
       refute conn.status
       refute conn.halted
     end
+
+    @tag api_key: "Bearer #{@token}", header: "authorization"
+    test "assigns jwt information on success", %{
+      conn: conn
+    } do
+      conn = AuthTenant.call(conn, %{})
+      assert conn.assigns.jwt == @token
+      assert conn.assigns.claims == %{"exp" => "bar", "iat" => 1_516_239_022, "role" => "foo"}
+      assert conn.assigns.role == "foo"
+    end
   end
 end

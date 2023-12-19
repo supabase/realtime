@@ -13,7 +13,7 @@ defmodule Realtime.Tenants.Authorization do
         }
 
   @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), DBConnection.t(), params()) ::
-          {:error, :unauthorized} | {:ok, Socket | Conn}
+          {:error, :unauthorized} | {:ok, Socket} | {:ok, Conn}
   def get_authorizations(%Socket{} = socket, db_conn, params) do
     case get_permissions_for_connection(db_conn, params) do
       {:ok, permissions} -> {:ok, Socket.assign(socket, :permissions, permissions)}
