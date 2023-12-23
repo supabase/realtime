@@ -81,12 +81,14 @@ defmodule Realtime.Nodes do
   is unstable.
   """
 
-  @spec region_nodes(String.t()) :: [atom()]
+  @spec region_nodes(String.t() | nil) :: [atom()]
   def region_nodes(region) when is_binary(region) do
     :syn.members(RegionNodes, region)
     |> Enum.map(fn {_pid, [node: node]} -> node end)
     |> Enum.sort()
   end
+
+  def region_nodes(nil), do: []
 
   @doc """
   Picks the node to launch the Postgres connection on.
@@ -94,7 +96,7 @@ defmodule Realtime.Nodes do
   If there are not two nodes in a region the connection is established from
   the `default` node given.
   """
-  @spec launch_node(String.t(), String.t(), atom()) :: atom()
+  @spec launch_node(String.t(), String.t() | nil, atom()) :: atom()
   def launch_node(tenant_id, region, default) do
     case region_nodes(region) do
       [node] ->
