@@ -10,6 +10,18 @@ defmodule RealtimeWeb.Endpoint do
     signing_salt: "5OUq5X4H"
   ]
 
+  socket "/realtime/v1", RealtimeWeb.UserSocket,
+    websocket: [
+      connect_info: [:peer_data, :uri, :x_headers],
+      fullsweep_after: 20,
+      max_frame_size: 8_000_000,
+      serializer: [
+        {Phoenix.Socket.V1.JSONSerializer, "~> 1.0.0"},
+        {Phoenix.Socket.V2.JSONSerializer, "~> 2.0.0"}
+      ]
+    ],
+    longpoll: true
+
   socket "/socket", RealtimeWeb.UserSocket,
     websocket: [
       connect_info: [:peer_data, :uri, :x_headers],
