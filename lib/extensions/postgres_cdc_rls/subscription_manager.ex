@@ -102,11 +102,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
     Rls.update_meta(id, self(), conn_pub)
 
+    oids = Subscriptions.fetch_publication_tables(conn, publication)
+
     state = %State{
       id: id,
       conn: conn,
       publication: publication,
       subscribers_tid: subscribers_tid,
+      oids: oids,
       delete_queue: %{
         ref: check_delete_queue(),
         queue: :queue.new()
