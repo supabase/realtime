@@ -8,6 +8,7 @@ defmodule Realtime.Latency do
   require Logger
 
   alias Realtime.Helpers
+  alias Realtime.Rpc
 
   defmodule Payload do
     @moduledoc false
@@ -94,7 +95,7 @@ defmodule Realtime.Latency do
       for n <- [Node.self() | Node.list()] do
         Task.Supervisor.async(Realtime.TaskSupervisor, fn ->
           {latency, response} =
-            :timer.tc(fn -> :rpc.call(n, __MODULE__, :pong, [pong_timeout], timer_timeout) end)
+            :timer.tc(fn -> Rpc.call(n, __MODULE__, :pong, [pong_timeout], timer_timeout) end)
 
           latency_ms = latency / 1_000
           region = Application.get_env(:realtime, :region, "not_set")

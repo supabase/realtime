@@ -5,6 +5,7 @@ defmodule Extensions.PostgresCdcStream do
   require Logger
 
   alias Extensions.PostgresCdcStream, as: Stream
+  alias Realtime.Rpc
 
   def handle_connect(opts) do
     Enum.reduce_while(1..5, nil, fn retry, acc ->
@@ -59,7 +60,7 @@ defmodule Extensions.PostgresCdcStream do
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, platform_region: platform_region)}"
     )
 
-    case :rpc.call(launch_node, __MODULE__, :start, [args], 30_000) do
+    case Rpc.call(launch_node, __MODULE__, :start, [args], 30_000) do
       {:ok, _pid} = ok ->
         ok
 

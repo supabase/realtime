@@ -7,7 +7,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
   alias Rls.Subscriptions
 
   alias Realtime.Helpers, as: H
-
+  alias Realtime.Rpc
   @timeout 120_000
   @max_delete_records 1000
 
@@ -178,7 +178,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       if node == node() do
         acc ++ not_alive_pids(pids)
       else
-        case :rpc.call(node, __MODULE__, :not_alive_pids, [pids], 15_000) do
+        case Rpc.call(node, __MODULE__, :not_alive_pids, [pids], 15_000) do
           {:badrpc, _} = error ->
             Logger.error("Can't check pids on node #{inspect(node)}: #{inspect(error)}")
             acc
@@ -202,18 +202,10 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
   end
 
   defp check_delete_queue() do
-    Process.send_after(
-      self(),
-      :check_delete_queue,
-      1000
-    )
+    Process.send_after(self(), :check_delete_queue, 1000)
   end
 
   defp check_active_pids() do
-    Process.send_after(
-      self(),
-      :check_active_pids,
-      @timeout
-    )
+    Process.send_after(self(), :check_active_pids, @timeout)
   end
 end

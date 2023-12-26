@@ -14,6 +14,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Helpers
   alias Realtime.Tenants
   alias Realtime.UsersCounter
+  alias Realtime.Rpc
 
   @erpc_timeout_default 5000
   @check_connected_user_interval_default 50_000
@@ -173,7 +174,7 @@ defmodule Realtime.Tenants.Connect do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
-      :erpc.call(node, __MODULE__, :connect, [tenant_id, opts], erpc_timeout)
+      Rpc.ecall(node, __MODULE__, :connect, [tenant_id, opts], erpc_timeout)
     end
   end
 
