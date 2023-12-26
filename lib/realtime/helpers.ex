@@ -5,7 +5,7 @@ defmodule Realtime.Helpers do
 
   alias Realtime.Api.Tenant
   alias Realtime.PostgresCdc
-
+  alias Realtime.Rpc
   require Logger
 
   @spec cancel_timer(reference() | nil) :: non_neg_integer() | false | :ok | nil
@@ -318,7 +318,7 @@ defmodule Realtime.Helpers do
     [node() | Node.list()]
     |> Task.async_stream(
       fn node ->
-        :erpc.call(node, __MODULE__, :kill_connections_to_tenant_id, [tenant_id, reason], 5000)
+        Rpc.ecall(node, __MODULE__, :kill_connections_to_tenant_id, [tenant_id, reason], 5000)
       end,
       timeout: 5000
     )

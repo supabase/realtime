@@ -9,6 +9,7 @@ defmodule Extensions.PostgresCdcRls do
   alias RealtimeWeb.Endpoint
   alias Extensions.PostgresCdcRls, as: Rls
   alias Rls.Subscriptions
+  alias Realtime.Rpc
 
   @spec handle_connect(map()) :: {:ok, {pid(), pid()}} | nil
   def handle_connect(args) do
@@ -31,7 +32,7 @@ defmodule Extensions.PostgresCdcRls do
     conn_node = node(conn)
 
     if conn_node !== node() do
-      :rpc.call(
+      Rpc.call(
         conn_node,
         Subscriptions,
         :create,
@@ -67,7 +68,7 @@ defmodule Extensions.PostgresCdcRls do
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, platform_region: platform_region)}"
     )
 
-    case :rpc.call(launch_node, __MODULE__, :start, [args], 30_000) do
+    case Rpc.call(launch_node, __MODULE__, :start, [args], 30_000) do
       {:ok, _pid} = ok ->
         ok
 
