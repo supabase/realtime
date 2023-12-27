@@ -11,7 +11,24 @@ defmodule Realtime.PromEx.Plugins.Tenants do
 
   @impl true
   def event_metrics(opts) do
-    [rpc_metrics(opts)]
+    rpc_metrics(opts)
+  end
+
+  defp rpc_metrics(_opts) do
+    Event.build(:realtime, [
+      counter(
+        [:prom_ex, :plugin, :realtime, :realtime, :tenants, :rpc],
+        event_name: [:realtime, :tenants, :rpc],
+        description: "The total count of rpc calls triggered by a tenant action",
+        measurement: :calls
+      ),
+      counter(
+        [:prom_ex, :plugin, :realtime, :realtime, :tenants, :erpc],
+        event_name: [:realtime, :tenants, :erpc],
+        description: "The total count of erpc calls triggered by a tenant action",
+        measurement: :calls
+      )
+    ])
   end
 
   @impl true
@@ -19,23 +36,6 @@ defmodule Realtime.PromEx.Plugins.Tenants do
     poll_rate = Keyword.get(opts, :poll_rate)
 
     [metrics(poll_rate)]
-  end
-
-  defp rpc_metrics(_opts) do
-    Event.build(:realtime, [
-      counter(
-        "realtime.tenants.rpc.call",
-        event_name: [:realtime, :tenants, :rpc],
-        description: "The total count of rpc calls triggered by a tenant action",
-        measurement: :calls
-      ),
-      counter(
-        "realtime.tenants.erpc.call",
-        event_name: [:realtime, :tenants, :rpc],
-        description: "The total count of erpc calls triggered by a tenant action",
-        measurement: :calls
-      )
-    ])
   end
 
   defp metrics(poll_rate) do
