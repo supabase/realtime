@@ -36,6 +36,8 @@ defmodule Realtime.Helpers do
           :socket_opts => list,
           :ssl_enforced => boolean,
           :user => binary,
+          :application_name => binary,
+          :backoff => :stop | :exp | :rand | :rand_exp,
           optional(any) => any
         }) :: {:error, any} | {:ok, pid}
   def connect_db(%{
@@ -48,7 +50,8 @@ defmodule Realtime.Helpers do
         pool: pool,
         queue_target: queue_target,
         ssl_enforced: ssl_enforced,
-        application_name: application_name
+        application_name: application_name,
+        backoff: backoff
       }) do
     connect_db(
       host,
@@ -60,7 +63,8 @@ defmodule Realtime.Helpers do
       pool,
       queue_target,
       ssl_enforced,
-      application_name
+      application_name,
+      backoff
     )
   end
 
@@ -74,7 +78,8 @@ defmodule Realtime.Helpers do
           non_neg_integer(),
           non_neg_integer(),
           boolean(),
-          String.t()
+          String.t(),
+          :stop | :exp | :rand | :rand_exp
         ) ::
           {:ok, pid} | {:error, Postgrex.Error.t() | term()}
   def connect_db(
@@ -87,7 +92,8 @@ defmodule Realtime.Helpers do
         pool \\ 5,
         queue_target \\ 5_000,
         ssl_enforced \\ true,
-        application_name \\ "realtime_supabase"
+        application_name \\ "realtime_supabase",
+        backoff_type \\ :rand_exp
       ) do
     Logger.metadata(application_name: application_name)
     metadata = Logger.metadata()
@@ -105,7 +111,7 @@ defmodule Realtime.Helpers do
         application_name: application_name
       ],
       socket_options: socket_opts,
-      backoff_type: :stop,
+      backoff_type: backoff_type,
       configure: fn args ->
         Logger.metadata(metadata)
         args
@@ -145,7 +151,8 @@ defmodule Realtime.Helpers do
         pool: 1,
         queue_target: 1000,
         ssl_enforced: ssl_enforced,
-        application_name: application_name
+        application_name: application_name,
+        backoff: :stop
       }
 
       with {:ok, conn} <- connect_db(opts) do
