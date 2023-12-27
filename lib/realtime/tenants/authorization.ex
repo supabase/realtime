@@ -1,4 +1,10 @@
 defmodule Realtime.Tenants.Authorization do
+  @moduledoc """
+  Runs validations based on RLS policies to set permissions for a given connection.
+
+  It will assign the a new key to a socket or a conn with the following:
+  * read - a boolean indicating whether the connection has read permissions
+  """
   require Logger
 
   @type params :: %{
@@ -11,6 +17,9 @@ defmodule Realtime.Tenants.Authorization do
 
   @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), DBConnection.t(), params()) ::
           {:ok, Phoenix.Socket.t() | Plug.Conn.t()} | {:error, :unauthorized}
+  @doc """
+  Runs validations based on RLS policies to set permissions for a given connection (either Phoenix.Socket or Plug.Conn).
+  """
   def get_authorizations(%Phoenix.Socket{} = socket, db_conn, params) do
     case get_permissions_for_connection(db_conn, params) do
       {:ok, permissions} -> {:ok, Phoenix.Socket.assign(socket, :permissions, permissions)}
@@ -25,8 +34,6 @@ defmodule Realtime.Tenants.Authorization do
     end
   end
 
-  @spec get_permissions_for_connection(DBConnection.conn(), map()) ::
-          {:ok, map()} | {:error, any()}
   defp get_permissions_for_connection(conn, params) do
     %{
       channel_name: channel_name,

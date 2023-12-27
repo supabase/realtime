@@ -1,6 +1,6 @@
 defmodule RealtimeWeb.RlsAuthorization do
   @moduledoc """
-  Authorization plug to ensure with RLS rules that a user can access a resource.
+  Authorization plug to ensure with RLS rules that a user can access a resource using the Realtime.Tenants.Authorization module.
   """
   require Logger
 

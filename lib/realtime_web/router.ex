@@ -33,7 +33,7 @@ defmodule RealtimeWeb.Router do
     plug(RealtimeWeb.AuthTenant)
   end
 
-  pipeline :rls_authorization do
+  pipeline :channel_rls_authorization do
     plug(RealtimeWeb.RlsAuthorization)
   end
 
@@ -107,7 +107,7 @@ defmodule RealtimeWeb.Router do
   end
 
   scope "/api", RealtimeWeb do
-    pipe_through([:open_cors, :tenant_api, :secure_tenant_api, :rls_authorization])
+    pipe_through([:open_cors, :tenant_api, :secure_tenant_api, :channel_rls_authorization])
 
     resources("/channels", ChannelsController, only: [:index, :show])
   end
