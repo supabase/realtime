@@ -29,7 +29,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     claims = %{sub: random_string(), role: "authenticated", exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
 
-    jwt = Joken.generate_and_sign!(claims, %{}, signer)
+    jwt = Joken.generate_and_sign!(%{}, claims, signer)
 
     %{jwt: jwt, claims: claims, tenant: tenant}
   end
@@ -55,6 +55,24 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
       refute conn.halted
       assert conn.assigns.permissions == {:ok, %{read: unquote(expected_read)}}
     end
+  end
+
+  test "on error, halts the connection and set status to 401", %{
+    conn: conn,
+    jwt: jwt,
+    claims: claims,
+    tenant: tenant
+  } do
+    conn =
+      conn
+      |> assign(:tenant, tenant)
+      |> assign(:claims, claims)
+      |> assign(:jwt, jwt)
+      |> assign(:role, "no")
+
+    conn = RlsAuthorization.call(conn, %{})
+    assert conn.halted
+    assert conn.status == 401
   end
 
   defp create_rls_policy(conn) do

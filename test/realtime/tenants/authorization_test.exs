@@ -34,7 +34,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
 
-    jwt = Joken.generate_and_sign!(claims, %{}, signer)
+    jwt = Joken.generate_and_sign!(%{}, claims, signer)
 
     %{channel: channel, db_conn: db_conn, jwt: jwt, claims: claims}
   end
@@ -137,6 +137,20 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       assert {:ok, %{read: false}} = conn.assigns.permissions
     end
+  end
+
+  @tag role: "non_existant", rls: :select_authenticated_role
+  test "on error return error and unauthorized on channel", %{db_conn: db_conn} do
+    params = %{
+      channel_name: "channel",
+      headers: [{"header-1", "value-1"}],
+      jwt: "jwt",
+      claims: %{},
+      role: "non_existant"
+    }
+
+    {:error, :unauthorized} =
+      Authorization.get_authorizations(Phoenix.ConnTest.build_conn(), db_conn, params)
   end
 
   defp create_rls_policy(conn, :select_authenticated_role) do

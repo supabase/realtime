@@ -10,7 +10,7 @@ defmodule RealtimeWeb.RlsAuthorization do
   alias Realtime.Tenants.Connect
   def init(opts), do: opts
 
-  def call(%{assigns: %{tenant: tenant}} = conn, _opts) do
+  def call(%Plug.Conn{assigns: %{tenant: tenant}} = conn, _opts) do
     params = %{
       channel_name: nil,
       headers: conn.req_headers,
@@ -27,6 +27,6 @@ defmodule RealtimeWeb.RlsAuthorization do
     end
   end
 
-  def call(conn, _opts), do: unauthorized(conn)
+  def call(conn, _opts), do: unauthorized(conn) |> halt()
   defp unauthorized(conn), do: conn |> put_status(401) |> halt()
 end

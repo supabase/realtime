@@ -9,6 +9,7 @@ defmodule RealtimeWeb.ChannelsController do
   alias RealtimeWeb.OpenApiSchemas.ChannelResponseList
   alias RealtimeWeb.OpenApiSchemas.EmptyResponse
   alias RealtimeWeb.OpenApiSchemas.NotFoundResponse
+  alias RealtimeWeb.OpenApiSchemas.UnauthorizedResponse
 
   action_fallback(RealtimeWeb.FallbackController)
 
@@ -25,16 +26,19 @@ defmodule RealtimeWeb.ChannelsController do
       ]
     ],
     responses: %{
-      200 => ChannelResponseList.response()
+      200 => ChannelResponseList.response(),
+      401 => UnauthorizedResponse.response()
     }
   )
 
-  def index(%{assigns: %{tenant: tenant}} = conn, _params) do
+  def index(%{assigns: %{tenant: tenant, permissions: {:ok, %{read: true}}}} = conn, _params) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
          {:ok, channels} <- Channels.list_channels(db_conn) do
       json(conn, channels)
     end
   end
+
+  def index(_conn, _params), do: {:error, :unauthorized}
 
   operation(:show,
     summary: "Show user channel",
@@ -57,11 +61,12 @@ defmodule RealtimeWeb.ChannelsController do
     ],
     responses: %{
       200 => ChannelResponse.response(),
+      401 => UnauthorizedResponse.response(),
       404 => NotFoundResponse.response()
     }
   )
 
-  def show(%{assigns: %{tenant: tenant}} = conn, %{"id" => id}) do
+  def show(%{assigns: %{tenant: tenant, permissions: {:ok, %{read: true}}}} = conn, %{"id" => id}) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
          {:ok, channel} when not is_nil(channel) <- Channels.get_channel_by_id(id, db_conn) do
       json(conn, channel)
@@ -70,6 +75,8 @@ defmodule RealtimeWeb.ChannelsController do
       error -> error
     end
   end
+
+  def show(_conn, _params), do: {:error, :unauthorized}
 
   operation(:create,
     summary: "Create user channel",

@@ -5,7 +5,7 @@ defmodule Realtime.Tenants.Authorization do
   require Logger
 
   @type params :: %{
-          :channel_name => binary(),
+          :channel_name => binary() | nil,
           :claims => map(),
           :headers => keyword({binary(), binary()}),
           :jwt => map(),
@@ -44,7 +44,7 @@ defmodule Realtime.Tenants.Authorization do
     headers = headers |> Map.new() |> Jason.encode!()
 
     Postgrex.transaction(conn, fn conn ->
-      Postgrex.query!(
+      Postgrex.query(
         conn,
         """
         SELECT
