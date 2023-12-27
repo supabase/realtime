@@ -93,5 +93,4 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     assert conn.halted
     assert conn.status == 401
   end
-
 end
