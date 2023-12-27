@@ -68,7 +68,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     @tag role: "anon"
     test "returns 401 if unauthorized", %{conn: conn} do
       conn = get(conn, ~p"/api/channels")
-      assert json_response(conn, 401) == %{"message" => "Forbidden"}
+      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
     end
   end
 
@@ -98,7 +98,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     @tag role: "anon"
     test "returns 401 if unauthorized", %{conn: conn} do
       conn = get(conn, ~p"/api/channels/0")
-      assert json_response(conn, 401) == %{"message" => "Forbidden"}
+      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
     end
   end
 
