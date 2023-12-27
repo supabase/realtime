@@ -93,7 +93,7 @@ defmodule Realtime.Helpers do
         queue_target \\ 5_000,
         ssl_enforced \\ true,
         application_name \\ "realtime_supabase",
-        backoff_type \\ :exp
+        backoff_type \\ :rand_exp
       ) do
     Logger.metadata(application_name: application_name)
     metadata = Logger.metadata()
