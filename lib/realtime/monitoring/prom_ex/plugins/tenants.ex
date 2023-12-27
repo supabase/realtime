@@ -16,17 +16,11 @@ defmodule Realtime.PromEx.Plugins.Tenants do
 
   defp rpc_metrics(_opts) do
     Event.build(:realtime, [
-      counter(
-        [:prom_ex, :plugin, :realtime, :realtime, :tenants, :rpc],
+      sum(
+        [:realtime, :tenants, :rpc],
         event_name: [:realtime, :tenants, :rpc],
-        description: "The total count of rpc calls triggered by a tenant action",
-        measurement: :calls
-      ),
-      counter(
-        [:prom_ex, :plugin, :realtime, :realtime, :tenants, :erpc],
-        event_name: [:realtime, :tenants, :erpc],
-        description: "The total count of erpc calls triggered by a tenant action",
-        measurement: :calls
+        description: "The total latency of rpc calls triggered by a tenant action",
+        measurement: :latency
       )
     ])
   end

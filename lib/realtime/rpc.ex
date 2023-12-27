@@ -13,12 +13,17 @@ defmodule Realtime.Rpc do
     {latency, response} = :timer.tc(fn -> :rpc.call(node, mod, func, args, timeout) end)
     tenant = Keyword.get(opts, :tenant, nil)
 
-    Telemetry.execute([:realtime, :tenants, :rpc, :calls], %{latency: latency, tenant: tenant}, %{
-      mod: mod,
-      func: func,
-      target_node: node,
-      origin_node: node()
-    })
+    Telemetry.execute(
+      [:realtime, :tenants, :rpc],
+      %{latency: latency},
+      %{
+        tenant: tenant,
+        mod: mod,
+        func: func,
+        target_node: node,
+        origin_node: node()
+      }
+    )
 
     response
   end
@@ -33,9 +38,10 @@ defmodule Realtime.Rpc do
     tenant = Keyword.get(opts, :tenant, nil)
 
     Telemetry.execute(
-      [:realtime, :tenants, :erpc, :calls],
-      %{latency: latency, tenant: tenant},
+      [:realtime, :tenants, :rpc],
+      %{latency: latency},
       %{
+        tenant: tenant,
         mod: mod,
         func: func,
         target_node: node,
