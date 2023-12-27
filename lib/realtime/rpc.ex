@@ -9,8 +9,9 @@ defmodule Realtime.Rpc do
   """
   def call(node, mod, func, opts \\ [], timeout \\ 15000) do
     {latency, response} = :timer.tc(fn -> :rpc.call(node, mod, func, opts, timeout) end)
+    tenant = Keyword.get(opts, :tenant, nil)
 
-    Telemetry.execute([:rpc, :call], latency, %{
+    Telemetry.execute([:realtime, :tenants, :rpc, :calls], %{latency: latency, tenant: tenant}, %{
       mod: mod,
       func: func,
       target_node: node,
@@ -20,7 +21,9 @@ defmodule Realtime.Rpc do
     response
   rescue
     _ ->
-      Telemetry.execute([:erpc, :call], timeout, %{
+      tenant = Keyword.get(opts, :tenant, nil)
+
+      Telemetry.execute([:erpc, :calls], %{tenant: tenant, latency: timeout}, %{
         mod: mod,
         func: func,
         target_node: node,
@@ -33,18 +36,25 @@ defmodule Realtime.Rpc do
   """
   def ecall(node, mod, func, opts \\ [], timeout \\ 15000) do
     {latency, response} = :timer.tc(fn -> :erpc.call(node, mod, func, opts, timeout) end)
+    tenant = Keyword.get(opts, :tenant, nil)
 
-    Telemetry.execute([:erpc, :call], latency, %{
-      mod: mod,
-      func: func,
-      target_node: node,
-      origin_node: node()
-    })
+    Telemetry.execute(
+      [:realtime, :tenants, :erpc, :calls],
+      %{latency: latency, tenant: tenant},
+      %{
+        mod: mod,
+        func: func,
+        target_node: node,
+        origin_node: node()
+      }
+    )
 
     response
   rescue
     _ ->
-      Telemetry.execute([:erpc, :call], timeout, %{
+      tenant = Keyword.get(opts, :tenant, nil)
+
+      Telemetry.execute([:erpc, :calls], %{tenant: tenant, latency: timeout}, %{
         mod: mod,
         func: func,
         target_node: node,
