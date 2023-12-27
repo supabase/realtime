@@ -174,7 +174,10 @@ defmodule Realtime.Tenants.Connect do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
-      Rpc.ecall(node, __MODULE__, :connect, [tenant_id, opts], erpc_timeout)
+      Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, opts],
+        timeout: erpc_timeout,
+        tenant: tenant_id
+      )
     end
   end
 

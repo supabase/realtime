@@ -325,7 +325,9 @@ defmodule Realtime.Helpers do
     [node() | Node.list()]
     |> Task.async_stream(
       fn node ->
-        Rpc.ecall(node, __MODULE__, :kill_connections_to_tenant_id, [tenant_id, reason], 5000)
+        Rpc.enhanced_call(node, __MODULE__, :kill_connections_to_tenant_id, [tenant_id, reason],
+          timeout: 5000
+        )
       end,
       timeout: 5000
     )
