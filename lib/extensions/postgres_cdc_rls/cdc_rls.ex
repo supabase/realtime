@@ -37,7 +37,7 @@ defmodule Extensions.PostgresCdcRls do
         Subscriptions,
         :create,
         opts,
-        15_000
+        timeout: 15_000
       )
     else
       apply(Subscriptions, :create, opts)
@@ -68,7 +68,7 @@ defmodule Extensions.PostgresCdcRls do
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, platform_region: platform_region)}"
     )
 
-    case Rpc.call(launch_node, __MODULE__, :start, [args], 30_000) do
+    case Rpc.call(launch_node, __MODULE__, :start, [args], timeout: 30_000, tenant: tenant) do
       {:ok, _pid} = ok ->
         ok
 

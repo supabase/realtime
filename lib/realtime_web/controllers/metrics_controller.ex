@@ -9,7 +9,7 @@ defmodule RealtimeWeb.MetricsController do
       Node.list()
       |> Task.async_stream(
         fn node ->
-          {node, Rpc.call(node, PromEx, :get_metrics, [], 10_000)}
+          {node, Rpc.call(node, PromEx, :get_metrics, [], timeout: 10_000)}
         end,
         timeout: :infinity
       )

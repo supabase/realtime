@@ -7,48 +7,48 @@ defmodule Realtime.Rpc do
   @doc """
   Calls external node using :rpc.call/5 and collects telemetry
   """
-  def call(node, mod, func, opts \\ [], timeout \\ 15000) do
-    {latency, response} = :timer.tc(fn -> :rpc.call(node, mod, func, opts, timeout) end)
+  @spec call(atom(), atom(), atom(), any(), keyword()) :: any()
+  def call(node, mod, func, args, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, 15000)
+    {latency, response} = :timer.tc(fn -> :rpc.call(node, mod, func, args, timeout) end)
+    tenant = Keyword.get(opts, :tenant, nil)
 
-    Telemetry.execute([:rpc, :call], latency, %{
-      mod: mod,
-      func: func,
-      target_node: node,
-      origin_node: node()
-    })
-
-    response
-  rescue
-    _ ->
-      Telemetry.execute([:erpc, :call], timeout, %{
+    Telemetry.execute(
+      [:realtime, :tenants, :rpc],
+      %{latency: latency},
+      %{
+        tenant: tenant,
         mod: mod,
         func: func,
         target_node: node,
         origin_node: node()
-      })
+      }
+    )
+
+    response
   end
 
   @doc """
   Calls external node using :erpc.call/5 and collects telemetry
   """
-  def ecall(node, mod, func, opts \\ [], timeout \\ 15000) do
-    {latency, response} = :timer.tc(fn -> :erpc.call(node, mod, func, opts, timeout) end)
+  @spec enhanced_call(atom(), atom(), atom(), any(), keyword()) :: any()
+  def enhanced_call(node, mod, func, args \\ [], opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, 15000)
+    {latency, response} = :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end)
+    tenant = Keyword.get(opts, :tenant, nil)
 
-    Telemetry.execute([:erpc, :call], latency, %{
-      mod: mod,
-      func: func,
-      target_node: node,
-      origin_node: node()
-    })
-
-    response
-  rescue
-    _ ->
-      Telemetry.execute([:erpc, :call], timeout, %{
+    Telemetry.execute(
+      [:realtime, :tenants, :rpc],
+      %{latency: latency},
+      %{
+        tenant: tenant,
         mod: mod,
         func: func,
         target_node: node,
         origin_node: node()
-      })
+      }
+    )
+
+    response
   end
 end

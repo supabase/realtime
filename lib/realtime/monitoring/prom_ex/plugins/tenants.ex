@@ -2,17 +2,34 @@ defmodule Realtime.PromEx.Plugins.Tenants do
   @moduledoc false
 
   use PromEx.Plugin
+
+  alias PromEx.MetricTypes.Event
+
   require Logger
 
   @event_connected [:prom_ex, :plugin, :realtime, :tenants, :connected]
 
   @impl true
+  def event_metrics(opts) do
+    rpc_metrics(opts)
+  end
+
+  defp rpc_metrics(_opts) do
+    Event.build(:realtime, [
+      sum(
+        [:realtime, :tenants, :rpc],
+        event_name: [:realtime, :tenants, :rpc],
+        description: "The total latency of rpc calls triggered by a tenant action",
+        measurement: :latency
+      )
+    ])
+  end
+
+  @impl true
   def polling_metrics(opts) do
     poll_rate = Keyword.get(opts, :poll_rate)
 
-    [
-      metrics(poll_rate)
-    ]
+    [metrics(poll_rate)]
   end
 
   defp metrics(poll_rate) do
