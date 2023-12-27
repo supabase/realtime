@@ -26,9 +26,7 @@ defmodule RealtimeWeb.AuthTenant do
       |> assign(:jwt, token)
       |> assign(:role, claims["role"])
     else
-      err ->
-        IO.inspect(err)
-
+      _ ->
         conn
         |> unauthorized()
         |> halt()

@@ -16,20 +16,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
     start_supervised!({Tenants.Migrations, settings})
 
     {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
-    truncate_table(db_conn, "realtime.channels")
+    clean_table(db_conn, "realtime", "channels")
     channel = channel_fixture(tenant)
 
-    case context do
-      %{rls: policy} ->
-        create_rls_policy(db_conn, policy)
-
-        on_exit(fn ->
-          Postgrex.query!(db_conn, "drop policy #{policy} on realtime.channels", [])
-        end)
-
-      _ ->
-        :ok
-    end
+    create_rls_policy(db_conn, :select_authenticated_role)
 
     claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
@@ -151,18 +141,5 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
     {:error, :unauthorized} =
       Authorization.get_authorizations(Phoenix.ConnTest.build_conn(), db_conn, params)
-  end
-
-  defp create_rls_policy(conn, :select_authenticated_role) do
-    Postgrex.query!(
-      conn,
-      """
-      create policy select_authenticated_role
-      on realtime.channels for select
-      to authenticated
-      using ( realtime.channel_name() = name );
-      """,
-      []
-    )
   end
 end

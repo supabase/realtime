@@ -26,9 +26,9 @@ defmodule RealtimeWeb.ChannelsControllerTest do
 
     start_supervised!({Tenants.Migrations, settings})
     {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
-    truncate_table(db_conn, "realtime.channels")
+    clean_table(db_conn, "realtime", "channels")
 
-    create_rls_policy(db_conn)
+    create_rls_policy(db_conn, :select_authenticated_role)
 
     on_exit(fn ->
       Postgrex.query!(db_conn, "drop policy select_authenticated_role on realtime.channels", [])
@@ -151,17 +151,4 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   #     assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
   #   end
   # end
-
-  defp create_rls_policy(conn) do
-    Postgrex.query!(
-      conn,
-      """
-      create policy select_authenticated_role
-      on realtime.channels for select
-      to authenticated
-      using ( true );
-      """,
-      []
-    )
-  end
 end

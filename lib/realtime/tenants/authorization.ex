@@ -1,7 +1,4 @@
 defmodule Realtime.Tenants.Authorization do
-  alias Plug.Conn
-  alias Phoenix.Socket
-
   require Logger
 
   @type params :: %{
@@ -13,17 +10,17 @@ defmodule Realtime.Tenants.Authorization do
         }
 
   @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), DBConnection.t(), params()) ::
-          {:error, :unauthorized} | {:ok, Socket} | {:ok, Conn}
-  def get_authorizations(%Socket{} = socket, db_conn, params) do
+          {:ok, Phoenix.Socket.t() | Plug.Conn.t()} | {:error, :unauthorized}
+  def get_authorizations(%Phoenix.Socket{} = socket, db_conn, params) do
     case get_permissions_for_connection(db_conn, params) do
-      {:ok, permissions} -> {:ok, Socket.assign(socket, :permissions, permissions)}
+      {:ok, permissions} -> {:ok, Phoenix.Socket.assign(socket, :permissions, permissions)}
       _ -> {:error, :unauthorized}
     end
   end
 
-  def get_authorizations(%Conn{} = conn, db_conn, params) do
+  def get_authorizations(%Plug.Conn{} = conn, db_conn, params) do
     case get_permissions_for_connection(db_conn, params) do
-      {:ok, permissions} -> {:ok, Conn.assign(conn, :permissions, permissions)}
+      {:ok, permissions} -> {:ok, Plug.Conn.assign(conn, :permissions, permissions)}
       _ -> {:error, :unauthorized}
     end
   end
