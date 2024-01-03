@@ -4,6 +4,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
   import Plug.Conn
 
   alias Realtime.Tenants
+  alias Realtime.Tenants.Authorization.Permissions
   alias RealtimeWeb.Joken.CurrentTime
   alias RealtimeWeb.RlsAuthorization
 
@@ -47,7 +48,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
 
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
-    assert conn.assigns.permissions == {:ok, %{read: false}}
+    assert conn.assigns.permissions == {:ok, %Permissions{read: false}}
   end
 
   @tag role: "anon", rls: :select_authenticated_role
@@ -63,7 +64,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
 
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
-    assert conn.assigns.permissions == {:ok, %{read: false}}
+    assert conn.assigns.permissions == {:ok, %Permissions{read: false}}
   end
 
   @tag role: "authenticated", rls: :select_authenticated_role_on_channel_name
@@ -83,7 +84,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
 
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
-    assert conn.assigns.permissions == {:ok, %{read: true}}
+    assert conn.assigns.permissions == {:ok, %Permissions{read: true}}
   end
 
   @tag role: "authenticated", rls: :select_authenticated_role
@@ -98,7 +99,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     conn = setup_conn(conn, tenant, claims, jwt, role)
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
-    assert conn.assigns.permissions == {:ok, %{read: true}}
+    assert conn.assigns.permissions == {:ok, %Permissions{read: true}}
   end
 
   @tag role: "authenticated", rls: :select_authenticated_role

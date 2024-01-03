@@ -22,6 +22,7 @@ defmodule RealtimeWeb.RlsAuthorization do
 
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
          params <- set_channel_name_for_authorization_check(conn, db_conn, params),
+         params <- Authorization.build_authorization_params(params),
          {:ok, conn} <- Authorization.get_authorizations(conn, db_conn, params) do
       conn
     else

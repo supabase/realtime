@@ -5,6 +5,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
+  alias Realtime.Tenants.Authorization.Permissions
   alias RealtimeWeb.Joken.CurrentTime
 
   setup context do
@@ -39,18 +40,19 @@ defmodule Realtime.Tenants.AuthorizationTest do
       claims: claims,
       role: role
     } do
-      params = %{
-        channel_name: channel.name,
-        headers: [{"header-1", "value-1"}],
-        jwt: jwt,
-        claims: claims,
-        role: role
-      }
+      params =
+        Authorization.build_authorization_params(%{
+          channel_name: channel.name,
+          headers: [{"header-1", "value-1"}],
+          jwt: jwt,
+          claims: claims,
+          role: role
+        })
 
       {:ok, conn} =
         Authorization.get_authorizations(Phoenix.ConnTest.build_conn(), db_conn, params)
 
-      assert {:ok, %{read: true}} = conn.assigns.permissions
+      assert {:ok, %Permissions{read: true}} = conn.assigns.permissions
     end
 
     @tag role: "anon", rls: :select_authenticated_role
@@ -61,18 +63,19 @@ defmodule Realtime.Tenants.AuthorizationTest do
       claims: claims,
       role: role
     } do
-      params = %{
-        channel_name: channel.name,
-        headers: [{"header-1", "value-1"}],
-        jwt: jwt,
-        claims: claims,
-        role: role
-      }
+      params =
+        Authorization.build_authorization_params(%{
+          channel_name: channel.name,
+          headers: [{"header-1", "value-1"}],
+          jwt: jwt,
+          claims: claims,
+          role: role
+        })
 
       {:ok, conn} =
         Authorization.get_authorizations(Phoenix.ConnTest.build_conn(), db_conn, params)
 
-      assert {:ok, %{read: false}} = conn.assigns.permissions
+      assert {:ok, %Permissions{read: false}} = conn.assigns.permissions
     end
   end
 
@@ -85,13 +88,14 @@ defmodule Realtime.Tenants.AuthorizationTest do
       claims: claims,
       role: role
     } do
-      params = %{
-        channel_name: channel.name,
-        headers: [{"header-1", "value-1"}],
-        jwt: jwt,
-        claims: claims,
-        role: role
-      }
+      params =
+        Authorization.build_authorization_params(%{
+          channel_name: channel.name,
+          headers: [{"header-1", "value-1"}],
+          jwt: jwt,
+          claims: claims,
+          role: role
+        })
 
       {:ok, conn} =
         Authorization.get_authorizations(
@@ -100,7 +104,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
           params
         )
 
-      assert {:ok, %{read: true}} = conn.assigns.permissions
+      assert {:ok, %Permissions{read: true}} = conn.assigns.permissions
     end
 
     @tag role: "anon", rls: :select_authenticated_role
@@ -111,13 +115,14 @@ defmodule Realtime.Tenants.AuthorizationTest do
       claims: claims,
       role: role
     } do
-      params = %{
-        channel_name: channel.name,
-        headers: [{"header-1", "value-1"}],
-        jwt: jwt,
-        claims: claims,
-        role: role
-      }
+      params =
+        Authorization.build_authorization_params(%{
+          channel_name: channel.name,
+          headers: [{"header-1", "value-1"}],
+          jwt: jwt,
+          claims: claims,
+          role: role
+        })
 
       {:ok, conn} =
         Authorization.get_authorizations(
@@ -126,19 +131,20 @@ defmodule Realtime.Tenants.AuthorizationTest do
           params
         )
 
-      assert {:ok, %{read: false}} = conn.assigns.permissions
+      assert {:ok, %Permissions{read: false}} = conn.assigns.permissions
     end
   end
 
   @tag role: "non_existant", rls: :select_authenticated_role
   test "on error return error and unauthorized on channel", %{db_conn: db_conn} do
-    params = %{
-      channel_name: "channel",
-      headers: [{"header-1", "value-1"}],
-      jwt: "jwt",
-      claims: %{},
-      role: "non_existant"
-    }
+    params =
+      Authorization.build_authorization_params(%{
+        channel_name: "channel",
+        headers: [{"header-1", "value-1"}],
+        jwt: "jwt",
+        claims: %{},
+        role: "non_existant"
+      })
 
     {:error, :unauthorized} =
       Authorization.get_authorizations(Phoenix.ConnTest.build_conn(), db_conn, params)

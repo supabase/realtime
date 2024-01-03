@@ -6,16 +6,43 @@ defmodule Realtime.Tenants.Authorization do
   * read - a boolean indicating whether the connection has read permissions
   """
   require Logger
+  defstruct [:channel_name, :headers, :jwt, :claims, :role]
 
-  @type params :: %{
+  defmodule Permissions do
+    defstruct read: false
+
+    @type t :: %__MODULE__{
+            :read => boolean()
+          }
+  end
+
+  @type t :: %__MODULE__{
           :channel_name => binary() | nil,
           :claims => map(),
           :headers => keyword({binary(), binary()}),
           :jwt => map(),
           :role => binary()
         }
+  @doc """
+  Builds a new authorization params struct.
+  """
+  def build_authorization_params(%{
+        channel_name: channel_name,
+        headers: headers,
+        jwt: jwt,
+        claims: claims,
+        role: role
+      }) do
+    %__MODULE__{
+      channel_name: channel_name,
+      headers: headers,
+      jwt: jwt,
+      claims: claims,
+      role: role
+    }
+  end
 
-  @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), DBConnection.t(), params()) ::
+  @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), DBConnection.t(), __MODULE__.t()) ::
           {:ok, Phoenix.Socket.t() | Plug.Conn.t()} | {:error, :unauthorized}
   @doc """
   Runs validations based on RLS policies to set permissions for a given connection (either Phoenix.Socket or Plug.Conn).
@@ -35,7 +62,7 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   defp get_permissions_for_connection(conn, params) do
-    %{
+    %__MODULE__{
       channel_name: channel_name,
       headers: headers,
       jwt: jwt,
@@ -65,13 +92,13 @@ defmodule Realtime.Tenants.Authorization do
 
       case Postgrex.query(conn, "SELECT name from realtime.channels", [], mode: :savepoint) do
         {:ok, %{num_rows: 0}} ->
-          {:ok, %{read: false}}
+          {:ok, %Permissions{read: false}}
 
         {:ok, _} ->
-          {:ok, %{read: true}}
+          {:ok, %Permissions{read: true}}
 
         {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-          {:ok, %{read: false}}
+          {:ok, %Permissions{read: false}}
 
         {:error, error} ->
           Logger.error("Error getting permissions for connection: #{inspect(error)}")
