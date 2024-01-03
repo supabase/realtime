@@ -21,7 +21,7 @@ defmodule RealtimeWeb.RlsAuthorization do
     }
 
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
-         params <- set_channel_name(conn, db_conn, params),
+         params <- set_channel_name_for_authorization_check(conn, db_conn, params),
          {:ok, conn} <- Authorization.get_authorizations(conn, db_conn, params) do
       conn
     else
@@ -33,13 +33,14 @@ defmodule RealtimeWeb.RlsAuthorization do
 
   def call(conn, _opts), do: unauthorized(conn) |> halt()
 
-  defp set_channel_name(%{path_params: %{"id" => id}}, db_conn, params) do
-    case Channels.get_channel_by_id(id, db_conn) do
-      {:ok, channel} -> Map.put(params, :channel_name, channel.name)
+  defp set_channel_name_for_authorization_check(%{path_params: path_params}, db_conn, params) do
+    with {:ok, id} <- Map.fetch(path_params, "id"),
+         {:ok, %{name: name}} <- Channels.get_channel_by_id(id, db_conn) do
+      Map.put(params, :channel_name, name)
+    else
       _ -> Map.put(params, :channel_name, nil)
     end
   end
 
-  defp set_channel_name(_, _, params), do: Map.put(params, :channel_name, nil)
   defp unauthorized(conn), do: conn |> put_status(401) |> halt()
 end

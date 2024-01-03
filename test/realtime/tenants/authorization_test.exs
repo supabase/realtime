@@ -1,6 +1,7 @@
 defmodule Realtime.Tenants.AuthorizationTest do
+  # Needs to be false due to some conflicts when fetching connection from the pool since this use Postgrex directly
+  use RealtimeWeb.ConnCase, async: false
   require Phoenix.ChannelTest
-  use RealtimeWeb.ConnCase
 
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization

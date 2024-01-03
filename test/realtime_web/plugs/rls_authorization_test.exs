@@ -20,77 +20,105 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
 
     clean_table(db_conn, "realtime", "channels")
-    channel_fixture(tenant, context.rls_setup_params || %{})
-    create_rls_policy(db_conn, context.rls, context.rls_setup_params)
+    channel = channel_fixture(tenant)
+    create_rls_policy(db_conn, context.rls, channel)
 
     claims = %{sub: random_string(), role: "authenticated", exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
-
     jwt = Joken.generate_and_sign!(%{}, claims, signer)
 
-    %{jwt: jwt, claims: claims, tenant: tenant}
+    %{jwt: jwt, claims: claims, tenant: tenant, channel: channel}
   end
 
-  @select_authenticated_role_tests [
-    {"anon", :select_authenticated_role, nil, [], %{read: false}},
-    {"authenticated", :select_authenticated_role, nil, [], %{read: true}}
-  ]
-  @select_authenticated_role_on_channel_name_tests [
-    {
-      "authenticated",
-      :select_authenticated_role_on_channel_name,
-      %{name: random_string()},
-      [{"id", "1"}],
-      %{read: true}
-    },
-    {
-      "anon",
-      :select_authenticated_role_on_channel_name,
-      %{name: random_string()},
-      [{"id", "1"}],
-      %{read: false}
-    }
-  ]
+  @tag role: "anon", rls: :select_authenticated_role_on_channel_name
+  test "assigns the permissions correctly to anon and select_authenticated_role_on_channel_name rule",
+       %{
+         conn: conn,
+         jwt: jwt,
+         claims: claims,
+         tenant: tenant,
+         role: role,
+         channel: channel
+       } do
+    conn =
+      conn
+      |> setup_conn(tenant, claims, jwt, role)
+      |> Map.put(:path_params, %{"id" => channel.id})
 
-  for {role, rls, rls_setup_params, conn_params, %{read: expected_read}} <-
-        @select_authenticated_role_tests ++ @select_authenticated_role_on_channel_name_tests do
-    @tag role: role, rls: rls, rls_setup_params: rls_setup_params
-    test "assigns the permissions correctly to #{role} and #{rls} rule", %{
-      conn: conn,
-      jwt: jwt,
-      claims: claims,
-      tenant: tenant
-    } do
-      conn =
-        conn
-        |> assign(:tenant, tenant)
-        |> assign(:claims, claims)
-        |> assign(:jwt, jwt)
-        |> assign(:role, unquote(role))
-        |> Map.put(:path_params, unquote(conn_params) |> Map.new())
-
-      conn = RlsAuthorization.call(conn, %{})
-      refute conn.halted
-      assert conn.assigns.permissions == {:ok, %{read: unquote(expected_read)}}
-    end
+    conn = RlsAuthorization.call(conn, %{})
+    refute conn.halted
+    assert conn.assigns.permissions == {:ok, %{read: false}}
   end
 
-  @tag role: "authenticated", rls: :select_authenticated_role, rls_setup_params: nil
+  @tag role: "anon", rls: :select_authenticated_role
+  test "assigns the permissions correctly to anon and select_authenticated_role rule",
+       %{
+         conn: conn,
+         jwt: jwt,
+         claims: claims,
+         tenant: tenant,
+         role: role
+       } do
+    conn = setup_conn(conn, tenant, claims, jwt, role)
+
+    conn = RlsAuthorization.call(conn, %{})
+    refute conn.halted
+    assert conn.assigns.permissions == {:ok, %{read: false}}
+  end
+
+  @tag role: "authenticated", rls: :select_authenticated_role_on_channel_name
+  test "assigns the permissions correctly to authenticated and select_authenticated_role_on_channel_name rule",
+       %{
+         conn: conn,
+         jwt: jwt,
+         claims: claims,
+         tenant: tenant,
+         role: role,
+         channel: channel
+       } do
+    conn =
+      conn
+      |> setup_conn(tenant, claims, jwt, role)
+      |> Map.put(:path_params, %{"id" => channel.id})
+
+    conn = RlsAuthorization.call(conn, %{})
+    refute conn.halted
+    assert conn.assigns.permissions == {:ok, %{read: true}}
+  end
+
+  @tag role: "authenticated", rls: :select_authenticated_role
+  test "assigns the permissions correctly to authenticated and select_authenticated_role rule",
+       %{
+         conn: conn,
+         jwt: jwt,
+         claims: claims,
+         tenant: tenant,
+         role: role
+       } do
+    conn = setup_conn(conn, tenant, claims, jwt, role)
+    conn = RlsAuthorization.call(conn, %{})
+    refute conn.halted
+    assert conn.assigns.permissions == {:ok, %{read: true}}
+  end
+
+  @tag role: "authenticated", rls: :select_authenticated_role
   test "on error, halts the connection and set status to 401", %{
     conn: conn,
     jwt: jwt,
     claims: claims,
     tenant: tenant
   } do
-    conn =
-      conn
-      |> assign(:tenant, tenant)
-      |> assign(:claims, claims)
-      |> assign(:jwt, jwt)
-      |> assign(:role, "no")
-
+    conn = setup_conn(conn, tenant, claims, jwt, "no")
     conn = RlsAuthorization.call(conn, %{})
     assert conn.halted
     assert conn.status == 401
+  end
+
+  defp setup_conn(conn, tenant, claims, jwt, role) do
+    conn
+    |> assign(:tenant, tenant)
+    |> assign(:claims, claims)
+    |> assign(:jwt, jwt)
+    |> assign(:role, role)
   end
 end
