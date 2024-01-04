@@ -5,9 +5,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
 
   alias Realtime.GenCounter
   alias Realtime.Tenants
-  @moduletag :skip
   @cdc "postgres_cdc_rls"
-  @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE1MTYyMzkwMjIsInJvbGUiOiJmb28iLCJleHAiOiJiYXIifQ.Ret2CevUozCsPhpgW2FMeFL7RooLgoOvfQzNpLBj5ak"
 
   setup_with_mocks [
                      {GenCounter, [], new: fn _ -> :ok end},
@@ -15,61 +13,94 @@ defmodule RealtimeWeb.ChannelsControllerTest do
                      {GenCounter, [], put: fn _, _ -> :ok end},
                      {GenCounter, [], get: fn _ -> {:ok, 0} end}
                    ],
-                   %{conn: conn} do
+                   %{conn: conn} = context do
     start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
     tenant = tenant_fixture()
+
+    secret =
+      tenant.jwt_secret |> Realtime.Helpers.decrypt!(Application.get_env(:realtime, :db_enc_key))
+
     settings = Realtime.PostgresCdc.filter_settings(@cdc, tenant.extensions)
     settings = Map.put(settings, "id", tenant.external_id)
     settings = Map.put(settings, "db_socket_opts", [:inet])
 
     start_supervised!({Tenants.Migrations, settings})
     {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
-    truncate_table(db_conn, "realtime.channels")
+    clean_table(db_conn, "realtime", "channels")
+
+    create_rls_policy(db_conn, :select_authenticated_role)
+
+    on_exit(fn ->
+      Postgrex.query!(db_conn, "drop policy select_authenticated_role on realtime.channels", [])
+    end)
+
+    claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
+    signer = Joken.Signer.create("HS256", secret)
+
+    jwt = Joken.generate_and_sign!(%{}, claims, signer)
 
     conn =
       conn
       |> put_req_header("accept", "application/json")
-      |> put_req_header("authorization", "Bearer #{@token}")
+      |> put_req_header("authorization", "Bearer #{jwt}")
       |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
 
     {:ok, conn: conn, tenant: tenant}
   end
 
-  # describe "index" do
-  #   test "lists tenant channels", %{conn: conn, tenant: tenant} do
-  #     expected =
-  #       Stream.repeatedly(fn -> channel_fixture(tenant) end)
-  #       |> Enum.take(10)
-  #       |> Jason.encode!()
-  #       |> Jason.decode!()
+  describe "index" do
+    @tag role: "authenticated"
+    test "lists tenant channels", %{conn: conn, tenant: tenant} do
+      expected =
+        Stream.repeatedly(fn -> channel_fixture(tenant) end)
+        |> Enum.take(10)
+        |> Jason.encode!()
+        |> Jason.decode!()
 
-  #     conn = get(conn, ~p"/api/channels")
-  #     res = json_response(conn, 200)
+      conn = get(conn, ~p"/api/channels")
+      res = json_response(conn, 200)
 
-  #     res = Enum.sort_by(res, fn %{"id" => id} -> id end)
-  #     expected = Enum.sort_by(expected, fn %{"id" => id} -> id end)
-  #     assert res == expected
-  #   end
-  # end
+      res = Enum.sort_by(res, fn %{"id" => id} -> id end)
+      expected = Enum.sort_by(expected, fn %{"id" => id} -> id end)
+      assert res == expected
+    end
 
-  # describe "show" do
-  #   test "lists tenant channels", %{conn: conn, tenant: tenant} do
-  #     [channel | _] =
-  #       Stream.repeatedly(fn -> channel_fixture(tenant) end)
-  #       |> Enum.take(10)
+    @tag role: "anon"
+    test "returns 401 if unauthorized", %{conn: conn} do
+      conn = get(conn, ~p"/api/channels")
+      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
+    end
+  end
 
-  #     expected = channel |> Jason.encode!() |> Jason.decode!()
+  describe "show" do
+    @tag role: "authenticated"
+    test "lists tenant channels", %{conn: conn, tenant: tenant} do
+      [channel | _] =
+        Stream.repeatedly(fn -> channel_fixture(tenant) end)
+        |> Enum.take(10)
 
-  #     conn = get(conn, ~p"/api/channels/#{channel.id}")
-  #     res = json_response(conn, 200)
-  #     assert res == expected
-  #   end
+      expected = channel |> Jason.encode!() |> Jason.decode!()
 
-  #   test "returns not found if id doesn't exist", %{conn: conn} do
-  #     conn = get(conn, ~p"/api/channels/0")
-  #     assert json_response(conn, 404) == %{"message" => "Not found"}
-  #   end
-  # end
+      conn = get(conn, ~p"/api/channels/#{channel.id}")
+      res = json_response(conn, 200)
+      assert res == expected
+    end
+
+    @tag role: "authenticated"
+    test "returns not found if id doesn't exist", %{conn: conn, tenant: tenant} do
+      Stream.repeatedly(fn -> channel_fixture(tenant) end)
+      |> Enum.take(10)
+
+      conn = get(conn, ~p"/api/channels/0")
+      assert json_response(conn, 404) == %{"message" => "Not found"}
+    end
+
+    @tag role: "anon"
+    test "returns 401 if unauthorized", %{conn: conn} do
+      conn = get(conn, ~p"/api/channels/0")
+      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
+    end
+  end
 
   # describe "create" do
   #   test "creates a channel", %{conn: conn} do

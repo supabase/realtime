@@ -33,6 +33,10 @@ defmodule RealtimeWeb.Router do
     plug(RealtimeWeb.AuthTenant)
   end
 
+  pipeline :channel_rls_authorization do
+    plug(RealtimeWeb.RlsAuthorization)
+  end
+
   pipeline :dashboard_admin do
     plug(:dashboard_basic_auth)
   end
@@ -100,7 +104,12 @@ defmodule RealtimeWeb.Router do
     pipe_through([:open_cors, :tenant_api, :secure_tenant_api])
 
     post("/broadcast", BroadcastController, :broadcast)
-    # resources("/channels", ChannelsController)
+  end
+
+  scope "/api", RealtimeWeb do
+    pipe_through([:open_cors, :tenant_api, :secure_tenant_api, :channel_rls_authorization])
+
+    resources("/channels", ChannelsController, only: [:index, :show])
   end
 
   # Enables LiveDashboard only for development

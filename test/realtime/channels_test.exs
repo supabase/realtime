@@ -15,7 +15,7 @@ defmodule Realtime.ChannelsTest do
 
     start_supervised!({Tenants.Migrations, settings})
     {:ok, conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
-    truncate_table(conn, "realtime.channels")
+    clean_table(conn, "realtime", "channels")
 
     %{conn: conn, tenant: tenant}
   end

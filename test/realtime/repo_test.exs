@@ -19,8 +19,7 @@ defmodule Realtime.RepoTest do
     settings = Map.put(settings, "db_socket_opts", [:inet])
 
     start_supervised!({Migrations, settings})
-    truncate_table(conn, "realtime.channels")
-
+    clean_table(conn, "realtime", "channels")
     %{conn: conn, tenant: tenant}
   end
 

@@ -18,11 +18,18 @@ defmodule RealtimeWeb.AuthTenant do
     with %Tenant{jwt_secret: jwt_secret} <- tenant,
          token when is_binary(token) <- access_token(conn),
          jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
-         {:ok, _claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec) do
+         {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec) do
       Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
+
       conn
+      |> assign(:claims, claims)
+      |> assign(:jwt, token)
+      |> assign(:role, claims["role"])
     else
-      _ -> unauthorized(conn)
+      _ ->
+        conn
+        |> unauthorized()
+        |> halt()
     end
   end
 

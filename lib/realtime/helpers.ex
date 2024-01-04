@@ -126,7 +126,7 @@ defmodule Realtime.Helpers do
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
   """
   @spec check_tenant_connection(Tenant.t(), binary()) :: {:error, atom()} | {:ok, pid()}
-  def check_tenant_connection(nil, _), do: {:error, :tenant_not_found}
+  def check_tenant_connection(nil, _, _), do: {:error, :tenant_not_found}
 
   def check_tenant_connection(tenant, application_name) do
     tenant

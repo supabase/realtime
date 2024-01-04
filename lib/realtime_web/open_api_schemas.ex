@@ -380,6 +380,20 @@ defmodule RealtimeWeb.OpenApiSchemas do
     def response(), do: {"Not Found", "application/json", __MODULE__}
   end
 
+  defmodule UnauthorizedResponse do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{
+        error: %Schema{type: :string, default: "unauthorized"}
+      }
+    })
+
+    def response(), do: {"Unauthorized", "application/json", __MODULE__}
+  end
+
   defmodule UnprocessableEntityResponse do
     @moduledoc false
     require OpenApiSpex

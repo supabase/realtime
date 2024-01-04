@@ -51,5 +51,49 @@ defmodule Realtime.DataCase do
     end)
   end
 
-  def truncate_table(db_conn, table), do: Postgrex.query!(db_conn, "TRUNCATE TABLE #{table}", [])
+  def clean_table(db_conn, schema, table) do
+    %{rows: rows} =
+      Postgrex.query!(
+        db_conn,
+        "SELECT policyname FROM pg_policies WHERE schemaname = '#{schema}' and tablename = '#{table}'",
+        []
+      )
+
+    rows
+    |> List.flatten()
+    |> Enum.each(fn name ->
+      Postgrex.query!(db_conn, "DROP POLICY IF EXISTS #{name} ON #{schema}.#{table}", [])
+    end)
+
+    Postgrex.query!(db_conn, "TRUNCATE TABLE #{schema}.#{table}", [])
+    Postgrex.query!(db_conn, "ALTER SEQUENCE #{schema}.#{table}_id_seq RESTART WITH 1", [])
+  end
+
+  def create_rls_policy(conn, policy, params \\ nil)
+
+  def create_rls_policy(conn, :select_authenticated_role_on_channel_name, %{name: name}) do
+    Postgrex.query!(
+      conn,
+      """
+      create policy select_authenticated_role
+      on realtime.channels for select
+      to authenticated
+      using ( realtime.channel_name() = '#{name}' );
+      """,
+      []
+    )
+  end
+
+  def create_rls_policy(conn, :select_authenticated_role, _) do
+    Postgrex.query!(
+      conn,
+      """
+      create policy select_authenticated_role
+      on realtime.channels for select
+      to authenticated
+      using ( true );
+      """,
+      []
+    )
+  end
 end

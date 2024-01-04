@@ -12,7 +12,15 @@ services:
     environment:
       POSTGRES_HOST: /var/run/postgresql
       POSTGRES_PASSWORD: postgres
-
+  tenant_db:
+    image: supabase/postgres:14.1.0.105
+    container_name: tenant-db
+    ports:
+      - "5433:5432"
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PASSWORD: postgres
   realtime:
     depends_on:
       - db
