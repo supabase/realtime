@@ -75,10 +75,10 @@ defmodule Realtime.DataCase do
     Postgrex.query!(
       conn,
       """
-      create policy select_authenticated_role
-      on realtime.channels for select
-      to authenticated
-      using ( realtime.channel_name() = '#{name}' );
+      CREATE POLICY select_authenticated_role
+      ON realtime.channels FOR SELECT
+      TO authenticated
+      USING ( realtime.channel_name() = '#{name}' )
       """,
       []
     )
@@ -88,10 +88,26 @@ defmodule Realtime.DataCase do
     Postgrex.query!(
       conn,
       """
-      create policy select_authenticated_role
-      on realtime.channels for select
-      to authenticated
-      using ( true );
+      CREATE POLICY select_authenticated_role
+      ON realtime.channels FOR SELECT
+      TO authenticated
+      USING ( true )
+      """,
+      []
+    )
+  end
+
+  def create_rls_policy(conn, :write_authenticated_role, %{name: name} = channel) do
+    create_rls_policy(conn, :select_authenticated_role_on_channel_name, channel)
+
+    Postgrex.query!(
+      conn,
+      """
+      CREATE POLICY write_authenticated_role
+      ON realtime.channels FOR UPDATE
+      TO authenticated
+      USING ( realtime.channel_name() = '#{name}' )
+      WITH CHECK ( realtime.channel_name() = '#{name}' )
       """,
       []
     )

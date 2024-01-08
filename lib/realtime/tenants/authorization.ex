@@ -6,18 +6,25 @@ defmodule Realtime.Tenants.Authorization do
   * read - a boolean indicating whether the connection has read permissions
   """
   require Logger
-  defstruct [:channel_name, :headers, :jwt, :claims, :role]
+
+  import Ecto.Query
+
+  alias Realtime.Repo
+  alias Realtime.Api.Channel
+
+  defstruct [:channel, :headers, :jwt, :claims, :role]
 
   defmodule Permissions do
-    defstruct read: false
+    defstruct read: false, write: false
 
     @type t :: %__MODULE__{
-            :read => boolean()
+            :read => boolean(),
+            :write => boolean()
           }
   end
 
   @type t :: %__MODULE__{
-          :channel_name => binary() | nil,
+          :channel => Channel.t() | nil,
           :claims => map(),
           :headers => keyword({binary(), binary()}),
           :jwt => map(),
@@ -27,14 +34,14 @@ defmodule Realtime.Tenants.Authorization do
   Builds a new authorization params struct.
   """
   def build_authorization_params(%{
-        channel_name: channel_name,
+        channel: channel,
         headers: headers,
         jwt: jwt,
         claims: claims,
         role: role
       }) do
     %__MODULE__{
-      channel_name: channel_name,
+      channel: channel,
       headers: headers,
       jwt: jwt,
       claims: claims,
@@ -62,8 +69,21 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   defp get_permissions_for_connection(conn, params) do
+    Postgrex.transaction(conn, fn transaction_conn ->
+      set_config(transaction_conn, params)
+      permissions = %Permissions{}
+
+      with {:ok, %{write: false} = permissions} <-
+             check_write_permissions(transaction_conn, permissions, params),
+           {:ok, permissions} <- check_read_permissions(transaction_conn, permissions) do
+        {:ok, permissions}
+      end
+    end)
+  end
+
+  defp set_config(conn, params) do
     %__MODULE__{
-      channel_name: channel_name,
+      channel: channel,
       headers: headers,
       jwt: jwt,
       claims: claims,
@@ -73,37 +93,68 @@ defmodule Realtime.Tenants.Authorization do
     sub = Map.get(claims, :sub)
     claims = Jason.encode!(claims)
     headers = headers |> Map.new() |> Jason.encode!()
+    channel_name = if channel, do: channel.name, else: nil
 
-    Postgrex.transaction(conn, fn conn ->
-      Postgrex.query(
-        conn,
-        """
-        SELECT
-         set_config('role', $1, true),
-         set_config('realtime.channel_name', $2, true),
-         set_config('request.jwt.claim.role', $3, true),
-         set_config('request.jwt', $4, true),
-         set_config('request.jwt.claim.sub', $5, true),
-         set_config('request.jwt.claims', $6, true),
-         set_config('request.headers', $7, true)
-        """,
-        [role, channel_name, role, jwt, sub, claims, headers]
-      )
+    Postgrex.query(
+      conn,
+      """
+      SELECT
+       set_config('role', $1, true),
+       set_config('realtime.channel_name', $2, true),
+       set_config('request.jwt.claim.role', $3, true),
+       set_config('request.jwt', $4, true),
+       set_config('request.jwt.claim.sub', $5, true),
+       set_config('request.jwt.claims', $6, true),
+       set_config('request.headers', $7, true)
+      """,
+      [role, channel_name, role, jwt, sub, claims, headers]
+    )
+  end
 
-      case Postgrex.query(conn, "SELECT name from realtime.channels", [], mode: :savepoint) do
-        {:ok, %{num_rows: 0}} ->
-          {:ok, %Permissions{read: false}}
+  defp check_read_permissions(conn, permissions) do
+    query = from(c in Channel, select: c.name)
 
-        {:ok, _} ->
-          {:ok, %Permissions{read: true}}
+    case Repo.all(conn, query, Channel, mode: :savepoint) do
+      {:ok, channels} when channels != [] ->
+        {:ok, %Permissions{permissions | read: true}}
 
-        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-          {:ok, %Permissions{read: false}}
+      {:ok, _} ->
+        {:ok, %Permissions{permissions | read: false}}
 
-        {:error, error} ->
-          Logger.error("Error getting permissions for connection: #{inspect(error)}")
-          {:error, error}
-      end
-    end)
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+        {:ok, %Permissions{permissions | read: false}}
+
+      {:error, error} ->
+        Logger.error("Error getting permissions for connection: #{inspect(error)}")
+        {:error, error}
+    end
+  end
+
+  defp check_write_permissions(_, permissions, %__MODULE__{channel: nil}) do
+    {:ok, %Permissions{permissions | write: false}}
+  end
+
+  defp check_write_permissions(conn, permissions, %__MODULE__{channel: channel}) do
+    changeset = Channel.check_changeset(channel, %{check: true})
+
+    case Repo.update(conn, changeset, Channel, mode: :savepoint) do
+      {:ok, %Channel{check: true} = channel} ->
+        revert_changeset = Channel.check_changeset(channel, %{check: nil})
+        {:ok, _} = Repo.update(conn, revert_changeset, Channel)
+        {:ok, %Permissions{permissions | write: true, read: true}}
+
+      {:ok, _} ->
+        {:ok, %Permissions{permissions | write: false}}
+
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+        {:ok, %Permissions{permissions | write: false}}
+
+      {:error, :not_found} ->
+        {:ok, %Permissions{permissions | write: false}}
+
+      {:error, error} ->
+        Logger.error("Error getting permissions for connection: #{inspect(error)}")
+        {:error, error}
+    end
   end
 end

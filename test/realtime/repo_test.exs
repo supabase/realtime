@@ -142,6 +142,11 @@ defmodule Realtime.RepoTest do
       assert {:ok, [^channel_1, ^channel_2] = res} = Repo.all(conn, Channel, Channel)
       assert Enum.all?(res, &(Ecto.get_meta(&1, :state) == :loaded))
     end
+
+    test "handles exceptions", %{conn: conn} do
+      Process.exit(conn, :kill)
+      assert {:error, :postgrex_exception} = Repo.all(conn, from(c in Channel), Channel)
+    end
   end
 
   describe "one/3" do
@@ -166,6 +171,12 @@ defmodule Realtime.RepoTest do
       query = from c in Channel, where: c.name == "potato"
       assert {:error, :not_found} = Repo.one(conn, query, Channel)
     end
+
+    test "handles exceptions", %{conn: conn} do
+      Process.exit(conn, :kill)
+      query = from c in Channel, where: c.name == "potato"
+      assert {:error, :postgrex_exception} = Repo.one(conn, query, Channel)
+    end
   end
 
   describe "insert/3" do
@@ -185,6 +196,12 @@ defmodule Realtime.RepoTest do
       assert {:ok, _} = Repo.insert(conn, changeset, Channel)
       assert {:error, _} = Repo.insert(conn, changeset, Channel)
     end
+
+    test "handles exceptions", %{conn: conn} do
+      Process.exit(conn, :kill)
+      changeset = Channel.changeset(%Channel{}, %{name: "foo"})
+      assert {:error, :postgrex_exception} = Repo.insert(conn, changeset, Channel)
+    end
   end
 
   describe "del/3" do
@@ -200,6 +217,11 @@ defmodule Realtime.RepoTest do
       assert_raise Ecto.QueryError, fn ->
         Repo.del(conn, query)
       end
+    end
+
+    test "handles exceptions", %{conn: conn} do
+      Process.exit(conn, :kill)
+      assert {:error, :postgrex_exception} = Repo.del(conn, Channel)
     end
   end
 
@@ -226,6 +248,12 @@ defmodule Realtime.RepoTest do
 
       changeset = Channel.changeset(channel_to_update, %{name: channel.name})
       assert {:error, _} = Repo.update(conn, changeset, Channel)
+    end
+
+    test "handles exceptions", %{tenant: tenant, conn: conn} do
+      changeset = Channel.changeset(channel_fixture(tenant), %{name: "foo"})
+      Process.exit(conn, :kill)
+      assert {:error, :postgrex_exception} = Repo.update(conn, changeset, Channel)
     end
   end
 

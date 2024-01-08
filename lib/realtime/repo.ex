@@ -1,4 +1,6 @@
 defmodule Realtime.Repo do
+  require Logger
+
   use Ecto.Repo,
     otp_app: :realtime,
     adapter: Ecto.Adapters.Postgres
@@ -21,11 +23,11 @@ defmodule Realtime.Repo do
   @doc """
   Lists all records for a given query and converts them into a given struct
   """
-  @spec all(DBConnection.conn(), Ecto.Queryable.t(), module()) ::
+  @spec all(DBConnection.conn(), Ecto.Queryable.t(), module(), [Postgrex.execute_option()]) ::
           {:ok, list(struct())} | {:error, any()}
-  def all(conn, query, result_struct) do
+  def all(conn, query, result_struct, opts \\ []) do
     conn
-    |> run_all_query(query)
+    |> run_all_query(query, opts)
     |> result_to_structs(result_struct)
   end
 
@@ -48,7 +50,7 @@ defmodule Realtime.Repo do
   def insert(conn, changeset, result_struct) do
     with {:ok, {query, args}} <- insert_query_from_changeset(changeset) do
       conn
-      |> Postgrex.query(query, args)
+      |> run_query_with_trap(query, args)
       |> result_to_single_struct(result_struct)
     end
   end
@@ -69,10 +71,10 @@ defmodule Realtime.Repo do
   """
   @spec update(DBConnection.conn(), Ecto.Changeset.t(), module()) ::
           {:ok, struct()} | {:error, any()} | Ecto.Changeset.t()
-  def update(conn, changeset, result_struct) do
+  def update(conn, changeset, result_struct, opts \\ []) do
     with {:ok, {query, args}} <- update_query_from_changeset(changeset) do
       conn
-      |> Postgrex.query(query, args)
+      |> run_query_with_trap(query, args, opts)
       |> result_to_single_struct(result_struct)
     end
   end
@@ -132,13 +134,26 @@ defmodule Realtime.Repo do
     {:ok, to_sql(:update_all, query)}
   end
 
-  defp run_all_query(conn, query) do
+  defp run_all_query(conn, query, opts \\ []) do
     {query, args} = to_sql(:all, query)
-    Postgrex.query(conn, query, args)
+    run_query_with_trap(conn, query, args, opts)
   end
 
   defp run_delete_query(conn, query) do
     {query, args} = to_sql(:delete_all, query)
-    Postgrex.query(conn, query, args)
+    run_query_with_trap(conn, query, args)
+  end
+
+  defp run_query_with_trap(conn, query, args, opts \\ []) do
+    Postgrex.query(conn, query, args, opts)
+  rescue
+    exception ->
+      Logger.error("Postgrex exception: #{inspect(exception)}")
+      {:error, :postgrex_exception}
+  catch
+    :exit, reason ->
+      Logger.error("Postgrex exit: #{inspect(reason)}")
+
+      {:error, :postgrex_exception}
   end
 end
