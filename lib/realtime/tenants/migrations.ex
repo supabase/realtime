@@ -43,7 +43,9 @@ defmodule Realtime.Tenants.Migrations do
     CreateChannels,
     SetRequiredGrants,
     CreateRlsHelperFunctions,
-    EnableChannelsRls
+    EnableChannelsRls,
+    AddChannelsColumnForWriteCheck,
+    AddUpdateGrantToChannels
   }
 
   alias Realtime.Helpers, as: H
@@ -83,7 +85,9 @@ defmodule Realtime.Tenants.Migrations do
     {20_231_018_144_023, CreateChannels},
     {20_231_204_144_023, SetRequiredGrants},
     {20_231_204_144_024, CreateRlsHelperFunctions},
-    {20_231_204_144_025, EnableChannelsRls}
+    {20_231_204_144_025, EnableChannelsRls},
+    {20_240_108_234_812, AddChannelsColumnForWriteCheck},
+    {20_240_109_165_339, AddUpdateGrantToChannels}
   ]
 
   @spec start_link(GenServer.options()) :: GenServer.on_start()
