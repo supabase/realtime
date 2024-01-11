@@ -50,6 +50,8 @@ defmodule Realtime.Application do
     region = Application.get_env(:realtime, :region)
     :syn.join(RegionNodes, region, self(), node: node())
 
+    :ets.new(Realtime.Tenants.TenantRepo, [:named_table, :set, :public, read_concurrency: true])
+
     children =
       [
         Realtime.ErlSysMon,

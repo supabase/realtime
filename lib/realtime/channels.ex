@@ -4,7 +4,7 @@ defmodule Realtime.Channels do
   """
 
   alias Realtime.Api.Channel
-  alias Realtime.Repo
+  alias Realtime.Tenants.TenantRepo
 
   import Ecto.Query
 
@@ -13,7 +13,7 @@ defmodule Realtime.Channels do
   """
   @spec list_channels(DBConnection.conn()) :: {:error, any()} | {:ok, [struct()]}
   def list_channels(conn) do
-    Repo.all(conn, Channel, Channel)
+    TenantRepo.all(conn, Channel, Channel)
   end
 
   @doc """
@@ -22,7 +22,7 @@ defmodule Realtime.Channels do
   @spec get_channel_by_id(binary(), DBConnection.conn()) :: {:ok, Channel.t()} | {:error, any()}
   def get_channel_by_id(id, conn) do
     query = from c in Channel, where: c.id == ^id
-    Repo.one(conn, query, Channel)
+    TenantRepo.one(conn, query, Channel)
   end
 
   @doc """
@@ -32,7 +32,7 @@ defmodule Realtime.Channels do
   def create_channel(attrs, conn) do
     channel = Channel.changeset(%Channel{}, attrs)
 
-    Repo.insert(conn, channel, Channel)
+    TenantRepo.insert(conn, channel, Channel)
   end
 
   @doc """
@@ -42,7 +42,7 @@ defmodule Realtime.Channels do
           {:ok, Channel.t()} | {:error, any()}
   def get_channel_by_name(name, conn) do
     query = from c in Channel, where: c.name == ^name
-    Repo.one(conn, query, Channel)
+    TenantRepo.one(conn, query, Channel)
   end
 
   @doc """
@@ -53,7 +53,7 @@ defmodule Realtime.Channels do
   def delete_channel_by_id(id, conn) do
     query = from c in Channel, where: c.id == ^id
 
-    with {:ok, 1} <- Repo.del(conn, query) do
+    with {:ok, 1} <- TenantRepo.del(conn, query) do
       :ok
     else
       {:ok, 0} -> {:error, :not_found}
@@ -69,7 +69,7 @@ defmodule Realtime.Channels do
   def update_channel_by_id(id, attrs, conn) do
     with {:ok, channel} when not is_nil(channel) <- get_channel_by_id(id, conn) do
       channel = Channel.changeset(channel, attrs)
-      Repo.update(conn, channel, Channel)
+      TenantRepo.update(conn, channel, Channel)
     end
   end
 end

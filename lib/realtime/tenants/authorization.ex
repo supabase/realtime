@@ -9,7 +9,7 @@ defmodule Realtime.Tenants.Authorization do
 
   import Ecto.Query
 
-  alias Realtime.Repo
+  alias Realtime.Tenants.TenantRepo
   alias Realtime.Api.Channel
 
   defstruct [:channel, :headers, :jwt, :claims, :role]
@@ -114,7 +114,7 @@ defmodule Realtime.Tenants.Authorization do
   defp check_read_permissions(conn, permissions) do
     query = from(c in Channel, select: c.name)
 
-    case Repo.all(conn, query, Channel, mode: :savepoint) do
+    case TenantRepo.all(conn, query, Channel, mode: :savepoint) do
       {:ok, channels} when channels != [] ->
         {:ok, %Permissions{permissions | read: true}}
 
@@ -137,10 +137,10 @@ defmodule Realtime.Tenants.Authorization do
   defp check_write_permissions(conn, permissions, %__MODULE__{channel: channel}) do
     changeset = Channel.check_changeset(channel, %{check: true})
 
-    case Repo.update(conn, changeset, Channel, mode: :savepoint) do
+    case TenantRepo.update(conn, changeset, Channel, mode: :savepoint) do
       {:ok, %Channel{check: true} = channel} ->
         revert_changeset = Channel.check_changeset(channel, %{check: nil})
-        {:ok, _} = Repo.update(conn, revert_changeset, Channel)
+        {:ok, _} = TenantRepo.update(conn, revert_changeset, Channel)
         {:ok, %Permissions{permissions | write: true, read: true}}
 
       {:ok, _} ->
