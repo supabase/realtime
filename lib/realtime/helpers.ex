@@ -139,7 +139,7 @@ defmodule Realtime.Helpers do
       name = settings["db_name"]
       user = settings["db_user"]
       password = settings["db_password"]
-      socket_opts = settings["db_socket_opts"]
+      socket_opts = [detect_ip_version(host)]
 
       opts = %{
         host: host,
@@ -377,6 +377,26 @@ defmodule Realtime.Helpers do
       _, acc ->
         acc
     end)
+  end
+
+  @doc """
+  Detects the IP version for a given host.
+
+  ## Examples
+
+      iex> Realtime.Helpers.detect_ip_version("example.com")
+      :inet
+      iex> Realtime.Helpers.detect_ip_version("ipv6.example.com")
+      :inet6
+  """
+  @spec detect_ip_version(String.t()) :: :inet | :inet6
+  def detect_ip_version(host) when is_binary(host) do
+    host = String.to_charlist(host)
+
+    case :inet.gethostbyname(host) do
+      {:ok, _} -> :inet
+      _ -> :inet6
+    end
   end
 
   defp stop_user_tenant_process(tenant, platform_region, acc) do
