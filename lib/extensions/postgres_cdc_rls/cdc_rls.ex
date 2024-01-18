@@ -10,6 +10,7 @@ defmodule Extensions.PostgresCdcRls do
   alias Extensions.PostgresCdcRls, as: Rls
   alias Rls.Subscriptions
   alias Realtime.Rpc
+  alias Realtime.Helpers
 
   @spec handle_connect(map()) :: {:ok, {pid(), pid()}} | nil
   def handle_connect(args) do
@@ -88,14 +89,7 @@ defmodule Extensions.PostgresCdcRls do
   """
   @spec start(map()) :: :ok | {:error, :already_started | :reserved}
   def start(args) do
-    addrtype =
-      case args["ip_version"] do
-        6 ->
-          :inet6
-
-        _ ->
-          :inet
-      end
+    addrtype = Helpers.detect_ip_version(args["db_host"])
 
     args =
       Map.merge(args, %{

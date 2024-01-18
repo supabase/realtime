@@ -63,7 +63,7 @@ You can check out the [Multiplayer demo](https://multiplayer.dev) that features 
 
 To get started, spin up your Postgres database and Realtime server containers defined in `docker-compose.yml`. As an example, you may run `docker-compose -f docker-compose.yml up`.
 
-> **Note**  
+> **Note**
 > Supabase runs Realtime in production with a separate database that keeps track of all tenants. However, a schema, `_realtime`, is created when spinning up containers via `docker-compose.yml` to simplify local development.
 
 A tenant has already been added on your behalf. You can confirm this by checking the `_realtime.tenants` and `_realtime.extensions` tables inside the database.
@@ -91,7 +91,6 @@ You can add your own by making a `POST` request to the server. You must change b
             "region": "us-west-1",
             "poll_interval_ms": 100,
             "poll_max_record_bytes": 1048576,
-            "ip_version": 4
           }
         }
       ]
@@ -100,7 +99,7 @@ You can add your own by making a `POST` request to the server. You must change b
   http://localhost:4000/api/tenants
 ```
 
-> **Note**  
+> **Note**
 > The `Authorization` token is signed with the secret set by `API_JWT_SECRET` in `docker-compose.yml`.
 
 If you want to listen to Postgres changes, you can create a table and then add the table to the `supabase_realtime` publication:
@@ -121,7 +120,7 @@ If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000
 
 **ALL RELEVANT OPTIONS**
 
-> **Note**  
+> **Note**
 > Realtime server is tightly coupled to [Fly.io](https://fly.io) at the moment.
 
 ```sh
