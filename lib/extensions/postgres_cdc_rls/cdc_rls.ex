@@ -89,7 +89,7 @@ defmodule Extensions.PostgresCdcRls do
   """
   @spec start(map()) :: :ok | {:error, :already_started | :reserved}
   def start(args) do
-    addrtype = Helpers.detect_ip_version(args["db_host"])
+    {:ok, addrtype} = Helpers.detect_ip_version(args["db_host"])
 
     args =
       Map.merge(args, %{
