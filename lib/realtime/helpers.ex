@@ -139,7 +139,9 @@ defmodule Realtime.Helpers do
       name = settings["db_name"]
       user = settings["db_user"]
       password = settings["db_password"]
-      socket_opts = [detect_ip_version(host)]
+      {:ok, addrtype} = detect_ip_version(host)
+
+      socket_opts = [addrtype]
 
       opts = %{
         host: host,
@@ -380,22 +382,30 @@ defmodule Realtime.Helpers do
   end
 
   @doc """
-  Detects the IP version for a given host.
+  Detects the IP version for a given encrypted host.
 
   ## Examples
+      # Using ipv4.google.com
+      iex> Realtime.Helpers.detect_ip_version("SnSEgD5+ZsQoWpCJ+xDh7g==")
+      {:ok, :inet}
 
-      iex> Realtime.Helpers.detect_ip_version("example.com")
-      :inet
-      iex> Realtime.Helpers.detect_ip_version("ipv6.example.com")
-      :inet6
+      # Using ipv6.google.com
+      iex> Realtime.Helpers.detect_ip_version("8vsiF4ELRsLa1yLdhZGBOw==")
+      {:ok, :inet6}
+
+      # Using invalid domain
+      iex> Realtime.Helpers.detect_ip_version("ZNVOgBtti0+i/o6eZCPAwA==")
+      {:error, :nxdomain}
   """
-  @spec detect_ip_version(String.t()) :: :inet | :inet6
+  @spec detect_ip_version(String.t()) :: {:ok, :inet | :inet6} | {:error, :nxdomain}
   def detect_ip_version(host) when is_binary(host) do
-    host = String.to_charlist(host)
+    secret_key = Application.get_env(:realtime, :db_enc_key)
+    host = host |> decrypt!(secret_key) |> String.to_charlist()
 
-    case :inet.gethostbyname(host) do
-      {:ok, _} -> :inet
-      _ -> :inet6
+    cond do
+      match?({:ok, _}, :inet6_tcp.getaddr(host)) -> {:ok, :inet6}
+      match?({:ok, _}, :inet.gethostbyname(host)) -> {:ok, :inet}
+      true -> {:error, :nxdomain}
     end
   end
 
