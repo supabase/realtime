@@ -125,9 +125,17 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "delete tenant" do
     setup [:create_tenant]
 
+    setup %{tenant: tenant} do
+      [extension] = tenant.extensions
+      args = Map.put(extension.settings, "id", random_string())
+      start_supervised!({Extensions.PostgresCdcStream.Replication, args})
+      :ok
+    end
+
     test "deletes chosen tenant", %{conn: conn, tenant: tenant} do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
         conn = delete(conn, Routes.tenant_path(conn, :delete, tenant.external_id))
+        :timer.sleep(10000)
         assert response(conn, 204)
         conn = get(conn, Routes.tenant_path(conn, :show, tenant.external_id))
         assert response(conn, 404)
