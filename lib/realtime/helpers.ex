@@ -409,6 +409,23 @@ defmodule Realtime.Helpers do
     end
   end
 
+  def replication_slot_teardown(tenant) do
+    {:ok, conn} = check_tenant_connection(tenant, "replication_slot_teardown")
+
+    with {:ok, %{rows: rows}} <-
+           Postgrex.query(
+             conn,
+             "select active_pid from pg_replication_slots where slot_name ilike '%realtime%'",
+             []
+           ) do
+      Enum.each(rows, fn [pid] ->
+        Postgrex.query(conn, "select pg_terminate_backend(#{pid})", [])
+      end)
+
+      :ok
+    end
+  end
+
   defp stop_user_tenant_process(tenant, platform_region, acc) do
     Extensions.PostgresCdcRls.handle_stop(tenant, 5_000)
     # credo:disable-for-next-line

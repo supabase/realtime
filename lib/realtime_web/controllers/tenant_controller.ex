@@ -6,9 +6,11 @@ defmodule RealtimeWeb.TenantController do
 
   alias Realtime.Api
   alias Realtime.Api.Tenant
-  alias Realtime.Tenants
+  alias Realtime.Helpers
   alias Realtime.PostgresCdc
-  alias RealtimeWeb.{Endpoint, UserSocket}
+  alias Realtime.Tenants
+  alias RealtimeWeb.Endpoint
+  alias RealtimeWeb.UserSocket
 
   alias RealtimeWeb.OpenApiSchemas.{
     EmptyResponse,
@@ -178,13 +180,21 @@ defmodule RealtimeWeb.TenantController do
   def delete(conn, %{"tenant_id" => id}) do
     Logger.metadata(external_id: id, project: id)
 
-    case Api.delete_tenant_by_external_id(id) do
-      true ->
-        id |> UserSocket.subscribers_id() |> Endpoint.broadcast("disconnect", %{})
-        Task.async(fn -> PostgresCdc.stop_all(id) end)
-
-      false ->
+    case Api.get_tenant_by_external_id(id) do
+      nil ->
         Logger.error("Tenant #{id} does not exist")
+
+      tenant ->
+        id
+        |> UserSocket.subscribers_id()
+        |> Endpoint.broadcast("disconnect", %{})
+
+        Task.async(fn ->
+          PostgresCdc.stop_all(id)
+          Helpers.replication_slot_teardown(tenant)
+        end)
+
+        Api.delete_tenant_by_external_id(id)
     end
 
     send_resp(conn, 204, "")
