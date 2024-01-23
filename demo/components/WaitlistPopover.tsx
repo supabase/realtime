@@ -1,15 +1,8 @@
 import { FC, useState, memo } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import {
-  Button,
-  Form,
-  Input,
-  IconMinimize2,
-  IconMaximize2,
-  IconGitHub,
-  IconTwitter,
-} from '@supabase/ui'
+import {Twitter, GitHub, Minimize2, Maximize2} from 'react-feather'
+import { Form, Input, Button } from '@supabase/ui'
 import supabaseClient from '../client'
 import { useTheme } from '../lib/ThemeProvider'
 
@@ -49,8 +42,7 @@ const WaitlistPopover: FC<Props> = ({}) => {
     setSubmitting(false)
   }
 
-  return (
-    <div
+  return <div
       className={`bg-scale-200 border border-scale-500 dark:border-scale-300 p-6 rounded-md w-[400px] space-y-8 transition-all ${
         isExpanded ? 'max-h-[600px]' : 'max-h-[70px]'
       } duration-500 overflow-hidden shadow-2xl dark:shadow-lg`}
@@ -79,14 +71,14 @@ const WaitlistPopover: FC<Props> = ({}) => {
           </div>
         </div>
         {isExpanded ? (
-          <IconMinimize2
+          <Minimize2
             className="transition-all text-scale-900 cursor-pointer hover:text-scale-1200 hover:scale-105"
             strokeWidth={2}
             size={16}
             onClick={() => setIsExpanded(false)}
           />
         ) : (
-          <IconMaximize2
+          <Maximize2
             className="transition-all text-scale-900 cursor-pointer hover:text-scale-1200 hover:scale-105"
             strokeWidth={2}
             size={16}
@@ -122,14 +114,12 @@ const WaitlistPopover: FC<Props> = ({}) => {
         </div>
         <div className="flex items-center gap-2">
           <Link href="https://github.com/supabase/realtime" passHref>
-            <Button as="a" type="default" icon={<IconGitHub />}>
+              <GitHub size={16}/>
               View on GitHub
-            </Button>
           </Link>
           <Link href={`https://twitter.com/intent/tweet?text=${getGeneratedTweet()}`} passHref>
-            <Button as="a" type="alternative" icon={<IconTwitter />}>
+              <Twitter size={16}/>
               Invite on Twitter
-            </Button>
           </Link>
         </div>
       </div>
@@ -141,14 +131,14 @@ const WaitlistPopover: FC<Props> = ({}) => {
               <Input
                 id="email"
                 name="email"
-                size="small"
+size="small"
                 placeholder="example@email.com"
                 autoComplete="off"
-                actions={[
-                  <Button
+              actions={[
+              <Button
                     className="mr-0.5"
                     key="submit"
-                    htmlType="submit"
+htmlType="submit"
                     loading={isSubmitting}
                     disabled={isSubmitting}
                   >
@@ -174,7 +164,6 @@ const WaitlistPopover: FC<Props> = ({}) => {
         }}
       </Form>
     </div>
-  )
 }
 
 export default memo(WaitlistPopover)

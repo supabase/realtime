@@ -1,147 +1,85 @@
-const ui = require('@supabase/ui/dist/config/ui.config.js')
+const config = require('./config/tailwind.config.js')
+const { fontFamily } = require('tailwindcss/defaultTheme')
 
-const blueGray = {
-  50: '#F8FAFC',
-  100: '#F1F5F9',
-  200: '#E2E8F0',
-  300: '#CBD5E1',
-  400: '#94A3B8',
-  500: '#64748B',
-  600: '#475569',
-  700: '#334155',
-  800: '#1E293B',
-  900: '#0F172A',
-}
-
-const coolGray = {
-  50: '#F9FAFB',
-  100: '#F3F4F6',
-  200: '#E5E7EB',
-  300: '#D1D5DB',
-  400: '#9CA3AF',
-  500: '#6B7280',
-  600: '#4B5563',
-  700: '#374151',
-  800: '#1F2937',
-  900: '#111827',
-}
-
-module.exports = ui({
-  darkMode: 'class', // or 'media' or 'class'
-  content: [
-    // purge styles from app
-    './pages/**/*.{js,ts,jsx,tsx}',
-    './components/**/*.{js,ts,jsx,tsx}',
-    './internals/**/*.{js,ts,jsx,tsx}',
-    './lib/**/*.{js,ts,jsx,tsx}',
-    './lib/**/**/*.{js,ts,jsx,tsx}',
-    // purge styles from supabase ui theme
-    './node_modules/@supabase/ui/dist/config/default-theme.js',
-  ],
+module.exports = config({
+  content: ['../../packages/ui/**/*.{tsx,ts,js}', '../../packages/ui/**/*.*.{tsx,ts,js}'],
   theme: {
-    fontFamily: {
-      sans: ['circular', 'Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif'],
-      mono: ['source code pro', 'Menlo', 'monospace'],
+    container: {
+      center: true,
+      padding: '2rem',
+      screens: {
+        '2xl': '1400px',
+      },
     },
-    borderColor: (theme) => ({
-      ...theme('colors'),
-      DEFAULT: 'var(--colors-scale5)',
-      dark: 'var(--colors-scale4)',
-    }),
-    divideColor: (theme) => ({
-      ...theme('colors'),
-      DEFAULT: 'var(--colors-scale3)',
-      dark: 'var(--colors-scale2)',
-    }),
     extend: {
-      typography: ({ theme }) => ({
-        // Removal of backticks in code blocks for tailwind v3.0
-        // https://github.com/tailwindlabs/tailwindcss-typography/issues/135
-        DEFAULT: {
-          css: {
-            'code::before': {
-              content: '""',
-            },
-            'code::after': {
-              content: '""',
-            },
-          },
-        },
-      }),
-      colors: {
-        /*  typography */
-        'typography-body': {
-          light: 'var(--colors-scale11)',
-          dark: 'var(--colors-scale11)',
-        },
-        'typography-body-secondary': {
-          light: 'var(--colors-scale10)',
-          dark: 'var(--colors-scale10)',
-        },
-        'typography-body-strong': {
-          light: 'var(--colors-scale12)',
-          dark: 'var(--colors-scale12)',
-        },
-        'typography-body-faded': {
-          light: 'var(--colors-scale9)',
-          dark: 'var(--colors-scale9)',
-        },
-
-        /* borders */
-        'border-secondary': {
-          light: 'var(--colors-scale7)',
-          dark: 'var(--colors-scale7)',
-        },
-        'border-secondary-hover': {
-          light: 'var(--colors-scale9)',
-          dark: 'var(--colors-scale9)',
-        },
-
-        /*  app backgrounds */
-        'bg-primary': {
-          light: 'var(--colors-scale2)',
-          dark: 'var(--colors-scale2)',
-        },
-        'bg-secondary': {
-          light: 'var(--colors-scale2)',
-          dark: 'var(--colors-scale2)',
-        },
-        'bg-alt': {
-          light: 'var(--colors-scale2)',
-          dark: 'var(--colors-scale2)',
+      keyframes: {
+        'flash-code': {
+          '0%': { backgroundColor: 'rgba(63, 207, 142, 0.1)' },
+          '100%': { backgroundColor: 'transparent' },
         },
       },
       animation: {
-        gradient: 'gradient 60s ease infinite',
-        'ping-once': 'ping-once 1s cubic-bezier(0, 0, 0.2, 1);',
+        'flash-code': 'flash-code 1s forwards',
+        'flash-code-slow': 'flash-code 2s forwards',
+      },
+      colors: {
+        border: 'hsl(var(--border-overlay))',
+        input: 'hsl(var(--border-control))',
+        ring: 'hsl(var(--ring))',
+        background: 'hsl(var(--background-default))',
+        foreground: 'hsl(var(--foreground-default))',
+        primary: {
+          DEFAULT: 'hsl(var(--foreground-default))',
+          foreground: 'hsl(var(--background-default))',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive-default))',
+          foreground: 'hsl(var(--foreground-default))',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--border-overlay))',
+          foreground: 'hsl(var(--foreground-lighter))',
+        },
+        accent: {
+          DEFAULT: 'hsl(var(--background-overlay))',
+          foreground: 'hsl(var(--foreground-lighter))',
+        },
+        popover: {
+          DEFAULT: 'hsl(var(--background-overlay))',
+          foreground: 'hsl(var(--foreground-default))',
+        },
+        card: {
+          DEFAULT: 'hsl(var(--background-overlay))',
+          foreground: 'hsl(var(--foreground-default))',
+        },
+      },
+      borderRadius: {
+        lg: `var(--radius)`,
+        md: `calc(var(--radius) - 2px)`,
+        sm: 'calc(var(--radius) - 4px)',
+      },
+      fontFamily: {
+        sans: ['var(--font-sans)', ...fontFamily.sans],
       },
       keyframes: {
-        gradient: {
-          '0%': {
-            'background-position': '0% 50%',
-          },
-          '50%': {
-            'background-position': '100% 50%',
-          },
-          '100%': {
-            'background-position': '0% 50%',
-          },
+        'accordion-down': {
+          from: { height: 0 },
+          to: { height: 'var(--radix-accordion-content-height)' },
         },
-        'ping-once': {
-          '75%': {
-            transform: 'scale(2)',
-            opacity: 0,
-          },
-          '100%': {
-            transform: 'scale(2)',
-            opacity: 0,
-          },
+        'accordion-up': {
+          from: { height: 'var(--radix-accordion-content-height)' },
+          to: { height: 0 },
         },
+      },
+      animation: {
+        'accordion-down': 'accordion-down 0.2s ease-out',
+        'accordion-up': 'accordion-up 0.2s ease-out',
       },
     },
   },
-  variants: {
-    extend: {},
-  },
-  plugins: [require('@tailwindcss/typography')],
+  plugins: [require('tailwindcss-animate')],
 })

@@ -1,4 +1,4 @@
-import { IconSun, IconMoon } from '@supabase/ui'
+import { Sun, Moon } from 'react-feather'
 import { useEffect } from 'react'
 import { useTheme } from '../lib/ThemeProvider'
 
@@ -26,7 +26,7 @@ function DarkModeToggle() {
         type="button"
         aria-pressed="false"
         className={`
-                relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer 
+                relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer
                 transition-colors ease-in-out duration-200 focus:outline-none ${
                   isDarkMode
                     ? 'bg-scale-500 hover:bg-scale-700'
@@ -46,7 +46,7 @@ function DarkModeToggle() {
                   bg-white dark:bg-scale-300 shadow-lg transform ring-0 transition ease-in-out duration-200
                 `}
         >
-          <IconSun
+          <Sun
             className={
               'absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-scale-900 ' +
               (!isDarkMode ? 'opacity-100' : 'opacity-0')
@@ -54,7 +54,7 @@ function DarkModeToggle() {
             strokeWidth={2}
             size={12}
           />
-          <IconMoon
+          <Moon
             className={
               'absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-scale-900 ' +
               (isDarkMode ? 'opacity-100' : 'opacity-0')

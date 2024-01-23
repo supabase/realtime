@@ -4,7 +4,6 @@ import { useRouter } from 'next/router'
 import { nanoid } from 'nanoid'
 import cloneDeep from 'lodash.clonedeep'
 import throttle from 'lodash.throttle'
-import { Badge } from '@supabase/ui'
 import {
   PostgrestResponse,
   REALTIME_LISTEN_TYPES,
@@ -143,7 +142,7 @@ const Room: NextPage = () => {
 
       joinTimestampRef.current = performance.now()
 
-      /* 
+      /*
         Client is joining 'rooms' channel to examine existing rooms and their users
         and then the channel is removed once a room is selected
       */
@@ -183,7 +182,7 @@ const Room: NextPage = () => {
           ).toFixed(1)} ms`
         )
 
-      /* 
+      /*
         Client is re-joining 'rooms' channel and the user's id will be tracked with Presence.
 
         Note: Realtime enforces unique channel names per client so the previous 'rooms' channel
@@ -511,7 +510,7 @@ const Room: NextPage = () => {
         <div className="flex items-end justify-between">
           <div className="flex items-center space-x-4">
             <DarkModeToggle />
-            <Badge>Latency: {latency.toFixed(1)}ms</Badge>
+            <h3>Latency: {latency.toFixed(1)}ms</h3>
           </div>
           <div className="flex justify-end">
             <Chatbox

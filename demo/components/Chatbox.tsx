@@ -1,4 +1,4 @@
-import { IconLoader } from '@supabase/ui'
+import { Loader } from 'react-feather'
 import { FC, RefObject } from 'react'
 import { Message } from '../types'
 
@@ -18,7 +18,7 @@ const Chatbox: FC<Props> = ({ messages, chatboxRef, messagesInTransit, areMessag
       >
         {!areMessagesFetched ? (
           <div className="flex items-center space-x-2">
-            <IconLoader className="animate-spin text-scale-1200" size={14} />
+            <Loader className="animate-spin text-scale-1200" size={14} />
             <p className="text-sm text-scale-1100">Loading messages</p>
           </div>
         ) : messages.length === 0 && messagesInTransit.length === 0 ? (
