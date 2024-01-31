@@ -6,7 +6,6 @@ defmodule Extensions.PostgresCdcStream do
 
   alias Extensions.PostgresCdcStream, as: Stream
   alias Realtime.Rpc
-  alias Realtime.Helpers
 
   def handle_connect(opts) do
     Enum.reduce_while(1..5, nil, fn retry, acc ->
@@ -77,13 +76,6 @@ defmodule Extensions.PostgresCdcStream do
 
   @spec start(map()) :: :ok | {:error, :already_started | :reserved}
   def start(args) do
-    {:ok, addrtype} = Helpers.detect_ip_version(args["db_host"])
-
-    args =
-      Map.merge(args, %{
-        "db_socket_opts" => [addrtype]
-      })
-
     Logger.debug("Starting postgres stream extension with args: #{inspect(args, pretty: true)}")
 
     DynamicSupervisor.start_child(

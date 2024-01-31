@@ -125,10 +125,12 @@ defmodule Realtime.Tenants.Migrations do
            "db_port" => db_port,
            "db_name" => db_name,
            "db_user" => db_user,
-           "db_password" => db_password,
-           "db_socket_opts" => db_socket_opts
+           "db_password" => db_password
          } = args
        ) do
+    {:ok, addrtype} = H.detect_ip_version(db_host)
+    db_socket_opts = [addrtype]
+
     {host, port, name, user, pass} =
       H.decrypt_creds(
         db_host,
