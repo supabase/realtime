@@ -43,9 +43,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       "db_name" => name,
       "db_user" => user,
       "db_password" => pass,
-      "db_socket_opts" => socket_opts,
       "subscribers_tid" => subscribers_tid
     } = args
+
+    {:ok, addrtype} = H.detect_ip_version(host)
+    socket_opts = [addrtype]
 
     Logger.metadata(external_id: id, project: id)
 

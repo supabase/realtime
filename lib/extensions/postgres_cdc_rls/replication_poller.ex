@@ -8,7 +8,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   require Logger
 
-  import Realtime.Helpers, only: [cancel_timer: 1, default_ssl_param: 1, connect_db: 10]
+  import Realtime.Helpers,
+    only: [cancel_timer: 1, default_ssl_param: 1, connect_db: 10, detect_ip_version: 1]
 
   alias DBConnection.Backoff
   alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
@@ -22,7 +23,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   @impl true
   def init(args) do
     tenant = args["id"]
-
+    {:ok, addrtype} = detect_ip_version(args["db_host"])
+    db_socket_opts = [addrtype]
     Logger.metadata(external_id: tenant, project: tenant)
 
     ssl_enforced = default_ssl_param(args)
@@ -34,7 +36,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         args["db_name"],
         args["db_user"],
         args["db_password"],
-        args["db_socket_opts"],
+        db_socket_opts,
         1,
         @queue_target,
         ssl_enforced,
@@ -49,7 +51,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       db_name: args["db_name"],
       db_user: args["db_user"],
       db_pass: args["db_password"],
-      db_socket_opts: args["db_socket_opts"],
+      db_socket_opts: db_socket_opts,
       max_changes: args["poll_max_changes"],
       max_record_bytes: args["poll_max_record_bytes"],
       poll_interval_ms: args["poll_interval_ms"],

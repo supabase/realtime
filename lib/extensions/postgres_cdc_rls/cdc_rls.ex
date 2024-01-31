@@ -10,7 +10,6 @@ defmodule Extensions.PostgresCdcRls do
   alias Extensions.PostgresCdcRls, as: Rls
   alias Rls.Subscriptions
   alias Realtime.Rpc
-  alias Realtime.Helpers
 
   @spec handle_connect(map()) :: {:ok, {pid(), pid()}} | nil
   def handle_connect(args) do
@@ -89,13 +88,7 @@ defmodule Extensions.PostgresCdcRls do
   """
   @spec start(map()) :: :ok | {:error, :already_started | :reserved}
   def start(args) do
-    {:ok, addrtype} = Helpers.detect_ip_version(args["db_host"])
-
-    args =
-      Map.merge(args, %{
-        "db_socket_opts" => [addrtype],
-        "subs_pool_size" => Map.get(args, "subcriber_pool_size", 5)
-      })
+    args = Map.merge(args, %{"subs_pool_size" => Map.get(args, "subcriber_pool_size", 5)})
 
     Logger.debug("Starting postgres stream extension with args: #{inspect(args, pretty: true)}")
 

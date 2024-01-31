@@ -63,12 +63,13 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       "db_name" => name,
       "db_user" => user,
       "db_password" => pass,
-      "db_socket_opts" => socket_opts,
       "subs_pool_size" => subs_pool_size
     } = args
 
     Logger.metadata(external_id: id, project: id)
 
+    {:ok, addrtype} = H.detect_ip_version(host)
+    socket_opts = [addrtype]
     ssl_enforced = H.default_ssl_param(args)
 
     {:ok, conn} =
