@@ -46,9 +46,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       "subscribers_tid" => subscribers_tid
     } = args
 
-    {:ok, addrtype} = H.detect_ip_version(host)
-    socket_opts = [addrtype]
-
     Logger.metadata(external_id: id, project: id)
 
     ssl_enforced = H.default_ssl_param(args)
@@ -60,7 +57,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
         name,
         user,
         pass,
-        socket_opts,
         1,
         5_000,
         ssl_enforced,

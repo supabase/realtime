@@ -68,8 +68,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     Logger.metadata(external_id: id, project: id)
 
-    {:ok, addrtype} = H.detect_ip_version(host)
-    socket_opts = [addrtype]
     ssl_enforced = H.default_ssl_param(args)
 
     {:ok, conn} =
@@ -79,7 +77,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         name,
         user,
         pass,
-        socket_opts,
         1,
         5_000,
         ssl_enforced,
@@ -93,7 +90,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         name,
         user,
         pass,
-        socket_opts,
         subs_pool_size,
         5_000,
         ssl_enforced,

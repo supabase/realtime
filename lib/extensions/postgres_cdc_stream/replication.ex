@@ -260,8 +260,6 @@ defmodule Extensions.PostgresCdcStream.Replication do
   defp current_time(), do: System.os_time(:microsecond) - @epoch
 
   def connection_opts(args) do
-    {:ok, addrtype} = H.detect_ip_version(args["db_host"])
-
     {host, port, name, user, pass} =
       H.decrypt_creds(
         args["db_host"],
@@ -271,13 +269,15 @@ defmodule Extensions.PostgresCdcStream.Replication do
         args["db_password"]
       )
 
+    {:ok, addrtype} = H.detect_ip_version(host)
+
     [
       hostname: host,
       database: name,
       username: user,
       password: pass,
       port: port,
-      socket_opts: addrtype
+      socket_opts: [addrtype]
     ]
   end
 end
