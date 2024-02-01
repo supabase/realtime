@@ -33,7 +33,6 @@ defmodule Realtime.Helpers do
           :pool => non_neg_integer,
           :port => binary,
           :queue_target => non_neg_integer,
-          :socket_opts => list,
           :ssl_enforced => boolean,
           :user => binary,
           :application_name => binary,
@@ -46,7 +45,6 @@ defmodule Realtime.Helpers do
         name: name,
         user: user,
         pass: pass,
-        socket_opts: socket_opts,
         pool: pool,
         queue_target: queue_target,
         ssl_enforced: ssl_enforced,
@@ -59,7 +57,6 @@ defmodule Realtime.Helpers do
       name,
       user,
       pass,
-      socket_opts,
       pool,
       queue_target,
       ssl_enforced,
@@ -74,7 +71,6 @@ defmodule Realtime.Helpers do
           String.t(),
           String.t(),
           String.t(),
-          list(),
           non_neg_integer(),
           non_neg_integer(),
           boolean(),
@@ -88,7 +84,6 @@ defmodule Realtime.Helpers do
         name,
         user,
         pass,
-        socket_opts,
         pool \\ 5,
         queue_target \\ 5_000,
         ssl_enforced \\ true,
@@ -98,6 +93,7 @@ defmodule Realtime.Helpers do
     Logger.metadata(application_name: application_name)
     metadata = Logger.metadata()
     {host, port, name, user, pass} = decrypt_creds(host, port, name, user, pass)
+    {:ok, addrtype} = detect_ip_version(host)
 
     [
       hostname: host,
@@ -110,7 +106,7 @@ defmodule Realtime.Helpers do
       parameters: [
         application_name: application_name
       ],
-      socket_options: socket_opts,
+      socket_options: [addrtype],
       backoff_type: backoff_type,
       configure: fn args ->
         Logger.metadata(metadata)
@@ -139,9 +135,6 @@ defmodule Realtime.Helpers do
       name = settings["db_name"]
       user = settings["db_user"]
       password = settings["db_password"]
-      {:ok, addrtype} = detect_ip_version(host)
-
-      socket_opts = [addrtype]
 
       opts = %{
         host: host,
@@ -149,7 +142,6 @@ defmodule Realtime.Helpers do
         name: name,
         user: user,
         pass: password,
-        socket_opts: socket_opts,
         pool: 1,
         queue_target: 1000,
         ssl_enforced: ssl_enforced,
@@ -382,25 +374,24 @@ defmodule Realtime.Helpers do
   end
 
   @doc """
-  Detects the IP version for a given encrypted host.
+  Detects the IP version for a given host.
 
   ## Examples
       # Using ipv4.google.com
-      iex> Realtime.Helpers.detect_ip_version("SnSEgD5+ZsQoWpCJ+xDh7g==")
+      iex> Realtime.Helpers.detect_ip_version("ipv4.google.com")
       {:ok, :inet}
 
       # Using ipv6.google.com
-      iex> Realtime.Helpers.detect_ip_version("8vsiF4ELRsLa1yLdhZGBOw==")
+      iex> Realtime.Helpers.detect_ip_version("ipv6.google.com")
       {:ok, :inet6}
 
       # Using invalid domain
-      iex> Realtime.Helpers.detect_ip_version("ZNVOgBtti0+i/o6eZCPAwA==")
+      iex> Realtime.Helpers.detect_ip_version("potato")
       {:error, :nxdomain}
   """
   @spec detect_ip_version(String.t()) :: {:ok, :inet | :inet6} | {:error, :nxdomain}
   def detect_ip_version(host) when is_binary(host) do
-    secret_key = Application.get_env(:realtime, :db_enc_key)
-    host = host |> decrypt!(secret_key) |> String.to_charlist()
+    host = String.to_charlist(host)
 
     cond do
       match?({:ok, _}, :inet6_tcp.getaddr(host)) -> {:ok, :inet6}
