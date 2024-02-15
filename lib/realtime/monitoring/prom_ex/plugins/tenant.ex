@@ -21,7 +21,8 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     # Event metrics definitions
     [
       channel_events(),
-      replication_metrics()
+      replication_metrics(),
+      subscription_metrics()
     ]
   end
 
@@ -84,8 +85,30 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           tags: [:tenant],
           unit: {:microsecond, :millisecond},
           reporter_options: [
-            buckets: [125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000]
+            buckets: [125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000]
           ]
+        )
+      ]
+    )
+  end
+
+  defp subscription_metrics() do
+    Event.build(
+      :realtime_tenant_channel_event_metrics,
+      [
+        sum(
+          [:realtime, :subscriptions_checker, :pid_not_found],
+          event_name: [:realtime, :subscriptions_checker, :pid_not_found],
+          measurement: :sum,
+          description: "Sum of pids not found in Subscription tables.",
+          tags: [:tenant]
+        ),
+        sum(
+          [:realtime, :subscriptions_checker, :phantom_pid_detected],
+          event_name: [:realtime, :subscriptions_checker, :phantom_pid_detected],
+          measurement: :sum,
+          description: "Sum of phantom pids detected in Subscription tables.",
+          tags: [:tenant]
         )
       ]
     )

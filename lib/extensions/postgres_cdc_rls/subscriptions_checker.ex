@@ -4,10 +4,13 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
   require Logger
 
   alias Extensions.PostgresCdcRls, as: Rls
-  alias Rls.Subscriptions
 
   alias Realtime.Helpers, as: H
   alias Realtime.Rpc
+  alias Realtime.Telemetry
+
+  alias Rls.Subscriptions
+
   @timeout 120_000
   @max_delete_records 1000
 
@@ -80,14 +83,15 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
   @impl true
   def handle_info(
         :check_active_pids,
-        %State{check_active_pids: ref, subscribers_tid: tid, delete_queue: delete_queue} = state
+        %State{check_active_pids: ref, subscribers_tid: tid, delete_queue: delete_queue, id: id} =
+          state
       ) do
     H.cancel_timer(ref)
 
     ids =
       subscribers_by_node(tid)
       |> not_alive_pids_dist()
-      |> pop_not_alive_pids(tid)
+      |> pop_not_alive_pids(tid, id)
 
     new_delete_queue =
       if length(ids) > 0 do
@@ -134,19 +138,22 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
   ## Internal functions
 
-  @spec pop_not_alive_pids([pid()], :ets.tid()) :: [Ecto.UUID.t()]
-  def pop_not_alive_pids(pids, tid) do
+  @spec pop_not_alive_pids([pid()], :ets.tid(), binary()) :: [Ecto.UUID.t()]
+  def pop_not_alive_pids(pids, tid, tenant_id) do
     Enum.reduce(pids, [], fn pid, acc ->
       case :ets.lookup(tid, pid) do
         [] ->
-          Logger.error("Can't find pid in subscribers table: #{inspect(pid)}")
+          Telemetry.execute([:realtime, :subscriptions_checker, :pid_not_found], 1, %{
+            tenant_id: tenant_id
+          })
+
           acc
 
         results ->
           for {^pid, postgres_id, _ref, _node} <- results do
-            Logger.error(
-              "Detected phantom subscriber #{inspect(pid)} with postgres_id #{inspect(postgres_id)}"
-            )
+            Telemetry.execute([:realtime, :subscriptions_checker, :phantom_pid_detected], 1, %{
+              tenant_id: tenant_id
+            })
 
             :ets.delete(tid, pid)
             UUID.string_to_binary!(postgres_id)

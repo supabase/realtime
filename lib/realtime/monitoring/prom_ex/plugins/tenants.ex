@@ -24,7 +24,7 @@ defmodule Realtime.PromEx.Plugins.Tenants do
         unit: {:microsecond, :millisecond},
         tags: [:tenant],
         reporter_options: [
-          buckets: [125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000]
+          buckets: [10, 50, 250, 1500, 6000, 30_000]
         ]
       )
     ])
