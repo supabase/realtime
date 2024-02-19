@@ -55,7 +55,7 @@ defmodule SubscriptionsCheckerTest do
 
       :ets.insert(tid, test_data)
 
-      not_alive = Enum.sort(Checker.pop_not_alive_pids([:pid1], tid))
+      not_alive = Enum.sort(Checker.pop_not_alive_pids([:pid1], tid, "id"))
       expected = Enum.sort([UUID.string_to_binary!(uuid1), UUID.string_to_binary!(uuid2)])
       assert not_alive == expected
 
@@ -73,7 +73,7 @@ defmodule SubscriptionsCheckerTest do
       ]
 
       :ets.insert(tid, test_data)
-      assert Checker.pop_not_alive_pids([:pid1], tid) == [UUID.string_to_binary!(uuid1)]
+      assert Checker.pop_not_alive_pids([:pid1], tid, "id") == [UUID.string_to_binary!(uuid1)]
       assert :ets.tab2list(tid) == [{:pid2, "uuid", :ref, :node2}]
     end
   end

@@ -12,7 +12,9 @@ defmodule Realtime.HelpersTest do
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
       [extension] = tenant.extensions
       args = Map.put(extension.settings, "id", random_string())
-      pid = start_supervised!({Extensions.PostgresCdcStream.Replication, args})
+
+      pid =
+        start_supervised!({Extensions.PostgresCdcStream.Replication, args}, restart: :transient)
 
       {:ok, conn} = Helpers.check_tenant_connection(tenant, "realtime_test")
       # Check replication slot was created
@@ -21,9 +23,6 @@ defmodule Realtime.HelpersTest do
 
       # Kill connections to database
       Extensions.PostgresCdcStream.Replication.stop(pid)
-      Process.exit(conn, :normal)
-
-      :timer.sleep(100)
       Helpers.replication_slot_teardown(tenant)
 
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
