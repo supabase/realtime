@@ -439,7 +439,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp confirm_token(%{assigns: %{jwt_secret: jwt_secret, access_token: access_token} = assigns}) do
-    secure_key = Application.get_env(:realtime, :db_enc_key)
+    secure_key = Application.fetch_env!(:realtime, :db_enc_key)
 
     with jwt_secret_dec <- Helpers.decrypt!(jwt_secret, secure_key),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
