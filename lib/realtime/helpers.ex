@@ -385,6 +385,14 @@ defmodule Realtime.Helpers do
       iex> Realtime.Helpers.detect_ip_version("ipv6.google.com")
       {:ok, :inet6}
 
+      # Using 2001:0db8:85a3:0000:0000:8a2e:0370:7334
+      iex> Realtime.Helpers.detect_ip_version("2001:0db8:85a3:0000:0000:8a2e:0370:7334")
+      {:ok, :inet6}
+
+      # Using 127.0.0.1
+      iex> Realtime.Helpers.detect_ip_version("127.0.0.1")
+      {:ok, :inet}
+
       # Using invalid domain
       iex> Realtime.Helpers.detect_ip_version("potato")
       {:error, :nxdomain}

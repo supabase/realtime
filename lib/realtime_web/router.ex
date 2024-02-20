@@ -106,7 +106,7 @@ defmodule RealtimeWeb.Router do
     post("/broadcast", BroadcastController, :broadcast)
   end
 
-  scope "/api", RealtimeWeb do
+  scope "/v3/api", RealtimeWeb do
     pipe_through([:open_cors, :tenant_api, :secure_tenant_api, :channel_rls_authorization])
 
     resources("/channels", ChannelsController, only: [:index, :show])

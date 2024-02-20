@@ -6,13 +6,12 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   require Logger
 
-  alias Realtime.Helpers
-
   alias DBConnection.Backoff
 
   alias Phoenix.Tracker.Shard
 
   alias Realtime.GenCounter
+  alias Realtime.Helpers
   alias Realtime.PostgresCdc
   alias Realtime.RateCounter
   alias Realtime.SignalHandler
@@ -20,8 +19,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.ChannelsAuthorization
-  alias RealtimeWeb.Endpoint
   alias RealtimeWeb.Presence
+  alias RealtimeWeb.RealtimeChannel.BroadcastHandler
+  alias RealtimeWeb.RealtimeChannel.PresenceHandler
 
   @confirm_token_ms_interval 1_000 * 60 * 5
 
@@ -45,9 +45,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     start_db_rate_counter(tenant)
 
     with false <- SignalHandler.shutdown_in_progress?(),
-         :ok <- limit_joins(socket),
+         :ok <- limit_joins(socket.assigns),
          :ok <- limit_channels(socket),
-         :ok <- limit_max_users(socket),
+         :ok <- limit_max_users(socket.assigns),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket),
          {:ok, _} <- Connect.lookup_or_start_connection(tenant),
          is_new_api <- is_new_api(params) do
@@ -288,42 +288,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_in(
-        "broadcast" = type,
-        payload,
-        %{
-          assigns: %{
-            is_new_api: true,
-            ack_broadcast: ack_broadcast,
-            self_broadcast: self_broadcast,
-            tenant_topic: tenant_topic
-          }
-        } = socket
-      ) do
-    socket = count(socket)
-
-    if self_broadcast do
-      Endpoint.broadcast(tenant_topic, type, payload)
-    else
-      Endpoint.broadcast_from(self(), tenant_topic, type, payload)
-    end
-
-    if ack_broadcast do
-      {:reply, :ok, socket}
-    else
-      {:noreply, socket}
-    end
+  def handle_in("broadcast", payload, socket) do
+    BroadcastHandler.call(payload, socket)
   end
 
-  def handle_in(
-        "presence",
-        %{"event" => event} = payload,
-        %{assigns: %{is_new_api: true, presence_key: _, tenant_topic: _}} = socket
-      ) do
-    socket = count(socket)
-    result = handle_presence_event(event, payload, socket)
-
-    {:reply, result, socket}
+  def handle_in("presence", payload, socket) do
+    PresenceHandler.call(payload, socket)
   end
 
   def handle_in(type, payload, socket) do
@@ -337,39 +307,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  defp handle_presence_event(event, payload, socket) do
-    %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
-
-    case String.downcase(event) do
-      "track" ->
-        with payload <- Map.get(payload, "payload", %{}),
-             {:error, {:already_tracked, _, _, _}} <-
-               Presence.track(self(), tenant_topic, presence_key, payload),
-             {:ok, _} <- Presence.update(self(), tenant_topic, presence_key, payload) do
-          :ok
-        else
-          {:ok, _} -> :ok
-          {:error, _} -> :error
-        end
-
-      "untrack" ->
-        Presence.untrack(self(), tenant_topic, presence_key)
-
-      _ ->
-        :error
-    end
-  end
-
   @impl true
   def terminate(reason, _state) do
     Logger.debug("Channel terminated with reason: " <> inspect(reason))
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
     :ok
-  end
-
-  defp decrypt_jwt_secret(secret) do
-    secure_key = Application.get_env(:realtime, :db_enc_key)
-    Helpers.decrypt!(secret, secure_key)
   end
 
   defp postgres_subscribe(min \\ 1, max \\ 5) do
@@ -381,7 +323,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     wait
   end
 
-  def limit_joins(%{assigns: %{tenant: tenant, limits: limits}}) do
+  def limit_joins(%{tenant: tenant, limits: limits}) do
     id = Tenants.joins_per_second_key(tenant)
     GenCounter.new(id)
 
@@ -421,16 +363,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp limit_max_users(%{
-         assigns: %{limits: %{max_concurrent_users: max_conn_users}, tenant: tenant}
-       }) do
+  defp limit_max_users(%{limits: %{max_concurrent_users: max_conn_users}, tenant: tenant}) do
     conns = Realtime.UsersCounter.tenant_users(tenant)
 
-    if conns < max_conn_users do
-      :ok
-    else
-      {:error, :too_many_connections}
-    end
+    if conns < max_conn_users,
+      do: :ok,
+      else: {:error, :too_many_connections}
   end
 
   defp assign_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
@@ -474,8 +412,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp presence_key(params) do
-    with key when is_binary(key) <- params["config"]["presence"]["key"],
-         true <- String.length(key) > 0 do
+    with key when is_binary(key) and key != "" <- params["config"]["presence"]["key"] do
       key
     else
       _ -> UUID.uuid1()
@@ -502,7 +439,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp confirm_token(%{assigns: %{jwt_secret: jwt_secret, access_token: access_token} = assigns}) do
-    with jwt_secret_dec <- decrypt_jwt_secret(jwt_secret),
+    secure_key = Application.fetch_env!(:realtime, :db_enc_key)
+
+    with jwt_secret_dec <- Helpers.decrypt!(jwt_secret, secure_key),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
@@ -536,7 +475,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     })
   end
 
-  def presence_dirty_list(topic) do
+  defp presence_dirty_list(topic) do
     [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
 
     Presence

@@ -57,7 +57,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
         |> Jason.encode!()
         |> Jason.decode!()
 
-      conn = get(conn, ~p"/api/channels")
+      conn = get(conn, ~p"/v3/api/channels")
       res = json_response(conn, 200)
 
       res = Enum.sort_by(res, fn %{"id" => id} -> id end)
@@ -67,7 +67,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
 
     @tag role: "anon"
     test "returns 401 if unauthorized", %{conn: conn} do
-      conn = get(conn, ~p"/api/channels")
+      conn = get(conn, ~p"/v3/api/channels")
       assert json_response(conn, 401) == %{"message" => "Unauthorized"}
     end
   end
@@ -81,7 +81,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
 
       expected = channel |> Jason.encode!() |> Jason.decode!()
 
-      conn = get(conn, ~p"/api/channels/#{channel.id}")
+      conn = get(conn, ~p"/v3/api/channels/#{channel.id}")
       res = json_response(conn, 200)
       assert res == expected
     end
@@ -91,13 +91,13 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       Stream.repeatedly(fn -> channel_fixture(tenant) end)
       |> Enum.take(10)
 
-      conn = get(conn, ~p"/api/channels/0")
+      conn = get(conn, ~p"/v3/api/channels/0")
       assert json_response(conn, 404) == %{"message" => "Not found"}
     end
 
     @tag role: "anon"
     test "returns 401 if unauthorized", %{conn: conn} do
-      conn = get(conn, ~p"/api/channels/0")
+      conn = get(conn, ~p"/v3/api/channels/0")
       assert json_response(conn, 401) == %{"message" => "Unauthorized"}
     end
   end
@@ -105,13 +105,13 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   # describe "create" do
   #   test "creates a channel", %{conn: conn} do
   #     name = random_string()
-  #     conn = post(conn, ~p"/api/channels", %{name: name})
+  #     conn = post(conn, ~p"/v3/api/channels", %{name: name})
   #     res = json_response(conn, 201)
   #     assert name == res["name"]
   #   end
 
   #   test "422 if params are invalid", %{conn: conn} do
-  #     conn = post(conn, ~p"/api/channels", %{})
+  #     conn = post(conn, ~p"/v3/api/channels", %{})
   #     assert json_response(conn, 422) == %{"errors" => %{"name" => ["can't be blank"]}}
   #   end
   # end
@@ -119,12 +119,12 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   # describe "delete" do
   #   test "deletes a channel", %{conn: conn, tenant: tenant} do
   #     channel = channel_fixture(tenant)
-  #     conn = delete(conn, ~p"/api/channels/#{channel.id}")
+  #     conn = delete(conn, ~p"/v3/api/channels/#{channel.id}")
   #     assert conn.status == 202
   #   end
 
   #   test "returns not found if id doesn't exist", %{conn: conn} do
-  #     conn = delete(conn, ~p"/api/channels/0")
+  #     conn = delete(conn, ~p"/v3/api/channels/0")
   #     assert conn.status == 404
   #   end
   # end
@@ -133,21 +133,21 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   #   test "updates a channel", %{conn: conn, tenant: tenant} do
   #     channel = channel_fixture(tenant)
   #     name = random_string()
-  #     conn = put(conn, ~p"/api/channels/#{channel.id}", %{name: name})
+  #     conn = put(conn, ~p"/v3/api/channels/#{channel.id}", %{name: name})
   #     res = json_response(conn, 202)
   #     assert name == res["name"]
 
   #     name = random_string()
-  #     conn = patch(conn, ~p"/api/channels/#{channel.id}", %{name: name})
+  #     conn = patch(conn, ~p"/v3/api/channels/#{channel.id}", %{name: name})
   #     res = json_response(conn, 202)
   #     assert name == res["name"]
   #   end
 
   #   test "422 if params are invalid", %{conn: conn, tenant: tenant} do
   #     channel = channel_fixture(tenant)
-  #     conn = put(conn, ~p"/api/channels/#{channel.id}", %{name: 1})
+  #     conn = put(conn, ~p"/v3/api/channels/#{channel.id}", %{name: 1})
   #     assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
-  #     conn = patch(conn, ~p"/api/channels/#{channel.id}", %{name: 1})
+  #     conn = patch(conn, ~p"/v3/api/channels/#{channel.id}", %{name: 1})
   #     assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
   #   end
   # end
