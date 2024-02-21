@@ -143,17 +143,25 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
     Enum.reduce(pids, [], fn pid, acc ->
       case :ets.lookup(tid, pid) do
         [] ->
-          Telemetry.execute([:realtime, :subscriptions_checker, :pid_not_found], 1, %{
-            tenant_id: tenant_id
-          })
+          Telemetry.execute(
+            [:realtime, :subscriptions_checker, :pid_not_found],
+            %{quantity: 1},
+            %{
+              tenant_id: tenant_id
+            }
+          )
 
           acc
 
         results ->
           for {^pid, postgres_id, _ref, _node} <- results do
-            Telemetry.execute([:realtime, :subscriptions_checker, :phantom_pid_detected], 1, %{
-              tenant_id: tenant_id
-            })
+            Telemetry.execute(
+              [:realtime, :subscriptions_checker, :phantom_pid_detected],
+              %{quantity: 1},
+              %{
+                tenant_id: tenant_id
+              }
+            )
 
             :ets.delete(tid, pid)
             UUID.string_to_binary!(postgres_id)
