@@ -7,7 +7,7 @@ defmodule Realtime.Telemetry do
   Dispatches Telemetry events.
   """
 
-  @spec execute([atom, ...], number | map, map) :: :ok
+  @spec execute([atom, ...], map, map) :: :ok
   def execute(event, measurements, metadata \\ %{}) do
     :telemetry.execute(event, measurements, metadata)
   end
