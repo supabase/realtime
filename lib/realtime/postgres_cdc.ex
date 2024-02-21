@@ -2,6 +2,11 @@ defmodule Realtime.PostgresCdc do
   @moduledoc false
 
   require Logger
+
+  alias Realtime.Rpc
+  alias Realtime.Tenants
+  alias Realtime.Api.Tenant
+
   @timeout 10_000
   @extensions Application.compile_env(:realtime, :extensions)
 
@@ -18,15 +23,18 @@ defmodule Realtime.PostgresCdc do
     apply(module, :handle_subscribe, [pg_change_params, tenant, metadata])
   end
 
+  @spec stop(module, Tenant.t(), pos_integer) :: :ok
   def stop(module, tenant, timeout \\ @timeout) do
-    apply(module, :handle_stop, [tenant, timeout])
+    with {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
+      Rpc.enhanced_call(node, module, :handle_stop, [tenant.external_id, timeout])
+    else
+      _ -> Logger.warn("Unable to stop #{module} for #{tenant.external_id}")
+    end
   end
 
+  @spec stop_all(Tenant.t(), pos_integer) :: :ok
   def stop_all(tenant, timeout \\ @timeout) do
-    available_drivers()
-    |> Enum.each(fn module ->
-      stop(module, tenant, timeout)
-    end)
+    Enum.each(available_drivers(), fn module -> stop(module, tenant, timeout) end)
   end
 
   @spec available_drivers :: list
@@ -37,14 +45,7 @@ defmodule Realtime.PostgresCdc do
   end
 
   def filter_settings(key, extensions) do
-    [cdc] =
-      Enum.filter(extensions, fn e ->
-        if e.type == key do
-          true
-        else
-          false
-        end
-      end)
+    [cdc] = Enum.filter(extensions, fn e -> if e.type == key, do: true, else: false end)
 
     cdc.settings
   end
