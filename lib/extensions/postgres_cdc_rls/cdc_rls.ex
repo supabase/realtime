@@ -50,11 +50,8 @@ defmodule Extensions.PostgresCdcRls do
 
   def handle_stop(tenant, timeout) do
     case :syn.whereis_name({__MODULE__, tenant}) do
-      :undefined ->
-        Logger.warning("Database supervisor not found for tenant #{tenant}")
-
-      pid ->
-        DynamicSupervisor.stop(pid, :shutdown, timeout)
+      :undefined -> Logger.warning("Database supervisor not found for tenant #{tenant}")
+      pid -> DynamicSupervisor.stop(pid, :shutdown, timeout)
     end
   end
 

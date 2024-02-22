@@ -7,8 +7,8 @@ defmodule Extensions.PostgresCdcStream.Replication do
   use Postgrex.ReplicationConnection
   require Logger
 
-  alias Extensions.PostgresCdcStream, as: Stream
-  alias Realtime.Helpers, as: H
+  alias Extensions.PostgresCdcStream
+  alias Realtime.Helpers
   alias Realtime.Adapters.Postgres.Decoder
 
   alias Decoder.Messages.{
@@ -26,11 +26,9 @@ defmodule Extensions.PostgresCdcStream.Replication do
     opts = connection_opts(args)
 
     slot_name =
-      if args["dynamic_slot"] do
-        args["slot_name"] <> "_" <> (System.system_time(:second) |> Integer.to_string())
-      else
-        args["slot_name"]
-      end
+      if args["dynamic_slot"],
+        do: args["slot_name"] <> "_" <> (System.system_time(:second) |> Integer.to_string()),
+        else: args["slot_name"]
 
     init = %{
       tenant: args["id"],
@@ -42,9 +40,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
   end
 
   @spec stop(pid) :: :ok
-  def stop(pid) do
-    GenServer.stop(pid)
-  end
+  def stop(pid), do: GenServer.stop(pid)
 
   @impl true
   def init(args) do
@@ -66,7 +62,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
     query =
       "START_REPLICATION SLOT #{state.slot_name} LOGICAL 0/0 (proto_version '1', publication_names '#{state.publication}')"
 
-    Stream.track_manager(state.tenant, self(), nil)
+    PostgresCdcStream.track_manager(state.tenant, self(), nil)
     {:stream, query, [], %{state | step: :streaming}}
   end
 
@@ -77,7 +73,8 @@ defmodule Extensions.PostgresCdcStream.Replication do
   @impl true
   def handle_data(<<?w, _header::192, msg::binary>>, state) do
     new_state =
-      Decoder.decode_message(msg)
+      msg
+      |> Decoder.decode_message()
       |> process_message(state)
 
     {:noreply, new_state}
@@ -124,7 +121,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
     Logger.debug("Got message: #{inspect(msg)}")
     [{_, columns, schema, table}] = :ets.lookup(state.tid, msg.relation_id)
 
-    %NewRecord{
+    record = %NewRecord{
       columns: columns,
       commit_timestamp: state.ts,
       errors: nil,
@@ -133,7 +130,8 @@ defmodule Extensions.PostgresCdcStream.Replication do
       record: data_tuple_to_map(columns, msg.tuple_data),
       type: "UPDATE"
     }
-    |> broadcast(state.tenant)
+
+    broadcast(record, state.tenant)
 
     state
   end
@@ -142,7 +140,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
     Logger.debug("Got message: #{inspect(msg)}")
     [{_, columns, schema, table}] = :ets.lookup(state.tid, msg.relation_id)
 
-    %UpdatedRecord{
+    record = %UpdatedRecord{
       columns: columns,
       commit_timestamp: state.ts,
       errors: nil,
@@ -152,7 +150,8 @@ defmodule Extensions.PostgresCdcStream.Replication do
       record: data_tuple_to_map(columns, msg.tuple_data),
       type: "UPDATE"
     }
-    |> broadcast(state.tenant)
+
+    broadcast(record, state.tenant)
 
     state
   end
@@ -161,7 +160,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
     Logger.debug("Got message: #{inspect(msg)}")
     [{_, columns, schema, table}] = :ets.lookup(state.tid, msg.relation_id)
 
-    %DeletedRecord{
+    record = %DeletedRecord{
       columns: columns,
       commit_timestamp: state.ts,
       errors: nil,
@@ -170,7 +169,8 @@ defmodule Extensions.PostgresCdcStream.Replication do
       old_record: data_tuple_to_map(columns, msg.old_tuple_data),
       type: "UPDATE"
     }
-    |> broadcast(state.tenant)
+
+    broadcast(record, state.tenant)
 
     state
   end
@@ -203,9 +203,9 @@ defmodule Extensions.PostgresCdcStream.Replication do
       Phoenix.PubSub.broadcast_from(
         Realtime.PubSub,
         self(),
-        Stream.topic(tenant, params),
+        PostgresCdcStream.topic(tenant, params),
         change,
-        Stream.MessageDispatcher
+        PostgresCdcStream.MessageDispatcher
       )
     end)
   end
@@ -261,7 +261,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
 
   def connection_opts(args) do
     {host, port, name, user, pass} =
-      H.decrypt_creds(
+      Helpers.decrypt_creds(
         args["db_host"],
         args["db_port"],
         args["db_name"],
@@ -269,7 +269,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
         args["db_password"]
       )
 
-    {:ok, addrtype} = H.detect_ip_version(host)
+    {:ok, addrtype} = Helpers.detect_ip_version(host)
 
     [
       hostname: host,

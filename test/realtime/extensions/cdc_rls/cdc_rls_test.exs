@@ -106,7 +106,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       assert !Map.equal?(oids2, oids3)
     end
 
-    test "Stop tenant supervisor" do
+    test "Stop tenant supervisor", %{tenant: tenant} do
       sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
           :syn.lookup(Extensions.PostgresCdcRls, @external_id)
@@ -121,7 +121,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
         end)
 
       assert Process.alive?(sup)
-      PostgresCdc.stop(@cdc_module, @external_id)
+      PostgresCdc.stop(@cdc_module, tenant)
       assert Process.alive?(sup) == false
     end
   end

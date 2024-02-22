@@ -177,24 +177,23 @@ defmodule RealtimeWeb.TenantController do
     }
   )
 
-  def delete(conn, %{"tenant_id" => id}) do
-    Logger.metadata(external_id: id, project: id)
+  def delete(conn, %{"tenant_id" => tenant_id}) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    case Api.get_tenant_by_external_id(id) do
+    case Api.get_tenant_by_external_id(tenant_id) do
       nil ->
-        Logger.error("Tenant #{id} does not exist")
+        Logger.error("Tenant #{tenant_id} does not exist")
 
       tenant ->
-        id
+        tenant_id
         |> UserSocket.subscribers_id()
         |> Endpoint.broadcast("disconnect", %{})
 
         Task.async(fn ->
-          PostgresCdc.stop_all(id)
+          PostgresCdc.stop_all(tenant)
           Helpers.replication_slot_teardown(tenant)
+          Api.delete_tenant_by_external_id(tenant_id)
         end)
-
-        Api.delete_tenant_by_external_id(id)
     end
 
     send_resp(conn, 204, "")
@@ -223,17 +222,17 @@ defmodule RealtimeWeb.TenantController do
   def reload(conn, %{"tenant_id" => tenant_id}) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    case Api.get_tenant_by_external_id(tenant_id) do
-      %Tenant{} ->
-        PostgresCdc.stop_all(tenant_id, @stop_timeout)
-        send_resp(conn, 204, "")
-
+    case Tenants.get_tenant_by_external_id(tenant_id) do
       nil ->
-        Logger.error("Atttempted to reload non-existant tenant #{tenant_id}")
+        Logger.error("Attempted to reload non-existant tenant #{tenant_id}")
 
         conn
         |> put_status(404)
         |> render("not_found.json", tenant: nil)
+
+      tenant ->
+        PostgresCdc.stop_all(tenant, @stop_timeout)
+        send_resp(conn, 204, "")
     end
   end
 

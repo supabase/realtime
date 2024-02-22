@@ -9,8 +9,7 @@ defmodule Extensions.PostgresCdcStream do
 
   def handle_connect(opts) do
     Enum.reduce_while(1..5, nil, fn retry, acc ->
-      get_manager_conn(opts["id"])
-      |> case do
+      case get_manager_conn(opts["id"]) do
         {:error, nil} ->
           start_distributed(opts)
           if retry > 1, do: Process.sleep(1_000)
@@ -28,25 +27,22 @@ defmodule Extensions.PostgresCdcStream do
 
   def handle_subscribe(pg_change_params, tenant, metadata) do
     Enum.each(pg_change_params, fn e ->
-      topic(tenant, e.params)
+      tenant
+      |> topic(e.params)
       |> RealtimeWeb.Endpoint.subscribe(metadata)
     end)
   end
 
   def handle_stop(tenant, timeout) do
     case :syn.lookup(PostgresCdcStream, tenant) do
-      :undefined ->
-        Logger.warning("Database supervisor not found for tenant #{tenant}")
-
-      {pid, _} ->
-        DynamicSupervisor.stop(pid, :shutdown, timeout)
+      :undefined -> Logger.warning("Database supervisor not found for tenant #{tenant}")
+      {pid, _} -> DynamicSupervisor.stop(pid, :shutdown, timeout)
     end
   end
 
   @spec get_manager_conn(String.t()) :: {:error, nil} | {:ok, pid(), pid()}
   def get_manager_conn(id) do
-    Phoenix.Tracker.get_by_key(Stream.Tracker, "postgres_cdc_stream", id)
-    |> case do
+    case Phoenix.Tracker.get_by_key(Stream.Tracker, "postgres_cdc_stream", id) do
       [] -> {:error, nil}
       [{_, %{manager_pid: pid, conn: conn}}] -> {:ok, pid, conn}
     end

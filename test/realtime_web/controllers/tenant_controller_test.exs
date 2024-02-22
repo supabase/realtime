@@ -1,13 +1,17 @@
 defmodule RealtimeWeb.TenantControllerTest do
   alias Realtime.UsersCounter
-  use RealtimeWeb.ConnCase
+
+  # async: false required due to the delete tests that connects to the database directly and might interfere with other tests
+  use RealtimeWeb.ConnCase, async: false
 
   import Mock
   import Realtime.Helpers, only: [encrypt!: 2]
 
   alias Realtime.Api
   alias Realtime.Api.Tenant
-  alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
+  alias Realtime.Helpers
+  alias RealtimeWeb.ChannelsAuthorization
+  alias RealtimeWeb.JwtVerification
 
   @update_attrs %{
     jwt_secret: "some updated jwt_secret",
@@ -127,16 +131,36 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     setup %{tenant: tenant} do
       [extension] = tenant.extensions
-      args = Map.put(extension.settings, "id", random_string())
-      start_supervised!({Extensions.PostgresCdcStream.Replication, args})
+      args = Map.put(extension.settings, "id", tenant.external_id)
+      {:ok, _} = Realtime.PostgresCdc.connect(Extensions.PostgresCdcStream, args)
+      on_exit(fn -> Realtime.PostgresCdc.stop_all(tenant) end)
       :ok
     end
 
     test "deletes chosen tenant", %{conn: conn, tenant: tenant} do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+        {:ok, db_conn} = Helpers.check_tenant_connection(tenant, "realtime_test")
+
+        assert %{rows: [["supabase_realtime_replication_slot"]]} =
+                 Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
+
         conn = delete(conn, Routes.tenant_path(conn, :delete, tenant.external_id))
-        :timer.sleep(10000)
         assert response(conn, 204)
+        :timer.sleep(1000)
+
+        {:ok, db_conn} =
+          start_supervised(
+            {Postgrex,
+             [
+               host: "localhost",
+               database: "realtime_test",
+               username: "postgres",
+               password: "postgres",
+               after_connect: &Postgrex.query!(&1, "set search_path=realtime", [])
+             ]}
+          )
+
+        {:ok, _} = Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
         conn = get(conn, Routes.tenant_path(conn, :show, tenant.external_id))
         assert response(conn, 404)
       end
@@ -151,14 +175,13 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   describe "reload tenant" do
-    test "reload when tenant does exist", %{conn: conn} do
-      with_mocks [
-        {ChannelsAuthorization, [], authorize: fn _, _ -> {:ok, %{}} end},
-        {Api, [], get_tenant_by_external_id: fn _ -> %Tenant{} end}
-      ] do
-        Routes.tenant_path(conn, :reload, "external_id")
-        %{status: status} = post(conn, Routes.tenant_path(conn, :reload, "external_id"))
-        assert status == 204
+    setup [:create_tenant]
+
+    test "reload when tenant does exist", %{conn: conn, tenant: tenant} do
+      with_mock ChannelsAuthorization, authorize: fn _, _ -> {:ok, %{}} end do
+        Routes.tenant_path(conn, :reload, tenant.external_id)
+        %{status: status} = post(conn, Routes.tenant_path(conn, :reload, "wrong_external_id"))
+        assert status == 404
       end
     end
 
