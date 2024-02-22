@@ -3,8 +3,6 @@ defmodule Realtime.PostgresCdc do
 
   require Logger
 
-  alias Realtime.Rpc
-  alias Realtime.Tenants
   alias Realtime.Api.Tenant
 
   @timeout 10_000
@@ -25,11 +23,7 @@ defmodule Realtime.PostgresCdc do
 
   @spec stop(module, Tenant.t(), pos_integer) :: :ok
   def stop(module, tenant, timeout \\ @timeout) do
-    with {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
-      Rpc.enhanced_call(node, module, :handle_stop, [tenant.external_id, timeout])
-    else
-      _ -> Logger.warn("Unable to stop #{module} for #{tenant.external_id}")
-    end
+    apply(module, :handle_stop, [tenant.external_id, timeout])
   end
 
   @spec stop_all(Tenant.t(), pos_integer) :: :ok
@@ -45,7 +39,7 @@ defmodule Realtime.PostgresCdc do
   end
 
   def filter_settings(key, extensions) do
-    [cdc] = Enum.filter(extensions, fn e -> if e.type == key, do: true, else: false end)
+    [cdc] = Enum.filter(extensions, fn e -> e.type == key end)
 
     cdc.settings
   end

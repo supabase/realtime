@@ -49,7 +49,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket.assigns),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket),
-         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant),
+         {:ok, _} <- Connect.lookup_or_start_connection(tenant),
          is_new_api <- is_new_api(params) do
       Realtime.UsersCounter.add(transport_pid, tenant)
 
@@ -83,8 +83,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         presence_key: presence_key(params),
         self_broadcast: !!params["config"]["broadcast"]["self"],
         tenant_topic: tenant_topic,
-        channel_name: sub_topic,
-        db_conn: db_conn
+        channel_name: sub_topic
       }
 
       {:ok, state, assign(socket, assigns)}
