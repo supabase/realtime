@@ -7,8 +7,6 @@ defmodule Realtime.RepoTest do
   alias Realtime.Repo
   alias Realtime.Tenants.Connect
 
-  @cdc "postgres_cdc_rls"
-
   setup do
     tenant = tenant_fixture()
 

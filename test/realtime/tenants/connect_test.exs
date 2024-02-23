@@ -162,7 +162,6 @@ defmodule Realtime.Tenants.ConnectTest do
     test "on migrations failure, process is alive", %{tenant: tenant} do
       with_mock Ecto.Migrator, [:passthrough], run: fn _, _, _, _ -> nil end do
         assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-        :timer.sleep(200)
         assert_called(Ecto.Migrator.run(:_, :_, :_, :_))
         assert Process.alive?(db_conn) == true
       end
@@ -170,11 +169,10 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "on migrations failure, stop the process", %{tenant: tenant} do
       with_mock Ecto.Migrator, [], run: fn _, _, _, _ -> raise("error") end do
-        assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+        assert {:error, :tenant_database_unavailable} =
+                 Connect.lookup_or_start_connection(tenant.external_id)
 
-        :timer.sleep(200)
         assert_called(Ecto.Migrator.run(:_, :_, :_, :_))
-        assert Process.alive?(db_conn) == false
       end
     end
   end

@@ -5,8 +5,6 @@ defmodule Realtime.ChannelsTest do
   alias Realtime.Api.Channel
   alias Realtime.Tenants
 
-  @cdc "postgres_cdc_rls"
-
   setup do
     tenant = tenant_fixture()
     {:ok, conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)

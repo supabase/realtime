@@ -25,8 +25,7 @@ defmodule Realtime.Tenants.Connect do
             db_conn_reference: nil,
             db_conn_pid: nil,
             check_connected_user_interval: nil,
-            connected_users_bucket: [1],
-            tenant: nil
+            connected_users_bucket: [1]
 
   @doc """
   Returns the database connection for a tenant. If the tenant is not connected, it will attempt to connect to the tenant's database.
@@ -92,21 +91,16 @@ defmodule Realtime.Tenants.Connect do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
-         res <- Helpers.check_tenant_connection(tenant, @application_name) do
+         res <- Helpers.check_tenant_connection(tenant, @application_name),
+         [%{settings: settings} | _] <- tenant.extensions,
+         {:ok, _} <- Migrations.run_migrations(settings) do
       case res do
         {:ok, conn} ->
           :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
 
-          state = %{
-            state
-            | db_conn_reference: Process.monitor(conn),
-              db_conn_pid: conn,
-              tenant: tenant
-          }
+          state = %{state | db_conn_reference: Process.monitor(conn), db_conn_pid: conn}
 
-          :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:suspend_tenant")
-
-          {:ok, state, {:continue, :setup_connected_users}}
+          {:ok, state, {:continue, :setup_connected_user_events}}
 
         {:error, error} ->
           Logger.error("Error connecting to tenant database: #{inspect(error)}")
@@ -117,26 +111,16 @@ defmodule Realtime.Tenants.Connect do
 
   @impl GenServer
   def handle_continue(
-        :setup_connected_users,
+        :setup_connected_user_events,
         %{
           check_connected_user_interval: check_connected_user_interval,
           connected_users_bucket: connected_users_bucket
         } = state
       ) do
+    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:suspend_tenant")
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
 
-    {:noreply, state, {:continue, :run_migrations}}
-  end
-
-  def handle_continue(:run_migrations, %{tenant: tenant} = state) do
-    with [%{settings: settings} | _] <- tenant.extensions,
-         {:ok, _} <- Migrations.run_migrations(settings) do
-      {:noreply, state}
-    else
-      {:error, error} ->
-        Logger.error("Error running migrations for tenant database: #{inspect(error)}")
-        {:stop, :failed_migrations, state}
-    end
+    {:noreply, state}
   end
 
   @impl GenServer
