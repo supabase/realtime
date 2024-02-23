@@ -10,8 +10,6 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
     SubscriptionsChecker
   }
 
-  alias Realtime.Tenants.Migrations
-
   def start_link(args) do
     name = PostgresCdcRls.supervisor_id(args["id"], args["region"])
     Supervisor.start_link(__MODULE__, args, name: {:via, :syn, name})
@@ -19,17 +17,9 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
 
   @impl true
   def init(args) do
-    tid_args =
-      Map.merge(args, %{
-        "subscribers_tid" => :ets.new(__MODULE__, [:public, :bag])
-      })
+    tid_args = Map.merge(args, %{"subscribers_tid" => :ets.new(__MODULE__, [:public, :bag])})
 
     children = [
-      %{
-        id: Migrations,
-        start: {Migrations, :start_link, [args]},
-        restart: :transient
-      },
       %{
         id: ReplicationPoller,
         start: {ReplicationPoller, :start_link, [args]},

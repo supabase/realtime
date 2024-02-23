@@ -3,8 +3,6 @@ defmodule Realtime.Tenants.Migrations do
   Run Realtime database migrations for tenant's database.
   """
 
-  use GenServer, restart: :transient
-
   require Logger
 
   alias Realtime.Repo
@@ -48,7 +46,7 @@ defmodule Realtime.Tenants.Migrations do
     AddUpdateGrantToChannels
   }
 
-  alias Realtime.Helpers, as: H
+  alias Realtime.Helpers
 
   @migrations [
     {20_211_116_024_918, CreateRealtimeSubscriptionTable},
@@ -90,46 +88,18 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_109_165_339, AddUpdateGrantToChannels}
   ]
 
-  @spec start_link(GenServer.options()) :: GenServer.on_start()
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts)
-  end
-
-  ## Callbacks
-
-  @impl true
-  def init(%{"id" => id} = args) do
-    Logger.metadata(external_id: id, project: id)
-
-    case apply_migrations(args) do
-      {:ok, migrations} ->
-        Logger.debug("Migrations applied successfully #{inspect(migrations)}")
-        {:ok, %{}, {:continue, :stop}}
-
-      {:error, error} ->
-        runners = H.dirty_terminate_runners()
-        Logger.error("Migrations failed, terminated runners: #{inspect(runners)}")
-        {:stop, error}
-    end
-  end
-
-  @impl true
-  def handle_continue(:stop, %{}) do
-    {:stop, :normal, %{}}
-  end
-
-  @spec apply_migrations(map()) :: {:ok, [integer()]} | {:error, any()}
-  defp apply_migrations(
-         %{
-           "db_host" => db_host,
-           "db_port" => db_port,
-           "db_name" => db_name,
-           "db_user" => db_user,
-           "db_password" => db_password
-         } = args
-       ) do
+  @spec run_migrations(map()) :: {:ok, [integer()]} | {:error, any()}
+  def run_migrations(
+        %{
+          "db_host" => db_host,
+          "db_port" => db_port,
+          "db_name" => db_name,
+          "db_user" => db_user,
+          "db_password" => db_password
+        } = settings
+      ) do
     {host, port, name, user, pass} =
-      H.decrypt_creds(
+      Helpers.decrypt_creds(
         db_host,
         db_port,
         db_name,
@@ -137,8 +107,8 @@ defmodule Realtime.Tenants.Migrations do
         db_password
       )
 
-    {:ok, addrtype} = H.detect_ip_version(host)
-    ssl_enforced = H.default_ssl_param(args)
+    {:ok, addrtype} = Helpers.detect_ip_version(host)
+    ssl_enforced = Helpers.default_ssl_param(settings)
 
     [
       hostname: host,
@@ -151,20 +121,13 @@ defmodule Realtime.Tenants.Migrations do
       parameters: [application_name: "realtime_migrations"],
       backoff_type: :stop
     ]
-    |> H.maybe_enforce_ssl_config(ssl_enforced)
+    |> Helpers.maybe_enforce_ssl_config(ssl_enforced)
     |> Repo.with_dynamic_repo(fn repo ->
       Logger.info("Applying migrations to #{host}")
 
       try do
-        res =
-          Ecto.Migrator.run(
-            Repo,
-            @migrations,
-            :up,
-            all: true,
-            prefix: "realtime",
-            dynamic_repo: repo
-          )
+        opts = [all: true, prefix: "realtime", dynamic_repo: repo]
+        res = Ecto.Migrator.run(Repo, @migrations, :up, opts)
 
         {:ok, res}
       rescue

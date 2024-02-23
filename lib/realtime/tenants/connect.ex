@@ -12,9 +12,10 @@ defmodule Realtime.Tenants.Connect do
 
   alias Realtime.Api.Tenant
   alias Realtime.Helpers
+  alias Realtime.Rpc
   alias Realtime.Tenants
   alias Realtime.UsersCounter
-  alias Realtime.Rpc
+  alias Realtime.Tenants.Migrations
 
   @erpc_timeout_default 5000
   @check_connected_user_interval_default 50_000
@@ -24,7 +25,8 @@ defmodule Realtime.Tenants.Connect do
             db_conn_reference: nil,
             db_conn_pid: nil,
             check_connected_user_interval: nil,
-            connected_users_bucket: [1]
+            connected_users_bucket: [1],
+            tenant: nil
 
   @doc """
   Returns the database connection for a tenant. If the tenant is not connected, it will attempt to connect to the tenant's database.
@@ -94,13 +96,15 @@ defmodule Realtime.Tenants.Connect do
       case res do
         {:ok, conn} ->
           :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
-          state = %{state | db_conn_reference: Process.monitor(conn), db_conn_pid: conn}
 
-          :ok =
-            Phoenix.PubSub.subscribe(
-              Realtime.PubSub,
-              "realtime:operations:suspend_tenant"
-            )
+          state = %{
+            state
+            | db_conn_reference: Process.monitor(conn),
+              db_conn_pid: conn,
+              tenant: tenant
+          }
+
+          :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:suspend_tenant")
 
           {:ok, state, {:continue, :setup_connected_users}}
 
@@ -121,7 +125,18 @@ defmodule Realtime.Tenants.Connect do
       ) do
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
 
-    {:noreply, state}
+    {:noreply, state, {:continue, :run_migrations}}
+  end
+
+  def handle_continue(:run_migrations, %{tenant: tenant} = state) do
+    with [%{settings: settings} | _] <- tenant.extensions,
+         {:ok, _} <- Migrations.run_migrations(settings) do
+      {:noreply, state}
+    else
+      {:error, error} ->
+        Logger.error("Error running migrations for tenant database: #{inspect(error)}")
+        {:stop, :failed_migrations, state}
+    end
   end
 
   @impl GenServer
