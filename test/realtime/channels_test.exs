@@ -5,15 +5,8 @@ defmodule Realtime.ChannelsTest do
   alias Realtime.Api.Channel
   alias Realtime.Tenants
 
-  @cdc "postgres_cdc_rls"
-
   setup do
     tenant = tenant_fixture()
-    settings = Realtime.PostgresCdc.filter_settings(@cdc, tenant.extensions)
-    settings = Map.put(settings, "id", tenant.external_id)
-    settings = Map.put(settings, "db_socket_opts", [:inet])
-
-    start_supervised!({Tenants.Migrations, settings})
     {:ok, conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
     clean_table(conn, "realtime", "channels")
 

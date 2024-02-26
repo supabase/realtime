@@ -12,9 +12,10 @@ defmodule Realtime.Tenants.Connect do
 
   alias Realtime.Api.Tenant
   alias Realtime.Helpers
+  alias Realtime.Rpc
   alias Realtime.Tenants
   alias Realtime.UsersCounter
-  alias Realtime.Rpc
+  alias Realtime.Tenants.Migrations
 
   @erpc_timeout_default 5000
   @check_connected_user_interval_default 50_000
@@ -90,19 +91,16 @@ defmodule Realtime.Tenants.Connect do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
-         res <- Helpers.check_tenant_connection(tenant, @application_name) do
+         res <- Helpers.check_tenant_connection(tenant, @application_name),
+         [%{settings: settings} | _] <- tenant.extensions,
+         {:ok, _} <- Migrations.run_migrations(settings) do
       case res do
         {:ok, conn} ->
           :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
+
           state = %{state | db_conn_reference: Process.monitor(conn), db_conn_pid: conn}
 
-          :ok =
-            Phoenix.PubSub.subscribe(
-              Realtime.PubSub,
-              "realtime:operations:suspend_tenant"
-            )
-
-          {:ok, state, {:continue, :setup_connected_users}}
+          {:ok, state, {:continue, :setup_connected_user_events}}
 
         {:error, error} ->
           Logger.error("Error connecting to tenant database: #{inspect(error)}")
@@ -113,12 +111,13 @@ defmodule Realtime.Tenants.Connect do
 
   @impl GenServer
   def handle_continue(
-        :setup_connected_users,
+        :setup_connected_user_events,
         %{
           check_connected_user_interval: check_connected_user_interval,
           connected_users_bucket: connected_users_bucket
         } = state
       ) do
+    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:suspend_tenant")
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
 
     {:noreply, state}

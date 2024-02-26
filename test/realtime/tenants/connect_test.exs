@@ -1,6 +1,8 @@
 defmodule Realtime.Tenants.ConnectTest do
   use Realtime.DataCase, async: false
 
+  import Mock
+
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
 
@@ -155,6 +157,23 @@ defmodule Realtime.Tenants.ConnectTest do
       send(check_db_connections_created(self(), tenant.external_id), :check)
       :timer.sleep(5000)
       refute_receive :too_many_connections
+    end
+
+    test "on migrations failure, process is alive", %{tenant: tenant} do
+      with_mock Ecto.Migrator, [:passthrough], run: fn _, _, _, _ -> nil end do
+        assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+        assert_called(Ecto.Migrator.run(:_, :_, :_, :_))
+        assert Process.alive?(db_conn) == true
+      end
+    end
+
+    test "on migrations failure, stop the process", %{tenant: tenant} do
+      with_mock Ecto.Migrator, [], run: fn _, _, _, _ -> raise("error") end do
+        assert {:error, :tenant_database_unavailable} =
+                 Connect.lookup_or_start_connection(tenant.external_id)
+
+        assert_called(Ecto.Migrator.run(:_, :_, :_, :_))
+      end
     end
   end
 

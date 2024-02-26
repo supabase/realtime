@@ -6,20 +6,13 @@ defmodule Realtime.RepoTest do
   alias Realtime.Api.Channel
   alias Realtime.Repo
   alias Realtime.Tenants.Connect
-  alias Realtime.Tenants.Migrations
-
-  @cdc "postgres_cdc_rls"
 
   setup do
     tenant = tenant_fixture()
+
     {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
-    settings = Realtime.PostgresCdc.filter_settings(@cdc, tenant.extensions)
-    settings = Map.put(settings, "id", tenant.external_id)
-    settings = Map.put(settings, "db_socket_opts", [:inet])
-
-    start_supervised!({Migrations, settings})
     clean_table(conn, "realtime", "channels")
+
     %{conn: conn, tenant: tenant}
   end
 

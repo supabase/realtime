@@ -7,7 +7,6 @@ defmodule RealtimeWeb.TenantControllerTest do
   import Mock
   import Realtime.Helpers, only: [encrypt!: 2]
 
-  alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Helpers
   alias RealtimeWeb.ChannelsAuthorization

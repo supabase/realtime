@@ -5,7 +5,6 @@ defmodule RealtimeWeb.ChannelsControllerTest do
 
   alias Realtime.GenCounter
   alias Realtime.Tenants
-  @cdc "postgres_cdc_rls"
 
   setup_with_mocks [
                      {GenCounter, [], new: fn _ -> :ok end},
@@ -18,13 +17,8 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     tenant = tenant_fixture()
 
     secret =
-      tenant.jwt_secret |> Realtime.Helpers.decrypt!(Application.get_env(:realtime, :db_enc_key))
+      Realtime.Helpers.decrypt!(tenant.jwt_secret, Application.get_env(:realtime, :db_enc_key))
 
-    settings = Realtime.PostgresCdc.filter_settings(@cdc, tenant.extensions)
-    settings = Map.put(settings, "id", tenant.external_id)
-    settings = Map.put(settings, "db_socket_opts", [:inet])
-
-    start_supervised!({Tenants.Migrations, settings})
     {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
     clean_table(db_conn, "realtime", "channels")
 
