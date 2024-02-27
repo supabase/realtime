@@ -2,12 +2,14 @@ defmodule Realtime.ChannelsTest do
   use Realtime.DataCase, async: false
 
   alias Realtime.Channels
+  alias Realtime.Api.Broadcast
   alias Realtime.Api.Channel
   alias Realtime.Tenants
 
   setup do
     tenant = tenant_fixture()
     {:ok, conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    clean_table(conn, "realtime", "broadcasts")
     clean_table(conn, "realtime", "channels")
 
     %{conn: conn, tenant: tenant}
@@ -33,9 +35,13 @@ defmodule Realtime.ChannelsTest do
   end
 
   describe "create/2" do
-    test "creates channel in tenant database", %{conn: conn} do
+    test "creates a channel and a broadcast entry in tenant database", %{conn: conn} do
       name = random_string()
-      assert {:ok, %Channel{name: ^name}} = Channels.create_channel(%{name: name}, conn)
+
+      assert {:ok, %Channel{name: ^name, id: channel_id}} =
+               Channels.create_channel(%{name: name}, conn)
+
+      assert {:ok, [%Broadcast{channel_id: ^channel_id}]} = Repo.all(conn, Broadcast, Broadcast)
     end
 
     test "no channel name has error changeset", %{conn: conn} do

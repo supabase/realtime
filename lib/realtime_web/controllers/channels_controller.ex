@@ -4,7 +4,9 @@ defmodule RealtimeWeb.ChannelsController do
 
   alias Realtime.Channels
   alias Realtime.Tenants.Authorization.Permissions
+  alias Realtime.Tenants.Authorization.Permissions.ChannelPermissions
   alias Realtime.Tenants.Connect
+
   alias RealtimeWeb.OpenApiSchemas.ChannelParams
   alias RealtimeWeb.OpenApiSchemas.ChannelResponse
   alias RealtimeWeb.OpenApiSchemas.ChannelResponseList
@@ -33,7 +35,12 @@ defmodule RealtimeWeb.ChannelsController do
   )
 
   def index(
-        %{assigns: %{tenant: tenant, permissions: {:ok, %Permissions{read: true}}}} = conn,
+        %{
+          assigns: %{
+            tenant: tenant,
+            permissions: {:ok, %Permissions{channel: %ChannelPermissions{read: true}}}
+          }
+        } = conn,
         _params
       ) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
@@ -70,9 +77,17 @@ defmodule RealtimeWeb.ChannelsController do
     }
   )
 
-  def show(%{assigns: %{tenant: tenant, permissions: {:ok, %Permissions{read: true}}}} = conn, %{
-        "id" => id
-      }) do
+  def show(
+        %{
+          assigns: %{
+            tenant: tenant,
+            permissions: {:ok, %Permissions{channel: %ChannelPermissions{read: true}}}
+          }
+        } = conn,
+        %{
+          "id" => id
+        }
+      ) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
          {:ok, channel} when not is_nil(channel) <- Channels.get_channel_by_id(id, db_conn) do
       json(conn, channel)
