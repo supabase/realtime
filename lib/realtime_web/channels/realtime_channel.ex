@@ -83,7 +83,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         presence_key: presence_key(params),
         self_broadcast: !!params["config"]["broadcast"]["self"],
         tenant_topic: tenant_topic,
-        channel_name: sub_topic
+        channel_name: sub_topic,
+        public: !!params["config"]["broadcast"]["public"]
       }
 
       {:ok, state, assign(socket, assigns)}

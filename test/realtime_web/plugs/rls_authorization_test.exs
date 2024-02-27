@@ -5,6 +5,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
 
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization.Permissions
+  alias Realtime.Tenants.Authorization.Permissions.ChannelPermissions
   alias RealtimeWeb.Joken.CurrentTime
   alias RealtimeWeb.RlsAuthorization
 
@@ -42,7 +43,9 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
 
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
-    assert conn.assigns.permissions == {:ok, %Permissions{read: false}}
+
+    assert conn.assigns.permissions ==
+             {:ok, %Permissions{channel: %ChannelPermissions{read: false}}}
   end
 
   @tag role: "anon", rls: :select_authenticated_role
@@ -58,7 +61,9 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
 
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
-    assert conn.assigns.permissions == {:ok, %Permissions{read: false}}
+
+    assert conn.assigns.permissions ==
+             {:ok, %Permissions{channel: %ChannelPermissions{read: false}}}
   end
 
   @tag role: "authenticated", rls: :select_authenticated_role_on_channel_name
@@ -78,7 +83,9 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
 
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
-    assert conn.assigns.permissions == {:ok, %Permissions{read: true}}
+
+    assert conn.assigns.permissions ==
+             {:ok, %Permissions{channel: %ChannelPermissions{read: true}}}
   end
 
   @tag role: "authenticated", rls: :select_authenticated_role
@@ -93,7 +100,9 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     conn = setup_conn(conn, tenant, claims, jwt, role)
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
-    assert conn.assigns.permissions == {:ok, %Permissions{read: true}}
+
+    assert conn.assigns.permissions ==
+             {:ok, %Permissions{channel: %ChannelPermissions{read: true}}}
   end
 
   @tag role: "authenticated", rls: :select_authenticated_role

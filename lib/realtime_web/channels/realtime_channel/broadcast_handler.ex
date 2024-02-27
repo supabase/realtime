@@ -12,18 +12,18 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   @event_type "broadcast"
   @spec call(map(), Phoenix.Socket.t()) ::
           {:reply, :ok, Phoenix.Socket.t()} | {:noreply, Phoenix.Socket.t()}
-  def call(
-        payload,
-        %{
-          assigns: %{
-            is_new_api: true,
-            ack_broadcast: ack_broadcast,
-            self_broadcast: self_broadcast,
-            tenant_topic: tenant_topic
-          }
-        } = socket
-      ) do
+  def call(payload, %{assigns: %{is_new_api: true} = assigns} = socket) do
+    %{
+      ack_broadcast: ack_broadcast,
+      self_broadcast: self_broadcast,
+      tenant_topic: tenant_topic,
+      public: public
+    } = assigns
+
     socket = count(socket)
+
+    if !public do
+    end
 
     if self_broadcast,
       do: Endpoint.broadcast(tenant_topic, @event_type, payload),
