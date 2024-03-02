@@ -6,6 +6,7 @@ defmodule RealtimeWeb.TenantController do
 
   alias Realtime.Api
   alias Realtime.Api.Tenant
+  alias Realtime.Tenants.Cache
   alias Realtime.Helpers
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
@@ -193,6 +194,7 @@ defmodule RealtimeWeb.TenantController do
           PostgresCdc.stop_all(tenant)
           Helpers.replication_slot_teardown(tenant)
           Api.delete_tenant_by_external_id(tenant_id)
+          Cache.invalidate_tenant_cache(tenant_id)
         end)
     end
 

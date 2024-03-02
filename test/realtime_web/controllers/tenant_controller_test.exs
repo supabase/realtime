@@ -9,6 +9,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
   alias Realtime.Api.Tenant
   alias Realtime.Helpers
+  alias Realtime.Tenants.Cache
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.JwtVerification
 
@@ -138,6 +139,8 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "deletes chosen tenant", %{conn: conn, tenant: tenant} do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+        assert Cache.get_tenant_by_external_id(tenant.external_id)
+
         {:ok, db_conn} = Helpers.check_tenant_connection(tenant, "realtime_test")
 
         assert %{rows: [["supabase_realtime_replication_slot"]]} =
@@ -159,7 +162,11 @@ defmodule RealtimeWeb.TenantControllerTest do
              ]}
           )
 
-        {:ok, _} = Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
+        {:ok, %{rows: []}} =
+          Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
+
+        refute Cache.get_tenant_by_external_id(tenant.external_id)
+
         conn = get(conn, Routes.tenant_path(conn, :show, tenant.external_id))
         assert response(conn, 404)
       end
