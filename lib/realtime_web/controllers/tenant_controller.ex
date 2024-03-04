@@ -194,7 +194,7 @@ defmodule RealtimeWeb.TenantController do
           PostgresCdc.stop_all(tenant)
           Helpers.replication_slot_teardown(tenant)
           Api.delete_tenant_by_external_id(tenant_id)
-          Cache.invalidate_tenant_cache(tenant_id)
+          Cache.distributed_invalidate_tenant_cache(tenant_id)
         end)
     end
 

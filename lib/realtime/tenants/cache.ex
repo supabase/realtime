@@ -16,8 +16,22 @@ defmodule Realtime.Tenants.Cache do
 
   def get_tenant_by_external_id(keyword), do: apply_repo_fun(__ENV__.function, [keyword])
 
+  @doc """
+    Invalidates the cache for a tenant in the local node
+  """
   def invalidate_tenant_cache(tenant_id) do
     Cachex.del(__MODULE__, {{:get_tenant_by_external_id, 1}, [tenant_id]})
+  end
+
+  @doc """
+  Broadcasts a message to invalidate the tenant cache to all connected nodes
+  """
+  def distributed_invalidate_tenant_cache(tenant_id) do
+    Phoenix.PubSub.broadcast!(
+      Realtime.PubSub,
+      "realtime:operations:invalidate_cache",
+      {:invalidate_cache, tenant_id}
+    )
   end
 
   defp apply_repo_fun(arg1, arg2) do

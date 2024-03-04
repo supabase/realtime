@@ -222,7 +222,7 @@ defmodule Realtime.Tenants do
   defp broadcast_operation_event(action, external_id) do
     Phoenix.PubSub.broadcast!(
       Realtime.PubSub,
-      "realtime:operations:suspend_tenant",
+      "realtime:operations:invalidate_cache",
       {action, external_id}
     )
   end
