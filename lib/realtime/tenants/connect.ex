@@ -117,7 +117,7 @@ defmodule Realtime.Tenants.Connect do
           connected_users_bucket: connected_users_bucket
         } = state
       ) do
-    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:suspend_tenant")
+    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:invalidate_cache")
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
 
     {:noreply, state}

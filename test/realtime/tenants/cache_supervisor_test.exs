@@ -21,7 +21,7 @@ defmodule Realtime.Tenants.CacheSupervisorTest do
     # PubSub message
     Phoenix.PubSub.broadcast(
       Realtime.PubSub,
-      "realtime:operations:suspend_tenant",
+      "realtime:operations:invalidate_cache",
       {:suspend_tenant, external_id}
     )
 
