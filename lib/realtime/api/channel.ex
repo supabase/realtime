@@ -32,12 +32,7 @@ defmodule Realtime.Api.Channel do
   end
 
   defp put_timestamp(changeset, field) do
-    timestamp =
-      DateTime.utc_now()
-      |> DateTime.to_naive()
-      |> NaiveDateTime.truncate(:second)
-
-    put_change(changeset, field, timestamp)
+    put_change(changeset, field, NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second))
   end
 
   defp maybe_put_timestamp(changeset, field) do

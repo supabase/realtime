@@ -37,7 +37,7 @@ defmodule Realtime.Channels do
 
     Postgrex.transaction(conn, fn transaction_conn ->
       with {:ok, channel} <- Repo.insert(transaction_conn, channel, Channel),
-           changeset <- Broadcast.changeset(%Broadcast{}, %{channel_id: channel.id}),
+           changeset = Broadcast.changeset(%Broadcast{}, %{channel_id: channel.id}),
            {:ok, _} <- Repo.insert(transaction_conn, changeset, Broadcast) do
         channel
       else

@@ -38,7 +38,7 @@ defmodule RealtimeWeb.ChannelsController do
         %{
           assigns: %{
             tenant: tenant,
-            permissions: {:ok, %Permissions{channel: %ChannelPermissions{read: true}}}
+            permissions: %Permissions{channel: %ChannelPermissions{read: true}}
           }
         } = conn,
         _params
@@ -81,7 +81,7 @@ defmodule RealtimeWeb.ChannelsController do
         %{
           assigns: %{
             tenant: tenant,
-            permissions: {:ok, %Permissions{channel: %ChannelPermissions{read: true}}}
+            permissions: %Permissions{channel: %ChannelPermissions{read: true}}
           }
         } = conn,
         %{

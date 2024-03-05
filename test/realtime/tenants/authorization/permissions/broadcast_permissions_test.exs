@@ -61,6 +61,21 @@ defmodule Realtime.Tenants.Authorization.Permissions.BroadcastPermissionsTest do
         assert result == %Permissions{broadcast: %BroadcastPermissions{read: false}}
       end)
     end
+
+    @tag role: "anon", policies: []
+    test "handles database errors", context do
+      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+        Authorization.set_conn_config(transaction_conn, context.authorization_context)
+        Process.exit(context.db_conn, :kill)
+
+        assert {:error, _} =
+                 BroadcastPermissions.check_read_permissions(
+                   transaction_conn,
+                   %Permissions{},
+                   context.authorization_context
+                 )
+      end)
+    end
   end
 
   describe "check_write_permissions/3" do

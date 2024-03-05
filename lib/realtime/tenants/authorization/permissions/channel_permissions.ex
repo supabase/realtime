@@ -27,50 +27,46 @@ defmodule Realtime.Tenants.Authorization.Permissions.ChannelPermissions do
 
   @impl true
   def check_read_permissions(conn, %Permissions{} = permissions, %Authorization{channel: nil}) do
-    case Repo.all(conn, Channel, Channel, mode: :savepoint) do
-      {:ok, channels} when channels != [] ->
-        permissions = Permissions.update_permissions(permissions, :channel, :read, true)
-        {:ok, permissions}
+    Postgrex.transaction(conn, fn transaction_conn ->
+      case Repo.all(transaction_conn, Channel, Channel, mode: :savepoint) do
+        {:ok, channels} when channels != [] ->
+          Permissions.update_permissions(permissions, :channel, :read, true)
 
-      {:ok, _} ->
-        permissions = Permissions.update_permissions(permissions, :channel, :read, false)
-        {:ok, permissions}
+        {:ok, _} ->
+          Permissions.update_permissions(permissions, :channel, :read, false)
 
-      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        permissions = Permissions.update_permissions(permissions, :channel, :read, false)
-        {:ok, permissions}
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+          Permissions.update_permissions(permissions, :channel, :read, false)
 
-      {:error, error} ->
-        Logger.error("Error getting permissions for connection: #{inspect(error)}")
-        {:error, error}
-    end
+        {:error, error} ->
+          Logger.error(
+            "Error getting all channel read permissions for connection: #{inspect(error)}"
+          )
+
+          Postgrex.rollback(transaction_conn, error)
+      end
+    end)
   end
 
   def check_read_permissions(conn, %Permissions{} = permissions, %Authorization{channel: channel}) do
     query = from(c in Channel, where: c.id == ^channel.id)
 
-    case Repo.one(conn, query, Channel) do
-      {:ok, channels} when channels != [] ->
-        permissions = Permissions.update_permissions(permissions, :channel, :read, true)
-        {:ok, permissions}
+    Postgrex.transaction(conn, fn transaction_conn ->
+      case Repo.one(transaction_conn, query, Channel) do
+        {:ok, %Channel{}} ->
+          Permissions.update_permissions(permissions, :channel, :read, true)
 
-      {:ok, _} ->
-        permissions = Permissions.update_permissions(permissions, :channel, :read, false)
-        {:ok, permissions}
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+          Permissions.update_permissions(permissions, :channel, :read, false)
 
-      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        permissions = Permissions.update_permissions(permissions, :channel, :read, false)
-        {:ok, permissions}
+        {:error, :not_found} ->
+          Permissions.update_permissions(permissions, :channel, :read, false)
 
-      {:error, :not_found} ->
-        permissions = Permissions.update_permissions(permissions, :channel, :read, false)
-
-        {:ok, permissions}
-
-      {:error, error} ->
-        Logger.error("Error getting permissions for connection: #{inspect(error)}")
-        {:error, error}
-    end
+        {:error, error} ->
+          Logger.error("Error getting channel read permissions for connection: #{inspect(error)}")
+          Postgrex.rollback(transaction_conn, error)
+      end
+    end)
   end
 
   @impl true
@@ -85,25 +81,19 @@ defmodule Realtime.Tenants.Authorization.Permissions.ChannelPermissions do
       {:ok, %Channel{check: true} = channel} ->
         revert_changeset = Channel.check_changeset(channel, %{check: false})
         {:ok, _} = Repo.update(conn, revert_changeset, Channel)
-        permissions = Permissions.update_permissions(permissions, :channel, :write, true)
-
-        {:ok, permissions}
+        {:ok, Permissions.update_permissions(permissions, :channel, :write, true)}
 
       {:ok, _} ->
-        permissions = Permissions.update_permissions(permissions, :channel, :write, false)
-        {:ok, permissions}
+        {:ok, Permissions.update_permissions(permissions, :channel, :write, false)}
 
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        permissions = Permissions.update_permissions(permissions, :channel, :write, false)
-        {:ok, permissions}
+        {:ok, Permissions.update_permissions(permissions, :channel, :write, false)}
 
       {:error, :not_found} ->
-        permissions = Permissions.update_permissions(permissions, :channel, :write, false)
-
-        {:ok, permissions}
+        {:ok, Permissions.update_permissions(permissions, :channel, :write, false)}
 
       {:error, error} ->
-        Logger.error("Error getting permissions for connection: #{inspect(error)}")
+        Logger.error("Error getting channel write permissions for connection: #{inspect(error)}")
         {:error, error}
     end
   end

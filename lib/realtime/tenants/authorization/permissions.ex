@@ -14,7 +14,7 @@ defmodule Realtime.Tenants.Authorization.Permissions do
   alias Realtime.Tenants.Authorization.Permissions.ChannelPermissions
   defstruct channel: %ChannelPermissions{}, broadcast: %BroadcastPermissions{}
 
-  @type t :: %__MODULE__{:channel => ChannelPermissions.t()}
+  @type t :: %__MODULE__{channel: ChannelPermissions.t(), broadcast: BroadcastPermissions.t()}
 
   @doc """
   Implementation of the method on how to check read permissions for a given entity within the context of a database connection
@@ -24,8 +24,8 @@ defmodule Realtime.Tenants.Authorization.Permissions do
     * `permissions` - The permissions struct to which the result will be accumulated
     * `authorization` - The authorization struct with required information for permission checking
   """
-  @callback check_read_permissions(DBConnection.t(), __MODULE__.t(), Authorization.t()) ::
-              {:ok, __MODULE__.t()} | {:error, any()}
+  @callback check_read_permissions(DBConnection.t(), t(), Authorization.t()) ::
+              {:ok, t()} | {:error, any()}
   @doc """
   Implementation of the method on how to check write permissions for a given entity within the context of a database connection
 
@@ -34,13 +34,13 @@ defmodule Realtime.Tenants.Authorization.Permissions do
     * `permissions` - The permissions struct to which the result will be accumulated
     * `authorization` - The authorization struct with required information for permission checking
   """
-  @callback check_write_permissions(DBConnection.t(), __MODULE__.t(), Authorization.t()) ::
-              {:ok, __MODULE__.t()} | {:error, any()}
+  @callback check_write_permissions(DBConnection.t(), t(), Authorization.t()) ::
+              {:ok, t()} | {:error, any()}
 
   @doc """
   Updates the Permission struct sub key with the given value.
   """
-  @spec update_permissions(__MODULE__.t(), atom, atom, boolean) :: __MODULE__.t()
+  @spec update_permissions(t(), atom, atom, boolean) :: t()
   def update_permissions(permissions, key, sub_key, value) do
     Map.update!(permissions, key, fn map -> Map.put(map, sub_key, value) end)
   end

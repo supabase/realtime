@@ -25,11 +25,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
           context.authorization_context
         )
 
-      assert {:ok,
-              %Permissions{
-                channel: %ChannelPermissions{read: true, write: false},
-                broadcast: %BroadcastPermissions{read: true, write: false}
-              }} = conn.assigns.permissions
+      assert %Permissions{
+               channel: %ChannelPermissions{read: true, write: false},
+               broadcast: %BroadcastPermissions{read: true, write: false}
+             } = conn.assigns.permissions
     end
 
     @tag role: "anon",
@@ -42,11 +41,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
           context.authorization_context
         )
 
-      assert {:ok,
-              %Permissions{
-                channel: %ChannelPermissions{read: false, write: false},
-                broadcast: %BroadcastPermissions{read: false, write: false}
-              }} = conn.assigns.permissions
+      assert %Permissions{
+               channel: %ChannelPermissions{read: false, write: false},
+               broadcast: %BroadcastPermissions{read: false, write: false}
+             } = conn.assigns.permissions
     end
   end
 
@@ -61,11 +59,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
           context.authorization_context
         )
 
-      assert {:ok,
-              %Permissions{
-                channel: %ChannelPermissions{read: true, write: true},
-                broadcast: %BroadcastPermissions{read: true, write: true}
-              }} = conn.assigns.permissions
+      assert %Permissions{
+               channel: %ChannelPermissions{read: true, write: true},
+               broadcast: %BroadcastPermissions{read: true, write: true}
+             } = conn.assigns.permissions
     end
 
     @tag role: "anon",
@@ -78,11 +75,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
           context.authorization_context
         )
 
-      assert {:ok,
-              %Permissions{
-                channel: %ChannelPermissions{read: false, write: false},
-                broadcast: %BroadcastPermissions{read: false, write: false}
-              }} = conn.assigns.permissions
+      assert %Permissions{
+               channel: %ChannelPermissions{read: false, write: false},
+               broadcast: %BroadcastPermissions{read: false, write: false}
+             } = conn.assigns.permissions
     end
   end
 

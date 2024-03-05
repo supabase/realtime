@@ -31,25 +31,27 @@ defmodule Realtime.Tenants.Authorization.Permissions.BroadcastPermissions do
   def check_read_permissions(conn, %Permissions{} = permissions, %Authorization{
         channel: %Channel{id: channel_id}
       }) do
-    query = from(b in Broadcast, where: b.channel_id == ^channel_id, select: b.channel_id)
+    query = from(b in Broadcast, where: b.channel_id == ^channel_id)
 
-    case Repo.all(conn, query, Broadcast, mode: :savepoint) do
-      {:ok, broadcast} when broadcast != [] ->
-        permissions = Permissions.update_permissions(permissions, :broadcast, :read, true)
-        {:ok, permissions}
+    Postgrex.transaction(conn, fn transaction_conn ->
+      case Repo.one(conn, query, Broadcast) do
+        {:ok, %Broadcast{}} ->
+          Permissions.update_permissions(permissions, :broadcast, :read, true)
 
-      {:ok, _} ->
-        permissions = Permissions.update_permissions(permissions, :broadcast, :read, false)
-        {:ok, permissions}
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+          Permissions.update_permissions(permissions, :broadcast, :read, false)
 
-      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        permissions = Permissions.update_permissions(permissions, :broadcast, :read, false)
-        {:ok, permissions}
+        {:error, :not_found} ->
+          Permissions.update_permissions(permissions, :broadcast, :read, false)
 
-      {:error, error} ->
-        Logger.error("Error getting permissions for connection: #{inspect(error)}")
-        {:error, error}
-    end
+        {:error, error} ->
+          Logger.error(
+            "Error getting broadcast read permissions for connection: #{inspect(error)}"
+          )
+
+          Postgrex.rollback(transaction_conn, error)
+      end
+    end)
   end
 
   @impl true
@@ -62,32 +64,34 @@ defmodule Realtime.Tenants.Authorization.Permissions.BroadcastPermissions do
       }) do
     query = from(b in Broadcast, where: b.channel_id == ^channel_id)
 
-    with {:ok, broadcast} <- Repo.one(conn, query, Broadcast),
-         changeset <- Broadcast.check_changeset(broadcast, %{check: true}),
-         {:ok, %Broadcast{check: true} = broadcast} <-
-           Repo.update(conn, changeset, Broadcast, mode: :savepoint) do
-      revert_changeset = Broadcast.check_changeset(broadcast, %{check: false})
-      {:ok, _} = Repo.update(conn, revert_changeset, Broadcast)
-      permissions = Permissions.update_permissions(permissions, :broadcast, :write, true)
+    Postgrex.transaction(conn, fn transaction_conn ->
+      case Repo.one(conn, query, Broadcast) do
+        {:ok, %Broadcast{} = broadcast} ->
+          changeset = Broadcast.check_changeset(broadcast, %{check: true})
 
-      {:ok, permissions}
-    else
-      {:ok, _} ->
-        permissions = Permissions.update_permissions(permissions, :broadcast, :write, false)
-        {:ok, permissions}
+          case Repo.update(conn, changeset, Broadcast, mode: :savepoint) do
+            {:ok, %Broadcast{check: true} = broadcast} ->
+              revert_changeset = Broadcast.check_changeset(broadcast, %{check: false})
+              {:ok, _} = Repo.update(conn, revert_changeset, Broadcast)
+              Permissions.update_permissions(permissions, :broadcast, :write, true)
 
-      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        permissions = Permissions.update_permissions(permissions, :broadcast, :write, false)
-        {:ok, permissions}
+            {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+              Permissions.update_permissions(permissions, :broadcast, :write, false)
 
-      {:error, :not_found} ->
-        permissions = Permissions.update_permissions(permissions, :broadcast, :write, false)
+            {:error, :not_found} ->
+              Permissions.update_permissions(permissions, :broadcast, :write, false)
 
-        {:ok, permissions}
+            {:error, error} ->
+              Logger.error(
+                "Error getting broadcast write permissions for connection: #{inspect(error)}"
+              )
 
-      {:error, error} ->
-        Logger.error("Error getting permissions for connection: #{inspect(error)}")
-        {:error, error}
-    end
+              Postgrex.rollback(transaction_conn, error)
+          end
+
+        {:error, :not_found} ->
+          Permissions.update_permissions(permissions, :broadcast, :write, false)
+      end
+    end)
   end
 end

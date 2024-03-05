@@ -44,8 +44,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
 
-    assert conn.assigns.permissions ==
-             {:ok, %Permissions{channel: %ChannelPermissions{read: false}}}
+    assert conn.assigns.permissions == %Permissions{channel: %ChannelPermissions{read: false}}
   end
 
   @tag role: "authenticated", policies: [:read_all_channels]
@@ -61,8 +60,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
 
-    assert conn.assigns.permissions ==
-             {:ok, %Permissions{channel: %ChannelPermissions{read: true}}}
+    assert conn.assigns.permissions == %Permissions{channel: %ChannelPermissions{read: true}}
   end
 
   @tag role: "authenticated", policies: [:read_channel]
