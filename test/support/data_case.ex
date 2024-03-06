@@ -65,51 +65,73 @@ defmodule Realtime.DataCase do
       Postgrex.query!(db_conn, "DROP POLICY IF EXISTS #{name} ON #{schema}.#{table}", [])
     end)
 
-    Postgrex.query!(db_conn, "TRUNCATE TABLE #{schema}.#{table}", [])
+    Postgrex.query!(db_conn, "TRUNCATE TABLE #{schema}.#{table} CASCADE", [])
     Postgrex.query!(db_conn, "ALTER SEQUENCE #{schema}.#{table}_id_seq RESTART WITH 1", [])
   end
 
-  def create_rls_policy(conn, policy, params \\ nil)
-
-  def create_rls_policy(conn, :select_authenticated_role_on_channel_name, %{name: name}) do
-    Postgrex.query!(
-      conn,
-      """
-      CREATE POLICY select_authenticated_role
-      ON realtime.channels FOR SELECT
-      TO authenticated
-      USING ( realtime.channel_name() = '#{name}' )
-      """,
-      []
-    )
+  def create_rls_policies(conn, policies, params) do
+    Enum.each(policies, fn policy ->
+      query = policy_query(policy, params)
+      Postgrex.query!(conn, query, [])
+    end)
   end
 
-  def create_rls_policy(conn, :select_authenticated_role, _) do
-    Postgrex.query!(
-      conn,
-      """
-      CREATE POLICY select_authenticated_role
-      ON realtime.channels FOR SELECT
-      TO authenticated
-      USING ( true )
-      """,
-      []
-    )
+  def policy_query(query, params \\ nil)
+
+  def policy_query(:read_all_channels, _) do
+    """
+    CREATE POLICY select_authenticated_role
+    ON realtime.channels FOR SELECT
+    TO authenticated
+    USING ( true );
+    """
   end
 
-  def create_rls_policy(conn, :write_authenticated_role, %{name: name} = channel) do
-    create_rls_policy(conn, :select_authenticated_role_on_channel_name, channel)
+  def policy_query(:write_all_channels, _) do
+    """
+    CREATE POLICY write_authenticated_role
+    ON realtime.channels FOR UPDATE
+    TO authenticated
+    USING ( true )
+    WITH CHECK ( true );
+    """
+  end
 
-    Postgrex.query!(
-      conn,
-      """
-      CREATE POLICY write_authenticated_role
-      ON realtime.channels FOR UPDATE
-      TO authenticated
-      USING ( realtime.channel_name() = '#{name}' )
-      WITH CHECK ( realtime.channel_name() = '#{name}' )
-      """,
-      []
-    )
+  def policy_query(:read_channel, %{name: name}) do
+    """
+    CREATE POLICY select_authenticated_role
+    ON realtime.channels FOR SELECT
+    TO authenticated
+    USING ( realtime.channel_name() = '#{name}' );
+    """
+  end
+
+  def policy_query(:write_channel, %{name: name}) do
+    """
+    CREATE POLICY write_authenticated_role
+    ON realtime.channels FOR UPDATE
+    TO authenticated
+    USING ( realtime.channel_name() = '#{name}' )
+    WITH CHECK ( realtime.channel_name() = '#{name}' );
+    """
+  end
+
+  def policy_query(:read_broadcast, %{name: name}) do
+    """
+    CREATE POLICY broadcast_read_enabled_authenticated_role_on_channel_name
+    ON realtime.broadcasts FOR SELECT
+    TO authenticated
+    USING ( realtime.channel_name() = '#{name}' );
+    """
+  end
+
+  def policy_query(:write_broadcast, %{name: name}) do
+    """
+    CREATE POLICY broadcast_write_enabled_authenticated_role_on_channel_name
+    ON realtime.broadcasts FOR UPDATE
+    TO authenticated
+    USING ( realtime.channel_name() = '#{name}' )
+    WITH CHECK ( realtime.channel_name() = '#{name}' );
+    """
   end
 end

@@ -4,7 +4,8 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
   import Plug.Conn
 
   alias Realtime.Tenants
-  alias Realtime.Tenants.Authorization.Permissions
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
   alias RealtimeWeb.Joken.CurrentTime
   alias RealtimeWeb.RlsAuthorization
 
@@ -16,7 +17,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
 
     clean_table(db_conn, "realtime", "channels")
     channel = channel_fixture(tenant)
-    create_rls_policy(db_conn, context.rls, channel)
+    create_rls_policies(db_conn, context.policies, channel)
 
     claims = %{sub: random_string(), role: "authenticated", exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
@@ -25,8 +26,8 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     %{jwt: jwt, claims: claims, tenant: tenant, channel: channel}
   end
 
-  @tag role: "anon", rls: :select_authenticated_role_on_channel_name
-  test "assigns the permissions correctly to anon and select_authenticated_role_on_channel_name rule",
+  @tag role: "anon", policies: [:read_channel]
+  test "assigns the policies correctly to anon user",
        %{
          conn: conn,
          jwt: jwt,
@@ -42,47 +43,12 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
 
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
-    assert conn.assigns.permissions == {:ok, %Permissions{read: false}}
+
+    assert conn.assigns.policies == %Policies{channel: %ChannelPolicies{read: false}}
   end
 
-  @tag role: "anon", rls: :select_authenticated_role
-  test "assigns the permissions correctly to anon and select_authenticated_role rule",
-       %{
-         conn: conn,
-         jwt: jwt,
-         claims: claims,
-         tenant: tenant,
-         role: role
-       } do
-    conn = setup_conn(conn, tenant, claims, jwt, role)
-
-    conn = RlsAuthorization.call(conn, %{})
-    refute conn.halted
-    assert conn.assigns.permissions == {:ok, %Permissions{read: false}}
-  end
-
-  @tag role: "authenticated", rls: :select_authenticated_role_on_channel_name
-  test "assigns the permissions correctly to authenticated and select_authenticated_role_on_channel_name rule",
-       %{
-         conn: conn,
-         jwt: jwt,
-         claims: claims,
-         tenant: tenant,
-         role: role,
-         channel: channel
-       } do
-    conn =
-      conn
-      |> setup_conn(tenant, claims, jwt, role)
-      |> Map.put(:path_params, %{"id" => channel.id})
-
-    conn = RlsAuthorization.call(conn, %{})
-    refute conn.halted
-    assert conn.assigns.permissions == {:ok, %Permissions{read: true}}
-  end
-
-  @tag role: "authenticated", rls: :select_authenticated_role
-  test "assigns the permissions correctly to authenticated and select_authenticated_role rule",
+  @tag role: "authenticated", policies: [:read_all_channels]
+  test "assigns the policies correctly to authenticated user",
        %{
          conn: conn,
          jwt: jwt,
@@ -93,10 +59,11 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     conn = setup_conn(conn, tenant, claims, jwt, role)
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
-    assert conn.assigns.permissions == {:ok, %Permissions{read: true}}
+
+    assert conn.assigns.policies == %Policies{channel: %ChannelPolicies{read: true}}
   end
 
-  @tag role: "authenticated", rls: :select_authenticated_role
+  @tag role: "authenticated", policies: [:read_channel]
   test "on error, halts the connection and set status to 401", %{
     conn: conn,
     jwt: jwt,

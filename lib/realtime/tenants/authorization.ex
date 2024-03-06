@@ -1,27 +1,21 @@
 defmodule Realtime.Tenants.Authorization do
   @moduledoc """
-  Runs validations based on RLS policies to set permissions for a given connection.
+  Runs validations based on RLS policies to set policies for a given connection and
+  creates a Realtime.Tenants.Policies struct with the accumulated results of the policies
+  for a given user and a given channel context
 
-  It will assign the a new key to a socket or a conn with the following:
-  * read - a boolean indicating whether the connection has read permissions
+  Each feature will have their own set of ways to check Policies against the Authorization context.
+
+  Check more information at Realtime.Tenants.Authorization.Policies
   """
   require Logger
 
-  import Ecto.Query
-
-  alias Realtime.Repo
   alias Realtime.Api.Channel
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
 
   defstruct [:channel, :headers, :jwt, :claims, :role]
-
-  defmodule Permissions do
-    defstruct read: false, write: false
-
-    @type t :: %__MODULE__{
-            :read => boolean(),
-            :write => boolean()
-          }
-  end
 
   @type t :: %__MODULE__{
           :channel => Channel.t() | nil,
@@ -30,9 +24,18 @@ defmodule Realtime.Tenants.Authorization do
           :jwt => map(),
           :role => binary()
         }
+
   @doc """
-  Builds a new authorization params struct.
+  Builds a new authorization struct which will be used to retain the information required to check Policies.
+
+  Requires a map with the following keys:
+  * channel: Realtime.Api.Channel struct for which channel is being accessed
+  * headers: Request headers when the connection was made or WS was updated
+  * jwt: JWT String
+  * claims: JWT claims
+  * role: JWT role
   """
+  @spec build_authorization_params(map()) :: t()
   def build_authorization_params(%{
         channel: channel,
         headers: headers,
@@ -49,46 +52,45 @@ defmodule Realtime.Tenants.Authorization do
     }
   end
 
+  @doc """
+  Runs validations based on RLS policies to set policies for a given connection (either Phoenix.Socket or Plug.Conn).
+  """
   @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), DBConnection.t(), __MODULE__.t()) ::
           {:ok, Phoenix.Socket.t() | Plug.Conn.t()} | {:error, :unauthorized}
+  def get_authorizations(%Phoenix.Socket{} = socket, db_conn, authorization_context) do
+    case get_policies_for_connection(db_conn, authorization_context) do
+      {:ok, policies} -> {:ok, Phoenix.Socket.assign(socket, :policies, policies)}
+      _ -> {:error, :unauthorized}
+    end
+  end
+
+  def get_authorizations(%Plug.Conn{} = conn, db_conn, authorization_context) do
+    case get_policies_for_connection(db_conn, authorization_context) do
+      {:ok, policies} -> {:ok, Plug.Conn.assign(conn, :policies, policies)}
+      _ -> {:error, :unauthorized}
+    end
+  end
+
   @doc """
-  Runs validations based on RLS policies to set permissions for a given connection (either Phoenix.Socket or Plug.Conn).
+  Sets the current connection configuration with the following config values:
+  * role: The role of the user
+  * realtime.channel_name: The name of the channel being accessed
+  * request.jwt.claim.role: The role of the user
+  * request.jwt: The JWT token
+  * request.jwt.claim.sub: The sub claim of the JWT token
+  * request.jwt.claims: The claims of the JWT token
+  * request.headers: The headers of the request
   """
-  def get_authorizations(%Phoenix.Socket{} = socket, db_conn, params) do
-    case get_permissions_for_connection(db_conn, params) do
-      {:ok, permissions} -> {:ok, Phoenix.Socket.assign(socket, :permissions, permissions)}
-      _ -> {:error, :unauthorized}
-    end
-  end
-
-  def get_authorizations(%Plug.Conn{} = conn, db_conn, params) do
-    case get_permissions_for_connection(db_conn, params) do
-      {:ok, permissions} -> {:ok, Plug.Conn.assign(conn, :permissions, permissions)}
-      _ -> {:error, :unauthorized}
-    end
-  end
-
-  defp get_permissions_for_connection(conn, params) do
-    Postgrex.transaction(conn, fn transaction_conn ->
-      set_config(transaction_conn, params)
-      permissions = %Permissions{}
-
-      with {:ok, %{write: false} = permissions} <-
-             check_write_permissions(transaction_conn, permissions, params),
-           {:ok, permissions} <- check_read_permissions(transaction_conn, permissions) do
-        {:ok, permissions}
-      end
-    end)
-  end
-
-  defp set_config(conn, params) do
+  @spec set_conn_config(DBConnection.t(), t()) ::
+          {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
+  def set_conn_config(conn, authorization_context) do
     %__MODULE__{
       channel: channel,
       headers: headers,
       jwt: jwt,
       claims: claims,
       role: role
-    } = params
+    } = authorization_context
 
     sub = Map.get(claims, :sub)
     claims = Jason.encode!(claims)
@@ -111,50 +113,31 @@ defmodule Realtime.Tenants.Authorization do
     )
   end
 
-  defp check_read_permissions(conn, permissions) do
-    query = from(c in Channel, select: c.name)
+  @policies_mods [ChannelPolicies, BroadcastPolicies]
+  defp get_policies_for_connection(conn, authorization_context) do
+    Postgrex.transaction(conn, fn transaction_conn ->
+      set_conn_config(transaction_conn, authorization_context)
 
-    case Repo.all(conn, query, Channel, mode: :savepoint) do
-      {:ok, channels} when channels != [] ->
-        {:ok, %Permissions{permissions | read: true}}
-
-      {:ok, _} ->
-        {:ok, %Permissions{permissions | read: false}}
-
-      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        {:ok, %Permissions{permissions | read: false}}
-
-      {:error, error} ->
-        Logger.error("Error getting permissions for connection: #{inspect(error)}")
-        {:error, error}
-    end
-  end
-
-  defp check_write_permissions(_, permissions, %__MODULE__{channel: nil}) do
-    {:ok, %Permissions{permissions | write: false}}
-  end
-
-  defp check_write_permissions(conn, permissions, %__MODULE__{channel: channel}) do
-    changeset = Channel.check_changeset(channel, %{check: true})
-
-    case Repo.update(conn, changeset, Channel, mode: :savepoint) do
-      {:ok, %Channel{check: true} = channel} ->
-        revert_changeset = Channel.check_changeset(channel, %{check: nil})
-        {:ok, _} = Repo.update(conn, revert_changeset, Channel)
-        {:ok, %Permissions{permissions | write: true, read: true}}
-
-      {:ok, _} ->
-        {:ok, %Permissions{permissions | write: false}}
-
-      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        {:ok, %Permissions{permissions | write: false}}
-
-      {:error, :not_found} ->
-        {:ok, %Permissions{permissions | write: false}}
-
-      {:error, error} ->
-        Logger.error("Error getting permissions for connection: #{inspect(error)}")
-        {:error, error}
-    end
+      Enum.reduce_while(@policies_mods, %Policies{}, fn policies_mod, policies ->
+        with {:ok, policies} <-
+               policies_mod.check_write_policies(
+                 transaction_conn,
+                 policies,
+                 authorization_context
+               ),
+             {:ok, policies} <-
+               policies_mod.check_read_policies(
+                 transaction_conn,
+                 policies,
+                 authorization_context
+               ) do
+          {:cont, policies}
+        else
+          {:error, _} ->
+            Postgrex.rollback(transaction_conn, :unauthorized)
+            {:halt, {:error, :unauthorized}}
+        end
+      end)
+    end)
   end
 end

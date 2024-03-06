@@ -20,13 +20,10 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       Realtime.Helpers.decrypt!(tenant.jwt_secret, Application.get_env(:realtime, :db_enc_key))
 
     {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 
-    create_rls_policy(db_conn, :select_authenticated_role)
-
-    on_exit(fn ->
-      Postgrex.query!(db_conn, "drop policy select_authenticated_role on realtime.channels", [])
-    end)
+    create_rls_policies(db_conn, [:read_all_channels], nil)
 
     claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", secret)

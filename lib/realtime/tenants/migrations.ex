@@ -43,7 +43,8 @@ defmodule Realtime.Tenants.Migrations do
     CreateRlsHelperFunctions,
     EnableChannelsRls,
     AddChannelsColumnForWriteCheck,
-    AddUpdateGrantToChannels
+    AddUpdateGrantToChannels,
+    AddBroadcastsPoliciesTable
   }
 
   alias Realtime.Helpers
@@ -85,7 +86,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_231_204_144_024, CreateRlsHelperFunctions},
     {20_231_204_144_025, EnableChannelsRls},
     {20_240_108_234_812, AddChannelsColumnForWriteCheck},
-    {20_240_109_165_339, AddUpdateGrantToChannels}
+    {20_240_109_165_339, AddUpdateGrantToChannels},
+    {20_240_227_174_441, AddBroadcastsPoliciesTable}
   ]
 
   @spec run_migrations(map()) :: {:ok, [integer()]} | {:error, any()}
@@ -131,7 +133,9 @@ defmodule Realtime.Tenants.Migrations do
 
         {:ok, res}
       rescue
-        error -> {:error, error}
+        error ->
+          Logger.error(error)
+          {:error, error}
       end
     end)
   end
