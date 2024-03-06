@@ -5,7 +5,7 @@ defmodule Realtime.Application do
 
   use Application
   require Logger, warn: false
-
+  alias Realtime.Repo.Replica
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
@@ -61,6 +61,7 @@ defmodule Realtime.Application do
         Realtime.GenCounter.DynamicSupervisor,
         {Cachex, name: Realtime.RateCounter},
         Realtime.Tenants.CacheSupervisor,
+        Realtime.Channels.CacheSupervisor,
         Realtime.RateCounter.DynamicSupervisor,
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence,
@@ -74,7 +75,7 @@ defmodule Realtime.Application do
       ] ++ extensions_supervisors()
 
     children =
-      case Realtime.Repo.Replica.replica() do
+      case Replica.replica() do
         Realtime.Repo -> children
         replica -> List.insert_at(children, 2, replica)
       end

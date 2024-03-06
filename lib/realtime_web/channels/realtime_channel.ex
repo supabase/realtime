@@ -3,19 +3,23 @@ defmodule RealtimeWeb.RealtimeChannel do
   Used for handling channels and subscriptions.
   """
   use RealtimeWeb, :channel
-
   require Logger
 
+  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
+  alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies
   alias DBConnection.Backoff
 
   alias Phoenix.Tracker.Shard
 
+  alias Realtime.Channels.Cache, as: ChannelsCache
   alias Realtime.GenCounter
   alias Realtime.Helpers
   alias Realtime.PostgresCdc
   alias Realtime.RateCounter
   alias Realtime.SignalHandler
   alias Realtime.Tenants
+  alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.ChannelsAuthorization
@@ -48,9 +52,12 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_joins(socket.assigns),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket.assigns),
-         {:ok, claims, confirm_token_ref} <- confirm_token(socket),
-         {:ok, _} <- Connect.lookup_or_start_connection(tenant),
-         is_new_api <- is_new_api(params) do
+         {:ok, claims, confirm_token_ref, access_token} <- confirm_token(socket),
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant),
+         is_new_api = is_new_api(params),
+         public = is_public(params),
+         {:ok, socket} <-
+           assign_policies(public, db_conn, sub_topic, access_token, claims, socket) do
       Realtime.UsersCounter.add(transport_pid, tenant)
 
       tenant_topic = tenant <> ":" <> sub_topic
@@ -83,7 +90,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         presence_key: presence_key(params),
         self_broadcast: !!params["config"]["broadcast"]["self"],
         tenant_topic: tenant_topic,
-        channel_name: sub_topic
+        channel_name: sub_topic,
+        public: !!public
       }
 
       {:ok, state, assign(socket, assigns)}
@@ -191,7 +199,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_info(:confirm_token, %{assigns: %{pg_change_params: pg_change_params}} = socket) do
     case confirm_token(socket) do
-      {:ok, claims, confirm_token_ref} ->
+      {:ok, claims, confirm_token_ref, _} ->
         pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
         {:noreply,
@@ -262,7 +270,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     socket = assign(socket, :access_token, refresh_token)
 
     case confirm_token(socket) do
-      {:ok, claims, confirm_token_ref} ->
+      {:ok, claims, confirm_token_ref, _} ->
         Helpers.cancel_timer(pg_sub_ref)
 
         pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
@@ -450,7 +458,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       interval = min(@confirm_token_ms_interval, exp_diff * 1_000)
       ref = Process.send_after(self(), :confirm_token, interval)
 
-      {:ok, claims, ref}
+      {:ok, claims, ref, access_token}
     else
       {:error, e} -> {:error, e}
       e -> {:error, e}
@@ -500,6 +508,13 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp is_new_api(%{"config" => _}), do: true
   defp is_new_api(_), do: false
+
+  defp is_public(params) do
+    case params["config"]["broadcast"]["public"] do
+      nil -> true
+      public -> !!public
+    end
+  end
 
   defp pg_change_params(true, params, channel_pid, claims, _) do
     send(self(), :sync_presence)
@@ -585,5 +600,34 @@ defmodule RealtimeWeb.RealtimeChannel do
     error_msg = inspect(error)
     Logger.error("Start channel error: " <> error_msg)
     {:error, %{reason: error_msg}}
+  end
+
+  defp assign_policies(false, db_conn, sub_topic, access_token, claims, socket) do
+    channel =
+      case ChannelsCache.get_channel_by_name(sub_topic, db_conn) do
+        {:error, :not_found} -> raise "Channel #{sub_topic} hasn't been initialized"
+        {:ok, channel} -> channel
+      end
+
+    authorization_context =
+      Authorization.build_authorization_params(%{
+        channel: channel,
+        headers: socket.assigns.headers,
+        jwt: access_token,
+        claims: claims,
+        role: claims["role"]
+      })
+
+    {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
+
+    case socket.assigns.policies do
+      %Policies{broadcast: %BroadcastPolicies{read: false}} -> {:error, :unauthorized}
+      %Policies{channel: %ChannelPolicies{read: false}} -> {:error, :unauthorized}
+      _ -> {:ok, socket}
+    end
+  end
+
+  defp assign_policies(true, _, _, _, _, socket) do
+    {:ok, assign(socket, policies: nil)}
   end
 end

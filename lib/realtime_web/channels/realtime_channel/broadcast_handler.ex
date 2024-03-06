@@ -6,6 +6,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   alias Realtime.GenCounter
   alias Realtime.RateCounter
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
 
   alias RealtimeWeb.Endpoint
 
@@ -19,15 +21,23 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
             is_new_api: true,
             ack_broadcast: ack_broadcast,
             self_broadcast: self_broadcast,
-            tenant_topic: tenant_topic
+            tenant_topic: tenant_topic,
+            policies: policies
           }
         } = socket
       ) do
     socket = count(socket)
 
-    if self_broadcast,
-      do: Endpoint.broadcast(tenant_topic, @event_type, payload),
-      else: Endpoint.broadcast_from(self(), tenant_topic, @event_type, payload)
+    case policies do
+      nil ->
+        send_message(self_broadcast, tenant_topic, payload)
+
+      %Policies{broadcast: %BroadcastPolicies{write: true}} ->
+        send_message(self_broadcast, tenant_topic, payload)
+
+      _ ->
+        nil
+    end
 
     if ack_broadcast,
       do: {:reply, :ok, socket},
@@ -36,6 +46,12 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   def call(_payload, socket) do
     {:noreply, socket}
+  end
+
+  defp send_message(self_broadcast, tenant_topic, payload) do
+    if self_broadcast,
+      do: Endpoint.broadcast(tenant_topic, @event_type, payload),
+      else: Endpoint.broadcast_from(self(), tenant_topic, @event_type, payload)
   end
 
   defp count(%{assigns: %{rate_counter: counter}} = socket) do

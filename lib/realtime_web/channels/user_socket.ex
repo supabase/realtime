@@ -65,7 +65,8 @@ defmodule RealtimeWeb.UserSocket do
           postgres_cdc_module: postgres_cdc_module,
           tenant: external_id,
           log_level: log_level,
-          tenant_token: token
+          tenant_token: token,
+          headers: opts.x_headers
         }
 
         assigns = Map.from_struct(assigns)
