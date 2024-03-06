@@ -26,9 +26,25 @@ defmodule Realtime.PostgresCdc do
     apply(module, :handle_stop, [tenant.external_id, timeout])
   end
 
-  @spec stop_all(Tenant.t(), pos_integer) :: :ok
+  @doc """
+  Stops all available drivers within a specified timeout.
+
+  Expects all handle_stop calls to return `:ok` within the `stop_timeout`.
+
+  We want all available drivers to stop within the `timeout`.
+  """
+
+  @spec stop_all(Tenant.t(), pos_integer) :: :ok | :error
   def stop_all(tenant, timeout \\ @timeout) do
-    Enum.each(available_drivers(), fn module -> stop(module, tenant, timeout) end)
+    count = Enum.count(available_drivers())
+    stop_timeout = Kernel.ceil(timeout / count)
+
+    stops = Enum.map(available_drivers(), fn module -> stop(module, tenant, stop_timeout) end)
+
+    case Enum.all?(stops, &(&1 == :ok)) do
+      true -> :ok
+      false -> :error
+    end
   end
 
   @spec available_drivers :: list

@@ -33,10 +33,21 @@ defmodule Extensions.PostgresCdcStream do
     end)
   end
 
-  def handle_stop(tenant, timeout) do
+  @doc """
+  Stops the Supervision tree for a tenant.
+
+  Expects an `external_id` as the `tenant`.
+  """
+
+  @spec handle_stop(String.t(), non_neg_integer()) :: :ok
+  def handle_stop(tenant, timeout) when is_binary(tenant) do
     case :syn.lookup(PostgresCdcStream, tenant) do
-      :undefined -> Logger.warning("Database supervisor not found for tenant #{tenant}")
-      {pid, _} -> DynamicSupervisor.stop(pid, :shutdown, timeout)
+      :undefined ->
+        Logger.warning("Database supervisor not found for tenant #{tenant}")
+        :ok
+
+      {pid, _} ->
+        DynamicSupervisor.stop(pid, :shutdown, timeout)
     end
   end
 
