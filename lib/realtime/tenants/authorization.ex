@@ -1,19 +1,19 @@
 defmodule Realtime.Tenants.Authorization do
   @moduledoc """
-  Runs validations based on RLS policies to set permissions for a given connection and
-  creates a Realtime.Tenants.Permissions struct with the accumulated results of the permissions
+  Runs validations based on RLS policies to set policies for a given connection and
+  creates a Realtime.Tenants.Policies struct with the accumulated results of the policies
   for a given user and a given channel context
 
-  Each feature will have their own set of ways to check Permissions against the Authorization context.
+  Each feature will have their own set of ways to check Policies against the Authorization context.
 
-  Check more information at Realtime.Tenants.Authorization.Permissions
+  Check more information at Realtime.Tenants.Authorization.Policies
   """
   require Logger
 
   alias Realtime.Api.Channel
-  alias Realtime.Tenants.Authorization.Permissions
-  alias Realtime.Tenants.Authorization.Permissions.BroadcastPermissions
-  alias Realtime.Tenants.Authorization.Permissions.ChannelPermissions
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
 
   defstruct [:channel, :headers, :jwt, :claims, :role]
 
@@ -26,7 +26,7 @@ defmodule Realtime.Tenants.Authorization do
         }
 
   @doc """
-  Builds a new authorization struct which will be used to retain the information required to check Permissions.
+  Builds a new authorization struct which will be used to retain the information required to check Policies.
 
   Requires a map with the following keys:
   * channel: Realtime.Api.Channel struct for which channel is being accessed
@@ -53,20 +53,20 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   @doc """
-  Runs validations based on RLS policies to set permissions for a given connection (either Phoenix.Socket or Plug.Conn).
+  Runs validations based on RLS policies to set policies for a given connection (either Phoenix.Socket or Plug.Conn).
   """
   @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), DBConnection.t(), __MODULE__.t()) ::
           {:ok, Phoenix.Socket.t() | Plug.Conn.t()} | {:error, :unauthorized}
   def get_authorizations(%Phoenix.Socket{} = socket, db_conn, authorization_context) do
-    case get_permissions_for_connection(db_conn, authorization_context) do
-      {:ok, permissions} -> {:ok, Phoenix.Socket.assign(socket, :permissions, permissions)}
+    case get_policies_for_connection(db_conn, authorization_context) do
+      {:ok, policies} -> {:ok, Phoenix.Socket.assign(socket, :policies, policies)}
       _ -> {:error, :unauthorized}
     end
   end
 
   def get_authorizations(%Plug.Conn{} = conn, db_conn, authorization_context) do
-    case get_permissions_for_connection(db_conn, authorization_context) do
-      {:ok, permissions} -> {:ok, Plug.Conn.assign(conn, :permissions, permissions)}
+    case get_policies_for_connection(db_conn, authorization_context) do
+      {:ok, policies} -> {:ok, Plug.Conn.assign(conn, :policies, policies)}
       _ -> {:error, :unauthorized}
     end
   end
@@ -113,25 +113,25 @@ defmodule Realtime.Tenants.Authorization do
     )
   end
 
-  @permission_mods [ChannelPermissions, BroadcastPermissions]
-  defp get_permissions_for_connection(conn, authorization_context) do
+  @policies_mods [ChannelPolicies, BroadcastPolicies]
+  defp get_policies_for_connection(conn, authorization_context) do
     Postgrex.transaction(conn, fn transaction_conn ->
       set_conn_config(transaction_conn, authorization_context)
 
-      Enum.reduce_while(@permission_mods, %Permissions{}, fn permission_mod, permissions ->
-        with {:ok, permissions} <-
-               permission_mod.check_write_permissions(
+      Enum.reduce_while(@policies_mods, %Policies{}, fn policies_mod, policies ->
+        with {:ok, policies} <-
+               policies_mod.check_write_policies(
                  transaction_conn,
-                 permissions,
+                 policies,
                  authorization_context
                ),
-             {:ok, permissions} <-
-               permission_mod.check_read_permissions(
+             {:ok, policies} <-
+               policies_mod.check_read_policies(
                  transaction_conn,
-                 permissions,
+                 policies,
                  authorization_context
                ) do
-          {:cont, permissions}
+          {:cont, policies}
         else
           {:error, _} ->
             Postgrex.rollback(transaction_conn, :unauthorized)

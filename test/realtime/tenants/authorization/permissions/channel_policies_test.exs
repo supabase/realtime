@@ -1,46 +1,46 @@
-defmodule Realtime.Tenants.Authorization.Permissions.ChannelPermissionsTest do
+defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
   use Realtime.DataCase
 
   alias Realtime.Api.Channel
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
-  alias Realtime.Tenants.Authorization.Permissions
-  alias Realtime.Tenants.Authorization.Permissions.ChannelPermissions
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
 
   alias RealtimeWeb.Joken.CurrentTime
 
-  describe "check_read_permissions/3" do
+  describe "check_read_policies/3" do
     setup [:rls_context]
 
     @tag role: "authenticated", policies: [:read_channel]
-    test "authenticated user has read permissions", context do
+    test "authenticated user has read policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
-        assert {:ok, permissions} =
-                 ChannelPermissions.check_read_permissions(
+        assert {:ok, policies} =
+                 ChannelPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    context.authorization_context
                  )
 
-        assert permissions == %Permissions{channel: %ChannelPermissions{read: true}}
+        assert policies == %Policies{channel: %ChannelPolicies{read: true}}
       end)
     end
 
     @tag role: "anon", policies: [:read_channel]
-    test "anon user has no read permissions", context do
+    test "anon user has no read policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 ChannelPermissions.check_read_permissions(
+                 ChannelPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    context.authorization_context
                  )
 
-        assert result == %Permissions{channel: %ChannelPermissions{read: false}}
+        assert result == %Policies{channel: %ChannelPolicies{read: false}}
       end)
     end
 
@@ -52,13 +52,13 @@ defmodule Realtime.Tenants.Authorization.Permissions.ChannelPermissionsTest do
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 ChannelPermissions.check_read_permissions(
+                 ChannelPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    authorization_context
                  )
 
-        assert result == %Permissions{channel: %ChannelPermissions{read: true}}
+        assert result == %Policies{channel: %ChannelPolicies{read: true}}
       end)
     end
 
@@ -70,13 +70,13 @@ defmodule Realtime.Tenants.Authorization.Permissions.ChannelPermissionsTest do
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 ChannelPermissions.check_read_permissions(
+                 ChannelPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    authorization_context
                  )
 
-        assert result == %Permissions{channel: %ChannelPermissions{read: false}}
+        assert result == %Policies{channel: %ChannelPolicies{read: false}}
       end)
     end
 
@@ -87,20 +87,20 @@ defmodule Realtime.Tenants.Authorization.Permissions.ChannelPermissionsTest do
         Process.exit(context.db_conn, :kill)
 
         assert {:error, _} =
-                 ChannelPermissions.check_read_permissions(
+                 ChannelPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    context.authorization_context
                  )
       end)
     end
   end
 
-  describe "check_write_permissions/3" do
+  describe "check_write_policies/3" do
     setup [:rls_context]
 
     @tag role: "authenticated", policies: [:read_channel, :write_channel]
-    test "authenticated user has write permissions and reverts check", context do
+    test "authenticated user has write policies and reverts check", context do
       query = from(c in Channel, where: c.id == ^context.channel.id)
       {:ok, %Channel{check: check}} = Repo.one(context.db_conn, query, Channel)
 
@@ -108,13 +108,13 @@ defmodule Realtime.Tenants.Authorization.Permissions.ChannelPermissionsTest do
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 ChannelPermissions.check_write_permissions(
+                 ChannelPolicies.check_write_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    context.authorization_context
                  )
 
-        assert result == %Permissions{channel: %ChannelPermissions{write: true}}
+        assert result == %Policies{channel: %ChannelPolicies{write: true}}
       end)
 
       # Ensure check stays with the initial value
@@ -122,18 +122,18 @@ defmodule Realtime.Tenants.Authorization.Permissions.ChannelPermissionsTest do
     end
 
     @tag role: "anon", policies: [:read_channel, :write_channel]
-    test "anon user has no write permissions", context do
+    test "anon user has no write policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 ChannelPermissions.check_write_permissions(
+                 ChannelPolicies.check_write_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    context.authorization_context
                  )
 
-        assert result == %Permissions{channel: %ChannelPermissions{write: false}}
+        assert result == %Policies{channel: %ChannelPolicies{write: false}}
       end)
     end
 
@@ -145,13 +145,13 @@ defmodule Realtime.Tenants.Authorization.Permissions.ChannelPermissionsTest do
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 ChannelPermissions.check_read_permissions(
+                 ChannelPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    authorization_context
                  )
 
-        assert result == %Permissions{channel: %ChannelPermissions{write: false}}
+        assert result == %Policies{channel: %ChannelPolicies{write: false}}
       end)
     end
 
@@ -163,13 +163,13 @@ defmodule Realtime.Tenants.Authorization.Permissions.ChannelPermissionsTest do
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 ChannelPermissions.check_read_permissions(
+                 ChannelPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    authorization_context
                  )
 
-        assert result == %Permissions{channel: %ChannelPermissions{write: false}}
+        assert result == %Policies{channel: %ChannelPolicies{write: false}}
       end)
     end
   end

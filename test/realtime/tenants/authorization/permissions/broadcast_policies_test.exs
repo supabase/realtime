@@ -1,64 +1,64 @@
-defmodule Realtime.Tenants.Authorization.Permissions.BroadcastPermissionsTest do
+defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
   use Realtime.DataCase
 
   alias Realtime.Api.Broadcast
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
-  alias Realtime.Tenants.Authorization.Permissions
-  alias Realtime.Tenants.Authorization.Permissions.BroadcastPermissions
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
 
   alias RealtimeWeb.Joken.CurrentTime
 
-  describe "check_read_permissions/3" do
+  describe "check_read_policies/3" do
     setup [:rls_context]
 
     @tag role: "authenticated", policies: [:read_broadcast]
-    test "authenticated user has read permissions", context do
+    test "authenticated user has read policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 BroadcastPermissions.check_read_permissions(
+                 BroadcastPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    context.authorization_context
                  )
 
-        assert result == %Permissions{broadcast: %BroadcastPermissions{read: true}}
+        assert result == %Policies{broadcast: %BroadcastPolicies{read: true}}
       end)
     end
 
     @tag role: "anon", policies: [:read_broadcast]
-    test "anon user has read permissions", context do
+    test "anon user has read policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 BroadcastPermissions.check_read_permissions(
+                 BroadcastPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    context.authorization_context
                  )
 
-        assert result == %Permissions{broadcast: %BroadcastPermissions{read: false}}
+        assert result == %Policies{broadcast: %BroadcastPolicies{read: false}}
       end)
     end
 
     @tag role: "anon", policies: []
-    test "no channel in context returns false permissions", context do
+    test "no channel in context returns false policies", context do
       authorization_context = %{context.authorization_context | channel: nil}
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 BroadcastPermissions.check_read_permissions(
+                 BroadcastPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    authorization_context
                  )
 
-        assert result == %Permissions{broadcast: %BroadcastPermissions{read: false}}
+        assert result == %Policies{broadcast: %BroadcastPolicies{read: false}}
       end)
     end
 
@@ -69,20 +69,20 @@ defmodule Realtime.Tenants.Authorization.Permissions.BroadcastPermissionsTest do
         Process.exit(context.db_conn, :kill)
 
         assert {:error, _} =
-                 BroadcastPermissions.check_read_permissions(
+                 BroadcastPolicies.check_read_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    context.authorization_context
                  )
       end)
     end
   end
 
-  describe "check_write_permissions/3" do
+  describe "check_write_policies/3" do
     setup [:rls_context]
 
     @tag role: "authenticated", policies: [:read_broadcast, :write_broadcast]
-    test "authenticated user has write permissions and reverts check", context do
+    test "authenticated user has write policies and reverts check", context do
       query = from(b in Broadcast, where: b.channel_id == ^context.channel.id)
       {:ok, %Broadcast{check: check}} = Repo.one(context.db_conn, query, Broadcast)
 
@@ -90,13 +90,13 @@ defmodule Realtime.Tenants.Authorization.Permissions.BroadcastPermissionsTest do
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 BroadcastPermissions.check_write_permissions(
+                 BroadcastPolicies.check_write_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    context.authorization_context
                  )
 
-        assert result == %Permissions{broadcast: %BroadcastPermissions{write: true}}
+        assert result == %Policies{broadcast: %BroadcastPolicies{write: true}}
       end)
 
       # Ensure check stays with the initial value
@@ -104,18 +104,18 @@ defmodule Realtime.Tenants.Authorization.Permissions.BroadcastPermissionsTest do
     end
 
     @tag role: "anon", policies: [:read_broadcast, :write_broadcast]
-    test "anon user has no write permissions", context do
+    test "anon user has no write policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 BroadcastPermissions.check_write_permissions(
+                 BroadcastPolicies.check_write_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    context.authorization_context
                  )
 
-        assert result == %Permissions{broadcast: %BroadcastPermissions{write: false}}
+        assert result == %Policies{broadcast: %BroadcastPolicies{write: false}}
       end)
     end
 
@@ -127,13 +127,13 @@ defmodule Realtime.Tenants.Authorization.Permissions.BroadcastPermissionsTest do
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 BroadcastPermissions.check_write_permissions(
+                 BroadcastPolicies.check_write_policies(
                    transaction_conn,
-                   %Permissions{},
+                   %Policies{},
                    authorization_context
                  )
 
-        assert result == %Permissions{broadcast: %BroadcastPermissions{write: false}}
+        assert result == %Policies{broadcast: %BroadcastPolicies{write: false}}
       end)
     end
   end

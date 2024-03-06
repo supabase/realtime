@@ -6,9 +6,9 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
-  alias Realtime.Tenants.Authorization.Permissions
-  alias Realtime.Tenants.Authorization.Permissions.BroadcastPermissions
-  alias Realtime.Tenants.Authorization.Permissions.ChannelPermissions
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
 
   alias RealtimeWeb.Joken.CurrentTime
 
@@ -17,7 +17,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
   describe "get_authorizations for Plug.Conn" do
     @tag role: "authenticated",
          policies: [:read_channel, :read_broadcast]
-    test "authenticated user has expected permissions", context do
+    test "authenticated user has expected policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
           Phoenix.ConnTest.build_conn(),
@@ -25,15 +25,15 @@ defmodule Realtime.Tenants.AuthorizationTest do
           context.authorization_context
         )
 
-      assert %Permissions{
-               channel: %ChannelPermissions{read: true, write: false},
-               broadcast: %BroadcastPermissions{read: true, write: false}
-             } = conn.assigns.permissions
+      assert %Policies{
+               channel: %ChannelPolicies{read: true, write: false},
+               broadcast: %BroadcastPolicies{read: true, write: false}
+             } = conn.assigns.policies
     end
 
     @tag role: "anon",
          policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
-    test "anon user has no permissions", context do
+    test "anon user has no policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
           Phoenix.ConnTest.build_conn(),
@@ -41,17 +41,17 @@ defmodule Realtime.Tenants.AuthorizationTest do
           context.authorization_context
         )
 
-      assert %Permissions{
-               channel: %ChannelPermissions{read: false, write: false},
-               broadcast: %BroadcastPermissions{read: false, write: false}
-             } = conn.assigns.permissions
+      assert %Policies{
+               channel: %ChannelPolicies{read: false, write: false},
+               broadcast: %BroadcastPolicies{read: false, write: false}
+             } = conn.assigns.policies
     end
   end
 
   describe "get_authorizations for Phoenix.Socket" do
     @tag role: "authenticated",
          policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
-    test "authenticated user has expected permissions", context do
+    test "authenticated user has expected policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
           Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
@@ -59,15 +59,15 @@ defmodule Realtime.Tenants.AuthorizationTest do
           context.authorization_context
         )
 
-      assert %Permissions{
-               channel: %ChannelPermissions{read: true, write: true},
-               broadcast: %BroadcastPermissions{read: true, write: true}
-             } = conn.assigns.permissions
+      assert %Policies{
+               channel: %ChannelPolicies{read: true, write: true},
+               broadcast: %BroadcastPolicies{read: true, write: true}
+             } = conn.assigns.policies
     end
 
     @tag role: "anon",
          policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
-    test "anon user has no permissions", context do
+    test "anon user has no policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
           Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
@@ -75,10 +75,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
           context.authorization_context
         )
 
-      assert %Permissions{
-               channel: %ChannelPermissions{read: false, write: false},
-               broadcast: %BroadcastPermissions{read: false, write: false}
-             } = conn.assigns.permissions
+      assert %Policies{
+               channel: %ChannelPolicies{read: false, write: false},
+               broadcast: %BroadcastPolicies{read: false, write: false}
+             } = conn.assigns.policies
     end
   end
 

@@ -1,4 +1,4 @@
-defmodule Realtime.Tenants.Migrations.AddBroadcastsPermissionsTable do
+defmodule Realtime.Tenants.Migrations.AddBroadcastsPoliciesTable do
   @moduledoc false
 
   use Ecto.Migration

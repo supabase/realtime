@@ -3,8 +3,8 @@ defmodule RealtimeWeb.ChannelsController do
   use OpenApiSpex.ControllerSpecs
 
   alias Realtime.Channels
-  alias Realtime.Tenants.Authorization.Permissions
-  alias Realtime.Tenants.Authorization.Permissions.ChannelPermissions
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.OpenApiSchemas.ChannelParams
@@ -38,7 +38,7 @@ defmodule RealtimeWeb.ChannelsController do
         %{
           assigns: %{
             tenant: tenant,
-            permissions: %Permissions{channel: %ChannelPermissions{read: true}}
+            policies: %Policies{channel: %ChannelPolicies{read: true}}
           }
         } = conn,
         _params
@@ -81,7 +81,7 @@ defmodule RealtimeWeb.ChannelsController do
         %{
           assigns: %{
             tenant: tenant,
-            permissions: %Permissions{channel: %ChannelPermissions{read: true}}
+            policies: %Policies{channel: %ChannelPolicies{read: true}}
           }
         } = conn,
         %{

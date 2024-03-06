@@ -4,8 +4,8 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
   import Plug.Conn
 
   alias Realtime.Tenants
-  alias Realtime.Tenants.Authorization.Permissions
-  alias Realtime.Tenants.Authorization.Permissions.ChannelPermissions
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
   alias RealtimeWeb.Joken.CurrentTime
   alias RealtimeWeb.RlsAuthorization
 
@@ -27,7 +27,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
   end
 
   @tag role: "anon", policies: [:read_channel]
-  test "assigns the permissions correctly to anon user",
+  test "assigns the policies correctly to anon user",
        %{
          conn: conn,
          jwt: jwt,
@@ -44,11 +44,11 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
 
-    assert conn.assigns.permissions == %Permissions{channel: %ChannelPermissions{read: false}}
+    assert conn.assigns.policies == %Policies{channel: %ChannelPolicies{read: false}}
   end
 
   @tag role: "authenticated", policies: [:read_all_channels]
-  test "assigns the permissions correctly to authenticated user",
+  test "assigns the policies correctly to authenticated user",
        %{
          conn: conn,
          jwt: jwt,
@@ -60,7 +60,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     conn = RlsAuthorization.call(conn, %{})
     refute conn.halted
 
-    assert conn.assigns.permissions == %Permissions{channel: %ChannelPermissions{read: true}}
+    assert conn.assigns.policies == %Policies{channel: %ChannelPolicies{read: true}}
   end
 
   @tag role: "authenticated", policies: [:read_channel]
