@@ -67,6 +67,20 @@ defmodule RealtimeWeb.OpenApiSchemas do
             external_id: %Schema{type: :string, description: "External ID"},
             name: %Schema{type: :string, description: "Tenant name"},
             jwt_secret: %Schema{type: :string, description: "JWT secret"},
+            jwt_jwks: %Schema{
+              type: :object,
+              description: "JWKS for verifying JWTs",
+              properties: %{
+                keys: %Schema{
+                  type: :array,
+                  description: "Set of JWKs",
+                  items: %Schema{
+                    type: :object,
+                    description: "JWK"
+                  }
+                }
+              }
+            },
             max_concurrent_users: %Schema{
               type: :number,
               description: "Maximum connected concurrent clients"
@@ -177,6 +191,20 @@ defmodule RealtimeWeb.OpenApiSchemas do
         max_joins_per_second: %Schema{
           type: :number,
           description: "Maximum number of channel joins permitted for all connected clients"
+        },
+        jwt_jwks: %Schema{
+          type: :object,
+          description: "JWKS for verifying JWTs",
+          properties: %{
+            keys: %Schema{
+              type: :array,
+              description: "Set of JWKs",
+              items: %Schema{
+                type: :object,
+                description: "JWK"
+              }
+            }
+          }
         },
         inserted_at: %Schema{type: :string, format: "date-time", description: "Insert timestamp"},
         extensions: %Schema{

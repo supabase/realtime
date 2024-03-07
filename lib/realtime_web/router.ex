@@ -3,7 +3,7 @@ defmodule RealtimeWeb.Router do
 
   require Logger
 
-  import RealtimeWeb.ChannelsAuthorization, only: [authorize: 2]
+  import RealtimeWeb.ChannelsAuthorization, only: [authorize: 3]
 
   pipeline :browser do
     plug(:accepts, ["html"])
@@ -146,7 +146,7 @@ defmodule RealtimeWeb.Router do
     secret = Application.fetch_env!(:realtime, secret_key)
 
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
-         {:ok, _claims} <- authorize(token, secret) do
+         {:ok, _claims} <- authorize(token, secret, nil) do
       conn
     else
       _ ->
