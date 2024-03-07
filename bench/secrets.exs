@@ -12,7 +12,7 @@ string_to_decrypt = "A5mS7ggkPXm0FaKKoZtrsYNlZA3qZxFe9XA9w2YYqgU="
 
 Benchee.run(%{
   "authorize_jwt" => fn ->
-    {:ok, _} = ChannelsAuthorization.authorize_conn(jwt, jwt_secret)
+    {:ok, _} = ChannelsAuthorization.authorize_conn(jwt, jwt_secret, nil)
   end,
   "encrypt_string" => fn ->
     H.encrypt!(string_to_encrypt, secret_key)
