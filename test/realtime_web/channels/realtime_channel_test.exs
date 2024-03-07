@@ -99,7 +99,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
-        assert {:error, %{reason: "{:error, 0}"}} =
+        assert {:error, %{reason: "\"Token expiration time is invalid\""}} =
                  subscribe_and_join(socket, "realtime:test", %{})
       end
 
@@ -113,7 +113,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
-        assert {:error, %{reason: "{:error, -1}"}} =
+        assert {:error, %{reason: "\"Token expiration time is invalid\""}} =
                  subscribe_and_join(socket, "realtime:test", %{})
       end
     end
@@ -164,7 +164,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts)
 
-      assert {:error, %{reason: "{:error, :tenant_database_unavailable}"}} =
+      assert {:error, %{reason: "\"Realtime was unable to connect to the tenant database\""}} =
                subscribe_and_join(socket, "realtime:test", %{})
     end
   end

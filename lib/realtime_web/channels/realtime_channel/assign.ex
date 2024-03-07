@@ -17,7 +17,8 @@ defmodule RealtimeWeb.RealtimeChannel.Assigns do
     :tenant_token,
     :access_token,
     :postgres_cdc_module,
-    :channel_name
+    :channel_name,
+    :headers
   ]
 
   @type t :: %__MODULE__{

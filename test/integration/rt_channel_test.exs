@@ -3,14 +3,18 @@ Code.require_file("../support/websocket_client.exs", __DIR__)
 defmodule Realtime.Integration.RtChannelTest do
   use RealtimeWeb.ConnCase
   import ExUnit.CaptureLog
-  alias Postgrex, as: P
+
   require Logger
 
-  alias Realtime.Integration.WebsocketClient
-  alias Phoenix.Socket.{V1, Message}
-  alias __MODULE__.Endpoint
-  alias Extensions.PostgresCdcRls, as: Rls
   alias Ecto.Adapters.SQL.Sandbox
+  alias Extensions.PostgresCdcRls, as: Rls
+  alias Phoenix.Socket.{V1, Message}
+  alias Postgrex, as: P
+  alias Realtime.Api.Tenant
+  alias Realtime.Integration.WebsocketClient
+  alias Realtime.Repo
+  alias Realtime.Tenants.Connect
+  alias __MODULE__.Endpoint
 
   @moduletag :capture_log
   @port 4002
@@ -183,7 +187,7 @@ defmodule Realtime.Integration.RtChannelTest do
                    2000
   end
 
-  test "broadcast" do
+  test "public broadcast" do
     socket = get_connection()
 
     config = %{
@@ -215,6 +219,172 @@ defmodule Realtime.Integration.RtChannelTest do
       ref: nil,
       topic: "realtime:any"
     }
+  end
+
+  test "private broadcast with valid channel with permissions sends message" do
+    [tenant] = Repo.all(Tenant)
+
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    clean_table(db_conn, "realtime", "broadcasts")
+    clean_table(db_conn, "realtime", "channels")
+
+    channel = channel_fixture(tenant)
+    create_rls_policies(db_conn, [:read_channel, :read_broadcast, :write_broadcast], channel)
+    socket = get_connection("authenticated")
+    config = %{broadcast: %{self: true, public: false}}
+    topic = "realtime:#{channel.name}"
+
+    WebsocketClient.join(socket, topic, %{config: config})
+
+    assert_receive %Message{
+      event: "phx_reply",
+      payload: %{
+        "response" => %{"postgres_changes" => []},
+        "status" => "ok"
+      },
+      ref: "1",
+      topic: ^topic
+    }
+
+    assert_receive %Message{}
+
+    payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+    WebsocketClient.send_event(socket, topic, "broadcast", payload)
+
+    assert_receive %Message{
+      event: "broadcast",
+      payload: ^payload,
+      ref: nil,
+      topic: ^topic
+    }
+  end
+
+  test "private broadcast with valid channel no write permissions won't send message" do
+    [tenant] = Repo.all(Tenant)
+
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    clean_table(db_conn, "realtime", "broadcasts")
+    clean_table(db_conn, "realtime", "channels")
+
+    channel = channel_fixture(tenant)
+    create_rls_policies(db_conn, [:read_channel, :read_broadcast], channel)
+    socket = get_connection("authenticated")
+    config = %{broadcast: %{self: true, public: false}}
+    topic = "realtime:#{channel.name}"
+
+    WebsocketClient.join(socket, topic, %{config: config})
+
+    assert_receive %Message{
+      event: "phx_reply",
+      payload: %{
+        "response" => %{"postgres_changes" => []},
+        "status" => "ok"
+      },
+      ref: "1",
+      topic: ^topic
+    }
+
+    assert_receive %Message{}
+
+    payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+    WebsocketClient.send_event(socket, topic, "broadcast", payload)
+
+    refute_receive %Message{
+                     event: "broadcast",
+                     payload: ^payload,
+                     ref: nil,
+                     topic: ^topic
+                   },
+                   500
+  end
+
+  test "private broadcast with valid channel but no read permissions on broadcast does not connect" do
+    [tenant] = Repo.all(Tenant)
+
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    clean_table(db_conn, "realtime", "broadcasts")
+    clean_table(db_conn, "realtime", "channels")
+
+    channel = channel_fixture(tenant)
+    create_rls_policies(db_conn, [:read_channel], channel)
+    socket = get_connection("authenticated")
+    config = %{broadcast: %{self: true, public: false}}
+    topic = "realtime:#{channel.name}"
+
+    WebsocketClient.join(socket, topic, %{config: config})
+
+    assert_receive %Phoenix.Socket.Message{
+                     topic: ^topic,
+                     event: "phx_reply",
+                     payload: %{
+                       "response" => %{
+                         "reason" =>
+                           "\"You do not have permissions to read Broadcast messages from this channel\""
+                       },
+                       "status" => "error"
+                     },
+                     ref: "1",
+                     join_ref: nil
+                   },
+                   500
+  end
+
+  test "private broadcast with valid channel but no read permissions on channel does not connect" do
+    [tenant] = Repo.all(Tenant)
+
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    clean_table(db_conn, "realtime", "broadcasts")
+    clean_table(db_conn, "realtime", "channels")
+
+    channel = channel_fixture(tenant)
+    create_rls_policies(db_conn, [:read_broadcast], channel)
+    socket = get_connection("authenticated")
+    config = %{broadcast: %{self: true, public: false}}
+    topic = "realtime:#{channel.name}"
+
+    WebsocketClient.join(socket, topic, %{config: config})
+
+    assert_receive %Phoenix.Socket.Message{
+                     topic: ^topic,
+                     event: "phx_reply",
+                     payload: %{
+                       "response" => %{
+                         "reason" => "\"You do not have permissions to read from this Channel\""
+                       },
+                       "status" => "error"
+                     },
+                     ref: "1",
+                     join_ref: nil
+                   },
+                   500
+  end
+
+  test "private broadcast with non existing channel fails to join" do
+    [tenant] = Repo.all(Tenant)
+
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    clean_table(db_conn, "realtime", "broadcasts")
+    clean_table(db_conn, "realtime", "channels")
+
+    socket = get_connection("authenticated")
+    config = %{broadcast: %{self: true, public: false}}
+    channel_name = random_string()
+    topic = "realtime:#{channel_name}"
+
+    WebsocketClient.join(socket, topic, %{config: config})
+    reason = "\"Channel #{channel_name} does not exist, please create it first\""
+
+    assert_receive %Phoenix.Socket.Message{
+                     topic: ^topic,
+                     event: "phx_reply",
+                     payload: %{
+                       "response" => %{"reason" => ^reason},
+                       "status" => "error"
+                     },
+                     ref: "1",
+                     join_ref: nil
+                   },
+                   500
   end
 
   test "presence" do
@@ -282,13 +452,8 @@ defmodule Realtime.Integration.RtChannelTest do
              WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
   end
 
-  defp token_valid() do
-    %{role: "anon"} |> generate_token()
-  end
-
-  defp token_no_role() do
-    generate_token()
-  end
+  defp token_valid(role), do: generate_token(%{role: role})
+  defp token_no_role(), do: generate_token()
 
   defp generate_token(claims \\ %{}) do
     claims =
@@ -303,8 +468,8 @@ defmodule Realtime.Integration.RtChannelTest do
     Joken.Signer.sign(claims, signer)
   end
 
-  defp get_connection() do
-    {:ok, token} = token_valid()
+  defp get_connection(role \\ "anon") do
+    {:ok, token} = token_valid(role)
     {:ok, socket} = WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
     socket
   end

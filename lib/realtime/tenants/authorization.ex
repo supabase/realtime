@@ -36,19 +36,13 @@ defmodule Realtime.Tenants.Authorization do
   * role: JWT role
   """
   @spec build_authorization_params(map()) :: t()
-  def build_authorization_params(%{
-        channel: channel,
-        headers: headers,
-        jwt: jwt,
-        claims: claims,
-        role: role
-      }) do
+  def build_authorization_params(map) do
     %__MODULE__{
-      channel: channel,
-      headers: headers,
-      jwt: jwt,
-      claims: claims,
-      role: role
+      channel: Map.get(map, :channel),
+      headers: Map.get(map, :headers),
+      jwt: Map.get(map, :jwt),
+      claims: Map.get(map, :claims),
+      role: Map.get(map, :role)
     }
   end
 
