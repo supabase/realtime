@@ -318,7 +318,8 @@ defmodule Realtime.Integration.RtChannelTest do
                      event: "phx_reply",
                      payload: %{
                        "response" => %{
-                         "reason" => "\"You do not have permissions to access this broadcast\""
+                         "reason" =>
+                           "\"You do not have permissions to read Broadcast messages from this channel\""
                        },
                        "status" => "error"
                      },
@@ -348,7 +349,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      event: "phx_reply",
                      payload: %{
                        "response" => %{
-                         "reason" => "\"You do not have permissions to access this channel\""
+                         "reason" => "\"You do not have permissions to read from this Channel\""
                        },
                        "status" => "error"
                      },

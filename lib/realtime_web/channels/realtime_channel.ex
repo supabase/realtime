@@ -103,6 +103,12 @@ defmodule RealtimeWeb.RealtimeChannel do
       when type in [:too_many_channels, :too_many_connections, :too_many_joins] ->
         log_error_message(:warning, error)
 
+      {:error, :tenant_database_unavailable} ->
+        log_error_message(:error, "Realtime was unable to connect to the tenant database")
+
+      {:error, invalid_exp} when is_integer(invalid_exp) and invalid_exp <= 0 ->
+        log_error_message(:error, "Token expiration time is invalid")
+
       {:error, error} ->
         log_error_message(:error, error)
 
@@ -624,10 +630,10 @@ defmodule RealtimeWeb.RealtimeChannel do
 
         case socket.assigns.policies do
           %Policies{broadcast: %BroadcastPolicies{read: false}} ->
-            {:error, "You do not have permissions to access this broadcast"}
+            {:error, "You do not have permissions to read Broadcast messages from this channel"}
 
           %Policies{channel: %ChannelPolicies{read: false}} ->
-            {:error, "You do not have permissions to access this channel"}
+            {:error, "You do not have permissions to read from this Channel"}
 
           _ ->
             {:ok, socket}
