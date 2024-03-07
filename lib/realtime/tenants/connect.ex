@@ -157,6 +157,11 @@ defmodule Realtime.Tenants.Connect do
     {:noreply, state}
   end
 
+  # Ignore invalidate_cache messages to avoid handle_info unmatched functions
+  def handle_info({:invalidate_cache, _}, state) do
+    {:noreply, state}
+  end
+
   def handle_info(
         {:DOWN, db_conn_reference, _, _, _},
         %{db_conn_reference: db_conn_reference} = state
