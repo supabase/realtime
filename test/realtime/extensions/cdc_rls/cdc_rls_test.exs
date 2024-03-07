@@ -41,7 +41,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
     with_mocks([
       {ChannelsAuthorization, [],
        [
-         authorize_conn: fn _, _ ->
+         authorize_conn: fn _, _, _ ->
            {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
          end
        ]}

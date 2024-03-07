@@ -15,10 +15,10 @@ defmodule RealtimeWeb.AuthTenant do
   def call(%{assigns: %{tenant: tenant}} = conn, _opts) do
     secure_key = Application.get_env(:realtime, :db_enc_key)
 
-    with %Tenant{jwt_secret: jwt_secret} <- tenant,
+    with %Tenant{jwt_secret: jwt_secret, jwt_jwks: jwt_jwks} <- tenant,
          token when is_binary(token) <- access_token(conn),
          jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
-         {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec) do
+         {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks) do
       Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
 
       conn

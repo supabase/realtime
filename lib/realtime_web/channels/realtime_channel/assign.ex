@@ -14,6 +14,7 @@ defmodule RealtimeWeb.RealtimeChannel.Assigns do
     :postgres_extension,
     :claims,
     :jwt_secret,
+    :jwt_jwks,
     :tenant_token,
     :access_token,
     :postgres_cdc_module,
@@ -38,6 +39,7 @@ defmodule RealtimeWeb.RealtimeChannel.Assigns do
           postgres_extension: map(),
           claims: map(),
           jwt_secret: String.t(),
+          jwt_jwks: map(),
           tenant_token: String.t(),
           access_token: String.t(),
           channel_name: String.t()
