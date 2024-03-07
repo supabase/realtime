@@ -378,6 +378,20 @@ defmodule RealtimeWeb.OpenApiSchemas do
     def response(), do: {"Not Found", "application/json", __MODULE__}
   end
 
+  defmodule ErrorResponse do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      properties: %{
+        error: %Schema{type: :string, default: "error message"}
+      }
+    })
+
+    def response(), do: {"Error", "application/json", __MODULE__}
+  end
+
   defmodule UnauthorizedResponse do
     @moduledoc false
     require OpenApiSpex

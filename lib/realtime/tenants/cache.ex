@@ -26,7 +26,8 @@ defmodule Realtime.Tenants.Cache do
   @doc """
   Broadcasts a message to invalidate the tenant cache to all connected nodes
   """
-  def distributed_invalidate_tenant_cache(tenant_id) do
+  @spec distributed_invalidate_tenant_cache(String.t()) :: :ok
+  def distributed_invalidate_tenant_cache(tenant_id) when is_binary(tenant_id) do
     Phoenix.PubSub.broadcast!(
       Realtime.PubSub,
       "realtime:operations:invalidate_cache",

@@ -1,4 +1,6 @@
 defmodule RealtimeWeb.TenantController do
+  alias RealtimeWeb.OpenApiSchemas.UnauthorizedResponse
+  alias RealtimeWeb.OpenApiSchemas.ErrorResponse
   use RealtimeWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
@@ -7,7 +9,6 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Tenants.Cache
-  alias Realtime.Helpers
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
   alias RealtimeWeb.Endpoint
@@ -174,31 +175,37 @@ defmodule RealtimeWeb.TenantController do
     ],
     responses: %{
       204 => EmptyResponse.response(),
-      403 => EmptyResponse.response()
+      403 => UnauthorizedResponse.response(),
+      404 => NotFoundResponse.response(),
+      500 => ErrorResponse.response()
     }
   )
 
   def delete(conn, %{"tenant_id" => tenant_id}) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    case Api.get_tenant_by_external_id(tenant_id) do
+    stop_all_timeout = Enum.count(PostgresCdc.available_drivers()) * 1_000
+
+    subs_id = UserSocket.subscribers_id(tenant_id)
+
+    with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id),
+         true <- Api.delete_tenant_by_external_id(tenant_id),
+         :ok <- Cache.distributed_invalidate_tenant_cache(tenant_id),
+         :ok <- PostgresCdc.stop_all(tenant, stop_all_timeout),
+         :ok <- Endpoint.broadcast(subs_id, "disconnect", %{}) do
+      send_resp(conn, 204, "")
+    else
       nil ->
         Logger.error("Tenant #{tenant_id} does not exist")
 
-      tenant ->
-        tenant_id
-        |> UserSocket.subscribers_id()
-        |> Endpoint.broadcast("disconnect", %{})
+        send_resp(conn, 404, "")
 
-        Task.async(fn ->
-          PostgresCdc.stop_all(tenant)
-          Helpers.replication_slot_teardown(tenant)
-          Api.delete_tenant_by_external_id(tenant_id)
-          Cache.distributed_invalidate_tenant_cache(tenant_id)
-        end)
+      err ->
+        msg = "Error deleting tenant: #{inspect(err)}"
+        Logger.error(msg)
+
+        conn |> put_status(500) |> json(%{error: msg}) |> halt()
     end
-
-    send_resp(conn, 204, "")
   end
 
   operation(:reload,

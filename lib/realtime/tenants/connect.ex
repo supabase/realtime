@@ -90,7 +90,7 @@ defmodule Realtime.Tenants.Connect do
   def init(%{tenant_id: tenant_id} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
+    with %Tenant{} = tenant <- Tenants.get_tenant_by_external_id(tenant_id),
          res <- Helpers.check_tenant_connection(tenant, @application_name),
          [%{settings: settings} | _] <- tenant.extensions,
          {:ok, _} <- Migrations.run_migrations(settings) do
