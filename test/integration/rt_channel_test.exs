@@ -94,7 +94,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: "1",
                      topic: "realtime:any"
                    },
-                   10000
+                   10_000
 
     # skip the presence_state event
     assert_receive %Message{}

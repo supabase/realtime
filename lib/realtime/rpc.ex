@@ -9,7 +9,7 @@ defmodule Realtime.Rpc do
   """
   @spec call(atom(), atom(), atom(), any(), keyword()) :: any()
   def call(node, mod, func, args, opts \\ []) do
-    timeout = Keyword.get(opts, :timeout, 15000)
+    timeout = Keyword.get(opts, :timeout, 15_000)
     {latency, response} = :timer.tc(fn -> :rpc.call(node, mod, func, args, timeout) end)
     tenant = Keyword.get(opts, :tenant, nil)
 
@@ -33,7 +33,7 @@ defmodule Realtime.Rpc do
   """
   @spec enhanced_call(atom(), atom(), atom(), any(), keyword()) :: any()
   def enhanced_call(node, mod, func, args \\ [], opts \\ []) do
-    timeout = Keyword.get(opts, :timeout, 15000)
+    timeout = Keyword.get(opts, :timeout, 15_000)
     {latency, response} = :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end)
     tenant = Keyword.get(opts, :tenant, nil)
 

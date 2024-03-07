@@ -429,9 +429,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp presence_key(params) do
-    with key when is_binary(key) and key != "" <- params["config"]["presence"]["key"] do
-      key
-    else
+    case params["config"]["presence"]["key"] do
+      key when is_binary(key) and key != "" -> key
       _ -> UUID.uuid1()
     end
   end

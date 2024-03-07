@@ -297,10 +297,9 @@ defmodule Realtime.Helpers do
       case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
         {pid, %{region: region}} ->
           platform_region = Realtime.Nodes.platform_region_translator(region)
-          launch_node = Realtime.Nodes.launch_node(tenant, platform_region, false)
           current_node = node(pid)
 
-          case launch_node do
+          case Realtime.Nodes.launch_node(tenant, platform_region, false) do
             ^current_node -> acc
             _ -> stop_user_tenant_process(tenant, platform_region, acc)
           end
@@ -343,10 +342,10 @@ defmodule Realtime.Helpers do
           Keyword.get(dict, :"$logger_metadata$")[:external_id] == tenant_id,
           links = Keyword.get(info, :links) do
         links
-        |> Enum.filter(&is_pid/1)
         |> Enum.filter(fn pid ->
-          pid |> Process.info() |> Keyword.get(:dictionary, []) |> Keyword.get(:"$initial_call") ==
-            {:supervisor, DBConnection.ConnectionPool.Pool, 1}
+          is_pid(pid) &&
+            pid |> Process.info() |> Keyword.get(:dictionary, []) |> Keyword.get(:"$initial_call") ==
+              {:supervisor, DBConnection.ConnectionPool.Pool, 1}
         end)
       end
 

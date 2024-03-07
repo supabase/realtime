@@ -114,13 +114,12 @@ defmodule Realtime.Repo do
       end)
 
     table = "\"#{prefix}\".\"#{source}\""
-    header = "(#{header |> Enum.map(&"\"#{&1}\"") |> Enum.join(",")})"
+    header = "(#{Enum.map_join(header, ",", &"\"#{&1}\"")})"
 
     arg_index =
       rows
       |> Enum.with_index(1)
-      |> Enum.map(fn {_, index} -> "$#{index}" end)
-      |> Enum.join(",")
+      |> Enum.map_join(",", fn {_, index} -> "$#{index}" end)
 
     {:ok, {"INSERT INTO #{table} #{header} VALUES (#{arg_index}) RETURNING *", rows}}
   end
