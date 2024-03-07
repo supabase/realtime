@@ -175,7 +175,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     test "tenant doesn't exist", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
         conn = delete(conn, Routes.tenant_path(conn, :delete, "wrong_external_id"))
-        assert response(conn, 204)
+        assert response(conn, 404)
       end
     end
   end
