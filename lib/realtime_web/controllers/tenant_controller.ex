@@ -9,7 +9,6 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Tenants.Cache
-  alias Realtime.Helpers
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
   alias RealtimeWeb.Endpoint
@@ -185,12 +184,14 @@ defmodule RealtimeWeb.TenantController do
   def delete(conn, %{"tenant_id" => tenant_id}) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
+    stop_all_timeout = Enum.count(PostgresCdc.available_drivers()) * 1_000
+
     subs_id = UserSocket.subscribers_id(tenant_id)
 
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id),
          true <- Api.delete_tenant_by_external_id(tenant_id),
          :ok <- Cache.distributed_invalidate_tenant_cache(tenant_id),
-         :ok <- PostgresCdc.stop_all(tenant, 1_000),
+         :ok <- PostgresCdc.stop_all(tenant, stop_all_timeout),
          :ok <- Endpoint.broadcast(subs_id, "disconnect", %{}) do
       send_resp(conn, 204, "")
     else
