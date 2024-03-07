@@ -103,6 +103,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       when type in [:too_many_channels, :too_many_connections, :too_many_joins] ->
         log_error_message(:warning, error)
 
+      {:error, error} ->
+        log_error_message(:error, error)
+
       error ->
         log_error_message(:error, error)
     end
@@ -603,27 +606,32 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp assign_policies(false, db_conn, sub_topic, access_token, claims, socket) do
-    channel =
-      case ChannelsCache.get_channel_by_name(sub_topic, db_conn) do
-        {:error, :not_found} -> raise "Channel #{sub_topic} hasn't been initialized"
-        {:ok, channel} -> channel
-      end
+    case ChannelsCache.get_channel_by_name(sub_topic, db_conn) do
+      {:error, :not_found} ->
+        {:error, "Channel #{sub_topic} does not exist, please create it first"}
 
-    authorization_context =
-      Authorization.build_authorization_params(%{
-        channel: channel,
-        headers: socket.assigns.headers,
-        jwt: access_token,
-        claims: claims,
-        role: claims["role"]
-      })
+      {:ok, channel} ->
+        authorization_context =
+          Authorization.build_authorization_params(%{
+            channel: channel,
+            headers: socket.assigns.headers,
+            jwt: access_token,
+            claims: claims,
+            role: claims["role"]
+          })
 
-    {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
+        {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
 
-    case socket.assigns.policies do
-      %Policies{broadcast: %BroadcastPolicies{read: false}} -> {:error, :unauthorized}
-      %Policies{channel: %ChannelPolicies{read: false}} -> {:error, :unauthorized}
-      _ -> {:ok, socket}
+        case socket.assigns.policies do
+          %Policies{broadcast: %BroadcastPolicies{read: false}} ->
+            {:error, "You do not have permissions to access this broadcast"}
+
+          %Policies{channel: %ChannelPolicies{read: false}} ->
+            {:error, "You do not have permissions to access this channel"}
+
+          _ ->
+            {:ok, socket}
+        end
     end
   end
 

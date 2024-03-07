@@ -313,14 +313,17 @@ defmodule Realtime.Integration.RtChannelTest do
 
     WebsocketClient.join(socket, topic, %{config: config})
 
-    refute_receive %Message{
+    assert_receive %Phoenix.Socket.Message{
+                     topic: ^topic,
                      event: "phx_reply",
                      payload: %{
-                       "response" => %{"postgres_changes" => []},
-                       "status" => "ok"
+                       "response" => %{
+                         "reason" => "\"You do not have permissions to access this broadcast\""
+                       },
+                       "status" => "error"
                      },
                      ref: "1",
-                     topic: ^topic
+                     join_ref: nil
                    },
                    500
   end
@@ -340,14 +343,45 @@ defmodule Realtime.Integration.RtChannelTest do
 
     WebsocketClient.join(socket, topic, %{config: config})
 
-    refute_receive %Message{
+    assert_receive %Phoenix.Socket.Message{
+                     topic: ^topic,
                      event: "phx_reply",
                      payload: %{
-                       "response" => %{"postgres_changes" => []},
-                       "status" => "ok"
+                       "response" => %{
+                         "reason" => "\"You do not have permissions to access this channel\""
+                       },
+                       "status" => "error"
                      },
                      ref: "1",
-                     topic: ^topic
+                     join_ref: nil
+                   },
+                   500
+  end
+
+  test "private broadcast with non existing channel fails to join" do
+    [tenant] = Repo.all(Tenant)
+
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    clean_table(db_conn, "realtime", "broadcasts")
+    clean_table(db_conn, "realtime", "channels")
+
+    socket = get_connection("authenticated")
+    config = %{broadcast: %{self: true, public: false}}
+    channel_name = random_string()
+    topic = "realtime:#{channel_name}"
+
+    WebsocketClient.join(socket, topic, %{config: config})
+    reason = "\"Channel #{channel_name} does not exist, please create it first\""
+
+    assert_receive %Phoenix.Socket.Message{
+                     topic: ^topic,
+                     event: "phx_reply",
+                     payload: %{
+                       "response" => %{"reason" => ^reason},
+                       "status" => "error"
+                     },
+                     ref: "1",
+                     join_ref: nil
                    },
                    500
   end
