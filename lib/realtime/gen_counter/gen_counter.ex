@@ -70,9 +70,10 @@ defmodule Realtime.GenCounter do
 
   @spec add(term(), integer()) :: :ok | :error
   def add(term, count) when is_integer(count) do
-    with {:ok, counter_ref} <- find_counter(term) do
-      :counters.add(counter_ref, 1, count)
-    else
+    case find_counter(term) do
+      {:ok, counter_ref} ->
+        :counters.add(counter_ref, 1, count)
+
       err ->
         Logger.error("Error incrimenting counter", error_string: inspect(err))
         :error
@@ -94,9 +95,10 @@ defmodule Realtime.GenCounter do
 
   @spec sub(term(), integer()) :: :ok | :error
   def sub(term, count) when is_integer(count) do
-    with {:ok, counter_ref} <- find_counter(term) do
-      :counters.sub(counter_ref, 1, count)
-    else
+    case find_counter(term) do
+      {:ok, counter_ref} ->
+        :counters.sub(counter_ref, 1, count)
+
       err ->
         Logger.error("Error decrimenting counter", error_string: inspect(err))
         :error
@@ -109,9 +111,10 @@ defmodule Realtime.GenCounter do
 
   @spec put(term(), integer()) :: :ok | :error
   def put(term, count) when is_integer(count) do
-    with {:ok, counter_ref} <- find_counter(term) do
-      :counters.put(counter_ref, 1, count)
-    else
+    case find_counter(term) do
+      {:ok, counter_ref} ->
+        :counters.put(counter_ref, 1, count)
+
       err ->
         Logger.error("Error updating counter", error_string: inspect(err))
         :error
@@ -141,10 +144,11 @@ defmodule Realtime.GenCounter do
   @spec get(term()) ::
           {:ok, integer()} | {:error, :counter_not_found}
   def get(term) do
-    with {:ok, counter_ref} <- find_counter(term) do
-      count = :counters.get(counter_ref, 1)
-      {:ok, count}
-    else
+    case find_counter(term) do
+      {:ok, counter_ref} ->
+        count = :counters.get(counter_ref, 1)
+        {:ok, count}
+
       err ->
         Logger.error("Counter not found", error_string: inspect(err))
         err

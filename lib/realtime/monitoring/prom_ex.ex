@@ -113,23 +113,17 @@ defmodule Realtime.PromEx do
     metrics =
       PromEx.get_metrics(Realtime.PromEx)
       |> String.split("\n")
-      |> Enum.map(fn line ->
+      |> Enum.map_join("\n", fn line ->
         case Regex.run(~r/(?!\#)^(\w+)(?:{(.*?)})?\s*(.+)$/, line) do
           nil ->
             line
 
           [_, key, tags, value] ->
-            tags =
-              if tags == "" do
-                def_tags
-              else
-                tags <> "," <> def_tags
-              end
+            tags = if tags == "", do: def_tags, else: tags <> "," <> def_tags
 
             "#{key}{#{tags}} #{value}"
         end
       end)
-      |> Enum.join("\n")
 
     Realtime.PromEx.__ets_cron_flusher_name__()
     |> PromEx.ETSCronFlusher.defer_ets_flush()

@@ -89,7 +89,7 @@ defmodule Realtime.Latency do
 
   """
 
-  @spec ping :: [{%Task{}, tuple() | nil}]
+  @spec ping :: [{Task.t(), tuple() | nil}]
   def ping(pong_timeout \\ 0, timer_timeout \\ 5_000, yield_timeout \\ 5_000) do
     tasks =
       for n <- [Node.self() | Node.list()] do

@@ -15,22 +15,22 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
              Exception.t() | :malformed_subscription_params | {:subscription_insert_failed, map()}}
   def create(conn, publication, params_list, manager, caller) do
     sql = "with sub_tables as (
-		    select
-			    rr.entity
-		    from
-			    pg_publication_tables pub,
-			    lateral (
-				    select
-					    format('%I.%I', pub.schemaname, pub.tablename)::regclass entity
-			    ) rr
-		    where
-			    pub.pubname = $1
-			  and pub.schemaname like (case $2 when '*' then '%' else $2 end)
-			  and pub.tablename like (case $3 when '*' then '%' else $3 end)
-	    )
-	    insert into realtime.subscription as x(
-		    subscription_id,
-		    entity,
+        select
+        rr.entity
+        from
+        pg_publication_tables pub,
+        lateral (
+        select
+        format('%I.%I', pub.schemaname, pub.tablename)::regclass entity
+        ) rr
+        where
+        pub.pubname = $1
+        and pub.schemaname like (case $2 when '*' then '%' else $2 end)
+        and pub.tablename like (case $3 when '*' then '%' else $3 end)
+     )
+     insert into realtime.subscription as x(
+        subscription_id,
+        entity,
         filters,
         claims
       )

@@ -65,9 +65,8 @@ defmodule Realtime.Channels do
   def delete_channel_by_id(id, conn) do
     query = from c in Channel, where: c.id == ^id
 
-    with {:ok, 1} <- Repo.del(conn, query) do
-      :ok
-    else
+    case Repo.del(conn, query) do
+      {:ok, 1} -> :ok
       {:ok, 0} -> {:error, :not_found}
       error -> error
     end

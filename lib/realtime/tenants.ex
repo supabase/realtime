@@ -34,7 +34,7 @@ defmodule Realtime.Tenants do
       {:error, :tenant_database_unavailable}
   """
 
-  @spec get_health_conn(%Tenant{}) :: {:error, term()} | {:ok, pid()}
+  @spec get_health_conn(Tenant.t()) :: {:error, term()} | {:ok, pid()}
   def get_health_conn(%Tenant{external_id: external_id}) do
     case Connect.get_status(external_id) do
       {:ok, conn} -> {:ok, conn}
