@@ -8,6 +8,10 @@ defmodule Realtime.PostgresCdc do
   @timeout 10_000
   @extensions Application.compile_env(:realtime, :extensions)
 
+  defmodule Exception do
+    defexception message: "PostgresCdc error!"
+  end
+
   def connect(module, opts) do
     apply(module, :handle_connect, [opts])
   end

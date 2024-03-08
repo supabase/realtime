@@ -159,13 +159,18 @@ defmodule Realtime.Api do
     Tenant.changeset(tenant, attrs)
   end
 
-  @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
-  def get_tenant_by_external_id(external_id) do
-    repo_replica = Replica.replica()
+  @spec get_tenant_by_external_id(String.t(), atom()) :: Tenant.t() | nil
+  def get_tenant_by_external_id(external_id, repo \\ :replica)
+      when repo in [:primary, :replica] do
+    repo =
+      case repo do
+        :primary -> Repo
+        :replica -> Replica.replica()
+      end
 
     Tenant
-    |> repo_replica.get_by(external_id: external_id)
-    |> repo_replica.preload(:extensions)
+    |> repo.get_by(external_id: external_id)
+    |> repo.preload(:extensions)
   end
 
   def list_extensions(type \\ "postgres_cdc_rls") do
