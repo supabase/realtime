@@ -3,13 +3,18 @@ defmodule Extensions.PostgresCdcStream.WorkerSupervisor do
   use Supervisor
   alias Extensions.PostgresCdcStream, as: Stream
 
+  alias Realtime.Api
+  alias Realtime.PostgresCdc.Exception
+
   def start_link(args) do
     name = [name: {:via, :syn, {PostgresCdcStream, args["id"]}}]
     Supervisor.start_link(__MODULE__, args, name)
   end
 
   @impl true
-  def init(args) do
+  def init(%{"id" => tenant} = args) when is_binary(tenant) do
+    unless Api.get_tenant_by_external_id(tenant, :primary), do: raise(Exception)
+
     children = [
       %{
         id: Stream.Replication,
