@@ -1,5 +1,6 @@
 defmodule RealtimeWeb.RlsAuthorizationTest do
-  use RealtimeWeb.ConnCase
+  # async: false due to the fact that multiple operations against the database will use the same connection
+  use RealtimeWeb.ConnCase, async: false
 
   import Plug.Conn
 
@@ -61,6 +62,29 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     refute conn.halted
 
     assert conn.assigns.policies == %Policies{channel: %ChannelPolicies{read: true}}
+  end
+
+  @tag role: "service_role",
+       policies: [
+         :service_role_all_channels_read,
+         :service_role_all_channels_write,
+         :service_role_all_channels_delete,
+         :service_role_all_broadcasts_write
+       ]
+  test "assigns the policies correctly to authenticated user when channel name is in body and it's a post request",
+       %{
+         jwt: jwt,
+         claims: claims,
+         tenant: tenant,
+         role: role
+       } do
+    conn =
+      build_conn(:post, "", %{"name" => random_string()}) |> setup_conn(tenant, claims, jwt, role)
+
+    conn = RlsAuthorization.call(conn, %{})
+    refute conn.halted
+
+    assert conn.assigns.policies == %Policies{channel: %ChannelPolicies{read: true, write: true}}
   end
 
   @tag role: "authenticated", policies: [:read_channel]

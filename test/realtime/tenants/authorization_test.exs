@@ -1,7 +1,7 @@
 defmodule Realtime.Tenants.AuthorizationTest do
   # Needs to be false due to some conflicts when fetching connection from the pool since this use Postgrex directly
-
   use RealtimeWeb.ConnCase, async: false
+
   require Phoenix.ChannelTest
 
   alias Realtime.Tenants
@@ -94,12 +94,13 @@ defmodule Realtime.Tenants.AuthorizationTest do
         role: "non_existant"
       })
 
-    {:error, :unauthorized} =
-      Authorization.get_authorizations(
-        Phoenix.ConnTest.build_conn(),
-        db_conn,
-        authorization_context
-      )
+    assert {:error,
+            %DBConnection.TransactionError{status: :error, message: "transaction is aborted"}} =
+             Authorization.get_authorizations(
+               Phoenix.ConnTest.build_conn(),
+               db_conn,
+               authorization_context
+             )
   end
 
   def rls_context(context) do

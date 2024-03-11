@@ -1,7 +1,12 @@
 defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
-  use Realtime.DataCase
+  # async: false due to the fact that multiple operations against the database will use the same connection
+  use Realtime.DataCase, async: false
+
+  import Ecto.Query
 
   alias Realtime.Api.Channel
+  alias Realtime.Channels
+  alias Realtime.Repo
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -139,19 +144,55 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
 
     @tag role: "anon", policies: [:read_all_channels, :write_all_channels]
     test "no channel and authenticated returns false", context do
-      authorization_context = %{context.authorization_context | channel: nil}
+      authorization_context = %{
+        context.authorization_context
+        | channel: nil,
+          channel_name: nil
+      }
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
-        Authorization.set_conn_config(transaction_conn, context.authorization_context)
+        Authorization.set_conn_config(transaction_conn, authorization_context)
 
         assert {:ok, result} =
-                 ChannelPolicies.check_read_policies(
+                 ChannelPolicies.check_write_policies(
                    transaction_conn,
                    %Policies{},
                    authorization_context
                  )
 
         assert result == %Policies{channel: %ChannelPolicies{write: false}}
+      end)
+    end
+
+    @tag role: "service_role",
+         policies: [
+           :service_role_all_channels_read,
+           :service_role_all_channels_write,
+           :service_role_all_channels_delete,
+           :service_role_all_broadcasts_write
+         ]
+    test "no channel, channel name in context and service_role returns true", context do
+      channel_name = random_string()
+
+      authorization_context = %{
+        context.authorization_context
+        | channel: nil,
+          channel_name: channel_name
+      }
+
+      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+        Authorization.set_conn_config(transaction_conn, authorization_context)
+
+        assert {:ok, result} =
+                 ChannelPolicies.check_write_policies(
+                   transaction_conn,
+                   %Policies{},
+                   authorization_context
+                 )
+
+        assert result == %Policies{channel: %ChannelPolicies{write: true}}
+
+        assert {:error, :not_found} = Channels.get_channel_by_name(channel_name, transaction_conn)
       end)
     end
 
@@ -163,7 +204,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 ChannelPolicies.check_read_policies(
+                 ChannelPolicies.check_write_policies(
                    transaction_conn,
                    %Policies{},
                    authorization_context
@@ -177,9 +218,10 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
   def rls_context(context) do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
-
     {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
     clean_table(db_conn, "realtime", "channels")
+    clean_table(db_conn, "realtime", "broadcasts")
+
     channel = channel_fixture(tenant)
 
     create_rls_policies(db_conn, context.policies, channel)
@@ -195,7 +237,8 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
         headers: [{"header-1", "value-1"}],
         jwt: jwt,
         claims: claims,
-        role: claims.role
+        role: claims.role,
+        channel_name: channel.name
       })
 
     %{

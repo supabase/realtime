@@ -15,9 +15,10 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
 
-  defstruct [:channel, :headers, :jwt, :claims, :role]
+  defstruct [:channel_name, :channel, :headers, :jwt, :claims, :role]
 
   @type t :: %__MODULE__{
+          :channel_name => binary() | nil,
           :channel => Channel.t() | nil,
           :claims => map(),
           :headers => keyword({binary(), binary()}),
@@ -29,6 +30,7 @@ defmodule Realtime.Tenants.Authorization do
   Builds a new authorization struct which will be used to retain the information required to check Policies.
 
   Requires a map with the following keys:
+  * channel_name: The name of the channel being accessed taken from the request
   * channel: Realtime.Api.Channel struct for which channel is being accessed
   * headers: Request headers when the connection was made or WS was updated
   * jwt: JWT String
@@ -38,6 +40,7 @@ defmodule Realtime.Tenants.Authorization do
   @spec build_authorization_params(map()) :: t()
   def build_authorization_params(map) do
     %__MODULE__{
+      channel_name: Map.get(map, :channel_name),
       channel: Map.get(map, :channel),
       headers: Map.get(map, :headers),
       jwt: Map.get(map, :jwt),
@@ -54,14 +57,14 @@ defmodule Realtime.Tenants.Authorization do
   def get_authorizations(%Phoenix.Socket{} = socket, db_conn, authorization_context) do
     case get_policies_for_connection(db_conn, authorization_context) do
       {:ok, policies} -> {:ok, Phoenix.Socket.assign(socket, :policies, policies)}
-      _ -> {:error, :unauthorized}
+      error -> error
     end
   end
 
   def get_authorizations(%Plug.Conn{} = conn, db_conn, authorization_context) do
     case get_policies_for_connection(db_conn, authorization_context) do
       {:ok, policies} -> {:ok, Plug.Conn.assign(conn, :policies, policies)}
-      _ -> {:error, :unauthorized}
+      error -> error
     end
   end
 
@@ -79,6 +82,7 @@ defmodule Realtime.Tenants.Authorization do
           {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
   def set_conn_config(conn, authorization_context) do
     %__MODULE__{
+      channel_name: channel_name,
       channel: channel,
       headers: headers,
       jwt: jwt,
@@ -89,7 +93,13 @@ defmodule Realtime.Tenants.Authorization do
     sub = Map.get(claims, :sub)
     claims = Jason.encode!(claims)
     headers = headers |> Map.new() |> Jason.encode!()
-    channel_name = if channel, do: channel.name, else: nil
+
+    channel_name =
+      cond do
+        !is_nil(channel) -> channel.name
+        !is_nil(channel_name) -> channel_name
+        true -> nil
+      end
 
     Postgrex.query(
       conn,
@@ -127,9 +137,9 @@ defmodule Realtime.Tenants.Authorization do
                ) do
           {:cont, policies}
         else
-          {:error, _} ->
-            Postgrex.rollback(transaction_conn, :unauthorized)
-            {:halt, {:error, :unauthorized}}
+          {:error, error} ->
+            Postgrex.rollback(transaction_conn, error)
+            {:halt, {:error, error}}
         end
       end)
     end)

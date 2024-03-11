@@ -1,4 +1,5 @@
 defmodule Realtime.Tenants.ConnectTest do
+  # async: false due to the fact that multiple operations against the database will use the same connection
   use Realtime.DataCase, async: false
 
   import Mock

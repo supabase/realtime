@@ -1,5 +1,6 @@
 defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
-  use Realtime.DataCase
+  # async: false due to the fact that multiple operations against the database will use the same connection
+  use Realtime.DataCase, async: false
 
   alias Realtime.Api.Broadcast
   alias Realtime.Tenants

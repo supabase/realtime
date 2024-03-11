@@ -1,4 +1,5 @@
 defmodule Realtime.RepoTest do
+  # async: false due to the fact that multiple operations against the database will use the same connection
   use Realtime.DataCase, async: false
 
   import Ecto.Query
@@ -12,6 +13,7 @@ defmodule Realtime.RepoTest do
 
     {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
     clean_table(conn, "realtime", "channels")
+    clean_table(conn, "realtime", "broadcasts")
 
     %{conn: conn, tenant: tenant}
   end
@@ -184,10 +186,12 @@ defmodule Realtime.RepoTest do
       assert {:error, %Ecto.Changeset{valid?: false}} = res
     end
 
-    test "returns an error on Postgrex error", %{conn: conn} do
+    test "returns a Changeset on Changeset error", %{conn: conn} do
       changeset = Channel.changeset(%Channel{}, %{name: "foo"})
       assert {:ok, _} = Repo.insert(conn, changeset, Channel)
-      assert {:error, _} = Repo.insert(conn, changeset, Channel)
+
+      assert %Ecto.Changeset{valid?: false, errors: [name: {"has already been taken", []}]} =
+               Repo.insert(conn, changeset, Channel)
     end
 
     test "handles exceptions", %{conn: conn} do
@@ -235,12 +239,14 @@ defmodule Realtime.RepoTest do
       assert {:error, %Ecto.Changeset{valid?: false}} = res
     end
 
-    test "returns an error on Postgrex error", %{conn: conn, tenant: tenant} do
+    test "returns an Changeset on Changeset error", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
       channel_to_update = channel_fixture(tenant)
 
       changeset = Channel.changeset(channel_to_update, %{name: channel.name})
-      assert {:error, _} = Repo.update(conn, changeset, Channel)
+
+      assert %Ecto.Changeset{valid?: false, errors: [name: {"has already been taken", []}]} =
+               Repo.update(conn, changeset, Channel)
     end
 
     test "handles exceptions", %{tenant: tenant, conn: conn} do

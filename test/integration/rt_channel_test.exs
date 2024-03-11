@@ -1,7 +1,8 @@
 Code.require_file("../support/websocket_client.exs", __DIR__)
 
 defmodule Realtime.Integration.RtChannelTest do
-  use RealtimeWeb.ConnCase
+  # async: false due to the fact that multiple operations against the database will use the same connection
+  use RealtimeWeb.ConnCase, async: false
   import ExUnit.CaptureLog
 
   require Logger

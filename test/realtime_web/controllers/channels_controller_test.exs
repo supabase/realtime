@@ -1,18 +1,13 @@
 defmodule RealtimeWeb.ChannelsControllerTest do
+  # async: false due to the fact that multiple operations against the database will use the same connection
   use RealtimeWeb.ConnCase, async: false
 
-  import Mock
-
-  alias Realtime.GenCounter
+  alias Realtime.Channels
   alias Realtime.Tenants
 
-  setup_with_mocks [
-                     {GenCounter, [], new: fn _ -> :ok end},
-                     {GenCounter, [], add: fn _ -> :ok end},
-                     {GenCounter, [], put: fn _, _ -> :ok end},
-                     {GenCounter, [], get: fn _ -> {:ok, 0} end}
-                   ],
-                   %{conn: conn} = context do
+  setup %{conn: conn} = context do
+    start_supervised(Realtime.RateCounter.DynamicSupervisor)
+    start_supervised(Realtime.GenCounter.DynamicSupervisor)
     start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
     tenant = tenant_fixture()
 
@@ -23,7 +18,16 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 
-    create_rls_policies(db_conn, [:read_all_channels], nil)
+    create_rls_policies(
+      db_conn,
+      [
+        :service_role_all_channels_read,
+        :service_role_all_channels_write,
+        :service_role_all_channels_delete,
+        :service_role_all_broadcasts_write
+      ],
+      nil
+    )
 
     claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", secret)
@@ -36,11 +40,11 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       |> put_req_header("authorization", "Bearer #{jwt}")
       |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
 
-    {:ok, conn: conn, tenant: tenant}
+    {:ok, conn: conn, db_conn: db_conn, tenant: tenant}
   end
 
   describe "index" do
-    @tag role: "authenticated"
+    @tag role: "service_role"
     test "lists tenant channels", %{conn: conn, tenant: tenant} do
       expected =
         Stream.repeatedly(fn -> channel_fixture(tenant) end)
@@ -56,7 +60,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       assert res == expected
     end
 
-    @tag role: "anon"
+    @tag role: "authenticated"
     test "returns 401 if unauthorized", %{conn: conn} do
       conn = get(conn, ~p"/v3/api/channels")
       assert json_response(conn, 401) == %{"message" => "Unauthorized"}
@@ -64,7 +68,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   end
 
   describe "show" do
-    @tag role: "authenticated"
+    @tag role: "service_role"
     test "lists tenant channels", %{conn: conn, tenant: tenant} do
       [channel | _] =
         Stream.repeatedly(fn -> channel_fixture(tenant) end)
@@ -77,7 +81,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       assert res == expected
     end
 
-    @tag role: "authenticated"
+    @tag role: "service_role"
     test "returns not found if id doesn't exist", %{conn: conn, tenant: tenant} do
       Stream.repeatedly(fn -> channel_fixture(tenant) end)
       |> Enum.take(10)
@@ -86,60 +90,81 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       assert json_response(conn, 404) == %{"message" => "Not found"}
     end
 
-    @tag role: "anon"
+    @tag role: "authenticated"
     test "returns 401 if unauthorized", %{conn: conn} do
       conn = get(conn, ~p"/v3/api/channels/0")
       assert json_response(conn, 401) == %{"message" => "Unauthorized"}
     end
   end
 
-  # describe "create" do
-  #   test "creates a channel", %{conn: conn} do
-  #     name = random_string()
-  #     conn = post(conn, ~p"/v3/api/channels", %{name: name})
-  #     res = json_response(conn, 201)
-  #     assert name == res["name"]
-  #   end
+  describe "create" do
+    @tag role: "service_role"
+    test "creates a channel", %{conn: conn} do
+      name = random_string()
+      conn = post(conn, ~p"/v3/api/channels", %{"name" => name})
+      res = json_response(conn, 201)
+      assert name == res["name"]
+    end
 
-  #   test "422 if params are invalid", %{conn: conn} do
-  #     conn = post(conn, ~p"/v3/api/channels", %{})
-  #     assert json_response(conn, 422) == %{"errors" => %{"name" => ["can't be blank"]}}
-  #   end
-  # end
+    @tag role: "service_role"
+    test "422 if params are invalid", %{conn: conn, db_conn: db_conn} do
+      name = random_string()
+      Channels.create_channel(%{"name" => name}, db_conn)
+      conn = post(conn, ~p"/v3/api/channels", %{"name" => name})
+      assert json_response(conn, 422) == %{"errors" => %{"name" => ["has already been taken"]}}
+    end
 
-  # describe "delete" do
-  #   test "deletes a channel", %{conn: conn, tenant: tenant} do
-  #     channel = channel_fixture(tenant)
-  #     conn = delete(conn, ~p"/v3/api/channels/#{channel.id}")
-  #     assert conn.status == 202
-  #   end
+    @tag role: "authenticated"
+    test "returns 401 if unauthorized", %{conn: conn} do
+      conn = post(conn, ~p"/v3/api/channels", %{name: random_string()})
+      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
+    end
+  end
 
-  #   test "returns not found if id doesn't exist", %{conn: conn} do
-  #     conn = delete(conn, ~p"/v3/api/channels/0")
-  #     assert conn.status == 404
-  #   end
-  # end
+  describe "delete" do
+    @tag role: "service_role"
+    test "deletes a channel", %{conn: conn, tenant: tenant} do
+      channel = channel_fixture(tenant)
+      conn = delete(conn, ~p"/v3/api/channels/#{channel.id}")
+      assert conn.status == 202
+    end
 
-  # describe "update" do
-  #   test "updates a channel", %{conn: conn, tenant: tenant} do
-  #     channel = channel_fixture(tenant)
-  #     name = random_string()
-  #     conn = put(conn, ~p"/v3/api/channels/#{channel.id}", %{name: name})
-  #     res = json_response(conn, 202)
-  #     assert name == res["name"]
+    @tag role: "service_role"
+    test "returns unauthorized if id doesn't exist", %{conn: conn} do
+      conn = delete(conn, ~p"/v3/api/channels/0")
+      assert conn.status == 401
+    end
 
-  #     name = random_string()
-  #     conn = patch(conn, ~p"/v3/api/channels/#{channel.id}", %{name: name})
-  #     res = json_response(conn, 202)
-  #     assert name == res["name"]
-  #   end
+    @tag role: "authenticated"
+    test "returns 401 if unauthorized", %{conn: conn, tenant: tenant} do
+      channel = channel_fixture(tenant)
+      conn = delete(conn, ~p"/v3/api/channels/#{channel.id}")
+      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
+    end
+  end
 
-  #   test "422 if params are invalid", %{conn: conn, tenant: tenant} do
-  #     channel = channel_fixture(tenant)
-  #     conn = put(conn, ~p"/v3/api/channels/#{channel.id}", %{name: 1})
-  #     assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
-  #     conn = patch(conn, ~p"/v3/api/channels/#{channel.id}", %{name: 1})
-  #     assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
-  #   end
-  # end
+  describe "update" do
+    @tag role: "service_role"
+    test "updates a channel", %{conn: conn, tenant: tenant} do
+      channel = channel_fixture(tenant)
+      name = random_string()
+      conn = put(conn, ~p"/v3/api/channels/#{channel.id}", %{name: name})
+      res = json_response(conn, 202)
+      assert name == res["name"]
+
+      name = random_string()
+      conn = patch(conn, ~p"/v3/api/channels/#{channel.id}", %{name: name})
+      res = json_response(conn, 202)
+      assert name == res["name"]
+    end
+
+    @tag role: "service_role"
+    test "422 if params are invalid", %{conn: conn, tenant: tenant} do
+      channel = channel_fixture(tenant)
+      conn = put(conn, ~p"/v3/api/channels/#{channel.id}", %{"name" => 1})
+      assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
+      conn = patch(conn, ~p"/v3/api/channels/#{channel.id}", %{"name" => 1})
+      assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
+    end
+  end
 end

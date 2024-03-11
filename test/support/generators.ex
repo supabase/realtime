@@ -76,6 +76,16 @@ defmodule Generators do
     Postgrex.query!(db_conn, "ALTER SEQUENCE #{schema}.#{table}_id_seq RESTART WITH 1", [])
   end
 
+  @doc """
+  Creates support RLS policies given a name and params to be used by the policies
+  Supported:
+  * read_all_channels - Sets read all channels policy for authenticated role
+  * write_all_channels - Sets write all channels policy for authenticated role
+  * read_channel - Sets read channel policy for authenticated role
+  * write_channel - Sets write channel policy for authenticated role
+  * read_broadcast - Sets read broadcast policy for authenticated role
+  * write_broadcast - Sets write broadcast policy for authenticated role
+  """
   def create_rls_policies(conn, policies, params) do
     Enum.each(policies, fn policy ->
       query = policy_query(policy, params)
@@ -85,9 +95,45 @@ defmodule Generators do
 
   def policy_query(query, params \\ nil)
 
+  def policy_query(:service_role_all_channels_read, _) do
+    """
+    CREATE POLICY service_role_all_channels_read
+    ON realtime.channels FOR SELECT
+    TO service_role
+    USING ( true );
+    """
+  end
+
+  def policy_query(:service_role_all_channels_write, _) do
+    """
+    CREATE POLICY service_role_all_channels_write
+    ON realtime.channels FOR INSERT
+    TO service_role
+    WITH CHECK ( true );
+    """
+  end
+
+  def policy_query(:service_role_all_channels_delete, _) do
+    """
+    CREATE POLICY service_role_all_channels_delete
+    ON realtime.channels FOR DELETE
+    TO service_role
+    USING ( true );
+    """
+  end
+
+  def policy_query(:service_role_all_broadcasts_write, _) do
+    """
+    CREATE POLICY service_role_all_broadcast_write
+    ON realtime.channels FOR INSERT
+    TO service_role
+    WITH CHECK ( true );
+    """
+  end
+
   def policy_query(:read_all_channels, _) do
     """
-    CREATE POLICY select_authenticated_role
+    CREATE POLICY read_all_channels
     ON realtime.channels FOR SELECT
     TO authenticated
     USING ( true );
@@ -96,7 +142,7 @@ defmodule Generators do
 
   def policy_query(:write_all_channels, _) do
     """
-    CREATE POLICY write_authenticated_role
+    CREATE POLICY write_all_channels
     ON realtime.channels FOR UPDATE
     TO authenticated
     USING ( true )
@@ -106,7 +152,7 @@ defmodule Generators do
 
   def policy_query(:read_channel, %{name: name}) do
     """
-    CREATE POLICY select_authenticated_role
+    CREATE POLICY read_channel
     ON realtime.channels FOR SELECT
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' );
@@ -115,7 +161,7 @@ defmodule Generators do
 
   def policy_query(:write_channel, %{name: name}) do
     """
-    CREATE POLICY write_authenticated_role
+    CREATE POLICY write_channel
     ON realtime.channels FOR UPDATE
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' )
@@ -125,7 +171,7 @@ defmodule Generators do
 
   def policy_query(:read_broadcast, %{name: name}) do
     """
-    CREATE POLICY broadcast_read_enabled_authenticated_role_on_channel_name
+    CREATE POLICY read_broadcast
     ON realtime.broadcasts FOR SELECT
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' );
@@ -134,7 +180,7 @@ defmodule Generators do
 
   def policy_query(:write_broadcast, %{name: name}) do
     """
-    CREATE POLICY broadcast_write_enabled_authenticated_role_on_channel_name
+    CREATE POLICY write_broadcast
     ON realtime.broadcasts FOR UPDATE
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' )
