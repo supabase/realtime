@@ -226,6 +226,8 @@ defmodule Realtime.Integration.RtChannelTest do
     [tenant] = Repo.all(Tenant)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    on_exit(fn -> Process.exit(db_conn, :normal) end)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 

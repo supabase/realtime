@@ -7,10 +7,10 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
   alias Realtime.Api.Channel
   alias Realtime.Channels
   alias Realtime.Repo
-  alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
+  alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.Joken.CurrentTime
 
@@ -218,7 +218,9 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
   def rls_context(context) do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
-    {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
     clean_table(db_conn, "realtime", "channels")
     clean_table(db_conn, "realtime", "broadcasts")
 
@@ -240,6 +242,8 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
         role: claims.role,
         channel_name: channel.name
       })
+
+    on_exit(fn -> Process.exit(db_conn, :normal) end)
 
     %{
       channel: channel,

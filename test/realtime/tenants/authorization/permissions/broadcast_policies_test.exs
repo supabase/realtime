@@ -3,10 +3,10 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
   use Realtime.DataCase, async: false
 
   alias Realtime.Api.Broadcast
-  alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.Joken.CurrentTime
 
@@ -143,7 +143,8 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
     clean_table(db_conn, "realtime", "channels")
     clean_table(db_conn, "realtime", "broadcasts")
     channel = channel_fixture(tenant)

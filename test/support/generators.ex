@@ -41,6 +41,7 @@ defmodule Generators do
 
   def channel_fixture(tenant, override \\ %{}) do
     {:ok, conn} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+
     create_attrs = %{"name" => random_string()}
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
 
@@ -49,6 +50,7 @@ defmodule Generators do
       |> Map.merge(override)
       |> Realtime.Channels.create_channel(conn)
 
+    Process.exit(conn, :normal)
     channel
   end
 

@@ -4,11 +4,11 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   require Phoenix.ChannelTest
 
-  alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
+  alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.Joken.CurrentTime
 
@@ -107,7 +107,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
     channel = channel_fixture(tenant)
@@ -127,6 +128,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
         headers: [{"header-1", "value-1"}],
         role: claims.role
       })
+
+    on_exit(fn -> Process.exit(db_conn, :normal) end)
 
     %{
       channel: channel,

@@ -2,17 +2,20 @@ defmodule Realtime.ChannelsTest do
   # async: false due to the fact that multiple operations against the database will use the same connection
   use Realtime.DataCase, async: false
 
-  alias Realtime.Channels
   alias Realtime.Api.Broadcast
   alias Realtime.Api.Channel
-  alias Realtime.Tenants
+  alias Realtime.Channels
+  alias Realtime.Tenants.Connect
 
   setup do
     tenant = tenant_fixture()
-    {:ok, conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+
+    {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
     clean_table(conn, "realtime", "broadcasts")
     clean_table(conn, "realtime", "channels")
 
+    on_exit(fn -> Process.exit(conn, :normal) end)
     %{conn: conn, tenant: tenant}
   end
 

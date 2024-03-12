@@ -34,7 +34,7 @@ defmodule Realtime.DataCase do
       Sandbox.mode(Realtime.Repo, {:shared, self()})
     end
 
-    :ok
+    {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 
   @doc """

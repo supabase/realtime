@@ -24,6 +24,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     signer = Joken.Signer.create("HS256", "secret")
     jwt = Joken.generate_and_sign!(%{}, claims, signer)
 
+    on_exit(fn -> Process.exit(db_conn, :normal) end)
     %{jwt: jwt, claims: claims, tenant: tenant, channel: channel}
   end
 

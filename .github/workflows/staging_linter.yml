@@ -50,4 +50,4 @@ jobs:
       - name: Run dialyzer
         run: mix dialyzer
       - name: Run tests
-        run: mix test
+        run: mix test --trace

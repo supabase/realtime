@@ -15,6 +15,9 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       Realtime.Helpers.decrypt!(tenant.jwt_secret, Application.get_env(:realtime, :db_enc_key))
 
     {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+
+    on_exit(fn -> Process.exit(db_conn, :normal) end)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 

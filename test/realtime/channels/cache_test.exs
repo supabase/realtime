@@ -8,6 +8,7 @@ defmodule Realtime.Channels.CacheTest do
     tenant = tenant_fixture()
     channel = channel_fixture(tenant)
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    on_exit(fn -> Process.exit(db_conn, :normal) end)
     %{channel: channel, db_conn: db_conn}
   end
 

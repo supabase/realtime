@@ -31,10 +31,10 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
   def check_read_policies(conn, %Policies{} = policies, %Authorization{
         channel: %Channel{id: channel_id}
       }) do
-    query = from(b in Broadcast, where: b.channel_id == ^channel_id)
-
     Postgrex.transaction(conn, fn transaction_conn ->
-      case Repo.one(conn, query, Broadcast) do
+      query = from(b in Broadcast, where: b.channel_id == ^channel_id)
+
+      case Repo.one(conn, query, Broadcast, mode: :savepoint) do
         {:ok, %Broadcast{}} ->
           Policies.update_policies(policies, :broadcast, :read, true)
 
@@ -60,10 +60,10 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
   def check_write_policies(conn, policies, %Authorization{
         channel: %Channel{id: channel_id}
       }) do
-    query = from(b in Broadcast, where: b.channel_id == ^channel_id)
-
     Postgrex.transaction(conn, fn transaction_conn ->
-      case Repo.one(conn, query, Broadcast) do
+      query = from(b in Broadcast, where: b.channel_id == ^channel_id)
+
+      case Repo.one(conn, query, Broadcast, mode: :savepoint) do
         {:ok, %Broadcast{} = broadcast} ->
           changeset = Broadcast.check_changeset(broadcast, %{check: true})
 
