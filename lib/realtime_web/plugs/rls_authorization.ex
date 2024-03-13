@@ -39,7 +39,7 @@ defmodule RealtimeWeb.RlsAuthorization do
     params =
       cond do
         conn.method == "POST" && Map.get(body_params, "name", nil) ->
-          name = Map.get(body_params, "name")
+          name = Map.fetch!(body_params, "name")
           Map.put(params, :channel_name, name)
 
         true ->
