@@ -54,7 +54,7 @@ defmodule Realtime.Repo do
           DBConnection.conn(),
           Ecto.Changeset.t(),
           module(),
-          Postgrex.option() | []
+          Postgrex.option() | Keyword.t()
         ) ::
           {:ok, struct()} | {:error, any()} | Ecto.Changeset.t()
   def insert(conn, changeset, result_struct, opts \\ []) do

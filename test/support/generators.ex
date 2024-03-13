@@ -99,54 +99,27 @@ defmodule Generators do
 
   def policy_query(query, params \\ nil)
 
-  def policy_query(:service_role_all_channels_read, _) do
+  def policy_query(:authenticated_all_channels_read, _) do
     """
-    CREATE POLICY service_role_all_channels_read
-    ON realtime.channels FOR SELECT
-    TO service_role
-    USING ( true );
-    """
-  end
-
-  def policy_query(:service_role_all_channels_write, _) do
-    """
-    CREATE POLICY service_role_all_channels_write
-    ON realtime.channels FOR INSERT
-    TO service_role
-    WITH CHECK ( true );
-    """
-  end
-
-  def policy_query(:service_role_all_channels_delete, _) do
-    """
-    CREATE POLICY service_role_all_channels_delete
-    ON realtime.channels FOR DELETE
-    TO service_role
-    USING ( true );
-    """
-  end
-
-  def policy_query(:service_role_all_broadcasts_write, _) do
-    """
-    CREATE POLICY service_role_all_broadcast_write
-    ON realtime.channels FOR INSERT
-    TO service_role
-    WITH CHECK ( true );
-    """
-  end
-
-  def policy_query(:read_all_channels, _) do
-    """
-    CREATE POLICY read_all_channels
+    CREATE POLICY authenticated_all_channels_read
     ON realtime.channels FOR SELECT
     TO authenticated
     USING ( true );
     """
   end
 
-  def policy_query(:write_all_channels, _) do
+  def policy_query(:authenticated_all_channels_insert, _) do
     """
-    CREATE POLICY write_all_channels
+    CREATE POLICY authenticated_all_channels_write
+    ON realtime.channels FOR INSERT
+    TO authenticated
+    WITH CHECK ( true );
+    """
+  end
+
+  def policy_query(:authenticated_all_channels_update, _) do
+    """
+    CREATE POLICY authenticated_all_channels_update
     ON realtime.channels FOR UPDATE
     TO authenticated
     USING ( true )
@@ -154,18 +127,27 @@ defmodule Generators do
     """
   end
 
-  def policy_query(:read_channel, %{name: name}) do
+  def policy_query(:authenticated_all_channels_delete, _) do
     """
-    CREATE POLICY read_channel
+    CREATE POLICY authenticated_all_channels_delete
+    ON realtime.channels FOR DELETE
+    TO authenticated
+    USING ( true );
+    """
+  end
+
+  def policy_query(:authenticated_read_channel, %{name: name}) do
+    """
+    CREATE POLICY authenticated_read_channel
     ON realtime.channels FOR SELECT
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' );
     """
   end
 
-  def policy_query(:write_channel, %{name: name}) do
+  def policy_query(:authenticated_write_channel, %{name: name}) do
     """
-    CREATE POLICY write_channel
+    CREATE POLICY authenticated_write_channel
     ON realtime.channels FOR UPDATE
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' )
@@ -173,18 +155,18 @@ defmodule Generators do
     """
   end
 
-  def policy_query(:read_broadcast, %{name: name}) do
+  def policy_query(:authenticated_read_broadcast, %{name: name}) do
     """
-    CREATE POLICY read_broadcast
+    CREATE POLICY authenticated_read_broadcast
     ON realtime.broadcasts FOR SELECT
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' );
     """
   end
 
-  def policy_query(:write_broadcast, %{name: name}) do
+  def policy_query(:authenticated_write_broadcast, %{name: name}) do
     """
-    CREATE POLICY write_broadcast
+    CREATE POLICY authenticated_write_broadcast
     ON realtime.broadcasts FOR UPDATE
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' )

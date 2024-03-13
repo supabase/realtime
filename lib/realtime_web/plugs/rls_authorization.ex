@@ -27,7 +27,8 @@ defmodule RealtimeWeb.RlsAuthorization do
          {:ok, conn} <- Authorization.get_authorizations(conn, db_conn, params) do
       conn
     else
-      error -> conn |> FallbackController.call(error) |> halt()
+      error ->
+        conn |> FallbackController.call(error) |> halt()
     end
   end
 
@@ -38,7 +39,7 @@ defmodule RealtimeWeb.RlsAuthorization do
 
     params =
       cond do
-        conn.method == "POST" && Map.get(body_params, "name", nil) ->
+        Map.get(body_params, "name", nil) ->
           name = Map.fetch!(body_params, "name")
           Map.put(params, :channel_name, name)
 

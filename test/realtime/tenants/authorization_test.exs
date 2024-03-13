@@ -16,7 +16,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   describe "get_authorizations for Plug.Conn" do
     @tag role: "authenticated",
-         policies: [:read_channel, :read_broadcast]
+         policies: [:authenticated_read_channel, :authenticated_read_broadcast]
     test "authenticated user has expected policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
@@ -32,7 +32,12 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
 
     @tag role: "anon",
-         policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
+         policies: [
+           :authenticated_read_channel,
+           :authenticated_write_channel,
+           :authenticated_read_broadcast,
+           :authenticated_write_broadcast
+         ]
     test "anon user has no policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
@@ -50,7 +55,12 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   describe "get_authorizations for Phoenix.Socket" do
     @tag role: "authenticated",
-         policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
+         policies: [
+           :authenticated_read_channel,
+           :authenticated_write_channel,
+           :authenticated_read_broadcast,
+           :authenticated_write_broadcast
+         ]
     test "authenticated user has expected policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
@@ -66,7 +76,12 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
 
     @tag role: "anon",
-         policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
+         policies: [
+           :authenticated_read_channel,
+           :authenticated_write_channel,
+           :authenticated_read_broadcast,
+           :authenticated_write_broadcast
+         ]
     test "anon user has no policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
@@ -83,7 +98,12 @@ defmodule Realtime.Tenants.AuthorizationTest do
   end
 
   @tag role: "non_existant",
-       policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
+       policies: [
+         :authenticated_read_channel,
+         :authenticated_write_channel,
+         :authenticated_read_broadcast,
+         :authenticated_write_broadcast
+       ]
   test "on error return error and unauthorized on channel", %{db_conn: db_conn} do
     authorization_context =
       Authorization.build_authorization_params(%{

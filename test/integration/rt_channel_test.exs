@@ -232,7 +232,17 @@ defmodule Realtime.Integration.RtChannelTest do
     clean_table(db_conn, "realtime", "channels")
 
     channel = channel_fixture(tenant)
-    create_rls_policies(db_conn, [:read_channel, :read_broadcast, :write_broadcast], channel)
+
+    create_rls_policies(
+      db_conn,
+      [
+        :authenticated_read_channel,
+        :authenticated_read_broadcast,
+        :authenticated_write_broadcast
+      ],
+      channel
+    )
+
     socket = get_connection("authenticated")
     config = %{broadcast: %{self: true, public: false}}
     topic = "realtime:#{channel.name}"
@@ -272,7 +282,13 @@ defmodule Realtime.Integration.RtChannelTest do
     clean_table(db_conn, "realtime", "channels")
 
     channel = channel_fixture(tenant)
-    create_rls_policies(db_conn, [:read_channel, :read_broadcast], channel)
+
+    create_rls_policies(
+      db_conn,
+      [:authenticated_read_channel, :authenticated_read_broadcast],
+      channel
+    )
+
     socket = get_connection("authenticated")
     config = %{broadcast: %{self: true, public: false}}
     topic = "realtime:#{channel.name}"
@@ -313,7 +329,7 @@ defmodule Realtime.Integration.RtChannelTest do
     clean_table(db_conn, "realtime", "channels")
 
     channel = channel_fixture(tenant)
-    create_rls_policies(db_conn, [:read_channel], channel)
+    create_rls_policies(db_conn, [:authenticated_read_channel], channel)
     socket = get_connection("authenticated")
     config = %{broadcast: %{self: true, public: false}}
     topic = "realtime:#{channel.name}"
@@ -346,7 +362,7 @@ defmodule Realtime.Integration.RtChannelTest do
     clean_table(db_conn, "realtime", "channels")
 
     channel = channel_fixture(tenant)
-    create_rls_policies(db_conn, [:read_broadcast], channel)
+    create_rls_policies(db_conn, [:authenticated_read_broadcast], channel)
     socket = get_connection("authenticated")
     config = %{broadcast: %{self: true, public: false}}
     topic = "realtime:#{channel.name}"

@@ -2,7 +2,6 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   # async: false due to the fact that multiple operations against the database will use the same connection
   use RealtimeWeb.ConnCase, async: false
 
-  alias Realtime.Channels
   alias Realtime.Tenants.Connect
 
   setup %{conn: conn} = context do
@@ -23,10 +22,10 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     create_rls_policies(
       db_conn,
       [
-        :service_role_all_channels_read,
-        :service_role_all_channels_write,
-        :service_role_all_channels_delete,
-        :service_role_all_broadcasts_write
+        :authenticated_all_channels_read,
+        :authenticated_all_channels_insert,
+        :authenticated_all_channels_update,
+        :authenticated_all_channels_delete
       ],
       nil
     )
@@ -46,7 +45,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   end
 
   describe "index" do
-    @tag role: "service_role"
+    @tag role: "authenticated"
     test "lists tenant channels", %{conn: conn, tenant: tenant} do
       expected =
         Stream.repeatedly(fn -> channel_fixture(tenant) end)
@@ -70,7 +69,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   end
 
   describe "show" do
-    @tag role: "service_role"
+    @tag role: "authenticated"
     test "lists tenant channels", %{conn: conn, tenant: tenant} do
       [channel | _] =
         Stream.repeatedly(fn -> channel_fixture(tenant) end)
@@ -83,7 +82,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       assert res == expected
     end
 
-    @tag role: "service_role"
+    @tag role: "authenticated"
     test "returns not found if id doesn't exist", %{conn: conn, tenant: tenant} do
       Stream.repeatedly(fn -> channel_fixture(tenant) end)
       |> Enum.take(10)
@@ -92,7 +91,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       assert json_response(conn, 404) == %{"message" => "Not found"}
     end
 
-    @tag role: "authenticated"
+    @tag role: "anon"
     test "returns 401 if unauthorized", %{conn: conn} do
       conn = get(conn, ~p"/v3/api/channels/0")
       assert json_response(conn, 401) == %{"message" => "Unauthorized"}
@@ -100,7 +99,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   end
 
   describe "create" do
-    @tag role: "service_role"
+    @tag role: "authenticated"
     test "creates a channel", %{conn: conn} do
       name = random_string()
       conn = post(conn, ~p"/v3/api/channels", %{"name" => name})
@@ -108,15 +107,15 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       assert name == res["name"]
     end
 
-    @tag role: "service_role"
-    test "422 if params are invalid", %{conn: conn, db_conn: db_conn} do
+    @tag role: "authenticated"
+    test "422 if params are invalid", %{conn: conn, tenant: tenant} do
       name = random_string()
-      Channels.create_channel(%{"name" => name}, db_conn)
+      channel_fixture(tenant, %{name: name})
       conn = post(conn, ~p"/v3/api/channels", %{"name" => name})
       assert json_response(conn, 422) == %{"errors" => %{"name" => ["has already been taken"]}}
     end
 
-    @tag role: "authenticated"
+    @tag role: "anon"
     test "returns 401 if unauthorized", %{conn: conn} do
       conn = post(conn, ~p"/v3/api/channels", %{name: random_string()})
       assert json_response(conn, 401) == %{"message" => "Unauthorized"}
@@ -124,20 +123,20 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   end
 
   describe "delete" do
-    @tag role: "service_role"
+    @tag role: "authenticated"
     test "deletes a channel", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
       conn = delete(conn, ~p"/v3/api/channels/#{channel.id}")
       assert conn.status == 202
     end
 
-    @tag role: "service_role"
+    @tag role: "authenticated"
     test "returns unauthorized if id doesn't exist", %{conn: conn} do
       conn = delete(conn, ~p"/v3/api/channels/0")
       assert conn.status == 401
     end
 
-    @tag role: "authenticated"
+    @tag role: "anon"
     test "returns 401 if unauthorized", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
       conn = delete(conn, ~p"/v3/api/channels/#{channel.id}")
@@ -146,7 +145,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   end
 
   describe "update" do
-    @tag role: "service_role"
+    @tag role: "authenticated"
     test "updates a channel", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
       name = random_string()
@@ -160,13 +159,20 @@ defmodule RealtimeWeb.ChannelsControllerTest do
       assert name == res["name"]
     end
 
-    @tag role: "service_role"
+    @tag role: "authenticated"
     test "422 if params are invalid", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
       conn = put(conn, ~p"/v3/api/channels/#{channel.id}", %{"name" => 1})
       assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
       conn = patch(conn, ~p"/v3/api/channels/#{channel.id}", %{"name" => 1})
       assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
+    end
+
+    @tag role: "anon"
+    test "returns 401 if unauthorized", %{conn: conn, tenant: tenant} do
+      channel = channel_fixture(tenant)
+      conn = put(conn, ~p"/v3/api/channels/#{channel.id}", %{"name" => 1})
+      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
     end
   end
 end

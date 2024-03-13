@@ -36,7 +36,7 @@ defmodule Realtime.Channels do
 
   This tables will be used for to set Authorizations. Please read more at Realtime.Tenants.Authorization
   """
-  def create_channel(attrs, conn, opts \\ []) do
+  def create_channel(attrs, conn, opts \\ [mode: :savepoint]) do
     channel = Channel.changeset(%Channel{}, attrs)
 
     result =

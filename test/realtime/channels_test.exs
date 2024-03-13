@@ -40,7 +40,7 @@ defmodule Realtime.ChannelsTest do
     end
   end
 
-  describe "create/2" do
+  describe "create_channel/2" do
     test "creates a channel and a broadcast entry in tenant database", %{conn: conn} do
       name = random_string()
 
@@ -55,6 +55,16 @@ defmodule Realtime.ChannelsTest do
                Channels.create_channel(%{}, conn)
 
       assert ^errors = [name: {"can't be blank", [validation: :required]}]
+    end
+
+    test "already repeating channel returns changeset", %{conn: conn} do
+      name = random_string()
+      Channels.create_channel(%{name: name}, conn)
+
+      assert {:error, %Ecto.Changeset{valid?: false, errors: errors}} =
+               Channels.create_channel(%{name: name}, conn)
+
+      assert ^errors = [name: {"has already been taken", []}]
     end
   end
 

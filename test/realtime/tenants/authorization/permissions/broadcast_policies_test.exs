@@ -13,7 +13,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
   describe "check_read_policies/3" do
     setup [:rls_context]
 
-    @tag role: "authenticated", policies: [:read_broadcast]
+    @tag role: "authenticated", policies: [:authenticated_read_broadcast]
     test "authenticated user has read policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -29,7 +29,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
       end)
     end
 
-    @tag role: "anon", policies: [:read_broadcast]
+    @tag role: "anon", policies: [:authenticated_read_broadcast]
     test "anon user has read policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -83,7 +83,8 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
   describe "check_write_policies/3" do
     setup [:rls_context]
 
-    @tag role: "authenticated", policies: [:read_broadcast, :write_broadcast]
+    @tag role: "authenticated",
+         policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
     test "authenticated user has write policies and reverts check", context do
       query = from(b in Broadcast, where: b.channel_id == ^context.channel.id)
       {:ok, %Broadcast{check: check}} = Repo.one(context.db_conn, query, Broadcast)
@@ -105,7 +106,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
       assert {:ok, %{check: ^check}} = Repo.one(context.db_conn, query, Broadcast)
     end
 
-    @tag role: "anon", policies: [:read_broadcast, :write_broadcast]
+    @tag role: "anon", policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
     test "anon user has no write policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)

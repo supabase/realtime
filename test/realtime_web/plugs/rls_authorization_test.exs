@@ -28,7 +28,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     %{jwt: jwt, claims: claims, tenant: tenant, channel: channel}
   end
 
-  @tag role: "anon", policies: [:read_channel]
+  @tag role: "anon", policies: [:authenticated_read_channel]
   test "assigns the policies correctly to anon user",
        %{
          conn: conn,
@@ -44,12 +44,12 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
       |> Map.put(:path_params, %{"id" => channel.id})
 
     conn = RlsAuthorization.call(conn, %{})
-    refute conn.halted
 
     assert conn.assigns.policies == %Policies{channel: %ChannelPolicies{read: false}}
+    refute conn.halted
   end
 
-  @tag role: "authenticated", policies: [:read_all_channels]
+  @tag role: "authenticated", policies: [:authenticated_all_channels_read]
   test "assigns the policies correctly to authenticated user",
        %{
          conn: conn,
@@ -60,19 +60,17 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
        } do
     conn = setup_conn(conn, tenant, claims, jwt, role)
     conn = RlsAuthorization.call(conn, %{})
-    refute conn.halted
 
     assert conn.assigns.policies == %Policies{channel: %ChannelPolicies{read: true}}
+    refute conn.halted
   end
 
-  @tag role: "service_role",
+  @tag role: "authenticated",
        policies: [
-         :service_role_all_channels_read,
-         :service_role_all_channels_write,
-         :service_role_all_channels_delete,
-         :service_role_all_broadcasts_write
+         :authenticated_all_channels_read,
+         :authenticated_all_channels_insert
        ]
-  test "assigns the policies correctly to authenticated user when channel name is in body and it's a post request",
+  test "assigns the policies correctly to authenticated user when channel name is in body",
        %{
          jwt: jwt,
          claims: claims,
@@ -83,12 +81,12 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
       build_conn(:post, "", %{"name" => random_string()}) |> setup_conn(tenant, claims, jwt, role)
 
     conn = RlsAuthorization.call(conn, %{})
-    refute conn.halted
 
     assert conn.assigns.policies == %Policies{channel: %ChannelPolicies{read: true, write: true}}
+    refute conn.halted
   end
 
-  @tag role: "authenticated", policies: [:read_channel]
+  @tag role: "authenticated", policies: [:authenticated_read_channel]
   test "on error, halts the connection and set status to 401", %{
     conn: conn,
     jwt: jwt,
@@ -97,8 +95,8 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
   } do
     conn = setup_conn(conn, tenant, claims, jwt, "no")
     conn = RlsAuthorization.call(conn, %{})
-    assert conn.halted
     assert conn.status == 401
+    assert conn.halted
   end
 
   defp setup_conn(conn, tenant, claims, jwt, role) do
