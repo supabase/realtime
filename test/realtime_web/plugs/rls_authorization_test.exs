@@ -4,7 +4,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
 
   import Plug.Conn
 
-  alias Realtime.Tenants
+  alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
   alias RealtimeWeb.Joken.CurrentTime
@@ -14,7 +14,8 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
     clean_table(db_conn, "realtime", "channels")
     channel = channel_fixture(tenant)
@@ -24,7 +25,6 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     signer = Joken.Signer.create("HS256", "secret")
     jwt = Joken.generate_and_sign!(%{}, claims, signer)
 
-    on_exit(fn -> Process.exit(db_conn, :normal) end)
     %{jwt: jwt, claims: claims, tenant: tenant, channel: channel}
   end
 

@@ -10,7 +10,9 @@ defmodule Realtime.ChannelsTest do
   setup do
     tenant = tenant_fixture()
 
-    {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, pid} = Connect.connect(tenant.external_id)
+    Process.link(pid)
+    {:ok, conn} = Connect.get_status(tenant.external_id)
 
     clean_table(conn, "realtime", "broadcasts")
     clean_table(conn, "realtime", "channels")

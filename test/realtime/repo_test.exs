@@ -11,12 +11,12 @@ defmodule Realtime.RepoTest do
   setup do
     tenant = tenant_fixture()
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
     clean_table(db_conn, "realtime", "channels")
     clean_table(db_conn, "realtime", "broadcasts")
 
-    on_exit(fn -> Process.exit(db_conn, :normal) end)
     %{db_conn: db_conn, tenant: tenant}
   end
 
@@ -141,7 +141,9 @@ defmodule Realtime.RepoTest do
     end
 
     test "handles exceptions", %{db_conn: db_conn} do
+      Process.unlink(db_conn)
       Process.exit(db_conn, :kill)
+
       assert {:error, :postgrex_exception} = Repo.all(db_conn, from(c in Channel), Channel)
     end
   end
@@ -170,6 +172,7 @@ defmodule Realtime.RepoTest do
     end
 
     test "handles exceptions", %{db_conn: db_conn} do
+      Process.unlink(db_conn)
       Process.exit(db_conn, :kill)
       query = from c in Channel, where: c.name == "potato"
       assert {:error, :postgrex_exception} = Repo.one(db_conn, query, Channel)
@@ -197,7 +200,9 @@ defmodule Realtime.RepoTest do
     end
 
     test "handles exceptions", %{db_conn: db_conn} do
+      Process.unlink(db_conn)
       Process.exit(db_conn, :kill)
+
       changeset = Channel.changeset(%Channel{}, %{name: "foo"})
       assert {:error, :postgrex_exception} = Repo.insert(db_conn, changeset, Channel)
     end
@@ -219,7 +224,9 @@ defmodule Realtime.RepoTest do
     end
 
     test "handles exceptions", %{db_conn: db_conn} do
+      Process.unlink(db_conn)
       Process.exit(db_conn, :kill)
+
       assert {:error, :postgrex_exception} = Repo.del(db_conn, Channel)
     end
   end
@@ -253,7 +260,10 @@ defmodule Realtime.RepoTest do
 
     test "handles exceptions", %{tenant: tenant, db_conn: db_conn} do
       changeset = Channel.changeset(channel_fixture(tenant), %{name: "foo"})
+
+      Process.unlink(db_conn)
       Process.exit(db_conn, :kill)
+
       assert {:error, :postgrex_exception} = Repo.update(db_conn, changeset, Channel)
     end
   end

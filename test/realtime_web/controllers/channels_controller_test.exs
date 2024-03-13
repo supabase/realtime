@@ -3,7 +3,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
   use RealtimeWeb.ConnCase, async: false
 
   alias Realtime.Channels
-  alias Realtime.Tenants
+  alias Realtime.Tenants.Connect
 
   setup %{conn: conn} = context do
     start_supervised(Realtime.RateCounter.DynamicSupervisor)
@@ -14,9 +14,8 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     secret =
       Realtime.Helpers.decrypt!(tenant.jwt_secret, Application.get_env(:realtime, :db_enc_key))
 
-    {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
-
-    on_exit(fn -> Process.exit(db_conn, :normal) end)
+    {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")

@@ -225,8 +225,8 @@ defmodule Realtime.Integration.RtChannelTest do
   test "private broadcast with valid channel with permissions sends message" do
     [tenant] = Repo.all(Tenant)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-    on_exit(fn -> Process.exit(db_conn, :normal) end)
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
@@ -265,7 +265,9 @@ defmodule Realtime.Integration.RtChannelTest do
   test "private broadcast with valid channel no write permissions won't send message" do
     [tenant] = Repo.all(Tenant)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 
@@ -304,7 +306,9 @@ defmodule Realtime.Integration.RtChannelTest do
   test "private broadcast with valid channel but no read permissions on broadcast does not connect" do
     [tenant] = Repo.all(Tenant)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 
@@ -335,7 +339,9 @@ defmodule Realtime.Integration.RtChannelTest do
   test "private broadcast with valid channel but no read permissions on channel does not connect" do
     [tenant] = Repo.all(Tenant)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 
@@ -365,7 +371,9 @@ defmodule Realtime.Integration.RtChannelTest do
   test "private broadcast with non existing channel fails to join" do
     [tenant] = Repo.all(Tenant)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 

@@ -67,6 +67,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     test "handles database errors", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
+        Process.unlink(context.db_conn)
         Process.exit(context.db_conn, :kill)
 
         assert {:error, _} =
@@ -143,7 +144,8 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
     clean_table(db_conn, "realtime", "channels")
     clean_table(db_conn, "realtime", "broadcasts")
