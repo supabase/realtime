@@ -176,7 +176,6 @@ defmodule RealtimeWeb.TenantController do
     responses: %{
       204 => EmptyResponse.response(),
       403 => UnauthorizedResponse.response(),
-      404 => NotFoundResponse.response(),
       500 => ErrorResponse.response()
     }
   )
@@ -198,7 +197,7 @@ defmodule RealtimeWeb.TenantController do
       nil ->
         Logger.error("Tenant #{tenant_id} does not exist")
 
-        send_resp(conn, 404, "")
+        send_resp(conn, 204, "")
 
       err ->
         msg = "Error deleting tenant: #{inspect(err)}"

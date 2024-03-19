@@ -1,4 +1,5 @@
 defmodule RealtimeWeb.TenantControllerTest do
+  alias Realtime.PromEx.Plugins.Tenants
   alias Realtime.UsersCounter
 
   # async: false required due to the delete tests that connects to the database directly and might interfere with other tests
@@ -9,6 +10,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
   alias Realtime.Api.Tenant
   alias Realtime.Helpers
+  alias Realtime.Tenants
   alias Realtime.Tenants.Cache
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.JwtVerification
@@ -162,20 +164,18 @@ defmodule RealtimeWeb.TenantControllerTest do
              ]}
           )
 
-        {:ok, %{rows: []}} =
-          Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
+        assert {:ok, %{rows: []}} =
+                 Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
 
         refute Cache.get_tenant_by_external_id(tenant.external_id)
-
-        conn = get(conn, Routes.tenant_path(conn, :show, tenant.external_id))
-        assert response(conn, 404)
+        refute Tenants.get_tenant_by_external_id(tenant.external_id)
       end
     end
 
     test "tenant doesn't exist", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
         conn = delete(conn, Routes.tenant_path(conn, :delete, "wrong_external_id"))
-        assert response(conn, 404)
+        assert response(conn, 204)
       end
     end
   end
