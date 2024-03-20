@@ -26,18 +26,24 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
           }
         } = socket
       ) do
-    socket = count(socket)
+    sent? =
+      case policies do
+        nil ->
+          send_message(self_broadcast, tenant_topic, payload)
+          true
 
-    case policies do
-      nil ->
-        send_message(self_broadcast, tenant_topic, payload)
+        %Policies{broadcast: %BroadcastPolicies{write: true}} ->
+          send_message(self_broadcast, tenant_topic, payload)
+          true
 
-      %Policies{broadcast: %BroadcastPolicies{write: true}} ->
-        send_message(self_broadcast, tenant_topic, payload)
+        _ ->
+          nil
+      end
 
-      _ ->
-        nil
-    end
+    socket =
+      if sent?,
+        do: count(socket),
+        else: socket
 
     if ack_broadcast,
       do: {:reply, :ok, socket},
