@@ -5,9 +5,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
   require Logger
 
-  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
-  alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies
   alias DBConnection.Backoff
 
   alias Phoenix.Tracker.Shard
@@ -20,6 +17,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.SignalHandler
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.ChannelsAuthorization
@@ -54,13 +54,13 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_max_users(socket.assigns),
          {:ok, claims, confirm_token_ref, access_token} <- confirm_token(socket),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant),
-         is_new_api = is_new_api(params),
-         public = is_public(params),
-         {:ok, socket} <-
-           assign_policies(public, db_conn, sub_topic, access_token, claims, socket) do
-      Realtime.UsersCounter.add(transport_pid, tenant)
-
+         channel = ChannelsCache.get_channel_by_name(sub_topic, db_conn),
+         {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
+      is_new_api = is_new_api(params)
+      public? = match?({:ok, _}, channel)
       tenant_topic = tenant <> ":" <> sub_topic
+
+      Realtime.UsersCounter.add(transport_pid, tenant)
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
 
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
@@ -91,7 +91,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         self_broadcast: !!params["config"]["broadcast"]["self"],
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        public: !!public
+        public: public?
       }
 
       {:ok, state, assign(socket, assigns)}
@@ -517,13 +517,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp is_new_api(%{"config" => _}), do: true
   defp is_new_api(_), do: false
 
-  defp is_public(params) do
-    case params["config"]["broadcast"]["public"] do
-      nil -> true
-      public -> !!public
-    end
-  end
-
   defp pg_change_params(true, params, channel_pid, claims, _) do
     send(self(), :sync_presence)
 
@@ -610,37 +603,31 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:error, %{reason: error_msg}}
   end
 
-  defp assign_policies(false, db_conn, sub_topic, access_token, claims, socket) do
-    case ChannelsCache.get_channel_by_name(sub_topic, db_conn) do
-      {:error, :not_found} ->
-        {:error, "Channel #{sub_topic} does not exist, please create it first"}
+  defp assign_policies({:ok, channel}, db_conn, access_token, claims, socket) do
+    authorization_context =
+      Authorization.build_authorization_params(%{
+        channel: channel,
+        headers: socket.assigns.headers,
+        jwt: access_token,
+        claims: claims,
+        role: claims["role"]
+      })
 
-      {:ok, channel} ->
-        authorization_context =
-          Authorization.build_authorization_params(%{
-            channel: channel,
-            headers: socket.assigns.headers,
-            jwt: access_token,
-            claims: claims,
-            role: claims["role"]
-          })
+    {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
 
-        {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
+    case socket.assigns.policies do
+      %Policies{broadcast: %BroadcastPolicies{read: false}} ->
+        {:error, "You do not have permissions to read Broadcast messages from this channel"}
 
-        case socket.assigns.policies do
-          %Policies{broadcast: %BroadcastPolicies{read: false}} ->
-            {:error, "You do not have permissions to read Broadcast messages from this channel"}
+      %Policies{channel: %ChannelPolicies{read: false}} ->
+        {:error, "You do not have permissions to read from this Channel"}
 
-          %Policies{channel: %ChannelPolicies{read: false}} ->
-            {:error, "You do not have permissions to read from this Channel"}
-
-          _ ->
-            {:ok, socket}
-        end
+      _ ->
+        {:ok, socket}
     end
   end
 
-  defp assign_policies(true, _, _, _, _, socket) do
+  defp assign_policies(_, _, _, _, socket) do
     {:ok, assign(socket, policies: nil)}
   end
 end

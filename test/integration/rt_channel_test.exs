@@ -244,7 +244,7 @@ defmodule Realtime.Integration.RtChannelTest do
     )
 
     socket = get_connection("authenticated")
-    config = %{broadcast: %{self: true, public: false}}
+    config = %{broadcast: %{self: true}}
     topic = "realtime:#{channel.name}"
 
     WebsocketClient.join(socket, topic, %{config: config})
@@ -290,7 +290,7 @@ defmodule Realtime.Integration.RtChannelTest do
     )
 
     socket = get_connection("authenticated")
-    config = %{broadcast: %{self: true, public: false}}
+    config = %{broadcast: %{self: true}}
     topic = "realtime:#{channel.name}"
 
     WebsocketClient.join(socket, topic, %{config: config})
@@ -331,7 +331,7 @@ defmodule Realtime.Integration.RtChannelTest do
     channel = channel_fixture(tenant)
     create_rls_policies(db_conn, [:authenticated_read_channel], channel)
     socket = get_connection("authenticated")
-    config = %{broadcast: %{self: true, public: false}}
+    config = %{broadcast: %{self: true}}
     topic = "realtime:#{channel.name}"
 
     WebsocketClient.join(socket, topic, %{config: config})
@@ -364,7 +364,7 @@ defmodule Realtime.Integration.RtChannelTest do
     channel = channel_fixture(tenant)
     create_rls_policies(db_conn, [:authenticated_read_broadcast], channel)
     socket = get_connection("authenticated")
-    config = %{broadcast: %{self: true, public: false}}
+    config = %{broadcast: %{self: true}}
     topic = "realtime:#{channel.name}"
 
     WebsocketClient.join(socket, topic, %{config: config})
@@ -376,36 +376,6 @@ defmodule Realtime.Integration.RtChannelTest do
                        "response" => %{
                          "reason" => "\"You do not have permissions to read from this Channel\""
                        },
-                       "status" => "error"
-                     },
-                     ref: "1",
-                     join_ref: nil
-                   },
-                   500
-  end
-
-  test "private broadcast with non existing channel fails to join" do
-    [tenant] = Repo.all(Tenant)
-
-    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
-    {:ok, db_conn} = Connect.get_status(tenant.external_id)
-
-    clean_table(db_conn, "realtime", "broadcasts")
-    clean_table(db_conn, "realtime", "channels")
-
-    socket = get_connection("authenticated")
-    config = %{broadcast: %{self: true, public: false}}
-    channel_name = random_string()
-    topic = "realtime:#{channel_name}"
-
-    WebsocketClient.join(socket, topic, %{config: config})
-    reason = "\"Channel #{channel_name} does not exist, please create it first\""
-
-    assert_receive %Phoenix.Socket.Message{
-                     topic: ^topic,
-                     event: "phx_reply",
-                     payload: %{
-                       "response" => %{"reason" => ^reason},
                        "status" => "error"
                      },
                      ref: "1",
