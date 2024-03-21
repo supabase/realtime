@@ -10,6 +10,7 @@ defmodule RealtimeWeb.RlsAuthorization do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
 
+  alias RealtimeWeb.FallbackController
   def init(opts), do: opts
 
   def call(%Plug.Conn{assigns: %{tenant: tenant}} = conn, _opts) do
@@ -27,20 +28,32 @@ defmodule RealtimeWeb.RlsAuthorization do
       conn
     else
       error ->
-        Logger.error("Error authorizing connection: #{inspect(error)}")
-        unauthorized(conn)
+        conn |> FallbackController.call(error) |> halt()
     end
   end
 
   def call(conn, _opts), do: unauthorized(conn) |> halt()
 
-  defp set_channel_params_for_authorization_check(%{path_params: path_params}, db_conn, params) do
+  defp set_channel_params_for_authorization_check(conn, db_conn, params) do
+    %{path_params: path_params, body_params: body_params} = conn
+
+    params =
+      cond do
+        Map.get(body_params, "name", nil) ->
+          name = Map.fetch!(body_params, "name")
+          Map.put(params, :channel_name, name)
+
+        true ->
+          params
+      end
+
     with {:ok, id} <- Map.fetch(path_params, "id"),
          {:ok, channel} <- Channels.get_channel_by_id(id, db_conn) do
-      Map.put(params, :channel, channel)
+      params
+      |> Map.put(:channel, channel)
+      |> Map.put(:channel_name, channel.name)
     else
-      _ ->
-        Map.put(params, :channel, nil)
+      _ -> Map.put(params, :channel, nil)
     end
   end
 

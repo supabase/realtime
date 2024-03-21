@@ -1,17 +1,23 @@
 defmodule Realtime.ChannelsTest do
+  # async: false due to the fact that multiple operations against the database will use the same connection
   use Realtime.DataCase, async: false
 
-  alias Realtime.Channels
   alias Realtime.Api.Broadcast
   alias Realtime.Api.Channel
-  alias Realtime.Tenants
+  alias Realtime.Channels
+  alias Realtime.Tenants.Connect
 
   setup do
     tenant = tenant_fixture()
-    {:ok, conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+
+    {:ok, pid} = Connect.connect(tenant.external_id)
+    Process.link(pid)
+    {:ok, conn} = Connect.get_status(tenant.external_id)
+
     clean_table(conn, "realtime", "broadcasts")
     clean_table(conn, "realtime", "channels")
 
+    on_exit(fn -> Process.exit(conn, :normal) end)
     %{conn: conn, tenant: tenant}
   end
 
@@ -34,7 +40,7 @@ defmodule Realtime.ChannelsTest do
     end
   end
 
-  describe "create/2" do
+  describe "create_channel/2" do
     test "creates a channel and a broadcast entry in tenant database", %{conn: conn} do
       name = random_string()
 
@@ -49,6 +55,16 @@ defmodule Realtime.ChannelsTest do
                Channels.create_channel(%{}, conn)
 
       assert ^errors = [name: {"can't be blank", [validation: :required]}]
+    end
+
+    test "already repeating channel returns changeset", %{conn: conn} do
+      name = random_string()
+      Channels.create_channel(%{name: name}, conn)
+
+      assert {:error, %Ecto.Changeset{valid?: false, errors: errors}} =
+               Channels.create_channel(%{name: name}, conn)
+
+      assert ^errors = [name: {"has already been taken", []}]
     end
   end
 

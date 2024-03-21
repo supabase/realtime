@@ -1,7 +1,8 @@
 Code.require_file("../support/websocket_client.exs", __DIR__)
 
 defmodule Realtime.Integration.RtChannelTest do
-  use RealtimeWeb.ConnCase
+  # async: false due to the fact that multiple operations against the database will use the same connection
+  use RealtimeWeb.ConnCase, async: false
   import ExUnit.CaptureLog
 
   require Logger
@@ -224,12 +225,24 @@ defmodule Realtime.Integration.RtChannelTest do
   test "private broadcast with valid channel with permissions sends message" do
     [tenant] = Repo.all(Tenant)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 
     channel = channel_fixture(tenant)
-    create_rls_policies(db_conn, [:read_channel, :read_broadcast, :write_broadcast], channel)
+
+    create_rls_policies(
+      db_conn,
+      [
+        :authenticated_read_channel,
+        :authenticated_read_broadcast,
+        :authenticated_write_broadcast
+      ],
+      channel
+    )
+
     socket = get_connection("authenticated")
     config = %{broadcast: %{self: true, public: false}}
     topic = "realtime:#{channel.name}"
@@ -262,12 +275,20 @@ defmodule Realtime.Integration.RtChannelTest do
   test "private broadcast with valid channel no write permissions won't send message" do
     [tenant] = Repo.all(Tenant)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 
     channel = channel_fixture(tenant)
-    create_rls_policies(db_conn, [:read_channel, :read_broadcast], channel)
+
+    create_rls_policies(
+      db_conn,
+      [:authenticated_read_channel, :authenticated_read_broadcast],
+      channel
+    )
+
     socket = get_connection("authenticated")
     config = %{broadcast: %{self: true, public: false}}
     topic = "realtime:#{channel.name}"
@@ -301,12 +322,14 @@ defmodule Realtime.Integration.RtChannelTest do
   test "private broadcast with valid channel but no read permissions on broadcast does not connect" do
     [tenant] = Repo.all(Tenant)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 
     channel = channel_fixture(tenant)
-    create_rls_policies(db_conn, [:read_channel], channel)
+    create_rls_policies(db_conn, [:authenticated_read_channel], channel)
     socket = get_connection("authenticated")
     config = %{broadcast: %{self: true, public: false}}
     topic = "realtime:#{channel.name}"
@@ -332,12 +355,14 @@ defmodule Realtime.Integration.RtChannelTest do
   test "private broadcast with valid channel but no read permissions on channel does not connect" do
     [tenant] = Repo.all(Tenant)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 
     channel = channel_fixture(tenant)
-    create_rls_policies(db_conn, [:read_broadcast], channel)
+    create_rls_policies(db_conn, [:authenticated_read_broadcast], channel)
     socket = get_connection("authenticated")
     config = %{broadcast: %{self: true, public: false}}
     topic = "realtime:#{channel.name}"
@@ -362,7 +387,9 @@ defmodule Realtime.Integration.RtChannelTest do
   test "private broadcast with non existing channel fails to join" do
     [tenant] = Repo.all(Tenant)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
 

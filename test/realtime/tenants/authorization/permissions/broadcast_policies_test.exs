@@ -1,18 +1,19 @@
 defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
-  use Realtime.DataCase
+  # async: false due to the fact that multiple operations against the database will use the same connection
+  use Realtime.DataCase, async: false
 
   alias Realtime.Api.Broadcast
-  alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.Joken.CurrentTime
 
   describe "check_read_policies/3" do
     setup [:rls_context]
 
-    @tag role: "authenticated", policies: [:read_broadcast]
+    @tag role: "authenticated", policies: [:authenticated_read_broadcast]
     test "authenticated user has read policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -28,7 +29,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
       end)
     end
 
-    @tag role: "anon", policies: [:read_broadcast]
+    @tag role: "anon", policies: [:authenticated_read_broadcast]
     test "anon user has read policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -66,6 +67,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     test "handles database errors", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
+        Process.unlink(context.db_conn)
         Process.exit(context.db_conn, :kill)
 
         assert {:error, _} =
@@ -81,7 +83,8 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
   describe "check_write_policies/3" do
     setup [:rls_context]
 
-    @tag role: "authenticated", policies: [:read_broadcast, :write_broadcast]
+    @tag role: "authenticated",
+         policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
     test "authenticated user has write policies and reverts check", context do
       query = from(b in Broadcast, where: b.channel_id == ^context.channel.id)
       {:ok, %Broadcast{check: check}} = Repo.one(context.db_conn, query, Broadcast)
@@ -103,7 +106,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
       assert {:ok, %{check: ^check}} = Repo.one(context.db_conn, query, Broadcast)
     end
 
-    @tag role: "anon", policies: [:read_broadcast, :write_broadcast]
+    @tag role: "anon", policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
     test "anon user has no write policies", context do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -142,7 +145,9 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     clean_table(db_conn, "realtime", "channels")
     clean_table(db_conn, "realtime", "broadcasts")
     channel = channel_fixture(tenant)

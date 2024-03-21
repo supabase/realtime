@@ -1,4 +1,5 @@
 defmodule Realtime.Tenants.ConnectTest do
+  # async: false due to the fact that multiple operations against the database will use the same connection
   use Realtime.DataCase, async: false
 
   import Mock
@@ -13,16 +14,23 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "if tenant exists and connected, returns the db connection", %{tenant: tenant} do
-      assert {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      assert is_pid(conn)
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      on_exit(fn -> Process.exit(db_conn, :normal) end)
+
+      assert is_pid(db_conn)
     end
 
     test "on database disconnect, returns new connection", %{tenant: tenant} do
       assert {:ok, old_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
       GenServer.stop(old_conn)
       :timer.sleep(1000)
 
       assert {:ok, new_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      on_exit(fn -> Process.exit(new_conn, :normal) end)
+
       assert new_conn != old_conn
     end
 
@@ -47,12 +55,12 @@ defmodule Realtime.Tenants.ConnectTest do
 
       tenant = tenant_fixture(%{"extensions" => extensions})
 
-      assert Connect.lookup_or_start_connection(tenant.external_id) ==
-               {:error, :tenant_database_unavailable}
+      assert {:error, :tenant_database_unavailable} =
+               Connect.lookup_or_start_connection(tenant.external_id)
     end
 
     test "if tenant does not exist, returns error" do
-      assert Connect.lookup_or_start_connection("none") == {:error, :tenant_not_found}
+      assert {:error, :tenant_not_found} = Connect.lookup_or_start_connection("none")
     end
 
     test "if no users are connected to a tenant channel, stop the connection", %{
@@ -79,6 +87,8 @@ defmodule Realtime.Tenants.ConnectTest do
       {:ok, db_conn} =
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
+      on_exit(fn -> Process.exit(db_conn, :normal) end)
+
       assert {pid, %{conn: conn_pid}} = :syn.lookup(Connect, tenant_id)
       :timer.sleep(300)
       assert {^pid, %{conn: ^conn_pid}} = :syn.lookup(Connect, tenant_id)
@@ -104,7 +114,7 @@ defmodule Realtime.Tenants.ConnectTest do
     test "error if tenant is suspended" do
       tenant = tenant_fixture(suspend: true)
 
-      assert {:error, :tenant_suspended} == Connect.lookup_or_start_connection(tenant.external_id)
+      assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
     end
 
     test "handles tenant suspension and unsuspension in a reactive way" do
@@ -117,13 +127,16 @@ defmodule Realtime.Tenants.ConnectTest do
       :timer.sleep(100)
 
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
+
       assert Process.alive?(db_conn) == false
 
       Realtime.Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
 
       :timer.sleep(100)
 
-      assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      on_exit(fn -> Process.exit(db_conn, :normal) end)
     end
 
     test "properly handles of failing calls by avoid creating too many connections" do
@@ -162,6 +175,7 @@ defmodule Realtime.Tenants.ConnectTest do
     test "on migrations failure, process is alive", %{tenant: tenant} do
       with_mock Ecto.Migrator, [:passthrough], run: fn _, _, _, _ -> nil end do
         assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
         assert_called(Ecto.Migrator.run(:_, :_, :_, :_))
         assert Process.alive?(db_conn) == true
       end

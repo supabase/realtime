@@ -1,4 +1,5 @@
 defmodule Realtime.RepoTest do
+  # async: false due to the fact that multiple operations against the database will use the same connection
   use Realtime.DataCase, async: false
 
   import Ecto.Query
@@ -10,10 +11,13 @@ defmodule Realtime.RepoTest do
   setup do
     tenant = tenant_fixture()
 
-    {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
-    clean_table(conn, "realtime", "channels")
+    {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
-    %{conn: conn, tenant: tenant}
+    clean_table(db_conn, "realtime", "channels")
+    clean_table(db_conn, "realtime", "broadcasts")
+
+    %{db_conn: db_conn, tenant: tenant}
   end
 
   describe "with_dynamic_repo/2" do
@@ -128,125 +132,139 @@ defmodule Realtime.RepoTest do
   end
 
   describe "all/3" do
-    test "fetches multiple entries and loads a given struct", %{conn: conn, tenant: tenant} do
+    test "fetches multiple entries and loads a given struct", %{db_conn: db_conn, tenant: tenant} do
       channel_1 = channel_fixture(tenant)
       channel_2 = channel_fixture(tenant)
 
-      assert {:ok, [^channel_1, ^channel_2] = res} = Repo.all(conn, Channel, Channel)
+      assert {:ok, [^channel_1, ^channel_2] = res} = Repo.all(db_conn, Channel, Channel)
       assert Enum.all?(res, &(Ecto.get_meta(&1, :state) == :loaded))
     end
 
-    test "handles exceptions", %{conn: conn} do
-      Process.exit(conn, :kill)
-      assert {:error, :postgrex_exception} = Repo.all(conn, from(c in Channel), Channel)
+    test "handles exceptions", %{db_conn: db_conn} do
+      Process.unlink(db_conn)
+      Process.exit(db_conn, :kill)
+
+      assert {:error, :postgrex_exception} = Repo.all(db_conn, from(c in Channel), Channel)
     end
   end
 
   describe "one/3" do
-    test "fetches one entry and loads a given struct", %{conn: conn, tenant: tenant} do
+    test "fetches one entry and loads a given struct", %{db_conn: db_conn, tenant: tenant} do
       channel_1 = channel_fixture(tenant)
       _channel_2 = channel_fixture(tenant)
       query = from c in Channel, where: c.id == ^channel_1.id
-      assert {:ok, ^channel_1} = Repo.one(conn, query, Channel)
+      assert {:ok, ^channel_1} = Repo.one(db_conn, query, Channel)
       assert Ecto.get_meta(channel_1, :state) == :loaded
     end
 
-    test "raises exception on multiple results", %{conn: conn, tenant: tenant} do
+    test "raises exception on multiple results", %{db_conn: db_conn, tenant: tenant} do
       _channel_1 = channel_fixture(tenant)
       _channel_2 = channel_fixture(tenant)
 
       assert_raise RuntimeError, "expected at most one result but got 2 in result", fn ->
-        Repo.one(conn, Channel, Channel)
+        Repo.one(db_conn, Channel, Channel)
       end
     end
 
-    test "if not found, returns not found error", %{conn: conn} do
+    test "if not found, returns not found error", %{db_conn: db_conn} do
       query = from c in Channel, where: c.name == "potato"
-      assert {:error, :not_found} = Repo.one(conn, query, Channel)
+      assert {:error, :not_found} = Repo.one(db_conn, query, Channel)
     end
 
-    test "handles exceptions", %{conn: conn} do
-      Process.exit(conn, :kill)
+    test "handles exceptions", %{db_conn: db_conn} do
+      Process.unlink(db_conn)
+      Process.exit(db_conn, :kill)
       query = from c in Channel, where: c.name == "potato"
-      assert {:error, :postgrex_exception} = Repo.one(conn, query, Channel)
+      assert {:error, :postgrex_exception} = Repo.one(db_conn, query, Channel)
     end
   end
 
   describe "insert/3" do
-    test "inserts a new entry with a given changeset and returns struct", %{conn: conn} do
+    test "inserts a new entry with a given changeset and returns struct", %{db_conn: db_conn} do
       changeset = Channel.changeset(%Channel{}, %{name: "foo"})
-      assert {:ok, %Channel{}} = Repo.insert(conn, changeset, Channel)
+      assert {:ok, %Channel{}} = Repo.insert(db_conn, changeset, Channel)
     end
 
-    test "returns changeset if changeset is invalid", %{conn: conn} do
+    test "returns changeset if changeset is invalid", %{db_conn: db_conn} do
       changeset = Channel.changeset(%Channel{}, %{})
-      res = Repo.insert(conn, changeset, Channel)
+      res = Repo.insert(db_conn, changeset, Channel)
       assert {:error, %Ecto.Changeset{valid?: false}} = res
     end
 
-    test "returns an error on Postgrex error", %{conn: conn} do
+    test "returns a Changeset on Changeset error", %{db_conn: db_conn} do
       changeset = Channel.changeset(%Channel{}, %{name: "foo"})
-      assert {:ok, _} = Repo.insert(conn, changeset, Channel)
-      assert {:error, _} = Repo.insert(conn, changeset, Channel)
+      assert {:ok, _} = Repo.insert(db_conn, changeset, Channel)
+
+      assert %Ecto.Changeset{valid?: false, errors: [name: {"has already been taken", []}]} =
+               Repo.insert(db_conn, changeset, Channel)
     end
 
-    test "handles exceptions", %{conn: conn} do
-      Process.exit(conn, :kill)
+    test "handles exceptions", %{db_conn: db_conn} do
+      Process.unlink(db_conn)
+      Process.exit(db_conn, :kill)
+
       changeset = Channel.changeset(%Channel{}, %{name: "foo"})
-      assert {:error, :postgrex_exception} = Repo.insert(conn, changeset, Channel)
+      assert {:error, :postgrex_exception} = Repo.insert(db_conn, changeset, Channel)
     end
   end
 
   describe "del/3" do
-    test "deletes all from query entry", %{conn: conn, tenant: tenant} do
+    test "deletes all from query entry", %{db_conn: db_conn, tenant: tenant} do
       Stream.repeatedly(fn -> channel_fixture(tenant) end) |> Enum.take(3)
-      assert {:ok, 3} = Repo.del(conn, Channel)
+      assert {:ok, 3} = Repo.del(db_conn, Channel)
     end
 
-    test "raises error on bad queries", %{conn: conn} do
+    test "raises error on bad queries", %{db_conn: db_conn} do
       # wrong id type
       query = from c in Channel, where: c.id == "potato"
 
       assert_raise Ecto.QueryError, fn ->
-        Repo.del(conn, query)
+        Repo.del(db_conn, query)
       end
     end
 
-    test "handles exceptions", %{conn: conn} do
-      Process.exit(conn, :kill)
-      assert {:error, :postgrex_exception} = Repo.del(conn, Channel)
+    test "handles exceptions", %{db_conn: db_conn} do
+      Process.unlink(db_conn)
+      Process.exit(db_conn, :kill)
+
+      assert {:error, :postgrex_exception} = Repo.del(db_conn, Channel)
     end
   end
 
   describe "update/3" do
     test "updates a new entry with a given changeset and returns struct", %{
-      conn: conn,
+      db_conn: db_conn,
       tenant: tenant
     } do
       channel = channel_fixture(tenant)
       changeset = Channel.changeset(channel, %{name: "foo"})
-      assert {:ok, %Channel{}} = Repo.update(conn, changeset, Channel)
+      assert {:ok, %Channel{}} = Repo.update(db_conn, changeset, Channel)
     end
 
-    test "returns changeset if changeset is invalid", %{conn: conn, tenant: tenant} do
+    test "returns changeset if changeset is invalid", %{db_conn: db_conn, tenant: tenant} do
       channel = channel_fixture(tenant)
       changeset = Channel.changeset(channel, %{name: 0})
-      res = Repo.update(conn, changeset, Channel)
+      res = Repo.update(db_conn, changeset, Channel)
       assert {:error, %Ecto.Changeset{valid?: false}} = res
     end
 
-    test "returns an error on Postgrex error", %{conn: conn, tenant: tenant} do
+    test "returns an Changeset on Changeset error", %{db_conn: db_conn, tenant: tenant} do
       channel = channel_fixture(tenant)
       channel_to_update = channel_fixture(tenant)
 
       changeset = Channel.changeset(channel_to_update, %{name: channel.name})
-      assert {:error, _} = Repo.update(conn, changeset, Channel)
+
+      assert %Ecto.Changeset{valid?: false, errors: [name: {"has already been taken", []}]} =
+               Repo.update(db_conn, changeset, Channel)
     end
 
-    test "handles exceptions", %{tenant: tenant, conn: conn} do
+    test "handles exceptions", %{tenant: tenant, db_conn: db_conn} do
       changeset = Channel.changeset(channel_fixture(tenant), %{name: "foo"})
-      Process.exit(conn, :kill)
-      assert {:error, :postgrex_exception} = Repo.update(conn, changeset, Channel)
+
+      Process.unlink(db_conn)
+      Process.exit(db_conn, :kill)
+
+      assert {:error, :postgrex_exception} = Repo.update(db_conn, changeset, Channel)
     end
   end
 

@@ -34,24 +34,34 @@ defmodule Realtime.Repo do
   @doc """
   Fetches one record for a given query and converts it into a given struct
   """
-  @spec one(DBConnection.conn(), Ecto.Query.t(), module()) ::
-          {:ok, struct()} | {:ok, nil} | {:error, any()}
-  def one(conn, query, result_struct) do
+  @spec one(
+          DBConnection.conn(),
+          Ecto.Query.t(),
+          module(),
+          Postgrex.option() | Keyword.t()
+        ) ::
+          {:error, any()} | {:ok, struct()} | Ecto.Changeset.t()
+  def one(conn, query, result_struct, opts \\ []) do
     conn
-    |> run_all_query(query)
-    |> result_to_single_struct(result_struct)
+    |> run_all_query(query, opts)
+    |> result_to_single_struct(result_struct, nil)
   end
 
   @doc """
   Inserts a given changeset into the database and converts the result into a given struct
   """
-  @spec insert(DBConnection.conn(), Ecto.Changeset.t(), module()) ::
+  @spec insert(
+          DBConnection.conn(),
+          Ecto.Changeset.t(),
+          module(),
+          Postgrex.option() | Keyword.t()
+        ) ::
           {:ok, struct()} | {:error, any()} | Ecto.Changeset.t()
-  def insert(conn, changeset, result_struct) do
+  def insert(conn, changeset, result_struct, opts \\ []) do
     with {:ok, {query, args}} <- insert_query_from_changeset(changeset) do
       conn
-      |> run_query_with_trap(query, args)
-      |> result_to_single_struct(result_struct)
+      |> run_query_with_trap(query, args, opts)
+      |> result_to_single_struct(result_struct, changeset)
     end
   end
 
@@ -75,19 +85,28 @@ defmodule Realtime.Repo do
     with {:ok, {query, args}} <- update_query_from_changeset(changeset) do
       conn
       |> run_query_with_trap(query, args, opts)
-      |> result_to_single_struct(result_struct)
+      |> result_to_single_struct(result_struct, changeset)
     end
   end
 
-  defp result_to_single_struct({:error, _} = error, _), do: error
+  defp result_to_single_struct(
+         {:error,
+          %Postgrex.Error{postgres: %{code: :unique_violation, constraint: "channels_name_index"}}},
+         _struct,
+         changeset
+       ) do
+    Ecto.Changeset.add_error(changeset, :name, "has already been taken")
+  end
 
-  defp result_to_single_struct({:ok, %Postgrex.Result{rows: []}}, _), do: {:error, :not_found}
+  defp result_to_single_struct({:error, _} = error, _, _), do: error
 
-  defp result_to_single_struct({:ok, %Postgrex.Result{rows: [row], columns: columns}}, struct) do
+  defp result_to_single_struct({:ok, %Postgrex.Result{rows: []}}, _, _), do: {:error, :not_found}
+
+  defp result_to_single_struct({:ok, %Postgrex.Result{rows: [row], columns: columns}}, struct, _) do
     {:ok, load(struct, Enum.zip(columns, row))}
   end
 
-  defp result_to_single_struct({:ok, %Postgrex.Result{num_rows: num_rows}}, _) do
+  defp result_to_single_struct({:ok, %Postgrex.Result{num_rows: num_rows}}, _, _) do
     raise("expected at most one result but got #{num_rows} in result")
   end
 
@@ -133,7 +152,7 @@ defmodule Realtime.Repo do
     {:ok, to_sql(:update_all, query)}
   end
 
-  defp run_all_query(conn, query, opts \\ []) do
+  defp run_all_query(conn, query, opts) do
     {query, args} = to_sql(:all, query)
     run_query_with_trap(conn, query, args, opts)
   end

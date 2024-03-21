@@ -7,7 +7,10 @@ defmodule Realtime.Channels.CacheTest do
   setup do
     tenant = tenant_fixture()
     channel = channel_fixture(tenant)
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+    start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     %{channel: channel, db_conn: db_conn}
   end
 

@@ -2,7 +2,7 @@ defmodule Generators do
   @moduledoc """
   Data genarators for tests.
   """
-
+  alias Realtime.Tenants.Connect
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
     create_attrs = %{
@@ -40,15 +40,19 @@ defmodule Generators do
   end
 
   def channel_fixture(tenant, override \\ %{}) do
-    {:ok, conn} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, pid} = Connect.connect(tenant.external_id, restart: :transient)
+    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+
     create_attrs = %{"name" => random_string()}
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
 
     {:ok, channel} =
       create_attrs
       |> Map.merge(override)
-      |> Realtime.Channels.create_channel(conn)
+      |> Realtime.Channels.create_channel(db_conn)
 
+    Process.exit(pid, :normal)
+    :timer.sleep(100)
     channel
   end
 
@@ -76,6 +80,16 @@ defmodule Generators do
     Postgrex.query!(db_conn, "ALTER SEQUENCE #{schema}.#{table}_id_seq RESTART WITH 1", [])
   end
 
+  @doc """
+  Creates support RLS policies given a name and params to be used by the policies
+  Supported:
+  * read_all_channels - Sets read all channels policy for authenticated role
+  * write_all_channels - Sets write all channels policy for authenticated role
+  * read_channel - Sets read channel policy for authenticated role
+  * write_channel - Sets write channel policy for authenticated role
+  * read_broadcast - Sets read broadcast policy for authenticated role
+  * write_broadcast - Sets write broadcast policy for authenticated role
+  """
   def create_rls_policies(conn, policies, params) do
     Enum.each(policies, fn policy ->
       query = policy_query(policy, params)
@@ -85,18 +99,27 @@ defmodule Generators do
 
   def policy_query(query, params \\ nil)
 
-  def policy_query(:read_all_channels, _) do
+  def policy_query(:authenticated_all_channels_read, _) do
     """
-    CREATE POLICY select_authenticated_role
+    CREATE POLICY authenticated_all_channels_read
     ON realtime.channels FOR SELECT
     TO authenticated
     USING ( true );
     """
   end
 
-  def policy_query(:write_all_channels, _) do
+  def policy_query(:authenticated_all_channels_insert, _) do
     """
-    CREATE POLICY write_authenticated_role
+    CREATE POLICY authenticated_all_channels_write
+    ON realtime.channels FOR INSERT
+    TO authenticated
+    WITH CHECK ( true );
+    """
+  end
+
+  def policy_query(:authenticated_all_channels_update, _) do
+    """
+    CREATE POLICY authenticated_all_channels_update
     ON realtime.channels FOR UPDATE
     TO authenticated
     USING ( true )
@@ -104,18 +127,27 @@ defmodule Generators do
     """
   end
 
-  def policy_query(:read_channel, %{name: name}) do
+  def policy_query(:authenticated_all_channels_delete, _) do
     """
-    CREATE POLICY select_authenticated_role
+    CREATE POLICY authenticated_all_channels_delete
+    ON realtime.channels FOR DELETE
+    TO authenticated
+    USING ( true );
+    """
+  end
+
+  def policy_query(:authenticated_read_channel, %{name: name}) do
+    """
+    CREATE POLICY authenticated_read_channel
     ON realtime.channels FOR SELECT
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' );
     """
   end
 
-  def policy_query(:write_channel, %{name: name}) do
+  def policy_query(:authenticated_write_channel, %{name: name}) do
     """
-    CREATE POLICY write_authenticated_role
+    CREATE POLICY authenticated_write_channel
     ON realtime.channels FOR UPDATE
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' )
@@ -123,18 +155,18 @@ defmodule Generators do
     """
   end
 
-  def policy_query(:read_broadcast, %{name: name}) do
+  def policy_query(:authenticated_read_broadcast, %{name: name}) do
     """
-    CREATE POLICY broadcast_read_enabled_authenticated_role_on_channel_name
+    CREATE POLICY authenticated_read_broadcast
     ON realtime.broadcasts FOR SELECT
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' );
     """
   end
 
-  def policy_query(:write_broadcast, %{name: name}) do
+  def policy_query(:authenticated_write_broadcast, %{name: name}) do
     """
-    CREATE POLICY broadcast_write_enabled_authenticated_role_on_channel_name
+    CREATE POLICY authenticated_write_broadcast
     ON realtime.broadcasts FOR UPDATE
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' )

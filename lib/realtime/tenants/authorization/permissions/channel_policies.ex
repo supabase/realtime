@@ -70,31 +70,56 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
   end
 
   @impl true
-  def check_write_policies(_conn, policies, %Authorization{channel: nil}) do
+  def check_write_policies(_conn, policies, %Authorization{channel: nil, channel_name: nil}) do
     {:ok, Policies.update_policies(policies, :channel, :write, false)}
   end
 
-  def check_write_policies(conn, policies, %Authorization{channel: channel}) do
-    changeset = Channel.check_changeset(channel, %{check: true})
+  def check_write_policies(conn, policies, %Authorization{channel: channel})
+      when not is_nil(channel) do
+    Postgrex.transaction(conn, fn transaction_conn ->
+      changeset = Channel.check_changeset(channel, %{check: true})
 
-    case Repo.update(conn, changeset, Channel, mode: :savepoint) do
-      {:ok, %Channel{check: true} = channel} ->
-        revert_changeset = Channel.check_changeset(channel, %{check: false})
-        {:ok, _} = Repo.update(conn, revert_changeset, Channel)
-        {:ok, Policies.update_policies(policies, :channel, :write, true)}
+      case Repo.update(transaction_conn, changeset, Channel, mode: :savepoint) do
+        {:ok, %Channel{check: true} = channel} ->
+          revert_changeset = Channel.check_changeset(channel, %{check: false})
+          {:ok, _} = Repo.update(transaction_conn, revert_changeset, Channel)
+          Policies.update_policies(policies, :channel, :write, true)
 
-      {:ok, _} ->
-        {:ok, Policies.update_policies(policies, :channel, :write, false)}
+        {:ok, _} ->
+          Policies.update_policies(policies, :channel, :write, false)
 
-      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        {:ok, Policies.update_policies(policies, :channel, :write, false)}
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+          Policies.update_policies(policies, :channel, :write, false)
 
-      {:error, :not_found} ->
-        {:ok, Policies.update_policies(policies, :channel, :write, false)}
+        {:error, :not_found} ->
+          Policies.update_policies(policies, :channel, :write, false)
 
-      {:error, error} ->
-        Logger.error("Error getting channel write policies for connection: #{inspect(error)}")
-        {:error, error}
-    end
+        {:error, error} ->
+          Logger.error("Error getting channel write policies for connection: #{inspect(error)}")
+          Postgrex.rollback(transaction_conn, error)
+      end
+    end)
+  end
+
+  def check_write_policies(conn, policies, %Authorization{channel_name: channel_name}) do
+    Postgrex.transaction(conn, fn transaction_conn ->
+      changeset = Channel.changeset(%Channel{}, %{name: channel_name})
+
+      case Repo.insert(transaction_conn, changeset, Channel, mode: :savepoint) do
+        {:ok, %Channel{}} ->
+          Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
+          Policies.update_policies(policies, :channel, :write, true)
+
+        %Ecto.Changeset{errors: [name: {"has already been taken", []}]} ->
+          Policies.update_policies(policies, :channel, :write, true)
+
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+          Policies.update_policies(policies, :channel, :write, false)
+
+        {:error, error} ->
+          Logger.error("Error getting channel write policies for connection: #{inspect(error)}")
+          Postgrex.rollback(transaction_conn, error)
+      end
+    end)
   end
 end

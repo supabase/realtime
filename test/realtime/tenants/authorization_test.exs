@@ -1,14 +1,14 @@
 defmodule Realtime.Tenants.AuthorizationTest do
   # Needs to be false due to some conflicts when fetching connection from the pool since this use Postgrex directly
-
   use RealtimeWeb.ConnCase, async: false
+
   require Phoenix.ChannelTest
 
-  alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
+  alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.Joken.CurrentTime
 
@@ -16,7 +16,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   describe "get_authorizations for Plug.Conn" do
     @tag role: "authenticated",
-         policies: [:read_channel, :read_broadcast]
+         policies: [:authenticated_read_channel, :authenticated_read_broadcast]
     test "authenticated user has expected policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
@@ -32,7 +32,12 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
 
     @tag role: "anon",
-         policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
+         policies: [
+           :authenticated_read_channel,
+           :authenticated_write_channel,
+           :authenticated_read_broadcast,
+           :authenticated_write_broadcast
+         ]
     test "anon user has no policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
@@ -50,7 +55,12 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   describe "get_authorizations for Phoenix.Socket" do
     @tag role: "authenticated",
-         policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
+         policies: [
+           :authenticated_read_channel,
+           :authenticated_write_channel,
+           :authenticated_read_broadcast,
+           :authenticated_write_broadcast
+         ]
     test "authenticated user has expected policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
@@ -66,7 +76,12 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
 
     @tag role: "anon",
-         policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
+         policies: [
+           :authenticated_read_channel,
+           :authenticated_write_channel,
+           :authenticated_read_broadcast,
+           :authenticated_write_broadcast
+         ]
     test "anon user has no policies", context do
       {:ok, conn} =
         Authorization.get_authorizations(
@@ -83,7 +98,12 @@ defmodule Realtime.Tenants.AuthorizationTest do
   end
 
   @tag role: "non_existant",
-       policies: [:read_channel, :write_channel, :read_broadcast, :write_broadcast]
+       policies: [
+         :authenticated_read_channel,
+         :authenticated_write_channel,
+         :authenticated_read_broadcast,
+         :authenticated_write_broadcast
+       ]
   test "on error return error and unauthorized on channel", %{db_conn: db_conn} do
     authorization_context =
       Authorization.build_authorization_params(%{
@@ -94,19 +114,21 @@ defmodule Realtime.Tenants.AuthorizationTest do
         role: "non_existant"
       })
 
-    {:error, :unauthorized} =
-      Authorization.get_authorizations(
-        Phoenix.ConnTest.build_conn(),
-        db_conn,
-        authorization_context
-      )
+    assert {:error,
+            %DBConnection.TransactionError{status: :error, message: "transaction is aborted"}} =
+             Authorization.get_authorizations(
+               Phoenix.ConnTest.build_conn(),
+               db_conn,
+               authorization_context
+             )
   end
 
   def rls_context(context) do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, db_conn} = Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
     clean_table(db_conn, "realtime", "broadcasts")
     clean_table(db_conn, "realtime", "channels")
     channel = channel_fixture(tenant)
@@ -126,6 +148,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
         headers: [{"header-1", "value-1"}],
         role: claims.role
       })
+
+    on_exit(fn -> Process.exit(db_conn, :normal) end)
 
     %{
       channel: channel,

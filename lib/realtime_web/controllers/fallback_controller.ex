@@ -20,7 +20,7 @@ defmodule RealtimeWeb.FallbackController do
     |> render("error.json", message: "Not found")
   end
 
-  def call(conn, {:error, :unauthorized}) do
+  def call(conn, {:error, _}) do
     conn
     |> put_status(:unauthorized)
     |> put_view(RealtimeWeb.ErrorView)

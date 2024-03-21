@@ -118,7 +118,15 @@ defmodule RealtimeWeb.ChannelsController do
     }
   )
 
-  def create(%{assigns: %{tenant: tenant}} = conn, params) do
+  def create(
+        %{
+          assigns: %{
+            tenant: tenant,
+            policies: %Policies{channel: %ChannelPolicies{write: true}}
+          }
+        } = conn,
+        params
+      ) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
          {:ok, channel} <- Channels.create_channel(params, db_conn) do
       conn
@@ -126,6 +134,8 @@ defmodule RealtimeWeb.ChannelsController do
       |> json(channel)
     end
   end
+
+  def create(_conn, _params), do: {:error, :unauthorized}
 
   operation(:delete,
     summary: "Deletes a channel",
@@ -152,12 +162,22 @@ defmodule RealtimeWeb.ChannelsController do
     }
   )
 
-  def delete(%{assigns: %{tenant: tenant}} = conn, %{"id" => id}) do
+  def delete(
+        %{
+          assigns: %{
+            tenant: tenant,
+            policies: %Policies{channel: %ChannelPolicies{write: true}}
+          }
+        } = conn,
+        %{"id" => id}
+      ) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
          :ok <- Channels.delete_channel_by_id(id, db_conn) do
       send_resp(conn, :accepted, "")
     end
   end
+
+  def delete(_conn, _params), do: {:error, :unauthorized}
 
   operation(:update,
     summary: "Update user channel",
@@ -185,7 +205,15 @@ defmodule RealtimeWeb.ChannelsController do
     }
   )
 
-  def update(%{assigns: %{tenant: tenant}} = conn, %{"id" => id} = params) do
+  def update(
+        %{
+          assigns: %{
+            tenant: tenant,
+            policies: %Policies{channel: %ChannelPolicies{write: true}}
+          }
+        } = conn,
+        %{"id" => id} = params
+      ) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
          {:ok, channel} <- Channels.update_channel_by_id(id, params, db_conn) do
       conn
@@ -193,4 +221,6 @@ defmodule RealtimeWeb.ChannelsController do
       |> json(channel)
     end
   end
+
+  def update(_conn, _params), do: {:error, :unauthorized}
 end

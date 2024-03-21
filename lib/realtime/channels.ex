@@ -26,25 +26,33 @@ defmodule Realtime.Channels do
     Repo.one(conn, query, Channel)
   end
 
+  @spec create_channel(
+          map(),
+          DBConnection.t(),
+          Postgrex.option() | Keyword.t()
+        ) :: {:error, any()} | {:ok, any()}
   @doc """
   Creates a channel and supporting tables for a given channel in the tenant database using a given DBConnection.
 
   This tables will be used for to set Authorizations. Please read more at Realtime.Tenants.Authorization
   """
-  @spec create_channel(map(), DBConnection.conn()) :: {:ok, Channel.t()} | {:error, any()}
-  def create_channel(attrs, conn) do
+  def create_channel(attrs, conn, opts \\ [mode: :savepoint]) do
     channel = Channel.changeset(%Channel{}, attrs)
 
-    Postgrex.transaction(conn, fn transaction_conn ->
-      with {:ok, channel} <- Repo.insert(transaction_conn, channel, Channel),
-           changeset = Broadcast.changeset(%Broadcast{}, %{channel_id: channel.id}),
-           {:ok, _} <- Repo.insert(transaction_conn, changeset, Broadcast) do
-        channel
-      else
-        {:error, changeset} ->
-          Postgrex.rollback(transaction_conn, changeset)
-      end
-    end)
+    result =
+      Postgrex.transaction(conn, fn transaction_conn ->
+        with {:ok, %Channel{} = channel} <- Repo.insert(transaction_conn, channel, Channel, opts),
+             changeset = Broadcast.changeset(%Broadcast{}, %{channel_id: channel.id}),
+             {:ok, _} <- Repo.insert(transaction_conn, changeset, Broadcast, opts) do
+          channel
+        end
+      end)
+
+    case result do
+      {:ok, %Ecto.Changeset{valid?: false} = error} -> {:error, error}
+      {:ok, {:error, error}} -> {:error, error}
+      result -> result
+    end
   end
 
   @doc """
