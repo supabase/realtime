@@ -45,7 +45,8 @@ defmodule Realtime.Tenants.Migrations do
     AddChannelsColumnForWriteCheck,
     AddUpdateGrantToChannels,
     AddBroadcastsPoliciesTable,
-    AddInsertAndDeleteGrantToChannels
+    AddInsertAndDeleteGrantToChannels,
+    AddPresencesPoliciesTable
   }
 
   alias Realtime.Helpers
@@ -89,7 +90,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_108_234_812, AddChannelsColumnForWriteCheck},
     {20_240_109_165_339, AddUpdateGrantToChannels},
     {20_240_227_174_441, AddBroadcastsPoliciesTable},
-    {20_240_311_171_622, AddInsertAndDeleteGrantToChannels}
+    {20_240_311_171_622, AddInsertAndDeleteGrantToChannels},
+    {20_240_321_100_241, AddPresencesPoliciesTable}
   ]
 
   @spec run_migrations(map()) :: {:ok, [integer()]} | {:error, any()}

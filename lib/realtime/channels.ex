@@ -5,6 +5,7 @@ defmodule Realtime.Channels do
 
   alias Realtime.Api.Broadcast
   alias Realtime.Api.Channel
+  alias Realtime.Api.Presence
   alias Realtime.Repo
 
   import Ecto.Query
@@ -42,8 +43,10 @@ defmodule Realtime.Channels do
     result =
       Postgrex.transaction(conn, fn transaction_conn ->
         with {:ok, %Channel{} = channel} <- Repo.insert(transaction_conn, channel, Channel, opts),
-             changeset = Broadcast.changeset(%Broadcast{}, %{channel_id: channel.id}),
-             {:ok, _} <- Repo.insert(transaction_conn, changeset, Broadcast, opts) do
+             broadcast_changeset = Broadcast.changeset(%Broadcast{}, %{channel_id: channel.id}),
+             presence_changeset = Broadcast.changeset(%Presence{}, %{channel_id: channel.id}),
+             {:ok, _} <- Repo.insert(transaction_conn, broadcast_changeset, Broadcast, opts),
+             {:ok, _} <- Repo.insert(transaction_conn, presence_changeset, Presence, opts) do
           channel
         end
       end)

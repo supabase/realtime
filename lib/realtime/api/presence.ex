@@ -1,6 +1,6 @@
-defmodule Realtime.Api.Broadcast do
+defmodule Realtime.Api.Presence do
   @moduledoc """
-  Defines the Broadcast schema
+  Defines the Presence schema
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -9,7 +9,7 @@ defmodule Realtime.Api.Broadcast do
   @type t :: %__MODULE__{}
 
   @schema_prefix "realtime"
-  schema "broadcasts" do
+  schema "presences" do
     field(:check, :boolean, default: false)
     timestamps()
 

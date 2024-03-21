@@ -173,4 +173,23 @@ defmodule Generators do
     WITH CHECK ( realtime.channel_name() = '#{name}' );
     """
   end
+
+  def policy_query(:authenticated_read_presence, %{name: name}) do
+    """
+    CREATE POLICY authenticated_read_presence
+    ON realtime.presences FOR SELECT
+    TO authenticated
+    USING ( realtime.channel_name() = '#{name}' );
+    """
+  end
+
+  def policy_query(:authenticated_write_presence, %{name: name}) do
+    """
+    CREATE POLICY authenticated_write_presence
+    ON realtime.presences FOR UPDATE
+    TO authenticated
+    USING ( realtime.channel_name() = '#{name}' )
+    WITH CHECK ( realtime.channel_name() = '#{name}' );
+    """
+  end
 end

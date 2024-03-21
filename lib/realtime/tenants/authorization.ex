@@ -14,6 +14,7 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
+  alias Realtime.Tenants.Authorization.Policies.PresencePolicies
 
   defstruct [:channel_name, :channel, :headers, :jwt, :claims, :role]
 
@@ -117,7 +118,7 @@ defmodule Realtime.Tenants.Authorization do
     )
   end
 
-  @policies_mods [ChannelPolicies, BroadcastPolicies]
+  @policies_mods [ChannelPolicies, BroadcastPolicies, PresencePolicies]
   defp get_policies_for_connection(conn, authorization_context) do
     Postgrex.transaction(conn, fn transaction_conn ->
       set_conn_config(transaction_conn, authorization_context)
