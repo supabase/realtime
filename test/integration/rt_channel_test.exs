@@ -394,6 +394,101 @@ defmodule Realtime.Integration.RtChannelTest do
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
     end
+
+    @tag policies: [
+           :authenticated_read_channel,
+           :authenticated_read_presence,
+           :authenticated_write_presence
+         ]
+    test "private presence with read and write permissions will be able to track and receive presence changes" do
+      socket = get_connection()
+      config = %{presence: %{key: ""}}
+
+      WebsocketClient.join(socket, "realtime:any", %{config: config})
+
+      assert_receive %Message{
+        event: "phx_reply",
+        payload: %{
+          "response" => %{"postgres_changes" => []},
+          "status" => "ok"
+        },
+        ref: "1",
+        topic: "realtime:any"
+      }
+
+      assert_receive %Message{
+        event: "presence_state",
+        payload: %{},
+        ref: nil,
+        topic: "realtime:any"
+      }
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_96", t: 1814.7000000029802}
+      }
+
+      WebsocketClient.send_event(socket, "realtime:any", "presence", payload)
+
+      assert_receive %Message{
+        event: "presence_diff",
+        payload: %{"joins" => joins, "leaves" => %{}},
+        ref: nil,
+        topic: "realtime:any"
+      }
+
+      join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
+      assert get_in(join_payload, ["name"]) == payload.payload.name
+      assert get_in(join_payload, ["t"]) == payload.payload.t
+    end
+
+    @tag policies: [
+           :authenticated_read_channel,
+           :authenticated_read_presence
+         ]
+    test "private presence with read permissions will be able to receive presence changes but won't be able to track" do
+      socket = get_connection("authenticated")
+      config = %{presence: %{key: ""}}
+
+      WebsocketClient.join(socket, "realtime:any", %{config: config})
+
+      assert_receive %Message{
+        event: "phx_reply",
+        payload: %{
+          "response" => %{"postgres_changes" => []},
+          "status" => "ok"
+        },
+        ref: "1",
+        topic: "realtime:any"
+      }
+
+      assert_receive %Message{
+        event: "presence_state",
+        payload: %{},
+        ref: nil,
+        topic: "realtime:any"
+      }
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_96", t: 1814.7000000029802}
+      }
+
+      WebsocketClient.send_event(socket, "realtime:any", "presence", payload)
+
+      assert_receive %Message{
+        event: "presence_diff",
+        payload: %{"joins" => joins, "leaves" => %{}},
+        ref: nil,
+        topic: "realtime:any"
+      }
+
+      join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
+      assert get_in(join_payload, ["name"]) == payload.payload.name
+      assert get_in(join_payload, ["t"]) == payload.payload.t
+    end
   end
 
   test "token required the role key" do

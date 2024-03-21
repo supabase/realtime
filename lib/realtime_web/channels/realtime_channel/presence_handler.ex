@@ -3,11 +3,13 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   Handles the Presence feature from Realtime
   """
   import Phoenix.Socket, only: [assign: 3]
-
+  import Phoenix.Channel, only: [push: 3]
+  alias Phoenix.Tracker.Shard
   alias Realtime.GenCounter
   alias Realtime.RateCounter
 
   alias RealtimeWeb.Presence
+  alias RealtimeWeb.RealtimeChannel.Logging
 
   @spec call(map(), Phoenix.Socket.t()) ::
           {:noreply, Phoenix.Socket.t()} | {:reply, :error | :ok, Phoenix.Socket.t()}
@@ -22,6 +24,14 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   def call(_payload, socket) do
+    {:noreply, socket}
+  end
+
+  def track(msg, %{assigns: %{tenant_topic: topic}} = socket) do
+    socket = Logging.maybe_log_handle_info(socket, msg)
+
+    push(socket, "presence_state", presence_dirty_list(topic))
+
     {:noreply, socket}
   end
 
@@ -53,5 +63,14 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     {:ok, rate_counter} = RateCounter.get(counter.id)
 
     assign(socket, :rate_counter, rate_counter)
+  end
+
+  defp presence_dirty_list(topic) do
+    [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
+
+    Presence
+    |> Shard.name_for_topic(topic, size)
+    |> Shard.dirty_list(topic)
+    |> Phoenix.Presence.group()
   end
 end
