@@ -57,9 +57,10 @@ defmodule RealtimeWeb.RealtimeChannel do
          channel = ChannelsCache.get_channel_by_name(sub_topic, db_conn),
          {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
       is_new_api = is_new_api(params)
-      Realtime.UsersCounter.add(transport_pid, tenant)
-
+      public? = match?({:ok, _}, channel)
       tenant_topic = tenant <> ":" <> sub_topic
+
+      Realtime.UsersCounter.add(transport_pid, tenant)
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
 
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
@@ -73,12 +74,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         tenant: tenant,
         module: module
       }
-
-      public? =
-        case channel do
-          {:ok, _} -> false
-          _ -> true
-        end
 
       postgres_cdc_subscribe(opts)
 

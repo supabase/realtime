@@ -26,24 +26,18 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
           }
         } = socket
       ) do
-    sent? =
-      case policies do
-        nil ->
-          send_message(self_broadcast, tenant_topic, payload)
-          true
+    case policies do
+      nil ->
+        send_message(self_broadcast, tenant_topic, payload)
 
-        %Policies{broadcast: %BroadcastPolicies{write: true}} ->
-          send_message(self_broadcast, tenant_topic, payload)
-          true
+      %Policies{broadcast: %BroadcastPolicies{write: true}} ->
+        send_message(self_broadcast, tenant_topic, payload)
 
-        _ ->
-          nil
-      end
+      _ ->
+        nil
+    end
 
-    socket =
-      if sent?,
-        do: count(socket),
-        else: socket
+    socket = increment_rate_counter(socket)
 
     if ack_broadcast,
       do: {:reply, :ok, socket},
@@ -60,7 +54,17 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       else: Endpoint.broadcast_from(self(), tenant_topic, @event_type, payload)
   end
 
-  defp count(%{assigns: %{rate_counter: counter}} = socket) do
+  defp increment_rate_counter(
+         %{
+           assigns: %{
+             policies: %Policies{broadcast: %BroadcastPolicies{write: false}}
+           }
+         } = socket
+       ) do
+    socket
+  end
+
+  defp increment_rate_counter(%{assigns: %{rate_counter: counter}} = socket) do
     GenCounter.add(counter.id)
     {:ok, rate_counter} = RateCounter.get(counter.id)
 
