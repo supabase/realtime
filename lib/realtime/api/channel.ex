@@ -15,6 +15,7 @@ defmodule Realtime.Api.Channel do
     timestamps()
 
     has_many(:broadcasts, Realtime.Api.Broadcast)
+    has_many(:presences, Realtime.Api.Presence)
   end
 
   def changeset(channel, attrs) do

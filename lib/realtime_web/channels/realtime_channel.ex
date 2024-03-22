@@ -18,6 +18,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
+  alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.ChannelsAuthorization
@@ -53,7 +54,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, claims, confirm_token_ref, access_token} <- confirm_token(socket),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant),
          channel = ChannelsCache.get_channel_by_name(sub_topic, db_conn),
-         {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
+         {:ok, socket} <- assign_policies(channel, db_conn, params, access_token, claims, socket) do
       is_new_api = is_new_api(params)
       public? = match?({:ok, _}, channel)
       tenant_topic = tenant <> ":" <> sub_topic
@@ -565,7 +566,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     end)
   end
 
-  defp assign_policies({:ok, channel}, db_conn, access_token, claims, socket) do
+  defp assign_policies({:ok, channel}, db_conn, params, access_token, claims, socket) do
+    using_broadcast? = get_in(params, ["config", "broadcast"])
+    using_presence? = get_in(params, ["config", "presence"])
+
     authorization_context =
       Authorization.build_authorization_params(%{
         channel: channel,
@@ -577,19 +581,24 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
 
-    case socket.assigns.policies do
-      %Policies{broadcast: %BroadcastPolicies{read: false}} ->
+    cond do
+      using_presence? &&
+          match?(%Policies{presence: %PresencePolicies{read: false}}, socket.assigns.policies) ->
+        {:error, "You do not have permissions to read Presence messages from this channel"}
+
+      using_broadcast? &&
+          match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
         {:error, "You do not have permissions to read Broadcast messages from this channel"}
 
-      %Policies{channel: %ChannelPolicies{read: false}} ->
+      match?(%Policies{channel: %ChannelPolicies{read: false}}, socket.assigns.policies) ->
         {:error, "You do not have permissions to read from this Channel"}
 
-      _ ->
+      true ->
         {:ok, socket}
     end
   end
 
-  defp assign_policies(_, _, _, _, socket) do
+  defp assign_policies(_, _, _, _, _, socket) do
     {:ok, assign(socket, policies: nil)}
   end
 end

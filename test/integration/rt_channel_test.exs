@@ -228,7 +228,9 @@ defmodule Realtime.Integration.RtChannelTest do
     @tag policies: [
            :authenticated_read_channel,
            :authenticated_read_broadcast,
-           :authenticated_write_broadcast
+           :authenticated_write_broadcast,
+           :authenticated_read_presence,
+           :authenticated_write_presence
          ]
     test "private broadcast with valid channel with permissions sends message", %{
       channel: channel
@@ -264,7 +266,9 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [
            :authenticated_read_channel,
-           :authenticated_read_broadcast
+           :authenticated_read_broadcast,
+           :authenticated_read_presence,
+           :authenticated_write_presence
          ]
     test "private broadcast with valid channel no write permissions won't send message", %{
       channel: channel
@@ -447,28 +451,14 @@ defmodule Realtime.Integration.RtChannelTest do
            :authenticated_read_channel,
            :authenticated_read_presence
          ]
-    test "private presence with read permissions will be able to receive presence changes but won't be able to track" do
+    test "private presence with read permissions will be able to receive presence changes but won't be able to track",
+         %{channel: channel} do
       socket = get_connection("authenticated")
-      config = %{presence: %{key: ""}}
+      secondary_socket = get_connection("service_role")
+      config = fn key -> %{presence: %{key: key}} end
+      topic = "realtime:#{channel.name}"
 
-      WebsocketClient.join(socket, "realtime:any", %{config: config})
-
-      assert_receive %Message{
-        event: "phx_reply",
-        payload: %{
-          "response" => %{"postgres_changes" => []},
-          "status" => "ok"
-        },
-        ref: "1",
-        topic: "realtime:any"
-      }
-
-      assert_receive %Message{
-        event: "presence_state",
-        payload: %{},
-        ref: nil,
-        topic: "realtime:any"
-      }
+      WebsocketClient.join(socket, topic, %{config: config.("authenticated")})
 
       payload = %{
         type: "presence",
@@ -476,18 +466,119 @@ defmodule Realtime.Integration.RtChannelTest do
         payload: %{name: "realtime_presence_96", t: 1814.7000000029802}
       }
 
-      WebsocketClient.send_event(socket, "realtime:any", "presence", payload)
+      # This will be ignored
+      WebsocketClient.send_event(socket, topic, "presence", payload)
+
+      assert_receive %Phoenix.Socket.Message{
+        topic: ^topic,
+        event: "phx_reply",
+        payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"},
+        ref: "1",
+        join_ref: nil
+      }
+
+      refute_receive %Message{event: "presence_state", payload: _, ref: nil, topic: ^topic}
+      refute_receive %Message{event: "presence_diff", payload: _, ref: _, topic: ^topic}
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_97", t: 1814.7000000029802}
+      }
+
+      # This will be tracked
+      WebsocketClient.join(secondary_socket, topic, %{config: config.("service_role")})
+      WebsocketClient.send_event(secondary_socket, topic, "presence", payload)
 
       assert_receive %Message{
         event: "presence_diff",
         payload: %{"joins" => joins, "leaves" => %{}},
         ref: nil,
-        topic: "realtime:any"
+        topic: ^topic
       }
 
       join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
+
+      assert_receive %Phoenix.Socket.Message{
+                       topic: ^topic,
+                       event: "presence_diff",
+                       ref: nil,
+                       join_ref: nil
+                     } = res
+
+      assert join_payload =
+               res
+               |> Map.from_struct()
+               |> get_in([:payload, "joins", "service_role", "metas"])
+               |> hd()
+
+      assert get_in(join_payload, ["name"]) == payload.payload.name
+      assert get_in(join_payload, ["t"]) == payload.payload.t
+    end
+
+    @tag policies: [:authenticated_read_channel]
+    test "private presence with no presence permissions won't connect", %{channel: channel} do
+      socket = get_connection("authenticated")
+      config = fn key -> %{presence: %{key: key}} end
+      topic = "realtime:#{channel.name}"
+
+      WebsocketClient.join(socket, topic, %{config: config.("authenticated")})
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_96", t: 1814.7000000029802}
+      }
+
+      WebsocketClient.send_event(socket, topic, "presence", payload)
+
+      assert_receive %Phoenix.Socket.Message{
+                       topic: ^topic,
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "reason" =>
+                             "\"You do not have permissions to read Presence messages from this channel\""
+                         },
+                         "status" => "error"
+                       },
+                       ref: "1",
+                       join_ref: nil
+                     },
+                     500
+    end
+
+    @tag policies: [:authenticated_read_presence]
+    test "private presence with no permissions to the channel won't connect", %{channel: channel} do
+      socket = get_connection("authenticated")
+      config = fn key -> %{presence: %{key: key}} end
+      topic = "realtime:#{channel.name}"
+
+      WebsocketClient.join(socket, topic, %{config: config.("authenticated")})
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_96", t: 1814.7000000029802}
+      }
+
+      WebsocketClient.send_event(socket, topic, "presence", payload)
+
+      assert_receive %Phoenix.Socket.Message{
+                       topic: ^topic,
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "reason" => "\"You do not have permissions to read from this Channel\""
+                         },
+                         "status" => "error"
+                       },
+                       ref: "1",
+                       join_ref: nil
+                     },
+                     500
     end
   end
 
