@@ -21,8 +21,8 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
   @behaviour Realtime.Tenants.Authorization.Policies
 
   @type t :: %__MODULE__{
-          :read => boolean(),
-          :write => boolean()
+          read: boolean(),
+          write: boolean()
         }
 
   @impl true

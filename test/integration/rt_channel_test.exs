@@ -621,8 +621,8 @@ defmodule Realtime.Integration.RtChannelTest do
     clean_table(db_conn, "realtime", "channels")
     channel = channel_fixture(tenant)
 
-    if Map.has_key?(context, :policies) do
-      create_rls_policies(db_conn, context.policies, channel)
+    if policies = context[:policies] do
+      create_rls_policies(db_conn, policies, channel)
     end
 
     on_exit(fn -> Process.exit(db_conn, :normal) end)

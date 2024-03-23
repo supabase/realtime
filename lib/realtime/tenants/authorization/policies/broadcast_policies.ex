@@ -20,8 +20,8 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
   @behaviour Realtime.Tenants.Authorization.Policies
 
   @type t :: %__MODULE__{
-          :read => boolean(),
-          :write => boolean()
+          read: boolean(),
+          write: boolean()
         }
   @impl true
   def check_read_policies(_conn, policies, %Authorization{channel: nil}) do
