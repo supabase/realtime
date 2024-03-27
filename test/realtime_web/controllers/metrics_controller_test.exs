@@ -16,7 +16,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
   end
 
   test "exporting metrics", %{conn: conn} do
-    with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+    with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
       conn = get(conn, Routes.metrics_path(conn, :index))
       assert conn.status == 200
       lines = String.split(conn.resp_body, "\n") |> length()
