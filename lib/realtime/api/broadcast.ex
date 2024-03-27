@@ -1,6 +1,6 @@
 defmodule Realtime.Api.Broadcast do
   @moduledoc """
-  Defines the Channel schema
+  Defines the Broadcast schema
   """
   use Ecto.Schema
   import Ecto.Changeset

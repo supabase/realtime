@@ -1,33 +1,30 @@
-defmodule Realtime.Api.Channel do
+defmodule Realtime.Api.Presence do
   @moduledoc """
-  Defines the Channel schema
+  Defines the Presence schema
   """
   use Ecto.Schema
   import Ecto.Changeset
-  @derive {Jason.Encoder, only: [:name, :inserted_at, :updated_at, :id]}
+  @derive {Jason.Encoder, only: [:inserted_at, :updated_at, :id, :channel_id]}
 
   @type t :: %__MODULE__{}
 
   @schema_prefix "realtime"
-  schema "channels" do
-    field(:name, :string)
+  schema "presences" do
     field(:check, :boolean, default: false)
     timestamps()
 
-    has_many(:broadcasts, Realtime.Api.Broadcast)
-    has_many(:presences, Realtime.Api.Presence)
+    belongs_to(:channel, Realtime.Api.Channel)
   end
 
-  def changeset(channel, attrs) do
-    channel
-    |> cast(attrs, [:name, :check, :inserted_at, :updated_at])
-    |> validate_required([:name])
+  def changeset(broadcast, attrs) do
+    broadcast
+    |> cast(attrs, [:check, :inserted_at, :updated_at, :channel_id])
     |> put_timestamp(:updated_at)
     |> maybe_put_timestamp(:inserted_at)
   end
 
-  def check_changeset(channel, attrs) do
-    channel
+  def check_changeset(broadcast, attrs) do
+    broadcast
     |> change()
     |> put_change(:check, attrs[:check])
   end

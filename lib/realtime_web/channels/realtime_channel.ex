@@ -7,8 +7,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   alias DBConnection.Backoff
 
-  alias Phoenix.Tracker.Shard
-
   alias Realtime.Channels.Cache, as: ChannelsCache
   alias Realtime.GenCounter
   alias Realtime.Helpers
@@ -20,11 +18,12 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
+  alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.ChannelsAuthorization
-  alias RealtimeWeb.Presence
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
+  alias RealtimeWeb.RealtimeChannel.Logging
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
 
   @confirm_token_ms_interval 1_000 * 60 * 5
@@ -55,7 +54,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, claims, confirm_token_ref, access_token} <- confirm_token(socket),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant),
          channel = ChannelsCache.get_channel_by_name(sub_topic, db_conn),
-         {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
+         {:ok, socket} <- assign_policies(channel, db_conn, params, access_token, claims, socket) do
       is_new_api = is_new_api(params)
       public? = match?({:ok, _}, channel)
       tenant_topic = tenant <> ":" <> sub_topic
@@ -97,23 +96,23 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:ok, state, assign(socket, assigns)}
     else
       {:error, [message: "Invalid token", claim: _claim, claim_val: _value]} = error ->
-        log_error_message(:warning, error)
+        Logging.log_error_message(:warning, error)
 
       {:error, type} = error
       when type in [:too_many_channels, :too_many_connections, :too_many_joins] ->
-        log_error_message(:warning, error)
+        Logging.log_error_message(:warning, error)
 
       {:error, :tenant_database_unavailable} ->
-        log_error_message(:error, "Realtime was unable to connect to the tenant database")
+        Logging.log_error_message(:error, "Realtime was unable to connect to the tenant database")
 
       {:error, invalid_exp} when is_integer(invalid_exp) and invalid_exp <= 0 ->
-        log_error_message(:error, "Token expiration time is invalid")
+        Logging.log_error_message(:error, "Token expiration time is invalid")
 
       {:error, error} ->
-        log_error_message(:error, error)
+        Logging.log_error_message(:error, error)
 
       error ->
-        log_error_message(:error, error)
+        Logging.log_error_message(:error, error)
     end
   end
 
@@ -133,15 +132,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def handle_info(:sync_presence = msg, %{assigns: %{tenant_topic: topic}} = socket) do
-    # TODO: don't use Presence unless client explicitly wants to use Presence
-    # TODO: count these again when that happens
 
-    socket = maybe_log_handle_info(socket, msg)
-
-    push(socket, "presence_state", presence_dirty_list(topic))
-
-    {:noreply, socket}
+  def handle_info(:sync_presence = msg, socket) do
+    PresenceHandler.track(msg, socket)
   end
 
   @impl true
@@ -160,7 +153,10 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(%{event: type, payload: payload} = msg, socket) do
-    socket = socket |> count() |> maybe_log_handle_info(msg)
+    socket =
+      socket
+      |> count()
+      |> Logging.maybe_log_handle_info(msg)
 
     push(socket, type, payload)
     {:noreply, socket}
@@ -416,18 +412,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :rate_counter, rate_counter)
   end
 
-  defp maybe_log_handle_info(
-         %{assigns: %{log_level: log_level, channel_name: channel_name}} = socket,
-         msg
-       ) do
-    if Logger.compare_levels(log_level, :error) == :lt do
-      msg = "HANDLE_INFO INCOMING ON " <> channel_name <> " message: " <> inspect(msg)
-      Logger.log(log_level, msg)
-    end
-
-    socket
-  end
-
   defp presence_key(params) do
     case params["config"]["presence"]["key"] do
       key when is_binary(key) and key != "" -> key
@@ -489,15 +473,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       message: message,
       channel: channel_name
     })
-  end
-
-  defp presence_dirty_list(topic) do
-    [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
-
-    Presence
-    |> Shard.name_for_topic(topic, size)
-    |> Shard.dirty_list(topic)
-    |> Phoenix.Presence.group()
   end
 
   defp start_db_rate_counter(tenant) do
@@ -591,19 +566,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     end)
   end
 
-  defp log_error_message(:warning, error) do
-    error_msg = inspect(error)
-    Logger.warn("Start channel error: " <> error_msg)
-    {:error, %{reason: error_msg}}
-  end
+  defp assign_policies({:ok, channel}, db_conn, params, access_token, claims, socket) do
+    using_broadcast? = get_in(params, ["config", "broadcast"])
+    using_presence? = get_in(params, ["config", "presence"])
 
-  defp log_error_message(:error, error) do
-    error_msg = inspect(error)
-    Logger.error("Start channel error: " <> error_msg)
-    {:error, %{reason: error_msg}}
-  end
-
-  defp assign_policies({:ok, channel}, db_conn, access_token, claims, socket) do
     authorization_context =
       Authorization.build_authorization_params(%{
         channel: channel,
@@ -615,19 +581,24 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
 
-    case socket.assigns.policies do
-      %Policies{broadcast: %BroadcastPolicies{read: false}} ->
+    cond do
+      using_presence? &&
+          match?(%Policies{presence: %PresencePolicies{read: false}}, socket.assigns.policies) ->
+        {:error, "You do not have permissions to read Presence messages from this channel"}
+
+      using_broadcast? &&
+          match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
         {:error, "You do not have permissions to read Broadcast messages from this channel"}
 
-      %Policies{channel: %ChannelPolicies{read: false}} ->
+      match?(%Policies{channel: %ChannelPolicies{read: false}}, socket.assigns.policies) ->
         {:error, "You do not have permissions to read from this Channel"}
 
-      _ ->
+      true ->
         {:ok, socket}
     end
   end
 
-  defp assign_policies(_, _, _, _, socket) do
+  defp assign_policies(_, _, _, _, _, socket) do
     {:ok, assign(socket, policies: nil)}
   end
 end

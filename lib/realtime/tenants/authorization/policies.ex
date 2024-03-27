@@ -5,16 +5,25 @@ defmodule Realtime.Tenants.Authorization.Policies do
   Also defines a behaviour to be used by the different authorization modules to build and check policies within the context of an entity.
 
   Currently there are two types of policies:
-  * Realtime.Tenants.Authorization.Policies.BroadcastPolicies - Used to check access to the Channel itself
-  * Realtime.Tenants.Authorization.Policies.ChannelPolicies - Used to check access to the Broadcast feature on a given Channel
+  * Realtime.Tenants.Authorization.Policies.ChannelPolicies - Used to check access to the Channel itself
+  * Realtime.Tenants.Authorization.Policies.BroadcastPolicies - Used to check access to the Broadcast feature on a given Channel
+  * Realtime.Tenants.Authorization.Policies.PresencePolicies - Used to check access to Presence feature on a given Channel
   """
 
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
-  defstruct channel: %ChannelPolicies{}, broadcast: %BroadcastPolicies{}
+  alias Realtime.Tenants.Authorization.Policies.PresencePolicies
 
-  @type t :: %__MODULE__{channel: ChannelPolicies.t(), broadcast: BroadcastPolicies.t()}
+  defstruct channel: %ChannelPolicies{},
+            broadcast: %BroadcastPolicies{},
+            presence: %PresencePolicies{}
+
+  @type t :: %__MODULE__{
+          channel: ChannelPolicies.t(),
+          broadcast: BroadcastPolicies.t(),
+          presence: PresencePolicies.t()
+        }
 
   @doc """
   Implementation of the method on how to check read policies for a given entity within the context of a database connection

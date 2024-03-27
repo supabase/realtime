@@ -4,6 +4,7 @@ defmodule Realtime.ChannelsTest do
 
   alias Realtime.Api.Broadcast
   alias Realtime.Api.Channel
+  alias Realtime.Api.Presence
   alias Realtime.Channels
   alias Realtime.Tenants.Connect
 
@@ -14,6 +15,7 @@ defmodule Realtime.ChannelsTest do
     Process.link(pid)
     {:ok, conn} = Connect.get_status(tenant.external_id)
 
+    clean_table(conn, "realtime", "presences")
     clean_table(conn, "realtime", "broadcasts")
     clean_table(conn, "realtime", "channels")
 
@@ -41,13 +43,15 @@ defmodule Realtime.ChannelsTest do
   end
 
   describe "create_channel/2" do
-    test "creates a channel and a broadcast entry in tenant database", %{conn: conn} do
+    test "creates a channel and all supporting tables entries in tenant database for each policy checks needed",
+         %{conn: conn} do
       name = random_string()
 
       assert {:ok, %Channel{name: ^name, id: channel_id}} =
                Channels.create_channel(%{name: name}, conn)
 
       assert {:ok, [%Broadcast{channel_id: ^channel_id}]} = Repo.all(conn, Broadcast, Broadcast)
+      assert {:ok, [%Presence{channel_id: ^channel_id}]} = Repo.all(conn, Presence, Presence)
     end
 
     test "no channel name has error changeset", %{conn: conn} do

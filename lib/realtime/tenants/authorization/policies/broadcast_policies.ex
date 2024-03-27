@@ -1,8 +1,8 @@
 defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
   @moduledoc """
-  ChannelPolicies structure that holds the required authorization information for a given connection within the scope of a reading / altering channel entities
+  BroadcastPolicies structure that holds the required authorization information for a given connection within the scope of a sending / receiving broadcasts messages
 
-  Uses the Realtime.Api.Channel to try reads and writes on the database to determine authorization for a given connection.
+  Uses the Realtime.Api.Broadcast to try reads and writes on the database to determine authorization for a given connection.
 
   Implements Realtime.Tenants.Authorization behaviour
   """
@@ -20,8 +20,8 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
   @behaviour Realtime.Tenants.Authorization.Policies
 
   @type t :: %__MODULE__{
-          :read => boolean(),
-          :write => boolean()
+          read: boolean(),
+          write: boolean()
         }
   @impl true
   def check_read_policies(_conn, policies, %Authorization{channel: nil}) do
