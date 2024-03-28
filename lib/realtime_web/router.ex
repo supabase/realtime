@@ -109,7 +109,10 @@ defmodule RealtimeWeb.Router do
   scope "/api", RealtimeWeb do
     pipe_through([:open_cors, :tenant_api, :secure_tenant_api, :channel_rls_authorization])
 
-    resources("/channels", ChannelsController, only: [:index, :show, :create, :update, :delete])
+    resources("/channels", ChannelsController,
+      only: [:index, :show, :create, :update, :delete],
+      param: "name"
+    )
   end
 
   # Enables LiveDashboard only for development

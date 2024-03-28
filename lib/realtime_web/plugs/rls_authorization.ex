@@ -47,8 +47,8 @@ defmodule RealtimeWeb.RlsAuthorization do
           params
       end
 
-    with {:ok, id} <- Map.fetch(path_params, "id"),
-         {:ok, channel} <- Channels.get_channel_by_id(id, db_conn) do
+    with {:ok, name} <- Map.fetch(path_params, "name"),
+         {:ok, channel} <- Channels.get_channel_by_name(name, db_conn) do
       params
       |> Map.put(:channel, channel)
       |> Map.put(:channel_name, channel.name)
