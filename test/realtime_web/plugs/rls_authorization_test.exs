@@ -41,7 +41,7 @@ defmodule RealtimeWeb.RlsAuthorizationTest do
     conn =
       conn
       |> setup_conn(tenant, claims, jwt, role)
-      |> Map.put(:path_params, %{"id" => channel.id})
+      |> Map.put(:path_params, %{"name" => channel.name})
 
     conn = RlsAuthorization.call(conn, %{})
 

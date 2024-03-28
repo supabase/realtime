@@ -56,10 +56,10 @@ defmodule RealtimeWeb.ChannelsController do
     parameters: [
       id: [
         in: :path,
-        name: "id",
+        name: "name",
         schema: %OpenApiSpex.Schema{type: :string},
         required: true,
-        example: "1"
+        example: "channel_name"
       ],
       token: [
         in: :header,
@@ -85,11 +85,11 @@ defmodule RealtimeWeb.ChannelsController do
           }
         } = conn,
         %{
-          "id" => id
+          "name" => name
         }
       ) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
-         {:ok, channel} when not is_nil(channel) <- Channels.get_channel_by_id(id, db_conn) do
+         {:ok, channel} when not is_nil(channel) <- Channels.get_channel_by_name(name, db_conn) do
       json(conn, channel)
     else
       {:ok, nil} -> {:error, :not_found}
@@ -142,10 +142,10 @@ defmodule RealtimeWeb.ChannelsController do
     parameters: [
       id: [
         in: :path,
-        name: "id",
+        name: "name",
         schema: %OpenApiSpex.Schema{type: :string},
         required: true,
-        example: "1"
+        example: "channel_name"
       ],
       token: [
         in: :header,
@@ -169,10 +169,10 @@ defmodule RealtimeWeb.ChannelsController do
             policies: %Policies{channel: %ChannelPolicies{write: true}}
           }
         } = conn,
-        %{"id" => id}
+        %{"name" => name}
       ) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
-         :ok <- Channels.delete_channel_by_id(id, db_conn) do
+         :ok <- Channels.delete_channel_by_name(name, db_conn) do
       send_resp(conn, :accepted, "")
     end
   end
@@ -184,10 +184,10 @@ defmodule RealtimeWeb.ChannelsController do
     parameters: [
       id: [
         in: :path,
-        name: "id",
+        name: "name",
         schema: %OpenApiSpex.Schema{type: :string},
         required: true,
-        example: "1"
+        example: "channel_name"
       ],
       token: [
         in: :header,
@@ -210,12 +210,13 @@ defmodule RealtimeWeb.ChannelsController do
           assigns: %{
             tenant: tenant,
             policies: %Policies{channel: %ChannelPolicies{write: true}}
-          }
+          },
+          body_params: body_params
         } = conn,
-        %{"id" => id} = params
+        %{"name" => name}
       ) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
-         {:ok, channel} <- Channels.update_channel_by_id(id, params, db_conn) do
+         {:ok, channel} <- Channels.update_channel_by_name(name, body_params, db_conn) do
       conn
       |> put_status(:accepted)
       |> json(channel)

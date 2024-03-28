@@ -77,7 +77,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
 
       expected = channel |> Jason.encode!() |> Jason.decode!()
 
-      conn = get(conn, ~p"/api/channels/#{channel.id}")
+      conn = get(conn, ~p"/api/channels/#{channel.name}")
       res = json_response(conn, 200)
       assert res == expected
     end
@@ -126,7 +126,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     @tag role: "authenticated"
     test "deletes a channel", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
-      conn = delete(conn, ~p"/api/channels/#{channel.id}")
+      conn = delete(conn, ~p"/api/channels/#{channel.name}")
       assert conn.status == 202
     end
 
@@ -139,7 +139,7 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     @tag role: "anon"
     test "returns 401 if unauthorized", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
-      conn = delete(conn, ~p"/api/channels/#{channel.id}")
+      conn = delete(conn, ~p"/api/channels/#{channel.name}")
       assert json_response(conn, 401) == %{"message" => "Unauthorized"}
     end
   end
@@ -149,12 +149,13 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     test "updates a channel", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
       name = random_string()
-      conn = put(conn, ~p"/api/channels/#{channel.id}", %{name: name})
+      conn = put(conn, ~p"/api/channels/#{channel.name}", %{name: name})
       res = json_response(conn, 202)
       assert name == res["name"]
 
+      channel = channel_fixture(tenant)
       name = random_string()
-      conn = patch(conn, ~p"/api/channels/#{channel.id}", %{name: name})
+      conn = patch(conn, ~p"/api/channels/#{channel.name}", %{name: name})
       res = json_response(conn, 202)
       assert name == res["name"]
     end
@@ -162,16 +163,16 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     @tag role: "authenticated"
     test "422 if params are invalid", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
-      conn = put(conn, ~p"/api/channels/#{channel.id}", %{"name" => 1})
+      conn = put(conn, ~p"/api/channels/#{channel.name}", %{"name" => 1})
       assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
-      conn = patch(conn, ~p"/api/channels/#{channel.id}", %{"name" => 1})
+      conn = patch(conn, ~p"/api/channels/#{channel.name}", %{"name" => 1})
       assert json_response(conn, 422) == %{"errors" => %{"name" => ["is invalid"]}}
     end
 
     @tag role: "anon"
     test "returns 401 if unauthorized", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
-      conn = put(conn, ~p"/api/channels/#{channel.id}", %{"name" => 1})
+      conn = put(conn, ~p"/api/channels/#{channel.name}", %{"name" => "new_name"})
       assert json_response(conn, 401) == %{"message" => "Unauthorized"}
     end
   end

@@ -69,12 +69,12 @@ defmodule Realtime.Channels do
   end
 
   @doc """
-  Deletes a channel by id from the tenant database using a given DBConnection
+  Deletes a channel by name from the tenant database using a given DBConnection
   """
-  @spec delete_channel_by_id(binary(), DBConnection.conn()) ::
+  @spec delete_channel_by_name(binary(), DBConnection.conn()) ::
           :ok | {:error, any()}
-  def delete_channel_by_id(id, conn) do
-    query = from c in Channel, where: c.id == ^id
+  def delete_channel_by_name(name, conn) do
+    query = from c in Channel, where: c.name == ^name
 
     case Repo.del(conn, query) do
       {:ok, 1} -> :ok
@@ -84,12 +84,12 @@ defmodule Realtime.Channels do
   end
 
   @doc """
-  Updates a channel by id from the tenant database using a given DBConnection
+  Updates a channel by name from the tenant database using a given DBConnection
   """
-  @spec update_channel_by_id(binary(), map(), DBConnection.conn()) ::
+  @spec update_channel_by_name(binary(), map(), DBConnection.conn()) ::
           {:ok, Channel.t()} | {:error, any()}
-  def update_channel_by_id(id, attrs, conn) do
-    with {:ok, channel} when not is_nil(channel) <- get_channel_by_id(id, conn) do
+  def update_channel_by_name(name, attrs, conn) do
+    with {:ok, channel} when not is_nil(channel) <- get_channel_by_name(name, conn) do
       channel = Channel.changeset(channel, attrs)
       Repo.update(conn, channel, Channel)
     end

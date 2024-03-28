@@ -84,29 +84,29 @@ defmodule Realtime.ChannelsTest do
     end
   end
 
-  describe "delete_channel_by_id/2" do
+  describe "delete_channel_by_name/2" do
     test "deletes correct channel", %{conn: conn, tenant: tenant} do
       [channel | _] = Stream.repeatedly(fn -> channel_fixture(tenant) end) |> Enum.take(10)
-      assert :ok = Channels.delete_channel_by_id(channel.id, conn)
-      assert {:error, :not_found} = Channels.get_channel_by_id(channel.id, conn)
+      assert :ok = Channels.delete_channel_by_name(channel.name, conn)
+      assert {:error, :not_found} = Channels.get_channel_by_name(channel.name, conn)
     end
 
     test "not found error if does not exist", %{conn: conn} do
-      assert {:error, :not_found} = Channels.delete_channel_by_id(0, conn)
+      assert {:error, :not_found} = Channels.delete_channel_by_name("none", conn)
     end
   end
 
-  describe "update_channel_by_id/2" do
+  describe "update_channel_by_name/2" do
     test "update correct channel", %{conn: conn, tenant: tenant} do
       name = random_string()
       [channel | _] = Stream.repeatedly(fn -> channel_fixture(tenant) end) |> Enum.take(10)
-      assert {:ok, channel} = Channels.update_channel_by_id(channel.id, %{name: name}, conn)
-      {:ok, channel} = Channels.get_channel_by_id(channel.id, conn)
+      assert {:ok, channel} = Channels.update_channel_by_name(channel.name, %{name: name}, conn)
+      {:ok, channel} = Channels.get_channel_by_name(channel.name, conn)
       assert name == channel.name
     end
 
     test "not found error if does not exist", %{conn: conn} do
-      assert {:error, :not_found} = Channels.update_channel_by_id(0, %{name: ""}, conn)
+      assert {:error, :not_found} = Channels.update_channel_by_name("none", %{name: ""}, conn)
     end
   end
 end
