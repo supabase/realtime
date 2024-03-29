@@ -6,8 +6,8 @@ defmodule Realtime.Channels do
   alias Realtime.Api.Broadcast
   alias Realtime.Api.Channel
   alias Realtime.Api.Presence
+  alias Realtime.Helpers
   alias Realtime.Repo
-  alias Realtime.Tenants.Connect
 
   import Ecto.Query
 
@@ -16,7 +16,7 @@ defmodule Realtime.Channels do
   """
   @spec list_channels(DBConnection.conn()) :: {:error, any()} | {:ok, [struct()]}
   def list_channels(conn) do
-    Connect.transaction(conn, fn db_conn -> Repo.all(db_conn, Channel, Channel) end)
+    Helpers.transaction(conn, fn db_conn -> Repo.all(db_conn, Channel, Channel) end)
   end
 
   @doc """
@@ -26,7 +26,7 @@ defmodule Realtime.Channels do
   def get_channel_by_id(id, conn) do
     query = from c in Channel, where: c.id == ^id
 
-    Connect.transaction(conn, fn transaction_conn ->
+    Helpers.transaction(conn, fn transaction_conn ->
       Repo.one(transaction_conn, query, Channel)
     end)
   end
@@ -45,7 +45,7 @@ defmodule Realtime.Channels do
     channel = Channel.changeset(%Channel{}, attrs)
 
     result =
-      Connect.transaction(conn, fn transaction_conn ->
+      Helpers.transaction(conn, fn transaction_conn ->
         with {:ok, %Channel{} = channel} <-
                Repo.insert(transaction_conn, channel, Channel, opts),
              broadcast_changeset = Broadcast.changeset(%Broadcast{}, %{channel_id: channel.id}),
@@ -71,7 +71,7 @@ defmodule Realtime.Channels do
   def get_channel_by_name(name, conn) do
     query = from c in Channel, where: c.name == ^name
 
-    Connect.transaction(conn, fn transaction_conn ->
+    Helpers.transaction(conn, fn transaction_conn ->
       Repo.one(transaction_conn, query, Channel)
     end)
   end
@@ -84,7 +84,7 @@ defmodule Realtime.Channels do
   def delete_channel_by_name(name, conn) do
     query = from c in Channel, where: c.name == ^name
 
-    Connect.transaction(conn, fn transaction_conn ->
+    Helpers.transaction(conn, fn transaction_conn ->
       case Repo.del(transaction_conn, query) do
         {:ok, 1} -> :ok
         {:ok, 0} -> {:error, :not_found}
@@ -102,7 +102,7 @@ defmodule Realtime.Channels do
     with {:ok, channel} when not is_nil(channel) <- get_channel_by_name(name, conn) do
       channel = Channel.changeset(channel, attrs)
 
-      Connect.transaction(conn, fn transaction_conn ->
+      Helpers.transaction(conn, fn transaction_conn ->
         Repo.update(transaction_conn, channel, Channel)
       end)
     end

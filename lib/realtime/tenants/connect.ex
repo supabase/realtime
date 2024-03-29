@@ -68,30 +68,6 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  @doc """
-  Runs database transaction in local node or against a target node withing a Postgrex transaction
-  """
-  @spec transaction(pid | DBConnection.t(), fun) :: any()
-  def transaction(%DBConnection{} = db_conn, func) do
-    with {:ok, result} <- Postgrex.transaction(db_conn, func) do
-      result
-    else
-      {:error, error} -> error
-    end
-  end
-
-  def transaction(db_conn, func) when node() == node(db_conn) do
-    with {:ok, result} <- Postgrex.transaction(db_conn, func) do
-      result
-    else
-      {:error, error} -> error
-    end
-  end
-
-  def transaction(db_conn, func) do
-    Rpc.enhanced_call(node(db_conn), __MODULE__, :run_db_request, [db_conn, func], timeout: 15_000)
-  end
-
   def start_link(opts) do
     tenant_id = Keyword.get(opts, :tenant_id)
 

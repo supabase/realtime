@@ -11,11 +11,11 @@ defmodule Realtime.Tenants.Authorization do
   require Logger
 
   alias Realtime.Api.Channel
+  alias Realtime.Helpers
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
-  alias Realtime.Tenants.Connect
 
   defstruct [:channel_name, :channel, :headers, :jwt, :claims, :role]
 
@@ -121,7 +121,7 @@ defmodule Realtime.Tenants.Authorization do
 
   @policies_mods [ChannelPolicies, BroadcastPolicies, PresencePolicies]
   defp get_policies_for_connection(conn, authorization_context) do
-    Connect.transaction(conn, fn transaction_conn ->
+    Helpers.transaction(conn, fn transaction_conn ->
       set_conn_config(transaction_conn, authorization_context)
 
       Enum.reduce_while(@policies_mods, %Policies{}, fn policies_mod, policies ->
