@@ -181,7 +181,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
           channel_name: channel_name
       }
 
-      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+      Connect.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, authorization_context)
 
         assert {:ok, result} =
@@ -213,7 +213,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
           channel_name: channel_name
       }
 
-      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+      Connect.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, authorization_context)
 
         assert {:ok, result} =
