@@ -58,15 +58,23 @@ defmodule Realtime.Tenants.Authorization do
           {:ok, Phoenix.Socket.t() | Plug.Conn.t()} | {:error, :unauthorized}
   def get_authorizations(%Phoenix.Socket{} = socket, db_conn, authorization_context) do
     case get_policies_for_connection(db_conn, authorization_context) do
-      %Policies{} = policies -> {:ok, Phoenix.Socket.assign(socket, :policies, policies)}
-      error -> {:error, error}
+      %Policies{} = policies ->
+        {:ok, Phoenix.Socket.assign(socket, :policies, policies)}
+
+      error ->
+        Logger.warning(inspect(error))
+        {:error, error}
     end
   end
 
   def get_authorizations(%Plug.Conn{} = conn, db_conn, authorization_context) do
     case get_policies_for_connection(db_conn, authorization_context) do
-      %Policies{} = policies -> {:ok, Plug.Conn.assign(conn, :policies, policies)}
-      error -> {:error, error}
+      %Policies{} = policies ->
+        {:ok, Plug.Conn.assign(conn, :policies, policies)}
+
+      error ->
+        Logger.warning(inspect(error))
+        {:error, error}
     end
   end
 

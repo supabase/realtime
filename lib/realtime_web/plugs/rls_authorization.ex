@@ -28,11 +28,15 @@ defmodule RealtimeWeb.RlsAuthorization do
       conn
     else
       error ->
-        conn |> FallbackController.call(error) |> halt()
+        Logger.warning(inspect(error))
+
+        conn
+        |> FallbackController.call(error)
+        |> halt()
     end
   end
 
-  def call(conn, _opts), do: unauthorized(conn) |> halt()
+  def call(conn, _opts), do: unauthorized(conn)
 
   defp set_channel_params_for_authorization_check(conn, db_conn, params) do
     %{path_params: path_params, body_params: body_params} = conn
