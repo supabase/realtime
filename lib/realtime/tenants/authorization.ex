@@ -54,7 +54,7 @@ defmodule Realtime.Tenants.Authorization do
   @doc """
   Runs validations based on RLS policies to set policies for a given connection (either Phoenix.Socket or Plug.Conn).
   """
-  @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), DBConnection.t(), __MODULE__.t()) ::
+  @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), pid(), __MODULE__.t()) ::
           {:ok, Phoenix.Socket.t() | Plug.Conn.t()} | {:error, :unauthorized}
   def get_authorizations(%Phoenix.Socket{} = socket, db_conn, authorization_context) do
     case get_policies_for_connection(db_conn, authorization_context) do
@@ -88,7 +88,7 @@ defmodule Realtime.Tenants.Authorization do
   * request.jwt.claims: The claims of the JWT token
   * request.headers: The headers of the request
   """
-  @spec set_conn_config(DBConnection.t(), t()) ::
+  @spec set_conn_config(pid(), t()) ::
           {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
   def set_conn_config(conn, authorization_context) do
     %__MODULE__{

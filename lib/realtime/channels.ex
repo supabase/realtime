@@ -14,7 +14,7 @@ defmodule Realtime.Channels do
   @doc """
   Lists all channels in the tenant database using a given DBConnection
   """
-  @spec list_channels(DBConnection.conn()) :: {:error, any()} | {:ok, [struct()]}
+  @spec list_channels(pid()) :: {:error, any()} | {:ok, [struct()]}
   def list_channels(conn) do
     Helpers.transaction(conn, fn db_conn -> Repo.all(db_conn, Channel, Channel) end)
   end
@@ -22,7 +22,7 @@ defmodule Realtime.Channels do
   @doc """
   Fetches a channel by id from the tenant database using a given DBConnection
   """
-  @spec get_channel_by_id(binary(), DBConnection.conn()) :: {:ok, Channel.t()} | {:error, any()}
+  @spec get_channel_by_id(binary(), pid()) :: {:ok, Channel.t()} | {:error, any()}
   def get_channel_by_id(id, conn) do
     query = from c in Channel, where: c.id == ^id
 
@@ -33,7 +33,7 @@ defmodule Realtime.Channels do
 
   @spec create_channel(
           map(),
-          DBConnection.t(),
+          pid(),
           Postgrex.option() | Keyword.t()
         ) :: {:error, any()} | {:ok, Channel.t()}
   @doc """
@@ -66,7 +66,7 @@ defmodule Realtime.Channels do
   @doc """
   Fetches a channel by name from the tenant database using a given DBConnection
   """
-  @spec get_channel_by_name(String.t(), DBConnection.conn()) ::
+  @spec get_channel_by_name(String.t(), pid()) ::
           {:ok, Channel.t()} | {:error, any()}
   def get_channel_by_name(name, conn) do
     query = from c in Channel, where: c.name == ^name
@@ -79,7 +79,7 @@ defmodule Realtime.Channels do
   @doc """
   Deletes a channel by name from the tenant database using a given DBConnection
   """
-  @spec delete_channel_by_name(binary(), DBConnection.conn()) ::
+  @spec delete_channel_by_name(binary(), pid()) ::
           :ok | {:error, any()}
   def delete_channel_by_name(name, conn) do
     query = from c in Channel, where: c.name == ^name
@@ -96,7 +96,7 @@ defmodule Realtime.Channels do
   @doc """
   Updates a channel by name from the tenant database using a given DBConnection
   """
-  @spec update_channel_by_name(binary(), map(), DBConnection.conn()) ::
+  @spec update_channel_by_name(binary(), map(), pid()) ::
           {:ok, Channel.t()} | {:error, any()}
   def update_channel_by_name(name, attrs, conn) do
     with {:ok, channel} when not is_nil(channel) <- get_channel_by_name(name, conn) do
