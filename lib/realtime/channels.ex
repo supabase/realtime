@@ -6,6 +6,7 @@ defmodule Realtime.Channels do
   alias Realtime.Api.Broadcast
   alias Realtime.Api.Channel
   alias Realtime.Api.Presence
+  alias Realtime.Helpers
   alias Realtime.Repo
 
   import Ecto.Query
@@ -15,7 +16,7 @@ defmodule Realtime.Channels do
   """
   @spec list_channels(DBConnection.conn()) :: {:error, any()} | {:ok, [struct()]}
   def list_channels(conn) do
-    Repo.all(conn, Channel, Channel)
+    Helpers.transaction(conn, fn db_conn -> Repo.all(db_conn, Channel, Channel) end)
   end
 
   @doc """
@@ -24,14 +25,17 @@ defmodule Realtime.Channels do
   @spec get_channel_by_id(binary(), DBConnection.conn()) :: {:ok, Channel.t()} | {:error, any()}
   def get_channel_by_id(id, conn) do
     query = from c in Channel, where: c.id == ^id
-    Repo.one(conn, query, Channel)
+
+    Helpers.transaction(conn, fn transaction_conn ->
+      Repo.one(transaction_conn, query, Channel)
+    end)
   end
 
   @spec create_channel(
           map(),
           DBConnection.t(),
           Postgrex.option() | Keyword.t()
-        ) :: {:error, any()} | {:ok, any()}
+        ) :: {:error, any()} | {:ok, Channel.t()}
   @doc """
   Creates a channel and supporting tables for a given channel in the tenant database using a given DBConnection.
 
@@ -41,8 +45,9 @@ defmodule Realtime.Channels do
     channel = Channel.changeset(%Channel{}, attrs)
 
     result =
-      Postgrex.transaction(conn, fn transaction_conn ->
-        with {:ok, %Channel{} = channel} <- Repo.insert(transaction_conn, channel, Channel, opts),
+      Helpers.transaction(conn, fn transaction_conn ->
+        with {:ok, %Channel{} = channel} <-
+               Repo.insert(transaction_conn, channel, Channel, opts),
              broadcast_changeset = Broadcast.changeset(%Broadcast{}, %{channel_id: channel.id}),
              presence_changeset = Broadcast.changeset(%Presence{}, %{channel_id: channel.id}),
              {:ok, _} <- Repo.insert(transaction_conn, broadcast_changeset, Broadcast, opts),
@@ -52,9 +57,9 @@ defmodule Realtime.Channels do
       end)
 
     case result do
-      {:ok, %Ecto.Changeset{valid?: false} = error} -> {:error, error}
-      {:ok, {:error, error}} -> {:error, error}
-      result -> result
+      %Ecto.Changeset{valid?: false} = error -> {:error, error}
+      {:error, error} -> {:error, error}
+      result -> {:ok, result}
     end
   end
 
@@ -65,7 +70,10 @@ defmodule Realtime.Channels do
           {:ok, Channel.t()} | {:error, any()}
   def get_channel_by_name(name, conn) do
     query = from c in Channel, where: c.name == ^name
-    Repo.one(conn, query, Channel)
+
+    Helpers.transaction(conn, fn transaction_conn ->
+      Repo.one(transaction_conn, query, Channel)
+    end)
   end
 
   @doc """
@@ -76,11 +84,13 @@ defmodule Realtime.Channels do
   def delete_channel_by_name(name, conn) do
     query = from c in Channel, where: c.name == ^name
 
-    case Repo.del(conn, query) do
-      {:ok, 1} -> :ok
-      {:ok, 0} -> {:error, :not_found}
-      error -> error
-    end
+    Helpers.transaction(conn, fn transaction_conn ->
+      case Repo.del(transaction_conn, query) do
+        {:ok, 1} -> :ok
+        {:ok, 0} -> {:error, :not_found}
+        error -> error
+      end
+    end)
   end
 
   @doc """
@@ -91,7 +101,10 @@ defmodule Realtime.Channels do
   def update_channel_by_name(name, attrs, conn) do
     with {:ok, channel} when not is_nil(channel) <- get_channel_by_name(name, conn) do
       channel = Channel.changeset(channel, attrs)
-      Repo.update(conn, channel, Channel)
+
+      Helpers.transaction(conn, fn transaction_conn ->
+        Repo.update(transaction_conn, channel, Channel)
+      end)
     end
   end
 end

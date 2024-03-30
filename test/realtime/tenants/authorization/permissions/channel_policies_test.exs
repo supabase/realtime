@@ -6,6 +6,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
 
   alias Realtime.Api.Channel
   alias Realtime.Channels
+  alias Realtime.Helpers
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -181,7 +182,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
           channel_name: channel_name
       }
 
-      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+      Helpers.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, authorization_context)
 
         assert {:ok, result} =
@@ -213,7 +214,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
           channel_name: channel_name
       }
 
-      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+      Helpers.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, authorization_context)
 
         assert {:ok, result} =
