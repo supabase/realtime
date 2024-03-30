@@ -427,14 +427,6 @@ defmodule Realtime.Helpers do
   @doc """
   Runs database transaction in local node or against a target node withing a Postgrex transaction
   """
-  @spec transaction(pid | DBConnection.t(), fun) :: any()
-  def transaction(%DBConnection{} = db_conn, func) do
-    with {:ok, result} <- Postgrex.transaction(db_conn, func) do
-      result
-    else
-      {:error, error} -> error
-    end
-  end
 
   def transaction(db_conn, func) when node() == node(db_conn) do
     with {:ok, result} <- Postgrex.transaction(db_conn, func) do

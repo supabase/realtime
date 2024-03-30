@@ -193,9 +193,9 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
                  )
 
         assert result == %Policies{channel: %ChannelPolicies{write: true}}
-
-        assert {:error, :not_found} = Channels.get_channel_by_name(channel_name, transaction_conn)
       end)
+
+      assert {:error, :not_found} = Channels.get_channel_by_name(channel_name, context.db_conn)
     end
 
     @tag role: "authenticated",
@@ -225,9 +225,9 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
                  )
 
         assert result == %Policies{channel: %ChannelPolicies{write: true}}
-
-        assert {:ok, _} = Channels.get_channel_by_name(channel_name, transaction_conn)
       end)
+
+      assert {:ok, _} = Channels.get_channel_by_name(channel_name, context.db_conn)
     end
 
     @tag role: "anon",
@@ -254,8 +254,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
-    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
     clean_table(db_conn, "realtime", "channels")
     clean_table(db_conn, "realtime", "broadcasts")
@@ -277,8 +276,6 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
         role: claims.role,
         channel_name: channel.name
       })
-
-    on_exit(fn -> Process.exit(db_conn, :normal) end)
 
     %{
       tenant: tenant,
