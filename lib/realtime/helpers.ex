@@ -445,7 +445,7 @@ defmodule Realtime.Helpers do
   end
 
   def transaction(db_conn, func) do
-    Rpc.enhanced_call(node(db_conn), __MODULE__, :run_db_request, [db_conn, func], timeout: 15_000)
+    Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func], timeout: 15_000)
   end
 
   defp stop_user_tenant_process(tenant, platform_region, acc) do
