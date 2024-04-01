@@ -16,20 +16,20 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeAdminAndMoveOwnership do
     execute("ALTER function realtime.channel_name() owner to supabase_realtime_admin")
 
     execute("""
-      DO
-      $do$
-      BEGIN
-         IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles
-            WHERE  rolname = 'authenticator') THEN
-            CREATE ROLE authenticator NOINHERIT ;
-            GRANT anon TO authenticator;
-            GRANT authenticated TO authenticator;
-            GRANT service_role TO authenticator;
-            GRANT postgres TO authenticator;
-         END IF;
-      END
-      $do$;
-      """)
+    DO
+    $do$
+    BEGIN
+       IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles
+          WHERE  rolname = 'authenticator') THEN
+          CREATE ROLE authenticator NOINHERIT ;
+          GRANT anon TO authenticator;
+          GRANT authenticated TO authenticator;
+          GRANT service_role TO authenticator;
+          GRANT postgres TO authenticator;
+       END IF;
+    END
+    $do$;
+    """)
 
     execute("GRANT supabase_realtime_admin TO authenticator")
   end
