@@ -212,4 +212,27 @@ defmodule RealtimeWeb.JwtVerificationTest do
 
     assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
   end
+
+  test "verify/3 using ES256 JWK" do
+    jwks = %{
+      "keys" => [
+        %{
+          "kty" => "EC",
+          "x" => "iX_niXPSL2nW-9IyCELzyceAtuE3B98pWML5tQGACD4",
+          "y" => "kT02DoLhXx6gtpkbrN8XwQ2wtzE6cDBaqlWgVXIeqV0",
+          "crv" => "P-256",
+          "d" => "FBVYnsYA2C3FTggEwV8kCRMo4FLl220_cWY2RdXyb_8",
+          "kid" => "key-id-1"
+        }
+      ]
+    }
+
+    token =
+      "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6ImtleS1pZC0xIn0.eyJpYXQiOjE3MTIwNDk2NTcsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoidXNlci1pZCIsImV4cCI6MTcxMjA1MzI1N30.IIQBuEiSnZacGMqiqsrLAeRGOjIaB4F3x1gnLN5zvhFryJ-6tdgu96lFv5HUF13IL2UfHWad0OuvoDt4DEHRxw"
+
+    current_time = 1_712_049_657 + 1
+    Mock.freeze(current_time)
+
+    assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
+  end
 end
