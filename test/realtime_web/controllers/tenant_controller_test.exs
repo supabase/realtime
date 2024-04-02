@@ -65,7 +65,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
   describe "create tenant" do
     test "renders tenant when data is valid", %{conn: conn} do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         ext_id = @default_tenant_attrs["external_id"]
         conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @default_tenant_attrs)
         assert %{"id" => _id, "external_id" => ^ext_id} = json_response(conn, 201)["data"]
@@ -79,7 +79,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "encrypt creds", %{conn: conn} do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         ext_id = @default_tenant_attrs["external_id"]
         conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @default_tenant_attrs)
         [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
@@ -92,7 +92,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "renders errors when data is invalid", %{conn: conn} do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         conn = post(conn, Routes.tenant_path(conn, :create), tenant: @invalid_attrs)
         assert json_response(conn, 422)["errors"] != %{}
       end
@@ -106,7 +106,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       conn: conn,
       tenant: %Tenant{id: id, external_id: ext_id} = _tenant
     } do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @update_attrs)
         assert %{"id" => ^id, "external_id" => ^ext_id} = json_response(conn, 200)["data"]
         conn = get(conn, Routes.tenant_path(conn, :show, ext_id))
@@ -119,7 +119,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "renders errors when data is invalid", %{conn: conn, tenant: tenant} do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         conn =
           put(conn, Routes.tenant_path(conn, :update, tenant.external_id), tenant: @invalid_attrs)
 
@@ -140,7 +140,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "deletes chosen tenant", %{conn: conn, tenant: tenant} do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         assert Cache.get_tenant_by_external_id(tenant.external_id)
 
         {:ok, db_conn} = Helpers.check_tenant_connection(tenant, "realtime_test")
@@ -173,7 +173,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "tenant doesn't exist", %{conn: conn} do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         conn = delete(conn, Routes.tenant_path(conn, :delete, "wrong_external_id"))
         assert response(conn, 204)
       end
@@ -184,7 +184,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     setup [:create_tenant]
 
     test "reload when tenant does exist", %{conn: conn, tenant: tenant} do
-      with_mock ChannelsAuthorization, authorize: fn _, _ -> {:ok, %{}} end do
+      with_mock ChannelsAuthorization, authorize: fn _, _, _ -> {:ok, %{}} end do
         Routes.tenant_path(conn, :reload, tenant.external_id)
         %{status: status} = post(conn, Routes.tenant_path(conn, :reload, "wrong_external_id"))
         assert status == 404
@@ -192,7 +192,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "reload when tenant does not exist", %{conn: conn} do
-      with_mock ChannelsAuthorization, authorize: fn _, _ -> {:ok, %{}} end do
+      with_mock ChannelsAuthorization, authorize: fn _, _, _ -> {:ok, %{}} end do
         Routes.tenant_path(conn, :reload, "wrong_external_id")
         %{status: status} = post(conn, Routes.tenant_path(conn, :reload, "wrong_external_id"))
         assert status == 404
@@ -204,7 +204,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     setup [:create_tenant]
 
     test "health check when tenant does not exist", %{conn: conn} do
-      with_mock ChannelsAuthorization, authorize: fn _, _ -> {:ok, %{}} end do
+      with_mock ChannelsAuthorization, authorize: fn _, _, _ -> {:ok, %{}} end do
         Routes.tenant_path(conn, :reload, "wrong_external_id")
         %{status: status} = get(conn, Routes.tenant_path(conn, :health, "wrong_external_id"))
         assert status == 404
@@ -215,7 +215,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       conn: conn,
       tenant: %Tenant{external_id: ext_id}
     } do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
         assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
@@ -226,7 +226,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       conn: conn,
       tenant: %Tenant{external_id: ext_id}
     } do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         # Fake adding a connected client here
         # No connection to the tenant database
         UsersCounter.add(self(), ext_id)
@@ -242,7 +242,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       conn: conn,
       tenant: %Tenant{external_id: ext_id}
     } do
-      with_mock JwtVerification, verify: fn _token, _secret -> {:ok, %{}} end do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         # Fake adding a connected client here
         UsersCounter.add(self(), ext_id)
 
