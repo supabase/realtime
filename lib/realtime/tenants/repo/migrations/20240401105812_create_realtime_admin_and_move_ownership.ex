@@ -9,6 +9,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeAdminAndMoveOwnership do
     execute("GRANT ALL PRIVILEGES ON SCHEMA realtime TO supabase_realtime_admin")
     execute("GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA realtime TO supabase_realtime_admin")
     execute("GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA realtime TO supabase_realtime_admin")
+    execute("GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA realtime TO supabase_realtime_admin")
 
     execute("ALTER table realtime.channels OWNER to supabase_realtime_admin")
     execute("ALTER table realtime.broadcasts OWNER to supabase_realtime_admin")
