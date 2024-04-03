@@ -152,13 +152,31 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def handle_info(%{event: type, payload: payload} = msg, socket) do
+  def handle_info(
+        %{event: type, payload: payload} = msg,
+        %{assigns: %{policies: policies}} = socket
+      ) do
     socket =
-      socket
-      |> count()
-      |> Logging.maybe_log_handle_info(msg)
+      cond do
+        type == "presence_diff" &&
+            match?(%Policies{broadcast: %PresencePolicies{read: false}}, policies) ->
+          Logger.info("Presence tracking message ignored")
+          socket
 
-    push(socket, type, payload)
+        type != "presence_diff" &&
+            match?(%Policies{broadcast: %BroadcastPolicies{write: false}}, policies) ->
+          Logger.info("Broadcast message ignored")
+          socket
+
+        true ->
+          socket =
+            socket
+            |> count()
+            |> Logging.maybe_log_handle_info(msg)
+
+          push(socket, type, payload)
+      end
+
     {:noreply, socket}
   end
 
