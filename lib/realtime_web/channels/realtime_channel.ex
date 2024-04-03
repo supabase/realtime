@@ -588,7 +588,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp assign_policies({:ok, channel}, db_conn, params, access_token, claims, socket) do
     using_broadcast? = get_in(params, ["config", "broadcast"])
-    using_presence? = get_in(params, ["config", "presence"])
 
     authorization_context =
       Authorization.build_authorization_params(%{
@@ -602,16 +601,15 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
 
     cond do
-      using_presence? &&
-          match?(%Policies{presence: %PresencePolicies{read: false}}, socket.assigns.policies) ->
-        {:error, "You do not have permissions to read Presence messages from this channel"}
+      match?(%Policies{channel: %ChannelPolicies{read: false}}, socket.assigns.policies) ->
+        {:error, "You do not have permissions to read from this Channel"}
 
       using_broadcast? &&
           match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
         {:error, "You do not have permissions to read Broadcast messages from this channel"}
 
-      match?(%Policies{channel: %ChannelPolicies{read: false}}, socket.assigns.policies) ->
-        {:error, "You do not have permissions to read from this Channel"}
+      match?(%Policies{presence: %PresencePolicies{read: false}}, socket.assigns.policies) ->
+        {:error, "You do not have permissions to read Presence messages from this channel"}
 
       true ->
         {:ok, socket}

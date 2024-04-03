@@ -37,17 +37,8 @@ defmodule Realtime.Tenants do
   """
 
   @spec get_health_conn(Tenant.t()) :: {:error, term()} | {:ok, pid()}
-  def get_health_conn(%Tenant{external_id: external_id} = tenant) do
-    case Connect.get_status(external_id) do
-      {:ok, conn} ->
-        [%{settings: settings} | _] = tenant.extensions
-        Helpers.transaction(conn, fn _ -> Migrations.run_migrations(settings) end)
-
-        {:ok, conn}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+  def get_health_conn(%Tenant{external_id: external_id}) do
+    Connect.get_status(external_id)
   end
 
   @doc """
@@ -78,8 +69,10 @@ defmodule Realtime.Tenants do
       nil ->
         {:error, :tenant_not_found}
 
-      {:ok, _health_conn} ->
+      {:ok, health_conn} ->
         connected_cluster = UsersCounter.tenant_users(external_id)
+        %{extensions: [%{settings: settings} | _]} = Cache.get_tenant_by_external_id(external_id)
+        Helpers.transaction(health_conn, fn _ -> Migrations.run_migrations(settings) end)
 
         {:ok, %{healthy: true, db_connected: true, connected_cluster: connected_cluster}}
 
