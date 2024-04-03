@@ -4,7 +4,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   """
   import Phoenix.Socket, only: [assign: 3]
   import Phoenix.Channel, only: [push: 3]
-
+  require Logger
   alias Phoenix.Tracker.Shard
 
   alias Realtime.GenCounter
@@ -36,6 +36,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
     case policies do
       %Policies{presence: %PresencePolicies{write: false}} ->
+        Logger.info("Presence track message ignored on #{topic}")
         {:noreply, socket}
 
       _ ->
@@ -57,6 +58,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
     cond do
       match?(%Policies{presence: %PresencePolicies{write: false}}, policies) ->
+        Logger.info("Presence message ignored on #{tenant_topic}")
         :ok
 
       String.downcase(event) == "track" ->

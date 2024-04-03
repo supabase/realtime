@@ -3,7 +3,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   Handles the Broadcast feature from Realtime
   """
   import Phoenix.Socket, only: [assign: 3]
-
+  require Logger
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants.Authorization.Policies
@@ -27,14 +27,11 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         } = socket
       ) do
     case policies do
-      nil ->
-        send_message(self_broadcast, tenant_topic, payload)
-
-      %Policies{broadcast: %BroadcastPolicies{write: true}} ->
-        send_message(self_broadcast, tenant_topic, payload)
+      %Policies{broadcast: %BroadcastPolicies{write: false}} ->
+        Logger.info("Broadcast message ignored on #{tenant_topic}")
 
       _ ->
-        nil
+        send_message(self_broadcast, tenant_topic, payload)
     end
 
     socket = increment_rate_counter(socket)
