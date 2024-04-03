@@ -164,7 +164,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           socket
 
         type != "presence_diff" and
-            match?(%Policies{broadcast: %BroadcastPolicies{write: false}}, policies) ->
+            match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, policies) ->
           Logger.error("Broadcast message ignored")
           socket
 
