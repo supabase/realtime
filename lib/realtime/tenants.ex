@@ -11,6 +11,7 @@ defmodule Realtime.Tenants do
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.Cache
   alias Realtime.UsersCounter
+  alias Realtime.Helpers
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
@@ -40,7 +41,8 @@ defmodule Realtime.Tenants do
     case Connect.get_status(external_id) do
       {:ok, conn} ->
         [%{settings: settings} | _] = tenant.extensions
-        {:ok, _} = Migrations.run_migrations(settings)
+        Helpers.transaction(conn, fn _ -> Migrations.run_migrations(settings) end)
+
         {:ok, conn}
 
       {:error, reason} ->
