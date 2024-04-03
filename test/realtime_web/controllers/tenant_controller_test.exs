@@ -1,17 +1,18 @@
 defmodule RealtimeWeb.TenantControllerTest do
-  alias Realtime.PromEx.Plugins.Tenants
-  alias Realtime.UsersCounter
-
   # async: false required due to the delete tests that connects to the database directly and might interfere with other tests
   use RealtimeWeb.ConnCase, async: false
 
   import Mock
-  import Realtime.Helpers, only: [encrypt!: 2]
+  import Realtime.Helpers, only: [encrypt!: 2, transaction: 2]
 
   alias Realtime.Api.Tenant
   alias Realtime.Helpers
+  alias Realtime.PromEx.Plugins.Tenants
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
+  alias Realtime.Tenants.Connect
+  alias Realtime.UsersCounter
+
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.JwtVerification
 
@@ -257,6 +258,30 @@ defmodule RealtimeWeb.TenantControllerTest do
         data = json_response(conn, 200)["data"]
 
         assert %{"healthy" => true, "db_connected" => true, "connected_cluster" => 1} = data
+      end
+    end
+
+    test "runs migrations", %{
+      conn: conn,
+      tenant: %Tenant{external_id: ext_id}
+    } do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        {:ok, db_conn} = Connect.lookup_or_start_connection(ext_id)
+
+        transaction(db_conn, fn transaction_conn ->
+          Postgrex.query!(transaction_conn, "DROP SCHEMA realtime CASCADE", [])
+          Postgrex.query!(transaction_conn, "CREATE SCHEMA realtime", [])
+          Postgrex.query!(transaction_conn, "DROP ROLE supabase_realtime_admin", [])
+        end)
+
+        assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.channels", [])
+
+        conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
+        data = json_response(conn, 200)["data"]
+
+        assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.channels", [])
+
+        assert %{"healthy" => true, "db_connected" => true, "connected_cluster" => 0} = data
       end
     end
   end

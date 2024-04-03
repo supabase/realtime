@@ -4,6 +4,7 @@ defmodule Realtime.Tenants do
   """
 
   require Logger
+  alias Realtime.Tenants.Migrations
   alias Realtime.Api.Tenant
   alias Realtime.Tenants.Connect
   alias Realtime.Repo
@@ -35,10 +36,15 @@ defmodule Realtime.Tenants do
   """
 
   @spec get_health_conn(Tenant.t()) :: {:error, term()} | {:ok, pid()}
-  def get_health_conn(%Tenant{external_id: external_id}) do
+  def get_health_conn(%Tenant{external_id: external_id} = tenant) do
     case Connect.get_status(external_id) do
-      {:ok, conn} -> {:ok, conn}
-      {:error, reason} -> {:error, reason}
+      {:ok, conn} ->
+        [%{settings: settings} | _] = tenant.extensions
+        {:ok, _} = Migrations.run_migrations(settings)
+        {:ok, conn}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
