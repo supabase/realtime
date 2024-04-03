@@ -244,6 +244,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       tenant: %Tenant{external_id: ext_id}
     } do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        {:ok, db_conn} = Connect.lookup_or_start_connection(ext_id)
         # Fake adding a connected client here
         UsersCounter.add(self(), ext_id)
 
@@ -251,7 +252,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         :syn.register(Realtime.Tenants.Connect, ext_id, self(), %{conn: nil})
 
         :syn.update_registry(Realtime.Tenants.Connect, ext_id, fn _pid, meta ->
-          %{meta | conn: conn}
+          %{meta | conn: db_conn}
         end)
 
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
