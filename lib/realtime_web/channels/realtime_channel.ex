@@ -158,23 +158,21 @@ defmodule RealtimeWeb.RealtimeChannel do
       ) do
     socket =
       cond do
-        type == "presence_diff" &&
+        type == "presence_diff" and
             match?(%Policies{broadcast: %PresencePolicies{read: false}}, policies) ->
-          Logger.info("Presence tracking message ignored")
-          socket
+          Logger.error("Presence tracking message ignored")
 
-        type != "presence_diff" &&
+        type != "presence_diff" and
             match?(%Policies{broadcast: %BroadcastPolicies{write: false}}, policies) ->
-          Logger.info("Broadcast message ignored")
-          socket
+          Logger.error("Broadcast message ignored")
 
         true ->
-          socket =
-            socket
-            |> count()
-            |> Logging.maybe_log_handle_info(msg)
+          socket
+          |> count()
+          |> Logging.maybe_log_handle_info(msg)
 
           push(socket, type, payload)
+          socket
       end
 
     {:noreply, socket}
