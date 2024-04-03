@@ -77,6 +77,10 @@ defmodule Realtime.Tenants do
         {:ok, %{healthy: true, db_connected: true, connected_cluster: connected_cluster}}
 
       connected_cluster when is_integer(connected_cluster) ->
+        {:ok, db_conn} = Connect.lookup_or_start_connection(external_id)
+        %{extensions: [%{settings: settings} | _]} = Cache.get_tenant_by_external_id(external_id)
+        Helpers.transaction(db_conn, fn _ -> Migrations.run_migrations(settings) end)
+
         {:ok, %{healthy: true, db_connected: false, connected_cluster: connected_cluster}}
     end
   end

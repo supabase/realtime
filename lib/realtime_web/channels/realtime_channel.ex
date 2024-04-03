@@ -162,11 +162,13 @@ defmodule RealtimeWeb.RealtimeChannel do
             match?(%Policies{broadcast: %PresencePolicies{read: false}}, policies) ->
           Logger.error("Presence tracking message ignored")
 
-        match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, policies) ->
+        type != "presence_diff" and
+            match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, policies) ->
           Logger.error("Broadcast message ignored")
           socket
 
-        match?(%Policies{broadcast: %BroadcastPolicies{write: false}}, policies) ->
+        type != "presence_diff" and
+            match?(%Policies{broadcast: %BroadcastPolicies{write: false}}, policies) ->
           Logger.error("Broadcast message ignored")
           socket
 
