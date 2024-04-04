@@ -48,16 +48,18 @@ defmodule RealtimeWeb.BroadcastControllerTest do
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
             "messages" => [
               %{"topic" => sub_topic_1, "payload" => payload_2, "event" => event_1},
+              %{"topic" => sub_topic_1, "payload" => payload_2, "event" => event_1},
               %{"topic" => sub_topic_2, "payload" => payload_2, "event" => event_2}
             ]
           })
 
-        assert_called(
+        assert_called_exactly(
           Endpoint.broadcast_from(:_, topic_1, "broadcast", %{
             "payload" => payload_1,
             "event" => event_1,
             "type" => "broadcast"
-          })
+          }),
+          2
         )
 
         assert_called(
@@ -69,7 +71,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
           )
         )
 
-        assert_called_exactly(GenCounter.add(events_key), 2)
+        assert_called_exactly(GenCounter.add(events_key), 3)
         assert conn.status == 202
       end
     end
@@ -411,6 +413,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         channels =
           Stream.repeatedly(fn -> generate_channel_with_policies(db_conn, tenant) end)
           |> Enum.take(5)
+
+        # Duplicate messages to ensure same topics emit twice
+        channels = channels ++ channels
 
         messages =
           Enum.map(channels, fn %{name: name} ->
