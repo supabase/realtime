@@ -139,7 +139,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_read_channel, %{name: name}) do
     """
-    CREATE POLICY authenticated_read_channel
+    CREATE POLICY authenticated_read_channel_#{name}
     ON realtime.channels FOR SELECT
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' );
@@ -148,7 +148,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_write_channel, %{name: name}) do
     """
-    CREATE POLICY authenticated_write_channel
+    CREATE POLICY authenticated_write_channel_#{name}
     ON realtime.channels FOR UPDATE
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' )
@@ -158,7 +158,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_read_broadcast, %{name: name}) do
     """
-    CREATE POLICY authenticated_read_broadcast
+    CREATE POLICY authenticated_read_broadcast_#{name}
     ON realtime.broadcasts FOR SELECT
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' );
@@ -167,7 +167,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_write_broadcast, %{name: name}) do
     """
-    CREATE POLICY authenticated_write_broadcast
+    CREATE POLICY authenticated_write_broadcast_#{name}
     ON realtime.broadcasts FOR UPDATE
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' )
@@ -177,7 +177,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_read_presence, %{name: name}) do
     """
-    CREATE POLICY authenticated_read_presence
+    CREATE POLICY authenticated_read_presence_#{name}
     ON realtime.presences FOR SELECT
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' );
@@ -186,7 +186,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_write_presence, %{name: name}) do
     """
-    CREATE POLICY authenticated_write_presence
+    CREATE POLICY authenticated_write_presence_#{name}
     ON realtime.presences FOR UPDATE
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' )
