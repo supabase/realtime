@@ -92,7 +92,6 @@ defmodule Realtime.Tenants.Authorization do
       role: role
     } = authorization_context
 
-    sub = Map.get(claims, :sub)
     claims = Jason.encode!(claims)
     headers = headers |> Map.new() |> Jason.encode!()
 
@@ -109,13 +108,11 @@ defmodule Realtime.Tenants.Authorization do
       SELECT
        set_config('role', $1, true),
        set_config('realtime.channel_name', $2, true),
-       set_config('request.jwt.claim.role', $3, true),
-       set_config('request.jwt', $4, true),
-       set_config('request.jwt.claim.sub', $5, true),
-       set_config('request.jwt.claims', $6, true),
-       set_config('request.headers', $7, true)
+       set_config('request.jwt', $3, true),
+       set_config('request.jwt.claims', $4, true),
+       set_config('request.headers', $5, true)
       """,
-      [role, channel_name, role, jwt, sub, claims, headers]
+      [role, channel_name, jwt, claims, headers]
     )
   end
 
