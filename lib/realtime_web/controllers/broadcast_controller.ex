@@ -68,8 +68,11 @@ defmodule RealtimeWeb.BroadcastController do
       query_to_check = from(c in Channel, where: c.name in ^MapSet.to_list(channel_names))
 
       channels =
-        Repo.all(db_conn, query_to_check, Channel)
-        |> then(fn {:ok, channels} -> channels end)
+        Helpers.transaction(db_conn, fn transaction_conn ->
+          transaction_conn
+          |> Repo.all(query_to_check, Channel)
+          |> then(fn {:ok, channels} -> channels end)
+        end)
 
       channels_names_to_check =
         channels
