@@ -135,6 +135,8 @@ defmodule Realtime.Helpers do
       name = settings["db_name"]
       user = settings["db_user"]
       password = settings["db_password"]
+      pool = settings["db_pool"] || 5
+      queue_target = settings["db_queue_target"] || 2000
 
       opts = %{
         host: host,
@@ -142,8 +144,8 @@ defmodule Realtime.Helpers do
         name: name,
         user: user,
         pass: password,
-        pool: 1,
-        queue_target: 1000,
+        pool: pool,
+        queue_target: queue_target,
         ssl_enforced: ssl_enforced,
         application_name: application_name,
         backoff: :stop
