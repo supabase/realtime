@@ -4,7 +4,21 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeAdminAndMoveOwnership do
   use Ecto.Migration
 
   def change do
-    execute("CREATE ROLE supabase_realtime_admin WITH NOINHERIT NOLOGIN NOREPLICATION")
+    execute("""
+    DO
+    $do$
+    BEGIN
+       IF EXISTS (
+          SELECT FROM pg_catalog.pg_roles
+          WHERE  rolname = 'supabase_realtime_admin') THEN
+
+          RAISE NOTICE 'Role "supabase_realtime_admin" already exists. Skipping.';
+       ELSE
+          CREATE ROLE supabase_realtime_admin WITH NOINHERIT NOLOGIN NOREPLICATION;
+       END IF;
+    END
+    $do$;
+    """)
 
     execute("GRANT ALL PRIVILEGES ON SCHEMA realtime TO supabase_realtime_admin")
     execute("GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA realtime TO supabase_realtime_admin")
