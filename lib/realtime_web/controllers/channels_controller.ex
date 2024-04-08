@@ -49,7 +49,7 @@ defmodule RealtimeWeb.ChannelsController do
     end
   end
 
-  def index(_conn, _params), do: {:error, :unauthorized}
+  def index(conn, _params), do: json(conn, [])
 
   operation(:show,
     summary: "Show user channel",
@@ -97,7 +97,7 @@ defmodule RealtimeWeb.ChannelsController do
     end
   end
 
-  def show(_conn, _params), do: {:error, :unauthorized}
+  def show(_conn, _params), do: {:error, :not_found}
 
   operation(:create,
     summary: "Create user channel",
@@ -114,6 +114,7 @@ defmodule RealtimeWeb.ChannelsController do
     request_body: ChannelParams.params(),
     responses: %{
       201 => ChannelResponse.response(),
+      401 => UnauthorizedResponse.response(),
       404 => NotFoundResponse.response()
     }
   )
@@ -158,6 +159,7 @@ defmodule RealtimeWeb.ChannelsController do
     ],
     responses: %{
       202 => EmptyResponse.response(),
+      401 => UnauthorizedResponse.response(),
       404 => NotFoundResponse.response()
     }
   )
@@ -177,7 +179,7 @@ defmodule RealtimeWeb.ChannelsController do
     end
   end
 
-  def delete(_conn, _params), do: {:error, :unauthorized}
+  def delete(_conn, _params), do: {:error, :not_found}
 
   operation(:update,
     summary: "Update user channel",
@@ -201,6 +203,7 @@ defmodule RealtimeWeb.ChannelsController do
     request_body: ChannelParams.params(),
     responses: %{
       201 => ChannelResponse.response(),
+      401 => UnauthorizedResponse.response(),
       404 => NotFoundResponse.response()
     }
   )
@@ -223,5 +226,5 @@ defmodule RealtimeWeb.ChannelsController do
     end
   end
 
-  def update(_conn, _params), do: {:error, :unauthorized}
+  def update(_conn, _params), do: {:error, :not_found}
 end

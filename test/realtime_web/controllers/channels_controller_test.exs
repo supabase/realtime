@@ -62,9 +62,9 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     end
 
     @tag role: "authenticated"
-    test "returns 401 if unauthorized", %{conn: conn} do
+    test "returns empty list if unauthorized", %{conn: conn} do
       conn = get(conn, ~p"/api/channels")
-      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
+      assert json_response(conn, 200) == []
     end
   end
 
@@ -92,9 +92,9 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     end
 
     @tag role: "anon"
-    test "returns 401 if unauthorized", %{conn: conn} do
+    test "returns 404 if unauthorized", %{conn: conn} do
       conn = get(conn, ~p"/api/channels/0")
-      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
+      assert json_response(conn, 404) == %{"message" => "Not found"}
     end
   end
 
@@ -131,16 +131,16 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     end
 
     @tag role: "authenticated"
-    test "returns unauthorized if id doesn't exist", %{conn: conn} do
+    test "returns 404 if id doesn't exist", %{conn: conn} do
       conn = delete(conn, ~p"/api/channels/0")
-      assert conn.status == 401
+      assert conn.status == 404
     end
 
     @tag role: "anon"
-    test "returns 401 if unauthorized", %{conn: conn, tenant: tenant} do
+    test "returns 404 if unauthorized", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
       conn = delete(conn, ~p"/api/channels/#{channel.name}")
-      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
+      assert json_response(conn, 404) == %{"message" => "Not found"}
     end
   end
 
@@ -170,10 +170,10 @@ defmodule RealtimeWeb.ChannelsControllerTest do
     end
 
     @tag role: "anon"
-    test "returns 401 if unauthorized", %{conn: conn, tenant: tenant} do
+    test "returns 404 if unauthorized", %{conn: conn, tenant: tenant} do
       channel = channel_fixture(tenant)
       conn = put(conn, ~p"/api/channels/#{channel.name}", %{"name" => "new_name"})
-      assert json_response(conn, 401) == %{"message" => "Unauthorized"}
+      assert json_response(conn, 404) == %{"message" => "Not found"}
     end
   end
 end
