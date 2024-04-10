@@ -57,7 +57,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, socket} <- assign_policies(channel, db_conn, params, access_token, claims, socket) do
       is_new_api = is_new_api(params)
       public? = match?({:ok, _}, channel)
-      tenant_topic = tenant <> ":" <> sub_topic
+      tenant_topic = Tenants.tenant_topic(tenant, sub_topic, public?)
 
       Realtime.UsersCounter.add(transport_pid, tenant)
       RealtimeWeb.Endpoint.subscribe(tenant_topic)

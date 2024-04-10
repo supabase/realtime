@@ -32,7 +32,7 @@ defmodule Realtime.Tenants do
 
   ## Examples
 
-      iex> get_health_conn(%Tenant{external_id: "not_found_tenant"})
+      iex> Realtime.Tenants.get_health_conn(%Realtime.Api.Tenant{external_id: "not_found_tenant"})
       {:error, :tenant_database_unavailable}
   """
 
@@ -44,14 +44,9 @@ defmodule Realtime.Tenants do
   @doc """
   Checks if a tenant is healthy. A tenant is healthy if:
   - Tenant has no db connection and zero client connetions
-  - Teantn has a db connection and >0 client connections
+  - Tenant has a db connection and >0 client connections
 
   A tenant is not healthy if a tenant has client connections and no database connection.
-
-  ## Examples
-
-      iex> health_check("not_healthy_external_id")
-      {:error, %{healthy: false, db_connected: false, connected_cluster: 10}}
   """
 
   @spec health_check(binary) ::
@@ -194,10 +189,27 @@ defmodule Realtime.Tenants do
 
   @doc """
   Builds a PubSub topic from a tenant and a sub-topic.
+  ## Examples
+
+      iex> Realtime.Tenants.tenant_topic(%Realtime.Api.Tenant{external_id: "tenant_id"}, "sub_topic")
+      "tenant_id:sub_topic"
+      iex> Realtime.Tenants.tenant_topic("tenant_id", "sub_topic")
+      "tenant_id:sub_topic"
+      iex> Realtime.Tenants.tenant_topic(%Realtime.Api.Tenant{external_id: "tenant_id"}, "sub_topic", false)
+      "tenant_id:private:sub_topic"
+      iex> Realtime.Tenants.tenant_topic("tenant_id", "sub_topic", false)
+      "tenant_id:private:sub_topic"
   """
-  @spec tenant_topic(Tenant.t(), String.t()) :: String.t()
-  def tenant_topic(%Tenant{external_id: external_id}, sub_topic) do
-    "#{external_id}:#{sub_topic}"
+  @spec tenant_topic(Tenant.t() | binary(), String.t(), boolean()) :: String.t()
+  def tenant_topic(external_id, sub_topic, public? \\ true)
+
+  def tenant_topic(%Tenant{external_id: external_id}, sub_topic, public?) do
+    tenant_topic(external_id, sub_topic, public?)
+  end
+
+  def tenant_topic(external_id, sub_topic, public?) do
+    private_prefix = if public?, do: "", else: ":private"
+    "#{external_id}#{private_prefix}:#{sub_topic}"
   end
 
   @doc """

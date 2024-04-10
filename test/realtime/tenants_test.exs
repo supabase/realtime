@@ -5,6 +5,7 @@ defmodule Realtime.TenantsTest do
 
   alias Realtime.GenCounter
   alias Realtime.Tenants
+  doctest Realtime.Tenants
 
   describe "tenants" do
     test "get_tenant_limits/1" do
