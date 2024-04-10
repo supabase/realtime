@@ -11,7 +11,7 @@
 #  Following query was used to generate this file:
 #  SELECT json_object_agg(UPPER(PT.typname), PT.oid::int4 ORDER BY pt.oid)
 #  FROM pg_type PT
-#  WHERE typnamespace = (SELECT pgn.oid FROM pg_namespace pgn WHERE nspname = 'pg_catalog') -- Take only builting Postgres types with stable OID (extension types are not guaranted to be stable)
+#  WHERE typnamespace = (SELECT pgn.oid FROM pg_namespace pgn WHERE nspname = 'pg_catalog') -- Take only builting Postgres types with stable OID (extension types are not guaranteed to be stable)
 #  AND typtype = 'b' -- Only basic types
 #  AND typisdefined -- Ignore undefined types
 
