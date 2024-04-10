@@ -278,7 +278,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
         Enum.each(channels, fn %{name: name} ->
-          topic = Tenants.tenant_topic(tenant, name)
+          topic = Tenants.tenant_topic(tenant, name, false)
           assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
         end)
 
@@ -327,7 +327,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
         Enum.each(channels, fn %{name: name} ->
-          topic = Tenants.tenant_topic(tenant, name)
+          topic = Tenants.tenant_topic(tenant, name, name == "open_channel")
           assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
         end)
 
@@ -378,14 +378,14 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
         Enum.each(channels, fn %{name: name} ->
-          topic = Tenants.tenant_topic(tenant, name)
+          topic = Tenants.tenant_topic(tenant, name, false)
           assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
         end)
 
         assert_not_called(
           Endpoint.broadcast_from(
             :_,
-            Tenants.tenant_topic(tenant, no_auth_channel.name),
+            Tenants.tenant_topic(tenant, no_auth_channel.name, false),
             "broadcast",
             :_
           )
