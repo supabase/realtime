@@ -195,9 +195,16 @@ defmodule Realtime.Tenants do
   @doc """
   Builds a PubSub topic from a tenant and a sub-topic.
   """
-  @spec tenant_topic(Tenant.t(), String.t()) :: String.t()
-  def tenant_topic(%Tenant{external_id: external_id}, sub_topic) do
-    "#{external_id}:#{sub_topic}"
+  @spec tenant_topic(Tenant.t() | binary(), String.t(), boolean()) :: String.t()
+  def tenant_topic(external_id, sub_topic, public? \\ false)
+
+  def tenant_topic(%Tenant{external_id: external_id}, sub_topic, public?) do
+    tenant_topic(external_id, sub_topic, public?)
+  end
+
+  def tenant_topic(external_id, sub_topic, public?) do
+    private_prefix = if public?, do: "", else: ":private"
+    "#{external_id}#{private_prefix}:#{sub_topic}"
   end
 
   @doc """
