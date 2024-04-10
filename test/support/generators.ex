@@ -78,7 +78,6 @@ defmodule Generators do
     end)
 
     Postgrex.query!(db_conn, "TRUNCATE TABLE #{schema}.#{table} CASCADE", [])
-    Postgrex.query!(db_conn, "ALTER SEQUENCE #{schema}.#{table}_id_seq RESTART WITH 1", [])
   end
 
   @doc """

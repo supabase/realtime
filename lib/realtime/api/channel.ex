@@ -8,7 +8,10 @@ defmodule Realtime.Api.Channel do
 
   @type t :: %__MODULE__{}
 
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
   @schema_prefix "realtime"
+
   schema "channels" do
     field(:name, :string)
     field(:check, :boolean, default: false)

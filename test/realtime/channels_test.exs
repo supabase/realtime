@@ -38,7 +38,7 @@ defmodule Realtime.ChannelsTest do
     end
 
     test "not found error if does not exist", %{conn: conn} do
-      assert {:error, :not_found} = Channels.get_channel_by_id(0, conn)
+      assert {:error, :not_found} = Channels.get_channel_by_id(Ecto.UUID.generate(), conn)
     end
   end
 

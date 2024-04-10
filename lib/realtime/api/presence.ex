@@ -8,7 +8,10 @@ defmodule Realtime.Api.Presence do
 
   @type t :: %__MODULE__{}
 
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
   @schema_prefix "realtime"
+
   schema "presences" do
     field(:check, :boolean, default: false)
     timestamps()

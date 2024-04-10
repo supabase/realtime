@@ -126,6 +126,12 @@ defmodule Realtime.Repo do
 
     %{header: header, rows: rows} =
       Enum.reduce(changeset.changes, acc, fn {field, row}, %{header: header, rows: rows} ->
+        row =
+          case schema.__schema__(:type, field) do
+            :binary_id -> Ecto.UUID.dump!(row)
+            _ -> row
+          end
+
         %{
           header: [Atom.to_string(field) | header],
           rows: [row | rows]
