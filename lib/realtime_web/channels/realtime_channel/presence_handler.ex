@@ -65,7 +65,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         payload = Map.get(payload, "payload", %{})
 
         case Presence.track(self(), tenant_topic, presence_key, payload) do
-          {:ok, _} -> :ok
+          {:ok, _} ->
+            :ok
 
           {:error, {:already_tracked, _, _, _}} ->
             case Presence.update(self(), tenant_topic, presence_key, payload) do
