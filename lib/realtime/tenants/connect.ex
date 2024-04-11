@@ -117,7 +117,7 @@ defmodule Realtime.Tenants.Connect do
           connected_users_bucket: connected_users_bucket
         } = state
       ) do
-    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:invalidate_cache")
+    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations")
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
 
     {:noreply, state}
@@ -146,7 +146,23 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :normal, state}
   end
 
-  def handle_info({:suspend_tenant, _}, %{db_conn_pid: db_conn_pid} = state) do
+  def handle_info(
+        {:disconnect, tenant_id},
+        %{db_conn_pid: db_conn_pid, tenant_id: tenant_id} = state
+      ) do
+    Logger.info("Tenant has requested to disconnect, database connection will be terminated")
+    :ok = GenServer.stop(db_conn_pid, :normal, 1000)
+    {:stop, :normal, state}
+  end
+
+  def handle_info({:disconnect, _}, state) do
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:suspend_tenant, tenant_id},
+        %{db_conn_pid: db_conn_pid, tenant_id: tenant_id} = state
+      ) do
     Logger.warning("Tenant was suspended, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 1000)
     {:stop, :normal, state}

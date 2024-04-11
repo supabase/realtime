@@ -260,11 +260,15 @@ defmodule Realtime.Tenants do
     |> tap(fn _ -> broadcast_operation_event(:unsuspend_tenant, external_id) end)
   end
 
+  @doc """
+  Disconnects all clients from a tenant
+  """
+  @spec disconnect_clients(String.t()) :: :ok
+  def disconnect_clients(external_id) do
+    broadcast_operation_event(:disconnect, external_id)
+  end
+
   defp broadcast_operation_event(action, external_id) do
-    Phoenix.PubSub.broadcast!(
-      Realtime.PubSub,
-      "realtime:operations:invalidate_cache",
-      {action, external_id}
-    )
+    Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations", {action, external_id})
   end
 end

@@ -98,6 +98,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         db_conn: db_conn
       }
 
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations")
+
       {:ok, state, assign(socket, assigns)}
     else
       {:error, [message: "Invalid token", claim: _claim, claim_val: _value]} = error ->
@@ -245,6 +247,21 @@ defmodule RealtimeWeb.RealtimeChannel do
 
         shutdown_response(socket, message)
     end
+  end
+
+  def handle_info({:suspend_tenant, tenant_id}, %{tenant_id: tenant_id} = state) do
+    Logger.info("Tenant suspend, disconencting the socket")
+    {:stop, :normal, state}
+  end
+
+  def handle_info({:disconnect, tenant_id}, %{tenant_id: tenant_id} = state) do
+    Logger.info("Socket disconnection requested by the user")
+    {:stop, :normal, state}
+  end
+
+  # Ignore operations
+  def handle_info({_, _}, state) do
+    {:noreply, state}
   end
 
   def handle_info(msg, socket) do

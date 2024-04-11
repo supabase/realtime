@@ -30,7 +30,7 @@ defmodule Realtime.Tenants.Cache do
   def distributed_invalidate_tenant_cache(tenant_id) when is_binary(tenant_id) do
     Phoenix.PubSub.broadcast!(
       Realtime.PubSub,
-      "realtime:operations:invalidate_cache",
+      "realtime:operations",
       {:invalidate_cache, tenant_id}
     )
   end

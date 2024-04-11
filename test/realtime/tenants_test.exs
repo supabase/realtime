@@ -43,7 +43,7 @@ defmodule Realtime.TenantsTest do
   describe "suspend_tenant_by_external_id/1" do
     setup do
       tenant = tenant_fixture()
-      topic = "realtime:operations:invalidate_cache"
+      topic = "realtime:operations"
       Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
       %{topic: topic, tenant: tenant}
     end
@@ -58,7 +58,7 @@ defmodule Realtime.TenantsTest do
   describe "unsuspend_tenant_by_external_id/1" do
     setup do
       tenant = tenant_fixture()
-      topic = "realtime:operations:invalidate_cache"
+      topic = "realtime:operations"
       Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
       %{topic: topic, tenant: tenant}
     end

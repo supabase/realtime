@@ -244,6 +244,31 @@ defmodule RealtimeWeb.TenantController do
     end
   end
 
+  operation(:disconnect_clients,
+    summary: "Disconnect all clients",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ],
+      tenant_id: [in: :path, description: "Tenant ID", type: :string]
+    ],
+    responses: %{
+      200 => TenantHealthResponse.response(),
+      403 => EmptyResponse.response()
+    }
+  )
+
+  def disconnect_clients(%{assigns: %{tenant: tenant}} = conn, %{"tenant_id" => tenant_id}) do
+    Tenants.disconnect_clients(tenant_id)
+    PostgresCdc.stop_all(tenant, @stop_timeout)
+    send_resp(conn, 204, "")
+  end
+
   operation(:health,
     summary: "Tenant health",
     parameters: [

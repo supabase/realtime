@@ -27,6 +27,8 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
         |> tap(&GenCounter.add(Tenants.requests_per_second_key(&1)))
         |> Api.preload_counters()
 
+      Logger.metadata(external_id: external_id, project: external_id)
+
       assign(conn, :tenant, tenant)
     else
       {:error, :tenant_not_found_in_host} ->
