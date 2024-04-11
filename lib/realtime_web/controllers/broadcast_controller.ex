@@ -85,7 +85,7 @@ defmodule RealtimeWeb.BroadcastController do
         events
         |> Enum.filter(fn {sub_topic, _} -> sub_topic == channel_name end)
         |> Enum.each(fn {_, %{topic: sub_topic, payload: payload, event: event}} ->
-          send_message_and_count(tenant, sub_topic, event, payload)
+          send_message_and_count(tenant, sub_topic, event, payload, true)
         end)
       end)
 
@@ -105,7 +105,7 @@ defmodule RealtimeWeb.BroadcastController do
               channel: %ChannelPolicies{read: true},
               broadcast: %BroadcastPolicies{write: true}
             } ->
-              send_message_and_count(tenant, channel_name, event, payload)
+              send_message_and_count(tenant, channel_name, event, payload, false)
 
             _ ->
               nil
@@ -117,9 +117,9 @@ defmodule RealtimeWeb.BroadcastController do
     end
   end
 
-  defp send_message_and_count(tenant, channel_name, event, payload) do
+  defp send_message_and_count(tenant, channel_name, event, payload, public?) do
     events_per_second_key = Tenants.events_per_second_key(tenant)
-    tenant_topic = Tenants.tenant_topic(tenant, channel_name)
+    tenant_topic = Tenants.tenant_topic(tenant, channel_name, public?)
     payload = %{"payload" => payload, "event" => event, "type" => "broadcast"}
 
     GenCounter.add(events_per_second_key)
