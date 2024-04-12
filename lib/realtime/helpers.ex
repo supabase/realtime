@@ -135,7 +135,7 @@ defmodule Realtime.Helpers do
       name = settings["db_name"]
       user = settings["db_user"]
       password = settings["db_password"]
-      pool = settings["db_pool"] || 5
+      pool = settings["db_pool"] || 1
       queue_target = settings["db_queue_target"] || 2000
 
       opts = %{
