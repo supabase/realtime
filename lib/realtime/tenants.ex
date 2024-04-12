@@ -265,7 +265,10 @@ defmodule Realtime.Tenants do
   """
   @spec disconnect_clients(String.t()) :: :ok
   def disconnect_clients(external_id) do
-    broadcast_operation_event(:disconnect, external_id)
+    suspend_tenant_by_external_id(external_id)
+    :timer.sleep(1000)
+    unsuspend_tenant_by_external_id(external_id)
+    :ok
   end
 
   defp broadcast_operation_event(action, external_id) do

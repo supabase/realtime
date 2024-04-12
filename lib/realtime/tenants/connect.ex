@@ -147,25 +147,17 @@ defmodule Realtime.Tenants.Connect do
   end
 
   def handle_info(
-        {:disconnect, tenant_id},
-        %{db_conn_pid: db_conn_pid, tenant_id: tenant_id} = state
-      ) do
-    Logger.info("Tenant has requested to disconnect, database connection will be terminated")
-    :ok = GenServer.stop(db_conn_pid, :normal, 1000)
-    {:stop, :normal, state}
-  end
-
-  def handle_info({:disconnect, _}, state) do
-    {:noreply, state}
-  end
-
-  def handle_info(
         {:suspend_tenant, tenant_id},
         %{db_conn_pid: db_conn_pid, tenant_id: tenant_id} = state
       ) do
     Logger.warning("Tenant was suspended, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 1000)
     {:stop, :normal, state}
+  end
+
+  # Ignore suspend_tenant if they are not related with this tenant
+  def handle_info({:suspend_tenant, _}, state) do
+    {:noreply, state}
   end
 
   # Ignore unsuspend messages to avoid handle_info unmatched functions

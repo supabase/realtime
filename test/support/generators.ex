@@ -2,7 +2,9 @@ defmodule Generators do
   @moduledoc """
   Data genarators for tests.
   """
+  alias Realtime.Helpers
   alias Realtime.Tenants.Connect
+
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
     create_attrs = %{
@@ -193,5 +195,32 @@ defmodule Generators do
     USING ( realtime.channel_name() = '#{name}' )
     WITH CHECK ( realtime.channel_name() = '#{name}' );
     """
+  end
+
+  def generate_token(secret) when is_binary(secret) do
+    generate_token(%{}, secret)
+  end
+
+  def generate_token(claims) do
+    generate_token(claims, jwt_secret())
+  end
+
+  def generate_token(claims, jwt_secret) do
+    claims =
+      %{
+        ref: "localhost",
+        iat: System.system_time(:second),
+        exp: System.system_time(:second) + 604_800
+      }
+      |> Map.merge(claims)
+
+    signer = Joken.Signer.create("HS256", jwt_secret)
+    {:ok, token} = Joken.Signer.sign(claims, signer)
+    {token, jwt_secret}
+  end
+
+  def jwt_secret() do
+    secure_key = Application.fetch_env!(:realtime, :db_enc_key)
+    :crypto.strong_rand_bytes(33) |> Base.encode64() |> Helpers.encrypt!(secure_key)
   end
 end

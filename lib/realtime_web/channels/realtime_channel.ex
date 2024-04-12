@@ -249,13 +249,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_info({:suspend_tenant, tenant_id}, %{tenant_id: tenant_id} = state) do
+  def handle_info({:suspend_tenant, tenant_id}, %{assigns: %{tenant: tenant_id}} = state) do
     Logger.info("Tenant suspend, disconencting the socket")
-    {:stop, :normal, state}
-  end
-
-  def handle_info({:disconnect, tenant_id}, %{tenant_id: tenant_id} = state) do
-    Logger.info("Socket disconnection requested by the user")
     {:stop, :normal, state}
   end
 

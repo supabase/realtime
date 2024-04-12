@@ -623,20 +623,14 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
-  defp token_valid(role), do: generate_token(%{role: role})
-  defp token_no_role(), do: generate_token()
+  defp token_valid(role) do
+    {token, _} = generate_token(%{role: role}, @secret)
+    {:ok, token}
+  end
 
-  defp generate_token(claims \\ %{}) do
-    claims =
-      %{
-        ref: "localhost",
-        iat: System.system_time(:second),
-        exp: System.system_time(:second) + 604_800
-      }
-      |> Map.merge(claims)
-
-    signer = Joken.Signer.create("HS256", @secret)
-    Joken.Signer.sign(claims, signer)
+  defp token_no_role() do
+    {token, _} = generate_token(@secret)
+    {:ok, token}
   end
 
   defp get_connection(role \\ "anon") do

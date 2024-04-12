@@ -3,6 +3,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   use RealtimeWeb.ConnCase, async: false
 
   import Mock
+  import Phoenix.ChannelTest
   import Realtime.Helpers, only: [encrypt!: 2, transaction: 2]
 
   alias Realtime.Api.Tenant
@@ -15,6 +16,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.JwtVerification
+  alias RealtimeWeb.Joken.CurrentTime
 
   @update_attrs %{
     jwt_secret: "some updated jwt_secret",
@@ -135,7 +137,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     setup %{tenant: tenant} do
       [extension] = tenant.extensions
       args = Map.put(extension.settings, "id", tenant.external_id)
-      {:ok, _} = Realtime.PostgresCdc.connect(Extensions.PostgresCdcStream, args)
+      Realtime.PostgresCdc.connect(Extensions.PostgresCdcStream, args)
       on_exit(fn -> Realtime.PostgresCdc.stop_all(tenant) end)
       :ok
     end
@@ -287,7 +289,103 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
   end
 
+  describe "disconnect clients" do
+    setup do
+      start_supervised!(CurrentTime.Mock)
+
+      Application.put_env(:realtime, :db_enc_key, "1234567890123456")
+      {socket, tenant, jwt_secret} = create_socket()
+      {socket_2, _tenant_2, _jwt_secret_2} = create_socket()
+      %{socket: socket, socket_2: socket_2, tenant: tenant, jwt_secret: jwt_secret}
+    end
+
+    test "disconnects clients when disconnect clients is called and then it's able to reconnect",
+         %{
+           conn: conn,
+           socket: socket,
+           socket_2: socket_2,
+           tenant: tenant,
+           jwt_secret: jwt_secret
+         } do
+      {token, _} = generate_token(%{role: "service_role"}, jwt_secret)
+
+      conn =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("apikey", token)
+        |> delete_req_header("authorization")
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+        |> delete(~p"/api/disconnect_clients")
+
+      assert conn.status == 204
+      :timer.sleep(1000)
+      refute socket.channel_pid |> Process.alive?()
+      assert socket_2.channel_pid |> Process.alive?()
+      :timer.sleep(1000)
+
+      {socket, _tenant, _jwt_secret} = create_socket(tenant, jwt_secret)
+      assert socket.channel_pid |> Process.alive?()
+    end
+
+    test "no action if not service_role token", %{
+      conn: conn,
+      socket: socket,
+      tenant: tenant,
+      jwt_secret: jwt_secret
+    } do
+      {token, _} = generate_token(%{role: "authenticated"}, jwt_secret)
+
+      conn =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("apikey", token)
+        |> delete_req_header("authorization")
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+        |> delete(~p"/api/disconnect_clients")
+
+      assert conn.status == 401
+      assert socket.channel_pid |> Process.alive?()
+    end
+  end
+
   defp create_tenant(_) do
     %{tenant: tenant_fixture()}
+  end
+
+  defp create_socket() do
+    {_, jwt_secret} = generate_token(%{role: "anon"})
+    tenant = tenant_fixture(jwt_secret: jwt_secret)
+
+    create_socket(tenant, jwt_secret)
+  end
+
+  defp create_socket(tenant, jwt_secret) do
+    secure_key = Application.fetch_env!(:realtime, :db_enc_key)
+
+    {token, _} = generate_token(%{role: "anon"}, jwt_secret)
+
+    assigns = %{
+      tenant: tenant.external_id,
+      log_level: :info,
+      postgres_cdc_module: Extensions.PostgresCdcRls,
+      postgres_extension: tenant.extensions |> hd() |> Map.from_struct() |> Map.get(:settings),
+      tenant_token: token,
+      access_token: token,
+      jwt_secret: Helpers.encrypt!(jwt_secret, secure_key),
+      limits: %{
+        max_concurrent_users: 500,
+        max_events_per_second: 500,
+        max_bytes_per_second: 1_000_000,
+        max_channels_per_client: 100,
+        max_joins_per_second: 500
+      }
+    }
+
+    {:ok, _, socket} =
+      RealtimeWeb.UserSocket
+      |> socket("user_id", assigns)
+      |> subscribe_and_join(RealtimeWeb.RealtimeChannel, "realtime:#{tenant.external_id}:topic")
+
+    {socket, tenant, jwt_secret}
   end
 end

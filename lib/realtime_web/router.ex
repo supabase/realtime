@@ -104,6 +104,7 @@ defmodule RealtimeWeb.Router do
     pipe_through([:open_cors, :tenant_api, :secure_tenant_api])
 
     post("/broadcast", BroadcastController, :broadcast)
+    delete("/disconnect_clients", TenantController, :disconnect_clients)
   end
 
   scope "/api", RealtimeWeb do

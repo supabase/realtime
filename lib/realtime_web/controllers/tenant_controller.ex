@@ -263,11 +263,12 @@ defmodule RealtimeWeb.TenantController do
     }
   )
 
-  def disconnect_clients(%{assigns: %{tenant: tenant}} = conn, %{"tenant_id" => tenant_id}) do
-    Tenants.disconnect_clients(tenant_id)
-    PostgresCdc.stop_all(tenant, @stop_timeout)
+  def disconnect_clients(%{assigns: %{tenant: tenant, role: "service_role"}} = conn, _) do
+    :ok = Realtime.Tenants.disconnect_clients(tenant.external_id)
     send_resp(conn, 204, "")
   end
+
+  def disconnect_clients(_, _), do: {:error, :unauthorized}
 
   operation(:health,
     summary: "Tenant health",

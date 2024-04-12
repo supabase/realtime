@@ -25,4 +25,9 @@ defmodule Realtime.Tenants.CachePubSubHandler do
     Cache.invalidate_tenant_cache(tenant_id)
     {:noreply, state}
   end
+
+  # Ignore operations
+  def handle_info({_, _}, state) do
+    {:noreply, state}
+  end
 end
