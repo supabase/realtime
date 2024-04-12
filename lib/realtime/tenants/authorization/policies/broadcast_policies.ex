@@ -68,9 +68,8 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
           changeset = Broadcast.check_changeset(broadcast, %{check: true})
 
           case Repo.update(conn, changeset, Broadcast, mode: :savepoint) do
-            {:ok, %Broadcast{check: true} = broadcast} ->
-              revert_changeset = Broadcast.check_changeset(broadcast, %{check: false})
-              {:ok, _} = Repo.update(conn, revert_changeset, Broadcast)
+            {:ok, %Broadcast{check: true}} ->
+              Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
               Policies.update_policies(policies, :broadcast, :write, true)
 
             {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
@@ -83,8 +82,6 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
               Logger.error(
                 "Error getting broadcast write policies for connection: #{inspect(error)}"
               )
-
-              Postgrex.rollback(transaction_conn, error)
           end
 
         {:error, :not_found} ->

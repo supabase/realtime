@@ -80,9 +80,8 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
       changeset = Channel.check_changeset(channel, %{check: true})
 
       case Repo.update(transaction_conn, changeset, Channel, mode: :savepoint) do
-        {:ok, %Channel{check: true} = channel} ->
-          revert_changeset = Channel.check_changeset(channel, %{check: false})
-          {:ok, _} = Repo.update(transaction_conn, revert_changeset, Channel)
+        {:ok, %Channel{check: true}} ->
+          Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
           Policies.update_policies(policies, :channel, :write, true)
 
         {:ok, _} ->

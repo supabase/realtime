@@ -130,29 +130,40 @@ defmodule Realtime.Tenants.Authorization do
 
   @policies_mods [ChannelPolicies, BroadcastPolicies, PresencePolicies]
   defp get_policies_for_connection(conn, authorization_context) do
-    Helpers.transaction(conn, fn transaction_conn ->
-      set_conn_config(transaction_conn, authorization_context)
+    Enum.reduce_while(@policies_mods, %Policies{}, fn policies_mod, policies ->
+      res =
+        Helpers.transaction(conn, fn transaction_conn ->
+          set_conn_config(transaction_conn, authorization_context)
 
-      Enum.reduce_while(@policies_mods, %Policies{}, fn policies_mod, policies ->
-        with {:ok, policies} <-
-               policies_mod.check_write_policies(
-                 transaction_conn,
-                 policies,
-                 authorization_context
-               ),
-             {:ok, policies} <-
-               policies_mod.check_read_policies(
-                 transaction_conn,
-                 policies,
-                 authorization_context
-               ) do
-          {:cont, policies}
-        else
-          {:error, error} ->
-            Postgrex.rollback(transaction_conn, error)
-            {:halt, {:error, error}}
-        end
-      end)
+          get_policy_for_connection_and_feature(
+            policies_mod,
+            transaction_conn,
+            policies,
+            authorization_context
+          )
+        end)
+
+      case res do
+        {:error, error} -> {:halt, {:error, error}}
+        %DBConnection.TransactionError{} = err -> {:halt, err}
+        policy -> {:cont, policy}
+      end
     end)
+  end
+
+  defp get_policy_for_connection_and_feature(
+         policy_mod,
+         transaction_conn,
+         policies,
+         authorization_context
+       ) do
+    with {:ok, policies} <-
+           policy_mod.check_write_policies(transaction_conn, policies, authorization_context),
+         {:ok, policies} <-
+           policy_mod.check_read_policies(transaction_conn, policies, authorization_context) do
+      policies
+    else
+      {:error, error} -> Postgrex.rollback(transaction_conn, error)
+    end
   end
 end
