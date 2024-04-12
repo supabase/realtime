@@ -68,9 +68,8 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
           changeset = Presence.check_changeset(broadcast, %{check: true})
 
           case Repo.update(conn, changeset, Presence, mode: :savepoint) do
-            {:ok, %Presence{check: true} = broadcast} ->
-              revert_changeset = Presence.check_changeset(broadcast, %{check: false})
-              {:ok, _} = Repo.update(conn, revert_changeset, Presence)
+            {:ok, %Presence{check: true}} ->
+              Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
               Policies.update_policies(policies, :presence, :write, true)
 
             {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
