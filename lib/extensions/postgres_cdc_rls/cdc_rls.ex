@@ -81,11 +81,11 @@ defmodule Extensions.PostgresCdcRls do
         ok
 
       {:error, {:already_started, _pid}} = error ->
-        Logger.info("Postgres Extention already started on node #{inspect(launch_node)}")
+        Logger.info("Postgres Extension already started on node #{inspect(launch_node)}")
         error
 
       error ->
-        Logger.error("Error starting Postgres Extention: #{inspect(error, pretty: true)}")
+        Logger.error("Error starting Postgres Extension: #{inspect(error, pretty: true)}")
         error
     end
   end
