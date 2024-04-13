@@ -57,7 +57,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          channel = ChannelsCache.get_channel_by_name(sub_topic, db_conn),
          {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
       is_new_api = is_new_api(params)
-      public? = match?({:ok, _}, channel)
+      public? = !match?({:ok, _}, channel)
       tenant_topic = Tenants.tenant_topic(tenant, sub_topic, public?)
 
       Realtime.UsersCounter.add(transport_pid, tenant)
