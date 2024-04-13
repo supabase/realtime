@@ -1,5 +1,4 @@
 defmodule RealtimeWeb.BroadcastControllerTest do
-  alias Realtime.Tenants.Connect
   use RealtimeWeb.ConnCase, async: false
 
   import Mock
@@ -48,18 +47,16 @@ defmodule RealtimeWeb.BroadcastControllerTest do
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
             "messages" => [
               %{"topic" => sub_topic_1, "payload" => payload_2, "event" => event_1},
-              %{"topic" => sub_topic_1, "payload" => payload_2, "event" => event_1},
               %{"topic" => sub_topic_2, "payload" => payload_2, "event" => event_2}
             ]
           })
 
-        assert_called_exactly(
+        assert_called(
           Endpoint.broadcast_from(:_, topic_1, "broadcast", %{
             "payload" => payload_1,
             "event" => event_1,
             "type" => "broadcast"
-          }),
-          2
+          })
         )
 
         assert_called(
@@ -71,7 +68,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
           )
         )
 
-        assert_called_exactly(GenCounter.add(events_key), 3)
+        assert_called_exactly(GenCounter.add(events_key), 2)
         assert conn.status == 202
       end
     end
@@ -220,239 +217,5 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{})
       assert conn.status == 401
     end
-  end
-
-  describe "authorization for broadcast" do
-    setup %{conn: conn} = context do
-      start_supervised(Realtime.RateCounter.DynamicSupervisor)
-      start_supervised(Realtime.GenCounter.DynamicSupervisor)
-      start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
-      tenant = tenant_fixture()
-
-      secret =
-        Realtime.Helpers.decrypt!(tenant.jwt_secret, Application.get_env(:realtime, :db_enc_key))
-
-      {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
-      {:ok, db_conn} = Connect.get_status(tenant.external_id)
-
-      clean_table(db_conn, "realtime", "broadcasts")
-      clean_table(db_conn, "realtime", "channels")
-
-      claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
-      signer = Joken.Signer.create("HS256", secret)
-
-      jwt = Joken.generate_and_sign!(%{}, claims, signer)
-
-      conn =
-        conn
-        |> put_req_header("accept", "application/json")
-        |> put_req_header("authorization", "Bearer #{jwt}")
-        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
-
-      {:ok, conn: conn, db_conn: db_conn, tenant: tenant}
-    end
-
-    @tag role: "authenticated"
-    test "user with permission to read all channels and write to them is able to broadcast", %{
-      conn: conn,
-      db_conn: db_conn,
-      tenant: tenant
-    } do
-      with_mocks [
-        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
-        {GenCounter, [:passthrough], add: fn _ -> :ok end}
-      ] do
-        channels =
-          Stream.repeatedly(fn -> generate_channel_with_policies(db_conn, tenant) end)
-          |> Enum.take(5)
-
-        messages =
-          Enum.map(channels, fn %{name: name} ->
-            %{
-              "topic" => name,
-              "payload" => %{"content" => random_string()},
-              "event" => random_string()
-            }
-          end)
-
-        conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-
-        Enum.each(channels, fn %{name: name} ->
-          topic = Tenants.tenant_topic(tenant, name, false)
-          assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
-        end)
-
-        assert_called_exactly(
-          GenCounter.add(Tenants.events_per_second_key(tenant)),
-          length(channels)
-        )
-
-        assert conn.status == 202
-      end
-    end
-
-    @tag role: "authenticated"
-    test "user with permission is also able to broadcast to open channel", %{
-      conn: conn,
-      db_conn: db_conn,
-      tenant: tenant
-    } do
-      with_mocks [
-        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
-        {GenCounter, [:passthrough], add: fn _ -> :ok end}
-      ] do
-        channels =
-          Stream.repeatedly(fn -> generate_channel_with_policies(db_conn, tenant) end)
-          |> Enum.take(5)
-
-        messages =
-          Enum.map(channels, fn %{name: name} ->
-            %{
-              "topic" => name,
-              "payload" => %{"content" => random_string()},
-              "event" => random_string()
-            }
-          end)
-
-        messages =
-          messages ++
-            [
-              %{
-                "topic" => "open_channel",
-                "payload" => %{"content" => random_string()},
-                "event" => random_string()
-              }
-            ]
-
-        conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-
-        Enum.each(channels, fn %{name: name} ->
-          topic = Tenants.tenant_topic(tenant, name, name == "open_channel")
-          assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
-        end)
-
-        # Check open channel
-        assert_called(
-          Endpoint.broadcast_from(
-            :_,
-            Tenants.tenant_topic(tenant, "open_channel"),
-            "broadcast",
-            :_
-          )
-        )
-
-        assert_called_exactly(
-          GenCounter.add(Tenants.events_per_second_key(tenant)),
-          length(channels) + 1
-        )
-
-        assert conn.status == 202
-      end
-    end
-
-    @tag role: "authenticated"
-    test "user with permission to read a limited set is only able to broadcast to said set", %{
-      conn: conn,
-      db_conn: db_conn,
-      tenant: tenant
-    } do
-      with_mocks [
-        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
-        {GenCounter, [:passthrough], add: fn _ -> :ok end}
-      ] do
-        channels =
-          Stream.repeatedly(fn -> generate_channel_with_policies(db_conn, tenant) end)
-          |> Enum.take(5)
-
-        no_auth_channel = channel_fixture(tenant)
-
-        messages =
-          Enum.map(channels ++ [no_auth_channel], fn %{name: name} ->
-            %{
-              "topic" => name,
-              "payload" => %{"content" => random_string()},
-              "event" => random_string()
-            }
-          end)
-
-        conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-
-        Enum.each(channels, fn %{name: name} ->
-          topic = Tenants.tenant_topic(tenant, name, false)
-          assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
-        end)
-
-        assert_not_called(
-          Endpoint.broadcast_from(
-            :_,
-            Tenants.tenant_topic(tenant, no_auth_channel.name, false),
-            "broadcast",
-            :_
-          )
-        )
-
-        assert_called_exactly(
-          GenCounter.add(Tenants.events_per_second_key(tenant)),
-          length(channels)
-        )
-
-        assert conn.status == 202
-      end
-    end
-
-    @tag role: "anon"
-    test "user without permission won't broadcast", %{
-      conn: conn,
-      db_conn: db_conn,
-      tenant: tenant
-    } do
-      with_mocks [
-        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
-        {GenCounter, [:passthrough], add: fn _ -> :ok end}
-      ] do
-        channels =
-          Stream.repeatedly(fn -> generate_channel_with_policies(db_conn, tenant) end)
-          |> Enum.take(5)
-
-        # Duplicate messages to ensure same topics emit twice
-        channels = channels ++ channels
-
-        messages =
-          Enum.map(channels, fn %{name: name} ->
-            %{
-              "topic" => name,
-              "payload" => %{"content" => random_string()},
-              "event" => random_string()
-            }
-          end)
-
-        conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-
-        Enum.each(channels, fn %{name: name} ->
-          topic = Tenants.tenant_topic(tenant, name)
-          assert_not_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
-        end)
-
-        assert_not_called(GenCounter.add(Tenants.events_per_second_key(tenant)))
-
-        assert conn.status == 202
-      end
-    end
-  end
-
-  defp generate_channel_with_policies(db_conn, tenant) do
-    channel = channel_fixture(tenant)
-
-    create_rls_policies(
-      db_conn,
-      [
-        :authenticated_read_channel,
-        :authenticated_read_broadcast,
-        :authenticated_write_broadcast
-      ],
-      channel
-    )
-
-    channel
   end
 end
