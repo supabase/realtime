@@ -77,7 +77,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
   def check_write_policies(conn, policies, %Authorization{channel: channel})
       when not is_nil(channel) do
     Postgrex.transaction(conn, fn transaction_conn ->
-      now = DateTime.utc_now()
+      now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
       changeset = Channel.check_changeset(channel, %{updated_at: now})
 
       case Repo.update(transaction_conn, changeset, Channel, mode: :savepoint) do

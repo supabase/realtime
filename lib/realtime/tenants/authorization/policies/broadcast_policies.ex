@@ -65,7 +65,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
 
       case Repo.one(conn, query, Broadcast, mode: :savepoint) do
         {:ok, %Broadcast{} = broadcast} ->
-          now = DateTime.utc_now()
+          now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
           changeset = Broadcast.check_changeset(broadcast, %{updated_at: now})
 
           case Repo.update(conn, changeset, Broadcast, mode: :savepoint) do

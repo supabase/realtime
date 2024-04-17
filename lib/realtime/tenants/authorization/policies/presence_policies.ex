@@ -65,7 +65,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
 
       case Repo.one(conn, query, Presence, mode: :savepoint) do
         {:ok, %Presence{} = broadcast} ->
-          now = DateTime.utc_now()
+          now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
           changeset = Presence.check_changeset(broadcast, %{updated_at: now})
 
           case Repo.update(conn, changeset, Presence, mode: :savepoint) do
