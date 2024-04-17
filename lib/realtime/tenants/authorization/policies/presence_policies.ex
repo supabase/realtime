@@ -65,10 +65,11 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
 
       case Repo.one(conn, query, Presence, mode: :savepoint) do
         {:ok, %Presence{} = broadcast} ->
-          changeset = Presence.check_changeset(broadcast, %{check: true})
+          now = DateTime.utc_now()
+          changeset = Presence.check_changeset(broadcast, %{updated_at: now})
 
           case Repo.update(conn, changeset, Presence, mode: :savepoint) do
-            {:ok, %Presence{check: true}} ->
+            {:ok, %Presence{updated_at: ^now}} ->
               Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
               Policies.update_policies(policies, :presence, :write, true)
 
