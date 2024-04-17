@@ -10,7 +10,6 @@ defmodule Realtime.Api.Broadcast do
 
   @schema_prefix "realtime"
   schema "broadcasts" do
-    field(:check, :boolean, default: false)
     timestamps()
 
     belongs_to(:channel, Realtime.Api.Channel)
@@ -18,7 +17,7 @@ defmodule Realtime.Api.Broadcast do
 
   def changeset(broadcast, attrs) do
     broadcast
-    |> cast(attrs, [:check, :inserted_at, :updated_at, :channel_id])
+    |> cast(attrs, [:inserted_at, :updated_at, :channel_id])
     |> put_timestamp(:updated_at)
     |> maybe_put_timestamp(:inserted_at)
   end
@@ -26,7 +25,7 @@ defmodule Realtime.Api.Broadcast do
   def check_changeset(broadcast, attrs) do
     broadcast
     |> change()
-    |> put_change(:check, attrs[:check])
+    |> put_change(:updated_at, attrs[:updated_at])
   end
 
   defp put_timestamp(changeset, field) do

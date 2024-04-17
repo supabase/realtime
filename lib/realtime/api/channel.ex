@@ -11,7 +11,6 @@ defmodule Realtime.Api.Channel do
   @schema_prefix "realtime"
   schema "channels" do
     field(:name, :string)
-    field(:check, :boolean, default: false)
     timestamps()
 
     has_many(:broadcasts, Realtime.Api.Broadcast)
@@ -20,7 +19,7 @@ defmodule Realtime.Api.Channel do
 
   def changeset(channel, attrs) do
     channel
-    |> cast(attrs, [:name, :check, :inserted_at, :updated_at])
+    |> cast(attrs, [:name, :inserted_at, :updated_at])
     |> validate_required([:name])
     |> put_timestamp(:updated_at)
     |> maybe_put_timestamp(:inserted_at)
@@ -29,7 +28,7 @@ defmodule Realtime.Api.Channel do
   def check_changeset(channel, attrs) do
     channel
     |> change()
-    |> put_change(:check, attrs[:check])
+    |> put_change(:updated_at, attrs[:updated_at])
   end
 
   defp put_timestamp(changeset, field) do

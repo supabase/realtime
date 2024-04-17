@@ -87,7 +87,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
          policies: [:authenticated_read_presence, :authenticated_write_presence]
     test "authenticated user has write policies and reverts check", context do
       query = from(b in Presence, where: b.channel_id == ^context.channel.id)
-      {:ok, %Presence{check: check}} = Repo.one(context.db_conn, query, Presence)
+      {:ok, %Presence{updated_at: updated_at}} = Repo.one(context.db_conn, query, Presence)
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -103,7 +103,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
       end)
 
       # Ensure check stays with the initial value
-      assert {:ok, %{check: ^check}} = Repo.one(context.db_conn, query, Presence)
+      assert {:ok, %{updated_at: ^updated_at}} = Repo.one(context.db_conn, query, Presence)
     end
 
     @tag role: "anon", policies: [:authenticated_read_presence, :authenticated_write_presence]
