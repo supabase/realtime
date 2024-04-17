@@ -65,11 +65,11 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
 
       case Repo.one(conn, query, Broadcast, mode: :savepoint) do
         {:ok, %Broadcast{} = broadcast} ->
-          now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
-          changeset = Broadcast.check_changeset(broadcast, %{updated_at: now})
+          zero = NaiveDateTime.new!(~D[1970-01-01], ~T[00:00:00])
+          changeset = Broadcast.check_changeset(broadcast, %{updated_at: zero})
 
           case Repo.update(conn, changeset, Broadcast, mode: :savepoint) do
-            {:ok, %Broadcast{updated_at: ^now}} ->
+            {:ok, %Broadcast{updated_at: ^zero}} ->
               Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
               Policies.update_policies(policies, :broadcast, :write, true)
 
