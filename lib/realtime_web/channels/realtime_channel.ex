@@ -57,10 +57,10 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          tenant = TenantCache.get_tenant_by_external_id(tenant_id),
-         channel = ChannelsCache.get_channel_by_name(sub_topic, db_conn),
-         {:ok, socket} <- assign_policies(tenant, channel, db_conn, access_token, claims, socket) do
+         channel = maybe_get_channel(tenant, sub_topic, db_conn),
+         {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
+      public? = !!socket.assigns.policies
       is_new_api = is_new_api(params)
-      public? = !match?({:ok, _}, channel)
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
 
       Realtime.UsersCounter.add(transport_pid, tenant_id)
@@ -501,11 +501,12 @@ defmodule RealtimeWeb.RealtimeChannel do
       access_token: access_token,
       db_conn: db_conn,
       channel_name: channel_name,
-      tenant: tenant
+      tenant: tenant,
+      public?: public?
     } = assigns
 
-    with channel = ChannelsCache.get_channel_by_name(channel_name, db_conn),
-         {:ok, socket} <- assign_policies(tenant, channel, db_conn, access_token, claims, socket) do
+    with channel = !public? && ChannelsCache.get_channel_by_name(channel_name, db_conn),
+         {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
       {:ok, socket}
     end
   end
@@ -620,7 +621,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp assign_policies(
-         %Tenant{enable_authorization: true},
          {:ok, channel},
          db_conn,
          access_token,
@@ -653,7 +653,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp assign_policies(_, _, _, _, _, socket) do
+  defp assign_policies(_, _, _, _, socket) do
     {:ok, assign(socket, policies: nil)}
   end
+
+  defp maybe_get_channel(%Tenant{enable_authorization: true}, sub_topic, db_conn),
+    do: ChannelsCache.get_channel_by_name(sub_topic, db_conn)
+
+  defp maybe_get_channel(%Tenant{enable_authorization: false}, _, _), do: nil
 end
