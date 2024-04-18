@@ -89,29 +89,31 @@ defmodule RealtimeWeb.BroadcastController do
         end)
       end)
 
-      # Handle events with authorization
-      channels_names_to_check
-      |> Enum.reduce([], fn sub_topic, acc ->
-        Enum.filter(events, fn
-          {^sub_topic, _} -> true
-          _ -> false
-        end) ++ acc
-      end)
-      |> Enum.map(fn {_, event} -> event end)
-      |> Enum.each(fn %{topic: channel_name, payload: payload, event: event} ->
-        Helpers.transaction(db_conn, fn transaction_conn ->
-          case permissions_for_channel(conn, transaction_conn, channels, channel_name) do
-            %Policies{
-              channel: %ChannelPolicies{read: true},
-              broadcast: %BroadcastPolicies{write: true}
-            } ->
-              send_message_and_count(tenant, channel_name, event, payload, false)
-
-            _ ->
-              nil
-          end
+      if(tenant.enable_authorization) do
+        # Handle events with authorization
+        channels_names_to_check
+        |> Enum.reduce([], fn sub_topic, acc ->
+          Enum.filter(events, fn
+            {^sub_topic, _} -> true
+            _ -> false
+          end) ++ acc
         end)
-      end)
+        |> Enum.map(fn {_, event} -> event end)
+        |> Enum.each(fn %{topic: channel_name, payload: payload, event: event} ->
+          Helpers.transaction(db_conn, fn transaction_conn ->
+            case permissions_for_channel(conn, transaction_conn, channels, channel_name) do
+              %Policies{
+                channel: %ChannelPolicies{read: true},
+                broadcast: %BroadcastPolicies{write: true}
+              } ->
+                send_message_and_count(tenant, channel_name, event, payload, false)
+
+              _ ->
+                nil
+            end
+          end)
+        end)
+      end
 
       send_resp(conn, :accepted, "")
     end
