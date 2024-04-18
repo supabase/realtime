@@ -648,9 +648,6 @@ defmodule RealtimeWeb.RealtimeChannel do
           match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
         {:error, "You do not have permissions to read Broadcast messages from this channel"}
 
-      match?(%Policies{presence: %PresencePolicies{read: false}}, socket.assigns.policies) ->
-        {:error, "You do not have permissions to read Presence messages from this channel"}
-
       true ->
         {:ok, socket}
     end
