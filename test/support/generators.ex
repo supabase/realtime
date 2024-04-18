@@ -7,6 +7,7 @@ defmodule Generators do
   def tenant_fixture(override \\ %{}) do
     create_attrs = %{
       "external_id" => random_string(),
+      "enable_authorization" => true,
       "name" => "localhost",
       "extensions" => [
         %{

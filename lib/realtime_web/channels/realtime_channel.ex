@@ -8,6 +8,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias DBConnection.Backoff
 
   alias Realtime.Channels.Cache, as: ChannelsCache
+  alias Realtime.Api.Tenant
   alias Realtime.GenCounter
   alias Realtime.Helpers
   alias Realtime.PostgresCdc
@@ -19,6 +20,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
+  alias Realtime.Tenants.Cache, as: TenantCache
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.ChannelsAuthorization
@@ -31,13 +33,13 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def join("realtime:" <> sub_topic = topic, params, socket) do
     %{
-      assigns: %{tenant: tenant, log_level: log_level, postgres_cdc_module: module},
+      assigns: %{tenant: tenant_id, log_level: log_level, postgres_cdc_module: module},
       channel_pid: channel_pid,
       serializer: serializer,
       transport_pid: transport_pid
     } = socket
 
-    Logger.metadata(external_id: tenant, project: tenant)
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
 
     socket =
@@ -46,21 +48,22 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign_counter()
       |> assign(:using_broadcast?, !!params["config"]["broadcast"])
 
-    start_db_rate_counter(tenant)
+    start_db_rate_counter(tenant_id)
 
     with false <- SignalHandler.shutdown_in_progress?(),
          :ok <- limit_joins(socket.assigns),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket.assigns),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
-         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant),
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
+         tenant = TenantCache.get_tenant_by_external_id(tenant_id),
          channel = ChannelsCache.get_channel_by_name(sub_topic, db_conn),
-         {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
+         {:ok, socket} <- assign_policies(tenant, channel, db_conn, access_token, claims, socket) do
       is_new_api = is_new_api(params)
       public? = !match?({:ok, _}, channel)
-      tenant_topic = Tenants.tenant_topic(tenant, sub_topic, public?)
+      tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
 
-      Realtime.UsersCounter.add(transport_pid, tenant)
+      Realtime.UsersCounter.add(transport_pid, tenant_id)
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
 
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
@@ -71,7 +74,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         transport_pid: transport_pid,
         serializer: serializer,
         topic: topic,
-        tenant: tenant,
+        tenant: tenant_id,
         module: module
       }
 
@@ -497,11 +500,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     %{
       access_token: access_token,
       db_conn: db_conn,
-      channel_name: channel_name
+      channel_name: channel_name,
+      tenant: tenant
     } = assigns
 
     with channel = ChannelsCache.get_channel_by_name(channel_name, db_conn),
-         {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
+         {:ok, socket} <- assign_policies(tenant, channel, db_conn, access_token, claims, socket) do
       {:ok, socket}
     end
   end
@@ -615,7 +619,14 @@ defmodule RealtimeWeb.RealtimeChannel do
     end)
   end
 
-  defp assign_policies({:ok, channel}, db_conn, access_token, claims, socket) do
+  defp assign_policies(
+         %Tenant{enable_authorization: true},
+         {:ok, channel},
+         db_conn,
+         access_token,
+         claims,
+         socket
+       ) do
     %{using_broadcast?: using_broadcast?} = socket.assigns
 
     authorization_context =
@@ -645,7 +656,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp assign_policies(_, _, _, _, socket) do
+  defp assign_policies(_, _, _, _, _, socket) do
     {:ok, assign(socket, policies: nil)}
   end
 end
