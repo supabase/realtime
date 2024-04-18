@@ -515,12 +515,21 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     @tag policies: [:authenticated_read_channel]
-    test "private presence with no presence permissions won't connect", %{channel: channel} do
+    test "private presence with no presence permissions will connect but won't be able to track and sync",
+         %{channel: channel} do
       {socket, _} = get_connection("authenticated")
-      config = fn key -> %{presence: %{key: key}} end
+      config = %{presence: %{key: ""}}
       topic = "realtime:#{channel.name}"
+      WebsocketClient.join(socket, topic, %{config: config})
 
-      WebsocketClient.join(socket, topic, %{config: config.("authenticated")})
+      assert_receive %Phoenix.Socket.Message{
+                       topic: ^topic,
+                       event: "phx_reply",
+                       payload: %{"status" => "ok"}
+                     },
+                     500
+
+      refute_receive %Message{event: "presence_state", topic: ^topic}, 500
 
       payload = %{
         type: "presence",
@@ -530,20 +539,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.send_event(socket, topic, "presence", payload)
 
-      assert_receive %Phoenix.Socket.Message{
-                       topic: ^topic,
-                       event: "phx_reply",
-                       payload: %{
-                         "response" => %{
-                           "reason" =>
-                             "\"You do not have permissions to read Presence messages from this channel\""
-                         },
-                         "status" => "error"
-                       },
-                       ref: "1",
-                       join_ref: nil
-                     },
-                     500
+      refute_receive %Message{event: "presence_diff", topic: ^topic}, 500
     end
 
     @tag policies: [:authenticated_read_presence]
