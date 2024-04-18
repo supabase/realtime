@@ -47,7 +47,8 @@ defmodule Realtime.Tenants.Migrations do
     AddBroadcastsPoliciesTable,
     AddInsertAndDeleteGrantToChannels,
     AddPresencesPoliciesTable,
-    CreateRealtimeAdminAndMoveOwnership
+    CreateRealtimeAdminAndMoveOwnership,
+    RemoveCheckColumns
   }
 
   alias Realtime.Helpers
@@ -93,7 +94,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_227_174_441, AddBroadcastsPoliciesTable},
     {20_240_311_171_622, AddInsertAndDeleteGrantToChannels},
     {20_240_321_100_241, AddPresencesPoliciesTable},
-    {20_240_401_105_812, CreateRealtimeAdminAndMoveOwnership}
+    {20_240_401_105_812, CreateRealtimeAdminAndMoveOwnership},
+    {20_240_418_121_054, RemoveCheckColumns}
   ]
 
   @spec run_migrations(map()) :: {:ok, [integer()]} | {:error, any()}
