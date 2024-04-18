@@ -77,10 +77,11 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
   def check_write_policies(conn, policies, %Authorization{channel: channel})
       when not is_nil(channel) do
     Postgrex.transaction(conn, fn transaction_conn ->
-      changeset = Channel.check_changeset(channel, %{check: true})
+      zero = NaiveDateTime.new!(~D[1970-01-01], ~T[00:00:00])
+      changeset = Channel.check_changeset(channel, %{updated_at: zero})
 
       case Repo.update(transaction_conn, changeset, Channel, mode: :savepoint) do
-        {:ok, %Channel{check: true}} ->
+        {:ok, %Channel{updated_at: ^zero}} ->
           Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
           Policies.update_policies(policies, :channel, :write, true)
 

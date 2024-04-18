@@ -108,9 +108,9 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
 
     @tag role: "authenticated",
          policies: [:authenticated_read_channel, :authenticated_write_channel]
-    test "authenticated user has write policies and reverts check", context do
+    test "authenticated user has write policies and reverts updated_at", context do
       query = from(c in Channel, where: c.id == ^context.channel.id)
-      {:ok, %Channel{check: check}} = Repo.one(context.db_conn, query, Channel)
+      {:ok, %Channel{updated_at: updated_at}} = Repo.one(context.db_conn, query, Channel)
 
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
@@ -124,8 +124,8 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
                end)
 
       assert {:ok, %Policies{channel: %ChannelPolicies{write: true}}} = result
-      # Ensure check stays with the initial value
-      assert {:ok, %{check: ^check}} = Repo.one(context.db_conn, query, Channel)
+      # Ensure updated_at stays with the initial value
+      assert {:ok, %{updated_at: ^updated_at}} = Repo.one(context.db_conn, query, Channel)
     end
 
     @tag role: "anon", policies: [:authenticated_read_channel, :authenticated_write_channel]

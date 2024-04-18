@@ -85,9 +85,9 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
 
     @tag role: "authenticated",
          policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
-    test "authenticated user has write policies and reverts check", context do
+    test "authenticated user has write policies and reverts updated_at", context do
       query = from(b in Broadcast, where: b.channel_id == ^context.channel.id)
-      {:ok, %Broadcast{check: check}} = Repo.one(context.db_conn, query, Broadcast)
+      {:ok, %Broadcast{updated_at: updated_at}} = Repo.one(context.db_conn, query, Broadcast)
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -102,8 +102,8 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
         assert result == %Policies{broadcast: %BroadcastPolicies{write: true}}
       end)
 
-      # Ensure check stays with the initial value
-      assert {:ok, %{check: ^check}} = Repo.one(context.db_conn, query, Broadcast)
+      # Ensure updated_at with the initial value
+      assert {:ok, %{updated_at: ^updated_at}} = Repo.one(context.db_conn, query, Broadcast)
     end
 
     @tag role: "anon", policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
