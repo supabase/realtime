@@ -67,14 +67,38 @@ defmodule Realtime.Tenants do
       {:ok, health_conn} ->
         connected_cluster = UsersCounter.tenant_users(external_id)
         %{extensions: [%{settings: settings} | _]} = Cache.get_tenant_by_external_id(external_id)
-        Helpers.transaction(health_conn, fn _ -> Migrations.run_migrations(settings) end)
+
+        Helpers.transaction(health_conn, fn transaction_conn ->
+          res =
+            Postgrex.query!(
+              transaction_conn,
+              "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';",
+              []
+            )
+
+          if res.rows == [] do
+            Migrations.run_migrations(settings)
+          end
+        end)
 
         {:ok, %{healthy: true, db_connected: true, connected_cluster: connected_cluster}}
 
       connected_cluster when is_integer(connected_cluster) ->
         {:ok, db_conn} = Connect.lookup_or_start_connection(external_id)
         %{extensions: [%{settings: settings} | _]} = Cache.get_tenant_by_external_id(external_id)
-        Helpers.transaction(db_conn, fn _ -> Migrations.run_migrations(settings) end)
+
+        Helpers.transaction(db_conn, fn transaction_conn ->
+          res =
+            Postgrex.query!(
+              transaction_conn,
+              "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';",
+              []
+            )
+
+          if res.rows == [] do
+            Migrations.run_migrations(settings)
+          end
+        end)
 
         {:ok, %{healthy: true, db_connected: false, connected_cluster: connected_cluster}}
     end
