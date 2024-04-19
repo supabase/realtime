@@ -94,7 +94,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         self_broadcast: !!params["config"]["broadcast"]["self"],
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        public: public?,
+        public?: public?,
         db_conn: db_conn
       }
 
@@ -488,7 +488,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp validate_policy(%{public: true} = socket, _claims, _check_policy) do
+  defp validate_policy(%{assigns: %{public?: true}} = socket, _claims, _check_policy) do
     {:ok, socket}
   end
 
@@ -500,12 +500,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     %{
       access_token: access_token,
       db_conn: db_conn,
-      channel_name: channel_name,
-      tenant: tenant,
-      public?: public?
+      channel_name: channel_name
     } = assigns
 
-    with channel = !public? && ChannelsCache.get_channel_by_name(channel_name, db_conn),
+    with channel = ChannelsCache.get_channel_by_name(channel_name, db_conn),
          {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
       {:ok, socket}
     end
