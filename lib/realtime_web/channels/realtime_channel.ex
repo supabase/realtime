@@ -59,7 +59,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          tenant = TenantCache.get_tenant_by_external_id(tenant_id),
          channel = maybe_get_channel(tenant, sub_topic, db_conn),
          {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
-      public? = !!socket.assigns.policies
+      public? = !socket.assigns.policies
       is_new_api = is_new_api(params)
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
 
