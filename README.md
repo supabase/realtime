@@ -26,9 +26,9 @@
 
 | Features         | v1  | v2  | Status |
 | ---------------- | --- | --- | ------ |
-| Postgres Changes | ✔   | ✔   | GA     |
-| Broadcast        |     | ✔   | Beta   |
-| Presence         |     | ✔   | Beta   |
+| Postgres Changes | ✔  | ✔  | GA     |
+| Broadcast        |     | ✔  | Beta   |
+| Presence         |     | ✔  | Beta   |
 
 This repository focuses on version 2 but you can still access the previous version's [code](https://github.com/supabase/realtime/tree/v1) and [Docker image](https://hub.docker.com/layers/supabase/realtime/v1.0.0/images/sha256-e2766e0e3b0d03f7e9aa1b238286245697d0892c2f6f192fd2995dca32a4446a). For the latest Docker images go to https://hub.docker.com/r/supabase/realtime.
 
@@ -172,9 +172,23 @@ Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
 > Then JWT's "iss" value must equal "Issuer" and "nbf" value must equal 1610078130.
 
 **Note:**
+
 > JWT expiration is checked automatically. `exp` and `role` (database role) keys are mandatory.
 
 **Authorizing Client Connection**: You can pass in the JWT by following the instructions under the Realtime client lib. For example, refer to the **Usage** section in the [@supabase/realtime-js](https://github.com/supabase/realtime-js) client library.
+
+## Error Operational Codes
+
+This is the list of operational codes that can help you understand your deployment and your usage.
+
+| Code                             | Description                                                                                                                         | Action                                                                                             |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| RealtimeDisabledForConfiguration | The configuration provided to Realtime on connect will not be able to provide you any Postgres Changes                              | Verify your configuration on channel startup as you might not have your tables properly registered |
+| TenantNotFound                   | The tenant you are trying to connect to does not exist                                                                              | Verify the tenant name you are trying to connect to exists in the realtime.tenants table           |
+| UnableToDeleteTenant             | Error when trying to delete a tenant                                                                                                | Contact Support                                                                                    |
+| UnableToSetPolicies              | Error when setting up Authorization Policies                                                                                        | Contact Support                                                                                    |
+| RealtimeNodeDisconnected         | Realtime is a distributed application and this means that one the system is unable to communicate with one of the distributed nodes | Contact support for further instructions                                                           |
+| UnknownError                     | An unknown error occurred                                                                                                           | Contact support for further instructions                                                           |
 
 ## License
 

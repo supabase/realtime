@@ -22,15 +22,25 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   @doc """
   Logs errors in an expected format
   """
-  def log_error_message(:warning, error) do
-    error_msg = inspect(error)
-    Logger.warn("Start channel error: " <> error_msg)
+  def log_error_message(:warning, code, error) do
+    error_msg =
+      case error do
+        value when is_binary(value) -> value
+        value -> inspect(value)
+      end
+
+    Logger.warn(%{error_code: code, error_message: error_msg})
     {:error, %{reason: error_msg}}
   end
 
-  def log_error_message(:error, error) do
-    error_msg = inspect(error)
-    Logger.error("Start channel error: " <> error_msg)
+  def log_error_message(:error, code, error) do
+    error_msg =
+      case error do
+        value when is_binary(value) -> value
+        value -> inspect(value)
+      end
+
+    Logger.error(%{error_code: code, error_message: error_msg})
     {:error, %{reason: error_msg}}
   end
 end

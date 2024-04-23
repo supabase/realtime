@@ -50,8 +50,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
          id"
 
     transaction(conn, fn conn ->
-      params_list
-      |> Enum.map(fn %{id: id, claims: claims, params: params} ->
+      Enum.map(params_list, fn %{id: id, claims: claims, params: params} ->
         case parse_subscription_params(params) do
           {:ok, [schema, table, filters]} ->
             case query(conn, sql, [publication, schema, table, id, claims, filters]) do
@@ -60,15 +59,24 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
                 result
 
               {:ok, _} ->
-                rollback(
-                  conn,
-                  "Subscription insert failed with 0 rows. Check that tables are part of publication #{publication} and subscription params are correct: #{inspect(params)}"
-                )
+                msg =
+                  "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: #{inspect(params)}"
+
+                rollback(conn, %{
+                  error_code: "RealtimeDisabledForConfiguration",
+                  error_message: msg
+                })
 
               {:error, exception} ->
+                msg =
+                  "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: #{inspect(params)}. Exception: #{Exception.message(exception)}"
+
                 rollback(
                   conn,
-                  "Subscription insert failed with error: #{Exception.message(exception)}. Check that tables are part of publication #{publication} and subscription params are correct: #{inspect(params)}"
+                  %{
+                    error_code: "RealtimeSubscriptionError",
+                    error_message: msg
+                  }
                 )
             end
 

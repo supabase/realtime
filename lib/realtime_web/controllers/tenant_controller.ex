@@ -195,15 +195,15 @@ defmodule RealtimeWeb.TenantController do
       send_resp(conn, 204, "")
     else
       nil ->
-        Logger.error("Tenant #{tenant_id} does not exist")
+        Logger.error(%{error_code: "TenantNotFound", error_message: "Tenant not found"})
 
         send_resp(conn, 204, "")
 
       err ->
-        msg = "Error deleting tenant: #{inspect(err)}"
-        Logger.error(msg)
+        error = %{error_code: "UnableToDeleteTenant", error_message: inspect(err)}
+        Logger.error(error)
 
-        conn |> put_status(500) |> json(%{error: msg}) |> halt()
+        conn |> put_status(500) |> json(error) |> halt()
     end
   end
 
@@ -232,7 +232,7 @@ defmodule RealtimeWeb.TenantController do
 
     case Tenants.get_tenant_by_external_id(tenant_id) do
       nil ->
-        Logger.error("Attempted to reload non-existant tenant #{tenant_id}")
+        Logger.error(%{error_code: "TenantNotFound", error_message: "Tenant not found"})
 
         conn
         |> put_status(404)
@@ -275,6 +275,8 @@ defmodule RealtimeWeb.TenantController do
         json(conn, %{data: response})
 
       {:error, :tenant_not_found} ->
+        Logger.error(%{error_code: "TenantNotFound", error_message: "Tenant not found"})
+
         conn
         |> put_status(404)
         |> render("not_found.json", tenant: nil)

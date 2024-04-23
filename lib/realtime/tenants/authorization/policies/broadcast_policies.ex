@@ -45,7 +45,10 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
           Policies.update_policies(policies, :broadcast, :read, false)
 
         {:error, error} ->
-          Logger.error("Error getting broadcast read policies for connection: #{inspect(error)}")
+          Logger.error(%{
+            error_code: "UnableToSetPolicies",
+            error_message: "Error getting policies for connection: #{inspect(error)}"
+          })
 
           Postgrex.rollback(transaction_conn, error)
       end
@@ -80,9 +83,10 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
               Policies.update_policies(policies, :broadcast, :write, false)
 
             {:error, error} ->
-              Logger.error(
-                "Error getting broadcast write policies for connection: #{inspect(error)}"
-              )
+              Logger.error(%{
+                error_code: "UnableToSetPolicies",
+                error_message: "Error getting policies for connection: #{inspect(error)}"
+              })
           end
 
         {:error, :not_found} ->

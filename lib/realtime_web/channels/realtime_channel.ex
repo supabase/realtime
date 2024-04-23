@@ -101,23 +101,31 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:ok, state, assign(socket, assigns)}
     else
       {:error, [message: "Invalid token", claim: _claim, claim_val: _value]} = error ->
-        Logging.log_error_message(:warning, error)
+        Logging.log_error_message(:warning, "InvalidJWTToken", error)
 
       {:error, type} = error
       when type in [:too_many_channels, :too_many_connections, :too_many_joins] ->
-        Logging.log_error_message(:warning, error)
+        Logging.log_error_message(:warning, "RateLimitReached", error)
 
       {:error, :tenant_database_unavailable} ->
-        Logging.log_error_message(:error, "Realtime was unable to connect to the tenant database")
+        Logging.log_error_message(
+          :error,
+          "UnableToConnectToProject",
+          "Realtime was unable to connect to the project database"
+        )
 
       {:error, invalid_exp} when is_integer(invalid_exp) and invalid_exp <= 0 ->
-        Logging.log_error_message(:error, "Token expiration time is invalid")
+        Logging.log_error_message(
+          :error,
+          "InvalidJWTExpiration",
+          "Token expiration time is invalid"
+        )
 
       {:error, error} ->
-        Logging.log_error_message(:error, error)
+        Logging.log_error_message(:error, "UnknownError", error)
 
       error ->
-        Logging.log_error_message(:error, error)
+        Logging.log_error_message(:error, "UnknownError", error)
     end
   end
 
@@ -209,10 +217,14 @@ defmodule RealtimeWeb.RealtimeChannel do
             push_system_message("postgres_changes", socket, "ok", message, channel_name)
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
+          {:error, error} ->
+            Logger.error(error)
+            push_system_message("postgres_changes", socket, "error", error, channel_name)
+            {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
+
           error ->
-            message = "Subscribing to PostgreSQL failed: " <> inspect(error)
-            Logger.error(message)
-            push_system_message("postgres_changes", socket, "error", message, channel_name)
+            Logger.error(error)
+            push_system_message("postgres_changes", socket, "error", error, channel_name)
             {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
         end
 
@@ -512,11 +524,31 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:stop, :shutdown, socket}
   end
 
-  defp push_system_message(extension, socket, status, message, channel_name) do
+  defp push_system_message(extension, socket, status, error, channel_name)
+       when is_map(error) and is_map_key(error, :error_code) and is_map_key(error, :error_message) do
+    push(socket, "system", %{
+      extension: extension,
+      status: status,
+      message: "#{error.error_code}: #{error.error_message}",
+      channel: channel_name
+    })
+  end
+
+  defp push_system_message(extension, socket, status, message, channel_name)
+       when is_binary(message) do
     push(socket, "system", %{
       extension: extension,
       status: status,
       message: message,
+      channel: channel_name
+    })
+  end
+
+  defp push_system_message(extension, socket, status, message, channel_name) do
+    push(socket, "system", %{
+      extension: extension,
+      status: status,
+      message: inspect(message),
       channel: channel_name
     })
   end

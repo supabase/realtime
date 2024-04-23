@@ -39,9 +39,10 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :read, false)
 
         {:error, error} ->
-          Logger.error(
-            "Error getting all channel read policies for connection: #{inspect(error)}"
-          )
+          Logger.error(%{
+            error_code: "UnableToSetPolicies",
+            error_message: "Error getting policies for connection: #{inspect(error)}"
+          })
 
           Postgrex.rollback(transaction_conn, error)
       end
@@ -63,7 +64,11 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :read, false)
 
         {:error, error} ->
-          Logger.error("Error getting channel read policies for connection: #{inspect(error)}")
+          Logger.error(%{
+            error_code: "UnableToSetPolicies",
+            error_message: "Error getting policies for connection: #{inspect(error)}"
+          })
+
           Postgrex.rollback(transaction_conn, error)
       end
     end)
@@ -95,7 +100,11 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :write, false)
 
         {:error, error} ->
-          Logger.error("Error getting channel write policies for connection: #{inspect(error)}")
+          Logger.error(%{
+            error_code: "UnableToSetPolicies",
+            error_message: "Error getting policies for connection: #{inspect(error)}"
+          })
+
           Postgrex.rollback(transaction_conn, error)
       end
     end)
@@ -117,7 +126,11 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :write, false)
 
         {:error, error} ->
-          Logger.error("Error getting channel write policies for connection: #{inspect(error)}")
+          Logger.error(%{
+            error_code: "UnableToSetPolicies",
+            error_message: "Error getting policies for connection: #{inspect(error)}"
+          })
+
           Postgrex.rollback(transaction_conn, error)
       end
     end)
