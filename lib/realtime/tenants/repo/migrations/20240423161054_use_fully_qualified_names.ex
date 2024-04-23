@@ -16,7 +16,7 @@ AS $function$
       Builds a sql string that, if executed, creates a prepared statement to
       tests retrive a row from *entity* by its primary key columns.
       Example
-          select realtime.build_prepared_statement_sql('public.notes', '{"id"}'::text[], '{"bigint"}'::text[])
+          select realtime.build_prepared_statement_sql('public.notes', '{\"id\"}'::text[], '{\"bigint\"}'::text[])
       */
           select
       'prepare ' || prepared_statement_name || ' as
@@ -40,10 +40,10 @@ $function$;
 -- cast function
 
 CREATE OR REPLACE FUNCTION realtime.\"cast\"(val text, type_ regtype)
- RETURNS jsonb
- LANGUAGE plpgsql
- SET search_path = ''
- IMMUTABLE
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SET search_path = ''
+  IMMUTABLE
 AS $function$
     declare
       res jsonb;
@@ -56,10 +56,10 @@ $function$;
 -- channel_name function
 
 CREATE OR REPLACE FUNCTION realtime.channel_name()
- RETURNS text
- SET search_path = ''
- LANGUAGE sql
- STABLE
+  RETURNS text
+  SET search_path = ''
+  LANGUAGE sql
+  STABLE
 AS $function$
     select nullif(pg_catalog.current_setting('realtime.channel_name', true), '')::text;
 $function$;
@@ -67,10 +67,10 @@ $function$;
 -- check_equality_op function
 
 CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text)
- RETURNS boolean
- LANGUAGE plpgsql
+  RETURNS boolean
+  LANGUAGE plpgsql
   SET search_path = ''
- IMMUTABLE
+  IMMUTABLE
 AS $function$
       /*
       Casts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness
@@ -141,10 +141,10 @@ $function$;
 
 -- quote_wal2json function
 CREATE OR REPLACE FUNCTION realtime.list_changes(publication name, slot_name name, max_changes integer, max_record_bytes integer)
- RETURNS SETOF realtime.wal_rls
- LANGUAGE sql
- SET search_path = ''
- SET log_min_messages TO 'fatal'
+  RETURNS SETOF realtime.wal_rls
+  LANGUAGE sql
+  SET search_path = ''
+  SET log_min_messages TO 'fatal'
 AS $function$
       with pub as (
         select
@@ -216,10 +216,10 @@ AS $function$
           select pg_catalog.string_agg('' || ch,'')
           from pg_catalog.unnest(pg_catalog.string_to_array(nsp.nspname::text, null)) with ordinality x(ch, idx)
           where
-            not (x.idx = 1 and x.ch = '"')
+            not (x.idx = 1 and x.ch = '\"')
             and not (
               x.idx = pg_catalog.array_length(pg_catalog.string_to_array(nsp.nspname::text, null), 1)
-              and x.ch = '"'
+              and x.ch = '\"'
             )
         )
         || '.'
@@ -227,10 +227,10 @@ AS $function$
           select string_agg('' || ch,'')
           from pg_catalog.unnest(pg_catalog.string_to_array(pc.relname::text, null)) with ordinality x(ch, idx)
           where
-            not (x.idx = 1 and x.ch = '"')
+            not (x.idx = 1 and x.ch = '\"')
             and not (
               x.idx = pg_catalog.array_length(pg_catalog.string_to_array(nsp.nspname::text, null), 1)
-              and x.ch = '"'
+              and x.ch = '\"'
             )
           )
       from
