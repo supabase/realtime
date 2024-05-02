@@ -192,7 +192,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
             q1
 
           {:error, reason} ->
-            Logger.error("delete subscriptions from the queue failed: #{inspect(reason)}")
+            Logger.error(%{
+              error_code: "SubscriptionDeletionFailed",
+              error_message: H.to_log(reason)
+            })
+
             q
         end
       else
@@ -230,7 +234,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   end
 
   def handle_info(msg, state) do
-    Logger.error("Undef msg #{inspect(msg, pretty: true)}")
+    Logger.error(%{
+      error_code: "UnhandledProcessMessage",
+      error_message: H.to_log(msg)
+    })
+
     {:noreply, state}
   end
 

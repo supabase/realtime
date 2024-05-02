@@ -55,7 +55,7 @@ defmodule Realtime.Repo.Replica do
         Realtime.Repo
 
       is_nil(replica_conf) ->
-        Logger.error("Replica config not found for #{region} region")
+        Logger.warning("Replica config not found for #{region} region")
         Realtime.Repo
 
       true ->

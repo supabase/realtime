@@ -153,7 +153,10 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       {:ok, %{columns: ["schemaname", "tablename", "oid"], rows: rows}} ->
         Enum.reduce(rows, %{}, fn [schema, table, oid], acc ->
           if String.contains?(table, " ") do
-            Logger.error("Publication table name contains spaces: \"#{schema}\".\"#{table}\"")
+            Logger.error(%{
+              error_code: "TableHasSpacesInName",
+              error_message: "Table name cannot have spaces: \"#{schema}\".\"#{table}\""
+            })
           end
 
           Map.put(acc, {schema, table}, [oid])

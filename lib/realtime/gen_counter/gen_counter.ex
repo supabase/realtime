@@ -7,10 +7,9 @@ defmodule Realtime.GenCounter do
   counters are not serialized through the GenServer keeping GenCounters as performant as possible.
   """
   use GenServer
-
-  alias Realtime.GenCounter
-
   require Logger
+  import Realtime.Helpers, only: [to_log: 1]
+  alias Realtime.GenCounter
 
   defstruct id: nil, counters: []
 
@@ -50,7 +49,8 @@ defmodule Realtime.GenCounter do
         started
 
       err ->
-        Logger.error("Error creating counter #{inspect(err)}")
+        Logger.error(%{error_code: "UnableToCreateCounter", error_message: to_log(err)})
+
         {:error, :not_created}
     end
   end
@@ -75,7 +75,7 @@ defmodule Realtime.GenCounter do
         :counters.add(counter_ref, 1, count)
 
       err ->
-        Logger.error("Error incrimenting counter", error_string: inspect(err))
+        Logger.error(%{error_code: "UnableToIncrementCounter", error_message: to_log(err)})
         :error
     end
   end
@@ -100,7 +100,7 @@ defmodule Realtime.GenCounter do
         :counters.sub(counter_ref, 1, count)
 
       err ->
-        Logger.error("Error decrimenting counter", error_string: inspect(err))
+        Logger.error(%{error_code: "UnableToDecrementCounter", error_message: to_log(err)})
         :error
     end
   end
@@ -116,7 +116,7 @@ defmodule Realtime.GenCounter do
         :counters.put(counter_ref, 1, count)
 
       err ->
-        Logger.error("Error updating counter", error_string: inspect(err))
+        Logger.error(%{error_code: "UnableToUpdateCounter", error_message: to_log(err)})
         :error
     end
   end
@@ -131,8 +131,9 @@ defmodule Realtime.GenCounter do
       {:ok, counter_ref} ->
         :counters.info(counter_ref)
 
-      err ->
-        Logger.error("Counter not found", error_string: inspect(err))
+      _err ->
+        Logger.error(%{error_code: "UnableToFindCounter", error_message: "Unable to find counter"})
+
         :error
     end
   end
@@ -150,7 +151,7 @@ defmodule Realtime.GenCounter do
         {:ok, count}
 
       err ->
-        Logger.error("Counter not found", error_string: inspect(err))
+        Logger.error(%{error_code: "UnableToFindCounter", error_message: "Counter not found"})
         err
     end
   end

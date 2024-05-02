@@ -3,7 +3,7 @@ defmodule Extensions.PostgresCdcStream do
   @behaviour Realtime.PostgresCdc
 
   require Logger
-
+  import Realtime.Helpers, only: [to_log: 1]
   alias Extensions.PostgresCdcStream, as: Stream
   alias Realtime.Rpc
 
@@ -76,7 +76,11 @@ defmodule Extensions.PostgresCdcStream do
         error
 
       error ->
-        Logger.error("Error starting Postgres Extension: #{inspect(error, pretty: true)}")
+        Logger.error(%{
+          error_code: "ErrorStartingPostgresCDCStream",
+          error_message: to_log(error)
+        })
+
         error
     end
   end

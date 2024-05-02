@@ -117,14 +117,18 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
     new_queue =
       if !:queue.is_empty(q) do
         {ids, q1} = H.queue_take(q, @max_delete_records)
-        Logger.error("Delete #{length(ids)} phantom subscribers from db")
+        Logger.warning("Delete #{length(ids)} phantom subscribers from db")
 
         case Subscriptions.delete_multi(state.conn, ids) do
           {:ok, _} ->
             q1
 
           {:error, reason} ->
-            Logger.error("delete phantom subscriptions from the queue failed: #{inspect(reason)}")
+            Logger.error(%{
+              error_code: "UnableToDeletePhantomSubscriptions",
+              error_message: H.to_log(reason)
+            })
+
             q
         end
       else
@@ -193,7 +197,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       else
         case Rpc.call(node, __MODULE__, :not_alive_pids, [pids], timeout: 15_000) do
           {:badrpc, _} = error ->
-            Logger.error("Can't check pids on node #{inspect(node)}: #{H.to_log(error)}")
+            Logger.error(%{
+              error_code: "UnableToCheckProcessesOnRemoteNode",
+              error_message: "#{inspect(node)}: #{H.to_log(error)}"
+            })
+
             acc
 
           pids ->

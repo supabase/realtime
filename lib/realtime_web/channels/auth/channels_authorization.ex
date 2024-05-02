@@ -3,6 +3,7 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   Check connection is authorized to access channel
   """
   require Logger
+  import Realtime.Helpers, only: [to_log: 1]
 
   def authorize(token, jwt_secret, jwt_jwks) when is_binary(token) do
     token
@@ -32,7 +33,7 @@ defmodule RealtimeWeb.ChannelsAuthorization do
         {:error, reason}
 
       error ->
-        Logger.error("Unknown connection authorization error: #{inspect(error)}")
+        %{error_code: "ErrorAuthorizingWebsocket", error_message: to_log(error)}
         {:error, :unknown}
     end
   end
