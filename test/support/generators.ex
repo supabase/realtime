@@ -169,9 +169,8 @@ defmodule Generators do
   def policy_query(:authenticated_write_broadcast, %{name: name}) do
     """
     CREATE POLICY authenticated_write_broadcast_#{name}
-    ON realtime.broadcasts FOR UPDATE
+    ON realtime.broadcasts FOR INSERT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' )
     WITH CHECK ( realtime.channel_name() = '#{name}' );
     """
   end
@@ -188,9 +187,8 @@ defmodule Generators do
   def policy_query(:authenticated_write_presence, %{name: name}) do
     """
     CREATE POLICY authenticated_write_presence_#{name}
-    ON realtime.presences FOR UPDATE
+    ON realtime.presences FOR INSERT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' )
     WITH CHECK ( realtime.channel_name() = '#{name}' );
     """
   end

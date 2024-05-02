@@ -61,32 +61,23 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
         channel: %Channel{id: channel_id}
       }) do
     Postgrex.transaction(conn, fn transaction_conn ->
-      query = from(b in Broadcast, where: b.channel_id == ^channel_id)
+      # query = from(b in Broadcast, where: b.channel_id == ^channel_id)
+      changeset = Broadcast.changeset(%Broadcast{}, %{channel_id: channel_id})
 
-      case Repo.one(conn, query, Broadcast, mode: :savepoint) do
-        {:ok, %Broadcast{} = broadcast} ->
-          zero = NaiveDateTime.new!(~D[1970-01-01], ~T[00:00:00])
-          changeset = Broadcast.check_changeset(broadcast, %{updated_at: zero})
+      case Repo.insert(conn, changeset, Broadcast, mode: :savepoint) do
+        {:error, %Postgrex.Error{postgres: %{code: :unique_violation}}} ->
+          Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
+          Policies.update_policies(policies, :broadcast, :write, true)
 
-          case Repo.update(conn, changeset, Broadcast, mode: :savepoint) do
-            {:ok, %Broadcast{updated_at: ^zero}} ->
-              Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
-              Policies.update_policies(policies, :broadcast, :write, true)
-
-            {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-              Policies.update_policies(policies, :broadcast, :write, false)
-
-            {:error, :not_found} ->
-              Policies.update_policies(policies, :broadcast, :write, false)
-
-            {:error, error} ->
-              Logger.error(
-                "Error getting broadcast write policies for connection: #{inspect(error)}"
-              )
-          end
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+          Policies.update_policies(policies, :broadcast, :write, false)
 
         {:error, :not_found} ->
           Policies.update_policies(policies, :broadcast, :write, false)
+
+        {:error, error} ->
+          IO.inspect(error)
+          Logger.error("Error getting broadcast write policies for connection: #{inspect(error)}")
       end
     end)
   end

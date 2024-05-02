@@ -61,34 +61,24 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
         channel: %Channel{id: channel_id}
       }) do
     Postgrex.transaction(conn, fn transaction_conn ->
-      query = from(b in Presence, where: b.channel_id == ^channel_id)
+      # query = from(b in Presence, where: b.channel_id == ^channel_id)
+      changeset = Presence.changeset(%Presence{}, %{channel_id: channel_id})
 
-      case Repo.one(conn, query, Presence, mode: :savepoint) do
-        {:ok, %Presence{} = broadcast} ->
-          zero = NaiveDateTime.new!(~D[1970-01-01], ~T[00:00:00])
-          changeset = Presence.check_changeset(broadcast, %{updated_at: zero})
+      case Repo.insert(conn, changeset, Presence, mode: :savepoint) do
+        {:error, %Postgrex.Error{postgres: %{code: :unique_violation}}} ->
+          Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
+          Policies.update_policies(policies, :presence, :write, true)
 
-          case Repo.update(conn, changeset, Presence, mode: :savepoint) do
-            {:ok, %Presence{updated_at: ^zero}} ->
-              Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
-              Policies.update_policies(policies, :presence, :write, true)
-
-            {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-              Policies.update_policies(policies, :presence, :write, false)
-
-            {:error, :not_found} ->
-              Policies.update_policies(policies, :presence, :write, false)
-
-            {:error, error} ->
-              Logger.error(
-                "Error getting broadcast write policies for connection: #{inspect(error)}"
-              )
-
-              Postgrex.rollback(transaction_conn, error)
-          end
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+          Policies.update_policies(policies, :presence, :write, false)
 
         {:error, :not_found} ->
           Policies.update_policies(policies, :presence, :write, false)
+
+        {:error, error} ->
+          Logger.error("Error getting broadcast write policies for connection: #{inspect(error)}")
+
+          Postgrex.rollback(transaction_conn, error)
       end
     end)
   end
