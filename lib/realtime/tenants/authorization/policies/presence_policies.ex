@@ -8,6 +8,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
   """
   require Logger
   import Ecto.Query
+  import Realtime.Helpers, only: [to_log: 1]
 
   alias Realtime.Api.Presence
   alias Realtime.Api.Channel
@@ -47,7 +48,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
         {:error, error} ->
           Logger.error(%{
             error_code: "UnableToSetPolicies",
-            error_message: "Error getting policies for connection: #{inspect(error)}"
+            error_message: "Error getting policies for connection: #{to_log(error)}"
           })
 
           Postgrex.rollback(transaction_conn, error)
@@ -85,7 +86,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
             {:error, error} ->
               Logger.error(%{
                 error_code: "UnableToSetPolicies",
-                error_message: "Error getting policies for connection: #{inspect(error)}"
+                error_message: "Error getting policies for connection: #{to_log(error)}"
               })
 
               Postgrex.rollback(transaction_conn, error)

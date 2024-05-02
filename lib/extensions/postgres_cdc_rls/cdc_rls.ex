@@ -5,6 +5,7 @@ defmodule Extensions.PostgresCdcRls do
 
   @behaviour Realtime.PostgresCdc
   require Logger
+  import Realtime.Helpers, only: [to_log: 1]
 
   alias RealtimeWeb.Endpoint
   alias Extensions.PostgresCdcRls, as: Rls
@@ -85,7 +86,8 @@ defmodule Extensions.PostgresCdcRls do
         error
 
       error ->
-        Logger.error("Error starting Postgres Extension: #{inspect(error, pretty: true)}")
+        Logger.error(%{error_code: "ErrorStartingPostgresCDC", error_message: to_log(error)})
+
         error
     end
   end

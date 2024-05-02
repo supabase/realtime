@@ -103,9 +103,17 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, [message: "Invalid token", claim: _claim, claim_val: _value]} = error ->
         Logging.log_error_message(:warning, "InvalidJWTToken", error)
 
-      {:error, type} = error
-      when type in [:too_many_channels, :too_many_connections, :too_many_joins] ->
-        Logging.log_error_message(:warning, "RateLimitReached", error)
+      {:error, :too_many_channels} ->
+        msg = "Too many channels"
+        Logging.log_error_message(:warning, "ChannelRateLimitReached", msg)
+
+      {:error, :too_many_connections} ->
+        msg = "Too many connected users"
+        Logging.log_error_message(:warning, "ConnectionRateLimitReached", msg)
+
+      {:error, :too_many_joins} ->
+        msg = "Too many joins per second"
+        Logging.log_error_message(:warning, "ClientJoinRateLimitReached", msg)
 
       {:error, :tenant_database_unavailable} ->
         Logging.log_error_message(
@@ -177,6 +185,12 @@ defmodule RealtimeWeb.RealtimeChannel do
 
         type != "presence_diff" and
             match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, policies) ->
+          Logger.warning("Presence tracking message ignored")
+
+        type != "presence_diff" and
+            match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, policies) ->
+          Logger.warning("Broadcast message ignored")
+
           socket
 
         true ->
@@ -247,14 +261,18 @@ defmodule RealtimeWeb.RealtimeChannel do
          })}
 
       {:error, error} ->
-        message = "access token has expired: " <> inspect(error)
+        message = "Access token has expired: " <> Helpers.to_log(error)
 
         shutdown_response(socket, message)
     end
   end
 
   def handle_info(msg, socket) do
-    Logger.error("HANDLE_INFO message not handled: " <> inspect(msg))
+    Logger.error(%{
+      error_code: "UnhandledSystemMessage",
+      error_message: "Unhandled system message#{Helpers.to_log(msg)}"
+    })
+
     {:noreply, socket}
   end
 
@@ -390,10 +408,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:ok, %{avg: _}} ->
         {:error, :too_many_joins}
 
-      other ->
-        Logger.error("Unexpected error: " <> inspect(other))
-
-        {:error, other}
+      error ->
+        Logging.log_error_message(:error, "UnknownError", error)
+        {:error, error}
     end
   end
 
@@ -518,8 +535,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp shutdown_response(%{assigns: %{channel_name: channel_name}} = socket, message)
        when is_binary(message) do
     push_system_message("system", socket, "error", message, channel_name)
-
-    Logger.error("Channel shutting down with message: " <> message)
+    Logger.error(%{error_code: "ChannelShutdown", error_message: message})
 
     {:stop, :shutdown, socket}
   end

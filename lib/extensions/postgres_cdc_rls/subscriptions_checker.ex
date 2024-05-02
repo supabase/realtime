@@ -193,7 +193,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       else
         case Rpc.call(node, __MODULE__, :not_alive_pids, [pids], timeout: 15_000) do
           {:badrpc, _} = error ->
-            Logger.error("Can't check pids on node #{inspect(node)}: #{inspect(error)}")
+            Logger.error("Can't check pids on node #{inspect(node)}: #{H.to_log(error)}")
             acc
 
           pids ->

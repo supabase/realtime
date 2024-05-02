@@ -4,7 +4,7 @@ defmodule Realtime.Tenants.Migrations do
   """
 
   require Logger
-
+  import Realtime.Helpers, only: [to_log: 1]
   alias Realtime.Repo
 
   alias Realtime.Tenants.Migrations.{
@@ -142,7 +142,7 @@ defmodule Realtime.Tenants.Migrations do
         {:ok, res}
       rescue
         error ->
-          Logger.error(error)
+          Logger.error(%{error_code: "MigrationsFailedToRun", error_message: to_log(error)})
           {:error, error}
       end
     end)

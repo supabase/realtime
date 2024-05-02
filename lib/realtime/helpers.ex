@@ -450,6 +450,12 @@ defmodule Realtime.Helpers do
     Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func], timeout: 15_000)
   end
 
+  @doc """
+  Prepares a value to be logged
+  """
+  def to_log(value) when is_binary(value), do: value
+  def to_log(value), do: inspect(value, pretty: true)
+
   defp stop_user_tenant_process(tenant, platform_region, acc) do
     Extensions.PostgresCdcRls.handle_stop(tenant, 5_000)
     # credo:disable-for-next-line

@@ -4,6 +4,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   """
   require Logger
   import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
+  import Realtime.Helpers, only: [to_log: 1]
 
   @type conn() :: Postgrex.conn()
 
@@ -60,7 +61,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
               {:ok, _} ->
                 msg =
-                  "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: #{inspect(params)}"
+                  "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [#{params_to_log(params)}]"
 
                 rollback(conn, %{
                   error_code: "RealtimeDisabledForConfiguration",
@@ -69,7 +70,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
               {:error, exception} ->
                 msg =
-                  "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: #{inspect(params)}. Exception: #{Exception.message(exception)}"
+                  "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
 
                 rollback(
                   conn,
@@ -85,6 +86,13 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         end
       end)
     end)
+  end
+
+  defp params_to_log(map) do
+    map
+    |> Map.to_list()
+    |> Enum.map(fn {k, v} -> "#{k}: #{to_log(v)}" end)
+    |> Enum.join(", ")
   end
 
   @spec delete(conn(), String.t()) :: any()
