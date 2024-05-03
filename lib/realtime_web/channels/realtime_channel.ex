@@ -388,7 +388,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   def limit_channels(%{assigns: %{tenant: tenant, limits: limits}, transport_pid: pid}) do
     key = Tenants.channels_per_client_key(tenant)
 
-    if Registry.count_match(Realtime.Registry, key, pid) > limits.max_channels_per_client do
+    if Registry.count_match(Realtime.Registry, key, pid) > String.to_integer(System.get_env("MAX_CHANNELS_PER_CLIENT") || Integer.to_string(limits.max_channels_per_client)) do
       {:error, :too_many_channels}
     else
       Registry.register(Realtime.Registry, Tenants.channels_per_client_key(tenant), pid)
