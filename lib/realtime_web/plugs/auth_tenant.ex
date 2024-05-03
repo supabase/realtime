@@ -39,16 +39,27 @@ defmodule RealtimeWeb.AuthTenant do
     authorization = get_req_header(conn, "authorization")
     apikey = get_req_header(conn, "apikey")
 
+    authorization =
+      case authorization do
+        [] ->
+          nil
+
+        [value | _] ->
+          [bearer, token] = value |> String.split(" ")
+          bearer = String.downcase(bearer)
+          if bearer == "bearer", do: token
+      end
+
+    apikey =
+      case apikey do
+        [] -> nil
+        [value | _] -> value
+      end
+
     cond do
-      authorization != [] && match?(["Bearer " <> _], authorization) ->
-        ["Bearer " <> token] = authorization
-        token
-
-      apikey != [] ->
-        hd(apikey)
-
-      true ->
-        nil
+      authorization -> authorization
+      apikey -> apikey
+      true -> nil
     end
   end
 

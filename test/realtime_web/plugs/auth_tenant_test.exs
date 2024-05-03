@@ -48,6 +48,25 @@ defmodule RealtimeWeb.AuthTenantTest do
       refute conn.halted
     end
 
+    @tag api_key: "bearer #{@token}", header: "authorization"
+    test "returns non halted and null status if token in authorization header is valid and case insensitive",
+         %{
+           conn: conn
+         } do
+      conn = AuthTenant.call(conn, %{})
+      refute conn.status
+      refute conn.halted
+    end
+
+    @tag api_key: "earer #{@token}", header: "authorization"
+    test "returns halted and unauthorized if token is badly formatted", %{
+      conn: conn
+    } do
+      conn = AuthTenant.call(conn, %{})
+      assert conn.status == 401
+      assert conn.halted
+    end
+
     @tag api_key: "invalid", header: "apikey"
     test "returns 401 if token in apikey header isn't valid", %{conn: conn} do
       conn = AuthTenant.call(conn, %{})
