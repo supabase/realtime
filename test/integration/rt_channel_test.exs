@@ -268,17 +268,17 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [
            :authenticated_read_channel,
-           :authenticated_read_broadcast,
-           :authenticated_read_presence,
-           :authenticated_write_presence
+           :authenticated_read_broadcast
          ]
-    test "private broadcast with valid channel no write permissions won't send message", %{
-      channel: channel
-    } do
+    test "private broadcast with valid channel no write permissions won't send message but will receive message",
+         %{
+           channel: channel
+         } do
+      {service_role_socket, _} = get_connection("service_role")
       {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}}
       topic = "realtime:#{channel.name}"
-
+      WebsocketClient.join(service_role_socket, topic, %{config: config})
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{
@@ -291,12 +291,29 @@ defmodule Realtime.Integration.RtChannelTest do
         topic: ^topic
       }
 
-      assert_receive %Message{}
-
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
 
       refute_receive %Message{
+                       event: "broadcast",
+                       payload: ^payload,
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     500
+
+      :timer.sleep(1000)
+      WebsocketClient.send_event(service_role_socket, topic, "broadcast", payload)
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       payload: ^payload,
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     500
+
+      assert_receive %Message{
                        event: "broadcast",
                        payload: ^payload,
                        ref: nil,
