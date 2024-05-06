@@ -38,10 +38,9 @@ defmodule Realtime.Rpc do
     tenant = Keyword.get(opts, :tenant, nil)
 
     Telemetry.execute(
-      [:realtime, :tenants, :rpc],
+      [:realtime, :rpc],
       %{latency: latency},
       %{
-        tenant: tenant,
         mod: mod,
         func: func,
         target_node: node,
