@@ -11,6 +11,8 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.Tenants.Cache
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
+  alias Realtime.Helpers
+
   alias RealtimeWeb.Endpoint
   alias RealtimeWeb.UserSocket
 
@@ -195,15 +197,12 @@ defmodule RealtimeWeb.TenantController do
       send_resp(conn, 204, "")
     else
       nil ->
-        Logger.error(%{error_code: "TenantNotFound", error_message: "Tenant not found"})
-
+        Helpers.log_error("TenantNotFound", "Tenant not found")
         send_resp(conn, 204, "")
 
       err ->
-        error = %{error_code: "UnableToDeleteTenant", error_message: inspect(err)}
-        Logger.error(error)
-
-        conn |> put_status(500) |> json(error) |> halt()
+        Helpers.log_error("UnableToDeleteTenant", err)
+        conn |> put_status(500) |> json(err) |> halt()
     end
   end
 
@@ -232,7 +231,7 @@ defmodule RealtimeWeb.TenantController do
 
     case Tenants.get_tenant_by_external_id(tenant_id) do
       nil ->
-        Logger.error(%{error_code: "TenantNotFound", error_message: "Tenant not found"})
+        Helpers.log_error("TenantNotFound", "Tenant not found")
 
         conn
         |> put_status(404)
@@ -275,7 +274,7 @@ defmodule RealtimeWeb.TenantController do
         json(conn, %{data: response})
 
       {:error, :tenant_not_found} ->
-        Logger.error(%{error_code: "TenantNotFound", error_message: "Tenant not found"})
+        Helpers.log_error("TenantNotFound", "Tenant not found")
 
         conn
         |> put_status(404)

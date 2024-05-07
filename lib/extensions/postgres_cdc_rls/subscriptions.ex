@@ -4,7 +4,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   """
   require Logger
   import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
-  import Realtime.Helpers, only: [to_log: 1]
+  import Realtime.Helpers, only: [to_log: 1, log_error: 2]
 
   @type conn() :: Postgrex.conn()
 
@@ -63,22 +63,16 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
                 msg =
                   "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [#{params_to_log(params)}]"
 
-                rollback(conn, %{
-                  error_code: "RealtimeDisabledForConfiguration",
-                  error_message: msg
-                })
+                log_error("RealtimeDisabledForConfiguration", msg)
+                rollback(conn, msg)
 
               {:error, exception} ->
                 msg =
                   "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
 
-                rollback(
-                  conn,
-                  %{
-                    error_code: "RealtimeSubscriptionError",
-                    error_message: msg
-                  }
-                )
+                log_error("RealtimeSubscriptionError", msg)
+
+                rollback(conn, msg)
             end
 
           {:error, reason} ->
@@ -153,10 +147,10 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       {:ok, %{columns: ["schemaname", "tablename", "oid"], rows: rows}} ->
         Enum.reduce(rows, %{}, fn [schema, table, oid], acc ->
           if String.contains?(table, " ") do
-            Logger.error(%{
-              error_code: "TableHasSpacesInName",
-              error_message: "Table name cannot have spaces: \"#{schema}\".\"#{table}\""
-            })
+            log_error(
+              "TableHasSpacesInName",
+              "Table name cannot have spaces: \"#{schema}\".\"#{table}\""
+            )
           end
 
           Map.put(acc, {schema, table}, [oid])

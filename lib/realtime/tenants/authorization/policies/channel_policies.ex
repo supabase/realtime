@@ -10,7 +10,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
   """
   require Logger
   import Ecto.Query
-  import Realtime.Helpers, only: [to_log: 1]
+  import Realtime.Helpers, only: [to_log: 1, log_error: 2]
 
   alias Realtime.Api.Channel
   alias Realtime.Repo
@@ -40,10 +40,10 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :read, false)
 
         {:error, error} ->
-          Logger.error(%{
-            error_code: "UnableToSetPolicies",
-            error_message: "Error getting policies for connection: #{to_log(error)}"
-          })
+          log_error(
+            "UnableToSetPolicies",
+            "Error getting policies for connection: #{to_log(error)}"
+          )
 
           Postgrex.rollback(transaction_conn, error)
       end
@@ -65,10 +65,10 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :read, false)
 
         {:error, error} ->
-          Logger.error(%{
-            error_code: "UnableToSetPolicies",
-            error_message: "Error getting policies for connection: #{to_log(error)}"
-          })
+          log_error(
+            "UnableToSetPolicies",
+            "Error getting policies for connection: #{to_log(error)}"
+          )
 
           Postgrex.rollback(transaction_conn, error)
       end
@@ -101,10 +101,10 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :write, false)
 
         {:error, error} ->
-          Logger.error(%{
-            error_code: "UnableToSetPolicies",
-            error_message: "Error getting policies for connection: #{to_log(error)}"
-          })
+          log_error(
+            "UnableToSetPolicies",
+            "Error getting policies for connection: #{to_log(error)}"
+          )
 
           Postgrex.rollback(transaction_conn, error)
       end
@@ -127,10 +127,10 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :write, false)
 
         {:error, error} ->
-          Logger.error(%{
-            error_code: "UnableToSetPolicies",
-            error_message: "Error getting policies for connection: #{to_log(error)}"
-          })
+          log_error(
+            "UnableToSetPolicies",
+            "Error getting policies for connection: #{to_log(error)}"
+          )
 
           Postgrex.rollback(transaction_conn, error)
       end

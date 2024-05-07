@@ -5,7 +5,7 @@ defmodule Extensions.PostgresCdcRls do
 
   @behaviour Realtime.PostgresCdc
   require Logger
-  import Realtime.Helpers, only: [to_log: 1]
+  import Realtime.Helpers, only: [log_error: 2]
 
   alias RealtimeWeb.Endpoint
   alias Extensions.PostgresCdcRls, as: Rls
@@ -86,8 +86,7 @@ defmodule Extensions.PostgresCdcRls do
         error
 
       error ->
-        Logger.error(%{error_code: "ErrorStartingPostgresCDC", error_message: to_log(error)})
-
+        log_error("ErrorStartingPostgresCDC", error)
         error
     end
   end
@@ -142,7 +141,7 @@ defmodule Extensions.PostgresCdcRls do
       if node(pid) == node(manager_pid) do
         %{meta | manager: manager_pid, subs_pool: subs_pool}
       else
-        Logger.error(
+        Logger.warning(
           "Node mismatch for tenant #{tenant} #{inspect(node(pid))} #{inspect(node(manager_pid))}"
         )
 

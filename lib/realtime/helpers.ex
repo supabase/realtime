@@ -158,11 +158,7 @@ defmodule Realtime.Helpers do
 
           {:error, e} ->
             Process.exit(conn, :kill)
-
-            Logger.error(%{
-              error_code: "UnableToConnectToTenantDatabase",
-              error_message: to_log(e)
-            })
+            log_error("UnableToConnectToTenantDatabase", e)
 
             {:error, :tenant_database_unavailable}
         end
@@ -460,6 +456,13 @@ defmodule Realtime.Helpers do
   """
   def to_log(value) when is_binary(value), do: value
   def to_log(value), do: inspect(value, pretty: true)
+
+  @doc """
+  Logs error with a given Operational Code
+  """
+  def log_error(code, error) do
+    Logger.error("#{code}: #{to_log(error)}", error_code: code)
+  end
 
   defp stop_user_tenant_process(tenant, platform_region, acc) do
     Extensions.PostgresCdcRls.handle_stop(tenant, 5_000)

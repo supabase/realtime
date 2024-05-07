@@ -106,10 +106,10 @@ defmodule Realtime.Latency do
 
           case response do
             {:badrpc, reason} ->
-              Logger.error(%{
-                error_code: "RealtimeNodeDisconnected",
-                error_message: "Unable to connect to #{short_name} from #{region}: #{reason}"
-              })
+              Helpers.log_error(
+                "RealtimeNodeDisconnected",
+                "Unable to connect to #{short_name} from #{region}: #{reason}"
+              )
 
               payload = %Payload{
                 from_node: from_node,

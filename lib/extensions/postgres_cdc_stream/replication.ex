@@ -7,7 +7,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
   use Postgrex.ReplicationConnection
   require Logger
 
-  import Realtime.Helpers, only: [to_log: 1]
+  import Realtime.Helpers, only: [log_error: 2]
 
   alias Extensions.PostgresCdcStream
 
@@ -94,7 +94,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
   end
 
   def handle_data(data, state) do
-    Logger.error(%{error_code: "UnknownDataProcessed", error_message: to_log(data)})
+    log_error("UnknownDataProcessed", data)
 
     {:noreply, state}
   end
@@ -179,8 +179,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
   end
 
   defp process_message(msg, state) do
-    Logger.error(%{error_code: "UnhandledProcessMessage", error_message: to_log(msg)})
-
+    log_error("UnhandledProcessMessage", msg)
     state
   end
 

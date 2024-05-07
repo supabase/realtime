@@ -8,7 +8,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   require Logger
 
-  import Realtime.Helpers, only: [cancel_timer: 1, default_ssl_param: 1, connect_db: 9, to_log: 1]
+  import Realtime.Helpers,
+    only: [cancel_timer: 1, default_ssl_param: 1, connect_db: 9, log_error: 2, to_log: 1]
 
   alias DBConnection.Backoff
   alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
@@ -104,8 +105,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         {:noreply, %{state | backoff: backoff, poll_ref: pool_ref}}
 
       {:error, %Postgrex.Error{postgres: %{code: :object_in_use, message: msg}}} ->
-        Logger.error(%{error_code: "ReplicationSlotBeingUsed", error_message: to_log(msg)})
-
+        log_error("ReplicationSlotBeingUsed", msg)
         [_, db_pid] = Regex.run(~r/PID\s(\d*)$/, msg)
         db_pid = String.to_integer(db_pid)
 
@@ -166,10 +166,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         state
 
       {:error, error} ->
-        Logger.error(%{
-          error_code: "PoolingReplicationPreparationError",
-          error_message: to_log(error)
-        })
+        log_error("PoolingReplicationPreparationError", error)
 
         {timeout, backoff} = Backoff.backoff(backoff)
         retry_ref = Process.send_after(self(), :retry, timeout)

@@ -8,7 +8,7 @@ defmodule Realtime.GenCounter do
   """
   use GenServer
   require Logger
-  import Realtime.Helpers, only: [to_log: 1]
+  import Realtime.Helpers, only: [log_error: 2]
   alias Realtime.GenCounter
 
   defstruct id: nil, counters: []
@@ -49,8 +49,7 @@ defmodule Realtime.GenCounter do
         started
 
       err ->
-        Logger.error(%{error_code: "UnableToCreateCounter", error_message: to_log(err)})
-
+        log_error("UnableToCreateCounter", err)
         {:error, :not_created}
     end
   end
@@ -75,7 +74,7 @@ defmodule Realtime.GenCounter do
         :counters.add(counter_ref, 1, count)
 
       err ->
-        Logger.error(%{error_code: "UnableToIncrementCounter", error_message: to_log(err)})
+        log_error("UnableToIncrementCounter", err)
         :error
     end
   end
@@ -100,7 +99,7 @@ defmodule Realtime.GenCounter do
         :counters.sub(counter_ref, 1, count)
 
       err ->
-        Logger.error(%{error_code: "UnableToDecrementCounter", error_message: to_log(err)})
+        log_error("UnableToDecrementCounter", err)
         :error
     end
   end
@@ -116,7 +115,7 @@ defmodule Realtime.GenCounter do
         :counters.put(counter_ref, 1, count)
 
       err ->
-        Logger.error(%{error_code: "UnableToUpdateCounter", error_message: to_log(err)})
+        log_error("UnableToUpdateCounter", err)
         :error
     end
   end
@@ -132,8 +131,7 @@ defmodule Realtime.GenCounter do
         :counters.info(counter_ref)
 
       _err ->
-        Logger.error(%{error_code: "UnableToFindCounter", error_message: "Unable to find counter"})
-
+        log_error("UnableToFindCounter", "Unable to find counter")
         :error
     end
   end
@@ -151,7 +149,7 @@ defmodule Realtime.GenCounter do
         {:ok, count}
 
       err ->
-        Logger.error(%{error_code: "UnableToFindCounter", error_message: "Counter not found"})
+        log_error("UnableToFindCounter", "Counter not found")
         err
     end
   end

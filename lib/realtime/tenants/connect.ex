@@ -10,7 +10,7 @@ defmodule Realtime.Tenants.Connect do
 
   require Logger
 
-  import Realtime.Helpers, only: [to_log: 1]
+  import Realtime.Helpers, only: [log_error: 2]
 
   alias Realtime.Api.Tenant
   alias Realtime.Helpers
@@ -105,11 +105,7 @@ defmodule Realtime.Tenants.Connect do
           {:ok, state, {:continue, :setup_connected_user_events}}
 
         {:error, error} ->
-          Logger.error(%{
-            error_code: "UnableToConnectToTenantDatabase",
-            error_message: to_log(error)
-          })
-
+          log_error("UnableToConnectToTenantDatabase", error)
           {:stop, :normal}
       end
     end
