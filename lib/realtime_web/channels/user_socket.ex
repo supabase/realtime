@@ -3,7 +3,7 @@ defmodule RealtimeWeb.UserSocket do
 
   require Logger
 
-  import Realtime.Helpers, only: [decrypt!: 2, get_external_id: 1]
+  import Realtime.Helpers, only: [decrypt!: 2, get_external_id: 1, log_error: 2]
 
   alias Realtime.Api.Tenant
   alias Realtime.PostgresCdc
@@ -76,11 +76,11 @@ defmodule RealtimeWeb.UserSocket do
         {:ok, assign(socket, assigns)}
       else
         nil ->
-          Logger.error("Auth error: tenant `#{external_id}` not found")
+          log_error("TenantNotFound", "Tenant not found: #{external_id}")
           :error
 
         error ->
-          Logger.error("Auth error: #{inspect(error)}")
+          log_error("ErrorConnectingToWebsocket", error)
           :error
       end
     end

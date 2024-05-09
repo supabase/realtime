@@ -3,6 +3,7 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   Log functions for Realtime channels to ensure
   """
   require Logger
+  import Realtime.Helpers, only: [to_log: 1, log_error: 2]
 
   @doc """
   Logs messages according to user options given on config
@@ -22,15 +23,13 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   @doc """
   Logs errors in an expected format
   """
-  def log_error_message(:warning, error) do
-    error_msg = inspect(error)
-    Logger.warn("Start channel error: " <> error_msg)
-    {:error, %{reason: error_msg}}
+  def log_error_message(:warning, _, error) do
+    Logger.warn(to_log(error))
+    {:error, %{reason: error}}
   end
 
-  def log_error_message(:error, error) do
-    error_msg = inspect(error)
-    Logger.error("Start channel error: " <> error_msg)
-    {:error, %{reason: error_msg}}
+  def log_error_message(:error, code, error) do
+    log_error(code, error)
+    {:error, %{reason: error}}
   end
 end

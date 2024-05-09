@@ -7,20 +7,22 @@ defmodule Extensions.PostgresCdcStream.Replication do
   use Postgrex.ReplicationConnection
   require Logger
 
+  import Realtime.Helpers, only: [log_error: 2]
+
   alias Extensions.PostgresCdcStream
-  alias Realtime.Helpers
+
+  alias Realtime.Adapters.Changes.DeletedRecord
+  alias Realtime.Adapters.Changes.NewRecord
+  alias Realtime.Adapters.Changes.UpdatedRecord
   alias Realtime.Adapters.Postgres.Decoder
+  alias Realtime.Helpers
 
-  alias Decoder.Messages.{
-    Begin,
-    Relation,
-    Insert,
-    Update,
-    Delete,
-    Commit
-  }
-
-  alias Realtime.Adapters.Changes.{DeletedRecord, NewRecord, UpdatedRecord}
+  alias Decoder.Messages.Begin
+  alias Decoder.Messages.Relation
+  alias Decoder.Messages.Insert
+  alias Decoder.Messages.Update
+  alias Decoder.Messages.Delete
+  alias Decoder.Messages.Commit
 
   def start_link(args) do
     opts = connection_opts(args)
@@ -92,7 +94,8 @@ defmodule Extensions.PostgresCdcStream.Replication do
   end
 
   def handle_data(data, state) do
-    Logger.error("Unknown data: #{inspect(data)}")
+    log_error("UnknownDataProcessed", data)
+
     {:noreply, state}
   end
 
@@ -176,7 +179,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
   end
 
   defp process_message(msg, state) do
-    Logger.error("Unknown message: #{inspect(msg)}")
+    log_error("UnhandledProcessMessage", msg)
     state
   end
 

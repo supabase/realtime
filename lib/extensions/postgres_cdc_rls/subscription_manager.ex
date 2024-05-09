@@ -7,7 +7,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
   alias Extensions.PostgresCdcRls, as: Rls
   alias Rls.Subscriptions
-  alias Realtime.Helpers, as: H
+  alias Realtime.Helpers
 
   @timeout 15_000
   @max_delete_records 1000
@@ -68,10 +68,10 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     Logger.metadata(external_id: id, project: id)
 
-    ssl_enforced = H.default_ssl_param(args)
+    ssl_enforced = Helpers.default_ssl_param(args)
 
     {:ok, conn} =
-      H.connect_db(
+      Helpers.connect_db(
         host,
         port,
         name,
@@ -84,7 +84,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       )
 
     {:ok, conn_pub} =
-      H.connect_db(
+      Helpers.connect_db(
         host,
         port,
         name,
@@ -136,7 +136,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         :check_oids,
         %State{check_oid_ref: ref, conn: conn, publication: publication, oids: old_oids} = state
       ) do
-    H.cancel_timer(ref)
+    Helpers.cancel_timer(ref)
 
     oids =
       case Subscriptions.fetch_publication_tables(conn, publication) do
@@ -180,11 +180,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   end
 
   def handle_info(:check_delete_queue, %State{delete_queue: %{ref: ref, queue: q}} = state) do
-    H.cancel_timer(ref)
+    Helpers.cancel_timer(ref)
 
     q1 =
       if !:queue.is_empty(q) do
-        {ids, q1} = H.queue_take(q, @max_delete_records)
+        {ids, q1} = Helpers.queue_take(q, @max_delete_records)
         Logger.debug("delete sub id #{inspect(ids)}")
 
         case Subscriptions.delete_multi(state.conn, ids) do
@@ -192,7 +192,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
             q1
 
           {:error, reason} ->
-            Logger.error("delete subscriptions from the queue failed: #{inspect(reason)}")
+            Helpers.log_error("SubscriptionDeletionFailed", reason)
+
             q
         end
       else
@@ -210,7 +211,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   end
 
   def handle_info(:check_no_users, %{subscribers_tid: tid, no_users_ts: ts} = state) do
-    H.cancel_timer(state.no_users_ref)
+    Helpers.cancel_timer(state.no_users_ref)
 
     ts_new =
       case {:ets.info(tid, :size), ts != nil && ts + @stop_after < now()} do
@@ -230,7 +231,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   end
 
   def handle_info(msg, state) do
-    Logger.error("Undef msg #{inspect(msg, pretty: true)}")
+    Helpers.log_error("UnhandledProcessMessage", msg)
+
     {:noreply, state}
   end
 

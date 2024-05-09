@@ -63,10 +63,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         socket_over_capacity =
           Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: -1}})
 
-        assert {:error, %{reason: "{:error, :too_many_connections}"}} =
+        assert {:error, %{reason: "Too many connected users"}} =
                  subscribe_and_join(socket_at_capacity, "realtime:test", %{})
 
-        assert {:error, %{reason: "{:error, :too_many_connections}"}} =
+        assert {:error, %{reason: "Too many connected users"}} =
                  subscribe_and_join(socket_over_capacity, "realtime:test", %{})
       end
     end
@@ -99,7 +99,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
-        assert {:error, %{reason: "\"Token expiration time is invalid\""}} =
+        assert {:error, %{reason: "Token expiration time is invalid"}} =
                  subscribe_and_join(socket, "realtime:test", %{})
       end
 
@@ -113,7 +113,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
-        assert {:error, %{reason: "\"Token expiration time is invalid\""}} =
+        assert {:error, %{reason: "Token expiration time is invalid"}} =
                  subscribe_and_join(socket, "realtime:test", %{})
       end
     end
@@ -164,7 +164,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts)
 
-      assert {:error, %{reason: "\"Realtime was unable to connect to the tenant database\""}} =
+      assert {:error, %{reason: "Realtime was unable to connect to the project database"}} =
                subscribe_and_join(socket, "realtime:test", %{})
     end
   end

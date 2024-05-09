@@ -8,13 +8,13 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
   """
   require Logger
   import Ecto.Query
+  import Realtime.Helpers, only: [log_error: 2, to_log: 1]
 
   alias Realtime.Api.Broadcast
   alias Realtime.Api.Channel
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
-
   defstruct read: false, write: false
 
   @behaviour Realtime.Tenants.Authorization.Policies
@@ -45,7 +45,10 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
           Policies.update_policies(policies, :broadcast, :read, false)
 
         {:error, error} ->
-          Logger.error("Error getting broadcast read policies for connection: #{inspect(error)}")
+          log_error(
+            "UnableToSetPolicies",
+            "Error getting policies for connection: #{to_log(error)}"
+          )
 
           Postgrex.rollback(transaction_conn, error)
       end
@@ -80,8 +83,9 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
               Policies.update_policies(policies, :broadcast, :write, false)
 
             {:error, error} ->
-              Logger.error(
-                "Error getting broadcast write policies for connection: #{inspect(error)}"
+              log_error(
+                "UnableToSetPolicies",
+                "Error getting policies for connection: #{to_log(error)}"
               )
           end
 
