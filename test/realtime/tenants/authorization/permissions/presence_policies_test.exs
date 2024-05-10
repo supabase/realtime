@@ -68,7 +68,8 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
         Process.unlink(context.db_conn)
-        Process.exit(context.db_conn, :kill)
+        Process.exit(context.db_conn, :shutdown)
+        :timer.sleep(100)
 
         assert {:error, _} =
                  PresencePolicies.check_read_policies(

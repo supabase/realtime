@@ -53,7 +53,7 @@ defmodule Realtime.Latency do
   end
 
   def handle_info(msg, state) do
-    Logger.warn("Unexpected message: #{inspect(msg)}")
+    Logger.warning("Unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -128,7 +128,7 @@ defmodule Realtime.Latency do
             {:ok, {:pong, remote_region}} ->
               if latency_ms > 1_000,
                 do:
-                  Logger.warn(
+                  Logger.warning(
                     "Network warning: latency to #{remote_region} (#{short_name}) from #{region} (#{from_node}) is #{latency_ms} ms"
                   )
 
