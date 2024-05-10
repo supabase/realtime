@@ -6,6 +6,7 @@ defmodule Realtime.Repo do
     adapter: Ecto.Adapters.Postgres
 
   import Ecto.Query
+  import Realtime.Helpers, only: [log_error: 2]
 
   def with_dynamic_repo(config, callback) do
     default_dynamic_repo = get_dynamic_repo()
@@ -165,12 +166,20 @@ defmodule Realtime.Repo do
   defp run_query_with_trap(conn, query, args, opts \\ []) do
     Postgrex.query(conn, query, args, opts)
   rescue
-    exception ->
-      Logger.error("Postgrex exception: #{inspect(exception)}")
+    e ->
+      log_error("ErrorRunningQuery", e)
       {:error, :postgrex_exception}
   catch
+    :exit, {:noproc, {DBConnection.Holder, :checkout, _}} ->
+      log_error(
+        "UnableCheckoutConnection",
+        "Unable to checkout connection, please check your connection pool configuration"
+      )
+
+      {:error, :postgrex_exception}
+
     :exit, reason ->
-      Logger.error("Postgrex exit: #{inspect(reason)}")
+      log_error("UnknownError", reason)
 
       {:error, :postgrex_exception}
   end

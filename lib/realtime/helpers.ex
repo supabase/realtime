@@ -158,7 +158,8 @@ defmodule Realtime.Helpers do
 
           {:error, e} ->
             Process.exit(conn, :kill)
-            Logger.error("Error connecting to tenant database: #{inspect(e)}")
+            log_error("UnableToConnectToTenantDatabase", e)
+
             {:error, :tenant_database_unavailable}
         end
       end
@@ -448,6 +449,19 @@ defmodule Realtime.Helpers do
 
   def transaction(db_conn, func) do
     Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func], timeout: 15_000)
+  end
+
+  @doc """
+  Prepares a value to be logged
+  """
+  def to_log(value) when is_binary(value), do: value
+  def to_log(value), do: inspect(value, pretty: true)
+
+  @doc """
+  Logs error with a given Operational Code
+  """
+  def log_error(code, error) do
+    Logger.error("#{code}: #{to_log(error)}", error_code: code)
   end
 
   defp stop_user_tenant_process(tenant, platform_region, acc) do

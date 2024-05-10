@@ -17,15 +17,12 @@ defmodule Realtime.PromEx.Plugins.Tenants do
   defp rpc_metrics(_opts) do
     Event.build(:realtime, [
       distribution(
-        [:realtime, :tenants, :rpc],
-        event_name: [:realtime, :tenants, :rpc],
+        [:realtime, :rpc],
+        event_name: [:realtime, :rpc],
         description: "Latency of rpc calls triggered by a tenant action",
         measurement: :latency,
         unit: {:microsecond, :millisecond},
-        tags: [:tenant],
-        reporter_options: [
-          buckets: [10, 50, 250, 1500, 6000, 30_000]
-        ]
+        reporter_options: [buckets: [10, 50, 250, 1500, 15_000]]
       )
     ])
   end

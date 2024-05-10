@@ -8,7 +8,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   require Logger
 
-  import Realtime.Helpers, only: [cancel_timer: 1, default_ssl_param: 1, connect_db: 9]
+  import Realtime.Helpers,
+    only: [cancel_timer: 1, default_ssl_param: 1, connect_db: 9, log_error: 2, to_log: 1]
 
   alias DBConnection.Backoff
   alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
@@ -104,8 +105,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         {:noreply, %{state | backoff: backoff, poll_ref: pool_ref}}
 
       {:error, %Postgrex.Error{postgres: %{code: :object_in_use, message: msg}}} ->
-        Logger.error("Error polling replication: :object_in_use")
-
+        log_error("ReplicationSlotBeingUsed", msg)
         [_, db_pid] = Regex.run(~r/PID\s(\d*)$/, msg)
         db_pid = String.to_integer(db_pid)
 
@@ -119,7 +119,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           case Replications.terminate_backend(conn, slot_name) do
             {:ok, :terminated} -> Logger.warn("Replication slot in use - terminating")
             {:error, :slot_not_found} -> Logger.warn("Replication slot not found")
-            {:error, error} -> Logger.warn("Error terminating backend: #{inspect(error)}")
+            {:error, error} -> Logger.warn("Error terminating backend: #{to_log(error)}")
           end
         end
 
@@ -130,7 +130,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
          %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
 
       {:error, reason} ->
-        Logger.error("Error polling replication: #{inspect(reason, pretty: true)}")
+        Logger.error(%{error_code: "PoolingReplicationError", error_message: to_log(reason)})
 
         {timeout, backoff} = Backoff.backoff(backoff)
         retry_ref = Process.send_after(self(), :retry, timeout)
@@ -166,7 +166,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         state
 
       {:error, error} ->
-        Logger.error("Prepare replication error: #{inspect(error)}")
+        log_error("PoolingReplicationPreparationError", error)
+
         {timeout, backoff} = Backoff.backoff(backoff)
         retry_ref = Process.send_after(self(), :retry, timeout)
         %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}

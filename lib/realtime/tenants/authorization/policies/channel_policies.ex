@@ -10,6 +10,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
   """
   require Logger
   import Ecto.Query
+  import Realtime.Helpers, only: [to_log: 1, log_error: 2]
 
   alias Realtime.Api.Channel
   alias Realtime.Repo
@@ -39,8 +40,9 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :read, false)
 
         {:error, error} ->
-          Logger.error(
-            "Error getting all channel read policies for connection: #{inspect(error)}"
+          log_error(
+            "UnableToSetPolicies",
+            "Error getting policies for connection: #{to_log(error)}"
           )
 
           Postgrex.rollback(transaction_conn, error)
@@ -63,7 +65,11 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :read, false)
 
         {:error, error} ->
-          Logger.error("Error getting channel read policies for connection: #{inspect(error)}")
+          log_error(
+            "UnableToSetPolicies",
+            "Error getting policies for connection: #{to_log(error)}"
+          )
+
           Postgrex.rollback(transaction_conn, error)
       end
     end)
@@ -95,7 +101,11 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :write, false)
 
         {:error, error} ->
-          Logger.error("Error getting channel write policies for connection: #{inspect(error)}")
+          log_error(
+            "UnableToSetPolicies",
+            "Error getting policies for connection: #{to_log(error)}"
+          )
+
           Postgrex.rollback(transaction_conn, error)
       end
     end)
@@ -117,7 +127,11 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
           Policies.update_policies(policies, :channel, :write, false)
 
         {:error, error} ->
-          Logger.error("Error getting channel write policies for connection: #{inspect(error)}")
+          log_error(
+            "UnableToSetPolicies",
+            "Error getting policies for connection: #{to_log(error)}"
+          )
+
           Postgrex.rollback(transaction_conn, error)
       end
     end)

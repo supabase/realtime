@@ -35,13 +35,11 @@ defmodule Realtime.Rpc do
   def enhanced_call(node, mod, func, args \\ [], opts \\ []) do
     timeout = Keyword.get(opts, :timeout, 15_000)
     {latency, response} = :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end)
-    tenant = Keyword.get(opts, :tenant, nil)
 
     Telemetry.execute(
-      [:realtime, :tenants, :rpc],
+      [:realtime, :rpc],
       %{latency: latency},
       %{
-        tenant: tenant,
         mod: mod,
         func: func,
         target_node: node,

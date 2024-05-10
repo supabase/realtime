@@ -5,7 +5,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
   alias Extensions.PostgresCdcRls, as: Rls
 
-  alias Realtime.Helpers, as: H
+  alias Realtime.Helpers
   alias Realtime.Rpc
   alias Realtime.Telemetry
 
@@ -51,10 +51,10 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
     Logger.metadata(external_id: id, project: id)
 
-    ssl_enforced = H.default_ssl_param(args)
+    ssl_enforced = Helpers.default_ssl_param(args)
 
     {:ok, conn} =
-      H.connect_db(
+      Helpers.connect_db(
         host,
         port,
         name,
@@ -86,7 +86,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
         %State{check_active_pids: ref, subscribers_tid: tid, delete_queue: delete_queue, id: id} =
           state
       ) do
-    H.cancel_timer(ref)
+    Helpers.cancel_timer(ref)
 
     ids =
       subscribers_by_node(tid)
@@ -112,19 +112,20 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
   end
 
   def handle_info(:check_delete_queue, %State{delete_queue: %{ref: ref, queue: q}} = state) do
-    H.cancel_timer(ref)
+    Helpers.cancel_timer(ref)
 
     new_queue =
       if !:queue.is_empty(q) do
-        {ids, q1} = H.queue_take(q, @max_delete_records)
-        Logger.error("Delete #{length(ids)} phantom subscribers from db")
+        {ids, q1} = Helpers.queue_take(q, @max_delete_records)
+        Logger.warning("Delete #{length(ids)} phantom subscribers from db")
 
         case Subscriptions.delete_multi(state.conn, ids) do
           {:ok, _} ->
             q1
 
           {:error, reason} ->
-            Logger.error("delete phantom subscriptions from the queue failed: #{inspect(reason)}")
+            Helpers.log_error("UnableToDeletePhantomSubscriptions", reason)
+
             q
         end
       else
@@ -193,7 +194,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       else
         case Rpc.call(node, __MODULE__, :not_alive_pids, [pids], timeout: 15_000) do
           {:badrpc, _} = error ->
-            Logger.error("Can't check pids on node #{inspect(node)}: #{inspect(error)}")
+            Helpers.log_error("UnableToCheckProcessesOnRemoteNode", error)
             acc
 
           pids ->
