@@ -52,8 +52,7 @@ defmodule RealtimeWeb.BroadcastController do
            BatchBroadcast.changeset(%BatchBroadcast{}, attrs),
          %Ecto.Changeset{changes: %{messages: messages}} = changeset,
          events_per_second_key = Tenants.events_per_second_key(tenant),
-         :ok <- check_rate_limit(events_per_second_key, tenant, length(messages)),
-         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id) do
+         :ok <- check_rate_limit(events_per_second_key, tenant, length(messages)) do
       events =
         Enum.map(messages, fn %{changes: %{topic: sub_topic} = event} -> {sub_topic, event} end)
 
@@ -67,6 +66,8 @@ defmodule RealtimeWeb.BroadcastController do
 
       rls_channels =
         if tenant.enable_authorization do
+          {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
           Helpers.transaction(db_conn, fn transaction_conn ->
             query = from(c in Channel, where: c.name in ^MapSet.to_list(channel_names))
 
@@ -104,6 +105,8 @@ defmodule RealtimeWeb.BroadcastController do
         end)
         |> Enum.map(fn {_, event} -> event end)
         |> Enum.each(fn %{topic: channel_name, payload: payload, event: event} ->
+          {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
           Helpers.transaction(db_conn, fn transaction_conn ->
             case permissions_for_channel(conn, transaction_conn, rls_channels, channel_name) do
               %Policies{
