@@ -59,28 +59,32 @@ defmodule RealtimeWeb.BroadcastController do
 
       channel_names = events |> Enum.map(fn {sub_topic, _} -> sub_topic end) |> MapSet.new()
 
-      if MapSet.size(channel_names) > 1 do
+      if MapSet.size(channel_names) > 1 && tenant.enable_authorization do
         Logger.warning(
           "This Broadcast is sending to multiple channels. Avoid this as it impact your performance."
         )
       end
 
-      query_to_check = from(c in Channel, where: c.name in ^MapSet.to_list(channel_names))
+      rls_channels =
+        if tenant.enable_authorization do
+          Helpers.transaction(db_conn, fn transaction_conn ->
+            query = from(c in Channel, where: c.name in ^MapSet.to_list(channel_names))
 
-      channels =
-        Helpers.transaction(db_conn, fn transaction_conn ->
-          transaction_conn
-          |> Repo.all(query_to_check, Channel)
-          |> then(fn {:ok, channels} -> channels end)
-        end)
+            transaction_conn
+            |> Repo.all(query, Channel)
+            |> then(fn {:ok, channels} -> channels end)
+          end)
+        else
+          []
+        end
 
-      channels_names_to_check =
-        channels
+      rls_channel_names =
+        rls_channels
         |> Enum.map(& &1.name)
         |> MapSet.new()
 
       # Handle events without authorization
-      MapSet.difference(channel_names, channels_names_to_check)
+      MapSet.difference(channel_names, rls_channel_names)
       |> Enum.each(fn channel_name ->
         events
         |> Enum.filter(fn {sub_topic, _} -> sub_topic == channel_name end)
@@ -91,7 +95,7 @@ defmodule RealtimeWeb.BroadcastController do
 
       if(tenant.enable_authorization) do
         # Handle events with authorization
-        channels_names_to_check
+        rls_channel_names
         |> Enum.reduce([], fn sub_topic, acc ->
           Enum.filter(events, fn
             {^sub_topic, _} -> true
@@ -101,7 +105,7 @@ defmodule RealtimeWeb.BroadcastController do
         |> Enum.map(fn {_, event} -> event end)
         |> Enum.each(fn %{topic: channel_name, payload: payload, event: event} ->
           Helpers.transaction(db_conn, fn transaction_conn ->
-            case permissions_for_channel(conn, transaction_conn, channels, channel_name) do
+            case permissions_for_channel(conn, transaction_conn, rls_channels, channel_name) do
               %Policies{
                 channel: %ChannelPolicies{read: true},
                 broadcast: %BroadcastPolicies{write: true}
