@@ -102,7 +102,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       {:error, [message: "Invalid token", claim: _claim, claim_val: _value]} ->
         msg = "Invalid JWT Token"
-        Logging.log_error_message(:warning, "InvalidJWTToken", msg)
+        Logging.log_error_message(:error, "InvalidJWTToken", msg)
 
       {:error, :too_many_channels} ->
         msg = "Too many channels"
