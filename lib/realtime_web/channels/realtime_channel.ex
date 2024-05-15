@@ -232,11 +232,6 @@ defmodule RealtimeWeb.RealtimeChannel do
             push_system_message("postgres_changes", socket, "ok", message, channel_name)
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
-          {:error, error} ->
-            Helpers.log_error("UnableToSubscribeToPostgres", error)
-            push_system_message("postgres_changes", socket, "error", error, channel_name)
-            {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
-
           error ->
             Helpers.log_error("UnableToSubscribeToPostgres", error)
             push_system_message("postgres_changes", socket, "error", error, channel_name)
