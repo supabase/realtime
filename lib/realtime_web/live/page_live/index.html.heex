@@ -5,17 +5,17 @@
 <div class="my-5">
   <h3 class="font-bold">Tools</h3>
   <ul>
-    <li><%= live_redirect("🔎 Inspector", to: Routes.inspector_index_path(@socket, :new)) %></li>
-    <li><%= live_redirect("🟢 Status", to: Routes.status_index_path(@socket, :index)) %></li>
+    <li><.link href={Routes.inspector_index_path(@socket, :new)}>🔎 Inspector</.link></li>
+    <li><.link href={Routes.inspector_index_path(@socket, :index)}>🟢 Status</.link></li>
   </ul>
 </div>
 
 <div class="my-5">
   <h3 class="font-bold">Links</h3>
   <ul>
-    <li><%= link("📗 Guides", to: "https://supabase.com/docs/guides/realtime") %></li>
-    <li><%= link("💾 Github", to: "https://github.com/supabase/realtime") %></li>
-    <li><%= link("💾 realtime-js", to: "https://github.com/supabase/realtime-js") %></li>
-    <li><%= link("👾 multiplayer.dev", to: "https://multiplayer.dev") %></li>
+    <li><.link href="https://supabase.com/docs/guides/realtime">📗 Guides</.link></li>
+    <li><.link href="https://github.com/supabase/realtime">💾 Github</.link></li>
+    <li><.link href="https://github.com/supabase/realtime-js">💾 realtime-js</.link></li>
+    <li><.link href="https://multiplayer.dev">👾 multiplayer.dev</.link></li>
   </ul>
 </div>

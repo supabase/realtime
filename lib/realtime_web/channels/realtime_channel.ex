@@ -102,19 +102,19 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       {:error, [message: "Invalid token", claim: _claim, claim_val: _value]} ->
         msg = "Invalid JWT Token"
-        Logging.log_error_message(:warning, "InvalidJWTToken", msg)
+        Logging.log_error_message(:error, "InvalidJWTToken", msg)
 
       {:error, :too_many_channels} ->
         msg = "Too many channels"
-        Logging.log_error_message(:warning, "ChannelRateLimitReached", msg)
+        Logging.log_error_message(:error, "ChannelRateLimitReached", msg)
 
       {:error, :too_many_connections} ->
         msg = "Too many connected users"
-        Logging.log_error_message(:warning, "ConnectionRateLimitReached", msg)
+        Logging.log_error_message(:error, "ConnectionRateLimitReached", msg)
 
       {:error, :too_many_joins} ->
         msg = "Too many joins per second"
-        Logging.log_error_message(:warning, "ClientJoinRateLimitReached", msg)
+        Logging.log_error_message(:error, "ClientJoinRateLimitReached", msg)
 
       {:error, :tenant_database_unavailable} ->
         Logging.log_error_message(
@@ -688,8 +688,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:ok, assign(socket, policies: nil)}
   end
 
-  defp maybe_get_channel(%Tenant{enable_authorization: true}, sub_topic, db_conn),
-    do: ChannelsCache.get_channel_by_name(sub_topic, db_conn)
+  defp maybe_get_channel(%Tenant{enable_authorization: true}, sub_topic, db_conn) do
+    ChannelsCache.get_channel_by_name(sub_topic, db_conn)
+  end
 
   defp maybe_get_channel(%Tenant{enable_authorization: false}, _, _), do: nil
 end

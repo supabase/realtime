@@ -111,15 +111,15 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
         {:ok, diff} = Replications.get_pg_stat_activity_diff(conn, db_pid)
 
-        Logger.warn(
+        Logger.warning(
           "Database PID #{db_pid} found in pg_stat_activity with state_change diff of #{diff}"
         )
 
         if retry_count > 3 do
           case Replications.terminate_backend(conn, slot_name) do
-            {:ok, :terminated} -> Logger.warn("Replication slot in use - terminating")
-            {:error, :slot_not_found} -> Logger.warn("Replication slot not found")
-            {:error, error} -> Logger.warn("Error terminating backend: #{to_log(error)}")
+            {:ok, :terminated} -> Logger.warning("Replication slot in use - terminating")
+            {:error, :slot_not_found} -> Logger.warning("Replication slot not found")
+            {:error, error} -> Logger.warning("Error terminating backend: #{inspect(error)}")
           end
         end
 

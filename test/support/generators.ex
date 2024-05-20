@@ -54,7 +54,6 @@ defmodule Generators do
       |> Realtime.Channels.create_channel(db_conn)
 
     Process.exit(pid, :normal)
-    :timer.sleep(100)
     channel
   end
 

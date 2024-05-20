@@ -6,7 +6,6 @@ defmodule RealtimeWeb.TenantControllerTest do
   import Realtime.Helpers, only: [encrypt!: 2, transaction: 2]
 
   alias Realtime.Api.Tenant
-  alias Realtime.Helpers
   alias Realtime.PromEx.Plugins.Tenants
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
@@ -144,32 +143,30 @@ defmodule RealtimeWeb.TenantControllerTest do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         assert Cache.get_tenant_by_external_id(tenant.external_id)
 
-        {:ok, db_conn} = Helpers.check_tenant_connection(tenant, "realtime_test")
+        {:ok, db_conn} =
+          start_supervised(
+            {Postgrex,
+             [
+               host: "localhost",
+               username: "postgres",
+               password: "postgres",
+               database: "postgres",
+               port: 5433
+             ]}
+          )
 
         assert %{rows: [["supabase_realtime_replication_slot"]]} =
                  Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
 
         conn = delete(conn, Routes.tenant_path(conn, :delete, tenant.external_id))
         assert response(conn, 204)
-        :timer.sleep(1000)
 
-        {:ok, db_conn} =
-          start_supervised(
-            {Postgrex,
-             [
-               host: "localhost",
-               database: "realtime_test",
-               username: "postgres",
-               password: "postgres",
-               after_connect: &Postgrex.query!(&1, "set search_path=realtime", [])
-             ]}
-          )
+        :timer.sleep(5000)
+        refute Cache.get_tenant_by_external_id(tenant.external_id)
+        refute Tenants.get_tenant_by_external_id(tenant.external_id)
 
         assert {:ok, %{rows: []}} =
                  Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
-
-        refute Cache.get_tenant_by_external_id(tenant.external_id)
-        refute Tenants.get_tenant_by_external_id(tenant.external_id)
       end
     end
 

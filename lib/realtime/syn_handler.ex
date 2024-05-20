@@ -17,7 +17,7 @@ defmodule Realtime.SynHandler do
   def on_process_unregistered(mod, name, _pid, _meta, reason) do
     case reason do
       :syn_conflict_resolution ->
-        Logger.warn("#{mod} terminated: #{inspect(name)} #{node()}")
+        Logger.warning("#{mod} terminated: #{inspect(name)} #{node()}")
 
       _ ->
         topic = topic(mod)
@@ -55,7 +55,7 @@ defmodule Realtime.SynHandler do
     if node() == node(stop) do
       spawn(fn -> resolve_conflict(mod, stop, name) end)
     else
-      Logger.warn("Resolving #{name} conflict, remote pid: #{inspect(stop)}")
+      Logger.warning("Resolving #{name} conflict, remote pid: #{inspect(stop)}")
     end
 
     keep
@@ -76,7 +76,7 @@ defmodule Realtime.SynHandler do
     topic = topic(mod)
     Endpoint.broadcast(topic <> ":" <> name, topic <> "_down", nil)
 
-    Logger.warn(
+    Logger.warning(
       "Resolving #{name} conflict, stop local pid: #{inspect(stop)}, response: #{inspect(resp)}"
     )
   end

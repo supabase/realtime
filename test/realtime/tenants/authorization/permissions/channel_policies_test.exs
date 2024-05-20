@@ -88,18 +88,19 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
 
     @tag role: "anon", policies: []
     test "handles database errors", context do
-      assert {:error, :rollback} =
-               Postgrex.transaction(context.db_conn, fn transaction_conn ->
-                 Authorization.set_conn_config(transaction_conn, context.authorization_context)
-                 Process.unlink(context.db_conn)
-                 Process.exit(context.db_conn, :kill)
+      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+        Authorization.set_conn_config(transaction_conn, context.authorization_context)
+        Process.unlink(context.db_conn)
+        Process.exit(context.db_conn, :shutdown)
+        :timer.sleep(100)
 
+        assert {:error, _} =
                  ChannelPolicies.check_read_policies(
                    transaction_conn,
                    %Policies{},
                    context.authorization_context
                  )
-               end)
+      end)
     end
   end
 

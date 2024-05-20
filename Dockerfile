@@ -12,9 +12,9 @@
 #   - https://pkgs.org/ - resource for finding needed packages
 #   - Ex: hexpm/elixir:1.14.0-erlang-25.0.4-debian-bullseye-20220801-slim
 #
-ARG ELIXIR_VERSION=1.14.3
-ARG OTP_VERSION=25.3
-ARG DEBIAN_VERSION=bullseye-20230227-slim
+ARG ELIXIR_VERSION=1.16.2
+ARG OTP_VERSION=26.2.5
+ARG DEBIAN_VERSION=bookworm-20240513-slim
 
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
@@ -30,9 +30,9 @@ FROM ${BUILDER_IMAGE} as builder
 
 # install build dependencies
 RUN apt-get update -y \
-  && apt-get install curl -y \
-  && apt-get install -y build-essential git \
-  && apt-get clean
+    && apt-get install curl -y \
+    && apt-get install -y build-essential git \
+    && apt-get clean
 
 # install npm
 RUN set -uex; \
@@ -40,10 +40,10 @@ RUN set -uex; \
     apt-get install -y ca-certificates curl gnupg; \
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+    | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
     NODE_MAJOR=18; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
-     > /etc/apt/sources.list.d/nodesource.list; \
+    > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
     apt-get -qy install nodejs;
 
@@ -52,7 +52,7 @@ WORKDIR /app
 
 # install hex + rebar
 RUN mix local.hex --force && \
-  mix local.rebar --force
+    mix local.rebar --force
 
 # set build ENV
 ENV MIX_ENV="prod"
@@ -76,9 +76,9 @@ COPY assets assets
 
 # compile assets with esbuild and npm
 RUN cd assets \
-  && npm install \
-  && cd .. \
-  && mix assets.deploy
+    && npm install \
+    && cd .. \
+    && mix assets.deploy
 
 # Compile the release
 RUN mix compile
@@ -94,7 +94,7 @@ RUN mix release
 FROM ${RUNNER_IMAGE}
 
 RUN apt-get update -y && apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini curl \
-  && apt-get clean && rm -f /var/lib/apt/lists/*_*
+    && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Set the locale
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen

@@ -420,7 +420,7 @@ defmodule Realtime.Helpers do
              []
            ) do
       Enum.each(rows, fn [pid] ->
-        Postgrex.query(conn, "select pg_terminate_backend(#{pid})", [])
+        Postgrex.query!(conn, "select pg_terminate_backend(#{pid})", [])
       end)
 
       :ok
