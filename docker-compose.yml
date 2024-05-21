@@ -44,6 +44,7 @@ services:
       SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
       ERL_AFLAGS: -proto_dist inet_tcp
       ENABLE_TAILSCALE: "false"
+      RLIMIT_NOFILE: 1000000
       DNS_NODES: "''"
       ENABLE_ERL_CRASH_DUMP: true
       ERL_CRASH_DUMP_FOLDER: /tmp
