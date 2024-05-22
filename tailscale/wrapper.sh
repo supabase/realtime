@@ -63,6 +63,13 @@ fi
 
 echo "Starting Realtime"
 
+ulimit -n
+
+if [ ! -z "$RLIMIT_NOFILE" ]; then
+    echo "Setting RLIMIT_NOFILE to ${RLIMIT_NOFILE}"
+    ulimit -Sn "$RLIMIT_NOFILE"
+fi
+
 if [ "${AWS_EXECUTION_ENV:=none}" = "AWS_ECS_FARGATE" ]; then
     echo "Running migrations"
     sudo -E -u nobody /app/bin/migrate

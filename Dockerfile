@@ -123,11 +123,8 @@ COPY --from=tailscale /app/tailscaled /tailscale/tailscaled
 COPY --from=tailscale /app/tailscale /tailscale/tailscale
 RUN mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
 
-ENV RLIMIT_NOFILE 100000
-COPY limits.sh /app/limits.sh
-ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/app/limits.sh"]
+ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/tailscale/wrapper.sh"]
 
-CMD ["/tailscale/wrapper.sh"]
 # Appended by flyctl
 ENV ECTO_IPV6 true
 ENV ERL_AFLAGS "-proto_dist inet6_tcp"
