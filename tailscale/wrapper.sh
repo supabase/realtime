@@ -10,6 +10,7 @@ if [ "${ENABLE_TAILSCALE-}" = true ]; then
     /tailscale/tailscale up --authkey=${TAILSCALE_AUTHKEY} --hostname="${TAILSCALE_APP_NAME}" --accept-routes=true
 fi
 
+ulimit -n
 export ERL_CRASH_DUMP=/tmp/erl_crash.dump
 
 function upload_crash_dump_to_s3 {
@@ -68,4 +69,6 @@ if [ "${AWS_EXECUTION_ENV:=none}" = "AWS_ECS_FARGATE" ]; then
     sudo -E -u nobody /app/bin/migrate
 fi
 
-sudo -E -u nobody /app/bin/server
+ulimit -n
+
+sudo -E -u nobody /app/limits.sh
