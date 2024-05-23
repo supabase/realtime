@@ -3,10 +3,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
   use Realtime.DataCase, async: false
 
   import Ecto.Query
-
-  alias Realtime.Api.Channel
-  alias Realtime.Channels
-  alias Realtime.Helpers
+  alias Realtime.Api.Message
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -22,6 +19,8 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
     test "authenticated user has read policies", context do
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
+                 Realtime.Repo.all(transaction_conn, Message, Message)
+
                  Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
                  ChannelPolicies.check_read_policies(
@@ -51,8 +50,8 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
     end
 
     @tag role: "authenticated", policies: [:authenticated_all_channels_read]
-    test "no channel with authenticated and all channels returns true", context do
-      authorization_context = %{context.authorization_context | channel: nil}
+    test "no channel with authenticated returns false", context do
+      authorization_context = %{context.authorization_context | channel_name: nil}
 
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
@@ -65,12 +64,12 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
                  )
                end)
 
-      assert {:ok, %Policies{channel: %ChannelPolicies{read: true}}} = result
+      assert {:ok, %Policies{channel: %ChannelPolicies{read: false}}} = result
     end
 
     @tag role: "anon", policies: [:authenticated_all_channels_read]
     test "no channel with anon in context returns false", context do
-      authorization_context = %{context.authorization_context | channel: nil}
+      authorization_context = %{context.authorization_context | channel_name: nil}
 
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
@@ -109,9 +108,9 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
 
     @tag role: "authenticated",
          policies: [:authenticated_read_channel, :authenticated_write_channel]
-    test "authenticated user has write policies and reverts updated_at", context do
-      query = from(c in Channel, where: c.id == ^context.channel.id)
-      {:ok, %Channel{updated_at: updated_at}} = Repo.one(context.db_conn, query, Channel)
+    test "authenticated user has write policies", context do
+      query = from(m in Message, where: m.channel_name == ^context.channel_name)
+      assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
 
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
@@ -125,8 +124,8 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
                end)
 
       assert {:ok, %Policies{channel: %ChannelPolicies{write: true}}} = result
-      # Ensure updated_at stays with the initial value
-      assert {:ok, %{updated_at: ^updated_at}} = Repo.one(context.db_conn, query, Channel)
+      # Ensure policy check does not polute database
+      assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
     end
 
     @tag role: "anon", policies: [:authenticated_read_channel, :authenticated_write_channel]
@@ -148,11 +147,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
     @tag role: "anon",
          policies: [:authenticated_all_channels_read, :authenticated_all_channels_insert]
     test "no channel and authenticated returns false", context do
-      authorization_context = %{
-        context.authorization_context
-        | channel: nil,
-          channel_name: nil
-      }
+      authorization_context = %{context.authorization_context | channel_name: nil}
 
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
@@ -168,73 +163,10 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
       assert {:ok, %Policies{channel: %ChannelPolicies{write: false}}} = result
     end
 
-    @tag role: "authenticated",
-         policies: [
-           :authenticated_all_channels_read,
-           :authenticated_all_channels_insert
-         ]
-    test "no channel, channel name in context, allow policy and channel does not exist returns true",
-         context do
-      channel_name = random_string()
-
-      authorization_context = %{
-        context.authorization_context
-        | channel: nil,
-          channel_name: channel_name
-      }
-
-      Helpers.transaction(context.db_conn, fn transaction_conn ->
-        Authorization.set_conn_config(transaction_conn, authorization_context)
-
-        assert {:ok, result} =
-                 ChannelPolicies.check_write_policies(
-                   transaction_conn,
-                   %Policies{},
-                   authorization_context
-                 )
-
-        assert result == %Policies{channel: %ChannelPolicies{write: true}}
-
-        assert {:error, :not_found} = Channels.get_channel_by_name(channel_name, transaction_conn)
-      end)
-    end
-
-    @tag role: "authenticated",
-         policies: [
-           :authenticated_all_channels_read,
-           :authenticated_all_channels_insert
-         ]
-    test "no channel, channel name in context, allow policy and channel exists returns true",
-         context do
-      channel_name = random_string()
-      channel_fixture(context.tenant, %{name: channel_name})
-
-      authorization_context = %{
-        context.authorization_context
-        | channel: nil,
-          channel_name: channel_name
-      }
-
-      Helpers.transaction(context.db_conn, fn transaction_conn ->
-        Authorization.set_conn_config(transaction_conn, authorization_context)
-
-        assert {:ok, result} =
-                 ChannelPolicies.check_write_policies(
-                   transaction_conn,
-                   %Policies{},
-                   authorization_context
-                 )
-
-        assert result == %Policies{channel: %ChannelPolicies{write: true}}
-
-        assert {:ok, _} = Channels.get_channel_by_name(channel_name, transaction_conn)
-      end)
-    end
-
     @tag role: "anon",
          policies: [:authenticated_all_channels_read, :authenticated_all_channels_insert]
     test "no channel and anon returns false", context do
-      authorization_context = %{context.authorization_context | channel: nil}
+      authorization_context = %{context.authorization_context | channel_name: nil}
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -258,12 +190,10 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
     {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
     {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
-    clean_table(db_conn, "realtime", "channels")
-    clean_table(db_conn, "realtime", "broadcasts")
+    clean_table(db_conn, "realtime", "messages")
 
-    channel = channel_fixture(tenant)
-
-    create_rls_policies(db_conn, context.policies, channel)
+    message = message_fixture(tenant)
+    create_rls_policies(db_conn, context.policies, message)
 
     claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
@@ -271,19 +201,18 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
 
     authorization_context =
       Authorization.build_authorization_params(%{
-        channel: channel,
         headers: [{"header-1", "value-1"}],
+        channel_name: message.channel_name,
         jwt: jwt,
         claims: claims,
-        role: claims.role,
-        channel_name: channel.name
+        role: claims.role
       })
 
     on_exit(fn -> Process.exit(db_conn, :normal) end)
 
     %{
       tenant: tenant,
-      channel: channel,
+      channel_name: message.channel_name,
       db_conn: db_conn,
       authorization_context: authorization_context
     }

@@ -10,8 +10,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
   import Ecto.Query
   import Realtime.Helpers, only: [to_log: 1, log_error: 2]
 
-  alias Realtime.Api.Presence
-  alias Realtime.Api.Channel
+  alias Realtime.Api.Message
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -25,76 +24,72 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
           write: boolean()
         }
   @impl true
-  def check_read_policies(_conn, policies, %Authorization{channel: nil}) do
+  def check_read_policies(_conn, policies, %Authorization{channel_name: nil}) do
     {:ok, Policies.update_policies(policies, :presence, :read, false)}
   end
 
-  def check_read_policies(conn, %Policies{} = policies, %Authorization{
-        channel: %Channel{id: channel_id}
-      }) do
-    Postgrex.transaction(conn, fn transaction_conn ->
-      query = from(b in Presence, where: b.channel_id == ^channel_id)
+  def check_read_policies(conn, %Policies{} = policies, %Authorization{channel_name: channel_name}) do
+    query =
+      from(m in Message,
+        where: m.channel_name == ^channel_name,
+        where: m.feature == :presence,
+        limit: 1
+      )
 
-      case Repo.one(conn, query, Presence, mode: :savepoint) do
-        {:ok, %Presence{}} ->
-          Policies.update_policies(policies, :presence, :read, true)
+    case Repo.all(conn, query, Message, mode: :savepoint) do
+      {:ok, []} ->
+        {:ok, Policies.update_policies(policies, :presence, :read, false)}
 
-        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-          Policies.update_policies(policies, :presence, :read, false)
+      {:ok, [%Message{}]} ->
+        {:ok, Policies.update_policies(policies, :presence, :read, true)}
 
-        {:error, :not_found} ->
-          Policies.update_policies(policies, :presence, :read, false)
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+        {:ok, Policies.update_policies(policies, :presence, :read, false)}
 
-        {:error, error} ->
-          log_error(
-            "UnableToSetPolicies",
-            "Error getting policies for connection: #{to_log(error)}"
-          )
+      {:error, :not_found} ->
+        {:ok, Policies.update_policies(policies, :presence, :read, false)}
 
-          Postgrex.rollback(transaction_conn, error)
-      end
-    end)
+      {:error, error} ->
+        log_error(
+          "UnableToSetPolicies",
+          "Error getting policies for connection: #{to_log(error)}"
+        )
+
+        Postgrex.rollback(conn, error)
+    end
   end
 
   @impl true
-  def check_write_policies(_conn, policies, %Authorization{channel: nil}) do
+  def check_write_policies(_conn, policies, %Authorization{channel_name: nil}) do
     {:ok, Policies.update_policies(policies, :presence, :write, false)}
   end
 
-  def check_write_policies(conn, policies, %Authorization{
-        channel: %Channel{id: channel_id}
-      }) do
-    Postgrex.transaction(conn, fn transaction_conn ->
-      query = from(b in Presence, where: b.channel_id == ^channel_id)
+  def check_write_policies(conn, policies, %Authorization{channel_name: channel_name}) do
+    changeset =
+      Message.changeset(%Message{}, %{
+        channel_name: channel_name,
+        feature: :presence,
+        event: "dummy"
+      })
 
-      case Repo.one(conn, query, Presence, mode: :savepoint) do
-        {:ok, %Presence{} = broadcast} ->
-          zero = NaiveDateTime.new!(~D[1970-01-01], ~T[00:00:00])
-          changeset = Presence.check_changeset(broadcast, %{updated_at: zero})
+    case Repo.insert(conn, changeset, Message, mode: :savepoint) do
+      {:ok, %Message{}} ->
+        Postgrex.query!(conn, "ROLLBACK AND CHAIN", [])
+        {:ok, Policies.update_policies(policies, :presence, :write, true)}
 
-          case Repo.update(conn, changeset, Presence, mode: :savepoint) do
-            {:ok, %Presence{updated_at: ^zero}} ->
-              Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
-              Policies.update_policies(policies, :presence, :write, true)
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+        {:ok, Policies.update_policies(policies, :presence, :write, false)}
 
-            {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-              Policies.update_policies(policies, :presence, :write, false)
+      {:error, :not_found} ->
+        {:ok, Policies.update_policies(policies, :presence, :write, false)}
 
-            {:error, :not_found} ->
-              Policies.update_policies(policies, :presence, :write, false)
+      {:error, error} ->
+        log_error(
+          "UnableToSetPolicies",
+          "Error getting policies for connection: #{to_log(error)}"
+        )
 
-            {:error, error} ->
-              log_error(
-                "UnableToSetPolicies",
-                "Error getting policies for connection: #{to_log(error)}"
-              )
-
-              Postgrex.rollback(transaction_conn, error)
-          end
-
-        {:error, :not_found} ->
-          Policies.update_policies(policies, :presence, :write, false)
-      end
-    end)
+        Postgrex.rollback(conn, error)
+    end
   end
 end

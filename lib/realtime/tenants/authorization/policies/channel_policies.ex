@@ -12,7 +12,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
   import Ecto.Query
   import Realtime.Helpers, only: [to_log: 1, log_error: 2]
 
-  alias Realtime.Api.Channel
+  alias Realtime.Api.Message
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -27,113 +27,67 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
         }
 
   @impl true
-  def check_read_policies(conn, %Policies{} = policies, %Authorization{channel: nil}) do
-    Postgrex.transaction(conn, fn transaction_conn ->
-      case Repo.all(transaction_conn, Channel, Channel, mode: :savepoint) do
-        {:ok, channels} when channels != [] ->
-          Policies.update_policies(policies, :channel, :read, true)
-
-        {:ok, _} ->
-          Policies.update_policies(policies, :channel, :read, false)
-
-        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-          Policies.update_policies(policies, :channel, :read, false)
-
-        {:error, error} ->
-          log_error(
-            "UnableToSetPolicies",
-            "Error getting policies for connection: #{to_log(error)}"
-          )
-
-          Postgrex.rollback(transaction_conn, error)
-      end
-    end)
+  def check_read_policies(_conn, %Policies{} = policies, %Authorization{channel_name: nil}) do
+    {:ok, Policies.update_policies(policies, :channel, :read, false)}
   end
 
-  def check_read_policies(conn, %Policies{} = policies, %Authorization{channel: channel}) do
-    query = from(c in Channel, where: c.id == ^channel.id)
+  def check_read_policies(conn, %Policies{} = policies, %Authorization{channel_name: channel_name}) do
+    query = from(m in Message, where: m.channel_name == ^channel_name)
 
-    Postgrex.transaction(conn, fn transaction_conn ->
-      case Repo.one(transaction_conn, query, Channel) do
-        {:ok, %Channel{}} ->
-          Policies.update_policies(policies, :channel, :read, true)
+    case Repo.all(conn, query, Message, mode: :savepoint) do
+      {:ok, []} ->
+        {:ok, Policies.update_policies(policies, :channel, :read, false)}
 
-        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-          Policies.update_policies(policies, :channel, :read, false)
+      {:ok, [%Message{} | _]} ->
+        {:ok, Policies.update_policies(policies, :channel, :read, true)}
 
-        {:error, :not_found} ->
-          Policies.update_policies(policies, :channel, :read, false)
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+        {:ok, Policies.update_policies(policies, :channel, :read, false)}
 
-        {:error, error} ->
-          log_error(
-            "UnableToSetPolicies",
-            "Error getting policies for connection: #{to_log(error)}"
-          )
+      {:error, :not_found} ->
+        {:ok, Policies.update_policies(policies, :channel, :read, false)}
 
-          Postgrex.rollback(transaction_conn, error)
-      end
-    end)
+      {:error, error} ->
+        log_error(
+          "UnableToSetPolicies",
+          "Error getting policies for connection: #{to_log(error)}"
+        )
+
+        Postgrex.rollback(conn, error)
+    end
   end
 
   @impl true
-  def check_write_policies(_conn, policies, %Authorization{channel: nil, channel_name: nil}) do
+  def check_write_policies(_conn, policies, %Authorization{channel_name: nil}) do
     {:ok, Policies.update_policies(policies, :channel, :write, false)}
   end
 
-  def check_write_policies(conn, policies, %Authorization{channel: channel})
-      when not is_nil(channel) do
-    Postgrex.transaction(conn, fn transaction_conn ->
-      zero = NaiveDateTime.new!(~D[1970-01-01], ~T[00:00:00])
-      changeset = Channel.check_changeset(channel, %{updated_at: zero})
-
-      case Repo.update(transaction_conn, changeset, Channel, mode: :savepoint) do
-        {:ok, %Channel{updated_at: ^zero}} ->
-          Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
-          Policies.update_policies(policies, :channel, :write, true)
-
-        {:ok, _} ->
-          Policies.update_policies(policies, :channel, :write, false)
-
-        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-          Policies.update_policies(policies, :channel, :write, false)
-
-        {:error, :not_found} ->
-          Policies.update_policies(policies, :channel, :write, false)
-
-        {:error, error} ->
-          log_error(
-            "UnableToSetPolicies",
-            "Error getting policies for connection: #{to_log(error)}"
-          )
-
-          Postgrex.rollback(transaction_conn, error)
-      end
-    end)
-  end
-
   def check_write_policies(conn, policies, %Authorization{channel_name: channel_name}) do
-    Postgrex.transaction(conn, fn transaction_conn ->
-      changeset = Channel.changeset(%Channel{}, %{name: channel_name})
+    changeset =
+      Message.changeset(%Message{}, %{
+        channel_name: channel_name,
+        feature: :presence,
+        event: "test"
+      })
 
-      case Repo.insert(transaction_conn, changeset, Channel, mode: :savepoint) do
-        {:ok, %Channel{}} ->
-          Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
-          Policies.update_policies(policies, :channel, :write, true)
+    case Repo.insert(conn, changeset, Message, mode: :savepoint) do
+      {:ok, %Message{}} ->
+        Postgrex.query!(conn, "ROLLBACK AND CHAIN", [])
+        {:ok, Policies.update_policies(policies, :channel, :write, true)}
 
-        %Ecto.Changeset{errors: [name: {"has already been taken", []}]} ->
-          Policies.update_policies(policies, :channel, :write, true)
+      %Ecto.Changeset{errors: [name: {"has already been taken", []}]} ->
+        {:ok, Policies.update_policies(policies, :channel, :write, true)}
 
-        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-          Policies.update_policies(policies, :channel, :write, false)
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+        {:ok, Policies.update_policies(policies, :channel, :write, false)}
 
-        {:error, error} ->
-          log_error(
-            "UnableToSetPolicies",
-            "Error getting policies for connection: #{to_log(error)}"
-          )
+      {:error, error} ->
+        log_error(
+          "UnableToSetPolicies",
+          "Error getting policies for connection: #{to_log(error)}"
+        )
 
-          Postgrex.rollback(transaction_conn, error)
-      end
-    end)
+        Postgrex.rollback(conn, error)
+    end
   end
 end

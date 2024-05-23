@@ -1,31 +1,24 @@
-defmodule Realtime.Api.Broadcast do
+defmodule Realtime.Api.Message do
   @moduledoc """
-  Defines the Broadcast schema
+  Defines the Message schema to be used to check RLS authorization policies
   """
   use Ecto.Schema
   import Ecto.Changeset
-  @derive {Jason.Encoder, only: [:inserted_at, :updated_at, :id, :channel_id]}
-
-  @type t :: %__MODULE__{}
 
   @schema_prefix "realtime"
-  schema "broadcasts" do
+  schema "messages" do
+    field :channel_name, :string
+    field :feature, Ecto.Enum, values: [:broadcast, :presence]
+    field :event, :string
     timestamps()
-
-    belongs_to(:channel, Realtime.Api.Channel)
   end
 
-  def changeset(broadcast, attrs) do
-    broadcast
-    |> cast(attrs, [:inserted_at, :updated_at, :channel_id])
+  def changeset(message, attrs) do
+    message
+    |> cast(attrs, [:channel_name, :feature, :event, :inserted_at, :updated_at])
+    |> validate_required([:channel_name, :feature, :event])
     |> put_timestamp(:updated_at)
     |> maybe_put_timestamp(:inserted_at)
-  end
-
-  def check_changeset(broadcast, attrs) do
-    broadcast
-    |> change()
-    |> put_change(:updated_at, attrs[:updated_at])
   end
 
   defp put_timestamp(changeset, field) do

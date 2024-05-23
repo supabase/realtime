@@ -65,12 +65,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
   describe "get_authorizations for Phoenix.Socket" do
     @tag role: "authenticated",
          policies: [
-           :authenticated_read_channel,
-           :authenticated_write_channel,
-           :authenticated_read_broadcast,
-           :authenticated_write_broadcast,
-           :authenticated_read_presence,
-           :authenticated_write_presence
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
          ]
     test "authenticated user has expected policies", context do
       {:ok, conn} =
@@ -89,12 +85,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
     @tag role: "anon",
          policies: [
-           :authenticated_read_channel,
-           :authenticated_write_channel,
-           :authenticated_read_broadcast,
-           :authenticated_write_broadcast,
-           :authenticated_read_presence,
-           :authenticated_write_presence
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
          ]
     test "anon user has no policies", context do
       {:ok, conn} =
@@ -112,46 +104,16 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
   end
 
-  @tag role: "non_existant",
-       policies: [
-         :authenticated_read_channel,
-         :authenticated_write_channel,
-         :authenticated_read_broadcast,
-         :authenticated_write_broadcast,
-         :authenticated_read_presence,
-         :authenticated_write_presence
-       ]
-  test "on error return error and unauthorized on channel", %{db_conn: db_conn} do
-    authorization_context =
-      Authorization.build_authorization_params(%{
-        channel: nil,
-        headers: [{"header-1", "value-1"}],
-        jwt: "jwt",
-        claims: %{},
-        role: "non_existant"
-      })
-
-    assert {:error,
-            %DBConnection.TransactionError{status: :error, message: "transaction is aborted"}} =
-             Authorization.get_authorizations(
-               Phoenix.ConnTest.build_conn(),
-               db_conn,
-               authorization_context
-             )
-  end
-
   def rls_context(context) do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
-    clean_table(db_conn, "realtime", "presences")
-    clean_table(db_conn, "realtime", "broadcasts")
-    clean_table(db_conn, "realtime", "channels")
-    channel = channel_fixture(tenant)
+    clean_table(db_conn, "realtime", "messages")
+    channel_name = random_string()
 
-    create_rls_policies(db_conn, context.policies, channel)
+    create_rls_policies(db_conn, context.policies, %{channel_name: channel_name})
 
     claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
@@ -160,7 +122,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
     authorization_context =
       Authorization.build_authorization_params(%{
-        channel: channel,
+        channel_name: channel_name,
         jwt: jwt,
         claims: claims,
         headers: [{"header-1", "value-1"}],
@@ -170,7 +132,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     on_exit(fn -> Process.exit(db_conn, :normal) end)
 
     %{
-      channel: channel,
+      channel: channel_name,
       db_conn: db_conn,
       authorization_context: authorization_context
     }

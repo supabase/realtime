@@ -231,9 +231,12 @@ defmodule Realtime.Tenants do
     tenant_topic(external_id, sub_topic, public?)
   end
 
-  def tenant_topic(external_id, sub_topic, public?) do
-    private_prefix = if public?, do: "", else: ":private"
-    "#{external_id}#{private_prefix}:#{sub_topic}"
+  def tenant_topic(external_id, sub_topic, false) do
+    "#{external_id}:private:#{sub_topic}"
+  end
+
+  def tenant_topic(external_id, sub_topic, true) do
+    "#{external_id}:#{sub_topic}"
   end
 
   @doc """

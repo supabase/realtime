@@ -41,17 +41,22 @@ defmodule Generators do
     tenant
   end
 
-  def channel_fixture(tenant, override \\ %{}) do
+  def message_fixture(tenant, override \\ %{}) do
     {:ok, pid} = Connect.connect(tenant.external_id, restart: :transient)
     {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
-    create_attrs = %{"name" => random_string()}
+    create_attrs = %{
+      "channel_name" => random_string(),
+      "feature" => Enum.random([:presence, :broadcast]),
+      "event" => random_string()
+    }
+
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
 
     {:ok, channel} =
       create_attrs
       |> Map.merge(override)
-      |> Realtime.Channels.create_channel(db_conn)
+      |> Realtime.Messages.create_message(db_conn)
 
     Process.exit(pid, :normal)
     channel
@@ -103,7 +108,7 @@ defmodule Generators do
   def policy_query(:authenticated_all_channels_read, _) do
     """
     CREATE POLICY authenticated_all_channels_read
-    ON realtime.channels FOR SELECT
+    ON realtime.messages FOR SELECT
     TO authenticated
     USING ( true );
     """
@@ -112,85 +117,81 @@ defmodule Generators do
   def policy_query(:authenticated_all_channels_insert, _) do
     """
     CREATE POLICY authenticated_all_channels_write
-    ON realtime.channels FOR INSERT
+    ON realtime.messages FOR INSERT
     TO authenticated
     WITH CHECK ( true );
     """
   end
 
-  def policy_query(:authenticated_all_channels_update, _) do
-    """
-    CREATE POLICY authenticated_all_channels_update
-    ON realtime.channels FOR UPDATE
-    TO authenticated
-    USING ( true )
-    WITH CHECK ( true );
-    """
-  end
-
-  def policy_query(:authenticated_all_channels_delete, _) do
-    """
-    CREATE POLICY authenticated_all_channels_delete
-    ON realtime.channels FOR DELETE
-    TO authenticated
-    USING ( true );
-    """
-  end
-
-  def policy_query(:authenticated_read_channel, %{name: name}) do
+  def policy_query(:authenticated_read_channel, %{channel_name: name}) do
     """
     CREATE POLICY authenticated_read_channel_#{name}
-    ON realtime.channels FOR SELECT
+    ON realtime.messages FOR SELECT
     TO authenticated
     USING ( realtime.channel_name() = '#{name}' );
     """
   end
 
-  def policy_query(:authenticated_write_channel, %{name: name}) do
+  def policy_query(:authenticated_write_channel, %{channel_name: name}) do
     """
     CREATE POLICY authenticated_write_channel_#{name}
-    ON realtime.channels FOR UPDATE
+    ON realtime.messages FOR INSERT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' )
     WITH CHECK ( realtime.channel_name() = '#{name}' );
     """
   end
 
-  def policy_query(:authenticated_read_broadcast, %{name: name}) do
+  def policy_query(:authenticated_read_broadcast, %{channel_name: name}) do
     """
     CREATE POLICY authenticated_read_broadcast_#{name}
-    ON realtime.broadcasts FOR SELECT
+    ON realtime.messages FOR SELECT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' );
+    USING ( realtime.channel_name() = '#{name}' AND realtime.messages.feature = 'broadcast' );
     """
   end
 
-  def policy_query(:authenticated_write_broadcast, %{name: name}) do
+  def policy_query(:authenticated_write_broadcast, %{channel_name: name}) do
     """
     CREATE POLICY authenticated_write_broadcast_#{name}
-    ON realtime.broadcasts FOR UPDATE
+    ON realtime.messages FOR INSERT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' )
-    WITH CHECK ( realtime.channel_name() = '#{name}' );
+    WITH CHECK ( realtime.channel_name() = '#{name}' AND realtime.messages.feature = 'broadcast');
     """
   end
 
-  def policy_query(:authenticated_read_presence, %{name: name}) do
+  def policy_query(:authenticated_read_presence, %{channel_name: name}) do
     """
     CREATE POLICY authenticated_read_presence_#{name}
-    ON realtime.presences FOR SELECT
+    ON realtime.messages FOR SELECT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' );
+    USING ( realtime.channel_name() = '#{name}' AND realtime.messages.feature = 'presence' );
     """
   end
 
-  def policy_query(:authenticated_write_presence, %{name: name}) do
+  def policy_query(:authenticated_write_presence, %{channel_name: name}) do
     """
     CREATE POLICY authenticated_write_presence_#{name}
-    ON realtime.presences FOR UPDATE
+    ON realtime.messages FOR INSERT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' )
-    WITH CHECK ( realtime.channel_name() = '#{name}' );
+    WITH CHECK ( realtime.channel_name() = '#{name}' AND realtime.messages.feature = 'presence' );
+    """
+  end
+
+  def policy_query(:authenticated_read_broadcast_and_presence, %{channel_name: name}) do
+    """
+    CREATE POLICY authenticated_read_presence_#{name}
+    ON realtime.messages FOR SELECT
+    TO authenticated
+    USING ( realtime.channel_name() = '#{name}' AND realtime.messages.feature IN ('presence', 'broadcast') );
+    """
+  end
+
+  def policy_query(:authenticated_write_broadcast_and_presence, %{channel_name: name}) do
+    """
+    CREATE POLICY authenticated_write_presence_#{name}
+    ON realtime.messages FOR INSERT
+    TO authenticated
+    WITH CHECK ( realtime.channel_name() = '#{name}' AND realtime.messages.feature IN ('presence', 'broadcast') );
     """
   end
 end
