@@ -65,7 +65,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
       Message.changeset(%Message{}, %{
         channel_name: channel_name,
         feature: :broadcast,
-        event: "dummy"
+        event: "check_write_policy"
       })
 
     case Repo.insert(conn, changeset, Message, mode: :savepoint) do

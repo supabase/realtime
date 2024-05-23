@@ -49,9 +49,7 @@ defmodule RealtimeWeb.BroadcastController do
          events_per_second_key = Tenants.events_per_second_key(tenant),
          :ok <- check_rate_limit(events_per_second_key, tenant, length(messages)) do
       tenant_db_conn =
-        if tenant.enable_authorization,
-          do: Connect.lookup_or_start_connection(tenant.external_id),
-          else: nil
+        if tenant.enable_authorization, do: Connect.lookup_or_start_connection(tenant.external_id)
 
       events =
         messages

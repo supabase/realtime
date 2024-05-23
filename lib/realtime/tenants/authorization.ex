@@ -4,7 +4,7 @@ defmodule Realtime.Tenants.Authorization do
   creates a Realtime.Tenants.Policies struct with the accumulated results of the policies
   for a given user and a given channel context
 
-  Each feature will have their own set of ways to check Policies against the Authorization context but we will create some setup data to be used by the policies.
+  Each feature will have its own set of ways to check Policies against the Authorization context but we will create some setup data to be used by the policies.
 
   Check more information at Realtime.Tenants.Authorization.Policies
   """

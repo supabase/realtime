@@ -66,7 +66,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
       Message.changeset(%Message{}, %{
         channel_name: channel_name,
         feature: :presence,
-        event: "dummy"
+        event: "check_write_policy"
       })
 
     case Repo.insert(conn, changeset, Message, mode: :savepoint) do
