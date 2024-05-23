@@ -44,9 +44,6 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
         {:ok, Policies.update_policies(policies, :channel, :read, false)}
 
-      {:error, :not_found} ->
-        {:ok, Policies.update_policies(policies, :channel, :read, false)}
-
       {:error, error} ->
         log_error(
           "UnableToSetPolicies",

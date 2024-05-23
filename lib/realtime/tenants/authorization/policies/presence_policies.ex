@@ -46,9 +46,6 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
         {:ok, Policies.update_policies(policies, :presence, :read, false)}
 
-      {:error, :not_found} ->
-        {:ok, Policies.update_policies(policies, :presence, :read, false)}
-
       {:error, error} ->
         log_error(
           "UnableToSetPolicies",
@@ -78,9 +75,6 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
         {:ok, Policies.update_policies(policies, :presence, :write, true)}
 
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        {:ok, Policies.update_policies(policies, :presence, :write, false)}
-
-      {:error, :not_found} ->
         {:ok, Policies.update_policies(policies, :presence, :write, false)}
 
       {:error, error} ->

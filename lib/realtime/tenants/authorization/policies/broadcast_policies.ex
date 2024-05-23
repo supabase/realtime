@@ -45,9 +45,6 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
         {:ok, Policies.update_policies(policies, :broadcast, :read, false)}
 
-      {:error, :not_found} ->
-        {:ok, Policies.update_policies(policies, :broadcast, :read, false)}
-
       {:error, error} ->
         log_error(
           "UnableToSetPolicies",
@@ -77,9 +74,6 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
         {:ok, Policies.update_policies(policies, :broadcast, :write, true)}
 
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        {:ok, Policies.update_policies(policies, :broadcast, :write, false)}
-
-      {:error, :not_found} ->
         {:ok, Policies.update_policies(policies, :broadcast, :write, false)}
 
       {:error, error} ->
