@@ -177,11 +177,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       cond do
         type == "presence_diff" and
             match?(%Policies{broadcast: %PresencePolicies{read: false}}, policies) ->
-          socket
+          Logger.warning("Presence message ignored")
 
-        type != "presence_diff" and
-            match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, policies) ->
-          Logger.warning("Presence tracking message ignored")
+          socket
 
         type != "presence_diff" and
             match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, policies) ->
