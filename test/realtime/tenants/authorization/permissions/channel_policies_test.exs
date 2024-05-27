@@ -1,4 +1,4 @@
-defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
+defmodule Realtime.Tenants.Authorization.Policies.TopicPoliciesTest do
   # async: false due to the fact that multiple operations against the database will use the same connection
   use Realtime.DataCase, async: false
 
@@ -7,7 +7,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
-  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
+  alias Realtime.Tenants.Authorization.Policies.TopicPolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.Joken.CurrentTime
@@ -15,7 +15,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
   describe "check_read_policies/3" do
     setup [:rls_context]
 
-    @tag role: "authenticated", policies: [:authenticated_read_channel]
+    @tag role: "authenticated", policies: [:authenticated_read_topic]
     test "authenticated user has read policies", context do
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
@@ -23,66 +23,66 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
 
                  Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
-                 ChannelPolicies.check_read_policies(
+                 TopicPolicies.check_read_policies(
                    transaction_conn,
                    %Policies{},
                    context.authorization_context
                  )
                end)
 
-      assert {:ok, %Policies{channel: %ChannelPolicies{read: true}}} = result
+      assert {:ok, %Policies{topic: %TopicPolicies{read: true}}} = result
     end
 
-    @tag role: "anon", policies: [:authenticated_read_channel]
+    @tag role: "anon", policies: [:authenticated_read_topic]
     test "anon user has no read policies", context do
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
                  Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
-                 ChannelPolicies.check_read_policies(
+                 TopicPolicies.check_read_policies(
                    transaction_conn,
                    %Policies{},
                    context.authorization_context
                  )
                end)
 
-      assert {:ok, %Policies{channel: %ChannelPolicies{read: false}}} = result
+      assert {:ok, %Policies{topic: %TopicPolicies{read: false}}} = result
     end
 
-    @tag role: "authenticated", policies: [:authenticated_all_channels_read]
-    test "no channel with authenticated returns false", context do
-      authorization_context = %{context.authorization_context | channel_name: nil}
+    @tag role: "authenticated", policies: [:authenticated_all_topic_read]
+    test "no topic with authenticated returns false", context do
+      authorization_context = %{context.authorization_context | topic: nil}
 
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
                  Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
-                 ChannelPolicies.check_read_policies(
+                 TopicPolicies.check_read_policies(
                    transaction_conn,
                    %Policies{},
                    authorization_context
                  )
                end)
 
-      assert {:ok, %Policies{channel: %ChannelPolicies{read: false}}} = result
+      assert {:ok, %Policies{topic: %TopicPolicies{read: false}}} = result
     end
 
-    @tag role: "anon", policies: [:authenticated_all_channels_read]
-    test "no channel with anon in context returns false", context do
-      authorization_context = %{context.authorization_context | channel_name: nil}
+    @tag role: "anon", policies: [:authenticated_all_topic_read]
+    test "no topic with anon in context returns false", context do
+      authorization_context = %{context.authorization_context | topic: nil}
 
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
                  Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
-                 ChannelPolicies.check_read_policies(
+                 TopicPolicies.check_read_policies(
                    transaction_conn,
                    %Policies{},
                    authorization_context
                  )
                end)
 
-      assert {:ok, %Policies{channel: %ChannelPolicies{read: false}}} = result
+      assert {:ok, %Policies{topic: %TopicPolicies{read: false}}} = result
     end
 
     @tag role: "anon", policies: []
@@ -94,7 +94,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
         :timer.sleep(100)
 
         assert {:error, _} =
-                 ChannelPolicies.check_read_policies(
+                 TopicPolicies.check_read_policies(
                    transaction_conn,
                    %Policies{},
                    context.authorization_context
@@ -107,78 +107,78 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
     setup [:rls_context]
 
     @tag role: "authenticated",
-         policies: [:authenticated_read_channel, :authenticated_write_channel]
+         policies: [:authenticated_read_topic, :authenticated_write_topic]
     test "authenticated user has write policies", context do
-      query = from(m in Message, where: m.channel_name == ^context.channel_name)
+      query = from(m in Message, where: m.topic == ^context.topic)
       assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
 
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
                  Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
-                 ChannelPolicies.check_write_policies(
+                 TopicPolicies.check_write_policies(
                    transaction_conn,
                    %Policies{},
                    context.authorization_context
                  )
                end)
 
-      assert {:ok, %Policies{channel: %ChannelPolicies{write: true}}} = result
+      assert {:ok, %Policies{topic: %TopicPolicies{write: true}}} = result
       # Ensure policy check does not polute database
       assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
     end
 
-    @tag role: "anon", policies: [:authenticated_read_channel, :authenticated_write_channel]
+    @tag role: "anon", policies: [:authenticated_read_topic, :authenticated_write_topic]
     test "anon user has no write policies", context do
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
                  Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
-                 ChannelPolicies.check_write_policies(
+                 TopicPolicies.check_write_policies(
                    transaction_conn,
                    %Policies{},
                    context.authorization_context
                  )
                end)
 
-      assert {:ok, %Policies{channel: %ChannelPolicies{write: false}}} = result
+      assert {:ok, %Policies{topic: %TopicPolicies{write: false}}} = result
     end
 
     @tag role: "anon",
-         policies: [:authenticated_all_channels_read, :authenticated_all_channels_insert]
-    test "no channel and authenticated returns false", context do
-      authorization_context = %{context.authorization_context | channel_name: nil}
+         policies: [:authenticated_all_topic_read, :authenticated_all_topic_insert]
+    test "no topic and authenticated returns false", context do
+      authorization_context = %{context.authorization_context | topic: nil}
 
       assert {:ok, result} =
                Postgrex.transaction(context.db_conn, fn transaction_conn ->
                  Authorization.set_conn_config(transaction_conn, authorization_context)
 
-                 ChannelPolicies.check_write_policies(
+                 TopicPolicies.check_write_policies(
                    transaction_conn,
                    %Policies{},
                    authorization_context
                  )
                end)
 
-      assert {:ok, %Policies{channel: %ChannelPolicies{write: false}}} = result
+      assert {:ok, %Policies{topic: %TopicPolicies{write: false}}} = result
     end
 
     @tag role: "anon",
-         policies: [:authenticated_all_channels_read, :authenticated_all_channels_insert]
-    test "no channel and anon returns false", context do
-      authorization_context = %{context.authorization_context | channel_name: nil}
+         policies: [:authenticated_all_topic_read, :authenticated_all_topic_insert]
+    test "no topic and anon returns false", context do
+      authorization_context = %{context.authorization_context | topic: nil}
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
         assert {:ok, result} =
-                 ChannelPolicies.check_write_policies(
+                 TopicPolicies.check_write_policies(
                    transaction_conn,
                    %Policies{},
                    authorization_context
                  )
 
-        assert result == %Policies{channel: %ChannelPolicies{write: false}}
+        assert result == %Policies{topic: %TopicPolicies{write: false}}
       end)
     end
   end
@@ -202,7 +202,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
     authorization_context =
       Authorization.build_authorization_params(%{
         headers: [{"header-1", "value-1"}],
-        channel_name: message.channel_name,
+        topic: message.topic,
         jwt: jwt,
         claims: claims,
         role: claims.role
@@ -212,7 +212,7 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPoliciesTest do
 
     %{
       tenant: tenant,
-      channel_name: message.channel_name,
+      topic: message.topic,
       db_conn: db_conn,
       authorization_context: authorization_context
     }

@@ -46,8 +46,8 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     end
 
     @tag role: "anon", policies: []
-    test "no channel_name in context returns false policies", context do
-      authorization_context = %{context.authorization_context | channel_name: nil}
+    test "no topic in context returns false policies", context do
+      authorization_context = %{context.authorization_context | topic: nil}
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -87,7 +87,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     @tag role: "authenticated",
          policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
     test "authenticated user has write policies and reverts updated_at", context do
-      query = from(m in Message, where: m.channel_name == ^context.channel_name)
+      query = from(m in Message, where: m.topic == ^context.topic)
       assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
@@ -124,8 +124,8 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     end
 
     @tag role: "anon", policies: []
-    test "no channel in context returns false", context do
-      authorization_context = %{context.authorization_context | channel_name: nil}
+    test "no topic in context returns false", context do
+      authorization_context = %{context.authorization_context | topic: nil}
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -150,7 +150,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
     clean_table(db_conn, "realtime", "messages")
-    message = message_fixture(tenant, %{feature: :broadcast})
+    message = message_fixture(tenant, %{extension: :broadcast})
 
     create_rls_policies(db_conn, context.policies, message)
 
@@ -160,7 +160,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
 
     authorization_context =
       Authorization.build_authorization_params(%{
-        channel_name: message.channel_name,
+        topic: message.topic,
         headers: [{"header-1", "value-1"}],
         jwt: jwt,
         claims: claims,
@@ -168,7 +168,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
       })
 
     %{
-      channel_name: message.channel_name,
+      topic: message.topic,
       db_conn: db_conn,
       authorization_context: authorization_context
     }

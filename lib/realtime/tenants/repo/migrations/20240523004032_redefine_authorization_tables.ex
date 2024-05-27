@@ -9,13 +9,12 @@ defmodule Realtime.Tenants.Migrations.RedefineAuthorizationTables do
     drop table(:channels, mode: :cascade)
 
     create table(:messages) do
-      add :channel_name, :text, null: false
-      add :feature, :text, null: false
-      add :event, :text, null: false
+      add :topic, :text, null: false
+      add :extension, :text, null: false
       timestamps()
     end
 
-    create index(:messages, [:channel_name])
+    create index(:messages, [:topic])
 
     execute("ALTER TABLE realtime.messages ENABLE row level security")
     execute("GRANT SELECT ON realtime.messages TO postgres, anon, authenticated, service_role")
@@ -30,5 +29,17 @@ defmodule Realtime.Tenants.Migrations.RedefineAuthorizationTables do
     """)
 
     execute("ALTER table realtime.messages OWNER to supabase_realtime_admin")
+
+    execute("""
+    DROP function realtime.channel_name
+    """)
+
+    execute("""
+    create or replace function realtime.topic() returns text as $$
+    select nullif(current_setting('realtime.topic', true), '')::text;
+    $$ language sql stable;
+    """)
+
+    execute("ALTER function realtime.topic() owner to supabase_realtime_admin")
   end
 end

@@ -42,13 +42,11 @@ defmodule Generators do
   end
 
   def message_fixture(tenant, override \\ %{}) do
-    {:ok, pid} = Connect.connect(tenant.external_id, restart: :transient)
     {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
     create_attrs = %{
-      "channel_name" => random_string(),
-      "feature" => Enum.random([:presence, :broadcast]),
-      "event" => random_string()
+      "topic" => random_string(),
+      "extension" => Enum.random([:presence, :broadcast])
     }
 
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
@@ -58,7 +56,7 @@ defmodule Generators do
       |> Map.merge(override)
       |> Realtime.Messages.create_message(db_conn)
 
-    Process.exit(pid, :normal)
+    Process.exit(db_conn, :normal)
     channel
   end
 
@@ -89,10 +87,10 @@ defmodule Generators do
   @doc """
   Creates support RLS policies given a name and params to be used by the policies
   Supported:
-  * read_all_channels - Sets read all channels policy for authenticated role
-  * write_all_channels - Sets write all channels policy for authenticated role
-  * read_channel - Sets read channel policy for authenticated role
-  * write_channel - Sets write channel policy for authenticated role
+  * read_all_topic - Sets read all topic policy for authenticated role
+  * write_all_topic - Sets write all topic policy for authenticated role
+  * read_topic - Sets read channel policy for authenticated role
+  * write_topic - Sets write channel policy for authenticated role
   * read_broadcast - Sets read broadcast policy for authenticated role
   * write_broadcast - Sets write broadcast policy for authenticated role
   """
@@ -105,93 +103,93 @@ defmodule Generators do
 
   def policy_query(query, params \\ nil)
 
-  def policy_query(:authenticated_all_channels_read, _) do
+  def policy_query(:authenticated_all_topic_read, _) do
     """
-    CREATE POLICY authenticated_all_channels_read
+    CREATE POLICY authenticated_all_topic_read
     ON realtime.messages FOR SELECT
     TO authenticated
     USING ( true );
     """
   end
 
-  def policy_query(:authenticated_all_channels_insert, _) do
+  def policy_query(:authenticated_all_topic_insert, _) do
     """
-    CREATE POLICY authenticated_all_channels_write
+    CREATE POLICY authenticated_all_topic_write
     ON realtime.messages FOR INSERT
     TO authenticated
     WITH CHECK ( true );
     """
   end
 
-  def policy_query(:authenticated_read_channel, %{channel_name: name}) do
+  def policy_query(:authenticated_read_topic, %{topic: name}) do
     """
-    CREATE POLICY authenticated_read_channel_#{name}
+    CREATE POLICY authenticated_read_topic_#{name}
     ON realtime.messages FOR SELECT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' );
+    USING ( realtime.topic() = '#{name}' );
     """
   end
 
-  def policy_query(:authenticated_write_channel, %{channel_name: name}) do
+  def policy_query(:authenticated_write_topic, %{topic: name}) do
     """
-    CREATE POLICY authenticated_write_channel_#{name}
+    CREATE POLICY authenticated_write_topic_#{name}
     ON realtime.messages FOR INSERT
     TO authenticated
-    WITH CHECK ( realtime.channel_name() = '#{name}' );
+    WITH CHECK ( realtime.topic() = '#{name}' );
     """
   end
 
-  def policy_query(:authenticated_read_broadcast, %{channel_name: name}) do
+  def policy_query(:authenticated_read_broadcast, %{topic: name}) do
     """
     CREATE POLICY authenticated_read_broadcast_#{name}
     ON realtime.messages FOR SELECT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' AND realtime.messages.feature = 'broadcast' );
+    USING ( realtime.topic() = '#{name}' AND realtime.messages.extension = 'broadcast' );
     """
   end
 
-  def policy_query(:authenticated_write_broadcast, %{channel_name: name}) do
+  def policy_query(:authenticated_write_broadcast, %{topic: name}) do
     """
     CREATE POLICY authenticated_write_broadcast_#{name}
     ON realtime.messages FOR INSERT
     TO authenticated
-    WITH CHECK ( realtime.channel_name() = '#{name}' AND realtime.messages.feature = 'broadcast');
+    WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension = 'broadcast');
     """
   end
 
-  def policy_query(:authenticated_read_presence, %{channel_name: name}) do
+  def policy_query(:authenticated_read_presence, %{topic: name}) do
     """
     CREATE POLICY authenticated_read_presence_#{name}
     ON realtime.messages FOR SELECT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' AND realtime.messages.feature = 'presence' );
+    USING ( realtime.topic() = '#{name}' AND realtime.messages.extension = 'presence' );
     """
   end
 
-  def policy_query(:authenticated_write_presence, %{channel_name: name}) do
+  def policy_query(:authenticated_write_presence, %{topic: name}) do
     """
     CREATE POLICY authenticated_write_presence_#{name}
     ON realtime.messages FOR INSERT
     TO authenticated
-    WITH CHECK ( realtime.channel_name() = '#{name}' AND realtime.messages.feature = 'presence' );
+    WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension = 'presence' );
     """
   end
 
-  def policy_query(:authenticated_read_broadcast_and_presence, %{channel_name: name}) do
+  def policy_query(:authenticated_read_broadcast_and_presence, %{topic: name}) do
     """
     CREATE POLICY authenticated_read_presence_#{name}
     ON realtime.messages FOR SELECT
     TO authenticated
-    USING ( realtime.channel_name() = '#{name}' AND realtime.messages.feature IN ('presence', 'broadcast') );
+    USING ( realtime.topic() = '#{name}' AND realtime.messages.extension IN ('presence', 'broadcast') );
     """
   end
 
-  def policy_query(:authenticated_write_broadcast_and_presence, %{channel_name: name}) do
+  def policy_query(:authenticated_write_broadcast_and_presence, %{topic: name}) do
     """
     CREATE POLICY authenticated_write_presence_#{name}
     ON realtime.messages FOR INSERT
     TO authenticated
-    WITH CHECK ( realtime.channel_name() = '#{name}' AND realtime.messages.feature IN ('presence', 'broadcast') );
+    WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension IN ('presence', 'broadcast') );
     """
   end
 end

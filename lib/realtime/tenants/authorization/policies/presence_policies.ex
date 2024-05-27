@@ -24,15 +24,15 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
           write: boolean()
         }
   @impl true
-  def check_read_policies(_conn, policies, %Authorization{channel_name: nil}) do
+  def check_read_policies(_conn, policies, %Authorization{topic: nil}) do
     {:ok, Policies.update_policies(policies, :presence, :read, false)}
   end
 
-  def check_read_policies(conn, %Policies{} = policies, %Authorization{channel_name: channel_name}) do
+  def check_read_policies(conn, %Policies{} = policies, %Authorization{topic: topic}) do
     query =
       from(m in Message,
-        where: m.channel_name == ^channel_name,
-        where: m.feature == :presence,
+        where: m.topic == ^topic,
+        where: m.extension == :presence,
         limit: 1
       )
 
@@ -57,17 +57,12 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
   end
 
   @impl true
-  def check_write_policies(_conn, policies, %Authorization{channel_name: nil}) do
+  def check_write_policies(_conn, policies, %Authorization{topic: nil}) do
     {:ok, Policies.update_policies(policies, :presence, :write, false)}
   end
 
-  def check_write_policies(conn, policies, %Authorization{channel_name: channel_name}) do
-    changeset =
-      Message.changeset(%Message{}, %{
-        channel_name: channel_name,
-        feature: :presence,
-        event: "check_write_policy"
-      })
+  def check_write_policies(conn, policies, %Authorization{topic: topic}) do
+    changeset = Message.changeset(%Message{}, %{topic: topic, extension: :presence})
 
     case Repo.insert(conn, changeset, Message, mode: :savepoint) do
       {:ok, %Message{}} ->

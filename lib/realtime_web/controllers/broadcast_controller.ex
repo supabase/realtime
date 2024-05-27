@@ -68,8 +68,8 @@ defmodule RealtimeWeb.BroadcastController do
       events
       |> Map.get(true, [])
       |> Enum.group_by(fn event -> Map.get(event, :topic) end)
-      |> Enum.each(fn {channel_name, events} ->
-        case permissions_for_message(conn, tenant_db_conn, channel_name) do
+      |> Enum.each(fn {topic, events} ->
+        case permissions_for_message(conn, tenant_db_conn, topic) do
           %Policies{broadcast: %BroadcastPolicies{write: true}} ->
             Enum.each(events, fn %{topic: sub_topic, payload: payload, event: event} ->
               send_message_and_count(tenant, sub_topic, event, payload, false)
@@ -84,9 +84,9 @@ defmodule RealtimeWeb.BroadcastController do
     end
   end
 
-  defp send_message_and_count(tenant, channel_name, event, payload, public?) do
+  defp send_message_and_count(tenant, topic, event, payload, public?) do
     events_per_second_key = Tenants.events_per_second_key(tenant)
-    tenant_topic = Tenants.tenant_topic(tenant, channel_name, public?)
+    tenant_topic = Tenants.tenant_topic(tenant, topic, public?)
     payload = %{"payload" => payload, "event" => event, "type" => "broadcast"}
 
     GenCounter.add(events_per_second_key)
@@ -95,7 +95,7 @@ defmodule RealtimeWeb.BroadcastController do
 
   defp permissions_for_message(_, nil, _), do: nil
 
-  defp permissions_for_message(conn, {:ok, db_conn}, channel_name) do
+  defp permissions_for_message(conn, {:ok, db_conn}, topic) do
     params = %{
       headers: conn.req_headers,
       jwt: conn.assigns.jwt,
@@ -103,7 +103,7 @@ defmodule RealtimeWeb.BroadcastController do
       role: conn.assigns.role
     }
 
-    with params = Map.put(params, :channel_name, channel_name),
+    with params = Map.put(params, :topic, topic),
          params = Authorization.build_authorization_params(params),
          %Policies{} = policies <- Authorization.get_authorizations(db_conn, params) do
       policies

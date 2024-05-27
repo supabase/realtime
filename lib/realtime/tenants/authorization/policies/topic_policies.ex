@@ -1,6 +1,6 @@
-defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
+defmodule Realtime.Tenants.Authorization.Policies.TopicPolicies do
   @moduledoc """
-  ChannelPolicies structure that holds the required authorization information for a given connection within the scope of a reading / altering channel entities
+  TopicPolicies structure that holds the required authorization information for a given connection within the scope of a reading / altering channel entities
 
   Uses the Realtime.Api.Channel to try reads and writes on the database to determine authorization for a given connection.
 
@@ -27,22 +27,22 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
         }
 
   @impl true
-  def check_read_policies(_conn, %Policies{} = policies, %Authorization{channel_name: nil}) do
-    {:ok, Policies.update_policies(policies, :channel, :read, false)}
+  def check_read_policies(_conn, %Policies{} = policies, %Authorization{topic: nil}) do
+    {:ok, Policies.update_policies(policies, :topic, :read, false)}
   end
 
-  def check_read_policies(conn, %Policies{} = policies, %Authorization{channel_name: channel_name}) do
-    query = from(m in Message, where: m.channel_name == ^channel_name)
+  def check_read_policies(conn, %Policies{} = policies, %Authorization{topic: topic}) do
+    query = from(m in Message, where: m.topic == ^topic)
 
     case Repo.all(conn, query, Message, mode: :savepoint) do
       {:ok, []} ->
-        {:ok, Policies.update_policies(policies, :channel, :read, false)}
+        {:ok, Policies.update_policies(policies, :topic, :read, false)}
 
       {:ok, [%Message{} | _]} ->
-        {:ok, Policies.update_policies(policies, :channel, :read, true)}
+        {:ok, Policies.update_policies(policies, :topic, :read, true)}
 
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        {:ok, Policies.update_policies(policies, :channel, :read, false)}
+        {:ok, Policies.update_policies(policies, :topic, :read, false)}
 
       {:error, error} ->
         log_error(
@@ -55,28 +55,24 @@ defmodule Realtime.Tenants.Authorization.Policies.ChannelPolicies do
   end
 
   @impl true
-  def check_write_policies(_conn, policies, %Authorization{channel_name: nil}) do
-    {:ok, Policies.update_policies(policies, :channel, :write, false)}
+  def check_write_policies(_conn, policies, %Authorization{topic: nil}) do
+    {:ok, Policies.update_policies(policies, :topic, :write, false)}
   end
 
-  def check_write_policies(conn, policies, %Authorization{channel_name: channel_name}) do
+  def check_write_policies(conn, policies, %Authorization{topic: topic}) do
     changeset =
-      Message.changeset(%Message{}, %{
-        channel_name: channel_name,
-        feature: :presence,
-        event: "test"
-      })
+      Message.changeset(%Message{}, %{topic: topic, extension: :presence})
 
     case Repo.insert(conn, changeset, Message, mode: :savepoint) do
       {:ok, %Message{}} ->
         Postgrex.query!(conn, "ROLLBACK AND CHAIN", [])
-        {:ok, Policies.update_policies(policies, :channel, :write, true)}
+        {:ok, Policies.update_policies(policies, :topic, :write, true)}
 
       %Ecto.Changeset{errors: [name: {"has already been taken", []}]} ->
-        {:ok, Policies.update_policies(policies, :channel, :write, true)}
+        {:ok, Policies.update_policies(policies, :topic, :write, true)}
 
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        {:ok, Policies.update_policies(policies, :channel, :write, false)}
+        {:ok, Policies.update_policies(policies, :topic, :write, false)}
 
       {:error, error} ->
         log_error(

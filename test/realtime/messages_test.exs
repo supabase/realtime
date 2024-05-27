@@ -1,4 +1,4 @@
-defmodule Realtime.ChannelsTest do
+defmodule Realtime.MessagesTest do
   # async: false due to the fact that multiple operations against the database will use the same connection
   use Realtime.DataCase, async: false
 
@@ -22,21 +22,19 @@ defmodule Realtime.ChannelsTest do
   describe "create_message/2" do
     test "creates a message",
          %{conn: conn} do
-      channel_name = random_string()
-      event = random_string()
-      feature = Enum.random([:broadcast, :presence])
-      params = %{channel_name: channel_name, feature: feature, event: event}
-      assert {:ok, %Message{channel_name: ^channel_name}} = Messages.create_message(params, conn)
+      topic = random_string()
+      extension = Enum.random([:broadcast, :presence])
+      params = %{topic: topic, extension: extension}
+      assert {:ok, %Message{topic: ^topic}} = Messages.create_message(params, conn)
     end
 
-    test "ensure message has channel_name, feature and event", %{conn: conn} do
+    test "ensure message has topic, extension", %{conn: conn} do
       assert {:error, %Ecto.Changeset{valid?: false, errors: errors}} =
                Messages.create_message(%{}, conn)
 
       assert ^errors = [
-               channel_name: {"can't be blank", [validation: :required]},
-               feature: {"can't be blank", [validation: :required]},
-               event: {"can't be blank", [validation: :required]}
+               topic: {"can't be blank", [validation: :required]},
+               extension: {"can't be blank", [validation: :required]}
              ]
     end
   end

@@ -166,22 +166,21 @@ defmodule Realtime.RepoTest do
     end
 
     test "if not found, returns not found error", %{db_conn: db_conn} do
-      query = from c in Message, where: c.channel_name == "potato"
+      query = from c in Message, where: c.topic == "potato"
       assert {:error, :not_found} = Repo.one(db_conn, query, Message)
     end
 
     test "handles exceptions", %{db_conn: db_conn} do
       Process.unlink(db_conn)
       Process.exit(db_conn, :kill)
-      query = from c in Message, where: c.channel_name == "potato"
+      query = from c in Message, where: c.topic == "potato"
       assert {:error, :postgrex_exception} = Repo.one(db_conn, query, Message)
     end
   end
 
   describe "insert/3" do
     test "inserts a new entry with a given changeset and returns struct", %{db_conn: db_conn} do
-      changeset =
-        Message.changeset(%Message{}, %{channel_name: "foo", feature: :presence, event: "event"})
+      changeset = Message.changeset(%Message{}, %{topic: "foo", extension: :presence})
 
       assert {:ok, %Message{}} = Repo.insert(db_conn, changeset, Message)
     end
@@ -199,9 +198,8 @@ defmodule Realtime.RepoTest do
               %Ecto.Changeset{
                 valid?: false,
                 errors: [
-                  channel_name: {"can't be blank", [validation: :required]},
-                  feature: {"can't be blank", [validation: :required]},
-                  event: {"can't be blank", [validation: :required]}
+                  topic: {"can't be blank", [validation: :required]},
+                  extension: {"can't be blank", [validation: :required]}
                 ]
               }} =
                Repo.insert(db_conn, changeset, Message)
@@ -211,8 +209,7 @@ defmodule Realtime.RepoTest do
       Process.unlink(db_conn)
       Process.exit(db_conn, :kill)
 
-      changeset =
-        Message.changeset(%Message{}, %{channel_name: "foo", feature: :presence, event: "event"})
+      changeset = Message.changeset(%Message{}, %{topic: "foo", extension: :presence})
 
       assert {:error, :postgrex_exception} = Repo.insert(db_conn, changeset, Message)
     end
@@ -247,13 +244,13 @@ defmodule Realtime.RepoTest do
       tenant: tenant
     } do
       message = message_fixture(tenant)
-      changeset = Message.changeset(message, %{channel_name: "foo"})
+      changeset = Message.changeset(message, %{topic: "foo"})
       assert {:ok, %Message{}} = Repo.update(db_conn, changeset, Message)
     end
 
     test "returns changeset if changeset is invalid", %{db_conn: db_conn, tenant: tenant} do
       message = message_fixture(tenant)
-      changeset = Message.changeset(message, %{channel_name: 0})
+      changeset = Message.changeset(message, %{topic: 0})
       res = Repo.update(db_conn, changeset, Message)
       assert {:error, %Ecto.Changeset{valid?: false}} = res
     end
@@ -261,17 +258,17 @@ defmodule Realtime.RepoTest do
     test "returns an Changeset on Changeset error", %{db_conn: db_conn, tenant: tenant} do
       message_to_update = message_fixture(tenant)
 
-      changeset = Message.changeset(message_to_update, %{channel_name: nil})
+      changeset = Message.changeset(message_to_update, %{topic: nil})
 
       assert {:error,
               %Ecto.Changeset{
                 valid?: false,
-                errors: [channel_name: {"can't be blank", [validation: :required]}]
+                errors: [topic: {"can't be blank", [validation: :required]}]
               }} = Repo.update(db_conn, changeset, Message)
     end
 
     test "handles exceptions", %{tenant: tenant, db_conn: db_conn} do
-      changeset = Message.changeset(message_fixture(tenant), %{channel_name: "foo"})
+      changeset = Message.changeset(message_fixture(tenant), %{topic: "foo"})
 
       Process.unlink(db_conn)
       Process.exit(db_conn, :kill)

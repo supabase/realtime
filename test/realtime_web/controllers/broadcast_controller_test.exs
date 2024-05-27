@@ -266,9 +266,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
           |> Enum.take(5)
 
         messages =
-          Enum.map(messages_to_send, fn %{channel_name: channel_name} ->
+          Enum.map(messages_to_send, fn %{topic: topic} ->
             %{
-              "topic" => channel_name,
+              "topic" => topic,
               "payload" => %{"content" => random_string()},
               "event" => random_string(),
               "private" => true
@@ -277,8 +277,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-        Enum.each(messages_to_send, fn %{channel_name: channel_name} ->
-          topic = Tenants.tenant_topic(tenant, channel_name, false)
+        Enum.each(messages_to_send, fn %{topic: topic} ->
+          topic = Tenants.tenant_topic(tenant, topic, false)
           assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
         end)
 
@@ -306,9 +306,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
           |> Enum.take(5)
 
         messages =
-          Enum.map(channels, fn %{channel_name: channel_name} ->
+          Enum.map(channels, fn %{topic: topic} ->
             %{
-              "topic" => channel_name,
+              "topic" => topic,
               "payload" => %{"content" => random_string()},
               "event" => random_string(),
               "private" => true
@@ -327,8 +327,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-        Enum.each(channels, fn %{channel_name: channel_name} ->
-          topic = Tenants.tenant_topic(tenant, channel_name, channel_name == "open_channel")
+        Enum.each(channels, fn %{topic: topic} ->
+          topic = Tenants.tenant_topic(tenant, topic, topic == "open_channel")
           assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
         end)
 
@@ -368,9 +368,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         no_auth_channel = message_fixture(tenant)
 
         messages =
-          Enum.map(messages_to_send ++ [no_auth_channel], fn %{channel_name: channel_name} ->
+          Enum.map(messages_to_send ++ [no_auth_channel], fn %{topic: topic} ->
             %{
-              "topic" => channel_name,
+              "topic" => topic,
               "payload" => %{"content" => random_string()},
               "event" => random_string(),
               "private" => true
@@ -379,15 +379,15 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-        Enum.each(messages_to_send, fn %{channel_name: channel_name} ->
-          topic = Tenants.tenant_topic(tenant, channel_name, false)
+        Enum.each(messages_to_send, fn %{topic: topic} ->
+          topic = Tenants.tenant_topic(tenant, topic, false)
           assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
         end)
 
         assert_not_called(
           Endpoint.broadcast_from(
             :_,
-            Tenants.tenant_topic(tenant, no_auth_channel.channel_name, false),
+            Tenants.tenant_topic(tenant, no_auth_channel.topic, false),
             "broadcast",
             :_
           )
@@ -420,9 +420,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         messages = messages ++ messages
 
         messages =
-          Enum.map(messages, fn %{channel_name: channel_name} ->
+          Enum.map(messages, fn %{topic: topic} ->
             %{
-              "topic" => channel_name,
+              "topic" => topic,
               "payload" => %{"content" => random_string()},
               "event" => random_string(),
               "private" => true
@@ -431,8 +431,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-        Enum.each(messages, fn %{"topic" => channel_name} ->
-          topic = Tenants.tenant_topic(tenant, channel_name)
+        Enum.each(messages, fn %{"topic" => topic} ->
+          topic = Tenants.tenant_topic(tenant, topic)
           assert_not_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
         end)
 

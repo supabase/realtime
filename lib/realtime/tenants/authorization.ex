@@ -4,7 +4,7 @@ defmodule Realtime.Tenants.Authorization do
   creates a Realtime.Tenants.Policies struct with the accumulated results of the policies
   for a given user and a given channel context
 
-  Each feature will have its own set of ways to check Policies against the Authorization context but we will create some setup data to be used by the policies.
+  Each extension will have its own set of ways to check Policies against the Authorization context but we will create some setup data to be used by the policies.
 
   Check more information at Realtime.Tenants.Authorization.Policies
   """
@@ -13,13 +13,13 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Helpers
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
+  alias Realtime.Tenants.Authorization.Policies.TopicPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
 
-  defstruct [:channel_name, :headers, :jwt, :claims, :role]
+  defstruct [:topic, :headers, :jwt, :claims, :role]
 
   @type t :: %__MODULE__{
-          :channel_name => binary() | nil,
+          :topic => binary() | nil,
           :claims => map(),
           :headers => keyword({binary(), binary()}),
           :jwt => map(),
@@ -30,7 +30,7 @@ defmodule Realtime.Tenants.Authorization do
   Builds a new authorization struct which will be used to retain the information required to check Policies.
 
   Requires a map with the following keys:
-  * channel_name: The name of the channel being accessed taken from the request
+  * topic: The name of the channel being accessed taken from the request
   * headers: Request headers when the connection was made or WS was updated
   * jwt: JWT String
   * claims: JWT claims
@@ -39,7 +39,7 @@ defmodule Realtime.Tenants.Authorization do
   @spec build_authorization_params(map()) :: t()
   def build_authorization_params(map) do
     %__MODULE__{
-      channel_name: Map.get(map, :channel_name),
+      topic: Map.get(map, :topic),
       headers: Map.get(map, :headers),
       jwt: Map.get(map, :jwt),
       claims: Map.get(map, :claims),
@@ -81,7 +81,7 @@ defmodule Realtime.Tenants.Authorization do
   @doc """
   Sets the current connection configuration with the following config values:
   * role: The role of the user
-  * realtime.channel_name: The name of the channel being accessed
+  * realtime.topic: The name of the channel being accessed
   * request.jwt.claim.role: The role of the user
   * request.jwt: The JWT token
   * request.jwt.claim.sub: The sub claim of the JWT token
@@ -92,7 +92,7 @@ defmodule Realtime.Tenants.Authorization do
           {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
   def set_conn_config(conn, authorization_context) do
     %__MODULE__{
-      channel_name: channel_name,
+      topic: topic,
       headers: headers,
       jwt: jwt,
       claims: claims,
@@ -107,35 +107,27 @@ defmodule Realtime.Tenants.Authorization do
       """
       SELECT
        set_config('role', $1, true),
-       set_config('realtime.channel_name', $2, true),
+       set_config('realtime.topic', $2, true),
        set_config('request.jwt', $3, true),
        set_config('request.jwt.claims', $4, true),
        set_config('request.headers', $5, true)
       """,
-      [role, channel_name, jwt, claims, headers]
+      [role, topic, jwt, claims, headers]
     )
   end
 
-  @policies_mods [ChannelPolicies, BroadcastPolicies, PresencePolicies]
+  @policies_mods [TopicPolicies, BroadcastPolicies, PresencePolicies]
   defp get_policies_for_connection(conn, authorization_context) do
     Helpers.transaction(conn, fn transaction_conn ->
       {:ok, _} =
         Messages.create_message(
-          %{
-            channel_name: authorization_context.channel_name,
-            event: "event",
-            feature: :broadcast
-          },
+          %{topic: authorization_context.topic, extension: :broadcast},
           transaction_conn
         )
 
       {:ok, _} =
         Messages.create_message(
-          %{
-            channel_name: authorization_context.channel_name,
-            event: "event",
-            feature: :presence
-          },
+          %{topic: authorization_context.topic, extension: :presence},
           transaction_conn
         )
 
@@ -144,14 +136,14 @@ defmodule Realtime.Tenants.Authorization do
       policies = %Policies{}
 
       policies =
-        get_read_policy_for_connection_and_feature(
+        get_read_policy_for_connection_and_extension(
           transaction_conn,
           policies,
           authorization_context
         )
 
       policies =
-        get_write_policy_for_connection_and_feature(
+        get_write_policy_for_connection_and_extension(
           transaction_conn,
           policies,
           authorization_context
@@ -163,7 +155,7 @@ defmodule Realtime.Tenants.Authorization do
     end)
   end
 
-  defp get_read_policy_for_connection_and_feature(conn, policies, authorization_context) do
+  defp get_read_policy_for_connection_and_extension(conn, policies, authorization_context) do
     Enum.reduce_while(@policies_mods, policies, fn policy_mod, policies ->
       res = policy_mod.check_read_policies(conn, policies, authorization_context)
 
@@ -175,7 +167,7 @@ defmodule Realtime.Tenants.Authorization do
     end)
   end
 
-  defp get_write_policy_for_connection_and_feature(conn, policies, authorization_context) do
+  defp get_write_policy_for_connection_and_extension(conn, policies, authorization_context) do
     Enum.reduce_while(@policies_mods, policies, fn policy_mod, policies ->
       res = policy_mod.check_write_policies(conn, policies, authorization_context)
 

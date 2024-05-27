@@ -7,16 +7,15 @@ defmodule Realtime.Api.Message do
 
   @schema_prefix "realtime"
   schema "messages" do
-    field :channel_name, :string
-    field :feature, Ecto.Enum, values: [:broadcast, :presence]
-    field :event, :string
+    field :topic, :string
+    field :extension, Ecto.Enum, values: [:broadcast, :presence]
     timestamps()
   end
 
   def changeset(message, attrs) do
     message
-    |> cast(attrs, [:channel_name, :feature, :event, :inserted_at, :updated_at])
-    |> validate_required([:channel_name, :feature, :event])
+    |> cast(attrs, [:topic, :extension, :inserted_at, :updated_at])
+    |> validate_required([:topic, :extension])
     |> put_timestamp(:updated_at)
     |> maybe_put_timestamp(:inserted_at)
   end

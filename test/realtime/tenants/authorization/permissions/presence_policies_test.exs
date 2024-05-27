@@ -15,39 +15,39 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
 
     @tag role: "authenticated", policies: [:authenticated_read_presence]
     test "authenticated user has read policies", context do
-      assert {:ok, result} =
-               Postgrex.transaction(context.db_conn, fn transaction_conn ->
-                 Authorization.set_conn_config(transaction_conn, context.authorization_context)
+      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+        Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
+        assert {:ok, result} =
                  PresencePolicies.check_read_policies(
                    transaction_conn,
                    %Policies{},
                    context.authorization_context
                  )
-               end)
 
-      assert {:ok, %Policies{presence: %PresencePolicies{read: true}}} = result
+        assert result == %Policies{presence: %PresencePolicies{read: true}}
+      end)
     end
 
     @tag role: "anon", policies: [:authenticated_read_presence]
     test "anon user has read policies", context do
-      assert {:ok, result} =
-               Postgrex.transaction(context.db_conn, fn transaction_conn ->
-                 Authorization.set_conn_config(transaction_conn, context.authorization_context)
+      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+        Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
+        assert {:ok, result} =
                  PresencePolicies.check_read_policies(
                    transaction_conn,
                    %Policies{},
                    context.authorization_context
                  )
-               end)
 
-      assert {:ok, %Policies{presence: %PresencePolicies{read: false}}} = result
+        assert result == %Policies{presence: %PresencePolicies{read: false}}
+      end)
     end
 
     @tag role: "anon", policies: []
-    test "no channel in context returns false policies", context do
-      authorization_context = %{context.authorization_context | channel_name: nil}
+    test "no topic in context returns false policies", context do
+      authorization_context = %{context.authorization_context | topic: nil}
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -87,64 +87,58 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
     @tag role: "authenticated",
          policies: [:authenticated_read_presence, :authenticated_write_presence]
     test "authenticated user has write policies and reverts updated_at", context do
-      query = from(m in Message, where: m.channel_name == ^context.channel_name)
-      {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
+      query = from(m in Message, where: m.topic == ^context.topic)
+      assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
 
-      assert {:ok, result} =
-               Postgrex.transaction(context.db_conn, fn transaction_conn ->
-                 Authorization.set_conn_config(transaction_conn, context.authorization_context)
+      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+        Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
+        assert {:ok, result} =
                  PresencePolicies.check_write_policies(
                    transaction_conn,
                    %Policies{},
                    context.authorization_context
                  )
-               end)
 
-      assert {:ok, %Policies{presence: %PresencePolicies{write: true}}} = result
+        assert result == %Policies{presence: %PresencePolicies{write: true}}
+      end)
 
-      # Ensure policy check does not polute database
+      # Ensure database is not polluted by policy testing
       assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
     end
 
     @tag role: "anon", policies: [:authenticated_read_presence, :authenticated_write_presence]
     test "anon user has no write policies", context do
-      query = from(m in Message, where: m.channel_name == ^context.channel_name)
-      {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
+      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+        Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
-      assert {:ok, result} =
-               Postgrex.transaction(context.db_conn, fn transaction_conn ->
-                 Authorization.set_conn_config(transaction_conn, context.authorization_context)
-
+        assert {:ok, result} =
                  PresencePolicies.check_write_policies(
                    transaction_conn,
                    %Policies{},
                    context.authorization_context
                  )
-               end)
 
-      assert {:ok, %Policies{presence: %PresencePolicies{write: false}}} = result
-
-      # Ensure policy check does not polute database
-      assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
+        assert result == %Policies{presence: %PresencePolicies{write: false}}
+      end)
     end
 
     @tag role: "anon", policies: []
-    test "no channel in context returns false", context do
-      authorization_context = %{context.authorization_context | channel_name: nil}
+    test "no topic in context returns false", context do
+      authorization_context = %{context.authorization_context | topic: nil}
 
-      assert {:ok, result} =
-               Postgrex.transaction(context.db_conn, fn transaction_conn ->
-                 Authorization.set_conn_config(transaction_conn, context.authorization_context)
+      Postgrex.transaction(context.db_conn, fn transaction_conn ->
+        Authorization.set_conn_config(transaction_conn, context.authorization_context)
 
+        assert {:ok, result} =
                  PresencePolicies.check_write_policies(
                    transaction_conn,
                    %Policies{},
                    authorization_context
                  )
-               end)
 
-      assert {:ok, %Policies{presence: %PresencePolicies{write: false}}} = result
+        assert result == %Policies{presence: %PresencePolicies{write: false}}
+      end)
     end
   end
 
@@ -156,7 +150,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
     {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
     clean_table(db_conn, "realtime", "messages")
-    message = message_fixture(tenant, %{feature: :presence})
+    message = message_fixture(tenant, %{extension: :presence})
 
     create_rls_policies(db_conn, context.policies, message)
 
@@ -166,7 +160,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
 
     authorization_context =
       Authorization.build_authorization_params(%{
-        channel_name: message.channel_name,
+        topic: message.topic,
         headers: [{"header-1", "value-1"}],
         jwt: jwt,
         claims: claims,
@@ -174,7 +168,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
       })
 
     %{
-      channel_name: message.channel_name,
+      topic: message.topic,
       db_conn: db_conn,
       authorization_context: authorization_context
     }

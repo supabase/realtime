@@ -233,11 +233,11 @@ defmodule Realtime.Integration.RtChannelTest do
            :authenticated_write_broadcast_and_presence
          ]
     test "private broadcast with valid channel with permissions sends message", %{
-      channel_name: channel_name
+      topic: topic
     } do
       {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}}
-      topic = "realtime:#{channel_name}"
+      topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{
@@ -265,11 +265,11 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence]
     test "private broadcast with valid channel no write permissions won't send message but will receive message",
-         %{channel_name: channel_name} do
+         %{topic: topic} do
       {service_role_socket, _} = get_connection("service_role")
       {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}, private: true}
-      topic = "realtime:#{channel_name}"
+      topic = "realtime:#{topic}"
       WebsocketClient.join(service_role_socket, topic, %{config: config})
       WebsocketClient.join(socket, topic, %{config: config})
 
@@ -367,10 +367,10 @@ defmodule Realtime.Integration.RtChannelTest do
            :authenticated_write_broadcast_and_presence
          ]
     test "private presence with read and write permissions will be able to track and receive presence changes",
-         %{channel_name: channel_name} do
+         %{topic: topic} do
       {socket, _} = get_connection("authenticated")
       config = %{presence: %{key: ""}}
-      topic = "realtime:#{channel_name}"
+      topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{
@@ -404,11 +404,11 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence]
     test "private presence with read permissions will be able to receive presence changes but won't be able to track",
-         %{channel_name: channel_name} do
+         %{topic: topic} do
       {socket, _} = get_connection("authenticated")
       {secondary_socket, _} = get_connection("service_role")
       config = fn key -> %{presence: %{key: key}, private: true} end
-      topic = "realtime:#{channel_name}"
+      topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: config.("authenticated")})
 
@@ -486,11 +486,11 @@ defmodule Realtime.Integration.RtChannelTest do
            :authenticated_write_broadcast_and_presence
          ]
     test "on new access_token and channel is private policies are reevaluated",
-         %{channel_name: channel_name} do
+         %{topic: topic} do
       {socket, access_token} = get_connection("authenticated")
       {:ok, new_token} = token_valid("anon")
 
-      topic = "realtime:#{channel_name}"
+      topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{
         config: %{broadcast: %{self: true}, private: true},
@@ -503,7 +503,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        event: "phx_reply",
                        payload: %{
                          "response" => %{
-                           "reason" => "You do not have permissions to read from this Channel"
+                           "reason" => "You do not have permissions to read from this Topic"
                          },
                          "status" => "error"
                        },
@@ -549,6 +549,6 @@ defmodule Realtime.Integration.RtChannelTest do
 
     on_exit(fn -> Process.exit(db_conn, :normal) end)
 
-    %{channel_name: message.channel_name}
+    %{topic: message.topic}
   end
 end
