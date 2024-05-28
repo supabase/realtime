@@ -272,12 +272,12 @@ defmodule RealtimeWeb.TenantControllerTest do
           Postgrex.query!(transaction_conn, "DROP ROLE supabase_realtime_admin", [])
         end)
 
-        assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.channels", [])
+        assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
 
-        assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.channels", [])
+        assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
         assert %{"healthy" => true, "db_connected" => true, "connected_cluster" => 0} = data
       end

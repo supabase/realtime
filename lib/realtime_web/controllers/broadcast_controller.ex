@@ -2,19 +2,14 @@ defmodule RealtimeWeb.BroadcastController do
   use RealtimeWeb, :controller
   use OpenApiSpex.ControllerSpecs
   require Logger
-  import Ecto.Query
 
-  alias Realtime.Api.Channel
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
-  alias Realtime.Helpers
   alias Realtime.RateCounter
-  alias Realtime.Repo
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
   alias Realtime.Tenants.BatchBroadcast
   alias Realtime.Tenants.Connect
 
@@ -53,89 +48,54 @@ defmodule RealtimeWeb.BroadcastController do
          %Ecto.Changeset{changes: %{messages: messages}} = changeset,
          events_per_second_key = Tenants.events_per_second_key(tenant),
          :ok <- check_rate_limit(events_per_second_key, tenant, length(messages)) do
+      tenant_db_conn =
+        if tenant.enable_authorization, do: Connect.lookup_or_start_connection(tenant.external_id)
+
       events =
-        Enum.map(messages, fn %{changes: %{topic: sub_topic} = event} -> {sub_topic, event} end)
+        messages
+        |> Enum.map(fn %{changes: event} -> event end)
+        |> Enum.group_by(fn event -> Map.get(event, :private, false) end)
 
-      channel_names = events |> Enum.map(fn {sub_topic, _} -> sub_topic end) |> MapSet.new()
-
-      if MapSet.size(channel_names) > 1 && tenant.enable_authorization do
-        Logger.warning(
-          "This Broadcast is sending to multiple channels. Avoid this as it impact your performance."
-        )
-      end
-
-      rls_channels =
-        if tenant.enable_authorization do
-          {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
-          Helpers.transaction(db_conn, fn transaction_conn ->
-            query = from(c in Channel, where: c.name in ^MapSet.to_list(channel_names))
-
-            transaction_conn
-            |> Repo.all(query, Channel)
-            |> then(fn {:ok, channels} -> channels end)
-          end)
-        else
-          []
-        end
-
-      rls_channel_names =
-        rls_channels
-        |> Enum.map(& &1.name)
-        |> MapSet.new()
-
-      # Handle events without authorization
-      MapSet.difference(channel_names, rls_channel_names)
-      |> Enum.each(fn channel_name ->
-        events
-        |> Enum.filter(fn {sub_topic, _} -> sub_topic == channel_name end)
-        |> Enum.each(fn {_, %{topic: sub_topic, payload: payload, event: event}} ->
-          send_message_and_count(tenant, sub_topic, event, payload, true)
-        end)
+      # Handle events without authorization check
+      events
+      |> Map.get(false, [])
+      |> Enum.each(fn %{topic: sub_topic, payload: payload, event: event} ->
+        send_message_and_count(tenant, sub_topic, event, payload, true)
       end)
 
-      if(tenant.enable_authorization) do
-        # Handle events with authorization
-        rls_channel_names
-        |> Enum.reduce([], fn sub_topic, acc ->
-          Enum.filter(events, fn
-            {^sub_topic, _} -> true
-            _ -> false
-          end) ++ acc
-        end)
-        |> Enum.map(fn {_, event} -> event end)
-        |> Enum.each(fn %{topic: channel_name, payload: payload, event: event} ->
-          {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      # Handle events with authorization check
 
-          Helpers.transaction(db_conn, fn transaction_conn ->
-            case permissions_for_channel(conn, transaction_conn, rls_channels, channel_name) do
-              %Policies{
-                channel: %ChannelPolicies{read: true},
-                broadcast: %BroadcastPolicies{write: true}
-              } ->
-                send_message_and_count(tenant, channel_name, event, payload, false)
+      events
+      |> Map.get(true, [])
+      |> Enum.group_by(fn event -> Map.get(event, :topic) end)
+      |> Enum.each(fn {topic, events} ->
+        case permissions_for_message(conn, tenant_db_conn, topic) do
+          %Policies{broadcast: %BroadcastPolicies{write: true}} ->
+            Enum.each(events, fn %{topic: sub_topic, payload: payload, event: event} ->
+              send_message_and_count(tenant, sub_topic, event, payload, false)
+            end)
 
-              _ ->
-                nil
-            end
-          end)
-        end)
-      end
+          _ ->
+            nil
+        end
+      end)
 
       send_resp(conn, :accepted, "")
     end
   end
 
-  defp send_message_and_count(tenant, channel_name, event, payload, public?) do
+  defp send_message_and_count(tenant, topic, event, payload, public?) do
     events_per_second_key = Tenants.events_per_second_key(tenant)
-    tenant_topic = Tenants.tenant_topic(tenant, channel_name, public?)
+    tenant_topic = Tenants.tenant_topic(tenant, topic, public?)
     payload = %{"payload" => payload, "event" => event, "type" => "broadcast"}
 
     GenCounter.add(events_per_second_key)
     Endpoint.broadcast_from(self(), tenant_topic, "broadcast", payload)
   end
 
-  defp permissions_for_channel(conn, db_conn, channels, channel_name) do
+  defp permissions_for_message(_, nil, _), do: nil
+
+  defp permissions_for_message(conn, {:ok, db_conn}, topic) do
     params = %{
       headers: conn.req_headers,
       jwt: conn.assigns.jwt,
@@ -143,9 +103,7 @@ defmodule RealtimeWeb.BroadcastController do
       role: conn.assigns.role
     }
 
-    with channel <- Enum.find(channels, &(&1.name == channel_name)),
-         params = Map.put(params, :channel, channel),
-         params = Map.put(params, :channel_name, channel.name),
+    with params = Map.put(params, :topic, topic),
          params = Authorization.build_authorization_params(params),
          %Policies{} = policies <- Authorization.get_authorizations(db_conn, params) do
       policies

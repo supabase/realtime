@@ -10,8 +10,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
   import Ecto.Query
   import Realtime.Helpers, only: [log_error: 2, to_log: 1]
 
-  alias Realtime.Api.Broadcast
-  alias Realtime.Api.Channel
+  alias Realtime.Api.Message
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -24,74 +23,60 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
           write: boolean()
         }
   @impl true
-  def check_read_policies(_conn, policies, %Authorization{channel: nil}) do
+  def check_read_policies(_conn, policies, %Authorization{topic: nil}) do
     {:ok, Policies.update_policies(policies, :broadcast, :read, false)}
   end
 
-  def check_read_policies(conn, %Policies{} = policies, %Authorization{
-        channel: %Channel{id: channel_id}
-      }) do
-    Postgrex.transaction(conn, fn transaction_conn ->
-      query = from(b in Broadcast, where: b.channel_id == ^channel_id)
+  def check_read_policies(conn, %Policies{} = policies, %Authorization{topic: topic}) do
+    query =
+      from(m in Message,
+        where: m.topic == ^topic,
+        where: m.extension == :broadcast,
+        limit: 1
+      )
 
-      case Repo.one(conn, query, Broadcast, mode: :savepoint) do
-        {:ok, %Broadcast{}} ->
-          Policies.update_policies(policies, :broadcast, :read, true)
+    case Repo.all(conn, query, Message, mode: :savepoint) do
+      {:ok, []} ->
+        {:ok, Policies.update_policies(policies, :broadcast, :read, false)}
 
-        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-          Policies.update_policies(policies, :broadcast, :read, false)
+      {:ok, [%Message{}]} ->
+        {:ok, Policies.update_policies(policies, :broadcast, :read, true)}
 
-        {:error, :not_found} ->
-          Policies.update_policies(policies, :broadcast, :read, false)
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+        {:ok, Policies.update_policies(policies, :broadcast, :read, false)}
 
-        {:error, error} ->
-          log_error(
-            "UnableToSetPolicies",
-            "Error getting policies for connection: #{to_log(error)}"
-          )
+      {:error, error} ->
+        log_error(
+          "UnableToSetPolicies",
+          "Error getting policies for connection: #{to_log(error)}"
+        )
 
-          Postgrex.rollback(transaction_conn, error)
-      end
-    end)
+        Postgrex.rollback(conn, error)
+    end
   end
 
   @impl true
-  def check_write_policies(_conn, policies, %Authorization{channel: nil}) do
+  def check_write_policies(_conn, policies, %Authorization{topic: nil}) do
     {:ok, Policies.update_policies(policies, :broadcast, :write, false)}
   end
 
-  def check_write_policies(conn, policies, %Authorization{
-        channel: %Channel{id: channel_id}
-      }) do
-    Postgrex.transaction(conn, fn transaction_conn ->
-      query = from(b in Broadcast, where: b.channel_id == ^channel_id)
+  def check_write_policies(conn, policies, %Authorization{topic: topic}) do
+    changeset =
+      Message.changeset(%Message{}, %{topic: topic, extension: :broadcast})
 
-      case Repo.one(conn, query, Broadcast, mode: :savepoint) do
-        {:ok, %Broadcast{} = broadcast} ->
-          zero = NaiveDateTime.new!(~D[1970-01-01], ~T[00:00:00])
-          changeset = Broadcast.check_changeset(broadcast, %{updated_at: zero})
+    case Repo.insert(conn, changeset, Message, mode: :savepoint) do
+      {:ok, %Message{}} ->
+        Postgrex.query!(conn, "ROLLBACK AND CHAIN", [])
+        {:ok, Policies.update_policies(policies, :broadcast, :write, true)}
 
-          case Repo.update(conn, changeset, Broadcast, mode: :savepoint) do
-            {:ok, %Broadcast{updated_at: ^zero}} ->
-              Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
-              Policies.update_policies(policies, :broadcast, :write, true)
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+        {:ok, Policies.update_policies(policies, :broadcast, :write, false)}
 
-            {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-              Policies.update_policies(policies, :broadcast, :write, false)
-
-            {:error, :not_found} ->
-              Policies.update_policies(policies, :broadcast, :write, false)
-
-            {:error, error} ->
-              log_error(
-                "UnableToSetPolicies",
-                "Error getting policies for connection: #{to_log(error)}"
-              )
-          end
-
-        {:error, :not_found} ->
-          Policies.update_policies(policies, :broadcast, :write, false)
-      end
-    end)
+      {:error, error} ->
+        log_error(
+          "UnableToSetPolicies",
+          "Error getting policies for connection: #{to_log(error)}"
+        )
+    end
   end
 end

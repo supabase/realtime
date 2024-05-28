@@ -2,7 +2,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
   # async: false due to the fact that multiple operations against the database will use the same connection
   use Realtime.DataCase, async: false
 
-  alias Realtime.Api.Presence
+  alias Realtime.Api.Message
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
@@ -46,8 +46,8 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
     end
 
     @tag role: "anon", policies: []
-    test "no channel in context returns false policies", context do
-      authorization_context = %{context.authorization_context | channel: nil}
+    test "no topic in context returns false policies", context do
+      authorization_context = %{context.authorization_context | topic: nil}
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -87,8 +87,8 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
     @tag role: "authenticated",
          policies: [:authenticated_read_presence, :authenticated_write_presence]
     test "authenticated user has write policies and reverts updated_at", context do
-      query = from(b in Presence, where: b.channel_id == ^context.channel.id)
-      {:ok, %Presence{updated_at: updated_at}} = Repo.one(context.db_conn, query, Presence)
+      query = from(m in Message, where: m.topic == ^context.topic)
+      assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -103,8 +103,8 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
         assert result == %Policies{presence: %PresencePolicies{write: true}}
       end)
 
-      # Ensure updated_at stays with the initial value
-      assert {:ok, %{updated_at: ^updated_at}} = Repo.one(context.db_conn, query, Presence)
+      # Ensure database is not polluted by policy testing
+      assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
     end
 
     @tag role: "anon", policies: [:authenticated_read_presence, :authenticated_write_presence]
@@ -124,8 +124,8 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
     end
 
     @tag role: "anon", policies: []
-    test "no channel in context returns false", context do
-      authorization_context = %{context.authorization_context | channel: nil}
+    test "no topic in context returns false", context do
+      authorization_context = %{context.authorization_context | topic: nil}
 
       Postgrex.transaction(context.db_conn, fn transaction_conn ->
         Authorization.set_conn_config(transaction_conn, context.authorization_context)
@@ -149,11 +149,10 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
     {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
     {:ok, db_conn} = Connect.get_status(tenant.external_id)
 
-    clean_table(db_conn, "realtime", "channels")
-    clean_table(db_conn, "realtime", "presences")
-    channel = channel_fixture(tenant)
+    clean_table(db_conn, "realtime", "messages")
+    message = message_fixture(tenant, %{extension: :presence})
 
-    create_rls_policies(db_conn, context.policies, channel)
+    create_rls_policies(db_conn, context.policies, message)
 
     claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
@@ -161,7 +160,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
 
     authorization_context =
       Authorization.build_authorization_params(%{
-        channel: channel,
+        topic: message.topic,
         headers: [{"header-1", "value-1"}],
         jwt: jwt,
         claims: claims,
@@ -169,7 +168,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
       })
 
     %{
-      channel: channel,
+      topic: message.topic,
       db_conn: db_conn,
       authorization_context: authorization_context
     }

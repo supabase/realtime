@@ -129,6 +129,8 @@ defmodule Realtime.Repo do
 
     %{header: header, rows: rows} =
       Enum.reduce(changeset.changes, acc, fn {field, row}, %{header: header, rows: rows} ->
+        row = if is_atom(row), do: Atom.to_string(row), else: row
+
         %{
           header: [Atom.to_string(field) | header],
           rows: [row | rows]

@@ -7,8 +7,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   alias DBConnection.Backoff
 
-  alias Realtime.Channels.Cache, as: ChannelsCache
-  alias Realtime.Api.Tenant
   alias Realtime.GenCounter
   alias Realtime.Helpers
   alias Realtime.PostgresCdc
@@ -18,9 +16,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.ChannelPolicies
+  alias Realtime.Tenants.Authorization.Policies.TopicPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
-  alias Realtime.Tenants.Cache, as: TenantCache
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.ChannelsAuthorization
@@ -47,6 +44,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign_access_token(params)
       |> assign_counter()
       |> assign(:using_broadcast?, !!params["config"]["broadcast"])
+      |> assign(:check_authorization?, !!params["config"]["private"])
 
     start_db_rate_counter(tenant_id)
 
@@ -56,10 +54,8 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_max_users(socket.assigns),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         tenant = TenantCache.get_tenant_by_external_id(tenant_id),
-         channel = maybe_get_channel(tenant, sub_topic, db_conn),
-         {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
-      public? = !socket.assigns.policies
+         {:ok, socket} <- assign_policies(sub_topic, db_conn, access_token, claims, socket) do
+      public? = !socket.assigns.check_authorization?
       is_new_api = is_new_api(params)
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
 
@@ -94,7 +90,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         self_broadcast: !!params["config"]["broadcast"]["self"],
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        public?: public?,
         db_conn: db_conn
       }
 
@@ -182,11 +177,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       cond do
         type == "presence_diff" and
             match?(%Policies{broadcast: %PresencePolicies{read: false}}, policies) ->
-          socket
+          Logger.warning("Presence message ignored")
 
-        type != "presence_diff" and
-            match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, policies) ->
-          Logger.warning("Presence tracking message ignored")
+          socket
 
         type != "presence_diff" and
             match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, policies) ->
@@ -503,7 +496,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp validate_policy(%{assigns: %{public?: true}} = socket, _claims, _check_policy) do
+  defp validate_policy(%{assigns: %{check_authorization?: true}} = socket, _claims, _check_policy) do
     {:ok, socket}
   end
 
@@ -518,8 +511,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       channel_name: channel_name
     } = assigns
 
-    with channel = ChannelsCache.get_channel_by_name(channel_name, db_conn),
-         {:ok, socket} <- assign_policies(channel, db_conn, access_token, claims, socket) do
+    with {:ok, socket} <- assign_policies(channel_name, db_conn, access_token, claims, socket) do
       {:ok, socket}
     end
   end
@@ -652,17 +644,18 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp assign_policies(
-         {:ok, channel},
+         topic,
          db_conn,
          access_token,
          claims,
-         socket
-       ) do
+         %{assigns: %{check_authorization?: true}} = socket
+       )
+       when not is_nil(topic) do
     %{using_broadcast?: using_broadcast?} = socket.assigns
 
     authorization_context =
       Authorization.build_authorization_params(%{
-        channel: channel,
+        topic: topic,
         headers: socket.assigns.headers,
         jwt: access_token,
         claims: claims,
@@ -672,8 +665,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
 
     cond do
-      match?(%Policies{channel: %ChannelPolicies{read: false}}, socket.assigns.policies) ->
-        {:error, "You do not have permissions to read from this Channel"}
+      match?(%Policies{topic: %TopicPolicies{read: false}}, socket.assigns.policies) ->
+        {:error, "You do not have permissions to read from this Topic"}
 
       using_broadcast? &&
           match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
@@ -687,10 +680,4 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp assign_policies(_, _, _, _, socket) do
     {:ok, assign(socket, policies: nil)}
   end
-
-  defp maybe_get_channel(%Tenant{enable_authorization: true}, sub_topic, db_conn) do
-    ChannelsCache.get_channel_by_name(sub_topic, db_conn)
-  end
-
-  defp maybe_get_channel(%Tenant{enable_authorization: false}, _, _), do: nil
 end

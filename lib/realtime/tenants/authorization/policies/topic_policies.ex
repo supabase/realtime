@@ -1,10 +1,12 @@
-defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
+defmodule Realtime.Tenants.Authorization.Policies.TopicPolicies do
   @moduledoc """
-    PresencePolicies structure that holds the required authorization information for a given connection within the scope of a tracking / receiving presence messages
+  TopicPolicies structure that holds the required authorization information for a given connection within the scope of a reading / altering channel entities
 
-    Uses the Realtime.Api.Presence to try reads and writes on the database to determine authorization for a given connection.
+  Uses the Realtime.Api.Channel to try reads and writes on the database to determine authorization for a given connection.
 
-    Implements Realtime.Tenants.Authorization behaviour
+  > Note: Currently we only allow policies to read all but not write all IF the RLS policies allow it.
+
+  Implements Realtime.Tenants.Authorization behaviour.
   """
   require Logger
   import Ecto.Query
@@ -23,28 +25,24 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
           read: boolean(),
           write: boolean()
         }
+
   @impl true
-  def check_read_policies(_conn, policies, %Authorization{topic: nil}) do
-    {:ok, Policies.update_policies(policies, :presence, :read, false)}
+  def check_read_policies(_conn, %Policies{} = policies, %Authorization{topic: nil}) do
+    {:ok, Policies.update_policies(policies, :topic, :read, false)}
   end
 
   def check_read_policies(conn, %Policies{} = policies, %Authorization{topic: topic}) do
-    query =
-      from(m in Message,
-        where: m.topic == ^topic,
-        where: m.extension == :presence,
-        limit: 1
-      )
+    query = from(m in Message, where: m.topic == ^topic)
 
     case Repo.all(conn, query, Message, mode: :savepoint) do
       {:ok, []} ->
-        {:ok, Policies.update_policies(policies, :presence, :read, false)}
+        {:ok, Policies.update_policies(policies, :topic, :read, false)}
 
-      {:ok, [%Message{}]} ->
-        {:ok, Policies.update_policies(policies, :presence, :read, true)}
+      {:ok, [%Message{} | _]} ->
+        {:ok, Policies.update_policies(policies, :topic, :read, true)}
 
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        {:ok, Policies.update_policies(policies, :presence, :read, false)}
+        {:ok, Policies.update_policies(policies, :topic, :read, false)}
 
       {:error, error} ->
         log_error(
@@ -58,19 +56,23 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
 
   @impl true
   def check_write_policies(_conn, policies, %Authorization{topic: nil}) do
-    {:ok, Policies.update_policies(policies, :presence, :write, false)}
+    {:ok, Policies.update_policies(policies, :topic, :write, false)}
   end
 
   def check_write_policies(conn, policies, %Authorization{topic: topic}) do
-    changeset = Message.changeset(%Message{}, %{topic: topic, extension: :presence})
+    changeset =
+      Message.changeset(%Message{}, %{topic: topic, extension: :presence})
 
     case Repo.insert(conn, changeset, Message, mode: :savepoint) do
       {:ok, %Message{}} ->
         Postgrex.query!(conn, "ROLLBACK AND CHAIN", [])
-        {:ok, Policies.update_policies(policies, :presence, :write, true)}
+        {:ok, Policies.update_policies(policies, :topic, :write, true)}
+
+      %Ecto.Changeset{errors: [name: {"has already been taken", []}]} ->
+        {:ok, Policies.update_policies(policies, :topic, :write, true)}
 
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-        {:ok, Policies.update_policies(policies, :presence, :write, false)}
+        {:ok, Policies.update_policies(policies, :topic, :write, false)}
 
       {:error, error} ->
         log_error(
