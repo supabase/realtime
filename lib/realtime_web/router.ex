@@ -131,7 +131,7 @@ defmodule RealtimeWeb.Router do
 
   defp check_auth(conn, secret_key) do
     secret = Application.fetch_env!(:realtime, secret_key)
-    blocklist = Application.get_env(:realtime, :block_list, [])
+    blocklist = Application.get_env(:realtime, :blocklist, [])
 
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
          false <- token in blocklist,
