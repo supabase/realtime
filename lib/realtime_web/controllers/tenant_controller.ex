@@ -8,10 +8,11 @@ defmodule RealtimeWeb.TenantController do
 
   alias Realtime.Api
   alias Realtime.Api.Tenant
-  alias Realtime.Tenants.Cache
+  alias Realtime.Database
+  alias Realtime.Helpers
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
-  alias Realtime.Helpers
+  alias Realtime.Tenants.Cache
 
   alias RealtimeWeb.Endpoint
   alias RealtimeWeb.UserSocket
@@ -194,7 +195,7 @@ defmodule RealtimeWeb.TenantController do
          :ok <- Cache.distributed_invalidate_tenant_cache(tenant_id),
          :ok <- PostgresCdc.stop_all(tenant, stop_all_timeout),
          :ok <- Endpoint.broadcast(subs_id, "disconnect", %{}),
-         :ok <- Helpers.replication_slot_teardown(tenant) do
+         :ok <- Database.replication_slot_teardown(tenant) do
       send_resp(conn, 204, "")
     else
       nil ->

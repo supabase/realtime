@@ -100,7 +100,7 @@
   <ul class="flex flex-wrap items-center mt-3 text-sm text-gray-900">
     <li><span class="mr-4">Apache 2.0 License</span></li>
     <li>
-      <span class="font-mono mr-4"><%= Realtime.Helpers.short_node_id_from_name(node()) %></span>
+      <span class="font-mono mr-4"><%= Realtime.Nodes.short_node_id_from_name(node()) %></span>
     </li>
     <li><span class="font-mono mr-4"><%= System.get_env("FLY_REGION") %></span></li>
     <li><%= live_render(@socket, RealtimeWeb.PingLive, id: "ping") %></li>

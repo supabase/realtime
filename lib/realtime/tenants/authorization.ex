@@ -9,12 +9,13 @@ defmodule Realtime.Tenants.Authorization do
   Check more information at Realtime.Tenants.Authorization.Policies
   """
   require Logger
+
+  alias Realtime.Database
   alias Realtime.Messages
-  alias Realtime.Helpers
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.TopicPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
+  alias Realtime.Tenants.Authorization.Policies.TopicPolicies
 
   defstruct [:topic, :headers, :jwt, :claims, :role]
 
@@ -118,7 +119,7 @@ defmodule Realtime.Tenants.Authorization do
 
   @policies_mods [TopicPolicies, BroadcastPolicies, PresencePolicies]
   defp get_policies_for_connection(conn, authorization_context) do
-    Helpers.transaction(conn, fn transaction_conn ->
+    Database.transaction(conn, fn transaction_conn ->
       {:ok, _} =
         Messages.create_message(
           %{topic: authorization_context.topic, extension: :broadcast},

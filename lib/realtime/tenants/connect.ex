@@ -13,11 +13,11 @@ defmodule Realtime.Tenants.Connect do
   import Realtime.Helpers, only: [log_error: 2]
 
   alias Realtime.Api.Tenant
-  alias Realtime.Helpers
+  alias Realtime.Database
   alias Realtime.Rpc
   alias Realtime.Tenants
-  alias Realtime.UsersCounter
   alias Realtime.Tenants.Migrations
+  alias Realtime.UsersCounter
 
   @erpc_timeout_default 5000
   @check_connected_user_interval_default 50_000
@@ -93,7 +93,7 @@ defmodule Realtime.Tenants.Connect do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     with %Tenant{} = tenant <- Tenants.get_tenant_by_external_id(tenant_id),
-         res <- Helpers.check_tenant_connection(tenant, @application_name),
+         res <- Database.check_tenant_connection(tenant, @application_name),
          [%{settings: settings} | _] <- tenant.extensions,
          {:ok, _} <- Migrations.run_migrations(settings) do
       case res do

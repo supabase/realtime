@@ -3,7 +3,7 @@ defmodule Realtime.Messages do
   Module to handle messages
   """
   alias Realtime.Api.Message
-  alias Realtime.Helpers
+  alias Realtime.Database
   alias Realtime.Repo
 
   @doc """
@@ -15,7 +15,7 @@ defmodule Realtime.Messages do
     channel = Message.changeset(%Message{}, attrs)
 
     result =
-      Helpers.transaction(conn, fn transaction_conn ->
+      Database.transaction(conn, fn transaction_conn ->
         with {:ok, %Message{} = channel} <- Repo.insert(transaction_conn, channel, Message, opts) do
           channel
         end

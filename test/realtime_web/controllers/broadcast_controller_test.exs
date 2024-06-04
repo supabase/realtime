@@ -4,9 +4,11 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
   import Mock
 
+  alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
+
   alias RealtimeWeb.Endpoint
 
   @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE1MTYyMzkwMjIsInJvbGUiOiJmb28iLCJleHAiOiJiYXIifQ.Ret2CevUozCsPhpgW2FMeFL7RooLgoOvfQzNpLBj5ak"
@@ -228,9 +230,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       start_supervised(Realtime.GenCounter.DynamicSupervisor)
       start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
       tenant = tenant_fixture()
-
-      secret =
-        Realtime.Helpers.decrypt!(tenant.jwt_secret, Application.get_env(:realtime, :db_enc_key))
+      jwt_secret = Crypto.decrypt!(tenant.jwt_secret)
 
       {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
       {:ok, db_conn} = Connect.get_status(tenant.external_id)
@@ -238,7 +238,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       clean_table(db_conn, "realtime", "messages")
 
       claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
-      signer = Joken.Signer.create("HS256", secret)
+      signer = Joken.Signer.create("HS256", jwt_secret)
 
       jwt = Joken.generate_and_sign!(%{}, claims, signer)
 

@@ -5,6 +5,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
   alias Extensions.PostgresCdcRls, as: Rls
 
+  alias Realtime.Database
   alias Realtime.Helpers
   alias Realtime.Rpc
   alias Realtime.Telemetry
@@ -39,32 +40,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
   @impl true
   def init(args) do
-    %{
-      "id" => id,
-      "db_host" => host,
-      "db_port" => port,
-      "db_name" => name,
-      "db_user" => user,
-      "db_password" => pass,
-      "subscribers_tid" => subscribers_tid
-    } = args
+    %{"id" => id, "subscribers_tid" => subscribers_tid} = args
 
     Logger.metadata(external_id: id, project: id)
 
-    ssl_enforced = Helpers.default_ssl_param(args)
+    realtime_subscription_checker_settings =
+      Database.from_settings(args, "realtime_subscription_checker")
 
-    {:ok, conn} =
-      Helpers.connect_db(
-        host,
-        port,
-        name,
-        user,
-        pass,
-        1,
-        5_000,
-        ssl_enforced,
-        "realtime_subscription_checker"
-      )
+    {:ok, conn} = Database.connect_db(realtime_subscription_checker_settings)
 
     state = %State{
       id: id,

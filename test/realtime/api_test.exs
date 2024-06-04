@@ -6,6 +6,7 @@ defmodule Realtime.ApiTest do
   alias Realtime.Api
   alias Realtime.Api.Extensions
   alias Realtime.Api.Tenant
+  alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter
 
@@ -104,12 +105,10 @@ defmodule Realtime.ApiTest do
     end
 
     test "update_tenant/2 with valid data updates the tenant", %{tenants: [tenant | _]} do
-      db_enc_key = Application.get_env(:realtime, :db_enc_key)
-
       assert {:ok, %Tenant{} = tenant} = Api.update_tenant(tenant, @update_attrs)
       assert tenant.external_id == "external_id1"
 
-      assert tenant.jwt_secret == Realtime.Helpers.encrypt!("some updated jwt_secret", db_enc_key)
+      assert tenant.jwt_secret == Crypto.encrypt!("some updated jwt_secret")
       assert tenant.name == "some updated name"
     end
 
