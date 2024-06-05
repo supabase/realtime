@@ -16,7 +16,7 @@ defmodule RealtimeWeb.Router do
 
   pipeline :api do
     plug(:accepts, ["json"])
-    plug(:check_auth, :api_jwt_secret)
+    plug(:check_auth, [:api_jwt_secret, :api_blocklist])
   end
 
   pipeline :open_cors do
@@ -38,7 +38,7 @@ defmodule RealtimeWeb.Router do
   end
 
   pipeline :metrics do
-    plug(:check_auth, :metrics_jwt_secret)
+    plug(:check_auth, [:metrics_jwt_secret, :metrics_blocklist])
   end
 
   pipeline :openapi do
@@ -129,10 +129,12 @@ defmodule RealtimeWeb.Router do
     )
   end
 
-  defp check_auth(conn, secret_key) do
+  defp check_auth(conn, [secret_key, blocklist_key]) do
     secret = Application.fetch_env!(:realtime, secret_key)
+    blocklist = Application.get_env(:realtime, blocklist_key, [])
 
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
+         false <- token in blocklist,
          {:ok, _claims} <- authorize(token, secret, nil) do
       conn
     else
