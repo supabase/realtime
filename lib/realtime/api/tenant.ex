@@ -5,7 +5,7 @@ defmodule Realtime.Api.Tenant do
   use Ecto.Schema
   import Ecto.Changeset
   alias Realtime.Api.Extensions
-  import Realtime.Helpers, only: [encrypt!: 2]
+  alias Realtime.Crypto
 
   @type t :: %__MODULE__{}
 
@@ -87,9 +87,6 @@ defmodule Realtime.Api.Tenant do
   end
 
   def encrypt_jwt_secret(changeset) do
-    update_change(changeset, :jwt_secret, fn jwt_secret ->
-      secure_key = Application.get_env(:realtime, :db_enc_key)
-      encrypt!(jwt_secret, secure_key)
-    end)
+    update_change(changeset, :jwt_secret, &Crypto.encrypt!/1)
   end
 end

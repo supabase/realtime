@@ -7,6 +7,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   alias DBConnection.Backoff
 
+  alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.Helpers
   alias Realtime.PostgresCdc
@@ -16,8 +17,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.TopicPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
+  alias Realtime.Tenants.Authorization.Policies.TopicPolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.ChannelsAuthorization
@@ -479,9 +480,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     } = assigns
 
     jwt_jwks = Map.get(assigns, :jwt_jwks)
-    secure_key = Application.fetch_env!(:realtime, :db_enc_key)
 
-    with jwt_secret_dec <- Helpers.decrypt!(jwt_secret, secure_key),
+    with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),

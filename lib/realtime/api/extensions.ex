@@ -5,7 +5,8 @@ defmodule Realtime.Api.Extensions do
 
   use Ecto.Schema
   import Ecto.Changeset
-  import Realtime.Helpers, only: [encrypt!: 2]
+
+  alias Realtime.Crypto
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -42,11 +43,9 @@ defmodule Realtime.Api.Extensions do
 
   def encrypt_settings(changeset, required) do
     update_change(changeset, :settings, fn settings ->
-      secure_key = Application.get_env(:realtime, :db_enc_key)
-
       Enum.reduce(required, settings, fn
         {field, _, true}, acc ->
-          encrypted = encrypt!(settings[field], secure_key)
+          encrypted = Crypto.encrypt!(settings[field])
           %{acc | field => encrypted}
 
         _, acc ->

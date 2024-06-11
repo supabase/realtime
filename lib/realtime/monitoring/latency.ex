@@ -8,6 +8,7 @@ defmodule Realtime.Latency do
   require Logger
 
   alias Realtime.Helpers
+  alias Realtime.Nodes
   alias Realtime.Rpc
 
   defmodule Payload do
@@ -101,8 +102,8 @@ defmodule Realtime.Latency do
 
           latency_ms = latency / 1_000
           region = Application.get_env(:realtime, :region, "not_set")
-          short_name = Helpers.short_node_id_from_name(n)
-          from_node = Helpers.short_node_id_from_name(Node.self())
+          short_name = Nodes.short_node_id_from_name(n)
+          from_node = Nodes.short_node_id_from_name(Node.self())
 
           case response do
             {:badrpc, reason} ->

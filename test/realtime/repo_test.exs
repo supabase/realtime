@@ -5,7 +5,9 @@ defmodule Realtime.RepoTest do
   import Ecto.Query
 
   alias Realtime.Api.Message
+  alias Realtime.Crypto
   alias Realtime.Repo
+  alias Realtime.Database
   alias Realtime.Tenants.Connect
 
   setup do
@@ -289,7 +291,7 @@ defmodule Realtime.RepoTest do
     } = args = tenant.extensions |> hd() |> then(& &1.settings)
 
     {host, port, name, user, pass} =
-      Realtime.Helpers.decrypt_creds(
+      Crypto.decrypt_creds(
         db_host,
         db_port,
         db_name,
@@ -297,7 +299,7 @@ defmodule Realtime.RepoTest do
         db_password
       )
 
-    ssl_enforced = Realtime.Helpers.default_ssl_param(args)
+    ssl_enforced = Database.default_ssl_param(args)
 
     [
       hostname: host,

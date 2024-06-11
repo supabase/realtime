@@ -1,7 +1,7 @@
 defmodule Realtime.PromEx do
   alias Realtime.PromEx.Plugins.{OsMon, Phoenix, Tenants, Tenant}
 
-  import Realtime.Helpers, only: [short_node_id_from_name: 1]
+  alias Realtime.Nodes
 
   @moduledoc """
   Be sure to add the following to finish setting up PromEx:
@@ -137,7 +137,7 @@ defmodule Realtime.PromEx do
     metrics_tags = %{
       region: Application.get_env(:realtime, :region),
       node_host: node_host,
-      short_alloc_id: short_node_id_from_name(node())
+      short_alloc_id: Nodes.short_node_id_from_name(node())
     }
 
     Application.put_env(:realtime, :metrics_tags, metrics_tags)
