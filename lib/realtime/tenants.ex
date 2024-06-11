@@ -225,13 +225,14 @@ defmodule Realtime.Tenants do
   @spec tenant_topic(Tenant.t() | binary(), String.t(), boolean()) :: String.t()
   def tenant_topic(external_id, sub_topic, public? \\ true)
 
-  def tenant_topic(%Tenant{external_id: external_id}, sub_topic, public?) do
-    tenant_topic(external_id, sub_topic, public?)
-  end
+  def tenant_topic(%Tenant{external_id: external_id}, sub_topic, public?),
+    do: tenant_topic(external_id, sub_topic, public?)
 
-  def tenant_topic(external_id, sub_topic, false), do: "#{external_id}-private:#{sub_topic}"
+  def tenant_topic(external_id, sub_topic, false),
+    do: "#{external_id}-private:#{sub_topic}"
 
-  def tenant_topic(external_id, sub_topic, true), do: "#{external_id}:#{sub_topic}"
+  def tenant_topic(external_id, sub_topic, true),
+    do: "#{external_id}:#{sub_topic}"
 
   @doc """
   Sets tenant as suspended. New connections won't be accepted

@@ -77,7 +77,7 @@ defmodule Generators do
     rows
     |> List.flatten()
     |> Enum.each(fn name ->
-      Postgrex.query!(db_conn, "DROP POLICY IF EXISTS #{name} ON #{schema}.#{table}", [])
+      Postgrex.query!(db_conn, "DROP POLICY IF EXISTS \"#{name}\" ON #{schema}.#{table}", [])
     end)
 
     Postgrex.query!(db_conn, "TRUNCATE TABLE #{schema}.#{table} CASCADE", [])
@@ -105,7 +105,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_all_topic_read, _) do
     """
-    CREATE POLICY authenticated_all_topic_read
+    CREATE POLICY "authenticated_all_topic_read"
     ON realtime.messages FOR SELECT
     TO authenticated
     USING ( true );
@@ -114,7 +114,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_all_topic_insert, _) do
     """
-    CREATE POLICY authenticated_all_topic_write
+    CREATE POLICY "authenticated_all_topic_write"
     ON realtime.messages FOR INSERT
     TO authenticated
     WITH CHECK ( true );
@@ -123,7 +123,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_read_topic, %{topic: name}) do
     """
-    CREATE POLICY authenticated_read_topic_#{name}
+    CREATE POLICY "authenticated_read_topic_#{name}"
     ON realtime.messages FOR SELECT
     TO authenticated
     USING ( realtime.topic() = '#{name}' );
@@ -132,7 +132,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_write_topic, %{topic: name}) do
     """
-    CREATE POLICY authenticated_write_topic_#{name}
+    CREATE POLICY "authenticated_write_topic_#{name}"
     ON realtime.messages FOR INSERT
     TO authenticated
     WITH CHECK ( realtime.topic() = '#{name}' );
@@ -141,7 +141,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_read_broadcast, %{topic: name}) do
     """
-    CREATE POLICY authenticated_read_broadcast_#{name}
+    CREATE POLICY "authenticated_read_broadcast_#{name}"
     ON realtime.messages FOR SELECT
     TO authenticated
     USING ( realtime.topic() = '#{name}' AND realtime.messages.extension = 'broadcast' );
@@ -150,7 +150,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_write_broadcast, %{topic: name}) do
     """
-    CREATE POLICY authenticated_write_broadcast_#{name}
+    CREATE POLICY "authenticated_write_broadcast_#{name}"
     ON realtime.messages FOR INSERT
     TO authenticated
     WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension = 'broadcast');
@@ -159,7 +159,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_read_presence, %{topic: name}) do
     """
-    CREATE POLICY authenticated_read_presence_#{name}
+    CREATE POLICY "authenticated_read_presence_#{name}"
     ON realtime.messages FOR SELECT
     TO authenticated
     USING ( realtime.topic() = '#{name}' AND realtime.messages.extension = 'presence' );
@@ -168,7 +168,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_write_presence, %{topic: name}) do
     """
-    CREATE POLICY authenticated_write_presence_#{name}
+    CREATE POLICY "authenticated_write_presence_#{name}"
     ON realtime.messages FOR INSERT
     TO authenticated
     WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension = 'presence' );
@@ -177,7 +177,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_read_broadcast_and_presence, %{topic: name}) do
     """
-    CREATE POLICY authenticated_read_presence_#{name}
+    CREATE POLICY "authenticated_read_presence_#{name}"
     ON realtime.messages FOR SELECT
     TO authenticated
     USING ( realtime.topic() = '#{name}' AND realtime.messages.extension IN ('presence', 'broadcast') );
@@ -186,7 +186,7 @@ defmodule Generators do
 
   def policy_query(:authenticated_write_broadcast_and_presence, %{topic: name}) do
     """
-    CREATE POLICY authenticated_write_presence_#{name}
+    CREATE POLICY "authenticated_write_presence_#{name}"
     ON realtime.messages FOR INSERT
     TO authenticated
     WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension IN ('presence', 'broadcast') );
