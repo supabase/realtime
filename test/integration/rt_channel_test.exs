@@ -197,7 +197,8 @@ defmodule Realtime.Integration.RtChannelTest do
       {socket, _} = get_connection()
 
       config = %{
-        broadcast: %{self: true}
+        broadcast: %{self: true},
+        private: false
       }
 
       topic = "realtime:any"
@@ -236,7 +237,7 @@ defmodule Realtime.Integration.RtChannelTest do
       topic: topic
     } do
       {socket, _} = get_connection("authenticated")
-      config = %{broadcast: %{self: true}}
+      config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
@@ -261,6 +262,49 @@ defmodule Realtime.Integration.RtChannelTest do
         ref: nil,
         topic: ^topic
       }
+    end
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ],
+         topic: "topic"
+    test "private broadcast with valid channel a colon character sends message and won't intercept in public channels",
+         %{topic: topic} do
+      {anon_socket, _} = get_connection("anon")
+      {socket, _} = get_connection("authenticated")
+      valid_topic = "realtime:#{topic}"
+      malicious_topic = "realtime:private:#{topic}"
+
+      WebsocketClient.join(socket, valid_topic, %{
+        config: %{broadcast: %{self: true}, private: true}
+      })
+
+      WebsocketClient.join(anon_socket, malicious_topic, %{
+        config: %{broadcast: %{self: true}, private: false}
+      })
+
+      assert_receive %Message{
+        event: "phx_reply",
+        payload: %{
+          "response" => %{"postgres_changes" => []},
+          "status" => "ok"
+        },
+        ref: "1",
+        topic: ^valid_topic
+      }
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, valid_topic, "broadcast", payload)
+
+      assert_receive %Message{
+        event: "broadcast",
+        payload: ^payload,
+        ref: nil,
+        topic: ^valid_topic
+      }
+
+      refute_receive %Message{event: "broadcast"}
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence]
@@ -320,7 +364,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
     test "public presence" do
       {socket, _} = get_connection()
-      config = %{presence: %{key: ""}}
+      config = %{presence: %{key: ""}, private: false}
       topic = "realtime:any"
 
       WebsocketClient.join(socket, topic, %{config: config})
@@ -369,7 +413,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "private presence with read and write permissions will be able to track and receive presence changes",
          %{topic: topic} do
       {socket, _} = get_connection("authenticated")
-      config = %{presence: %{key: ""}}
+      config = %{presence: %{key: ""}, private: true}
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
@@ -541,7 +585,8 @@ defmodule Realtime.Integration.RtChannelTest do
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
     clean_table(db_conn, "realtime", "messages")
-    message = message_fixture(tenant)
+    topic = Map.get(context, :topic, random_string())
+    message = message_fixture(tenant, %{topic: topic})
 
     if policies = context[:policies] do
       create_rls_policies(db_conn, policies, message)

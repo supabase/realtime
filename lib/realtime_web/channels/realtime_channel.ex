@@ -59,7 +59,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       public? = !socket.assigns.check_authorization?
       is_new_api = is_new_api(params)
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
-
       Realtime.UsersCounter.add(transport_pid, tenant_id)
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
 
