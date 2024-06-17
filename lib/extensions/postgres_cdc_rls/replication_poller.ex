@@ -128,7 +128,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
          %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
 
       {:error, reason} ->
-        Logger.error(%{error_code: "PoolingReplicationError", error_message: to_log(reason)})
+        log_error("PoolingReplicationError", reason)
 
         {timeout, backoff} = Backoff.backoff(backoff)
         retry_ref = Process.send_after(self(), :retry, timeout)
