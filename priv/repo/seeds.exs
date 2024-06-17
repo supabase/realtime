@@ -18,7 +18,7 @@ Repo.transaction(fn ->
     "external_id" => tenant_name,
     "jwt_secret" =>
       System.get_env("API_JWT_SECRET", "super-secret-jwt-token-with-at-least-32-characters-long"),
-    "max_channels_per_client" => String.to_integer(System.get_env("MAX_CHANNELS_PER_CLIENT") || "100"),
+    "max_channels_per_client" => Application.get_env(:realtime, :max_channels_per_client, 100),
     "extensions" => [
       %{
         "type" => "postgres_cdc_rls",
