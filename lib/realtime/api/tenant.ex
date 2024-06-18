@@ -25,10 +25,6 @@ defmodule Realtime.Api.Tenant do
       default: Application.get_env(:realtime, :tenant_max_channels_per_client)
     )
 
-    field(:max_channels_per_client, :integer,
-      default: Application.get_env(:realtime, :tenant_max_channels_per_client)
-    )
-
     field(:max_joins_per_second, :integer, default: 100)
     field(:suspend, :boolean, default: false)
     field(:events_per_second_rolling, :float, virtual: true)
