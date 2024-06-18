@@ -20,7 +20,7 @@ defmodule Realtime.Api.Tenant do
     field(:max_concurrent_users, :integer, default: 200)
     field(:max_events_per_second, :integer, default: 100)
     field(:max_bytes_per_second, :integer, default: 100_000)
-    field(:max_channels_per_client, :integer, default: Application.get_env(:realtime, :tenant_max_channels_per_client, 100))
+    field(:max_channels_per_client, :integer, default: Application.get_env(:realtime, :tenant_max_channels_per_client))
     field(:max_joins_per_second, :integer, default: 100)
     field(:suspend, :boolean, default: false)
     field(:events_per_second_rolling, :float, virtual: true)
