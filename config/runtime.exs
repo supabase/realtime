@@ -10,7 +10,8 @@ password = System.get_env("DB_PASSWORD", "postgres")
 database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
-tenant_max_channels_per_client = String.to_integer(System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100"))
+tenant_max_channels_per_client =
+  String.to_integer(System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100"))
 
 if config_env() == :prod do
   secret_key_base =
