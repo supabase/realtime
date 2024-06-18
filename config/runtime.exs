@@ -10,7 +10,7 @@ password = System.get_env("DB_PASSWORD", "postgres")
 database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
-tenant_max_channels_per_client = String.to_integer(System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100"))
+tenant_max_channels_per_client = System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100")
 
 if config_env() == :prod do
   secret_key_base =
@@ -63,7 +63,7 @@ if config_env() != :test do
     prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer(),
     platform: platform,
     slot_name_suffix: slot_name_suffix,
-    max_channels_per_client: max_channels_per_client
+    tenant_max_channels_per_client: tenant_max_channels_per_client
 
   queue_target = System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer()
   queue_interval = System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
