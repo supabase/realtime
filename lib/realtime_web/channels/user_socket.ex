@@ -3,14 +3,16 @@ defmodule RealtimeWeb.UserSocket do
 
   require Logger
 
-  import Realtime.Helpers, only: [decrypt!: 2, get_external_id: 1, log_error: 2]
+  import Realtime.Helpers, only: [log_error: 2]
 
   alias Realtime.Api.Tenant
+  alias Realtime.Crypto
+  alias Realtime.Database
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
+
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
-
   ## Channels
   channel("realtime:*", RealtimeChannel)
 
@@ -21,7 +23,7 @@ defmodule RealtimeWeb.UserSocket do
     if Application.fetch_env!(:realtime, :secure_channels) do
       %{uri: %{host: host}, x_headers: headers} = opts
 
-      {:ok, external_id} = get_external_id(host)
+      {:ok, external_id} = Database.get_external_id(host)
 
       log_level =
         params
@@ -31,8 +33,6 @@ defmodule RealtimeWeb.UserSocket do
           level -> level
         end)
         |> String.to_existing_atom()
-
-      secure_key = Application.get_env(:realtime, :db_enc_key)
 
       Logger.metadata(external_id: external_id, project: external_id)
       Logger.put_process_level(self(), log_level)
@@ -49,7 +49,7 @@ defmodule RealtimeWeb.UserSocket do
              postgres_cdc_default: postgres_cdc_default
            } <- Tenants.Cache.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- access_token(params, headers),
-           jwt_secret_dec <- decrypt!(jwt_secret, secure_key),
+           jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
            {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
         assigns = %RealtimeChannel.Assigns{

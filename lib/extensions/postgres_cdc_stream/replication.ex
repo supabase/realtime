@@ -15,7 +15,8 @@ defmodule Extensions.PostgresCdcStream.Replication do
   alias Realtime.Adapters.Changes.NewRecord
   alias Realtime.Adapters.Changes.UpdatedRecord
   alias Realtime.Adapters.Postgres.Decoder
-  alias Realtime.Helpers
+  alias Realtime.Crypto
+  alias Realtime.Database
 
   alias Decoder.Messages.Begin
   alias Decoder.Messages.Relation
@@ -264,7 +265,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
 
   def connection_opts(args) do
     {host, port, name, user, pass} =
-      Helpers.decrypt_creds(
+      Crypto.decrypt_creds(
         args["db_host"],
         args["db_port"],
         args["db_name"],
@@ -272,7 +273,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
         args["db_password"]
       )
 
-    {:ok, addrtype} = Helpers.detect_ip_version(host)
+    {:ok, addrtype} = Database.detect_ip_version(host)
 
     [
       hostname: host,

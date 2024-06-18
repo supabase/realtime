@@ -5,6 +5,8 @@ defmodule Realtime.Tenants.Migrations do
 
   require Logger
   import Realtime.Helpers, only: [log_error: 2]
+  alias Realtime.Crypto
+  alias Realtime.Database
   alias Realtime.Repo
 
   alias Realtime.Tenants.Migrations.{
@@ -48,10 +50,9 @@ defmodule Realtime.Tenants.Migrations do
     AddInsertAndDeleteGrantToChannels,
     AddPresencesPoliciesTable,
     CreateRealtimeAdminAndMoveOwnership,
-    RemoveCheckColumns
+    RemoveCheckColumns,
+    RedefineAuthorizationTables
   }
-
-  alias Realtime.Helpers
 
   @migrations [
     {20_211_116_024_918, CreateRealtimeSubscriptionTable},
@@ -95,7 +96,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_311_171_622, AddInsertAndDeleteGrantToChannels},
     {20_240_321_100_241, AddPresencesPoliciesTable},
     {20_240_401_105_812, CreateRealtimeAdminAndMoveOwnership},
-    {20_240_418_121_054, RemoveCheckColumns}
+    {20_240_418_121_054, RemoveCheckColumns},
+    {20_240_523_004_032, RedefineAuthorizationTables}
   ]
 
   @spec run_migrations(map()) :: {:ok, [integer()]} | {:error, any()}
@@ -109,16 +111,10 @@ defmodule Realtime.Tenants.Migrations do
         } = settings
       ) do
     {host, port, name, user, pass} =
-      Helpers.decrypt_creds(
-        db_host,
-        db_port,
-        db_name,
-        db_user,
-        db_password
-      )
+      Crypto.decrypt_creds(db_host, db_port, db_name, db_user, db_password)
 
-    {:ok, addrtype} = Helpers.detect_ip_version(host)
-    ssl_enforced = Helpers.default_ssl_param(settings)
+    {:ok, addrtype} = Database.detect_ip_version(host)
+    ssl_enforced = Database.default_ssl_param(settings)
 
     [
       hostname: host,
@@ -131,7 +127,7 @@ defmodule Realtime.Tenants.Migrations do
       parameters: [application_name: "realtime_migrations"],
       backoff_type: :stop
     ]
-    |> Helpers.maybe_enforce_ssl_config(ssl_enforced)
+    |> Database.maybe_enforce_ssl_config(ssl_enforced)
     |> Repo.with_dynamic_repo(fn repo ->
       Logger.info("Applying migrations to #{host}")
 

@@ -8,6 +8,7 @@ defmodule Realtime.Latency do
   require Logger
 
   alias Realtime.Helpers
+  alias Realtime.Nodes
   alias Realtime.Rpc
 
   defmodule Payload do
@@ -53,7 +54,7 @@ defmodule Realtime.Latency do
   end
 
   def handle_info(msg, state) do
-    Logger.warn("Unexpected message: #{inspect(msg)}")
+    Logger.warning("Unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -101,8 +102,8 @@ defmodule Realtime.Latency do
 
           latency_ms = latency / 1_000
           region = Application.get_env(:realtime, :region, "not_set")
-          short_name = Helpers.short_node_id_from_name(n)
-          from_node = Helpers.short_node_id_from_name(Node.self())
+          short_name = Nodes.short_node_id_from_name(n)
+          from_node = Nodes.short_node_id_from_name(Node.self())
 
           case response do
             {:badrpc, reason} ->
@@ -128,7 +129,7 @@ defmodule Realtime.Latency do
             {:ok, {:pong, remote_region}} ->
               if latency_ms > 1_000,
                 do:
-                  Logger.warn(
+                  Logger.warning(
                     "Network warning: latency to #{remote_region} (#{short_name}) from #{region} (#{from_node}) is #{latency_ms} ms"
                   )
 

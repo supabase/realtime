@@ -4,14 +4,14 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
   """
   import Plug.Conn
   import Phoenix.Controller, only: [json: 2]
-  import Realtime.Helpers, only: [get_external_id: 1]
 
   require Logger
 
   alias Realtime.Api
-  alias Realtime.RateCounter
-  alias Realtime.GenCounter
   alias Realtime.Api.Tenant
+  alias Realtime.Database
+  alias Realtime.GenCounter
+  alias Realtime.RateCounter
   alias Realtime.Tenants
 
   def init(opts) do
@@ -19,7 +19,7 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
   end
 
   def call(%Plug.Conn{host: host} = conn, _opts) do
-    with {:ok, external_id} <- get_external_id(host),
+    with {:ok, external_id} <- Database.get_external_id(host),
          %Tenant{} = tenant <- Api.get_tenant_by_external_id(external_id) do
       tenant =
         tenant

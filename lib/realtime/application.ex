@@ -61,7 +61,6 @@ defmodule Realtime.Application do
         Realtime.GenCounter.DynamicSupervisor,
         {Cachex, name: Realtime.RateCounter},
         Realtime.Tenants.CacheSupervisor,
-        Realtime.Channels.CacheSupervisor,
         Realtime.RateCounter.DynamicSupervisor,
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence,

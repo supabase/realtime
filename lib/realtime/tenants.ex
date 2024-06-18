@@ -11,7 +11,7 @@ defmodule Realtime.Tenants do
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.Cache
   alias Realtime.UsersCounter
-  alias Realtime.Helpers
+  alias Realtime.Database
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
@@ -68,13 +68,11 @@ defmodule Realtime.Tenants do
         connected_cluster = UsersCounter.tenant_users(external_id)
         %{extensions: [%{settings: settings} | _]} = Cache.get_tenant_by_external_id(external_id)
 
-        Helpers.transaction(health_conn, fn transaction_conn ->
-          res =
-            Postgrex.query!(
-              transaction_conn,
-              "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';",
-              []
-            )
+        query =
+          "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
+
+        Database.transaction(health_conn, fn transaction_conn ->
+          res = Postgrex.query!(transaction_conn, query, [])
 
           if res.rows == [] do
             Migrations.run_migrations(settings)
@@ -87,13 +85,11 @@ defmodule Realtime.Tenants do
         {:ok, db_conn} = Connect.lookup_or_start_connection(external_id)
         %{extensions: [%{settings: settings} | _]} = Cache.get_tenant_by_external_id(external_id)
 
-        Helpers.transaction(db_conn, fn transaction_conn ->
-          res =
-            Postgrex.query!(
-              transaction_conn,
-              "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';",
-              []
-            )
+        Database.transaction(db_conn, fn transaction_conn ->
+          query =
+            "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
+
+          res = Postgrex.query!(transaction_conn, query, [])
 
           if res.rows == [] do
             Migrations.run_migrations(settings)
@@ -220,21 +216,23 @@ defmodule Realtime.Tenants do
       iex> Realtime.Tenants.tenant_topic("tenant_id", "sub_topic")
       "tenant_id:sub_topic"
       iex> Realtime.Tenants.tenant_topic(%Realtime.Api.Tenant{external_id: "tenant_id"}, "sub_topic", false)
-      "tenant_id:private:sub_topic"
+      "tenant_id-private:sub_topic"
       iex> Realtime.Tenants.tenant_topic("tenant_id", "sub_topic", false)
-      "tenant_id:private:sub_topic"
+      "tenant_id-private:sub_topic"
+      iex> Realtime.Tenants.tenant_topic("tenant_id", ":sub_topic", false)
+      "tenant_id-private::sub_topic"
   """
   @spec tenant_topic(Tenant.t() | binary(), String.t(), boolean()) :: String.t()
   def tenant_topic(external_id, sub_topic, public? \\ true)
 
-  def tenant_topic(%Tenant{external_id: external_id}, sub_topic, public?) do
-    tenant_topic(external_id, sub_topic, public?)
-  end
+  def tenant_topic(%Tenant{external_id: external_id}, sub_topic, public?),
+    do: tenant_topic(external_id, sub_topic, public?)
 
-  def tenant_topic(external_id, sub_topic, public?) do
-    private_prefix = if public?, do: "", else: ":private"
-    "#{external_id}#{private_prefix}:#{sub_topic}"
-  end
+  def tenant_topic(external_id, sub_topic, false),
+    do: "#{external_id}-private:#{sub_topic}"
+
+  def tenant_topic(external_id, sub_topic, true),
+    do: "#{external_id}:#{sub_topic}"
 
   @doc """
   Sets tenant as suspended. New connections won't be accepted

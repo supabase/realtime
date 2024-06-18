@@ -16,7 +16,7 @@ defmodule RealtimeWeb.Router do
 
   pipeline :api do
     plug(:accepts, ["json"])
-    plug(:check_auth, :api_jwt_secret)
+    plug(:check_auth, [:api_jwt_secret, :api_blocklist])
   end
 
   pipeline :open_cors do
@@ -33,16 +33,12 @@ defmodule RealtimeWeb.Router do
     plug(RealtimeWeb.AuthTenant)
   end
 
-  pipeline :channel_rls_authorization do
-    plug(RealtimeWeb.RlsAuthorization)
-  end
-
   pipeline :dashboard_admin do
     plug(:dashboard_basic_auth)
   end
 
   pipeline :metrics do
-    plug(:check_auth, :metrics_jwt_secret)
+    plug(:check_auth, [:metrics_jwt_secret, :metrics_blocklist])
   end
 
   pipeline :openapi do
@@ -106,15 +102,6 @@ defmodule RealtimeWeb.Router do
     post("/broadcast", BroadcastController, :broadcast)
   end
 
-  scope "/api", RealtimeWeb do
-    pipe_through([:open_cors, :tenant_api, :secure_tenant_api, :channel_rls_authorization])
-
-    resources("/channels", ChannelsController,
-      only: [:index, :show, :create, :update, :delete],
-      param: "name"
-    )
-  end
-
   # Enables LiveDashboard only for development
   #
   # If you want to use the LiveDashboard in production, you should put
@@ -142,10 +129,14 @@ defmodule RealtimeWeb.Router do
     )
   end
 
-  defp check_auth(conn, secret_key) do
+  defp check_auth(conn, [secret_key, blocklist_key]) do
     secret = Application.fetch_env!(:realtime, secret_key)
 
+    blocklist = Application.get_env(:realtime, blocklist_key, [])
+
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
+         token <- Regex.replace(~r/\s|\n/, URI.decode(token), ""),
+         false <- token in blocklist,
          {:ok, _claims} <- authorize(token, secret, nil) do
       conn
     else

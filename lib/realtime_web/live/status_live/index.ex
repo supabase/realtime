@@ -2,7 +2,7 @@ defmodule RealtimeWeb.StatusLive.Index do
   use RealtimeWeb, :live_view
 
   alias Realtime.Latency.Payload
-  alias Realtime.Helpers
+  alias Realtime.Nodes
 
   @impl true
   def mount(_params, _session, socket) do
@@ -31,7 +31,7 @@ defmodule RealtimeWeb.StatusLive.Index do
   end
 
   defp all_nodes() do
-    [Node.self() | Node.list()] |> Enum.map(&Helpers.short_node_id_from_name/1)
+    [Node.self() | Node.list()] |> Enum.map(&Nodes.short_node_id_from_name/1)
   end
 
   defp default_pings() do

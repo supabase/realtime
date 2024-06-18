@@ -3,10 +3,10 @@ defmodule RealtimeWeb.TenantControllerTest do
   use RealtimeWeb.ConnCase, async: false
 
   import Mock
-  import Realtime.Helpers, only: [encrypt!: 2, transaction: 2]
 
   alias Realtime.Api.Tenant
-  alias Realtime.Helpers
+  alias Realtime.Crypto
+  alias Realtime.Database
   alias Realtime.PromEx.Plugins.Tenants
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
@@ -84,11 +84,10 @@ defmodule RealtimeWeb.TenantControllerTest do
         ext_id = @default_tenant_attrs["external_id"]
         conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @default_tenant_attrs)
         [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
-        sec_key = Application.get_env(:realtime, :db_enc_key)
-        assert encrypt!("127.0.0.1", sec_key) == settings["db_host"]
-        assert encrypt!("postgres", sec_key) == settings["db_name"]
-        assert encrypt!("supabase_admin", sec_key) == settings["db_user"]
-        assert encrypt!("postgres", sec_key) == settings["db_password"]
+        assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
+        assert Crypto.encrypt!("postgres") == settings["db_name"]
+        assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
+        assert Crypto.encrypt!("postgres") == settings["db_password"]
       end
     end
 
@@ -144,32 +143,30 @@ defmodule RealtimeWeb.TenantControllerTest do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         assert Cache.get_tenant_by_external_id(tenant.external_id)
 
-        {:ok, db_conn} = Helpers.check_tenant_connection(tenant, "realtime_test")
+        {:ok, db_conn} =
+          start_supervised(
+            {Postgrex,
+             [
+               host: "localhost",
+               username: "postgres",
+               password: "postgres",
+               database: "postgres",
+               port: 5433
+             ]}
+          )
 
         assert %{rows: [["supabase_realtime_replication_slot"]]} =
                  Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
 
         conn = delete(conn, Routes.tenant_path(conn, :delete, tenant.external_id))
         assert response(conn, 204)
-        :timer.sleep(1000)
 
-        {:ok, db_conn} =
-          start_supervised(
-            {Postgrex,
-             [
-               host: "localhost",
-               database: "realtime_test",
-               username: "postgres",
-               password: "postgres",
-               after_connect: &Postgrex.query!(&1, "set search_path=realtime", [])
-             ]}
-          )
+        :timer.sleep(5000)
+        refute Cache.get_tenant_by_external_id(tenant.external_id)
+        refute Tenants.get_tenant_by_external_id(tenant.external_id)
 
         assert {:ok, %{rows: []}} =
                  Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
-
-        refute Cache.get_tenant_by_external_id(tenant.external_id)
-        refute Tenants.get_tenant_by_external_id(tenant.external_id)
       end
     end
 
@@ -269,18 +266,18 @@ defmodule RealtimeWeb.TenantControllerTest do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         {:ok, db_conn} = Connect.lookup_or_start_connection(ext_id)
 
-        transaction(db_conn, fn transaction_conn ->
+        Database.transaction(db_conn, fn transaction_conn ->
           Postgrex.query!(transaction_conn, "DROP SCHEMA realtime CASCADE", [])
           Postgrex.query!(transaction_conn, "CREATE SCHEMA realtime", [])
           Postgrex.query!(transaction_conn, "DROP ROLE supabase_realtime_admin", [])
         end)
 
-        assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.channels", [])
+        assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
 
-        assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.channels", [])
+        assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
         assert %{"healthy" => true, "db_connected" => true, "connected_cluster" => 0} = data
       end

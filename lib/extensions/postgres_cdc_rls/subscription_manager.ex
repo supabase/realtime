@@ -6,8 +6,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   require Logger
 
   alias Extensions.PostgresCdcRls, as: Rls
-  alias Rls.Subscriptions
+
+  alias Realtime.Database
   alias Realtime.Helpers
+
+  alias Rls.Subscriptions
 
   @timeout 15_000
   @max_delete_records 1000
@@ -54,49 +57,18 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
   @impl true
   def init(args) do
-    %{
-      "id" => id,
-      "publication" => publication,
-      "subscribers_tid" => subscribers_tid,
-      "db_host" => host,
-      "db_port" => port,
-      "db_name" => name,
-      "db_user" => user,
-      "db_password" => pass,
-      "subs_pool_size" => subs_pool_size
-    } = args
-
+    %{"id" => id, "publication" => publication, "subscribers_tid" => subscribers_tid} = args
     Logger.metadata(external_id: id, project: id)
 
-    ssl_enforced = Helpers.default_ssl_param(args)
+    subscription_manager_settings = Database.from_settings(args, "realtime_subscription_manager")
 
-    {:ok, conn} =
-      Helpers.connect_db(
-        host,
-        port,
-        name,
-        user,
-        pass,
-        1,
-        5_000,
-        ssl_enforced,
-        "realtime_subscription_manager"
-      )
+    subscription_manager_pub_settings =
+      Database.from_settings(args, "realtime_subscription_manager_pub")
 
-    {:ok, conn_pub} =
-      Helpers.connect_db(
-        host,
-        port,
-        name,
-        user,
-        pass,
-        subs_pool_size,
-        5_000,
-        ssl_enforced,
-        "realtime_subscription_manager_pub"
-      )
-
+    {:ok, conn} = Database.connect_db(subscription_manager_settings)
+    {:ok, conn_pub} = Database.connect_db(subscription_manager_pub_settings)
     {:ok, _} = Subscriptions.maybe_delete_all(conn)
+
     Rls.update_meta(id, self(), conn_pub)
 
     oids = Subscriptions.fetch_publication_tables(conn, publication)
@@ -171,7 +143,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         values ->
           for {_pid, id, _ref, _node} <- values, reduce: q do
             acc ->
-              UUID.string_to_binary!(id)
+              id
+              |> UUID.string_to_binary!()
               |> :queue.in(acc)
           end
       end

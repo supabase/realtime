@@ -9,14 +9,18 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   require Logger
 
   import Realtime.Helpers,
-    only: [cancel_timer: 1, default_ssl_param: 1, connect_db: 9, log_error: 2, to_log: 1]
+    only: [cancel_timer: 1, log_error: 2, to_log: 1]
 
   alias DBConnection.Backoff
-  alias Extensions.PostgresCdcRls.{Replications, MessageDispatcher}
-  alias Realtime.Adapters.Changes.{DeletedRecord, NewRecord, UpdatedRecord}
-  alias Realtime.PubSub
 
-  @queue_target 5_000
+  alias Extensions.PostgresCdcRls.MessageDispatcher
+  alias Extensions.PostgresCdcRls.Replications
+
+  alias Realtime.Adapters.Changes.DeletedRecord
+  alias Realtime.Adapters.Changes.NewRecord
+  alias Realtime.Adapters.Changes.UpdatedRecord
+  alias Realtime.Database
+  alias Realtime.PubSub
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
@@ -24,20 +28,14 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   def init(args) do
     tenant = args["id"]
     Logger.metadata(external_id: tenant, project: tenant)
-    ssl_enforced = default_ssl_param(args)
 
-    {:ok, conn} =
-      connect_db(
-        args["db_host"],
-        args["db_port"],
-        args["db_name"],
-        args["db_user"],
-        args["db_password"],
-        1,
-        @queue_target,
-        ssl_enforced,
-        "realtime_rls"
-      )
+    # higher number of pool connections leads to issues
+    realtime_rls_settings =
+      args
+      |> Database.from_settings("realtime_rls")
+      |> Map.put(:pool, 1)
+
+    {:ok, conn} = Database.connect_db(realtime_rls_settings)
 
     state = %{
       backoff: Backoff.new(backoff_min: 100, backoff_max: 5_000, backoff_type: :rand_exp),
@@ -111,15 +109,15 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
         {:ok, diff} = Replications.get_pg_stat_activity_diff(conn, db_pid)
 
-        Logger.warn(
+        Logger.warning(
           "Database PID #{db_pid} found in pg_stat_activity with state_change diff of #{diff}"
         )
 
         if retry_count > 3 do
           case Replications.terminate_backend(conn, slot_name) do
-            {:ok, :terminated} -> Logger.warn("Replication slot in use - terminating")
-            {:error, :slot_not_found} -> Logger.warn("Replication slot not found")
-            {:error, error} -> Logger.warn("Error terminating backend: #{to_log(error)}")
+            {:ok, :terminated} -> Logger.warning("Replication slot in use - terminating")
+            {:error, :slot_not_found} -> Logger.warning("Replication slot not found")
+            {:error, error} -> Logger.warning("Error terminating backend: #{inspect(error)}")
           end
         end
 
@@ -130,7 +128,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
          %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
 
       {:error, reason} ->
-        Logger.error(%{error_code: "PoolingReplicationError", error_message: to_log(reason)})
+        log_error("PoolingReplicationError", reason)
 
         {timeout, backoff} = Backoff.backoff(backoff)
         retry_ref = Process.send_after(self(), :retry, timeout)

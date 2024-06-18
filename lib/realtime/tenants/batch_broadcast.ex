@@ -7,9 +7,10 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
   embedded_schema do
     embeds_many :messages, Message do
-      field(:event, :string)
-      field(:topic, :string)
-      field(:payload, :map)
+      field :event, :string
+      field :topic, :string
+      field :payload, :map
+      field :private, :boolean, default: false
     end
   end
 
@@ -21,7 +22,15 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
   def message_changeset(message, attrs) do
     message
-    |> cast(attrs, [:topic, :payload, :event])
+    |> cast(attrs, [:topic, :payload, :event, :private])
+    |> maybe_put_private_change()
     |> validate_required([:topic, :payload, :event])
+  end
+
+  defp maybe_put_private_change(changeset) do
+    case get_change(changeset, :private) do
+      nil -> put_change(changeset, :private, false)
+      _ -> changeset
+    end
   end
 end

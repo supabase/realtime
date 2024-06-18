@@ -21,7 +21,7 @@ defmodule Realtime.Tenants.CachePubSubHandler do
   @impl true
   def handle_info({action, tenant_id}, state)
       when action in [:suspend_tenant, :unsuspend_tenant, :invalidate_cache] do
-    Logger.warn("Triggering cache invalidation", external_id: tenant_id)
+    Logger.warning("Triggering cache invalidation", external_id: tenant_id)
     Cache.invalidate_tenant_cache(tenant_id)
     {:noreply, state}
   end
