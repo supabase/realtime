@@ -11,6 +11,10 @@ database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
 
+config :realtime,
+  tenant_max_channels_per_client:
+    System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer()
+
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
