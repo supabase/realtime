@@ -23,7 +23,6 @@ config :realtime,
   tenant_max_joins_per_second:
     System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer()
 
-
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
