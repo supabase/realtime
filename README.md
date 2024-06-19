@@ -143,13 +143,17 @@ TAILSCALE_APP_NAME         # {string}      Name of the Tailscale app.
 TAILSCALE_AUTHKEY          # {string}      Auth key for the Tailscape app.
 DNS_NODES                  # {string}      Node name used when running server in a cluster.
 MAX_CONNECTIONS            # {string}     Set the soft maximum for WebSocket connections. Defaults to '16384'.
-TENANT_MAX_CHANNELS_PER_CLIENT    # {string}     The default value of maximum number of channels each tenant can support. Defaults to '100'.
 MAX_HEADER_LENGTH          # {string}      Set the maximum header length for connections (in bytes). Defaults to '4096'.
 NUM_ACCEPTORS              # {string}     Set the number of server processes that will relay incoming WebSocket connection requests. Defaults to '100'.
 DB_QUEUE_TARGET            # {string}     Maximum time to wait for a connection from the pool. Defaults to '5000' or 5 seconds. See for more info: https://hexdocs.pm/db_connection/DBConnection.html#start_link/2-queue-config.
 DB_QUEUE_INTERVAL          # {string}     Interval to wait to check if all connections were checked out under DB_QUEUE_TARGET. If all connections surpassed the target during this interval than the target is doubled. Defaults to '5000' or 5 seconds. See for more info: https://hexdocs.pm/db_connection/DBConnection.html#start_link/2-queue-config.
 DB_POOL_SIZE               # {string}     Sets the number of connections in the database pool. Defaults to '5'.
 SLOT_NAME_SUFFIX           # {string}     This is appended to the replication slot which allows making a custom slot name. May contain lowercase letters, numbers, and the underscore character. Together with the default `supabase_realtime_replication_slot`, slot name should be up to 64 characters long.
+TENANT_MAX_BYTES_PER_SECOND    # {string}     The default value of maximum bytes per second that each tenant can support, used when creating a tenant for the first time. Defaults to '100_000'.
+TENANT_MAX_CHANNELS_PER_CLIENT    # {string}     The default value of maximum number of channels each tenant can support, used when creating a tenant for the first time. Defaults to '100'.
+TENANT_MAX_CONCURRENT_USERS    # {string}     The default value of maximum concurrent users per channel that each tenant can support, used when creating a tenant for the first time. Defaults to '200'.
+TENANT_MAX_EVENTS_PER_SECOND    # {string}     The default value of maximum events per second that each tenant can support, used when creating a tenant for the first time. Defaults to '100'.
+TENANT_MAX_JOINS_PER_SECOND    # {string}     The default value of maximum channel joins per second that each tenant can support, used when creating a tenant for the first time. Defaults to '100'.
 ```
 
 ## WebSocket URL
