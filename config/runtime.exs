@@ -13,7 +13,7 @@ slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
 
 config :realtime,
   tenant_max_bytes_per_second:
-    System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100_000") |> String.to_integer(),
+    System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100000") |> String.to_integer(),
   tenant_max_channels_per_client:
     System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer(),
   tenant_max_concurrent_users:
