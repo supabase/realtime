@@ -90,7 +90,7 @@ You can add your own by making a `POST` request to the server. You must change b
             "db_port": "5432",
             "region": "us-west-1",
             "poll_interval_ms": 100,
-            "poll_max_record_bytes": 1048576,
+            "poll_max_record_bytes": 1048576
           }
         }
       ]
