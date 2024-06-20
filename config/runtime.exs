@@ -12,8 +12,16 @@ port = System.get_env("DB_PORT", "5432")
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
 
 config :realtime,
+  tenant_max_bytes_per_second:
+    System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100000") |> String.to_integer(),
   tenant_max_channels_per_client:
-    System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer()
+    System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer(),
+  tenant_max_concurrent_users:
+    System.get_env("TENANT_MAX_CONCURRENT_USERS", "200") |> String.to_integer(),
+  tenant_max_events_per_second:
+    System.get_env("TENANT_MAX_EVENTS_PER_SECOND", "100") |> String.to_integer(),
+  tenant_max_joins_per_second:
+    System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer()
 
 if config_env() == :prod do
   secret_key_base =
