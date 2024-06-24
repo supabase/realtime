@@ -3,7 +3,7 @@ import Config
 config :logflare_logger_backend,
   url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 
-app_name = System.get_env("FLY_APP_NAME", "")
+app_name = System.get_env("APP_NAME", "")
 default_db_host = System.get_env("DB_HOST", "localhost")
 username = System.get_env("DB_USER", "postgres")
 password = System.get_env("DB_PASSWORD", "postgres")
@@ -69,8 +69,7 @@ if config_env() != :test do
     metrics_blocklist: System.get_env("METRICS_TOKEN_BLOCKLIST", "") |> String.split(","),
     metrics_jwt_secret: System.get_env("METRICS_JWT_SECRET"),
     db_enc_key: System.get_env("DB_ENC_KEY"),
-    region: System.get_env("FLY_REGION") || System.get_env("REGION"),
-    fly_alloc_id: System.get_env("FLY_ALLOC_ID", ""),
+    region: System.get_env("REGION"),
     prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer(),
     platform: platform,
     slot_name_suffix: slot_name_suffix
