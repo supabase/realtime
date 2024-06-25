@@ -55,11 +55,9 @@ upload_crash_dump_to_s3() {
     exit "$EXIT_CODE"
 }
 
-if [ "${ENABLE_ERL_CRASH_DUMP-}" = true ]; then
+if [ "${ENABLE_ERL_CRASH_DUMP:-false}" = true ]; then
     trap upload_crash_dump_to_s3 INT TERM KILL EXIT
 fi
-
-echo "Starting Realtime"
 
 echo "Running migrations"
 sudo -E -u nobody /app/bin/migrate
@@ -69,6 +67,8 @@ if [ "${SEED_SELF_HOST-}" = true ]; then
     sudo -E -u nobody /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)'
 fi
 
-echo "Starting Realtime"
-ulimit -n
-exec /app/bin/server
+if [ "${SELF_HOST_START:-true}" = true ]; then
+    echo "Starting Realtime"
+    ulimit -n
+    exec /app/bin/server
+fi
