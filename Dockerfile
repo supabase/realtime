@@ -87,6 +87,7 @@ COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
 COPY run.sh run.sh
 RUN ls -la /app
 ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "sh", "run.sh"]
+CMD ["/app/bin/server"]
 
 # Appended by flyctl
 ENV ECTO_IPV6 true
