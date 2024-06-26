@@ -86,7 +86,7 @@ RUN chown nobody /app
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
 COPY run.sh run.sh
 RUN ls -la /app
-ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "run.sh"]
+ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/app/run.sh"]
 CMD ["/app/bin/server"]
 
 # Appended by flyctl
