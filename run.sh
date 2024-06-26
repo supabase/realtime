@@ -71,4 +71,4 @@ fi
 
 echo "Starting Realtime"
 ulimit -n
-exec /app/bin/server
+exec "$@"
