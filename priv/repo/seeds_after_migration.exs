@@ -14,7 +14,6 @@ end
 
 %{
   "name" => tenant_name,
-  "enable_authorization" => true,
   "extensions" => [
     %{
       "type" => "postgres_cdc_rls",

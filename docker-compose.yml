@@ -42,5 +42,4 @@ services:
       ERL_AFLAGS: -proto_dist inet_tcp
       RLIMIT_NOFILE: 1000000
       DNS_NODES: "''"
-      ENABLE_ERL_CRASH_DUMP: true
       APP_NAME: realtime

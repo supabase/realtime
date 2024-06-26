@@ -63,13 +63,15 @@ RUN mix release
 # start a new build stage so that the final image will only contain
 # the compiled release and other runtime necessities
 FROM ${RUNNER_IMAGE}
-
 ARG SLOT_NAME_SUFFIX
+
 ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}"
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US:en
 ENV LC_ALL en_US.UTF-8
 ENV MIX_ENV="prod"
+ENV ECTO_IPV6 true
+ENV ERL_AFLAGS "-proto_dist inet6_tcp"
 
 RUN apt-get update -y && \
     apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini curl && \
@@ -82,12 +84,8 @@ WORKDIR "/app"
 
 RUN chown nobody /app
 
-# Only copy the final release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
 COPY run.sh run.sh
 RUN ls -la /app
-ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "sh", "run.sh"]
-
-# Appended by flyctl
-ENV ECTO_IPV6 true
-ENV ERL_AFLAGS "-proto_dist inet6_tcp"
+ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/app/run.sh"]
+CMD ["/app/bin/server"]

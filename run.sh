@@ -1,5 +1,5 @@
 #!/bin/bash
-set -eu pipefail
+set -euo pipefail
 set -x
 ulimit -n
 
@@ -55,11 +55,9 @@ upload_crash_dump_to_s3() {
     exit "$EXIT_CODE"
 }
 
-if [ "${ENABLE_ERL_CRASH_DUMP-}" = true ]; then
+if [ "${ENABLE_ERL_CRASH_DUMP:-false}" = true ]; then
     trap upload_crash_dump_to_s3 INT TERM KILL EXIT
 fi
-
-echo "Starting Realtime"
 
 echo "Running migrations"
 sudo -E -u nobody /app/bin/migrate
@@ -71,4 +69,4 @@ fi
 
 echo "Starting Realtime"
 ulimit -n
-exec /app/bin/server
+exec "$@"
