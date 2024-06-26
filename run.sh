@@ -1,5 +1,5 @@
 #!/bin/bash
-set -eu pipefail
+set -euo pipefail
 set -x
 ulimit -n
 
@@ -67,8 +67,6 @@ if [ "${SEED_SELF_HOST-}" = true ]; then
     sudo -E -u nobody /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)'
 fi
 
-if [ "${SELF_HOST_START:-true}" = true ]; then
-    echo "Starting Realtime"
-    ulimit -n
-    exec /app/bin/server
-fi
+echo "Starting Realtime"
+ulimit -n
+exec "$@"
