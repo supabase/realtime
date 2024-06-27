@@ -4,6 +4,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
   import Mock
 
+  alias Realtime.Tenants
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
 
@@ -121,21 +122,16 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant = tenant_fixture()
 
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
       Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
 
       :timer.sleep(100)
-
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
-
       assert Process.alive?(db_conn) == false
 
       Realtime.Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
 
       :timer.sleep(100)
-
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
       on_exit(fn -> Process.exit(db_conn, :normal) end)
     end
 
@@ -188,6 +184,47 @@ defmodule Realtime.Tenants.ConnectTest do
 
         assert_called(Ecto.Migrator.run(:_, :_, :_, :_))
       end
+    end
+
+    test "on Connect module death, Listen also dies", %{tenant: tenant} do
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      :timer.sleep(100)
+
+      [{notifications_pid, _}] =
+        Registry.lookup(
+          Realtime.Registry.Unique,
+          {Postgrex.Notifications, :tenant_id, tenant.external_id}
+        )
+
+      [{listen_pid, _}] =
+        Registry.lookup(
+          Realtime.Registry.Unique,
+          {Postgrex.Notifications, :tenant_id, tenant.external_id}
+        )
+
+      {conn_pid, _} = :syn.lookup(Connect, tenant.external_id)
+      assert Process.alive?(db_conn)
+      assert Process.alive?(conn_pid)
+      assert Process.alive?(listen_pid)
+      assert Process.alive?(notifications_pid)
+
+      Tenants.suspend_tenant_by_external_id(tenant.external_id)
+      :timer.sleep(1000)
+
+      assert [] =
+               Registry.lookup(
+                 Realtime.Registry.Unique,
+                 {Postgrex.Notifications, :tenant_id, tenant.external_id}
+               )
+
+      assert [] =
+               Registry.lookup(
+                 Realtime.Registry.Unique,
+                 {Realtime.Tenants.Listen, :tenant_id, tenant.external_id}
+               )
+
+      assert :undefined = :syn.lookup(Connect, tenant.external_id)
     end
   end
 

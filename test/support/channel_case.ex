@@ -23,7 +23,7 @@ defmodule RealtimeWeb.ChannelCase do
       # Import conveniences for testing with channels
       import Phoenix.ChannelTest
       import Generators
-
+      import TenantConnection
       # The default endpoint for testing
       @endpoint RealtimeWeb.Endpoint
     end

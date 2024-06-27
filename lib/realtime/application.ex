@@ -70,7 +70,11 @@ defmodule Realtime.Application do
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,
-         name: Realtime.Tenants.Connect.DynamicSupervisor}
+         name: Realtime.Tenants.Connect.DynamicSupervisor},
+        {PartitionSupervisor,
+         child_spec: DynamicSupervisor,
+         strategy: :one_for_one,
+         name: Realtime.Tenants.Listen.DynamicSupervisor}
       ] ++ extensions_supervisors()
 
     children =

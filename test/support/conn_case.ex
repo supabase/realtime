@@ -22,6 +22,7 @@ defmodule RealtimeWeb.ConnCase do
     quote do
       # Import conveniences for testing with connections
       import Generators
+      import TenantConnection
       import Phoenix.ConnTest
       import Plug.Conn
       import Realtime.DataCase

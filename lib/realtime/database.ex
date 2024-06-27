@@ -35,10 +35,22 @@ defmodule Realtime.Database do
           backoff: :stop | :exp | :rand | :rand_exp
         }
 
-  @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: Realtime.Database.t()
-  def from_settings(settings, application_name, backoff \\ :rand_exp) do
+  @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp, boolean()) ::
+          Realtime.Database.t()
+  def from_settings(settings, application_name, backoff \\ :rand_exp, decrypt \\ false) do
     pool =
       settings["subs_pool_size"] || settings["als"] || settings["db_pool"] || 2
+
+    settings =
+      if decrypt do
+        settings
+        |> Map.take(["db_host", "db_port", "db_name", "db_user", "db_password"])
+        |> Enum.map(fn {k, v} -> {k, Crypto.decrypt!(v)} end)
+        |> Map.new()
+        |> then(&Map.merge(settings, &1))
+      else
+        settings
+      end
 
     %__MODULE__{
       host: settings["db_host"],
@@ -87,13 +99,16 @@ defmodule Realtime.Database do
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
   """
-  @spec check_tenant_connection(Tenant.t(), binary()) :: {:error, atom()} | {:ok, pid()}
+  @spec check_tenant_connection(Tenant.t(), binary(), integer()) ::
+          {:error, atom()} | {:ok, pid()}
+  def check_tenant_connection(tenant, application_name, pool \\ 1)
   def check_tenant_connection(nil, _, _), do: {:error, :tenant_not_found}
 
-  def check_tenant_connection(tenant, application_name) do
+  def check_tenant_connection(tenant, application_name, pool) do
     tenant
     |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
     |> then(fn settings ->
+      settings = Map.put(settings, "db_pool", pool)
       check_settings = from_settings(settings, application_name, :stop)
 
       with {:ok, conn} <- connect_db(check_settings) do
