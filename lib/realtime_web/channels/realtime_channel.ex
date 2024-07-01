@@ -303,8 +303,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{"access_token" => refresh_token},
         %{
           assigns: %{
-            access_token: _access_token,
+            access_token: access_token,
             pg_sub_ref: pg_sub_ref,
+            db_conn: db_conn,
+            channel_name: channel_name,
             pg_change_params: pg_change_params
           }
         } = socket
@@ -313,7 +315,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     socket = assign(socket, :access_token, refresh_token)
 
     with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
-         {:ok, socket} <- validate_policy(socket, claims) do
+         {:ok, socket} <-
+           maybe_assign_policies(channel_name, db_conn, access_token, claims, socket) do
       Helpers.cancel_timer(pg_sub_ref)
       pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
@@ -498,19 +501,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       {:error, e} -> {:error, e}
       e -> {:error, e}
-    end
-  end
-
-  defp validate_policy(%{assigns: assigns} = socket, claims) do
-    %{
-      access_token: access_token,
-      db_conn: db_conn,
-      channel_name: channel_name
-    } = assigns
-
-    with {:ok, socket} <-
-           maybe_assign_policies(channel_name, db_conn, access_token, claims, socket) do
-      {:ok, socket}
     end
   end
 
