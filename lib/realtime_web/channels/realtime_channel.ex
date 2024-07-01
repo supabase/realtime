@@ -312,25 +312,25 @@ defmodule RealtimeWeb.RealtimeChannel do
       when is_binary(refresh_token) do
     socket = assign(socket, :access_token, refresh_token)
 
-    case confirm_token(socket, true) do
-      {:ok, claims, confirm_token_ref, _, socket} ->
-        Helpers.cancel_timer(pg_sub_ref)
-        pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
+    with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
+         {:ok, socket} <- validate_policy(socket, claims) do
+      Helpers.cancel_timer(pg_sub_ref)
+      pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
-        pg_sub_ref =
-          case pg_change_params do
-            [_ | _] -> postgres_subscribe()
-            _ -> nil
-          end
+      pg_sub_ref =
+        case pg_change_params do
+          [_ | _] -> postgres_subscribe()
+          _ -> nil
+        end
 
-        assigns = %{
-          pg_sub_ref: pg_sub_ref,
-          confirm_token_ref: confirm_token_ref,
-          pg_change_params: pg_change_params
-        }
+      assigns = %{
+        pg_sub_ref: pg_sub_ref,
+        confirm_token_ref: confirm_token_ref,
+        pg_change_params: pg_change_params
+      }
 
-        {:noreply, assign(socket, assigns)}
-
+      {:noreply, assign(socket, assigns)}
+    else
       {:error, error} when is_binary(error) ->
         shutdown_response(socket, error)
 
@@ -477,7 +477,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :access_token, tenant_token)
   end
 
-  defp confirm_token(%{assigns: assigns} = socket, check_policy \\ false) do
+  defp confirm_token(%{assigns: assigns} = socket) do
     %{
       jwt_secret: jwt_secret,
       access_token: access_token
@@ -488,8 +488,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
-         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         {:ok, socket} <- validate_policy(socket, claims, check_policy) do
+         exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 
       interval = min(@confirm_token_ms_interval, exp_diff * 1_000)
@@ -502,11 +501,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp validate_policy(socket, _claims, false) do
-    {:ok, socket}
-  end
-
-  defp validate_policy(%{assigns: assigns} = socket, claims, true) do
+  defp validate_policy(%{assigns: assigns} = socket, claims) do
     %{
       access_token: access_token,
       db_conn: db_conn,
