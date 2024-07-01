@@ -473,7 +473,7 @@ defmodule Realtime.Integration.RtChannelTest do
         join_ref: nil
       }
 
-      refute_receive %Message{event: "presence_state", payload: _, ref: nil, topic: ^topic}
+      assert_receive %Message{event: "presence_state", payload: %{}, ref: nil, topic: ^topic}
       refute_receive %Message{event: "presence_diff", payload: _, ref: _, topic: ^topic}
 
       payload = %{
@@ -534,26 +534,33 @@ defmodule Realtime.Integration.RtChannelTest do
       {socket, access_token} = get_connection("authenticated")
       {:ok, new_token} = token_valid("anon")
 
-      topic = "realtime:#{topic}"
+      realtime_topic = "realtime:#{topic}"
 
-      WebsocketClient.join(socket, topic, %{
+      WebsocketClient.join(socket, realtime_topic, %{
         config: %{broadcast: %{self: true}, private: true},
-        access_token: new_token
+        access_token: access_token
       })
 
-      WebsocketClient.send_event(socket, topic, "access_token", %{"access_token" => access_token})
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}
+      :timer.sleep(2000)
+
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+        "access_token" => new_token
+      })
 
       assert_receive %Phoenix.Socket.Message{
-                       event: "phx_reply",
-                       payload: %{
-                         "response" => %{
-                           "reason" => "You do not have permissions to read from this Topic"
-                         },
-                         "status" => "error"
-                       },
-                       topic: ^topic
-                     },
-                     500
+        event: "system",
+        payload: %{
+          "channel" => ^topic,
+          "extension" => "system",
+          "message" => "You do not have permissions to read from this Topic",
+          "status" => "error"
+        },
+        topic: ^realtime_topic
+      }
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_close", topic: ^realtime_topic}
     end
   end
 

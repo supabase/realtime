@@ -4,15 +4,29 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeSubscriptionTable do
   use Ecto.Migration
 
   def change do
-    execute("create type realtime.equality_op as enum(
-      'eq', 'neq', 'lt', 'lte', 'gt', 'gte'
-    );")
+    execute("""
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'equality_op') THEN
+            CREATE TYPE realtime.equality_op AS ENUM(
+              'eq', 'neq', 'lt', 'lte', 'gt', 'gte'
+            );
+        END IF;
+    END$$;
+    """)
 
-    execute("create type realtime.user_defined_filter as (
-      column_name text,
-      op realtime.equality_op,
-      value text
-    );")
+    execute("""
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_defined_filter') THEN
+            CREATE TYPE realtime.user_defined_filter as (
+              column_name text,
+              op realtime.equality_op,
+              value text
+            );
+        END IF;
+    END$$;
+    """)
 
     execute("create table realtime.subscription (
       -- Tracks which users are subscribed to each table

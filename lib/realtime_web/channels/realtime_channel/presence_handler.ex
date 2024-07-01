@@ -35,7 +35,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     %{tenant_topic: topic, policies: policies} = assigns
 
     case policies do
-      %Policies{presence: %PresencePolicies{write: false}} ->
+      %Policies{presence: %PresencePolicies{read: false}} ->
         Logger.info("Presence track message ignored on #{topic}")
         {:noreply, socket}
 

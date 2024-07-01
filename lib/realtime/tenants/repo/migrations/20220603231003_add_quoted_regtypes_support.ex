@@ -6,16 +6,21 @@ defmodule Realtime.Tenants.Migrations.AddQuotedRegtypesSupport do
   def change do
     execute("drop type if exists realtime.wal_column cascade;")
 
-    execute("
-      create type realtime.wal_column as (
-        name text,
-        type_name text,
-        type_oid oid,
-        value jsonb,
-        is_pkey boolean,
-        is_selectable boolean
-      );
-    ")
+    execute("""
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'wal_column') THEN
+            CREATE TYPE realtime.wal_column AS (
+                name text,
+                type_name text,
+                type_oid oid,
+                value jsonb,
+                is_pkey boolean,
+                is_selectable boolean
+            );
+        END IF;
+    END$$;
+    """)
 
     execute("
       create or replace function realtime.is_visible_through_filters(columns realtime.wal_column[], filters realtime.user_defined_filter[])

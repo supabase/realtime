@@ -239,6 +239,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(:confirm_token, %{assigns: %{pg_change_params: pg_change_params}} = socket) do
+    IO.inspect(socket.policies, label: "confirm_token")
+
     case confirm_token(socket) do
       {:ok, claims, confirm_token_ref, _, _} ->
         pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
@@ -249,9 +251,11 @@ defmodule RealtimeWeb.RealtimeChannel do
            pg_change_params: pg_change_params
          })}
 
-      {:error, error} ->
-        message = "Access token has expired: " <> Helpers.to_log(error)
+      {:error, error} when is_binary(error) ->
+        shutdown_response(socket, error)
 
+      {:error, error} ->
+        message = Helpers.to_log(error)
         shutdown_response(socket, message)
     end
   end
@@ -328,6 +332,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         }
 
         {:noreply, assign(socket, assigns)}
+
+      {:error, error} when is_binary(error) ->
+        shutdown_response(socket, error)
 
       {:error, error} ->
         message = "Received an invalid access token from client: " <> inspect(error)
@@ -486,17 +493,15 @@ defmodule RealtimeWeb.RealtimeChannel do
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
          {:ok, socket} <- validate_policy(socket, claims, check_policy) do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
+
       interval = min(@confirm_token_ms_interval, exp_diff * 1_000)
       ref = Process.send_after(self(), :confirm_token, interval)
+
       {:ok, claims, ref, access_token, socket}
     else
       {:error, e} -> {:error, e}
       e -> {:error, e}
     end
-  end
-
-  defp validate_policy(%{assigns: %{check_authorization?: true}} = socket, _claims, _check_policy) do
-    {:ok, socket}
   end
 
   defp validate_policy(socket, _claims, false) do
