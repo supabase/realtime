@@ -335,7 +335,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:noreply, assign(socket, assigns)}
     else
       {:error, error} when is_binary(error) ->
-        shutdown_response(socket, error)
+        message = "Received an invalid access token from client: " <> error
+
+        shutdown_response(socket, message)
 
       {:error, error} ->
         message = "Received an invalid access token from client: " <> inspect(error)
