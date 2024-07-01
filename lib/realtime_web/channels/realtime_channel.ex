@@ -55,7 +55,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_max_users(socket.assigns),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, socket} <- assign_policies(sub_topic, db_conn, access_token, claims, socket) do
+         {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, access_token, claims, socket) do
       public? = !socket.assigns.check_authorization?
       is_new_api = is_new_api(params)
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
@@ -508,7 +508,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       channel_name: channel_name
     } = assigns
 
-    with {:ok, socket} <- assign_policies(channel_name, db_conn, access_token, claims, socket) do
+    with {:ok, socket} <-
+           maybe_assign_policies(channel_name, db_conn, access_token, claims, socket) do
       {:ok, socket}
     end
   end
@@ -640,7 +641,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end)
   end
 
-  defp assign_policies(
+  defp maybe_assign_policies(
          topic,
          db_conn,
          access_token,
@@ -674,7 +675,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp assign_policies(_, _, _, _, socket) do
+  defp maybe_assign_policies(_, _, _, _, socket) do
     {:ok, assign(socket, policies: nil)}
   end
 end
