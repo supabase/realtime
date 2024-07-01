@@ -253,7 +253,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         shutdown_response(socket, error)
 
       {:error, error} ->
-        message = Helpers.to_log(error)
+        message = "Access token has expired: " <> Helpers.to_log(error)
         shutdown_response(socket, message)
     end
   end

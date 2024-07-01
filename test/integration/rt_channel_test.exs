@@ -554,7 +554,8 @@ defmodule Realtime.Integration.RtChannelTest do
         payload: %{
           "channel" => ^topic,
           "extension" => "system",
-          "message" => "Received an invalid access token from client: You do not have permissions to read from this Topic",
+          "message" =>
+            "Received an invalid access token from client: You do not have permissions to read from this Topic",
           "status" => "error"
         },
         topic: ^realtime_topic
