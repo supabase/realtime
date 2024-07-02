@@ -4,13 +4,20 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeBuildPreparedStatementSqlFun
   use Ecto.Migration
 
   def change do
-    execute("create type realtime.wal_column as (
-      name text,
-      type text,
-      value jsonb,
-      is_pkey boolean,
-      is_selectable boolean
-    );")
+    execute("""
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'wal_column') THEN
+            CREATE TYPE realtime.wal_column AS (
+              name text,
+              type text,
+              value jsonb,
+              is_pkey boolean,
+              is_selectable boolean
+            );
+        END IF;
+    END$$;
+    """)
 
     execute("create function realtime.build_prepared_statement_sql(
       prepared_statement_name text,

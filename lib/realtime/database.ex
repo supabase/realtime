@@ -38,7 +38,7 @@ defmodule Realtime.Database do
   @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: Realtime.Database.t()
   def from_settings(settings, application_name, backoff \\ :rand_exp) do
     pool =
-      settings["subs_pool_size"] || settings["subcriber_pool_size"] || settings["db_pool"] || 1
+      settings["subs_pool_size"] || settings["als"] || settings["db_pool"] || 2
 
     %__MODULE__{
       host: settings["db_host"],

@@ -76,7 +76,7 @@ defmodule Realtime.Integration.RtChannelTest do
     :ok
   end
 
-  test "postgres" do
+  test "handle postgres extension" do
     {socket, _} = get_connection()
     topic = "realtime:any"
     config = %{postgres_changes: [%{event: "*", schema: "public"}]}
@@ -190,7 +190,7 @@ defmodule Realtime.Integration.RtChannelTest do
                    2000
   end
 
-  describe "broadcast feature" do
+  describe "handle broadcast extension" do
     setup [:rls_context]
 
     test "public broadcast" do
@@ -359,7 +359,7 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
-  describe "presence feature" do
+  describe "handle presence extension" do
     setup [:rls_context]
 
     test "public presence" do
@@ -473,7 +473,7 @@ defmodule Realtime.Integration.RtChannelTest do
         join_ref: nil
       }
 
-      refute_receive %Message{event: "presence_state", payload: _, ref: nil, topic: ^topic}
+      assert_receive %Message{event: "presence_state", payload: %{}, ref: nil, topic: ^topic}
       refute_receive %Message{event: "presence_diff", payload: _, ref: _, topic: ^topic}
 
       payload = %{
@@ -522,7 +522,7 @@ defmodule Realtime.Integration.RtChannelTest do
              WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
   end
 
-  describe "refresh token" do
+  describe "handle refresh token messages" do
     setup [:rls_context]
 
     @tag policies: [
@@ -534,26 +534,57 @@ defmodule Realtime.Integration.RtChannelTest do
       {socket, access_token} = get_connection("authenticated")
       {:ok, new_token} = token_valid("anon")
 
-      topic = "realtime:#{topic}"
+      realtime_topic = "realtime:#{topic}"
 
-      WebsocketClient.join(socket, topic, %{
+      WebsocketClient.join(socket, realtime_topic, %{
         config: %{broadcast: %{self: true}, private: true},
-        access_token: new_token
+        access_token: access_token
       })
 
-      WebsocketClient.send_event(socket, topic, "access_token", %{"access_token" => access_token})
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}
+      :timer.sleep(2000)
+
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+        "access_token" => new_token
+      })
 
       assert_receive %Phoenix.Socket.Message{
-                       event: "phx_reply",
-                       payload: %{
-                         "response" => %{
-                           "reason" => "You do not have permissions to read from this Topic"
-                         },
-                         "status" => "error"
-                       },
-                       topic: ^topic
-                     },
-                     500
+        event: "system",
+        payload: %{
+          "channel" => ^topic,
+          "extension" => "system",
+          "message" =>
+            "Received an invalid access token from client: You do not have permissions to read from this Topic",
+          "status" => "error"
+        },
+        topic: ^realtime_topic
+      }
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_close", topic: ^realtime_topic}
+    end
+
+    test "on new access_token and channel is public policies are not reevaluated",
+         %{topic: topic} do
+      {socket, access_token} = get_connection("authenticated")
+      {:ok, new_token} = token_valid("anon")
+
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{
+        config: %{broadcast: %{self: true}, private: false},
+        access_token: access_token
+      })
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}
+      :timer.sleep(1000)
+
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+        "access_token" => new_token
+      })
+
+      refute_receive %Phoenix.Socket.Message{}
     end
   end
 

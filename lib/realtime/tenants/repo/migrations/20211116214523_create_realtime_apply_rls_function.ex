@@ -4,16 +4,31 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeApplyRlsFunction do
   use Ecto.Migration
 
   def change do
-    execute(
-      "create type realtime.action as enum ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'ERROR');"
-    )
+    execute("""
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'action') THEN
+            CREATE TYPE realtime.action AS ENUM (
+              'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'ERROR'
+            );
+        END IF;
+    END$$;
+    """)
 
-    execute("create type realtime.wal_rls as (
-      wal jsonb,
-      is_rls_enabled boolean,
-      users uuid[],
-      errors text[]
-    );")
+    execute("""
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'wal_rls') THEN
+            CREATE TYPE realtime.wal_rls AS (
+              wal jsonb,
+              is_rls_enabled boolean,
+              users uuid[],
+              errors text[]
+            );
+        END IF;
+    END$$;
+    """)
+
     execute("create function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
       returns realtime.wal_rls
       language plpgsql
