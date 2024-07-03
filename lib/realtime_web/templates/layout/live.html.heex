@@ -102,7 +102,7 @@
     <li>
       <span class="font-mono mr-4"><%= Realtime.Nodes.short_node_id_from_name(node()) %></span>
     </li>
-    <li><span class="font-mono mr-4"><%= System.get_env("FLY_REGION") %></span></li>
+    <li><span class="font-mono mr-4"><%= System.get_env("REGION") %></span></li>
     <li><%= live_render(@socket, RealtimeWeb.PingLive, id: "ping") %></li>
   </ul>
 </footer>

@@ -48,8 +48,7 @@ defmodule RealtimeWeb.BroadcastController do
          %Ecto.Changeset{changes: %{messages: messages}} = changeset,
          events_per_second_key = Tenants.events_per_second_key(tenant),
          :ok <- check_rate_limit(events_per_second_key, tenant, length(messages)) do
-      tenant_db_conn =
-        if tenant.enable_authorization, do: Connect.lookup_or_start_connection(tenant.external_id)
+      tenant_db_conn = Connect.lookup_or_start_connection(tenant.external_id)
 
       events =
         messages
@@ -93,7 +92,7 @@ defmodule RealtimeWeb.BroadcastController do
     Endpoint.broadcast_from(self(), tenant_topic, "broadcast", payload)
   end
 
-  defp permissions_for_message(_, nil, _), do: nil
+  defp permissions_for_message(_, {:error, _}, _), do: nil
 
   defp permissions_for_message(conn, {:ok, db_conn}, topic) do
     params = %{

@@ -55,7 +55,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_max_users(socket.assigns),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, socket} <- assign_policies(sub_topic, db_conn, access_token, claims, socket) do
+         {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, access_token, claims, socket) do
       public? = !socket.assigns.check_authorization?
       is_new_api = is_new_api(params)
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
@@ -249,9 +249,11 @@ defmodule RealtimeWeb.RealtimeChannel do
            pg_change_params: pg_change_params
          })}
 
+      {:error, error} when is_binary(error) ->
+        shutdown_response(socket, error)
+
       {:error, error} ->
         message = "Access token has expired: " <> Helpers.to_log(error)
-
         shutdown_response(socket, message)
     end
   end
@@ -301,8 +303,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         %{"access_token" => refresh_token},
         %{
           assigns: %{
-            access_token: _access_token,
+            access_token: access_token,
             pg_sub_ref: pg_sub_ref,
+            db_conn: db_conn,
+            channel_name: channel_name,
             pg_change_params: pg_change_params
           }
         } = socket
@@ -310,24 +314,30 @@ defmodule RealtimeWeb.RealtimeChannel do
       when is_binary(refresh_token) do
     socket = assign(socket, :access_token, refresh_token)
 
-    case confirm_token(socket, true) do
-      {:ok, claims, confirm_token_ref, _, socket} ->
-        Helpers.cancel_timer(pg_sub_ref)
-        pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
+    with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
+         {:ok, socket} <-
+           maybe_assign_policies(channel_name, db_conn, access_token, claims, socket) do
+      Helpers.cancel_timer(pg_sub_ref)
+      pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
-        pg_sub_ref =
-          case pg_change_params do
-            [_ | _] -> postgres_subscribe()
-            _ -> nil
-          end
+      pg_sub_ref =
+        case pg_change_params do
+          [_ | _] -> postgres_subscribe()
+          _ -> nil
+        end
 
-        assigns = %{
-          pg_sub_ref: pg_sub_ref,
-          confirm_token_ref: confirm_token_ref,
-          pg_change_params: pg_change_params
-        }
+      assigns = %{
+        pg_sub_ref: pg_sub_ref,
+        confirm_token_ref: confirm_token_ref,
+        pg_change_params: pg_change_params
+      }
 
-        {:noreply, assign(socket, assigns)}
+      {:noreply, assign(socket, assigns)}
+    else
+      {:error, error} when is_binary(error) ->
+        message = "Received an invalid access token from client: " <> error
+
+        shutdown_response(socket, message)
 
       {:error, error} ->
         message = "Received an invalid access token from client: " <> inspect(error)
@@ -472,7 +482,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :access_token, tenant_token)
   end
 
-  defp confirm_token(%{assigns: assigns} = socket, check_policy \\ false) do
+  defp confirm_token(%{assigns: assigns} = socket) do
     %{
       jwt_secret: jwt_secret,
       access_token: access_token
@@ -483,35 +493,16 @@ defmodule RealtimeWeb.RealtimeChannel do
     with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
-         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         {:ok, socket} <- validate_policy(socket, claims, check_policy) do
+         exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
+
       interval = min(@confirm_token_ms_interval, exp_diff * 1_000)
       ref = Process.send_after(self(), :confirm_token, interval)
+
       {:ok, claims, ref, access_token, socket}
     else
       {:error, e} -> {:error, e}
       e -> {:error, e}
-    end
-  end
-
-  defp validate_policy(%{assigns: %{check_authorization?: true}} = socket, _claims, _check_policy) do
-    {:ok, socket}
-  end
-
-  defp validate_policy(socket, _claims, false) do
-    {:ok, socket}
-  end
-
-  defp validate_policy(%{assigns: assigns} = socket, claims, true) do
-    %{
-      access_token: access_token,
-      db_conn: db_conn,
-      channel_name: channel_name
-    } = assigns
-
-    with {:ok, socket} <- assign_policies(channel_name, db_conn, access_token, claims, socket) do
-      {:ok, socket}
     end
   end
 
@@ -642,7 +633,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end)
   end
 
-  defp assign_policies(
+  defp maybe_assign_policies(
          topic,
          db_conn,
          access_token,
@@ -676,7 +667,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp assign_policies(_, _, _, _, socket) do
+  defp maybe_assign_policies(_, _, _, _, socket) do
     {:ok, assign(socket, policies: nil)}
   end
 end
