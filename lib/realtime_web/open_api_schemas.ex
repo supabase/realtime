@@ -44,7 +44,8 @@ defmodule RealtimeWeb.OpenApiSchemas do
               event: %Schema{
                 type: :string,
                 description: "Name of the event being broadcast"
-              }
+              },
+              private: %Schema{type: :boolean}
             }
           }
         }
