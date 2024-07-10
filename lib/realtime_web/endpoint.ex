@@ -20,7 +20,13 @@ defmodule RealtimeWeb.Endpoint do
         {Phoenix.Socket.V2.JSONSerializer, "~> 2.0.0"}
       ]
     ],
-    longpoll: true
+    longpoll: [
+      connect_info: [:peer_data, :uri, :x_headers],
+      serializer: [
+        {Phoenix.Socket.V1.JSONSerializer, "~> 1.0.0"},
+        {Phoenix.Socket.V2.JSONSerializer, "~> 2.0.0"}
+      ]
+    ]
 
   socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
 
