@@ -16,6 +16,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Database
   alias Realtime.Rpc
   alias Realtime.Tenants
+  alias Realtime.Tenants.Listen
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
@@ -26,6 +27,7 @@ defmodule Realtime.Tenants.Connect do
   defstruct tenant_id: nil,
             db_conn_reference: nil,
             db_conn_pid: nil,
+            listen_pid: nil,
             check_connected_user_interval: nil,
             connected_users_bucket: [1]
 
@@ -83,7 +85,9 @@ defmodule Realtime.Tenants.Connect do
       check_connected_user_interval: check_connected_user_interval
     }
 
-    GenServer.start_link(__MODULE__, state, name: {:via, :syn, name})
+    opts = Keyword.put(opts, :name, {:via, :syn, name})
+
+    GenServer.start_link(__MODULE__, state, opts)
   end
 
   ## GenServer callbacks
@@ -121,8 +125,26 @@ defmodule Realtime.Tenants.Connect do
       ) do
     :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:invalidate_cache")
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
+    {:noreply, state, {:continue, :setup_listen}}
+  end
 
-    {:noreply, state}
+  def handle_continue(
+        :setup_listen,
+        %{tenant_id: tenant_id} = state
+      ) do
+    tenant = Tenants.get_tenant_by_external_id(tenant_id)
+
+    if tenant.notify_private_alpha do
+      with {:ok, listen_pid} <- Listen.start(tenant) do
+        {:noreply, %{state | listen_pid: listen_pid}}
+      else
+        {:error, error} ->
+          log_error("UnableToListenToTenantDatabase", error)
+          {:stop, :normal}
+      end
+    else
+      {:noreply, state}
+    end
   end
 
   @impl GenServer
@@ -142,15 +164,20 @@ defmodule Realtime.Tenants.Connect do
     {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
   end
 
-  def handle_info(:shutdown, %{db_conn_pid: db_conn_pid} = state) do
+  def handle_info(:shutdown, %{db_conn_pid: db_conn_pid, listen_pid: listen_pid} = state) do
     Logger.info("Tenant has no connected users, database connection will be terminated")
-    :ok = GenServer.stop(db_conn_pid, :normal, 1000)
+    :ok = GenServer.stop(db_conn_pid, :normal, 500)
+    if listen_pid, do: :ok = GenServer.stop(listen_pid, :normal, 500)
     {:stop, :normal, state}
   end
 
-  def handle_info({:suspend_tenant, _}, %{db_conn_pid: db_conn_pid} = state) do
+  def handle_info(
+        {:suspend_tenant, _},
+        %{db_conn_pid: db_conn_pid, listen_pid: listen_pid} = state
+      ) do
     Logger.warning("Tenant was suspended, database connection will be terminated")
-    :ok = GenServer.stop(db_conn_pid, :normal, 1000)
+    :ok = GenServer.stop(db_conn_pid, :normal, 500)
+    if listen_pid, do: :ok = GenServer.stop(listen_pid, :normal, 500)
     {:stop, :normal, state}
   end
 
@@ -166,9 +193,10 @@ defmodule Realtime.Tenants.Connect do
 
   def handle_info(
         {:DOWN, db_conn_reference, _, _, _},
-        %{db_conn_reference: db_conn_reference} = state
+        %{db_conn_reference: db_conn_reference, listen_pid: listen_pid} = state
       ) do
     Logger.info("Database connection has been terminated")
+    if listen_pid, do: :ok = GenServer.stop(listen_pid, :normal, 500)
     {:stop, :normal, state}
   end
 

@@ -6,7 +6,6 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.Joken.CurrentTime
 
@@ -146,8 +145,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
-    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+    {:ok, db_conn} = connect(tenant)
 
     clean_table(db_conn, "realtime", "messages")
     message = message_fixture(tenant, %{extension: :broadcast})

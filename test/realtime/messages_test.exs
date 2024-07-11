@@ -4,17 +4,11 @@ defmodule Realtime.MessagesTest do
 
   alias Realtime.Api.Message
   alias Realtime.Messages
-  alias Realtime.Tenants.Connect
 
   setup do
     tenant = tenant_fixture()
-
-    {:ok, pid} = Connect.connect(tenant.external_id)
-    Process.link(pid)
-    {:ok, conn} = Connect.get_status(tenant.external_id)
-
+    {:ok, conn} = connect(tenant)
     clean_table(conn, "realtime", "messages")
-
     on_exit(fn -> Process.exit(conn, :normal) end)
     %{conn: conn, tenant: tenant}
   end

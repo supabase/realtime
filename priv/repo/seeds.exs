@@ -26,14 +26,15 @@ Repo.transaction(fn ->
           "db_host" => System.get_env("DB_HOST", default_db_host),
           "db_user" => System.get_env("DB_USER", "supabase_admin"),
           "db_password" => System.get_env("DB_PASSWORD", "postgres"),
-          "db_port" => System.get_env("DB_PORT", "5432"),
+          "db_port" => System.get_env("DB_PORT", "5433"),
           "region" => "us-east-1",
           "poll_interval_ms" => 100,
           "poll_max_record_bytes" => 1_048_576,
           "ssl_enforced" => false
         }
       }
-    ]
+    ],
+    "notify_private_alpha" => true
   })
   |> Repo.insert!()
 end)

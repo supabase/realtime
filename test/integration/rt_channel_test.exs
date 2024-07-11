@@ -17,7 +17,6 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Realtime.Api.Tenant
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Repo
-  alias Realtime.Tenants.Connect
 
   @moduletag :capture_log
   @port 4002
@@ -611,9 +610,9 @@ defmodule Realtime.Integration.RtChannelTest do
   end
 
   def rls_context(context) do
-    [tenant] = Repo.all(Tenant)
+    [tenant] = Tenant |> Repo.all() |> Repo.preload(:extensions)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, db_conn} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
 
     clean_table(db_conn, "realtime", "messages")
     topic = Map.get(context, :topic, random_string())

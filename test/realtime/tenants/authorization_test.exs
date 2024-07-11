@@ -9,7 +9,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.TopicPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
-  alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.Joken.CurrentTime
 
@@ -108,7 +107,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, db_conn} = connect(tenant)
 
     clean_table(db_conn, "realtime", "messages")
     topic = random_string()

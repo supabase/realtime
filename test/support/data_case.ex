@@ -24,6 +24,7 @@ defmodule Realtime.DataCase do
       import Ecto.Query
       import Realtime.DataCase
       import Generators
+      import TenantConnection
     end
   end
 

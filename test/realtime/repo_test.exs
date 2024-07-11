@@ -8,16 +8,11 @@ defmodule Realtime.RepoTest do
   alias Realtime.Crypto
   alias Realtime.Repo
   alias Realtime.Database
-  alias Realtime.Tenants.Connect
 
   setup do
     tenant = tenant_fixture()
-
-    {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
-    {:ok, db_conn} = Connect.get_status(tenant.external_id)
-
+    {:ok, db_conn} = connect(tenant)
     clean_table(db_conn, "realtime", "messages")
-
     %{db_conn: db_conn, tenant: tenant}
   end
 

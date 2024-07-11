@@ -2,7 +2,7 @@ defmodule Generators do
   @moduledoc """
   Data genarators for tests.
   """
-  alias Realtime.Tenants.Connect
+
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
     create_attrs = %{
@@ -27,7 +27,8 @@ defmodule Generators do
       ],
       "postgres_cdc_default" => "postgres_cdc_rls",
       "jwt_secret" => "new secret",
-      "jwt_jwks" => nil
+      "jwt_jwks" => nil,
+      "notify_private_alpha" => true
     }
 
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
@@ -41,7 +42,7 @@ defmodule Generators do
   end
 
   def message_fixture(tenant, override \\ %{}) do
-    {:ok, db_conn} = Connect.get_status(tenant.external_id)
+    {:ok, db_conn} = TenantConnection.connect(tenant)
 
     create_attrs = %{
       "topic" => random_string(),
