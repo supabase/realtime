@@ -8,6 +8,7 @@ defmodule Realtime.Tenants.ListenTest do
   alias Realtime.Tenants.Listen
 
   alias RealtimeWeb.Endpoint
+  import ExUnit.CaptureLog
 
   describe("start/1") do
     setup do
@@ -81,6 +82,50 @@ defmodule Realtime.Tenants.ListenTest do
                      Enum.drop(args, 1) == expected.args
                  end)
         end)
+      end
+    end
+
+    test "on bad format logs out error", %{tenant: tenant, db_conn: db_conn} do
+      with_mocks [
+        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
+        {GenCounter, [:passthrough], add: fn _ -> :ok end},
+        {RateCounter, [:passthrough], get: fn _ -> {:ok, %{avg: 0}} end}
+      ] do
+        capture_log(fn ->
+          query =
+            """
+            select pg_notify(
+                'realtime:broadcast',
+                json_build_object(
+                    'private', $1::boolean,
+                    'event', $2::text,
+                    'payload', $3::jsonb
+                )::text
+            );
+            """
+
+          Postgrex.query!(db_conn, query, [false, random_string(), %{payload: random_string()}])
+        end) =~ "UnableToProcessListenPayload"
+      end
+    end
+
+    test "on non json format logs out error", %{tenant: tenant, db_conn: db_conn} do
+      with_mocks [
+        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
+        {GenCounter, [:passthrough], add: fn _ -> :ok end},
+        {RateCounter, [:passthrough], get: fn _ -> {:ok, %{avg: 0}} end}
+      ] do
+        capture_log(fn ->
+          query =
+            """
+            select pg_notify(
+                'realtime:broadcast',
+                'potato'::text
+            );
+            """
+
+          Postgrex.query!(db_conn, query, [])
+        end) =~ "UnableToProcessListenPayload"
       end
     end
   end

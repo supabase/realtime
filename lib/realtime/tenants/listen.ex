@@ -26,13 +26,13 @@ defmodule Realtime.Tenants.Listen do
     end
   end
 
-  @cdc "postgres_cdc_rls"
-  @topic "realtime:broadcast"
   def start_link(%Tenant{} = tenant) do
     name = {:via, Registry, {Unique, {__MODULE__, :tenant_id, tenant.external_id}}}
     GenServer.start_link(__MODULE__, tenant, name: name)
   end
 
+  @cdc "postgres_cdc_rls"
+  @topic "realtime:broadcast"
   def init(%Tenant{} = tenant) do
     settings =
       tenant
@@ -61,6 +61,8 @@ defmodule Realtime.Tenants.Listen do
     case Postgrex.Notifications.start_link(settings) do
       {:ok, conn} ->
         Postgrex.Notifications.listen(conn, @topic)
+        Logger.info("Listening to notifications on topic #{@topic} for tenant database")
+
         {:ok, %{tenant_id: tenant.external_id, listen_conn: conn}}
 
       {:error, {:already_started, conn}} ->
@@ -82,12 +84,19 @@ defmodule Realtime.Tenants.Listen do
       ) do
     tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
 
-    case Jason.decode(payload) do
-      {:ok, content} when is_list(content) ->
-        BatchBroadcast.broadcast(%{}, tenant, %{messages: content}, true)
+    content =
+      case Jason.decode(payload) do
+        {:ok, content} when is_list(content) -> {:ok, content}
+        {:ok, content} -> {:ok, [content]}
+        {:error, error} -> {:error, error}
+      end
 
-      {:ok, content} ->
-        BatchBroadcast.broadcast(%{}, tenant, %{messages: [content]}, true)
+    with {:ok, content} <- content,
+         :ok <- BatchBroadcast.broadcast(%{}, tenant, %{messages: content}, true) do
+      :ok
+    else
+      %Ecto.Changeset{valid?: false, changes: %{messages: messages}} ->
+        Helpers.log_error("UnableToBroadcastListenPayload", messages)
 
       {:error, error} ->
         Helpers.log_error("UnableToProcessListenPayload", error)
