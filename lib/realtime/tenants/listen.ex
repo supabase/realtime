@@ -11,8 +11,20 @@ defmodule Realtime.Tenants.Listen do
   alias Realtime.Registry.Unique
   alias Realtime.Tenants
   alias Realtime.Tenants.BatchBroadcast
-
+  alias Realtime.Helpers
   defstruct tenant_id: nil, listen_conn: nil
+
+  @spec start(Realtime.Api.Tenant.t()) :: {:ok, pid()} | {:error, any()}
+  def start(%Tenant{} = tenant) do
+    supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Listen.DynamicSupervisor, self()}}
+    spec = {__MODULE__, tenant}
+
+    case DynamicSupervisor.start_child(supervisor, spec) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, {:already_started, pid}} -> {:ok, pid}
+      {:error, e} -> {:error, e}
+    end
+  end
 
   @cdc "postgres_cdc_rls"
   @topic "realtime:broadcast"
@@ -39,43 +51,29 @@ defmodule Realtime.Tenants.Listen do
       |> Map.put(:hostname, settings[:host])
       |> Map.put(:database, settings[:name])
       |> Map.put(:password, settings[:pass])
-      |> Map.put(:username, "postgres")
+      |> Map.put(:username, settings[:user])
       |> Map.put(:port, String.to_integer(settings[:port]))
       |> Map.put(:ssl, settings[:ssl_enforced])
       |> Map.put(:auto_reconnect, true)
       |> Map.put(:name, name)
       |> Enum.to_list()
 
-    Logger.info("Listening for notifications on #{@topic}")
-
     case Postgrex.Notifications.start_link(settings) do
       {:ok, conn} ->
-        Postgrex.Notifications.listen!(conn, @topic)
+        Postgrex.Notifications.listen(conn, @topic)
         {:ok, %{tenant_id: tenant.external_id, listen_conn: conn}}
 
       {:error, {:already_started, conn}} ->
-        Postgrex.Notifications.listen!(conn, @topic)
         {:ok, %{tenant_id: tenant.external_id, listen_conn: conn}}
 
-      {:error, reason} ->
-        {:stop, reason}
+      e ->
+        Helpers.log_error("UnableToListenToTenantDatabase", e)
+        {:stop, e}
     end
-  catch
-    e -> {:stop, e}
   end
 
-  @spec start(Realtime.Api.Tenant.t()) :: {:ok, pid()} | {:error, any()}
-  def start(%Tenant{} = tenant) do
-    supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Listen.DynamicSupervisor, self()}}
-    spec = {__MODULE__, tenant}
-
-    case DynamicSupervisor.start_child(supervisor, spec) do
-      {:ok, pid} -> {:ok, pid}
-      {:error, {:already_started, pid}} -> {:ok, pid}
-      error -> {:error, error}
-    end
-  catch
-    e -> {:error, e}
+  def terminate(_, %{listen_conn: listen_conn}) do
+    Postgrex.Notifications.unlisten(listen_conn, @topic)
   end
 
   def handle_info(
@@ -91,8 +89,8 @@ defmodule Realtime.Tenants.Listen do
       {:ok, content} ->
         BatchBroadcast.broadcast(%{}, tenant, %{messages: [content]}, true)
 
-      {:error, _} ->
-        Logger.error("Error decoding payload")
+      {:error, error} ->
+        Helpers.log_error("UnableToProcessListenPayload", error)
     end
 
     {:noreply, state}

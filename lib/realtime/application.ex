@@ -74,7 +74,8 @@ defmodule Realtime.Application do
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,
-         name: Realtime.Tenants.Listen.DynamicSupervisor}
+         name: Realtime.Tenants.Listen.DynamicSupervisor,
+         max_restarts: 5}
       ] ++ extensions_supervisors()
 
     children =
