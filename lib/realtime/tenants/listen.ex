@@ -40,7 +40,7 @@ defmodule Realtime.Tenants.Listen do
     Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
     events_per_second_key = Tenants.events_per_second_key(tenant)
     Realtime.GenCounter.new(events_per_second_key)
-    Realtime.RateCounter.new(events_per_second_key)
+    Realtime.RateCounter.new(events_per_second_key, idle_shutdown: :infinity)
 
     settings =
       tenant
