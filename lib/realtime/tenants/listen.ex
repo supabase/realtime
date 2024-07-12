@@ -65,6 +65,7 @@ defmodule Realtime.Tenants.Listen do
       |> Map.put(:auto_reconnect, false)
       |> Map.put(:name, name)
       |> Map.put(:socket_options, [addrtype])
+      |> Map.put(:parameters, application_name: "realtime_listen")
       |> Map.merge(ssl_opts)
       |> Map.to_list()
 
@@ -76,6 +77,8 @@ defmodule Realtime.Tenants.Listen do
         {:ok, %{tenant_id: tenant.external_id, listen_conn: conn}}
 
       {:error, {:already_started, conn}} ->
+        Postgrex.Notifications.listen(conn, @topic)
+        Logger.info("Listening to notifications on topic #{@topic} for tenant database")
         {:ok, %{tenant_id: tenant.external_id, listen_conn: conn}}
 
       e ->
