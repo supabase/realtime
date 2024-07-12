@@ -12,6 +12,8 @@ defmodule Realtime.Tenants.Listen do
   alias Realtime.Tenants
   alias Realtime.Tenants.BatchBroadcast
   alias Realtime.Helpers
+  alias Realtime.Database
+
   defstruct tenant_id: nil, listen_conn: nil
 
   @spec start(Realtime.Api.Tenant.t()) :: {:ok, pid()} | {:error, any()}
@@ -47,6 +49,8 @@ defmodule Realtime.Tenants.Listen do
       {:via, Registry,
        {Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant.external_id}}}
 
+    {:ok, addrtype} = Database.detect_ip_version(settings[:host])
+
     settings =
       settings
       |> Map.put(:hostname, settings[:host])
@@ -58,6 +62,7 @@ defmodule Realtime.Tenants.Listen do
       |> Map.put(:sync_connect, true)
       |> Map.put(:auto_reconnect, false)
       |> Map.put(:name, name)
+      |> Map.put(:socket_options, [addrtype])
       |> Enum.to_list()
 
     case Postgrex.Notifications.start_link(settings) do
