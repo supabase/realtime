@@ -37,6 +37,10 @@ defmodule Realtime.Tenants.Listen do
   @cdc "postgres_cdc_rls"
   @topic "realtime:broadcast"
   def init(%Tenant{} = tenant) do
+    Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
+    events_per_second_key = Tenants.events_per_second_key(tenant)
+    Realtime.RateCounter.new(events_per_second_key)
+
     settings =
       tenant
       |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))

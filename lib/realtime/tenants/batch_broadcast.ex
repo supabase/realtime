@@ -38,7 +38,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
     broadcast(auth_params, %Tenant{} = tenant, messages, super_user)
   end
 
-  def broadcast(auth_params, tenant, messages, super_user) do
+  def broadcast(auth_params, %Tenant{} = tenant, messages, super_user) do
     with %Ecto.Changeset{valid?: true} = changeset <- changeset(%__MODULE__{}, messages),
          %Ecto.Changeset{changes: %{messages: messages}} = changeset,
          events_per_second_key = Tenants.events_per_second_key(tenant),
