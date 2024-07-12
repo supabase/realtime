@@ -104,7 +104,23 @@ defmodule Realtime.Tenants.Connect do
         {:ok, conn} ->
           :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
 
-          state = %{state | db_conn_reference: Process.monitor(conn), db_conn_pid: conn}
+          listen_pid =
+            if tenant.notify_private_alpha do
+              with {:ok, listen_pid} <- Listen.start(tenant) do
+                listen_pid
+              else
+                {:error, error} ->
+                  log_error("UnableToListenToTenantDatabase", error)
+                  nil
+              end
+            end
+
+          state = %{
+            state
+            | db_conn_reference: Process.monitor(conn),
+              db_conn_pid: conn,
+              listen_pid: listen_pid
+          }
 
           {:ok, state, {:continue, :setup_connected_user_events}}
 
@@ -125,26 +141,7 @@ defmodule Realtime.Tenants.Connect do
       ) do
     :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:invalidate_cache")
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
-    {:noreply, state, {:continue, :setup_listen}}
-  end
-
-  def handle_continue(
-        :setup_listen,
-        %{tenant_id: tenant_id} = state
-      ) do
-    tenant = Tenants.get_tenant_by_external_id(tenant_id)
-
-    if tenant.notify_private_alpha do
-      with {:ok, listen_pid} <- Listen.start(tenant) do
-        {:noreply, %{state | listen_pid: listen_pid}}
-      else
-        {:error, error} ->
-          log_error("UnableToListenToTenantDatabase", error)
-          {:stop, :normal}
-      end
-    else
-      {:noreply, state}
-    end
+    {:noreply, state}
   end
 
   @impl GenServer
