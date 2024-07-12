@@ -39,14 +39,12 @@ defmodule Realtime.Tenants.Listen do
   def init(%Tenant{} = tenant) do
     Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
     events_per_second_key = Tenants.events_per_second_key(tenant)
-    Realtime.RateCounter.new(events_per_second_key)
+    {:ok, _} = Realtime.RateCounter.new(events_per_second_key)
 
     settings =
       tenant
       |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
-      |> then(fn settings ->
-        Database.from_settings(settings, "realtime_listen", :rand_exp, true)
-      end)
+      |> then(&Database.from_settings(&1, "realtime_listen", :rand_exp, true))
       |> Map.from_struct()
 
     name =
