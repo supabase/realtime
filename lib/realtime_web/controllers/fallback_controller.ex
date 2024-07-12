@@ -5,8 +5,15 @@ defmodule RealtimeWeb.FallbackController do
   See `Phoenix.Controller.action_fallback/1` for more details.
   """
   use RealtimeWeb, :controller
+  import RealtimeWeb.ErrorHelpers
+  alias Realtime.Helpers
 
   def call(conn, {:error, %Ecto.Changeset{} = changeset}) do
+    Helpers.log_error(
+      "UnprocessableEntity",
+      Ecto.Changeset.traverse_errors(changeset, &translate_error/1)
+    )
+
     conn
     |> put_status(:unprocessable_entity)
     |> put_view(RealtimeWeb.ChangesetView)
@@ -28,6 +35,8 @@ defmodule RealtimeWeb.FallbackController do
   end
 
   def call(conn, {:error, status, message}) when is_atom(status) and is_binary(message) do
+    Helpers.log_error("UnprocessableEntity", message)
+
     conn
     |> put_status(status)
     |> put_view(RealtimeWeb.ErrorView)
@@ -35,6 +44,11 @@ defmodule RealtimeWeb.FallbackController do
   end
 
   def call(conn, %Ecto.Changeset{valid?: false} = changeset) do
+    Helpers.log_error(
+      "UnprocessableEntity",
+      Ecto.Changeset.traverse_errors(changeset, &translate_error/1)
+    )
+
     conn
     |> put_status(:unprocessable_entity)
     |> put_view(RealtimeWeb.ChangesetView)
