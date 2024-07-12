@@ -186,6 +186,53 @@ defmodule Realtime.Tenants.ConnectTest do
       end
     end
 
+    test "on Connect module start, Listen also starts if flag false" do
+      tenant = tenant_fixture(%{notify_private_alpha: false})
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      :timer.sleep(100)
+
+      assert [] =
+               Registry.lookup(
+                 Realtime.Registry.Unique,
+                 {Postgrex.Notifications, :tenant_id, tenant.external_id}
+               )
+
+      assert [] =
+               Registry.lookup(
+                 Realtime.Registry.Unique,
+                 {Postgrex.Notifications, :tenant_id, tenant.external_id}
+               )
+
+      {conn_pid, _} = :syn.lookup(Connect, tenant.external_id)
+      assert Process.alive?(db_conn)
+      assert Process.alive?(conn_pid)
+    end
+
+    test "on Connect module start, Listen also starts if flag true", %{tenant: tenant} do
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      :timer.sleep(100)
+
+      [{notifications_pid, _}] =
+        Registry.lookup(
+          Realtime.Registry.Unique,
+          {Postgrex.Notifications, :tenant_id, tenant.external_id}
+        )
+
+      [{listen_pid, _}] =
+        Registry.lookup(
+          Realtime.Registry.Unique,
+          {Postgrex.Notifications, :tenant_id, tenant.external_id}
+        )
+
+      {conn_pid, _} = :syn.lookup(Connect, tenant.external_id)
+      assert Process.alive?(db_conn)
+      assert Process.alive?(conn_pid)
+      assert Process.alive?(listen_pid)
+      assert Process.alive?(notifications_pid)
+    end
+
     test "on Connect module death, Listen also dies", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
