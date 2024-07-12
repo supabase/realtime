@@ -213,6 +213,7 @@ This is the list of operational codes that can help you understand your deployme
 | UnhandledProcessMessage            | Unhandled message received by a Realtime process                                                                                    |
 | UnableToProcessListenPayload       | Payload sent in NOTIFY operation was JSON parsable                                                                                  |
 | UnableToListenToTenantDatabase     | Unable to LISTEN for notifications against the Tenant Database                                                                      |
+| UnprocessableEntity                | Received a HTTP request with a body that was not able to be processed by the endpoint                                               |
 | UnknownError                       | An unknown error occurred                                                                                                           |
 
 ## License
