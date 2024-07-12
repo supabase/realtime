@@ -85,7 +85,32 @@ defmodule Realtime.Tenants.ListenTest do
       end
     end
 
-    test "on bad format logs out error", %{tenant: tenant, db_conn: db_conn} do
+    test "on failure to connect, returns error" do
+      tenant =
+        tenant_fixture(%{
+          extensions: [
+            %{
+              "type" => "postgres_cdc_rls",
+              "settings" => %{
+                "db_host" => "localhost",
+                "db_name" => "postgres",
+                "db_user" => "supabase_admin",
+                "db_password" => "postgres",
+                "db_port" => "5433",
+                "poll_interval" => 100,
+                "poll_max_changes" => 100,
+                "poll_max_record_bytes" => 1_048_576,
+                "region" => "us-east-1",
+                "ssl_enforced" => true
+              }
+            }
+          ]
+        })
+
+      assert {:error, %Postgrex.Error{message: "ssl not available"}} = Listen.start(tenant)
+    end
+
+    test "on bad format logs out error", %{db_conn: db_conn} do
       with_mocks [
         {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
         {GenCounter, [:passthrough], add: fn _ -> :ok end},
@@ -109,7 +134,7 @@ defmodule Realtime.Tenants.ListenTest do
       end
     end
 
-    test "on non json format logs out error", %{tenant: tenant, db_conn: db_conn} do
+    test "on non json format logs out error", %{db_conn: db_conn} do
       with_mocks [
         {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
         {GenCounter, [:passthrough], add: fn _ -> :ok end},

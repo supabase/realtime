@@ -22,6 +22,7 @@ defmodule Realtime.Tenants.Listen do
     case DynamicSupervisor.start_child(supervisor, spec) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
+      {:error, {:bad_return_from_init, {:stop, error, _}}} -> {:error, error}
       {:error, e} -> {:error, e}
     end
   end
@@ -54,7 +55,8 @@ defmodule Realtime.Tenants.Listen do
       |> Map.put(:username, settings[:user])
       |> Map.put(:port, String.to_integer(settings[:port]))
       |> Map.put(:ssl, settings[:ssl_enforced])
-      |> Map.put(:auto_reconnect, true)
+      |> Map.put(:sync_connect, true)
+      |> Map.put(:auto_reconnect, false)
       |> Map.put(:name, name)
       |> Enum.to_list()
 
