@@ -53,7 +53,7 @@ defmodule Realtime.Tenants.ListenTest do
           broadcast_test_message(db_conn, private, topic, event, payload)
         end)
 
-        :timer.sleep(100)
+        :timer.sleep(200)
 
         messages =
           Enum.map(messages, fn %{private: private, topic: topic, payload: payload, event: event} ->
