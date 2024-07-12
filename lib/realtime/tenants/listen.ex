@@ -39,7 +39,8 @@ defmodule Realtime.Tenants.Listen do
   def init(%Tenant{} = tenant) do
     Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
     events_per_second_key = Tenants.events_per_second_key(tenant)
-    {:ok, _} = Realtime.RateCounter.new(events_per_second_key)
+    Realtime.GenCounter.new(events_per_second_key)
+    Realtime.RateCounter.new(events_per_second_key)
 
     settings =
       tenant
