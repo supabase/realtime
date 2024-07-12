@@ -51,6 +51,9 @@ defmodule Realtime.Tenants.Listen do
 
     {:ok, addrtype} = Database.detect_ip_version(settings[:host])
 
+    ssl_opts =
+      if settings[:ssl_enforced], do: %{ssl: true, ssl_opts: [verify: :verify_none]}, else: %{}
+
     settings =
       settings
       |> Map.put(:hostname, settings[:host])
@@ -58,12 +61,12 @@ defmodule Realtime.Tenants.Listen do
       |> Map.put(:password, settings[:pass])
       |> Map.put(:username, settings[:user])
       |> Map.put(:port, String.to_integer(settings[:port]))
-      |> Map.put(:ssl, settings[:ssl_enforced])
       |> Map.put(:sync_connect, true)
       |> Map.put(:auto_reconnect, false)
       |> Map.put(:name, name)
       |> Map.put(:socket_options, [addrtype])
-      |> Enum.to_list()
+      |> Map.merge(ssl_opts)
+      |> Map.to_list()
 
     case Postgrex.Notifications.start_link(settings) do
       {:ok, conn} ->

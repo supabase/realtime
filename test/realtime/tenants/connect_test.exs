@@ -91,7 +91,7 @@ defmodule Realtime.Tenants.ConnectTest do
       on_exit(fn -> Process.exit(db_conn, :normal) end)
 
       assert {pid, %{conn: conn_pid}} = :syn.lookup(Connect, tenant_id)
-      :timer.sleep(300)
+      :timer.sleep(500)
       assert {^pid, %{conn: ^conn_pid}} = :syn.lookup(Connect, tenant_id)
       assert Process.alive?(db_conn)
     end
@@ -105,9 +105,9 @@ defmodule Realtime.Tenants.ConnectTest do
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
       assert {_pid, %{conn: _conn_pid}} = :syn.lookup(Connect, tenant_id)
-      :timer.sleep(300)
+      :timer.sleep(500)
       :syn.leave(:users, tenant_id, self())
-      :timer.sleep(300)
+      :timer.sleep(500)
       assert :undefined = :syn.lookup(Connect, tenant_id)
       refute Process.alive?(db_conn)
     end
