@@ -8,13 +8,13 @@ defmodule Realtime.Tenants.Migrations.RedefineAuthorizationTables do
     drop table(:presences, mode: :cascade)
     drop table(:channels, mode: :cascade)
 
-    create table(:messages) do
+    create_if_not_exists table(:messages) do
       add :topic, :text, null: false
       add :extension, :text, null: false
       timestamps()
     end
 
-    create index(:messages, [:topic])
+    create_if_not_exists index(:messages, [:topic])
 
     execute("ALTER TABLE realtime.messages ENABLE row level security")
     execute("GRANT SELECT ON realtime.messages TO postgres, anon, authenticated, service_role")

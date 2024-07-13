@@ -28,7 +28,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeSubscriptionTable do
     END$$;
     """)
 
-    execute("create table realtime.subscription (
+    execute("create table if not exists realtime.subscription (
       -- Tracks which users are subscribed to each table
       id bigint not null generated always as identity,
       user_id uuid not null,

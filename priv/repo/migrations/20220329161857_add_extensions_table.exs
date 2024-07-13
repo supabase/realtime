@@ -2,7 +2,7 @@ defmodule Realtime.Repo.Migrations.AddExtensionsTable do
   use Ecto.Migration
 
   def change do
-    create table(:extensions, primary_key: false) do
+    create_if_not_exists table(:extensions, primary_key: false) do
       add(:id, :binary_id, primary_key: true)
       add(:type, :string)
       add(:settings, :map)
@@ -15,6 +15,6 @@ defmodule Realtime.Repo.Migrations.AddExtensionsTable do
       timestamps()
     end
 
-    create(index(:extensions, [:tenant_external_id, :type], unique: true))
+    create_if_not_exists(index(:extensions, [:tenant_external_id, :type], unique: true))
   end
 end

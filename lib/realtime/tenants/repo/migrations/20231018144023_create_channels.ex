@@ -4,11 +4,11 @@ defmodule Realtime.Tenants.Migrations.CreateChannels do
   use Ecto.Migration
 
   def change do
-    create table(:channels, prefix: "realtime") do
+    create_if_not_exists table(:channels, prefix: "realtime") do
       add(:name, :string, null: false)
       timestamps()
     end
 
-    create unique_index(:channels, [:name], prefix: "realtime")
+    create_if_not_exists unique_index(:channels, [:name], prefix: "realtime")
   end
 end
