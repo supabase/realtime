@@ -19,12 +19,11 @@ defmodule Realtime.Tenants.ListenTest do
 
       RateCounter.new({:channel, :events, tenant.external_id})
       {:ok, listen_conn} = Listen.start(tenant)
-
       {:ok, db_conn} = connect(tenant)
 
       on_exit(fn ->
-        Process.exit(listen_conn, :shutdown)
-        Process.exit(db_conn, :shutdown)
+        Process.exit(listen_conn, :kill)
+        Process.exit(db_conn, :kill)
       end)
 
       {:ok, tenant: tenant, db_conn: db_conn}
@@ -32,54 +31,61 @@ defmodule Realtime.Tenants.ListenTest do
 
     test "on public notify, broadcasts to topic", %{tenant: tenant, db_conn: db_conn} do
       with_mocks [
-        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end}
+        {Endpoint, [], broadcast_from: fn _, _, _, _ -> :ok end}
       ] do
         topic = random_string()
 
-        messages =
-          Stream.repeatedly(fn ->
-            %{
-              private: Enum.random([true, false]),
-              topic: topic,
-              payload: random_string(),
-              event: random_string()
-            }
-          end)
-          |> Enum.take(5)
+        private_message = %{
+          topic: topic,
+          payload: random_string(),
+          event: random_string()
+        }
 
-        Enum.each(messages, fn %{private: private, topic: topic, payload: payload, event: event} ->
-          broadcast_test_message(db_conn, private, topic, event, payload)
-        end)
+        broadcast_test_message(
+          db_conn,
+          true,
+          private_message.topic,
+          private_message.event,
+          private_message.payload
+        )
+
+        public_message = %{
+          topic: topic,
+          payload: random_string(),
+          event: random_string()
+        }
+
+        broadcast_test_message(
+          db_conn,
+          false,
+          public_message.topic,
+          public_message.event,
+          public_message.payload
+        )
 
         :timer.sleep(1000)
 
-        messages =
-          Enum.map(messages, fn %{private: private, topic: topic, payload: payload, event: event} ->
-            payload = %{
-              "type" => "broadcast",
-              "event" => event,
-              "payload" => %{"payload" => payload}
-            }
+        private_topic =
+          Realtime.Tenants.tenant_topic(tenant.external_id, private_message.topic, false)
 
-            private_prefix = if private, do: "-private:", else: ":"
+        public_topic =
+          Realtime.Tenants.tenant_topic(tenant.external_id, private_message.topic, true)
 
-            args = [
-              "#{String.upcase(tenant.external_id)}#{private_prefix}#{topic}",
-              "broadcast",
-              payload
-            ]
+        assert_called(
+          Endpoint.broadcast_from(:_, private_topic, "broadcast", %{
+            "payload" => %{"payload" => private_message.payload},
+            "event" => private_message.event,
+            "type" => "broadcast"
+          })
+        )
 
-            %{mod: Endpoint, fun: :broadcast_from, args: args}
-          end)
-
-        calls = Endpoint |> call_history() |> Enum.map(&elem(&1, 1))
-
-        Enum.each(messages, fn expected ->
-          assert Enum.find(calls, fn {mod, function, args} ->
-                   mod == expected.mod and function == expected.fun and
-                     Enum.drop(args, 1) == expected.args
-                 end)
-        end)
+        assert_called(
+          Endpoint.broadcast_from(:_, public_topic, "broadcast", %{
+            "payload" => %{"payload" => public_message.payload},
+            "event" => public_message.event,
+            "type" => "broadcast"
+          })
+        )
       end
     end
 
