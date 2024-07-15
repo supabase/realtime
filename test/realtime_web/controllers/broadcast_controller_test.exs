@@ -12,6 +12,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   alias RealtimeWeb.Endpoint
 
   @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE1MTYyMzkwMjIsInJvbGUiOiJmb28iLCJleHAiOiJiYXIifQ.Ret2CevUozCsPhpgW2FMeFL7RooLgoOvfQzNpLBj5ak"
+  @expired_token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MjEwNzMyOTAsImlhdCI6MTYyNzg4NjQ0MCwicm9sZSI6ImFub24ifQ.AHmuaydSU3XAxwoIFhd3gwGwjnBIKsjFil0JQEOLtRw"
 
   describe "broadcast" do
     setup %{conn: conn} do
@@ -206,6 +207,19 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         conn
         |> put_req_header("accept", "application/json")
         |> put_req_header("x-api-key", "potato")
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+
+      conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{})
+      assert conn.status == 401
+    end
+
+    test "expired token returns 401", %{conn: conn} do
+      tenant = tenant_fixture()
+
+      conn =
+        conn
+        |> put_req_header("accept", "application/json")
+        |> put_req_header("x-api-key", @expired_token)
         |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{})
