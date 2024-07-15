@@ -56,7 +56,7 @@ defmodule RealtimeWeb.FallbackController do
   end
 
   def call(conn, response) do
-    Helpers.log_error("UnknownError",response)
+    Helpers.log_error("UnknownError", response)
 
     conn
     |> put_status(:not_found)
