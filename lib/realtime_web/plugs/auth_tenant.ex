@@ -5,6 +5,7 @@ defmodule RealtimeWeb.AuthTenant do
   require Logger
 
   import Plug.Conn
+  import Phoenix.Controller, only: [json: 2]
 
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
@@ -14,21 +15,20 @@ defmodule RealtimeWeb.AuthTenant do
   def init(opts), do: opts
 
   def call(%{assigns: %{tenant: tenant}} = conn, _opts) do
+    Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
+
     with %Tenant{jwt_secret: jwt_secret, jwt_jwks: jwt_jwks} <- tenant,
          token when is_binary(token) <- access_token(conn),
          jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks) do
-      Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
-
       conn
       |> assign(:claims, claims)
       |> assign(:jwt, token)
       |> assign(:role, claims["role"])
     else
-      _ ->
+      _error ->
         conn
         |> unauthorized()
-        |> halt()
     end
   end
 
@@ -62,5 +62,6 @@ defmodule RealtimeWeb.AuthTenant do
     end
   end
 
-  defp unauthorized(conn), do: conn |> put_status(401) |> halt()
+  defp unauthorized(conn),
+    do: conn |> put_status(401) |> json(%{message: "Unauthorized"}) |> halt()
 end
