@@ -15,6 +15,18 @@ defmodule RealtimeWeb.FallbackController do
     |> render("error.json", message: "Not found")
   end
 
+  def call(conn, {:error, %Ecto.Changeset{} = changeset}) do
+    Helpers.log_error(
+      "UnprocessableEntity",
+      Ecto.Changeset.traverse_errors(changeset, &translate_error/1)
+    )
+
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(RealtimeWeb.ChangesetView)
+    |> render("error.json", changeset: changeset)
+  end
+
   def call(conn, {:error, _}) do
     conn
     |> put_status(:unauthorized)
