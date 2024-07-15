@@ -59,7 +59,7 @@ defmodule RealtimeWeb.FallbackController do
     Helpers.log_error("UnknownError", response)
 
     conn
-    |> put_status(:not_found)
+    |> put_status(:unprocessable_entity)
     |> put_view(RealtimeWeb.ErrorView)
     |> render("error.json", message: "Unknown error")
   end
