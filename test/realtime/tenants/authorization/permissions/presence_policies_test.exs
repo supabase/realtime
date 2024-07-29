@@ -21,6 +21,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
         assert {:ok, result} =
                  PresencePolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    context.authorization_context
                  )
@@ -37,6 +38,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
         assert {:ok, result} =
                  PresencePolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    context.authorization_context
                  )
@@ -55,6 +57,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
         assert {:ok, result} =
                  PresencePolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    authorization_context
                  )
@@ -74,6 +77,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
         assert {:error, _} =
                  PresencePolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    context.authorization_context
                  )
@@ -168,6 +172,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
       })
 
     %{
+      ids: %{presence_id: message.id},
       topic: message.topic,
       db_conn: db_conn,
       authorization_context: authorization_context

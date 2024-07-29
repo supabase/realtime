@@ -25,6 +25,7 @@ defmodule Realtime.Tenants.Authorization.Policies.TopicPoliciesTest do
 
                  TopicPolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    context.authorization_context
                  )
@@ -41,6 +42,7 @@ defmodule Realtime.Tenants.Authorization.Policies.TopicPoliciesTest do
 
                  TopicPolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    context.authorization_context
                  )
@@ -59,6 +61,7 @@ defmodule Realtime.Tenants.Authorization.Policies.TopicPoliciesTest do
 
                  TopicPolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    authorization_context
                  )
@@ -77,6 +80,7 @@ defmodule Realtime.Tenants.Authorization.Policies.TopicPoliciesTest do
 
                  TopicPolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    authorization_context
                  )
@@ -96,6 +100,7 @@ defmodule Realtime.Tenants.Authorization.Policies.TopicPoliciesTest do
         assert {:error, _} =
                  TopicPolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    context.authorization_context
                  )
@@ -212,6 +217,7 @@ defmodule Realtime.Tenants.Authorization.Policies.TopicPoliciesTest do
 
     %{
       tenant: tenant,
+      ids: %{broadcast_id: message.id},
       topic: message.topic,
       db_conn: db_conn,
       authorization_context: authorization_context

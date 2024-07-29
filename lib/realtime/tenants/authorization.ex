@@ -120,25 +120,26 @@ defmodule Realtime.Tenants.Authorization do
   @policies_mods [TopicPolicies, BroadcastPolicies, PresencePolicies]
   defp get_policies_for_connection(conn, authorization_context) do
     Database.transaction(conn, fn transaction_conn ->
-      {:ok, _} =
+      {:ok, %{id: broadcast_id}} =
         Messages.create_message(
           %{topic: authorization_context.topic, extension: :broadcast},
           transaction_conn
         )
 
-      {:ok, _} =
+      {:ok, %{id: presence_id}} =
         Messages.create_message(
           %{topic: authorization_context.topic, extension: :presence},
           transaction_conn
         )
 
       set_conn_config(transaction_conn, authorization_context)
-
+      ids = %{presence_id: presence_id, broadcast_id: broadcast_id}
       policies = %Policies{}
 
       policies =
         get_read_policy_for_connection_and_extension(
           transaction_conn,
+          ids,
           policies,
           authorization_context
         )
@@ -156,9 +157,9 @@ defmodule Realtime.Tenants.Authorization do
     end)
   end
 
-  defp get_read_policy_for_connection_and_extension(conn, policies, authorization_context) do
+  defp get_read_policy_for_connection_and_extension(conn, ids, policies, authorization_context) do
     Enum.reduce_while(@policies_mods, policies, fn policy_mod, policies ->
-      res = policy_mod.check_read_policies(conn, policies, authorization_context)
+      res = policy_mod.check_read_policies(conn, ids, policies, authorization_context)
 
       case res do
         {:error, error} -> {:halt, {:error, error}}

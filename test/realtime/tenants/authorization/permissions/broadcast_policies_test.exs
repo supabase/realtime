@@ -20,6 +20,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
         assert {:ok, result} =
                  BroadcastPolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    context.authorization_context
                  )
@@ -36,6 +37,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
         assert {:ok, result} =
                  BroadcastPolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    context.authorization_context
                  )
@@ -54,6 +56,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
         assert {:ok, result} =
                  BroadcastPolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    authorization_context
                  )
@@ -73,6 +76,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
         assert {:error, _} =
                  BroadcastPolicies.check_read_policies(
                    transaction_conn,
+                   context.ids,
                    %Policies{},
                    context.authorization_context
                  )
@@ -166,6 +170,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
       })
 
     %{
+      ids: %{broadcast_id: message.id},
       topic: message.topic,
       db_conn: db_conn,
       authorization_context: authorization_context
