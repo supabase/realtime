@@ -33,7 +33,7 @@ defmodule Realtime.Tenants.Authorization.Policies do
     * `policies` - The policies struct to which the result will be accumulated
     * `authorization` - The authorization struct with required information for Policy checking
   """
-  @callback check_read_policies(DBConnection.t(), t(), Authorization.t()) ::
+  @callback check_read_policies(DBConnection.t(), map(), t(), Authorization.t()) ::
               {:ok, t()} | {:error, any()}
   @doc """
   Implementation of the method on how to check write policies for a given entity within the context of a database connection

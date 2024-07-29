@@ -18,7 +18,7 @@ defmodule Realtime.Tenants.Migrations.PartitionMessagesTable do
     for partition <- 1..@partitions do
       execute """
       CREATE TABLE realtime.messages_#{partition} PARTITION OF realtime.messages
-      FOR VALUES WITH (MODULUS #{@partitions}, REMAINDER #{partition-1});
+      FOR VALUES WITH (MODULUS #{@partitions}, REMAINDER #{partition - 1});
       """
     end
 

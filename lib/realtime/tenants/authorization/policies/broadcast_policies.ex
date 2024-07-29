@@ -23,16 +23,18 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
           write: boolean()
         }
   @impl true
-  def check_read_policies(_conn, policies, %Authorization{topic: nil}) do
+  def check_read_policies(_conn, _, policies, %Authorization{topic: nil}) do
     {:ok, Policies.update_policies(policies, :broadcast, :read, false)}
   end
 
-  def check_read_policies(conn, %Policies{} = policies, %Authorization{topic: topic}) do
+  def check_read_policies(conn, %{broadcast_id: id}, %Policies{} = policies, %Authorization{
+        topic: topic
+      }) do
     query =
       from(m in Message,
         where: m.topic == ^topic,
         where: m.extension == :broadcast,
-        limit: 1
+        where: m.id == ^id
       )
 
     case Repo.all(conn, query, Message, mode: :savepoint) do
