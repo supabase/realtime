@@ -54,19 +54,17 @@ defmodule Realtime.Application do
       [
         Realtime.ErlSysMon,
         Realtime.PromEx,
-        {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
+        Realtime.Telemetry.Logger,
         Realtime.Repo,
         RealtimeWeb.Telemetry,
+        {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
-        Realtime.GenCounter.DynamicSupervisor,
         {Cachex, name: Realtime.RateCounter},
         Realtime.Tenants.CacheSupervisor,
+        Realtime.GenCounter.DynamicSupervisor,
         Realtime.RateCounter.DynamicSupervisor,
-        RealtimeWeb.Endpoint,
-        RealtimeWeb.Presence,
-        {Task.Supervisor, name: Realtime.TaskSupervisor},
         Realtime.Latency,
-        Realtime.Telemetry.Logger,
+        {Task.Supervisor, name: Realtime.TaskSupervisor},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,
@@ -75,7 +73,11 @@ defmodule Realtime.Application do
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,
          name: Realtime.Tenants.Listen.DynamicSupervisor,
-         max_restarts: 5}
+         max_restarts: 5},
+        {DynamicSupervisor,
+         name: Realtime.Tenants.Migrations.DynamicSupervisor, strategy: :one_for_one},
+        RealtimeWeb.Endpoint,
+        RealtimeWeb.Presence
       ] ++ extensions_supervisors()
 
     children =

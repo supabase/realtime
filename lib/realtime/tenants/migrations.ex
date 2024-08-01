@@ -2,12 +2,16 @@ defmodule Realtime.Tenants.Migrations do
   @moduledoc """
   Run Realtime database migrations for tenant's database.
   """
+  use GenServer
 
   require Logger
+
   import Realtime.Helpers, only: [log_error: 2]
+
   alias Realtime.Crypto
   alias Realtime.Database
   alias Realtime.Repo
+  alias Realtime.Registry.Unique
 
   alias Realtime.Tenants.Migrations.{
     CreateRealtimeSubscriptionTable,
@@ -102,16 +106,35 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_618_124_746, FixWalrusRoleHandling}
   ]
 
-  @spec run_migrations(map()) :: {:ok, [integer()]} | {:error, any()}
-  def run_migrations(
-        %{
-          "db_host" => db_host,
-          "db_port" => db_port,
-          "db_name" => db_name,
-          "db_user" => db_user,
-          "db_password" => db_password
-        } = settings
-      ) do
+  @spec run_migrations(map()) :: :ok | {:error, any()}
+  def run_migrations(attrs) do
+    case DynamicSupervisor.start_child(__MODULE__.DynamicSupervisor, {__MODULE__, attrs}) do
+      :ignore -> :ok
+      error -> error
+    end
+  end
+
+  def start_link(attrs) do
+    name = {:via, Registry, {Unique, {__MODULE__, :host, attrs["db_host"]}}}
+    GenServer.start_link(__MODULE__, attrs, name: name)
+  end
+
+  def init(attrs) do
+    case migrate(attrs) do
+      {:ok, _} -> :ignore
+      {:error, error} -> {:stop, error}
+    end
+  end
+
+  defp migrate(
+         %{
+           "db_host" => db_host,
+           "db_port" => db_port,
+           "db_name" => db_name,
+           "db_user" => db_user,
+           "db_password" => db_password
+         } = settings
+       ) do
     {host, port, name, user, pass} =
       Crypto.decrypt_creds(db_host, db_port, db_name, db_user, db_password)
 

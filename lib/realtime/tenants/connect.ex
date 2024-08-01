@@ -99,7 +99,7 @@ defmodule Realtime.Tenants.Connect do
     with %Tenant{} = tenant <- Tenants.get_tenant_by_external_id(tenant_id),
          res <- Database.check_tenant_connection(tenant, @application_name),
          [%{settings: settings} | _] <- tenant.extensions,
-         {:ok, _} <- Migrations.run_migrations(settings) do
+         :ok <- Migrations.run_migrations(settings) do
       case res do
         {:ok, conn} ->
           :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
