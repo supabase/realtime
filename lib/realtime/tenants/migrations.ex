@@ -56,7 +56,8 @@ defmodule Realtime.Tenants.Migrations do
     CreateRealtimeAdminAndMoveOwnership,
     RemoveCheckColumns,
     RedefineAuthorizationTables,
-    FixWalrusRoleHandling
+    FixWalrusRoleHandling,
+    UnloggedMessagesTable
   }
 
   @migrations [
@@ -103,7 +104,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_401_105_812, CreateRealtimeAdminAndMoveOwnership},
     {20_240_418_121_054, RemoveCheckColumns},
     {20_240_523_004_032, RedefineAuthorizationTables},
-    {20_240_618_124_746, FixWalrusRoleHandling}
+    {20_240_618_124_746, FixWalrusRoleHandling},
+    {20_240_801_235_015, UnloggedMessagesTable}
   ]
 
   @spec run_migrations(map()) :: :ok | {:error, any()}
