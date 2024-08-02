@@ -212,6 +212,51 @@ defmodule Realtime.RepoTest do
     end
   end
 
+  describe "insert_all_entries/3" do
+    test "inserts a new entries with a given changeset and returns struct", %{db_conn: db_conn} do
+      changeset = [
+        Message.changeset(%Message{}, %{topic: random_string(), extension: :presence}),
+        Message.changeset(%Message{}, %{topic: random_string(), extension: :broadcast}),
+        Message.changeset(%Message{}, %{topic: random_string(), extension: :presence}),
+        Message.changeset(%Message{}, %{topic: random_string(), extension: :broadcast})
+      ]
+
+      assert {:ok, results} = Repo.insert_all_entries(db_conn, changeset, Message)
+      assert Enum.all?(results, fn result -> is_map(result) end)
+    end
+
+    test "returns changeset if changeset is invalid", %{db_conn: db_conn} do
+      changeset = [Message.changeset(%Message{}, %{})]
+      res = Repo.insert_all_entries(db_conn, changeset, Message)
+      assert {:error, [%Ecto.Changeset{valid?: false}]} = res
+    end
+
+    test "returns a Changeset on Changeset error", %{db_conn: db_conn} do
+      changeset = [Message.changeset(%Message{}, %{})]
+
+      assert {:error,
+              [
+                %Ecto.Changeset{
+                  valid?: false,
+                  errors: [
+                    topic: {"can't be blank", [validation: :required]},
+                    extension: {"can't be blank", [validation: :required]}
+                  ]
+                }
+              ]} =
+               Repo.insert_all_entries(db_conn, changeset, Message)
+    end
+
+    test "handles exceptions", %{db_conn: db_conn} do
+      Process.unlink(db_conn)
+      Process.exit(db_conn, :kill)
+
+      changeset = [Message.changeset(%Message{}, %{topic: "foo", extension: :presence})]
+
+      assert {:error, :postgrex_exception} = Repo.insert_all_entries(db_conn, changeset, Message)
+    end
+  end
+
   describe "del/3" do
     test "deletes all from query entry", %{db_conn: db_conn, tenant: tenant} do
       Stream.repeatedly(fn -> message_fixture(tenant) end) |> Enum.take(3)

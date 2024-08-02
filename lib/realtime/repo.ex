@@ -67,6 +67,24 @@ defmodule Realtime.Repo do
   end
 
   @doc """
+  Inserts all changesets into the database and converts the result into a given list of structs
+  """
+  @spec insert_all_entries(
+          DBConnection.conn(),
+          [Ecto.Changeset.t()],
+          module(),
+          Postgrex.option() | Keyword.t()
+        ) ::
+          {:ok, [struct()]} | {:error, any()} | Ecto.Changeset.t()
+  def insert_all_entries(conn, changesets, result_struct, opts \\ []) do
+    with {:ok, {query, args}} <- insert_all_query_from_changeset(changesets) do
+      conn
+      |> run_query_with_trap(query, args, opts)
+      |> result_to_structs(result_struct)
+    end
+  end
+
+  @doc """
   Deletes records for a given query and returns the number of deleted records
   """
   @spec del(DBConnection.conn(), Ecto.Queryable.t()) ::
@@ -146,6 +164,53 @@ defmodule Realtime.Repo do
       |> Enum.map_join(",", fn {_, index} -> "$#{index}" end)
 
     {:ok, {"INSERT INTO #{table} #{header} VALUES (#{arg_index}) RETURNING *", rows}}
+  end
+
+  defp insert_all_query_from_changeset(changesets) do
+    invalid = Enum.filter(changesets, &(!&1.valid?))
+
+    if invalid != [] do
+      {:error, changesets}
+    else
+      [schema] = changesets |> Enum.map(& &1.data.__struct__) |> Enum.uniq()
+
+      source = schema.__schema__(:source)
+      prefix = schema.__schema__(:prefix)
+      changes = Enum.map(changesets, & &1.changes)
+
+      %{header: header, rows: rows} =
+        Enum.reduce(changes, %{header: [], rows: []}, fn v, changes_acc ->
+          Enum.reduce(v, changes_acc, fn {field, row}, %{header: header, rows: rows} ->
+            row = if is_atom(row), do: Atom.to_string(row), else: row
+
+            %{
+              header: Enum.uniq([Atom.to_string(field) | header]),
+              rows: [row | rows]
+            }
+          end)
+        end)
+
+      args_index =
+        rows
+        |> Enum.chunk_every(length(header))
+        |> Enum.reduce({"", 1}, fn row, {acc, count} ->
+          arg_index =
+            row
+            |> Enum.with_index(count)
+            |> Enum.map_join("", fn {_, index} -> "$#{index}," end)
+            |> String.trim_trailing(",")
+            |> then(&"(#{&1})")
+
+          {"#{acc},#{arg_index}", count + length(row)}
+        end)
+        |> elem(0)
+        |> String.trim_leading(",")
+
+      table = "\"#{prefix}\".\"#{source}\""
+      header = "(#{Enum.map_join(header, ",", &"\"#{&1}\"")})"
+
+      {:ok, {"INSERT INTO #{table} #{header} VALUES #{args_index} RETURNING *", rows}}
+    end
   end
 
   defp update_query_from_changeset(%{valid?: false} = changeset), do: {:error, changeset}

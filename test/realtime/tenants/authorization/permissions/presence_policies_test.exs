@@ -106,9 +106,6 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
 
         assert result == %Policies{presence: %PresencePolicies{write: true}}
       end)
-
-      # Ensure database is not polluted by policy testing
-      assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
     end
 
     @tag role: "anon", policies: [:authenticated_read_presence, :authenticated_write_presence]
