@@ -18,7 +18,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
-  alias Realtime.Tenants.Authorization.Policies.TopicPolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.ChannelsAuthorization
@@ -655,7 +654,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
 
     cond do
-      match?(%Policies{topic: %TopicPolicies{read: false}}, socket.assigns.policies) ->
+      match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
         {:error, "You do not have permissions to read from this Topic"}
 
       using_broadcast? &&

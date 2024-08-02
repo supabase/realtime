@@ -105,9 +105,6 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
 
         assert result == %Policies{broadcast: %BroadcastPolicies{write: true}}
       end)
-
-      # Ensure database is not polluted by policy testing
-      assert {:ok, %Message{}} = Repo.one(context.db_conn, query, Message)
     end
 
     @tag role: "anon", policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]

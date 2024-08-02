@@ -10,12 +10,13 @@ defmodule Realtime.Tenants.Authorization do
   """
   require Logger
 
+  alias Realtime.Api.Message
   alias Realtime.Database
-  alias Realtime.Messages
+  alias Realtime.Api.Message
+  alias Realtime.Repo
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
-  alias Realtime.Tenants.Authorization.Policies.TopicPolicies
 
   defstruct [:topic, :headers, :jwt, :claims, :role]
 
@@ -117,23 +118,22 @@ defmodule Realtime.Tenants.Authorization do
     )
   end
 
-  @policies_mods [TopicPolicies, BroadcastPolicies, PresencePolicies]
+  @policies_mods [BroadcastPolicies, PresencePolicies]
   defp get_policies_for_connection(conn, authorization_context) do
     Database.transaction(conn, fn transaction_conn ->
-      {:ok, %{id: broadcast_id}} =
-        Messages.create_message(
-          %{topic: authorization_context.topic, extension: :broadcast},
-          transaction_conn
-        )
+      messages = [
+        Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: :broadcast}),
+        Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: :presence})
+      ]
 
-      {:ok, %{id: presence_id}} =
-        Messages.create_message(
-          %{topic: authorization_context.topic, extension: :presence},
-          transaction_conn
-        )
+      {:ok, messages} = Repo.insert_all_entries(transaction_conn, messages, Message)
+
+      {[%{id: broadcast_id}], [%{id: presence_id}]} =
+        Enum.split_with(messages, &(&1.extension == :broadcast))
+
+      ids = %{presence_id: presence_id, broadcast_id: broadcast_id}
 
       set_conn_config(transaction_conn, authorization_context)
-      ids = %{presence_id: presence_id, broadcast_id: broadcast_id}
       policies = %Policies{}
 
       policies =

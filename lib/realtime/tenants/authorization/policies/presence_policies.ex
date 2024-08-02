@@ -68,7 +68,6 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
 
     case Repo.insert(conn, changeset, Message, mode: :savepoint) do
       {:ok, %Message{}} ->
-        Postgrex.query!(conn, "ROLLBACK AND CHAIN", [])
         {:ok, Policies.update_policies(policies, :presence, :write, true)}
 
       {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->

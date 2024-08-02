@@ -4,10 +4,11 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   require Phoenix.ChannelTest
 
+  alias Realtime.Api.Message
+  alias Realtime.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.TopicPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
 
   alias RealtimeWeb.Joken.CurrentTime
@@ -30,7 +31,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
         )
 
       assert %Policies{
-               topic: %TopicPolicies{read: true, write: false},
                broadcast: %BroadcastPolicies{read: true, write: false},
                presence: %PresencePolicies{read: true, write: false}
              } = conn.assigns.policies
@@ -54,7 +54,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
         )
 
       assert %Policies{
-               topic: %TopicPolicies{read: false, write: false},
                broadcast: %BroadcastPolicies{read: false, write: false},
                presence: %PresencePolicies{read: false, write: false}
              } = conn.assigns.policies
@@ -76,7 +75,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
         )
 
       assert %Policies{
-               topic: %TopicPolicies{read: true, write: true},
                broadcast: %BroadcastPolicies{read: true, write: true},
                presence: %PresencePolicies{read: true, write: true}
              } = conn.assigns.policies
@@ -96,10 +94,28 @@ defmodule Realtime.Tenants.AuthorizationTest do
         )
 
       assert %Policies{
-               topic: %TopicPolicies{read: false, write: false},
                broadcast: %BroadcastPolicies{read: false, write: false},
                presence: %PresencePolicies{read: false, write: false}
              } = conn.assigns.policies
+    end
+  end
+
+  describe "ensure database stays clean" do
+    @tag role: "authenticated",
+         policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "authenticated user has expected policies", context do
+      {:ok, _} =
+        Authorization.get_authorizations(
+          Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+          context.db_conn,
+          context.authorization_context
+        )
+
+      {:ok, db_conn} = connect(context.tenant)
+      assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
   end
 
@@ -131,6 +147,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     on_exit(fn -> Process.exit(db_conn, :normal) end)
 
     %{
+      tenant: tenant,
       topic: topic,
       db_conn: db_conn,
       authorization_context: authorization_context
