@@ -99,16 +99,18 @@ defmodule Realtime.Database do
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
   """
-  @spec check_tenant_connection(Tenant.t(), binary(), integer()) ::
+  @spec check_tenant_connection(Tenant.t(), binary()) ::
           {:error, atom()} | {:ok, pid()}
-  def check_tenant_connection(tenant, application_name, pool \\ 1)
-  def check_tenant_connection(nil, _, _), do: {:error, :tenant_not_found}
+  def check_tenant_connection(tenant, application_name)
+  def check_tenant_connection(nil, _), do: {:error, :tenant_not_found}
 
-  def check_tenant_connection(tenant, application_name, pool) do
+  def check_tenant_connection(tenant, application_name) do
     tenant
     |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
     |> then(fn settings ->
-      settings = Map.put(settings, "db_pool", pool)
+      settings =
+        if Map.has_key?(settings, "db_pool"), do: settings, else: Map.put(settings, "db_pool", 1)
+
       check_settings = from_settings(settings, application_name, :stop)
 
       with {:ok, conn} <- connect_db(check_settings) do
