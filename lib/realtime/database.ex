@@ -102,7 +102,7 @@ defmodule Realtime.Database do
   If `use_settings` is set to `false`, the connection pool will default to 1.
   If `use_settings` is set to `true` and settings has the key `db_pool`, the connection pool will be set to the value of `db_pool`.
   """
-  @spec check_tenant_connection(Tenant.t(), binary(), integer() | nil) ::
+  @spec check_tenant_connection(Tenant.t(), binary(), boolean()) ::
           {:error, atom()} | {:ok, pid()}
   def check_tenant_connection(tenant, application_name, use_settings \\ true)
   def check_tenant_connection(nil, _, _), do: {:error, :tenant_not_found}
