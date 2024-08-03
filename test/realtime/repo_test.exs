@@ -11,7 +11,7 @@ defmodule Realtime.RepoTest do
 
   setup do
     tenant = tenant_fixture()
-    {:ok, db_conn} = connect(tenant)
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
     clean_table(db_conn, "realtime", "messages")
     %{db_conn: db_conn, tenant: tenant}
   end

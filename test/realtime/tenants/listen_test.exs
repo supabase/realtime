@@ -2,12 +2,13 @@ defmodule Realtime.Tenants.ListenTest do
   # async: false due to the fact that it's doing Postgres NOTIFY and could interfere with other tests
   use Realtime.DataCase, async: false
   import Mock
+  import ExUnit.CaptureLog
 
+  alias Realtime.Database
   alias Realtime.RateCounter
   alias Realtime.Tenants.Listen
 
   alias RealtimeWeb.Endpoint
-  import ExUnit.CaptureLog
 
   describe("start/1") do
     setup do
@@ -18,20 +19,14 @@ defmodule Realtime.Tenants.ListenTest do
       tenant = tenant_fixture()
 
       RateCounter.new({:channel, :events, tenant.external_id})
-      {:ok, listen_conn} = Listen.start(tenant)
-      {:ok, db_conn} = connect(tenant)
-
-      on_exit(fn ->
-        Process.exit(listen_conn, :kill)
-        Process.exit(db_conn, :kill)
-      end)
-
+      {:ok, _} = Listen.start(tenant)
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
       {:ok, tenant: tenant, db_conn: db_conn}
     end
 
     test "on public notify, broadcasts to topic", %{tenant: tenant, db_conn: db_conn} do
       with_mocks [
-        {Endpoint, [], broadcast_from: fn _, _, _, _ -> :ok end}
+        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end}
       ] do
         topic = random_string()
 

@@ -5,6 +5,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
   require Phoenix.ChannelTest
 
   alias Realtime.Api.Message
+  alias Realtime.Database
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -114,7 +115,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
           context.authorization_context
         )
 
-      {:ok, db_conn} = connect(context.tenant)
+      {:ok, db_conn} = Database.connect(context.tenant, "realtime_test", 1)
       assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
   end
@@ -123,7 +124,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, db_conn} = connect(tenant)
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
 
     clean_table(db_conn, "realtime", "messages")
     topic = random_string()

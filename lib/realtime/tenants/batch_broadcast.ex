@@ -83,6 +83,8 @@ defmodule Realtime.Tenants.BatchBroadcast do
     end
   end
 
+  def broadcast(_, nil, _, _), do: {:error, :tenant_not_found}
+
   def changeset(payload, attrs) do
     payload
     |> cast(attrs, [])
