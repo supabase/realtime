@@ -98,17 +98,24 @@ defmodule Realtime.Database do
   @cdc "postgres_cdc_rls"
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
+
+  If `use_settings` is set to `false`, the connection pool will default to 1.
+  If `use_settings` is set to `true` and settings has the key `db_pool`, the connection pool will be set to the value of `db_pool`.
   """
-  @spec check_tenant_connection(Tenant.t(), binary(), integer()) ::
+  @spec check_tenant_connection(Tenant.t(), binary(), boolean()) ::
           {:error, atom()} | {:ok, pid()}
-  def check_tenant_connection(tenant, application_name, pool \\ 1)
+  def check_tenant_connection(tenant, application_name, use_settings \\ true)
   def check_tenant_connection(nil, _, _), do: {:error, :tenant_not_found}
 
-  def check_tenant_connection(tenant, application_name, pool) do
+  def check_tenant_connection(tenant, application_name, use_settings) do
     tenant
     |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
     |> then(fn settings ->
-      settings = Map.put(settings, "db_pool", pool)
+      settings =
+        if Map.has_key?(settings, "db_pool") && use_settings,
+          do: settings,
+          else: Map.put(settings, "db_pool", 1)
+
       check_settings = from_settings(settings, application_name, :stop)
 
       with {:ok, conn} <- connect_db(check_settings) do
@@ -185,7 +192,7 @@ defmodule Realtime.Database do
   """
   @spec replication_slot_teardown(Tenant.t()) :: :ok
   def replication_slot_teardown(tenant) do
-    {:ok, conn} = check_tenant_connection(tenant, "replication_slot_teardown")
+    {:ok, conn} = check_tenant_connection(tenant, "replication_slot_teardown", false)
 
     with {:ok, %{rows: rows}} <-
            Postgrex.query(
