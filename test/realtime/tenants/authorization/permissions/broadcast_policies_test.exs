@@ -3,6 +3,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
   use Realtime.DataCase, async: false
 
   alias Realtime.Api.Message
+  alias Realtime.Database
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
@@ -146,7 +147,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
 
-    {:ok, db_conn} = connect(tenant)
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
 
     clean_table(db_conn, "realtime", "messages")
     message = message_fixture(tenant, %{extension: :broadcast})

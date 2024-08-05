@@ -1,6 +1,8 @@
 defmodule Realtime.Tenants.MigrationsTest do
   # async: false due to the fact that we're dropping database migrations
   use Realtime.DataCase, async: false
+
+  alias Realtime.Database
   alias Realtime.Tenants.Migrations
 
   describe "run_migrations/1" do
@@ -11,7 +13,7 @@ defmodule Realtime.Tenants.MigrationsTest do
 
     test "migrations for a given tenant only run once", %{tenant: tenant} do
       %{extensions: [%{settings: settings}]} = tenant
-      {:ok, conn} = connect(tenant)
+      {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
 
       Postgrex.query!(conn, "DROP SCHEMA realtime CASCADE", [])
       Postgrex.query!(conn, "CREATE SCHEMA realtime", [])

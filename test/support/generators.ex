@@ -3,6 +3,8 @@ defmodule Generators do
   Data genarators for tests.
   """
 
+  alias Realtime.Database
+
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
     create_attrs = %{
@@ -42,7 +44,7 @@ defmodule Generators do
   end
 
   def message_fixture(tenant, override \\ %{}) do
-    {:ok, db_conn} = TenantConnection.connect(tenant)
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
 
     create_attrs = %{
       "topic" => random_string(),

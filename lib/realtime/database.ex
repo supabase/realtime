@@ -2,6 +2,7 @@ defmodule Realtime.Database do
   @moduledoc """
   Handles tenant database operations
   """
+  import Realtime.Helpers, only: [log_error: 2]
 
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
@@ -39,7 +40,7 @@ defmodule Realtime.Database do
           Realtime.Database.t()
   def from_settings(settings, application_name, backoff \\ :rand_exp, decrypt \\ false) do
     pool =
-      settings["subs_pool_size"] || settings["als"] || settings["db_pool"] || 2
+      settings["subs_pool_size"] || settings["subcriber_pool_size"] || settings["db_pool"] || 1
 
     settings =
       if decrypt do
@@ -98,24 +99,16 @@ defmodule Realtime.Database do
   @cdc "postgres_cdc_rls"
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
-
-  If `use_settings` is set to `false`, the connection pool will default to 1.
-  If `use_settings` is set to `true` and settings has the key `db_pool`, the connection pool will be set to the value of `db_pool`.
   """
-  @spec check_tenant_connection(Tenant.t(), binary(), boolean()) ::
+  @spec check_tenant_connection(Tenant.t(), binary()) ::
           {:error, atom()} | {:ok, pid()}
-  def check_tenant_connection(tenant, application_name, use_settings \\ true)
-  def check_tenant_connection(nil, _, _), do: {:error, :tenant_not_found}
+  def check_tenant_connection(tenant, application_name)
+  def check_tenant_connection(nil, _), do: {:error, :tenant_not_found}
 
-  def check_tenant_connection(tenant, application_name, use_settings) do
+  def check_tenant_connection(tenant, application_name) do
     tenant
     |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
     |> then(fn settings ->
-      settings =
-        if Map.has_key?(settings, "db_pool") && use_settings,
-          do: settings,
-          else: Map.put(settings, "db_pool", 1)
-
       check_settings = from_settings(settings, application_name, :stop)
 
       with {:ok, conn} <- connect_db(check_settings) do
@@ -131,6 +124,14 @@ defmodule Realtime.Database do
         end
       end
     end)
+  end
+
+  def connect(tenant, application_name, pool, backoff \\ :stop) do
+    tenant
+    |> then(&Realtime.PostgresCdc.filter_settings(@cdc, &1.extensions))
+    |> then(&Realtime.Database.from_settings(&1, application_name, backoff))
+    |> then(&%{&1 | pool: pool})
+    |> connect_db()
   end
 
   @doc """
@@ -192,14 +193,10 @@ defmodule Realtime.Database do
   """
   @spec replication_slot_teardown(Tenant.t()) :: :ok
   def replication_slot_teardown(tenant) do
-    {:ok, conn} = check_tenant_connection(tenant, "replication_slot_teardown", false)
+    {:ok, conn} = connect(tenant, "realtime_replication_slot_teardown", 1)
+    query = "select active_pid from pg_replication_slots where slot_name ilike '%realtime%'"
 
-    with {:ok, %{rows: rows}} <-
-           Postgrex.query(
-             conn,
-             "select active_pid from pg_replication_slots where slot_name ilike '%realtime%'",
-             []
-           ) do
+    with {:ok, %{rows: rows}} <- Postgrex.query(conn, query, []) do
       Enum.each(rows, fn [pid] ->
         Postgrex.query!(conn, "select pg_terminate_backend(#{pid})", [])
       end)
@@ -211,25 +208,31 @@ defmodule Realtime.Database do
   @doc """
   Runs database transaction in local node or against a target node withing a Postgrex transaction
   """
-  @spec transaction(pid | DBConnection.t(), fun) :: any()
-  def transaction(%DBConnection{} = db_conn, func) do
-    with {:ok, result} <- Postgrex.transaction(db_conn, func) do
+  @spec transaction(pid | DBConnection.t(), fun(), keyword()) :: any()
+  def transaction(db_conn, func, opts \\ [])
+
+  def transaction(%DBConnection{} = db_conn, func, opts),
+    do: transaction_catched(db_conn, func, opts)
+
+  def transaction(db_conn, func, opts) when node() == node(db_conn),
+    do: transaction_catched(db_conn, func, opts)
+
+  def transaction(db_conn, func, opts),
+    do:
+      Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func, opts],
+        timeout: 15_000
+      )
+
+  defp transaction_catched(db_conn, func, opts) do
+    with {:ok, result} <- Postgrex.transaction(db_conn, func, opts) do
       result
     else
       {:error, error} -> error
     end
-  end
-
-  def transaction(db_conn, func) when node() == node(db_conn) do
-    with {:ok, result} <- Postgrex.transaction(db_conn, func) do
-      result
-    else
-      {:error, error} -> error
-    end
-  end
-
-  def transaction(db_conn, func) do
-    Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func], timeout: 15_000)
+  rescue
+    e ->
+      log_error("ErrorExecutingTransaction", e)
+      {:error, :postgrex_exception}
   end
 
   @doc """

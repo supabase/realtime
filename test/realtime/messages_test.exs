@@ -3,11 +3,12 @@ defmodule Realtime.MessagesTest do
   use Realtime.DataCase, async: false
 
   alias Realtime.Api.Message
+  alias Realtime.Database
   alias Realtime.Messages
 
   setup do
     tenant = tenant_fixture()
-    {:ok, conn} = connect(tenant)
+    {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
     clean_table(conn, "realtime", "messages")
     on_exit(fn -> Process.exit(conn, :normal) end)
     %{conn: conn, tenant: tenant}
