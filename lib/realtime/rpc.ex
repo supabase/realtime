@@ -31,22 +31,34 @@ defmodule Realtime.Rpc do
   @doc """
   Calls external node using :erpc.call/5 and collects telemetry
   """
-  @spec enhanced_call(atom(), atom(), atom(), any(), keyword()) :: any()
+  @spec enhanced_call(atom(), atom(), atom(), any(), keyword()) :: {:ok, any()} | {:error, any()}
   def enhanced_call(node, mod, func, args \\ [], opts \\ []) do
     timeout = Keyword.get(opts, :timeout, 15_000)
-    {latency, response} = :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end)
 
-    Telemetry.execute(
-      [:realtime, :rpc],
-      %{latency: latency},
-      %{
-        mod: mod,
-        func: func,
-        target_node: node,
-        origin_node: node()
-      }
-    )
+    try do
+      :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end)
+    catch
+      kind, reason -> {:error, {:badrpc, {kind, reason}}}
+    else
+      {_, {:EXIT, _}} = badrpc ->
+        {:error, {:badrpc, badrpc}}
 
-    response
+      {latency, response} ->
+        Telemetry.execute(
+          [:realtime, :rpc],
+          %{latency: latency},
+          %{
+            mod: mod,
+            func: func,
+            target_node: node,
+            origin_node: node()
+          }
+        )
+
+        case response do
+          {status, _} when status in [:ok, :error] -> response
+          _ -> {:error, response}
+        end
+    end
   end
 end
