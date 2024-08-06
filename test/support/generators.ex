@@ -56,7 +56,7 @@ defmodule Generators do
     {:ok, channel} =
       create_attrs
       |> Map.merge(override)
-      |> Realtime.Messages.create_message(db_conn)
+      |> TenantConnection.create_message(db_conn)
 
     Process.exit(db_conn, :normal)
     channel

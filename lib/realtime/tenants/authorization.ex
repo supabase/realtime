@@ -56,15 +56,15 @@ defmodule Realtime.Tenants.Authorization do
           {:ok, Phoenix.Socket.t() | Plug.Conn.t()} | {:error, any()}
   def get_authorizations(%Phoenix.Socket{} = socket, db_conn, authorization_context) do
     case get_authorizations(db_conn, authorization_context) do
-      %Policies{} = policies -> {:ok, Phoenix.Socket.assign(socket, :policies, policies)}
-      error -> {:error, error}
+      {:ok, %Policies{} = policies} -> {:ok, Phoenix.Socket.assign(socket, :policies, policies)}
+      {:error, error} -> {:error, error}
     end
   end
 
   def get_authorizations(%Plug.Conn{} = conn, db_conn, authorization_context) do
     case get_authorizations(db_conn, authorization_context) do
-      %Policies{} = policies -> {:ok, Plug.Conn.assign(conn, :policies, policies)}
-      error -> error
+      {:ok, %Policies{} = policies} -> {:ok, Plug.Conn.assign(conn, :policies, policies)}
+      {:error, error} -> {:error, error}
     end
   end
 
@@ -72,11 +72,11 @@ defmodule Realtime.Tenants.Authorization do
   Runs validations based on RLS policies and returns the policies
   """
   @spec get_authorizations(DBConnection.t(), __MODULE__.t()) ::
-          %Policies{} | {:error, any()}
+          {:ok, %Policies{}} | {:error, any()}
   def get_authorizations(db_conn, authorization_context) do
     case get_policies_for_connection(db_conn, authorization_context) do
-      %Policies{} = policies -> policies
-      error -> {:error, error}
+      {:ok, %Policies{} = policies} -> {:ok, policies}
+      {:error, error} -> {:error, error}
     end
   end
 

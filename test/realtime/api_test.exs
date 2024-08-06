@@ -45,6 +45,9 @@ defmodule Realtime.ApiTest do
   @invalid_attrs %{external_id: nil, jwt_secret: nil, name: nil}
 
   setup do
+    start_supervised(Realtime.RateCounter.DynamicSupervisor)
+    start_supervised(Realtime.GenCounter.DynamicSupervisor)
+
     tenants = [
       tenant_fixture(%{external_id: "external_id1", max_concurrent_users: 10}),
       tenant_fixture(%{external_id: "external_id2", max_concurrent_users: 5}),
@@ -139,8 +142,8 @@ defmodule Realtime.ApiTest do
       assert Api.preload_counters(nil) == nil
 
       with_mocks([
-        {GenCounter, [], [get: fn _ -> {:ok, 1} end]},
-        {RateCounter, [], [get: fn _ -> {:ok, %RateCounter{avg: 2}} end]}
+        {GenCounter, [:passthrough], [get: fn _ -> {:ok, 1} end]},
+        {RateCounter, [:passthrough], [get: fn _ -> {:ok, %RateCounter{avg: 2}} end]}
       ]) do
         counters = Api.preload_counters(tenant)
         assert counters.events_per_second_rolling == 2

@@ -38,7 +38,14 @@ defmodule Realtime.DatabaseTest do
       %{db_conn: db_conn}
     end
 
-    test "on error, captures the error", %{db_conn: db_conn} do
+    test "handles transaction errors", %{db_conn: db_conn} do
+      assert {:error, %DBConnection.ConnectionError{reason: :error}} =
+               Database.transaction(db_conn, fn conn ->
+                 Postgrex.query!(conn, "select pg_terminate_backend(pg_backend_pid())", [])
+               end)
+    end
+
+    test "on checkout error, handles raised exception as an error", %{db_conn: db_conn} do
       assert capture_log(fn ->
                Task.start(fn ->
                  Database.transaction(db_conn, fn conn ->
@@ -46,15 +53,13 @@ defmodule Realtime.DatabaseTest do
                  end)
                end)
 
-               for _ <- 0..10 do
-                 Task.start(fn ->
-                   Database.transaction(db_conn, fn conn ->
-                     Postgrex.query!(conn, "SELECT pg_sleep(5)", [])
-                   end)
-                 end)
-               end
-
-               :timer.sleep(15000)
+               assert {:error, %DBConnection.ConnectionError{reason: :queue_timeout}} =
+                        Task.async(fn ->
+                          Database.transaction(db_conn, fn conn ->
+                            Postgrex.query!(conn, "SELECT pg_sleep(5)", [])
+                          end)
+                        end)
+                        |> Task.await(15000)
              end) =~ "ErrorExecutingTransaction"
     end
   end
