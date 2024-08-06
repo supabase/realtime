@@ -651,18 +651,25 @@ defmodule RealtimeWeb.RealtimeChannel do
         role: claims["role"]
       })
 
-    {:ok, socket} = Authorization.get_authorizations(socket, db_conn, authorization_context)
-
-    cond do
-      match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-        {:error, "You do not have permissions to read from this Topic"}
-
-      using_broadcast? &&
+    case Authorization.get_authorizations(socket, db_conn, authorization_context) do
+      {:ok, socket} ->
+        cond do
           match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-        {:error, "You do not have permissions to read Broadcast messages from this channel"}
+            {:error, "You do not have permissions to read from this Topic"}
 
-      true ->
-        {:ok, socket}
+          using_broadcast? and
+              match?(
+                %Policies{broadcast: %BroadcastPolicies{read: false}},
+                socket.assigns.policies
+              ) ->
+            {:error, "You do not have permissions to read Broadcast messages from this channel"}
+
+          true ->
+            {:ok, socket}
+        end
+
+      {:error, error} ->
+        {:error, error}
     end
   end
 

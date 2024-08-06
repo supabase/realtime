@@ -208,7 +208,7 @@ defmodule Realtime.Database do
   @doc """
   Runs database transaction in local node or against a target node withing a Postgrex transaction
   """
-  @spec transaction(pid | DBConnection.t(), fun(), keyword()) :: any()
+  @spec transaction(pid | DBConnection.t(), fun(), keyword()) :: {:ok, any()} | {:error, any()}
   def transaction(db_conn, func, opts \\ [])
 
   def transaction(%DBConnection{} = db_conn, func, opts),
@@ -217,18 +217,17 @@ defmodule Realtime.Database do
   def transaction(db_conn, func, opts) when node() == node(db_conn),
     do: transaction_catched(db_conn, func, opts)
 
-  def transaction(db_conn, func, opts),
-    do:
-      Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func, opts],
-        timeout: 15_000
-      )
+  def transaction(db_conn, func, opts) do
+    # we need to return either {:ok, ...} or {:error, error} here
+    # example
+    {:ok,
+     Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func, opts],
+       timeout: 15_000
+     )}
+  end
 
   defp transaction_catched(db_conn, func, opts) do
-    with {:ok, result} <- Postgrex.transaction(db_conn, func, opts) do
-      result
-    else
-      {:error, error} -> error
-    end
+    Postgrex.transaction(db_conn, func, opts)
   rescue
     e ->
       log_error("ErrorExecutingTransaction", e)
