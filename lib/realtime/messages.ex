@@ -14,7 +14,7 @@ defmodule Realtime.Messages do
   def create_message(attrs, conn, opts \\ [mode: :savepoint]) do
     channel = Message.changeset(%Message{}, attrs)
 
-    result =
+    {:ok, result} =
       Database.transaction(conn, fn transaction_conn ->
         with {:ok, %Message{} = channel} <- Repo.insert(transaction_conn, channel, Message, opts) do
           channel
