@@ -409,6 +409,15 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
+  def handle_in(
+        "broadcast",
+        %{"private" => true},
+        %{assigns: %{check_authorization?: false}} = socket
+      ) do
+    message = "PrivateKeyPublicChannelError: Incoming private message found on public Channel"
+    shutdown_response(socket, message)
+  end
+
   def handle_in("broadcast", payload, socket) do
     BroadcastHandler.call(payload, socket)
   end

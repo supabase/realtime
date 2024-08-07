@@ -158,6 +158,7 @@ If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000
 | JANITOR_CLEANUP_CHILDREN_TIMEOUT     | number  | Timeout for each async task for janitor cleanup                                                                                                                                                                                                                                                                                 |
 | JANITOR_CHUNK_SIZE                   | number  | Number of tenants to process per chunk. Each chunk will be processed by a Task                                                                                                                                                                                                                                                  |
 | METRICS_CLEANER_SCHEDULE_TIMER_IN_MS | number  | Time in ms to run the Metric Cleaner task                                                                                                                                                                                                                                                                                       |
+
 ## WebSocket URL
 The WebSocket URL is in the following format for local development: `ws://[external_id].localhost:4000/socket/websocket`
 
@@ -237,6 +238,7 @@ This is the list of operational codes that can help you understand your deployme
 | ErrorOnRpcCall                     | Error when calling another realtime node                                                                                            |
 | ErrorExecutingTransaction          | Error executing a database transaction in tenant database                                                                           |
 | SynInitializationError             | Our framework to syncronize processes has failed to properly startup a connection to the database                                   |
+| PrivateKeyPublicChannelError       | Incoming private message found on public Channel                                                                                    |
 | JanitorFailedToDeleteOldMessages   | Scheduled task for realtime.message cleanup was unable to run                                                                       |
 | UnknownErrorOnController           | An error we are not handling correctly was triggered on a controller                                                                |
 | UnknownErrorOnChannel              | An error we are not handling correctly was triggered on a channel                                                                   |
