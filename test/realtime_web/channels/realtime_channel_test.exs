@@ -192,8 +192,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     test "private message on public Channel" do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
-      socket = Socket.assign(socket, %{check_authorization?: false})
-
       join_payload = %{
         "config" => %{
           "broadcase" => %{"self" => false},
@@ -205,10 +203,15 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       {:ok, _, %Socket{} = socket} =
         subscribe_and_join(socket, "realtime:test", join_payload)
-        |> IO.inspect()
 
-      push(socket, "broadcast", %{private: true})
-      assert_push("broadcast", %{private: true})
+      socket = Socket.assign(socket, check_authorization?: true)
+
+      IO.inspect(socket)
+
+      assert_received(%Phoenix.Socket.Message{topic: "realtime:test", event: "presence_state"})
+
+      push(socket, "broadcast", %{})
+      assert_received(%{})
     end
   end
 end
