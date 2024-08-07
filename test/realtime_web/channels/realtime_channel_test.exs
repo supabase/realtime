@@ -178,4 +178,37 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                subscribe_and_join(socket, "realtime:test", %{})
     end
   end
+
+  describe "private messages" do
+    setup_with_mocks([
+      {ChannelsAuthorization, [],
+       authorize_conn: fn _, _, _ ->
+         {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
+       end}
+    ]) do
+      :ok
+    end
+
+    test "private message on public Channel" do
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+
+      socket = Socket.assign(socket, %{check_authorization?: false})
+
+      join_payload = %{
+        "config" => %{
+          "broadcase" => %{"self" => false},
+          "presence" => %{"key" => ""},
+          "postgres_changes" => []
+        },
+        "access_token" => "blah"
+      }
+
+      {:ok, _, %Socket{} = socket} =
+        subscribe_and_join(socket, "realtime:test", join_payload)
+        |> IO.inspect()
+
+      push(socket, "broadcast", %{private: true})
+      assert_push("broadcast", %{private: true})
+    end
+  end
 end
