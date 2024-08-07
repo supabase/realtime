@@ -39,7 +39,9 @@ defmodule Realtime.Rpc do
     try do
       :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end)
     catch
-      kind, reason -> {:error, {:badrpc, {kind, reason}}}
+      kind, reason ->
+        log_error("ErrorOnRpcCall", {kind, reason})
+        {:error, "RPC call error"}
     else
       {_, {:EXIT, _}} = badrpc ->
         log_error("ErrorOnRpcCall", badrpc)
