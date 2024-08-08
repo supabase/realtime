@@ -11,7 +11,8 @@ import { createClient } from "@supabase/supabase-js";
 let Hooks = {};
 Hooks.payload = {
   initRealtime(
-    channelName,
+    channel_name,
+    private_channel,
     host,
     log_level,
     token,
@@ -33,6 +34,10 @@ Hooks.payload = {
       },
     };
 
+    const privateChannel = private_channel
+      ? private_channel.toLowerCase() === "true"
+      : false;
+
     this.realtimeSocket = createClient(host, token, opts);
 
     if (bearer != "") {
@@ -42,8 +47,8 @@ Hooks.payload = {
     // Join the Channel 'any'
     // Channels can be named anything
     // All clients on the same Channel will get messages sent to that Channel
-    this.channel = this.realtimeSocket.channel(channelName, {
-      config: { broadcast: { self: true } },
+    this.channel = this.realtimeSocket.channel(channel_name, {
+      config: { broadcast: { self: true }, private: privateChannel },
     });
 
     // Hack to confirm Postgres is subscribed
@@ -131,7 +136,7 @@ Hooks.payload = {
         localStorage.setItem("host", host);
         localStorage.setItem("token", token);
         localStorage.setItem("log_level", log_level);
-        localStorage.setItem("channel", channelName);
+        localStorage.setItem("channel", channel_name);
         localStorage.setItem("schema", schema);
         localStorage.setItem("table", table);
         localStorage.setItem("filter", filter);
@@ -187,12 +192,16 @@ Hooks.payload = {
     });
   },
 
-  sendRealtime(event, payload) {
+  sendRealtime(event, payload, privateMessage) {
     // Send a `broadcast` message over the Channel
     // All connected clients will receive this message if they're subscribed
     // to `broadcast` events and matching on the `event` name or using `*` to match all event names
+
+    let priv = privateMessage ? privateMessage.toLowerCase() === "true" : false;
+
     this.channel.send({
       type: "broadcast",
+      private: priv,
       event: event,
       payload: payload,
     });
@@ -221,6 +230,7 @@ Hooks.payload = {
       bearer: localStorage.getItem("bearer"),
       enable_presence: localStorage.getItem("enable_presence"),
       enable_db_changes: localStorage.getItem("enable_db_changes"),
+      private_channel: localStorage.getItem("private_channel"),
     };
 
     this.pushEventTo("#conn_form", "local_storage", params);
@@ -228,6 +238,7 @@ Hooks.payload = {
     this.handleEvent("connect", ({ connection }) =>
       this.initRealtime(
         connection.channel,
+        connection.private_channel,
         connection.host,
         connection.log_level,
         connection.token,
@@ -241,7 +252,7 @@ Hooks.payload = {
     );
 
     this.handleEvent("send_message", ({ message }) =>
-      this.sendRealtime(message.event, message.payload)
+      this.sendRealtime(message.event, message.payload, message.private_message)
     );
 
     this.handleEvent("disconnect", ({}) => this.disconnectRealtime());
