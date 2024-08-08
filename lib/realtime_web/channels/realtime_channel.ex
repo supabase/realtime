@@ -354,7 +354,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_in(
         "broadcast",
-        %{"payload" => %{"private" => true}},
+        %{"private" => true},
         %{assigns: %{check_authorization?: false}} = socket
       ) do
     message = "PrivateKeyPublicChannelError: Incoming private message found on public Channel"
@@ -371,7 +371,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_in(type, payload, socket) do
     socket = count(socket)
-
     # Log info here so that bad messages from clients won't flood Logflare
     # Can subscribe to a Channel with `log_level` `info` to see these messages
     message = "Unexpected message from client of type `#{type}` with payload: #{inspect(payload)}"
@@ -396,7 +395,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     wait
   end
 
-  def limit_joins(%{tenant: tenant, limits: limits}) do
+  defp limit_joins(%{tenant: tenant, limits: limits}) do
     id = Tenants.joins_per_second_key(tenant)
     GenCounter.new(id)
 
@@ -424,7 +423,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def limit_channels(%{assigns: %{tenant: tenant, limits: limits}, transport_pid: pid}) do
+  defp limit_channels(%{assigns: %{tenant: tenant, limits: limits}, transport_pid: pid}) do
     key = Tenants.channels_per_client_key(tenant)
 
     if Registry.count_match(Realtime.Registry, key, pid) > limits.max_channels_per_client do
