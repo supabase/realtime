@@ -264,6 +264,41 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     @tag policies: [
+           :authenticated_read_broadcast_and_presence_with_header,
+           :authenticated_write_broadcast_and_presence_with_header
+         ]
+    test "private broadcast with valid channel with permissions and headers sends message", %{
+      topic: topic
+    } do
+      {socket, _} = get_connection("authenticated", %{"x-test" => "test"})
+      config = %{broadcast: %{self: true}, private: true}
+      topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{
+        event: "phx_reply",
+        payload: %{
+          "response" => %{"postgres_changes" => []},
+          "status" => "ok"
+        },
+        ref: "1",
+        topic: ^topic
+      }
+
+      assert_receive %Message{}
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic, "broadcast", payload)
+
+      assert_receive %Message{
+        event: "broadcast",
+        payload: ^payload,
+        ref: nil,
+        topic: ^topic
+      }
+    end
+
+    @tag policies: [
            :authenticated_read_broadcast_and_presence,
            :authenticated_write_broadcast_and_presence
          ],
@@ -603,16 +638,20 @@ defmodule Realtime.Integration.RtChannelTest do
     Joken.Signer.sign(claims, signer)
   end
 
-  defp get_connection(role \\ "anon") do
+  defp get_connection(role \\ "anon", headers \\ %{}) do
+    headers = Enum.map(headers, & &1)
     {:ok, token} = token_valid(role)
-    {:ok, socket} = WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
+
+    {:ok, socket} =
+      WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token} | headers])
+
     {socket, token}
   end
 
   def rls_context(context) do
     [tenant] = Tenant |> Repo.all() |> Repo.preload(:extensions)
 
-    {:ok, db_conn} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+    {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test", 1)
 
     clean_table(db_conn, "realtime", "messages")
     topic = Map.get(context, :topic, random_string())

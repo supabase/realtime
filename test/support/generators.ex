@@ -159,6 +159,30 @@ defmodule Generators do
     """
   end
 
+  def policy_query(:authenticated_read_broadcast_with_header, %{topic: name}) do
+    """
+    CREATE POLICY "authenticated_read_broadcast_#{name}"
+    ON realtime.messages FOR SELECT
+    TO authenticated
+    USING (
+      realtime.topic() = '#{name}'
+      AND realtime.messages.extension = 'broadcast'
+      AND ( SELECT current_setting('request.headers', false):: json ->> 'x-test' ) = 'test' );
+    """
+  end
+
+  def policy_query(:authenticated_write_broadcast_with_header, %{topic: name}) do
+    """
+    CREATE POLICY "authenticated_write_broadcast_#{name}"
+    ON realtime.messages FOR INSERT
+    TO authenticated
+    WITH CHECK (
+      realtime.topic() = '#{name}'
+      AND realtime.messages.extension = 'broadcast'
+      AND ( SELECT current_setting('request.headers', false):: json ->> 'x-test' ) = 'test' );
+    """
+  end
+
   def policy_query(:authenticated_read_presence, %{topic: name}) do
     """
     CREATE POLICY "authenticated_read_presence_#{name}"
@@ -192,6 +216,32 @@ defmodule Generators do
     ON realtime.messages FOR INSERT
     TO authenticated
     WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension IN ('presence', 'broadcast') );
+    """
+  end
+
+  def policy_query(:authenticated_read_broadcast_and_presence_with_header, %{topic: name}) do
+    """
+    CREATE POLICY "authenticated_read_presence_with_header_#{name}" ON realtime.messages
+    FOR SELECT
+    TO authenticated
+    USING (
+      realtime.topic() = '#{name}'
+      AND realtime.messages.extension IN ('presence', 'broadcast')
+      AND ( SELECT current_setting('request.headers', false):: json ->> 'x-test' ) = 'test'
+    )
+    """
+  end
+
+  def policy_query(:authenticated_write_broadcast_and_presence_with_header, %{topic: name}) do
+    """
+    CREATE POLICY "authenticated_write_presence_with_header_#{name}" ON realtime.messages
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (
+      realtime.topic() = '#{name}'
+      AND realtime.messages.extension IN ('presence', 'broadcast')
+      AND ( SELECT current_setting('request.headers', false):: json ->> 'x-test' ) = 'test'
+    )
     """
   end
 end

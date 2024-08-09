@@ -306,6 +306,47 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     end
 
     @tag role: "authenticated"
+    test "user with header in rls policy is able to broadcast", %{
+      conn: conn,
+      db_conn: db_conn,
+      tenant: tenant
+    } do
+      with_mocks [
+        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
+        {GenCounter, [:passthrough], add: fn _ -> :ok end}
+      ] do
+        messages_to_send = [generate_message_with_policies_with_header(db_conn, tenant)]
+
+        messages =
+          Enum.map(messages_to_send, fn %{topic: topic} ->
+            %{
+              "topic" => topic,
+              "payload" => %{"content" => random_string()},
+              "event" => random_string(),
+              "private" => true
+            }
+          end)
+
+        conn =
+          conn
+          |> put_req_header("x-test", "test")
+          |> post(Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
+
+        Enum.each(messages_to_send, fn %{topic: topic} ->
+          topic = Tenants.tenant_topic(tenant, topic, false)
+          assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
+        end)
+
+        assert_called_exactly(
+          GenCounter.add(Tenants.events_per_second_key(tenant)),
+          length(messages)
+        )
+
+        assert conn.status == 202
+      end
+    end
+
+    @tag role: "authenticated"
     test "user with permission is also able to broadcast to open channel", %{
       conn: conn,
       db_conn: db_conn,
@@ -455,6 +496,18 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         assert conn.status == 202
       end
     end
+  end
+
+  defp generate_message_with_policies_with_header(db_conn, tenant) do
+    message = message_fixture(tenant)
+
+    create_rls_policies(
+      db_conn,
+      [:authenticated_read_broadcast_with_header, :authenticated_write_broadcast_with_header],
+      message
+    )
+
+    message
   end
 
   defp generate_message_with_policies(db_conn, tenant) do
