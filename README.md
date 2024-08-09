@@ -216,6 +216,7 @@ This is the list of operational codes that can help you understand your deployme
 | UnprocessableEntity                | Received a HTTP request with a body that was not able to be processed by the endpoint                                               |
 | ErrorOnRpcCall                     | Error when calling another realtime node                                                                                            |
 | ErrorExecutingTransaction          | Error executing a database transaction in tenant database                                                                           |
+| PrivateKeyPublicChannelError       | Incoming private message found on public Channel                                                                                    |
 | UnknownError                       | An unknown error occurred                                                                                                           |
 
 ## License

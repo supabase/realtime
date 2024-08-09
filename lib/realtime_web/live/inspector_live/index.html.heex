@@ -102,7 +102,19 @@
           <%= error_tag(m, :payload) %>
           <p class="text-gray-600 text-xs italic">Message payload</p>
         </div>
-
+        <div class="mb-4">
+          <%= label(m, :private_message, class: "block text-gray-700 text-sm font-bold mb-2") %>
+          <%= checkbox(m, :private_message, class: "
+                        my-1
+                        block
+                        rounded-md
+                        border-gray-300
+                        shadow-sm
+                        focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                      ") %>
+          <%= error_tag(m, :private_message) %>
+          <p class="text-gray-600 text-xs italic">Private message</p>
+        </div>
         <%= submit("Send",
           phx_disable_with: "Sending...",
           class:

@@ -266,6 +266,48 @@ defmodule Realtime.Integration.RtChannelTest do
     @tag policies: [
            :authenticated_read_broadcast_and_presence,
            :authenticated_write_broadcast_and_presence
+         ]
+    test "public subscriber tries to send private message closes the channel", %{
+      topic: topic
+    } do
+      {socket, _} = get_connection("anon")
+      config = %{broadcast: %{self: true}, private: false}
+      topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{
+        event: "phx_reply",
+        payload: %{
+          "response" => %{"postgres_changes" => []},
+          "status" => "ok"
+        },
+        ref: "1",
+        topic: ^topic
+      }
+
+      assert_receive %Message{}
+
+      payload = %{
+        "event" => "TEST",
+        "payload" => %{"msg" => 1},
+        "type" => "broadcast",
+        "private" => true
+      }
+
+      WebsocketClient.send_event(socket, topic, "broadcast", payload)
+
+      %{payload: payload} =
+        assert_receive %Message{
+          event: "system",
+          topic: ^topic
+        }
+
+      assert payload["message"] =~ "PrivateKeyPublicChannelError"
+    end
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
          ],
          topic: "topic"
     test "private broadcast with valid channel a colon character sends message and won't intercept in public channels",
