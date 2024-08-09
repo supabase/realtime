@@ -178,15 +178,4 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                subscribe_and_join(socket, "realtime:test", %{})
     end
   end
-
-  describe "private messages" do
-    setup_with_mocks([
-      {ChannelsAuthorization, [],
-       authorize_conn: fn _, _, _ ->
-         {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
-       end}
-    ]) do
-      :ok
-    end
-  end
 end
