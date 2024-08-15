@@ -1,6 +1,6 @@
 import Config
 
-# For production, don't forget to configure the url host
+# For production, don't forget to configure the URL host
 # to something meaningful, Phoenix uses this information
 # when generating URLs.
 #

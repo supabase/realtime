@@ -35,7 +35,7 @@ defmodule Extensions.PostgresCdcRls.Replications do
       {:ok, %Postgrex.Result{rows: [[backend]]}} ->
         case query(conn, "select pg_terminate_backend($1)", [backend]) do
           {:ok, _resp} -> {:ok, :terminated}
-          {:error, erroer} -> {:error, erroer}
+          {:error, error} -> {:error, error}
         end
 
       {:ok, %Postgrex.Result{num_rows: 0}} ->

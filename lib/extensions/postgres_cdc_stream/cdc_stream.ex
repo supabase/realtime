@@ -64,7 +64,7 @@ defmodule Extensions.PostgresCdcStream do
     launch_node = Realtime.Nodes.launch_node(tenant, platform_region, node())
 
     Logger.warning(
-      "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, platform_region: platform_region)}"
+      "Starting distributed postgres extension #{inspect(launch_node: launch_node, region: region, platform_region: platform_region)}"
     )
 
     case Rpc.call(launch_node, __MODULE__, :start, [args], timeout: 30_000) do

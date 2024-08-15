@@ -42,7 +42,7 @@ defmodule Realtime.Tenants.Migrations.UpdateRealtimeSubscriptionCheckFiltersFunc
         if col_type is null then
           raise exception 'failed to lookup type for column %', filter.column_name;
         end if;
-        -- raises an exception if value is not coercable to type
+        -- raises an exception if value is not coercible to type
         perform realtime.cast(filter.value, col_type);
       end loop;
 

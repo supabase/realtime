@@ -40,7 +40,7 @@ defmodule Realtime.Database do
           Realtime.Database.t()
   def from_settings(settings, application_name, backoff \\ :rand_exp, decrypt \\ false) do
     pool =
-      settings["subs_pool_size"] || settings["subcriber_pool_size"] || settings["db_pool"] || 1
+      settings["subs_pool_size"] || settings["subscriber_pool_size"] || settings["db_pool"] || 1
 
     settings =
       if decrypt do

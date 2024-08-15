@@ -74,7 +74,7 @@ defmodule Extensions.PostgresCdcRls do
     launch_node = Realtime.Nodes.launch_node(tenant, platform_region, node())
 
     Logger.warning(
-      "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, platform_region: platform_region)}"
+      "Starting distributed postgres extension #{inspect(launch_node: launch_node, region: region, platform_region: platform_region)}"
     )
 
     case Rpc.call(launch_node, __MODULE__, :start, [args], timeout: 30_000, tenant: tenant) do
@@ -97,7 +97,7 @@ defmodule Extensions.PostgresCdcRls do
 
   @spec start(map()) :: :ok | {:error, :already_started | :reserved}
   def start(%{"id" => tenant} = args) when is_binary(tenant) do
-    args = Map.merge(args, %{"subs_pool_size" => Map.get(args, "subcriber_pool_size", 4)})
+    args = Map.merge(args, %{"subs_pool_size" => Map.get(args, "subscriber_pool_size", 4)})
 
     Logger.debug("Starting #{__MODULE__} extension with args: #{inspect(args, pretty: true)}")
 

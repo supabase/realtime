@@ -67,10 +67,7 @@ defmodule Realtime.Api do
 
   ## Examples
 
-      iex> _by_host!(123) do
-
-      end
-
+      iex> get_tenant!(123)
       %Tenant{}
 
       iex> get_tenant!(456)

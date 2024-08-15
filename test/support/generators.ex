@@ -1,6 +1,6 @@
 defmodule Generators do
   @moduledoc """
-  Data genarators for tests.
+  Data generators for tests.
   """
 
   alias Realtime.Database

@@ -13,11 +13,11 @@ defmodule Realtime.Tenants.Migrations.UpdateRealtimeBuildPreparedStatementSqlFun
       language sql
     as $$
     /*
-    Builds a sql string that, if executed, creates a prepared statement to
-    tests retrive a row from *entity* by its primary key columns.
+    Builds a SQL string that, if executed, creates a prepared statement to
+    test retrieve a row from *entity* by its primary key columns.
 
     Example
-      select realtime.build_prepared_statment_sql('public.notes', '{\"id\"}'::text[], '{\"bigint\"}'::text[])
+      select realtime.build_prepared_statement_sql('public.notes', '{\"id\"}'::text[], '{\"bigint\"}'::text[])
     */
       select
     'prepare ' || prepared_statement_name || ' as

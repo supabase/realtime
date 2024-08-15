@@ -5,7 +5,7 @@ defmodule Realtime.Operations do
   alias Realtime.Rpc
 
   @doc """
-  Ensures connected users are connected to the closest region by killing and restart the connection process.
+  Ensures connected users are connected to the closest region by killing and restarting the connection process.
   """
   def rebalance() do
     Enum.reduce(:syn.group_names(:users), 0, fn tenant, acc ->

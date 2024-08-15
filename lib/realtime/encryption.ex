@@ -28,9 +28,9 @@ defmodule Realtime.Crypto do
     |> unpad()
   end
 
-  @doc "
+  @doc """
   Decrypts the given credentials
-  "
+  """
   @spec decrypt_creds(binary(), binary(), binary(), binary(), binary()) ::
           {binary(), binary(), binary(), binary(), binary()}
   def decrypt_creds(host, port, name, user, pass) do

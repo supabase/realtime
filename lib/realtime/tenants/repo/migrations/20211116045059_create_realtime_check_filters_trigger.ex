@@ -11,7 +11,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeCheckFiltersTrigger do
     /*
     Validates that the user defined filters for a subscription:
     - refer to valid columns that 'authenticated' may access
-    - values are coercable to the correct column type
+    - values are coercible to the correct column type
     */
     declare
       col_names text[] = coalesce(

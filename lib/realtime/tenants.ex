@@ -43,7 +43,7 @@ defmodule Realtime.Tenants do
 
   @doc """
   Checks if a tenant is healthy. A tenant is healthy if:
-  - Tenant has no db connection and zero client connetions
+  - Tenant has no db connection and zero client connections
   - Tenant has a db connection and >0 client connections
 
   A tenant is not healthy if a tenant has client connections and no database connection.
