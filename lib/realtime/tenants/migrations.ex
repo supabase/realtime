@@ -58,7 +58,8 @@ defmodule Realtime.Tenants.Migrations do
     RedefineAuthorizationTables,
     FixWalrusRoleHandling,
     UnloggedMessagesTable,
-    LoggedMessagesTable
+    LoggedMessagesTable,
+    FilterDeletePostgresChanges
   }
 
   @migrations [
@@ -107,7 +108,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_523_004_032, RedefineAuthorizationTables},
     {20_240_618_124_746, FixWalrusRoleHandling},
     {20_240_801_235_015, UnloggedMessagesTable},
-    {20_240_805_133_720, LoggedMessagesTable}
+    {20_240_805_133_720, LoggedMessagesTable},
+    {20_240_827_160_934, FilterDeletePostgresChanges}
   ]
 
   @spec run_migrations(map()) :: :ok | {:error, any()}
