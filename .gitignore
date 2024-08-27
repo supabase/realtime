@@ -35,3 +35,5 @@ node_modules
 config/prod.secret.exs
 
 demo/.env
+
+.lexical

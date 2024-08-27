@@ -17,7 +17,7 @@ defmodule RealtimeWeb do
   and import those modules here.
   """
 
-  def static_paths, do: ~w(assets fonts images favicon.svg robots.txt)
+  def static_paths, do: ~w(assets fonts images favicon.svg robots.txt worker.js)
 
   def controller do
     quote do
