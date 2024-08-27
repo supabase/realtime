@@ -3,7 +3,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   use RealtimeWeb.ChannelCase
 
   import Mock
-
+  import ExUnit.CaptureLog
   alias Phoenix.Socket
   alias RealtimeWeb.{ChannelsAuthorization, Joken.CurrentTime, UserSocket}
 
@@ -72,8 +72,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
-  describe "token expiration" do
-    test "valid" do
+  describe "JWT token validations" do
+    test "token has valid expiration" do
       with_mocks([
         {ChannelsAuthorization, [],
          [
@@ -88,7 +88,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       end
     end
 
-    test "invalid" do
+    test "token has invalid expiration" do
       with_mocks([
         {ChannelsAuthorization, [],
          [
@@ -115,6 +115,16 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
         assert {:error, %{reason: "Token expiration time is invalid"}} =
                  subscribe_and_join(socket, "realtime:test", %{})
+      end
+    end
+
+    test "missing claims returns a informative error" do
+      with_mock ChannelsAuthorization, [],
+        authorize_conn: fn _, _, _ -> {:error, :missing_claims} end do
+        capture_log(fn ->
+          assert {:error, :missing_claims} =
+                   connect(UserSocket, %{}, @default_conn_opts)
+        end) =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
       end
     end
   end

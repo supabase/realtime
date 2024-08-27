@@ -2,6 +2,7 @@ defmodule RealtimeWeb.ChannelsAuthorizationTest do
   use ExUnit.Case
 
   import Mock
+  import Generators
 
   alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
 
@@ -28,5 +29,12 @@ defmodule RealtimeWeb.ChannelsAuthorizationTest do
 
   test "authorize/3 when token is not a string" do
     assert :error = ChannelsAuthorization.authorize([], @secret, nil)
+  end
+
+  test "authorize_conn/3 fails when has missing headers" do
+    jwt = generate_jwt_token(@secret, %{})
+
+    assert {:error, :missing_claims} =
+             ChannelsAuthorization.authorize_conn(jwt, @secret, nil)
   end
 end
