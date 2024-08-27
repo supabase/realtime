@@ -248,8 +248,8 @@ defmodule RealtimeWeb.RealtimeChannel do
            pg_change_params: pg_change_params
          })}
 
-      {:error, error} when is_binary(error) ->
-        shutdown_response(socket, error)
+      {:error, :missing_claims} ->
+        shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
 
       {:error, error} ->
         message = "Access token has expired: " <> Helpers.to_log(error)
