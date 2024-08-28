@@ -98,4 +98,9 @@ defmodule Realtime.Operations do
       # credo:disable-for-next-line
       IO.inspect({"Failed to stop", tenant, kind, reason})
   end
+
+  def dump_processes do
+    term = Process.list() |> Enum.map(&Process.info/1) |> :erlang.term_to_binary()
+    File.write!("/tmp/erlang_process_dump.csv", term)
+  end
 end
