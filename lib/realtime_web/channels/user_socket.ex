@@ -77,11 +77,16 @@ defmodule RealtimeWeb.UserSocket do
       else
         nil ->
           log_error("TenantNotFound", "Tenant not found: #{external_id}")
-          :error
+          {:error, :tenant_not_found}
+
+        {:error, :missing_claims} ->
+          log_error("InvalidJWTToken", "Fields `role` and `exp` are required in JWT")
+          {:error, :missing_claims}
 
         error ->
+          IO.inspect(error)
           log_error("ErrorConnectingToWebsocket", error)
-          :error
+          error
       end
     end
   end

@@ -194,4 +194,11 @@ defmodule Generators do
     WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension IN ('presence', 'broadcast') );
     """
   end
+
+  def generate_jwt_token(secret, claims) do
+    signer = Joken.Signer.create("HS256", secret)
+    {:ok, claims} = Joken.generate_claims(%{}, claims)
+    {:ok, jwt, _} = Joken.encode_and_sign(claims, signer)
+    jwt
+  end
 end
