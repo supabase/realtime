@@ -159,7 +159,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       Enum.each(1..10, fn _ ->
         Task.start(fn ->
-          Connect.lookup_or_start_connection(tenant.external_id, erpc_timeout: 10_000)
+          Connect.lookup_or_start_connection(tenant.external_id, rpc_timeout: 10_000)
         end)
       end)
 

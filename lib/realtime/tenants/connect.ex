@@ -20,7 +20,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
-  @erpc_timeout_default 5000
+  @rpc_timeout_default 30_000
   @check_connected_user_interval_default 50_000
   @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
   @application_name "realtime_connect"
@@ -200,13 +200,13 @@ defmodule Realtime.Tenants.Connect do
   ## Private functions
 
   defp call_external_node(tenant_id, opts) do
-    erpc_timeout = Keyword.get(opts, :erpc_timeout, @erpc_timeout_default)
+    rpc_timeout = Keyword.get(opts, :rpc_timeout, @rpc_timeout_default)
 
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
       Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, opts],
-        timeout: erpc_timeout,
+        timeout: rpc_timeout,
         tenant: tenant_id
       )
     end

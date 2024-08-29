@@ -21,7 +21,8 @@ config :realtime,
   tenant_max_events_per_second:
     System.get_env("TENANT_MAX_EVENTS_PER_SECOND", "100") |> String.to_integer(),
   tenant_max_joins_per_second:
-    System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer()
+    System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer(),
+  rpc_timeout: System.get_env("RPC_TIMEOUT", "30000") |> String.to_integer()
 
 if config_env() == :prod do
   secret_key_base =
