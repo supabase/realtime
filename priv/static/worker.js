@@ -1,5 +1,5 @@
 addEventListener("message", (e) => {
-  if (e.data === "start") {
-    setInterval(() => postMessage("keepAlive"), 30000);
+  if (e.data.event === "start") {
+    setInterval(() => postMessage({ event: "keepAlive" }), e.data.interval);
   }
 });

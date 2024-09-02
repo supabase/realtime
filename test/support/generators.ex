@@ -69,21 +69,32 @@ defmodule Generators do
   end
 
   def clean_table(db_conn, schema, table) do
-    %{rows: rows} =
+    Database.transaction(db_conn, fn transaction_conn ->
+      %{rows: rows} =
+        Postgrex.query!(
+          transaction_conn,
+          "SELECT policyname FROM pg_policies WHERE schemaname = '#{schema}' and tablename = '#{table}'",
+          []
+        )
+
+      rows
+      |> List.flatten()
+      |> Enum.each(fn name ->
+        Postgrex.query!(
+          transaction_conn,
+          "DROP POLICY IF EXISTS \"#{name}\" ON #{schema}.#{table}",
+          []
+        )
+      end)
+
+      Postgrex.query!(transaction_conn, "TRUNCATE TABLE #{schema}.#{table} CASCADE", [])
+
       Postgrex.query!(
-        db_conn,
-        "SELECT policyname FROM pg_policies WHERE schemaname = '#{schema}' and tablename = '#{table}'",
+        transaction_conn,
+        "ALTER SEQUENCE #{schema}.#{table}_id_seq RESTART WITH 1",
         []
       )
-
-    rows
-    |> List.flatten()
-    |> Enum.each(fn name ->
-      Postgrex.query!(db_conn, "DROP POLICY IF EXISTS \"#{name}\" ON #{schema}.#{table}", [])
     end)
-
-    Postgrex.query!(db_conn, "TRUNCATE TABLE #{schema}.#{table} CASCADE", [])
-    Postgrex.query!(db_conn, "ALTER SEQUENCE #{schema}.#{table}_id_seq RESTART WITH 1", [])
   end
 
   @doc """
