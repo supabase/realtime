@@ -106,7 +106,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert {_pid, %{conn: _conn_pid}} = :syn.lookup(Connect, tenant_id)
       :timer.sleep(500)
-      :syn.leave(:users, tenant_id, self())
+      Realtime.SynShards.leave(:users, tenant_id, self())
       :timer.sleep(500)
       assert :undefined = :syn.lookup(Connect, tenant_id)
       refute Process.alive?(db_conn)
