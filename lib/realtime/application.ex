@@ -10,6 +10,15 @@ defmodule Realtime.Application do
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
   def start(_type, _args) do
+    primary_config = :logger.get_primary_config()
+
+    # add the region to logs
+    :ok =
+      :logger.set_primary_config(
+        :metadata,
+        Enum.into([region: System.get_env("REGION")], primary_config.metadata)
+      )
+
     topologies = Application.get_env(:libcluster, :topologies) || []
 
     if Application.fetch_env!(:realtime, :secure_channels) do
