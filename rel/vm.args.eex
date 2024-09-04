@@ -18,3 +18,5 @@
 
 ## Disable Busy Wait
 +sbwt none
++sbwtdio none
++sbwtdcpu none
