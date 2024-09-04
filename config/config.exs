@@ -9,8 +9,7 @@ import Config
 
 config :realtime,
   ecto_repos: [Realtime.Repo],
-  version: Mix.Project.config()[:version],
-  syn_shards: System.get_env("SYN_SHARDS", "5") |> String.to_integer()
+  version: Mix.Project.config()[:version]
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,

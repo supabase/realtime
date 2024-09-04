@@ -12,7 +12,6 @@ defmodule Realtime.Tenants do
   alias Realtime.Tenants.Cache
   alias Realtime.UsersCounter
   alias Realtime.Database
-  alias Realtime.SynShards
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
@@ -20,12 +19,12 @@ defmodule Realtime.Tenants do
 
   @spec list_connected_tenants :: [String.t()]
   def list_connected_tenants() do
-    SynShards.group_names(:users)
+    :syn.group_names(:users)
   end
 
   @spec list_connected_tenants(atom()) :: [String.t()]
   def list_connected_tenants(node) do
-    SynShards.group_names(:users, node)
+    :syn.group_names(:users, node)
   end
 
   @doc """

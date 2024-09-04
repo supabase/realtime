@@ -8,9 +8,7 @@ defmodule Realtime.Operations do
   Ensures connected users are connected to the closest region by killing and restart the connection process.
   """
   def rebalance() do
-    :users
-    |> Realtime.SynShards.group_names()
-    |> Enum.reduce(0, fn tenant, acc ->
+    Enum.reduce(:syn.group_names(:users), 0, fn tenant, acc ->
       case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
         {pid, %{region: region}} ->
           platform_region = Realtime.Nodes.platform_region_translator(region)
