@@ -46,6 +46,10 @@ defmodule RealtimeWeb.Router do
   end
 
   scope "/", RealtimeWeb do
+    get("/healthcheck", PageController, :healthcheck)
+  end
+
+  scope "/", RealtimeWeb do
     pipe_through(:browser)
 
     live("/", PageLive.Index, :index)
