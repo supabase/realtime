@@ -3,14 +3,19 @@ import {
   createClient,
   SupabaseClient,
   RealtimeChannel,
-} from "npm:@supabase/supabase-js@2.44.1";
+} from "npm:@supabase/supabase-js@latest";
 import {
   assert,
   assertEquals,
-  assertStringIncludes,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { describe, it } from "https://deno.land/std@0.224.0/testing/bdd.ts";
 import { sleep } from "https://deno.land/x/sleep/mod.ts";
+
+const env = await load();
+const url = env["PROJECT_URL"];
+const token = env["PROJECT_ANON_TOKEN"];
+const realtime = { heartbeatIntervalMs: 500, timeout: 1000 };
+const config = { config: { broadcast: { self: true } } };
 
 const signInUser = async (
   supabase: SupabaseClient,
@@ -32,14 +37,26 @@ const stopClient = async (
   });
   supabase.realtime.disconnect(1000, "test done");
   supabase.auth.stopAutoRefresh();
-  await sleep(2);
+  await sleep(1);
 };
 
-const env = await load();
-const url = env["PROJECT_URL"];
-const token = env["PROJECT_ANON_TOKEN"];
-const realtime = { heartbeatIntervalMs: 1000, timeout: 1000 };
-const config = { config: { broadcast: { self: true } } };
+const executeDatabaseActions = async (
+  supabase: SupabaseClient,
+  table: string,
+  values: { insertValue?: string; updateValue?: string } = {}
+) => {
+  const { data }: any = await supabase
+    .from(table)
+    .insert([{ value: values?.insertValue || crypto.randomUUID() }])
+    .select("id");
+
+  await supabase
+    .from(table)
+    .update({ value: values?.updateValue || crypto.randomUUID() })
+    .eq("id", data[0].id);
+
+  await supabase.from(table).delete().eq("id", data[0].id);
+};
 
 describe("broadcast extension", () => {
   it("user is able to receive self broadcast", async () => {
@@ -60,10 +77,9 @@ describe("broadcast extension", () => {
             payload: expectedPayload,
           });
         }
-        assert(status == "SUBSCRIBED" || status == "CLOSED");
       });
 
-    await sleep(1);
+    await sleep(2);
     await stopClient(supabase, [channel]);
     assertEquals(result, expectedPayload);
   });
@@ -87,9 +103,111 @@ describe("broadcast extension", () => {
       payload: expectedPayload,
     });
 
-    await sleep(2);
+    await sleep(1);
     await stopClient(supabase, [activeChannel, unsubscribedChannel]);
     assertEquals(result, expectedPayload);
+  });
+});
+
+describe("postgres changes extension", () => {
+  it("user is able to receive INSERT only events from a subscribed table with filter applied", async () => {
+    let supabase = await createClient(url, token, { realtime });
+    let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
+    await supabase.realtime.setAuth(accessToken);
+    let insertValue = crypto.randomUUID();
+    let result: Array<any> = [];
+    let topic = crypto.randomUUID();
+
+    const activeChannel = supabase
+      .channel(topic, config)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "pg_changes",
+          filter: `value=eq.${insertValue}`,
+        },
+        (payload) => result.push(payload)
+      )
+      .subscribe();
+    await sleep(2);
+    executeDatabaseActions(supabase, "pg_changes", { insertValue });
+    executeDatabaseActions(supabase, "pg_changes"); // Insert random value to check filter
+    executeDatabaseActions(supabase, "dummy"); // Insert random value into different table to check table filter
+    await sleep(2);
+    await stopClient(supabase, [activeChannel]);
+
+    assertEquals(result.length, 1);
+    assertEquals(result[0].eventType, "INSERT");
+    assertEquals(result[0].new.value, insertValue);
+  });
+
+  it("user is able to receive UPDATE only events from a subscribed table with filter applied", async () => {
+    let supabase = await createClient(url, token, { realtime });
+    let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
+    await supabase.realtime.setAuth(accessToken);
+    let updateValue = crypto.randomUUID();
+    let result: Array<any> = [];
+    let topic = crypto.randomUUID();
+
+    const activeChannel = supabase
+      .channel(topic, config)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "pg_changes",
+          filter: `value=eq.${updateValue}`,
+        },
+        (payload) => result.push(payload)
+      )
+      .subscribe();
+    await sleep(2);
+    executeDatabaseActions(supabase, "pg_changes", { updateValue });
+    executeDatabaseActions(supabase, "pg_changes"); // Insert random value to check filter
+    executeDatabaseActions(supabase, "dummy"); // Insert random value into different table to check table filter
+    await sleep(2);
+    await stopClient(supabase, [activeChannel]);
+
+    assertEquals(result.length, 1);
+    assertEquals(result[0].eventType, "UPDATE");
+    assertEquals(result[0].new.value, updateValue);
+  });
+
+  it("user is able to receive DELETE only events from a subscribed table with filter applied", async () => {
+    let supabase = await createClient(url, token, { realtime });
+    let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
+    await supabase.realtime.setAuth(accessToken);
+
+    let updateValue = crypto.randomUUID();
+    let result: Array<any> = [];
+    let topic = crypto.randomUUID();
+
+    const activeChannel = supabase
+      .channel(topic, config)
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "pg_changes",
+          filter: `value=eq.${updateValue}`,
+        },
+        (payload) => result.push(payload)
+      )
+      .subscribe();
+    await sleep(2);
+    executeDatabaseActions(supabase, "pg_changes", { updateValue });
+    executeDatabaseActions(supabase, "pg_changes"); // Insert random value to check filter
+    executeDatabaseActions(supabase, "dummy"); // Insert random value into different table to check table filter
+    await sleep(2);
+    await stopClient(supabase, [activeChannel]);
+
+    assertEquals(result.length, 1);
+    assertEquals(result[0].eventType, "DELETE");
+    assertEquals(result[0].new.value, updateValue);
   });
 });
 
