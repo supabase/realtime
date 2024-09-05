@@ -129,7 +129,10 @@ defmodule RealtimeWeb.Router do
         Realtime.Repo.Replica.SJC
       ],
       ecto_psql_extras_options: [long_running_queries: [threshold: "200 milliseconds"]],
-      metrics: RealtimeWeb.Telemetry
+      metrics: RealtimeWeb.Telemetry,
+      additional_pages: [
+        route_name: Realtime.Dashboard.ProcessDump
+      ]
     )
   end
 
