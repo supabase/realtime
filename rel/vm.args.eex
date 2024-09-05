@@ -15,3 +15,8 @@
 
 ## Set distribution buffer busy limit (default is 1024)
 +zdbbl 100000
+
+## Disable Busy Wait
++sbwt none
++sbwtdio none
++sbwtdcpu none
