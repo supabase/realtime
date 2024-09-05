@@ -40,27 +40,34 @@ const stopClient = async (
   await sleep(1);
 };
 
-const executeDatabaseActions = async (
+const executeCreateDatabaseActions = async (
   supabase: SupabaseClient,
-  table: string,
-  values: { insertValue?: string; updateValue?: string } = {}
-) => {
+  table: string
+): Promise<number> => {
   const { data }: any = await supabase
     .from(table)
-    .insert([{ value: values?.insertValue || crypto.randomUUID() }])
+    .insert([{ value: crypto.randomUUID() }])
     .select("id");
+  return data[0].id;
+};
 
+const executeModifyDatabaseActions = async (
+  supabase: SupabaseClient,
+  table: string,
+  id: number
+) => {
   await supabase
     .from(table)
-    .update({ value: values?.updateValue || crypto.randomUUID() })
-    .eq("id", data[0].id);
+    .update({ value: crypto.randomUUID() })
+    .eq("id", id);
 
-  await supabase.from(table).delete().eq("id", data[0].id);
+  await supabase.from(table).delete().eq("id", id);
 };
 
 describe("broadcast extension", () => {
   it("user is able to receive self broadcast", async () => {
     let supabase = await createClient(url, token, { realtime });
+
     let result = null;
     let event = crypto.randomUUID();
     let topic = crypto.randomUUID();
@@ -86,6 +93,7 @@ describe("broadcast extension", () => {
 
   it("user is able to use the endpoint to broadcast", async () => {
     let supabase = await createClient(url, token, { realtime });
+
     let result = null;
     let event = crypto.randomUUID();
     let topic = crypto.randomUUID();
@@ -114,9 +122,12 @@ describe("postgres changes extension", () => {
     let supabase = await createClient(url, token, { realtime });
     let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
     await supabase.realtime.setAuth(accessToken);
-    let insertValue = crypto.randomUUID();
+
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
+
+    let previousId = await executeCreateDatabaseActions(supabase, "pg_changes");
+    let dummyId = await executeCreateDatabaseActions(supabase, "dummy");
 
     const activeChannel = supabase
       .channel(topic, config)
@@ -126,30 +137,33 @@ describe("postgres changes extension", () => {
           event: "INSERT",
           schema: "public",
           table: "pg_changes",
-          filter: `value=eq.${insertValue}`,
+          filter: `id=eq.${previousId + 1}`,
         },
         (payload) => result.push(payload)
       )
       .subscribe();
     await sleep(2);
-    executeDatabaseActions(supabase, "pg_changes", { insertValue });
-    executeDatabaseActions(supabase, "pg_changes"); // Insert random value to check filter
-    executeDatabaseActions(supabase, "dummy"); // Insert random value into different table to check table filter
+    await executeCreateDatabaseActions(supabase, "pg_changes");
+    await executeCreateDatabaseActions(supabase, "pg_changes");
     await sleep(2);
     await stopClient(supabase, [activeChannel]);
 
     assertEquals(result.length, 1);
     assertEquals(result[0].eventType, "INSERT");
-    assertEquals(result[0].new.value, insertValue);
+    assertEquals(result[0].new.id, previousId + 1);
   });
 
   it("user is able to receive UPDATE only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });
     let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
     await supabase.realtime.setAuth(accessToken);
-    let updateValue = crypto.randomUUID();
+
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
+
+    let mainId = await executeCreateDatabaseActions(supabase, "pg_changes");
+    let fakeId = await executeCreateDatabaseActions(supabase, "pg_changes");
+    let dummyId = await executeCreateDatabaseActions(supabase, "dummy");
 
     const activeChannel = supabase
       .channel(topic, config)
@@ -159,21 +173,23 @@ describe("postgres changes extension", () => {
           event: "UPDATE",
           schema: "public",
           table: "pg_changes",
-          filter: `value=eq.${updateValue}`,
+          filter: `id=eq.${mainId}`,
         },
         (payload) => result.push(payload)
       )
       .subscribe();
     await sleep(2);
-    executeDatabaseActions(supabase, "pg_changes", { updateValue });
-    executeDatabaseActions(supabase, "pg_changes"); // Insert random value to check filter
-    executeDatabaseActions(supabase, "dummy"); // Insert random value into different table to check table filter
+
+    executeModifyDatabaseActions(supabase, "pg_changes", mainId);
+    executeModifyDatabaseActions(supabase, "pg_changes", fakeId);
+    executeModifyDatabaseActions(supabase, "dummy", dummyId);
+
     await sleep(2);
     await stopClient(supabase, [activeChannel]);
 
     assertEquals(result.length, 1);
     assertEquals(result[0].eventType, "UPDATE");
-    assertEquals(result[0].new.value, updateValue);
+    assertEquals(result[0].new.id, mainId);
   });
 
   it("user is able to receive DELETE only events from a subscribed table with filter applied", async () => {
@@ -181,9 +197,12 @@ describe("postgres changes extension", () => {
     let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
     await supabase.realtime.setAuth(accessToken);
 
-    let updateValue = crypto.randomUUID();
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
+
+    let mainId = await executeCreateDatabaseActions(supabase, "pg_changes");
+    let fakeId = await executeCreateDatabaseActions(supabase, "pg_changes");
+    let dummyId = await executeCreateDatabaseActions(supabase, "dummy");
 
     const activeChannel = supabase
       .channel(topic, config)
@@ -193,21 +212,23 @@ describe("postgres changes extension", () => {
           event: "DELETE",
           schema: "public",
           table: "pg_changes",
-          filter: `value=eq.${updateValue}`,
+          filter: `id=eq.${mainId}`,
         },
         (payload) => result.push(payload)
       )
       .subscribe();
     await sleep(2);
-    executeDatabaseActions(supabase, "pg_changes", { updateValue });
-    executeDatabaseActions(supabase, "pg_changes"); // Insert random value to check filter
-    executeDatabaseActions(supabase, "dummy"); // Insert random value into different table to check table filter
+
+    executeModifyDatabaseActions(supabase, "pg_changes", mainId);
+    executeModifyDatabaseActions(supabase, "pg_changes", fakeId);
+    executeModifyDatabaseActions(supabase, "dummy", dummyId);
+
     await sleep(2);
     await stopClient(supabase, [activeChannel]);
 
     assertEquals(result.length, 1);
     assertEquals(result[0].eventType, "DELETE");
-    assertEquals(result[0].new.value, updateValue);
+    assertEquals(result[0].old.id, mainId);
   });
 });
 
