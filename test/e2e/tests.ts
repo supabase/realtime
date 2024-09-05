@@ -136,12 +136,11 @@ describe("postgres changes extension", () => {
     executeDatabaseActions(supabase, "pg_changes"); // Insert random value to check filter
     executeDatabaseActions(supabase, "dummy"); // Insert random value into different table to check table filter
     await sleep(2);
+    await stopClient(supabase, [activeChannel]);
 
     assertEquals(result.length, 1);
     assertEquals(result[0].eventType, "INSERT");
     assertEquals(result[0].new.value, insertValue);
-
-    await stopClient(supabase, [activeChannel]);
   });
 
   it("user is able to receive UPDATE only events from a subscribed table with filter applied", async () => {
@@ -170,12 +169,11 @@ describe("postgres changes extension", () => {
     executeDatabaseActions(supabase, "pg_changes"); // Insert random value to check filter
     executeDatabaseActions(supabase, "dummy"); // Insert random value into different table to check table filter
     await sleep(2);
+    await stopClient(supabase, [activeChannel]);
 
     assertEquals(result.length, 1);
     assertEquals(result[0].eventType, "UPDATE");
     assertEquals(result[0].new.value, updateValue);
-
-    await stopClient(supabase, [activeChannel]);
   });
 
   it("user is able to receive DELETE only events from a subscribed table with filter applied", async () => {
@@ -205,12 +203,11 @@ describe("postgres changes extension", () => {
     executeDatabaseActions(supabase, "pg_changes"); // Insert random value to check filter
     executeDatabaseActions(supabase, "dummy"); // Insert random value into different table to check table filter
     await sleep(2);
+    await stopClient(supabase, [activeChannel]);
 
     assertEquals(result.length, 1);
     assertEquals(result[0].eventType, "DELETE");
     assertEquals(result[0].new.value, updateValue);
-
-    await stopClient(supabase, [activeChannel]);
   });
 });
 
