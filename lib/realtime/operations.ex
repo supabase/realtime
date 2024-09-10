@@ -33,9 +33,7 @@ defmodule Realtime.Operations do
     [node() | Node.list()]
     |> Task.async_stream(
       fn node ->
-        Rpc.enhanced_call(node, __MODULE__, :kill_connections_to_tenant_id, [tenant_id, reason],
-          timeout: 5000
-        )
+        Rpc.enhanced_call(node, __MODULE__, :kill_connections_to_tenant_id, [tenant_id, reason])
       end,
       timeout: 5000
     )
