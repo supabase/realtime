@@ -16,7 +16,6 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Database
   alias Realtime.Rpc
   alias Realtime.Tenants
-  alias Realtime.Tenants.Listen
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
@@ -27,7 +26,6 @@ defmodule Realtime.Tenants.Connect do
   defstruct tenant_id: nil,
             db_conn_reference: nil,
             db_conn_pid: nil,
-            listen_pid: nil,
             check_connected_user_interval: nil,
             connected_users_bucket: [1]
 
@@ -97,37 +95,17 @@ defmodule Realtime.Tenants.Connect do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     with %Tenant{} = tenant <- Tenants.get_tenant_by_external_id(tenant_id),
-         res <- Database.check_tenant_connection(tenant, @application_name),
+         {:ok, conn} <- Database.check_tenant_connection(tenant, @application_name),
+         ref <- Process.monitor(conn),
          [%{settings: settings} | _] <- tenant.extensions,
          :ok <- Migrations.run_migrations(settings) do
-      case res do
-        {:ok, conn} ->
-          :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
-
-          listen_pid =
-            if tenant.notify_private_alpha do
-              with {:ok, listen_pid} <- Listen.start(tenant) do
-                listen_pid
-              else
-                {:error, error} ->
-                  log_error("UnableToListenToTenantDatabase", error)
-                  nil
-              end
-            end
-
-          state = %{
-            state
-            | db_conn_reference: Process.monitor(conn),
-              db_conn_pid: conn,
-              listen_pid: listen_pid
-          }
-
-          {:ok, state, {:continue, :setup_connected_user_events}}
-
-        {:error, error} ->
-          log_error("UnableToConnectToTenantDatabase", error)
-          {:stop, :normal}
-      end
+      :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
+      state = %{state | db_conn_reference: ref, db_conn_pid: conn}
+      {:ok, state, {:continue, :setup_connected_user_events}}
+    else
+      {:error, error} ->
+        log_error("UnableToConnectToTenantDatabase", error)
+        {:stop, :shutdown}
     end
   end
 
@@ -161,20 +139,18 @@ defmodule Realtime.Tenants.Connect do
     {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
   end
 
-  def handle_info(:shutdown, %{db_conn_pid: db_conn_pid, listen_pid: listen_pid} = state) do
+  def handle_info(:shutdown, %{db_conn_pid: db_conn_pid} = state) do
     Logger.info("Tenant has no connected users, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 500)
-    if listen_pid, do: :ok = GenServer.stop(listen_pid, :normal, 500)
     {:stop, :normal, state}
   end
 
   def handle_info(
         {:suspend_tenant, _},
-        %{db_conn_pid: db_conn_pid, listen_pid: listen_pid} = state
+        %{db_conn_pid: db_conn_pid} = state
       ) do
     Logger.warning("Tenant was suspended, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 500)
-    if listen_pid, do: :ok = GenServer.stop(listen_pid, :normal, 500)
     {:stop, :normal, state}
   end
 
@@ -190,10 +166,9 @@ defmodule Realtime.Tenants.Connect do
 
   def handle_info(
         {:DOWN, db_conn_reference, _, _, _},
-        %{db_conn_reference: db_conn_reference, listen_pid: listen_pid} = state
+        %{db_conn_reference: db_conn_reference} = state
       ) do
     Logger.info("Database connection has been terminated")
-    if listen_pid, do: :ok = GenServer.stop(listen_pid, :normal, 500)
     {:stop, :normal, state}
   end
 

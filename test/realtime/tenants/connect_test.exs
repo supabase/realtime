@@ -4,7 +4,6 @@ defmodule Realtime.Tenants.ConnectTest do
 
   import Mock
 
-  alias Realtime.Tenants
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
 
@@ -36,15 +35,27 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "if tenant exists but unable to connect, returns error" do
+      Logger.configure(level: :critical)
+      on_exit(fn -> Logger.configure(level: :error) end)
+
+      expected_dbconnection_processes =
+        for pid <- Process.list(),
+            info = Process.info(pid),
+            dict = Keyword.get(info, :dictionary, []),
+            match?({DBConnection.Connection, :init, 1}, dict[:"$initial_call"]) do
+          pid
+        end
+        |> Enum.count()
+
       extensions = [
         %{
           "type" => "postgres_cdc_rls",
           "settings" => %{
-            "db_host" => "127.0.0.1",
-            "db_name" => "false",
-            "db_user" => "false",
-            "db_password" => "false",
-            "db_port" => "5433",
+            "db_host" => "localhost",
+            "db_name" => "postgres",
+            "db_user" => "postgres",
+            "db_password" => "postgres",
+            "db_port" => "5434",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
@@ -56,8 +67,23 @@ defmodule Realtime.Tenants.ConnectTest do
 
       tenant = tenant_fixture(%{"extensions" => extensions})
 
-      assert {:error, :tenant_database_unavailable} =
-               Connect.lookup_or_start_connection(tenant.external_id)
+      for _ <- 1..10 do
+        assert {:error, :tenant_database_unavailable} =
+                 Connect.lookup_or_start_connection(tenant.external_id)
+      end
+
+      :timer.sleep(2000)
+
+      current_dbconnection_processes =
+        for pid <- Process.list(),
+            info = Process.info(pid),
+            dict = Keyword.get(info, :dictionary, []),
+            match?({DBConnection.Connection, :init, 1}, dict[:"$initial_call"]) do
+          pid
+        end
+        |> Enum.count()
+
+      assert expected_dbconnection_processes == current_dbconnection_processes
     end
 
     test "if tenant does not exist, returns error" do
@@ -159,7 +185,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       Enum.each(1..10, fn _ ->
         Task.start(fn ->
-          Connect.lookup_or_start_connection(tenant.external_id, rpc_timeout: 10_000)
+          Connect.lookup_or_start_connection(tenant.external_id)
         end)
       end)
 
@@ -184,94 +210,6 @@ defmodule Realtime.Tenants.ConnectTest do
 
         assert_called(Ecto.Migrator.run(:_, :_, :_, :_))
       end
-    end
-
-    test "on Connect module start, Listen also starts if flag false" do
-      tenant = tenant_fixture(%{notify_private_alpha: false})
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
-      :timer.sleep(500)
-
-      assert [] =
-               Registry.lookup(
-                 Realtime.Registry.Unique,
-                 {Postgrex.Notifications, :tenant_id, tenant.external_id}
-               )
-
-      assert [] =
-               Registry.lookup(
-                 Realtime.Registry.Unique,
-                 {Postgrex.Notifications, :tenant_id, tenant.external_id}
-               )
-
-      {conn_pid, _} = :syn.lookup(Connect, tenant.external_id)
-      assert Process.alive?(db_conn)
-      assert Process.alive?(conn_pid)
-    end
-
-    test "on Connect module start, Listen also starts if flag true", %{tenant: tenant} do
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
-      :timer.sleep(500)
-
-      [{notifications_pid, _}] =
-        Registry.lookup(
-          Realtime.Registry.Unique,
-          {Postgrex.Notifications, :tenant_id, tenant.external_id}
-        )
-
-      [{listen_pid, _}] =
-        Registry.lookup(
-          Realtime.Registry.Unique,
-          {Postgrex.Notifications, :tenant_id, tenant.external_id}
-        )
-
-      {conn_pid, _} = :syn.lookup(Connect, tenant.external_id)
-      assert Process.alive?(db_conn)
-      assert Process.alive?(conn_pid)
-      assert Process.alive?(listen_pid)
-      assert Process.alive?(notifications_pid)
-    end
-
-    test "on Connect module death, Listen also dies", %{tenant: tenant} do
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
-      :timer.sleep(500)
-
-      [{notifications_pid, _}] =
-        Registry.lookup(
-          Realtime.Registry.Unique,
-          {Postgrex.Notifications, :tenant_id, tenant.external_id}
-        )
-
-      [{listen_pid, _}] =
-        Registry.lookup(
-          Realtime.Registry.Unique,
-          {Postgrex.Notifications, :tenant_id, tenant.external_id}
-        )
-
-      {conn_pid, _} = :syn.lookup(Connect, tenant.external_id)
-      assert Process.alive?(db_conn)
-      assert Process.alive?(conn_pid)
-      assert Process.alive?(listen_pid)
-      assert Process.alive?(notifications_pid)
-
-      Tenants.suspend_tenant_by_external_id(tenant.external_id)
-      :timer.sleep(500)
-
-      assert [] =
-               Registry.lookup(
-                 Realtime.Registry.Unique,
-                 {Postgrex.Notifications, :tenant_id, tenant.external_id}
-               )
-
-      assert [] =
-               Registry.lookup(
-                 Realtime.Registry.Unique,
-                 {Realtime.Tenants.Listen, :tenant_id, tenant.external_id}
-               )
-
-      assert :undefined = :syn.lookup(Connect, tenant.external_id)
     end
   end
 
