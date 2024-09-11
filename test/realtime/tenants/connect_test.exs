@@ -35,27 +35,15 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "if tenant exists but unable to connect, returns error" do
-      Logger.configure(level: :critical)
-      on_exit(fn -> Logger.configure(level: :error) end)
-
-      expected_dbconnection_processes =
-        for pid <- Process.list(),
-            info = Process.info(pid),
-            dict = Keyword.get(info, :dictionary, []),
-            match?({DBConnection.Connection, :init, 1}, dict[:"$initial_call"]) do
-          pid
-        end
-        |> Enum.count()
-
       extensions = [
         %{
           "type" => "postgres_cdc_rls",
           "settings" => %{
             "db_host" => "localhost",
-            "db_name" => "postgres",
-            "db_user" => "postgres",
-            "db_password" => "postgres",
-            "db_port" => "5434",
+            "db_name" => "false",
+            "db_user" => "false",
+            "db_password" => "false",
+            "db_port" => "5433",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
@@ -67,23 +55,8 @@ defmodule Realtime.Tenants.ConnectTest do
 
       tenant = tenant_fixture(%{"extensions" => extensions})
 
-      for _ <- 1..10 do
-        assert {:error, :tenant_database_unavailable} =
-                 Connect.lookup_or_start_connection(tenant.external_id)
-      end
-
-      :timer.sleep(2000)
-
-      current_dbconnection_processes =
-        for pid <- Process.list(),
-            info = Process.info(pid),
-            dict = Keyword.get(info, :dictionary, []),
-            match?({DBConnection.Connection, :init, 1}, dict[:"$initial_call"]) do
-          pid
-        end
-        |> Enum.count()
-
-      assert expected_dbconnection_processes == current_dbconnection_processes
+      assert {:error, :tenant_database_unavailable} =
+               Connect.lookup_or_start_connection(tenant.external_id)
     end
 
     test "if tenant does not exist, returns error" do

@@ -96,13 +96,17 @@ defmodule Realtime.Tenants.Connect do
 
     with %Tenant{} = tenant <- Tenants.get_tenant_by_external_id(tenant_id),
          {:ok, conn} <- Database.check_tenant_connection(tenant, @application_name),
-         ref <- Process.monitor(conn),
+         ref = Process.monitor(conn),
          [%{settings: settings} | _] <- tenant.extensions,
          :ok <- Migrations.run_migrations(settings) do
       :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
       state = %{state | db_conn_reference: ref, db_conn_pid: conn}
       {:ok, state, {:continue, :setup_connected_user_events}}
     else
+      nil ->
+        log_error("TenantNotFound", "Tenant not found")
+        {:stop, :shutdown}
+
       {:error, error} ->
         log_error("UnableToConnectToTenantDatabase", error)
         {:stop, :shutdown}
