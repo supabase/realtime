@@ -75,7 +75,10 @@ defmodule Realtime.Tenants do
           res = Postgrex.query!(transaction_conn, query, [])
 
           if res.rows == [] do
-            Migrations.run_migrations(settings)
+            Migrations.run_migrations(%Migrations{
+              tenant_external_id: external_id,
+              settings: settings
+            })
           end
         end)
 
@@ -92,7 +95,10 @@ defmodule Realtime.Tenants do
           res = Postgrex.query!(transaction_conn, query, [])
 
           if res.rows == [] do
-            Migrations.run_migrations(settings)
+            Migrations.run_migrations(%Migrations{
+              tenant_external_id: external_id,
+              settings: settings
+            })
           end
         end)
 

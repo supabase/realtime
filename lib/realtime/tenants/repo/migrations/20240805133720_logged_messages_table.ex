@@ -4,7 +4,7 @@ defmodule Realtime.Tenants.Migrations.LoggedMessagesTable do
 
   def change do
     execute """
-    ALTER TABLE realtime.messages SET LOGGED;
+    -- ALTER TABLE realtime.messages SET LOGGED;
     """
   end
 end
