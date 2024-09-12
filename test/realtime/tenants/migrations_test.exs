@@ -20,7 +20,12 @@ defmodule Realtime.Tenants.MigrationsTest do
 
       res =
         for _ <- 0..10 do
-          Task.async(fn -> Migrations.run_migrations(settings) end)
+          Task.async(fn ->
+            Migrations.run_migrations(%Migrations{
+              settings: settings,
+              tenant_external_id: tenant.external_id
+            })
+          end)
         end
         |> Task.await_many()
         |> Enum.uniq()

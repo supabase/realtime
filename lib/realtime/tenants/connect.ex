@@ -98,7 +98,11 @@ defmodule Realtime.Tenants.Connect do
          {:ok, conn} <- Database.check_tenant_connection(tenant, @application_name),
          ref = Process.monitor(conn),
          [%{settings: settings} | _] <- tenant.extensions,
-         :ok <- Migrations.run_migrations(settings) do
+         :ok <-
+           Migrations.run_migrations(%Migrations{
+             tenant_external_id: tenant.external_id,
+             settings: settings
+           }) do
       :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
       state = %{state | db_conn_reference: ref, db_conn_pid: conn}
       {:ok, state, {:continue, :setup_connected_user_events}}

@@ -111,22 +111,24 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_805_133_720, LoggedMessagesTable},
     {20_240_827_160_934, FilterDeletePostgresChanges}
   ]
-
+  defstruct [:tenant_external_id, :settings]
   @spec run_migrations(map()) :: :ok | {:error, any()}
-  def run_migrations(attrs) do
+  def run_migrations(%__MODULE__{} = attrs) do
     case DynamicSupervisor.start_child(__MODULE__.DynamicSupervisor, {__MODULE__, attrs}) do
       :ignore -> :ok
       error -> error
     end
   end
 
-  def start_link(attrs) do
-    name = {:via, Registry, {Unique, {__MODULE__, :host, attrs["db_host"]}}}
+  def start_link(%__MODULE__{tenant_external_id: tenant_external_id} = attrs) do
+    name = {:via, Registry, {Unique, {__MODULE__, :host, tenant_external_id}}}
     GenServer.start_link(__MODULE__, attrs, name: name)
   end
 
-  def init(attrs) do
-    case migrate(attrs) do
+  def init(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings}) do
+    Logger.metadata(external_id: tenant_external_id, project: tenant_external_id)
+
+    case migrate(settings) do
       {:ok, _} -> :ignore
       {:error, error} -> {:stop, error}
     end
