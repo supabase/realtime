@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   db:
     image: supabase/postgres:14.1.0.105

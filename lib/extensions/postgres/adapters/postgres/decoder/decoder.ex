@@ -130,18 +130,6 @@ defmodule Realtime.Adapters.Postgres.Decoder do
       """
       defstruct [:data]
     end
-
-    defmodule Relation.Column do
-      @moduledoc """
-      Struct representing a column in a relation in PostgreSQL's logical decoding output.
-
-      * `flags` - Column flags.
-      * `name` - The name of the column.
-      * `type` - The OID of the column type.
-      * `type_modifier` - The type modifier of the column.
-      """
-      defstruct [:flags, :name, :type, :type_modifier]
-    end
   end
 
   require Logger
