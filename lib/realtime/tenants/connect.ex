@@ -73,7 +73,7 @@ defmodule Realtime.Tenants.Connect do
         {:error, :tenant_database_connection_initializing}
 
       error ->
-        log_error("", error)
+        log_error("SynInitializationError", error)
         {:error, :tenant_database_unavailable}
     end
   end
