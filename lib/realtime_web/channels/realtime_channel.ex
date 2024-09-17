@@ -25,7 +25,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.Logging
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
 
-  @confirm_token_ms_interval 1_000 * 60 * 5
+  @confirm_token_ms_interval :timer.minutes(5)
 
   @impl true
   def join("realtime:" <> sub_topic = topic, params, socket) do
@@ -94,8 +94,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:ok, state, assign(socket, assigns)}
     else
-      {:error, [message: "Invalid token", claim: claim, claim_val: _value]} ->
-        msg = "Invalid value for JWT claim #{inspect(claim)}"
+      {:error, [message: "Invalid token", claim: claim, claim_val: value]} ->
+        msg = "Invalid value for JWT claim #{inspect(claim)} with value #{inspect(value)}"
         Logging.log_error_message(:error, "InvalidJWTToken", msg)
 
       {:error, :too_many_channels} ->
