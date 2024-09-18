@@ -13,12 +13,12 @@ defmodule Realtime.Tenants.Migrations.AddPayloadToMessages do
     end
 
     execute """
-    CREATE OR REPLACE FUNCTION realtime.send(payload jsonb, event text, topic text, private boolean DEFAULT true, extension text DEFAULT 'broadcast')
+    CREATE OR REPLACE FUNCTION realtime.send(payload jsonb, event text, topic text, private boolean DEFAULT true)
     RETURNS void
     AS $$
     BEGIN
-        INSERT INTO realtime.messages (payload, event, topic, extension, private)
-        VALUES (payload, event, topic, extension, private);
+        INSERT INTO realtime.messages (payload, event, topic, private, extension)
+        VALUES (payload, event, topic, private, 'broadcast');
     END;
     $$
     LANGUAGE plpgsql;
@@ -35,6 +35,10 @@ defmodule Realtime.Tenants.Migrations.AddPayloadToMessages do
         topic_name text := TG_ARGV[0]::text;
         event_name text := COALESCE(TG_ARGV[1]::text, TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME);
     BEGIN
+        -- Ensure trigger is not called for statements
+        IF TG_LEVEL = 'STATEMENT' THEN
+            RAISE EXCEPTION 'realtime.broadcast_changes should be triggered for each row, not for each statement';
+        END IF;
         -- Ensure topic_name is provided
         IF topic_name IS NULL THEN
             RAISE EXCEPTION 'Topic name must be provided';
