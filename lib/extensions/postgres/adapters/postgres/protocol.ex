@@ -31,14 +31,16 @@ defmodule Realtime.Adapters.Postgres.Protocol do
 
   Check https://www.postgresql.org/docs/current/protocol-replication.html#PROTOCOL-REPLICATION-STANDBY-STATUS-UPDATE for more information
   """
-  @spec standby(integer(), integer(), integer(), :now | :later, integer() | nil) :: [binary()]
-  def standby(last_wal_received, last_wal_flushed, last_wal_applied, reply, clock \\ nil)
+  @spec standby_status(integer(), integer(), integer(), :now | :later, integer() | nil) :: [
+          binary()
+        ]
+  def standby_status(last_wal_received, last_wal_flushed, last_wal_applied, reply, clock \\ nil)
 
-  def standby(last_wal_received, last_wal_flushed, last_wal_applied, reply, nil) do
-    standby(last_wal_received, last_wal_flushed, last_wal_applied, reply, current_time())
+  def standby_status(last_wal_received, last_wal_flushed, last_wal_applied, reply, nil) do
+    standby_status(last_wal_received, last_wal_flushed, last_wal_applied, reply, current_time())
   end
 
-  def standby(last_wal_received, last_wal_flushed, last_wal_applied, reply, clock) do
+  def standby_status(last_wal_received, last_wal_flushed, last_wal_applied, reply, clock) do
     reply =
       case reply do
         :now -> 1
