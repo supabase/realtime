@@ -25,31 +25,22 @@ defmodule Realtime.Tenants.Migrations.AddPayloadToMessages do
     """
 
     execute """
-    CREATE OR REPLACE FUNCTION realtime.broadcast_change ()
-        RETURNS TRIGGER
+    CREATE OR REPLACE FUNCTION realtime.broadcast_changes (topic_name text, event_name text, operation text, table_name text, table_schema text, NEW record, OLD record, level string DEFAULT 'ROW')
+        RETURNS void
         AS $$
     DECLARE
         -- Declare a variable to hold the JSONB representation of the row
         row_data jsonb := '{}'::jsonb;
-        -- Declare entry that will be written to the realtime.messages table
-        topic_name text := TG_ARGV[0]::text;
-        event_name text := COALESCE(TG_ARGV[1]::text, TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME);
     BEGIN
-        -- Ensure trigger is not called for statements
-        IF TG_LEVEL = 'STATEMENT' THEN
-            RAISE EXCEPTION 'realtime.broadcast_changes should be triggered for each row, not for each statement';
-        END IF;
-        -- Ensure topic_name is provided
-        IF topic_name IS NULL THEN
-            RAISE EXCEPTION 'Topic name must be provided';
+        IF level = 'STATEMENT' THEN
+            RAISE EXCEPTION 'function can only be triggered for each row, not for each statement';
         END IF;
         -- Check the operation type and handle accordingly
-        IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' OR TG_OP = 'DELETE' THEN
-            row_data := jsonb_build_object('old_record', OLD, 'record', NEW, 'operation', TG_OP, 'table', TG_TABLE_NAME, 'schema', TG_TABLE_SCHEMA);
+        IF operation = 'INSERT' OR operation = 'UPDATE' OR operation = 'DELETE' THEN
+            row_data := jsonb_build_object('old_record', OLD, 'record', NEW, 'operation', operation, 'table', table_name, 'schema', table_schema);
             PERFORM realtime.send (row_data, event_name, topic_name);
-            RETURN NULL;
         ELSE
-            RAISE EXCEPTION 'Unexpected operation type: %', TG_OP;
+            RAISE EXCEPTION 'Unexpected operation type: %', operation;
         END IF;
     EXCEPTION
         WHEN OTHERS THEN
