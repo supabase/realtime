@@ -31,7 +31,7 @@ defmodule Realtime.Adapters.Postgres.Protocol do
 
   Check https://www.postgresql.org/docs/current/protocol-replication.html#PROTOCOL-REPLICATION-STANDBY-STATUS-UPDATE for more information
   """
-  @spec standby(integer(), integer(), integer(), :now | :later, integer()) :: binary()
+  @spec standby(integer(), integer(), integer(), :now | :later, integer() | nil) :: [binary()]
   def standby(last_wal_received, last_wal_flushed, last_wal_applied, reply, clock \\ nil)
 
   def standby(last_wal_received, last_wal_flushed, last_wal_applied, reply, nil) do
@@ -48,49 +48,6 @@ defmodule Realtime.Adapters.Postgres.Protocol do
     [
       <<?r, last_wal_received::64, last_wal_flushed::64, last_wal_applied::64, clock::64,
         reply::8>>
-    ]
-  end
-
-  @doc """
-  Message to send to ths server to request a hot standby status update.
-
-  https://www.postgresql.org/docs/current/protocol-replication.html#PROTOCOL-REPLICATION-HOT-STANDBY-FEEDBACK-MESSAGE
-  """
-  @spec hot_standby(integer(), integer(), integer(), integer(), integer()) :: binary()
-  def hot_standby(
-        standby_global_xmin,
-        standby_global_xmin_epoch,
-        standby_catalog_xmin,
-        standby_catalog_xmin_epoch,
-        clock \\ nil
-      )
-
-  def hot_standby(
-        standby_global_xmin,
-        standby_global_xmin_epoch,
-        standby_catalog_xmin,
-        standby_catalog_xmin_epoch,
-        nil
-      ) do
-    hot_standby(
-      standby_global_xmin,
-      standby_global_xmin_epoch,
-      standby_catalog_xmin,
-      standby_catalog_xmin_epoch,
-      current_time()
-    )
-  end
-
-  def hot_standby(
-        standby_global_xmin,
-        standby_global_xmin_epoch,
-        standby_catalog_xmin,
-        standby_catalog_xmin_epoch,
-        clock
-      ) do
-    [
-      <<?h, clock::64, standby_global_xmin::32, standby_global_xmin_epoch::32,
-        standby_catalog_xmin::32, standby_catalog_xmin_epoch::32>>
     ]
   end
 

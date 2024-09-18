@@ -94,7 +94,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
 
     messages =
       case reply do
-        :now -> standby(wal_end, wal_end, wal_end, :npw)
+        :now -> standby(wal_end, wal_end, wal_end, :now)
         :later -> hold()
       end
 
