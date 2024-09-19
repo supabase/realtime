@@ -5,7 +5,9 @@ defmodule Realtime.Api.Message do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @primary_key {:id, Ecto.UUID, autogenerate: true}
   @schema_prefix "realtime"
+
   schema "messages" do
     field :topic, :string
     field :extension, Ecto.Enum, values: [:broadcast, :presence]

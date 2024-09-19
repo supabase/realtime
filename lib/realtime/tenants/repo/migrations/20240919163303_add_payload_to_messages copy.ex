@@ -8,6 +8,7 @@ defmodule Realtime.Tenants.Migrations.AddPayloadToMessages do
       add_if_not_exists :event, :text
       add_if_not_exists :topic, :text
       add_if_not_exists :private, :boolean, default: true
+
       modify :inserted_at, :utc_datetime, default: fragment("now()")
       modify :updated_at, :utc_datetime, default: fragment("now()")
     end
@@ -25,7 +26,7 @@ defmodule Realtime.Tenants.Migrations.AddPayloadToMessages do
     """
 
     execute """
-    CREATE OR REPLACE FUNCTION realtime.broadcast_changes (topic_name text, event_name text, operation text, table_name text, table_schema text, NEW record, OLD record, level string DEFAULT 'ROW')
+    CREATE OR REPLACE FUNCTION realtime.broadcast_changes (topic_name text, event_name text, operation text, table_name text, table_schema text, NEW record, OLD record, level text DEFAULT 'ROW')
         RETURNS void
         AS $$
     DECLARE
