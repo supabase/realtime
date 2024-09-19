@@ -548,13 +548,15 @@ defmodule Realtime.Integration.RtChannelTest do
         "access_token" => new_token
       })
 
+      error_message =
+        "Received an invalid access token from client: You do not have permissions to read from this Channel topic: #{topic}"
+
       assert_receive %Phoenix.Socket.Message{
         event: "system",
         payload: %{
           "channel" => ^topic,
           "extension" => "system",
-          "message" =>
-            "Received an invalid access token from client: You do not have permissions to read from this Topic",
+          "message" => ^error_message,
           "status" => "error"
         },
         topic: ^realtime_topic
