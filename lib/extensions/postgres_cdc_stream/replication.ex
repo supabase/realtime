@@ -8,6 +8,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
   require Logger
 
   import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Adapters.Postgres.Protocol
 
   alias Extensions.PostgresCdcStream
 
@@ -15,6 +16,8 @@ defmodule Extensions.PostgresCdcStream.Replication do
   alias Realtime.Adapters.Changes.NewRecord
   alias Realtime.Adapters.Changes.UpdatedRecord
   alias Realtime.Adapters.Postgres.Decoder
+  alias Realtime.Adapters.Postgres.Protocol.KeepAlive
+  alias Realtime.Adapters.Postgres.Protocol.Write
   alias Realtime.Crypto
   alias Realtime.Database
 
@@ -74,21 +77,25 @@ defmodule Extensions.PostgresCdcStream.Replication do
   end
 
   @impl true
-  def handle_data(<<?w, _header::192, msg::binary>>, state) do
+  def handle_data(data, state) when is_write(data) do
+    %Write{message: message} = parse(data)
+
     new_state =
-      msg
+      message
       |> Decoder.decode_message()
       |> process_message(state)
 
     {:noreply, new_state}
   end
 
-  # keepalive
-  def handle_data(<<?k, wal_end::64, _clock::64, reply>>, state) do
+  def handle_data(data, state) when is_keep_alive(data) do
+    %KeepAlive{reply: reply, wal_end: wal_end} = parse(data)
+    wal_end = wal_end + 1
+
     messages =
       case reply do
-        1 -> [<<?r, wal_end + 1::64, wal_end + 1::64, wal_end + 1::64, current_time()::64, 0>>]
-        0 -> []
+        :now -> standby_status(wal_end, wal_end, wal_end, :now)
+        :later -> hold()
       end
 
     {:noreply, messages, state}
@@ -259,9 +266,6 @@ defmodule Extensions.PostgresCdcStream.Replication do
   defp convert_column_record(record, _column_type) do
     record
   end
-
-  @epoch DateTime.to_unix(~U[2000-01-01 00:00:00Z], :microsecond)
-  defp current_time(), do: System.os_time(:microsecond) - @epoch
 
   def connection_opts(args) do
     {host, port, name, user, pass} =
