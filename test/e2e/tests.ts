@@ -252,7 +252,7 @@ describe("authorization check", () => {
     await stopClient(supabase, [channel]);
     assertEquals(
       result,
-      '"You do not have permissions to read from this Topic"'
+      `"You do not have permissions to read from this Channel topic: ${topic}"`
     );
   });
 

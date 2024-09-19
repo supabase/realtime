@@ -654,11 +654,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     with {:ok, socket} <- Authorization.get_authorizations(socket, db_conn, authorization_context) do
       cond do
         match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-          {:error, "You do not have permissions to read from this Topic"}
+          {:error, "You do not have permissions to read from this Channel topic: #{topic}"}
 
         using_broadcast? and
             match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-          {:error, "You do not have permissions to read Broadcast messages from this channel"}
+          {:error, "You do not have permissions to read from this Channel topic: #{topic}"}
 
         true ->
           {:ok, socket}
