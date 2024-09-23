@@ -43,8 +43,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
          %Ecto.Changeset{changes: %{messages: messages}} = changeset,
          events_per_second_key = Tenants.events_per_second_key(tenant),
          :ok <- check_rate_limit(events_per_second_key, tenant, length(messages)) do
-      tenant_db_conn = Connect.lookup_or_start_connection(tenant.external_id)
-
       events =
         messages
         |> Enum.map(fn %{changes: event} -> event end)
@@ -62,6 +60,9 @@ defmodule Realtime.Tenants.BatchBroadcast do
       |> Map.get(true, [])
       |> Enum.group_by(fn event -> Map.get(event, :topic) end)
       |> Enum.each(fn {topic, events} ->
+        tenant_db_conn =
+          Connect.lookup_or_start_connection(tenant.external_id)
+
         if super_user do
           Enum.each(events, fn %{topic: sub_topic, payload: payload, event: event} ->
             send_message_and_count(tenant, sub_topic, event, payload, false)

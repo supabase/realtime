@@ -11,12 +11,16 @@ defmodule Realtime.Api.Message do
   schema "messages" do
     field :topic, :string
     field :extension, Ecto.Enum, values: [:broadcast, :presence]
+    field :payload, :map
+    field :event, :string
+    field :private, :boolean
+
     timestamps()
   end
 
   def changeset(message, attrs) do
     message
-    |> cast(attrs, [:topic, :extension, :inserted_at, :updated_at])
+    |> cast(attrs, [:topic, :extension, :payload, :event, :private, :inserted_at, :updated_at])
     |> validate_required([:topic, :extension])
     |> put_timestamp(:updated_at)
     |> maybe_put_timestamp(:inserted_at)

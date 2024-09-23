@@ -123,13 +123,13 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
 
-      :timer.sleep(500)
+      :timer.sleep(200)
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Process.alive?(db_conn) == false
 
       Realtime.Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
 
-      :timer.sleep(500)
+      :timer.sleep(200)
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       on_exit(fn -> Process.exit(db_conn, :shutdown) end)
     end

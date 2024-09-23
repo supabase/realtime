@@ -117,6 +117,13 @@ defmodule RealtimeWeb.RealtimeChannel do
           "Realtime was unable to connect to the project database"
         )
 
+      {:error, :initializing} ->
+        Logging.log_error_message(
+          :error,
+          "InitializingProjectConnection",
+          "Realtime is initializing the project connection"
+        )
+
       {:error, invalid_exp} when is_integer(invalid_exp) and invalid_exp <= 0 ->
         Logging.log_error_message(
           :error,

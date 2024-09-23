@@ -26,7 +26,6 @@ defmodule Realtime.DatabaseTest do
       # Kill connections to database
       Extensions.PostgresCdcStream.Replication.stop(pid)
       Database.replication_slot_teardown(tenant)
-
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
   end

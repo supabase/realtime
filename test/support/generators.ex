@@ -30,7 +30,7 @@ defmodule Generators do
       "postgres_cdc_default" => "postgres_cdc_rls",
       "jwt_secret" => "new secret",
       "jwt_jwks" => nil,
-      "notify_private_alpha" => true
+      "notify_private_alpha" => false
     }
 
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
