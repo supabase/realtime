@@ -4,14 +4,14 @@ defmodule Realtime.Tenants do
   """
 
   require Logger
-  alias Realtime.Tenants.Migrations
   alias Realtime.Api.Tenant
   alias Realtime.Tenants.Connect
+  alias Realtime.Database
   alias Realtime.Repo
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.Cache
+  alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
-  alias Realtime.Database
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
@@ -25,20 +25,6 @@ defmodule Realtime.Tenants do
   @spec list_connected_tenants(atom()) :: [String.t()]
   def list_connected_tenants(node) do
     :syn.group_names(:users, node)
-  end
-
-  @doc """
-  Gets the database connection pid managed by the Tenants.Connect process.
-
-  ## Examples
-
-      iex> Realtime.Tenants.get_health_conn(%Realtime.Api.Tenant{external_id: "not_found_tenant"})
-      {:error, :tenant_database_connection_initializing}
-  """
-
-  @spec get_health_conn(Tenant.t()) :: {:error, term()} | {:ok, pid()}
-  def get_health_conn(%Tenant{external_id: external_id}) do
-    Connect.get_status(external_id)
   end
 
   @doc """
@@ -56,53 +42,39 @@ defmodule Realtime.Tenants do
            | %{connected_cluster: pos_integer, db_connected: false, healthy: false}}
           | {:ok, %{connected_cluster: non_neg_integer, db_connected: true, healthy: true}}
   def health_check(external_id) when is_binary(external_id) do
-    with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(external_id),
-         {:error, _} <- get_health_conn(tenant),
-         connected_cluster when connected_cluster > 0 <- UsersCounter.tenant_users(external_id) do
-      {:error, %{healthy: false, db_connected: false, connected_cluster: connected_cluster}}
+    connected_cluster = UsersCounter.tenant_users(external_id)
+
+    with tenant when not is_nil(tenant) <- Cache.get_tenant_by_external_id(external_id),
+         task <-
+           Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
+             Database.check_tenant_connection(tenant, "realtime_health_check")
+           end),
+         {:ok, {:ok, db_conn}} <- Task.yield(task),
+         {status, _} = Connect.get_status(tenant.external_id) do
+      %{extensions: [%{settings: settings} | _]} =
+        Cache.get_tenant_by_external_id(external_id)
+
+      Database.transaction(db_conn, fn transaction_conn ->
+        query =
+          "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
+
+        res = Postgrex.query!(transaction_conn, query, [])
+
+        if res.rows == [] do
+          Migrations.run_migrations(%Migrations{
+            tenant_external_id: external_id,
+            settings: settings
+          })
+        end
+      end)
+
+      {:ok, %{healthy: true, db_connected: status == :ok, connected_cluster: connected_cluster}}
     else
       nil ->
         {:error, :tenant_not_found}
 
-      {:ok, health_conn} ->
-        connected_cluster = UsersCounter.tenant_users(external_id)
-        %{extensions: [%{settings: settings} | _]} = Cache.get_tenant_by_external_id(external_id)
-
-        query =
-          "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
-
-        Database.transaction(health_conn, fn transaction_conn ->
-          res = Postgrex.query!(transaction_conn, query, [])
-
-          if res.rows == [] do
-            Migrations.run_migrations(%Migrations{
-              tenant_external_id: external_id,
-              settings: settings
-            })
-          end
-        end)
-
-        {:ok, %{healthy: true, db_connected: true, connected_cluster: connected_cluster}}
-
-      connected_cluster when is_integer(connected_cluster) ->
-        {:ok, db_conn} = Connect.lookup_or_start_connection(external_id)
-        %{extensions: [%{settings: settings} | _]} = Cache.get_tenant_by_external_id(external_id)
-
-        Database.transaction(db_conn, fn transaction_conn ->
-          query =
-            "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
-
-          res = Postgrex.query!(transaction_conn, query, [])
-
-          if res.rows == [] do
-            Migrations.run_migrations(%Migrations{
-              tenant_external_id: external_id,
-              settings: settings
-            })
-          end
-        end)
-
-        {:ok, %{healthy: true, db_connected: false, connected_cluster: connected_cluster}}
+      {:error, _} ->
+        {:error, %{healthy: false, db_connected: false, connected_cluster: connected_cluster}}
     end
   end
 

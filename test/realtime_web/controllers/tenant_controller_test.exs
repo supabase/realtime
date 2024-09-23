@@ -221,9 +221,29 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "unhealthy tenant with 1 client connections", %{
-      conn: conn,
-      tenant: %Tenant{external_id: ext_id}
+      conn: conn
     } do
+      %Tenant{external_id: ext_id} =
+        tenant_fixture(%{
+          extensions: [
+            %{
+              "type" => "postgres_cdc_rls",
+              "settings" => %{
+                "db_host" => "localhost",
+                "db_name" => "false",
+                "db_user" => "false",
+                "db_password" => "false",
+                "db_port" => "5433",
+                "poll_interval" => 100,
+                "poll_max_changes" => 100,
+                "poll_max_record_bytes" => 1_048_576,
+                "region" => "us-east-1",
+                "ssl_enforced" => false
+              }
+            }
+          ]
+        })
+
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         # Fake adding a connected client here
         # No connection to the tenant database
