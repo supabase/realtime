@@ -5,7 +5,7 @@ defmodule Realtime.Tenants.Migrations.ReduceGrantsPostgresUser do
   def change do
     execute("revoke supabase_realtime_admin from postgres")
 
-    execute("revoke all on table realtime.schema_migrations from postgres")
+    execute("revoke all on table realtime.schema_migrations from postgres, anon, authenticated, service_role")
     execute("grant select on table realtime.schema_migrations to postgres with grant option")
 
     execute("revoke all on table realtime.messages from postgres")
