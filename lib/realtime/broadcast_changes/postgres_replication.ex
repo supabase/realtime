@@ -86,10 +86,8 @@ defmodule Realtime.BroadcastChanges.PostgresReplication do
   end
 
   @impl true
-  def init(attrs) do
-    Logger.info(
-      "Initializing connection with the status: #{inspect(attrs |> Map.from_struct() |> Map.drop([:connection_opts]))}"
-    )
+  def init(%__MODULE__{} = attrs) do
+    Logger.info("Initializing connection with the status: #{inspect(attrs, pretty: true)}")
 
     publication_name = publication_name(attrs)
     replication_slot_name = replication_slot_name(attrs)
@@ -219,9 +217,7 @@ defmodule Realtime.BroadcastChanges.PostgresReplication do
 
   @impl true
   def handle_disconnect(state) do
-    Logger.error(
-      "Disconnected from the server: #{inspect(state |> Map.from_struct() |> Map.drop([:connection_opts]))}"
-    )
+    Logger.error("Disconnected from the server: #{inspect(state, pretty: true)}")
 
     {:noreply, %{state | step: :disconnected}}
   end

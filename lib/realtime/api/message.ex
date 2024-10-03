@@ -20,7 +20,7 @@ defmodule Realtime.Api.Message do
 
   def changeset(message, attrs) do
     message
-    |> cast(attrs, [:topic, :extension, :payload, :event, :private, :inserted_at, :updated_at])
+    |> cast(attrs, [:topic, :extension, :payload, :event, :private])
     |> validate_required([:topic, :extension])
     |> put_timestamp(:updated_at)
     |> maybe_put_timestamp(:inserted_at)
