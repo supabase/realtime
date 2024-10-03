@@ -160,7 +160,7 @@ defmodule Realtime.Tenants.Connect do
 
   def handle_continue(:setup_broadcast_changes, %{tenant_id: tenant_id} = state) do
     tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
-    opts = [tenant_id: tenant.external_id, name: Handler.name(tenant)]
+    opts = %Handler{tenant_id: tenant.external_id}
     supervisor_spec = Handler.supervisor_spec(tenant)
 
     child_spec = %{

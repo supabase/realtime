@@ -26,7 +26,7 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
     :ok
   end
 
-  test "start/1 fails if tenant connection is invalid" do
+  test "fails if tenant connection is invalid" do
     tenant =
       tenant_fixture(%{
         "extensions" => [
@@ -49,12 +49,10 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
       })
 
     capture_log(fn ->
-      opts = [tenant_id: tenant.external_id, name: Handler.name(tenant)]
-
       assert {:error, _} =
                start_supervised(%{
                  id: Handler,
-                 start: {Handler, :start_link, [opts]},
+                 start: {Handler, :start_link, [%Handler{tenant_id: tenant.external_id}]},
                  restart: :transient,
                  type: :worker
                })
@@ -65,14 +63,14 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
                  BatchBroadcast,
                  broadcast: fn _, _, _, _ -> :ok end do
     tenant = tenant_fixture()
-    opts = [tenant_id: tenant.external_id, name: Handler.name(tenant)]
 
-    start_supervised!(%{
-      id: Handler,
-      start: {Handler, :start_link, [opts]},
-      restart: :transient,
-      type: :worker
-    })
+    assert {:ok, _pid} =
+             start_supervised(%{
+               id: Handler,
+               start: {Handler, :start_link, [%Handler{tenant_id: tenant.external_id}]},
+               restart: :transient,
+               type: :worker
+             })
 
     :timer.sleep(500)
 
@@ -106,5 +104,26 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
     :timer.sleep(200)
 
     assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
+  end
+
+  test "handles duplicate replication slot by failing second worker" do
+    tenant = tenant_fixture()
+
+    start_supervised!(%{
+      id: Handler,
+      start: {Handler, :start_link, [%Handler{tenant_id: tenant.external_id}]},
+      restart: :transient,
+      type: :worker
+    })
+
+    capture_log(fn ->
+      assert {:error, _} =
+               start_supervised(%{
+                 id: Handler,
+                 start: {Handler, :start_link, [%Handler{tenant_id: tenant.external_id}]},
+                 restart: :transient,
+                 type: :worker
+               })
+    end) =~ "UnableToStartHandler"
   end
 end
