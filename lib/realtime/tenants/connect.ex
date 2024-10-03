@@ -130,8 +130,7 @@ defmodule Realtime.Tenants.Connect do
   def init(%{tenant_id: tenant_id} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    with %Tenant{} = tenant when not is_nil(tenant) <-
-           Tenants.get_tenant_by_external_id(tenant_id),
+    with %Tenant{} = tenant <- Tenants.get_tenant_by_external_id(tenant_id),
          {:ok, conn} <- Database.check_tenant_connection(tenant, @application_name),
          ref = Process.monitor(conn),
          [%{settings: settings} | _] <- tenant.extensions,
