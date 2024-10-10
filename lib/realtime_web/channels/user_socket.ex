@@ -84,7 +84,6 @@ defmodule RealtimeWeb.UserSocket do
           {:error, :missing_claims}
 
         error ->
-          IO.inspect(error)
           log_error("ErrorConnectingToWebsocket", error)
           error
       end

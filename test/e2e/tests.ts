@@ -103,7 +103,7 @@ describe("broadcast extension", () => {
       .channel(topic, config)
       .on("broadcast", { event }, ({ payload }) => (result = payload))
       .subscribe();
-    await sleep(1);
+    await sleep(2);
     const unsubscribedChannel = supabase.channel(topic, config);
     await unsubscribedChannel.send({
       type: "broadcast",
@@ -247,7 +247,7 @@ describe("authorization check", () => {
         assert(status == "CHANNEL_ERROR" || status == "CLOSED");
       });
 
-    await sleep(1);
+    await sleep(2);
 
     await stopClient(supabase, [channel]);
     assertEquals(
@@ -267,8 +267,59 @@ describe("authorization check", () => {
         assert(status == "SUBSCRIBED" || status == "CLOSED")
       );
 
-    await sleep(1);
+    await sleep(2);
     await supabase.auth.signOut();
     await stopClient(supabase, [channel]);
+  });
+});
+
+describe("broadcast changes", () => {
+  const table = "broadcast_changes";
+  const id = 1;
+
+  it("authenticated user receives insert broadcast change from a specific topic based on id", async () => {
+    let supabase = await createClient(url, token, { realtime });
+    let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
+    await supabase.realtime.setAuth(accessToken);
+
+    let insertResult: any, updateResult: any, deleteResult: any;
+    const channel = supabase
+      .channel(`event:${id}`, { config: { ...config, private: true } })
+      .on("broadcast", { event: "INSERT" }, (res) => (insertResult = res))
+      .on("broadcast", { event: "DELETE" }, (res) => (deleteResult = res))
+      .on("broadcast", { event: "UPDATE" }, (res) => (updateResult = res))
+      .subscribe();
+    await sleep(2);
+    const originalValue = crypto.randomUUID();
+    const updatedValue = crypto.randomUUID();
+
+    await supabase.from(table).insert({ value: originalValue, id: 1 });
+    await supabase.from(table).update({ value: updatedValue }).eq("id", id);
+    await supabase.from(table).delete().eq("id", id);
+
+    await supabase.auth.signOut();
+    await stopClient(supabase, [channel]);
+
+    assertEquals(insertResult.payload.record.id, 1);
+    assertEquals(insertResult.payload.record.value, originalValue);
+    assertEquals(insertResult.payload.old_record, null);
+    assertEquals(insertResult.payload.operation, "INSERT");
+    assertEquals(insertResult.payload.schema, "public");
+    assertEquals(insertResult.payload.table, "broadcast_changes");
+
+    assertEquals(updateResult.payload.record.id, 1);
+    assertEquals(updateResult.payload.record.value, updatedValue);
+    assertEquals(updateResult.payload.old_record.id, 1);
+    assertEquals(updateResult.payload.old_record.value, originalValue);
+    assertEquals(updateResult.payload.operation, "UPDATE");
+    assertEquals(updateResult.payload.schema, "public");
+    assertEquals(updateResult.payload.table, "broadcast_changes");
+
+    assertEquals(deleteResult.payload.record, null);
+    assertEquals(deleteResult.payload.old_record.id, 1);
+    assertEquals(deleteResult.payload.old_record.value, updatedValue);
+    assertEquals(deleteResult.payload.operation, "DELETE");
+    assertEquals(deleteResult.payload.schema, "public");
+    assertEquals(deleteResult.payload.table, "broadcast_changes");
   });
 });

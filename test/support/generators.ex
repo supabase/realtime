@@ -30,7 +30,7 @@ defmodule Generators do
       "postgres_cdc_default" => "postgres_cdc_rls",
       "jwt_secret" => "new secret",
       "jwt_jwks" => nil,
-      "notify_private_alpha" => true
+      "notify_private_alpha" => false
     }
 
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
@@ -88,12 +88,6 @@ defmodule Generators do
       end)
 
       Postgrex.query!(transaction_conn, "TRUNCATE TABLE #{schema}.#{table} CASCADE", [])
-
-      Postgrex.query!(
-        transaction_conn,
-        "ALTER SEQUENCE #{schema}.#{table}_id_seq RESTART WITH 1",
-        []
-      )
     end)
   end
 

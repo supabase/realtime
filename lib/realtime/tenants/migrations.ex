@@ -59,7 +59,9 @@ defmodule Realtime.Tenants.Migrations do
     FixWalrusRoleHandling,
     UnloggedMessagesTable,
     LoggedMessagesTable,
-    FilterDeletePostgresChanges
+    FilterDeletePostgresChanges,
+    AddPayloadToMessages,
+    ChangeMessagesIdType
   }
 
   @migrations [
@@ -109,7 +111,9 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_618_124_746, FixWalrusRoleHandling},
     {20_240_801_235_015, UnloggedMessagesTable},
     {20_240_805_133_720, LoggedMessagesTable},
-    {20_240_827_160_934, FilterDeletePostgresChanges}
+    {20_240_827_160_934, FilterDeletePostgresChanges},
+    {20_240_919_163_303, AddPayloadToMessages},
+    {20_240_919_163_305, ChangeMessagesIdType}
   ]
   defstruct [:tenant_external_id, :settings]
   @spec run_migrations(map()) :: :ok | {:error, any()}

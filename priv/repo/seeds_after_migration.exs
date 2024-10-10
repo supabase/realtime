@@ -33,23 +33,27 @@ end
     }
   ],
   "external_id" => tenant_name,
-  "jwt_secret" => "secure_jwt_secret"
-} |> Api.create_tenant()
+  "jwt_secret" => "secure_jwt_secret",
+  "notify_private_alpha" => true
+}
+|> Api.create_tenant()
 
 query(Repo, "drop publication #{publication}", [])
 
-{:ok, _} = Repo.transaction(fn ->
-  [
-    "drop table if exists \"public\".\"test\";",
-    "create sequence if not exists test_id_seq;",
-    "create table \"public\".\"test\" (
+{:ok, _} =
+  Repo.transaction(fn ->
+    [
+      "drop table if exists \"public\".\"test\";",
+      "create sequence if not exists test_id_seq;",
+      "create table \"public\".\"test\" (
         \"id\" int4 not null default nextval('test_id_seq'::regclass),
         \"details\" text,
         primary key (\"id\")
     );",
-    "grant all on table public.test to anon;",
-    "grant all on table public.test to postgres;",
-    "grant all on table public.test to authenticated;",
-    "create publication #{publication} for all tables"
-  ] |> Enum.each(&query(Repo, &1, []))
-end)
+      "grant all on table public.test to anon;",
+      "grant all on table public.test to postgres;",
+      "grant all on table public.test to authenticated;",
+      "create publication #{publication} for all tables"
+    ]
+    |> Enum.each(&query(Repo, &1, []))
+  end)

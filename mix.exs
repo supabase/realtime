@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.32.12",
+      version: "2.33.0",
       elixir: "~> 1.16.0",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -44,8 +44,8 @@ defmodule Realtime.MixProject do
       {:phoenix, "~> 1.7.0"},
       {:phoenix_ecto, "~> 4.4.0"},
       {:ecto_sql, "~> 3.11"},
-      {:ecto_psql_extras, "~> 0.7"},
-      {:postgrex, "~> 0.17"},
+      {:ecto_psql_extras, "~> 0.8"},
+      {:postgrex, "~> 0.18.0"},
       {:phoenix_html, "~> 3.2"},
       {:phoenix_live_view, "~> 0.18"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},

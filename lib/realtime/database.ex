@@ -23,6 +23,8 @@ defmodule Realtime.Database do
     backoff: :rand_exp
   ]
 
+  @cdc "postgres_cdc_rls"
+
   @type t :: %__MODULE__{
           host: binary(),
           port: binary(),
@@ -67,6 +69,25 @@ defmodule Realtime.Database do
     }
   end
 
+  @spec from_tenant(
+          Realtime.Api.Tenant.t(),
+          binary(),
+          :stop | :exp | :rand | :rand_exp,
+          boolean()
+        ) ::
+          Realtime.Database.t()
+
+  def from_tenant(
+        %Realtime.Api.Tenant{} = tenant,
+        application_name,
+        backoff \\ :rand_exp,
+        decrypt \\ false
+      ) do
+    tenant
+    |> then(&Realtime.PostgresCdc.filter_settings(@cdc, &1.extensions))
+    |> then(&Realtime.Database.from_settings(&1, application_name, backoff, decrypt))
+  end
+
   @spec connect_db(__MODULE__.t()) :: {:error, any} | {:ok, pid}
   def connect_db(%__MODULE__{} = settings) do
     %__MODULE__{
@@ -96,7 +117,6 @@ defmodule Realtime.Database do
     )
   end
 
-  @cdc "postgres_cdc_rls"
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
   """
@@ -194,7 +214,9 @@ defmodule Realtime.Database do
   @spec replication_slot_teardown(Tenant.t()) :: :ok
   def replication_slot_teardown(tenant) do
     {:ok, conn} = connect(tenant, "realtime_replication_slot_teardown", 1)
-    query = "select active_pid from pg_replication_slots where slot_name ilike '%realtime%'"
+
+    query =
+      "select active_pid from pg_replication_slots where slot_name ilike '%realtime%'"
 
     with {:ok, %{rows: rows}} <- Postgrex.query(conn, query, []) do
       Enum.each(rows, fn [pid] ->
