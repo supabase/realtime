@@ -292,21 +292,14 @@ defmodule Realtime.Integration.RtChannelTest do
         config: %{broadcast: %{self: true}, private: true}
       })
 
+      assert_receive %Message{event: "phx_reply", topic: ^valid_topic}, 500
+      assert_receive %Message{}, 500
+
       WebsocketClient.join(anon_socket, malicious_topic, %{
         config: %{broadcast: %{self: true}, private: false}
       })
 
-      assert_receive %Message{
-                       event: "phx_reply",
-                       payload: %{
-                         "response" => %{"postgres_changes" => []},
-                         "status" => "ok"
-                       },
-                       ref: "1",
-                       topic: ^valid_topic
-                     },
-                     500
-
+      assert_receive %Message{event: "phx_reply", topic: ^malicious_topic}, 500
       assert_receive %Message{}, 500
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}

@@ -89,13 +89,13 @@ defmodule Realtime.BroadcastChanges.Handler do
   end
 
   @impl true
-  def init(%__MODULE__{} = attrs) do
+  def init(%__MODULE__{} = state) do
+    state = %{state | table: "messages", schema: "realtime"}
+
     state = %{
-      attrs
-      | table: "messages",
-        schema: "realtime",
-        publication_name: publication_name(attrs),
-        replication_slot_name: replication_slot_name(attrs)
+      state
+      | publication_name: publication_name(state),
+        replication_slot_name: replication_slot_name(state)
     }
 
     Logger.info("Initializing connection with the status: #{inspect(state, pretty: true)}")
@@ -150,19 +150,6 @@ defmodule Realtime.BroadcastChanges.Handler do
     query = "SELECT * FROM pg_publication WHERE pubname = '#{publication_name}'"
 
     {:query, query, %{state | step: :create_publication}}
-  end
-
-  def handle_result(
-        [%Postgrex.Result{num_rows: 0}],
-        %__MODULE__{step: :create_publication, table: :all} = state
-      ) do
-    %{publication_name: publication_name} = state
-    Logger.info("Create publication #{publication_name} for all tables")
-
-    query =
-      "CREATE PUBLICATION #{publication_name} FOR ALL TABLES"
-
-    {:query, query, %{state | step: :start_replication_slot}}
   end
 
   def handle_result(
@@ -312,28 +299,12 @@ defmodule Realtime.BroadcastChanges.Handler do
     {:via, PartitionSupervisor, {Realtime.BroadcastChanges.Handler.DynamicSupervisor, tenant_id}}
   end
 
-  def publication_name(%__MODULE__{publication_name: nil, table: :all}) do
-    "all_table_publication_#{slot_suffix()}"
-  end
-
-  def publication_name(%__MODULE__{publication_name: nil, table: table, schema: schema}) do
+  def publication_name(%__MODULE__{table: table, schema: schema}) do
     "#{schema}_#{table}_publication_#{slot_suffix()}"
   end
 
-  def publication_name(%__MODULE__{publication_name: publication_name}) do
-    "#{publication_name}_#{slot_suffix()}"
-  end
-
-  def replication_slot_name(%__MODULE__{replication_slot_name: nil, table: :all}) do
-    "all_table_slot_#{slot_suffix()}"
-  end
-
-  def replication_slot_name(%__MODULE__{replication_slot_name: nil, table: table, schema: schema}) do
+  def replication_slot_name(%__MODULE__{table: table, schema: schema}) do
     "#{schema}_#{table}_replication_slot_#{slot_suffix()}"
-  end
-
-  def replication_slot_name(%__MODULE__{replication_slot_name: replication_slot_name}) do
-    "#{replication_slot_name}_#{slot_suffix()}"
   end
 
   defp slot_suffix(), do: Application.get_env(:realtime, :slot_name_suffix)

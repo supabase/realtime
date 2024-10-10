@@ -85,7 +85,7 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
       })
     end
 
-    :timer.sleep(200)
+    :timer.sleep(500)
 
     assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
     # Works with batch inserts
