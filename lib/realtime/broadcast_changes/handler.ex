@@ -253,7 +253,7 @@ defmodule Realtime.BroadcastChanges.Handler do
 
   def handle_info(%Decoder.Messages.Insert{} = msg, state) do
     %Decoder.Messages.Insert{relation_id: relation_id, tuple_data: tuple_data} = msg
-    %{buffer: buffer, relations: relations} = state
+    %{relations: relations, tenant_id: tenant_id} = state
 
     case Map.get(relations, relation_id) do
       %{columns: columns} ->
@@ -285,31 +285,20 @@ defmodule Realtime.BroadcastChanges.Handler do
                 payload: Map.put(payload, "id", id)
               }
 
-            buffer = [to_broadcast | buffer]
-            {:noreply, %{state | buffer: buffer}}
+            tenant = Cache.get_tenant_by_external_id(tenant_id)
+
+            case BatchBroadcast.broadcast(nil, tenant, %{messages: [to_broadcast]}, true) do
+              :ok -> :ok
+              error -> log_error("UnableToBatchBroadcastChanges", error)
+            end
+
+            {:noreply, state}
         end
 
       _ ->
         log_error("UnknownBroadcastChangesRelation", "Relation ID not found: #{relation_id}")
         {:noreply, state}
     end
-  end
-
-  def handle_info(%Decoder.Messages.Commit{}, %{buffer: []} = state) do
-    {:noreply, state}
-  end
-
-  def handle_info(%Decoder.Messages.Commit{}, state) do
-    %{buffer: buffer, tenant_id: tenant_id} = state
-    buffer = Enum.reverse(buffer)
-    tenant = Cache.get_tenant_by_external_id(tenant_id)
-
-    case BatchBroadcast.broadcast(nil, tenant, %{messages: buffer}, true) do
-      :ok -> :ok
-      error -> log_error("UnableToBatchBroadcastChanges", error)
-    end
-
-    {:noreply, %{state | buffer: []}}
   end
 
   def handle_info(:shutdown, state) do
@@ -324,26 +313,28 @@ defmodule Realtime.BroadcastChanges.Handler do
   end
 
   def publication_name(%__MODULE__{publication_name: nil, table: :all}) do
-    "all_table_publication"
+    "all_table_publication_#{slot_suffix()}"
   end
 
   def publication_name(%__MODULE__{publication_name: nil, table: table, schema: schema}) do
-    "#{schema}_#{table}_publication"
+    "#{schema}_#{table}_publication_#{slot_suffix()}"
   end
 
   def publication_name(%__MODULE__{publication_name: publication_name}) do
-    publication_name
+    "#{publication_name}_#{slot_suffix()}"
   end
 
   def replication_slot_name(%__MODULE__{replication_slot_name: nil, table: :all}) do
-    "all_table_slot"
+    "all_table_slot_#{slot_suffix()}"
   end
 
   def replication_slot_name(%__MODULE__{replication_slot_name: nil, table: table, schema: schema}) do
-    "#{schema}_#{table}_replication_slot"
+    "#{schema}_#{table}_replication_slot_#{slot_suffix()}"
   end
 
   def replication_slot_name(%__MODULE__{replication_slot_name: replication_slot_name}) do
-    replication_slot_name
+    "#{replication_slot_name}_#{slot_suffix()}"
   end
+
+  defp slot_suffix(), do: Application.get_env(:realtime, :slot_name_suffix)
 end

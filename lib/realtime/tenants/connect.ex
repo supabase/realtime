@@ -157,7 +157,6 @@ defmodule Realtime.Tenants.Connect do
   end
 
   @impl GenServer
-
   def handle_continue(:setup_broadcast_changes, %{tenant_id: tenant_id} = state) do
     tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
     opts = %Handler{tenant_id: tenant.external_id}
