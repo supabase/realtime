@@ -15,8 +15,10 @@ defmodule Realtime.Integration.RtChannelTest do
   alias __MODULE__.Endpoint
 
   alias Realtime.Api.Tenant
+  alias Realtime.Database
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Repo
+  alias Realtime.Tenants.Migrations
 
   @moduletag :capture_log
   @port 4002
@@ -68,6 +70,15 @@ defmodule Realtime.Integration.RtChannelTest do
     use Joken.Config
   end
 
+  setup do
+    [tenant] = Tenant |> Repo.all() |> Repo.preload(:extensions)
+    [%{settings: settings} | _] = tenant.extensions
+    migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
+    :ok = Migrations.run_migrations(migrations)
+
+    %{tenant: tenant}
+  end
+
   setup_all do
     Sandbox.mode(Realtime.Repo, {:shared, self()})
     capture_log(fn -> start_supervised!(Endpoint) end)
@@ -96,7 +107,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: "1",
                      topic: ^topic
                    },
-                   10_000
+                   200
 
     # skip the presence_state event
     assert_receive %Message{}
@@ -137,7 +148,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: "realtime:any"
                    },
-                   2000
+                   500
 
     P.query!(conn, "update test set details = 'test' where id = #{id}", [])
 
@@ -162,7 +173,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: "realtime:any"
                    },
-                   2000
+                   500
 
     P.query!(conn, "delete from test where id = #{id}", [])
 
@@ -186,7 +197,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: "realtime:any"
                    },
-                   2000
+                   500
   end
 
   describe "handle broadcast extension" do
@@ -204,16 +215,17 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{
-        event: "phx_reply",
-        payload: %{
-          "response" => %{
-            "postgres_changes" => []
-          },
-          "status" => "ok"
-        },
-        ref: "1",
-        topic: ^topic
-      }
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "postgres_changes" => []
+                         },
+                         "status" => "ok"
+                       },
+                       ref: "1",
+                       topic: ^topic
+                     },
+                     500
 
       assert_receive %Message{}
 
@@ -221,11 +233,11 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
 
       assert_receive %Message{
-        event: "broadcast",
-        payload: ^payload,
-        ref: nil,
-        topic: ^topic
-      }
+                       event: "broadcast",
+                       payload: ^payload,
+                       topic: ^topic
+                     },
+                     500
     end
 
     @tag policies: [
@@ -241,14 +253,15 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{
-        event: "phx_reply",
-        payload: %{
-          "response" => %{"postgres_changes" => []},
-          "status" => "ok"
-        },
-        ref: "1",
-        topic: ^topic
-      }
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{"postgres_changes" => []},
+                         "status" => "ok"
+                       },
+                       ref: "1",
+                       topic: ^topic
+                     },
+                     500
 
       assert_receive %Message{}
 
@@ -279,29 +292,25 @@ defmodule Realtime.Integration.RtChannelTest do
         config: %{broadcast: %{self: true}, private: true}
       })
 
+      assert_receive %Message{event: "phx_reply", topic: ^valid_topic}, 500
+      assert_receive %Message{}, 500
+
       WebsocketClient.join(anon_socket, malicious_topic, %{
         config: %{broadcast: %{self: true}, private: false}
       })
 
-      assert_receive %Message{
-        event: "phx_reply",
-        payload: %{
-          "response" => %{"postgres_changes" => []},
-          "status" => "ok"
-        },
-        ref: "1",
-        topic: ^valid_topic
-      }
+      assert_receive %Message{event: "phx_reply", topic: ^malicious_topic}, 500
+      assert_receive %Message{}, 500
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, valid_topic, "broadcast", payload)
 
       assert_receive %Message{
-        event: "broadcast",
-        payload: ^payload,
-        ref: nil,
-        topic: ^valid_topic
-      }
+                       event: "broadcast",
+                       payload: ^payload,
+                       topic: ^valid_topic
+                     },
+                     500
 
       refute_receive %Message{event: "broadcast"}
     end
@@ -309,22 +318,19 @@ defmodule Realtime.Integration.RtChannelTest do
     @tag policies: [:authenticated_read_broadcast_and_presence]
     test "private broadcast with valid channel no write permissions won't send message but will receive message",
          %{topic: topic} do
-      {service_role_socket, _} = get_connection("service_role")
-      {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
-      WebsocketClient.join(service_role_socket, topic, %{config: config})
-      WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{
-        event: "phx_reply",
-        payload: %{
-          "response" => %{"postgres_changes" => []},
-          "status" => "ok"
-        },
-        ref: "1",
-        topic: ^topic
-      }
+      {service_role_socket, _} = get_connection("service_role")
+
+      WebsocketClient.join(service_role_socket, topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+
+      {socket, _} = get_connection("authenticated")
+      WebsocketClient.join(socket, topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
@@ -332,18 +338,15 @@ defmodule Realtime.Integration.RtChannelTest do
       refute_receive %Message{
                        event: "broadcast",
                        payload: ^payload,
-                       ref: nil,
                        topic: ^topic
                      },
                      500
 
-      :timer.sleep(1000)
       WebsocketClient.send_event(service_role_socket, topic, "broadcast", payload)
 
       assert_receive %Message{
                        event: "broadcast",
                        payload: ^payload,
-                       ref: nil,
                        topic: ^topic
                      },
                      500
@@ -351,7 +354,6 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{
                        event: "broadcast",
                        payload: ^payload,
-                       ref: nil,
                        topic: ^topic
                      },
                      500
@@ -369,21 +371,22 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{
-        event: "phx_reply",
-        payload: %{
-          "response" => %{"postgres_changes" => []},
-          "status" => "ok"
-        },
-        ref: "1",
-        topic: ^topic
-      }
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{"postgres_changes" => []},
+                         "status" => "ok"
+                       },
+                       ref: "1",
+                       topic: ^topic
+                     },
+                     500
 
       assert_receive %Message{
-        event: "presence_state",
-        payload: %{},
-        ref: nil,
-        topic: ^topic
-      }
+                       event: "presence_state",
+                       payload: %{},
+                       topic: ^topic
+                     },
+                     500
 
       payload = %{
         type: "presence",
@@ -419,7 +422,6 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{
                        event: "presence_state",
                        payload: %{},
-                       ref: nil,
                        topic: ^topic
                      },
                      500
@@ -435,7 +437,6 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{
                        event: "presence_diff",
                        payload: %{"joins" => joins, "leaves" => %{}},
-                       ref: nil,
                        topic: ^topic
                      },
                      500
@@ -465,12 +466,13 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.send_event(socket, topic, "presence", payload)
 
       assert_receive %Phoenix.Socket.Message{
-        topic: ^topic,
-        event: "phx_reply",
-        payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"},
-        ref: "1",
-        join_ref: nil
-      }
+                       topic: ^topic,
+                       event: "phx_reply",
+                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"},
+                       ref: "1",
+                       join_ref: nil
+                     },
+                     500
 
       assert_receive %Message{event: "presence_state", payload: %{}, ref: nil, topic: ^topic}
       refute_receive %Message{event: "presence_diff", payload: _, ref: _, topic: ^topic}
@@ -499,7 +501,6 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Phoenix.Socket.Message{
                        topic: ^topic,
                        event: "presence_diff",
-                       ref: nil,
                        join_ref: nil
                      } = res
 
@@ -540,9 +541,8 @@ defmodule Realtime.Integration.RtChannelTest do
         access_token: access_token
       })
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}
-      :timer.sleep(2000)
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
         "access_token" => new_token
@@ -569,17 +569,13 @@ defmodule Realtime.Integration.RtChannelTest do
          %{topic: topic} do
       {socket, access_token} = get_connection("authenticated")
       {:ok, new_token} = token_valid("anon")
-
+      config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
 
-      WebsocketClient.join(socket, realtime_topic, %{
-        config: %{broadcast: %{self: true}, private: false},
-        access_token: access_token
-      })
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}
-      :timer.sleep(1000)
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
         "access_token" => new_token
@@ -589,17 +585,236 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
+  describe "handle broadcast changes" do
+    setup [:rls_context, :setup_trigger]
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ],
+         notify_private_alpha: true
+    test "broadcast insert event changes on insert in table with trigger", %{
+      topic: topic,
+      db_conn: db_conn,
+      table_name: table_name
+    } do
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: true}
+      topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+      :timer.sleep(500)
+      value = random_string()
+      Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
+
+      record = %{"details" => value, "id" => 1}
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       payload: %{
+                         "event" => "INSERT",
+                         "payload" => %{
+                           "old_record" => nil,
+                           "operation" => "INSERT",
+                           "record" => ^record,
+                           "schema" => "public",
+                           "table" => ^table_name
+                         },
+                         "type" => "broadcast"
+                       },
+                       topic: ^topic
+                     },
+                     200
+    end
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ],
+         notify_private_alpha: true,
+         requires_data: true
+    test "broadcast update event changes on update in table with trigger", %{
+      topic: topic,
+      db_conn: db_conn,
+      table_name: table_name
+    } do
+      value = random_string()
+      Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
+      :timer.sleep(500)
+
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: true}
+      topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+      :timer.sleep(500)
+      new_value = random_string()
+
+      Postgrex.query!(db_conn, "UPDATE #{table_name} SET details = $1 WHERE details = $2", [
+        new_value,
+        value
+      ])
+
+      :timer.sleep(500)
+      old_record = %{"details" => value, "id" => 1}
+      record = %{"details" => new_value, "id" => 1}
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       payload: %{
+                         "event" => "UPDATE",
+                         "payload" => %{
+                           "old_record" => ^old_record,
+                           "operation" => "UPDATE",
+                           "record" => ^record,
+                           "schema" => "public",
+                           "table" => ^table_name
+                         },
+                         "type" => "broadcast"
+                       },
+                       topic: ^topic
+                     },
+                     200
+    end
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ],
+         notify_private_alpha: true
+    test "broadcast delete event changes on delete in table with trigger", %{
+      topic: topic,
+      db_conn: db_conn,
+      table_name: table_name
+    } do
+      value = random_string()
+      Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
+      :timer.sleep(500)
+
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: true}
+      topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+      :timer.sleep(500)
+      Postgrex.query!(db_conn, "DELETE FROM #{table_name} WHERE details = $1", [value])
+
+      record = %{"details" => value, "id" => 1}
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       payload: %{
+                         "event" => "DELETE",
+                         "payload" => %{
+                           "old_record" => ^record,
+                           "operation" => "DELETE",
+                           "record" => nil,
+                           "schema" => "public",
+                           "table" => ^table_name
+                         },
+                         "type" => "broadcast"
+                       },
+                       topic: ^topic
+                     },
+                     200
+    end
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ],
+         notify_private_alpha: true
+    test "broadcast event when function 'send' is called with private topic", %{
+      topic: topic,
+      db_conn: db_conn
+    } do
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: true}
+      full_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, full_topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+      :timer.sleep(500)
+      value = random_string()
+      event = random_string()
+
+      Postgrex.query!(
+        db_conn,
+        "SELECT realtime.send (json_build_object ('value', $1 :: text)::jsonb, $2 :: text, $3 :: text, TRUE::bool);",
+        [value, event, topic]
+      )
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       payload: %{
+                         "event" => ^event,
+                         "payload" => %{"value" => ^value},
+                         "type" => "broadcast"
+                       },
+                       topic: ^full_topic,
+                       join_ref: nil,
+                       ref: nil
+                     },
+                     500
+    end
+
+    @tag notify_private_alpha: true
+    test "broadcast event when function 'send' is called with public topic", %{
+      topic: topic,
+      db_conn: db_conn
+    } do
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      full_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, full_topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+      :timer.sleep(500)
+      value = random_string()
+      event = random_string()
+
+      Postgrex.query!(
+        db_conn,
+        "SELECT realtime.send (json_build_object ('value', $1 :: text)::jsonb, $2 :: text, $3 :: text, FALSE::bool);",
+        [value, event, topic]
+      )
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       payload: %{
+                         "event" => ^event,
+                         "payload" => %{"value" => ^value},
+                         "type" => "broadcast"
+                       },
+                       topic: ^full_topic
+                     },
+                     500
+    end
+  end
+
   defp token_valid(role), do: generate_token(%{role: role})
   defp token_no_role(), do: generate_token()
 
   defp generate_token(claims \\ %{}) do
     claims =
-      %{
-        ref: "localhost",
-        iat: System.system_time(:second),
-        exp: System.system_time(:second) + 604_800
-      }
-      |> Map.merge(claims)
+      Map.merge(
+        %{
+          ref: "localhost",
+          iat: System.system_time(:second),
+          exp: System.system_time(:second) + 604_800
+        },
+        claims
+      )
 
     signer = Joken.Signer.create("HS256", @secret)
     Joken.Signer.sign(claims, signer)
@@ -611,10 +826,9 @@ defmodule Realtime.Integration.RtChannelTest do
     {socket, token}
   end
 
-  def rls_context(context) do
-    [tenant] = Tenant |> Repo.all() |> Repo.preload(:extensions)
-
-    {:ok, db_conn} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+  def rls_context(%{tenant: tenant} = context) do
+    {:ok, db_conn} =
+      Database.connect(tenant, "realtime_test", 1)
 
     clean_table(db_conn, "realtime", "messages")
     topic = Map.get(context, :topic, random_string())
@@ -624,8 +838,55 @@ defmodule Realtime.Integration.RtChannelTest do
       create_rls_policies(db_conn, policies, message)
     end
 
-    on_exit(fn -> Process.exit(db_conn, :normal) end)
+    Map.put(context, :topic, message.topic)
+  end
 
-    %{topic: message.topic}
+  def setup_trigger(%{tenant: tenant, topic: topic} = context) do
+    Realtime.Tenants.Connect.shutdown(@external_id)
+    :timer.sleep(1000)
+    {:ok, db_conn} = Realtime.Tenants.Connect.connect(@external_id)
+
+    random_name = String.downcase("test_#{random_string()}")
+    query = "CREATE TABLE #{random_name} (id serial primary key, details text)"
+    Postgrex.query!(db_conn, query, [])
+
+    query = """
+    CREATE OR REPLACE FUNCTION broadcast_changes_for_table_#{random_name}_trigger ()
+    RETURNS TRIGGER
+    AS $$
+    DECLARE
+    topic text;
+    BEGIN
+    topic = '#{topic}';
+    PERFORM
+      realtime.broadcast_changes (topic, TG_OP, TG_OP, TG_TABLE_NAME, TG_TABLE_SCHEMA, NEW, OLD, TG_LEVEL);
+    RETURN NULL;
+    END;
+    $$
+    LANGUAGE plpgsql;
+    """
+
+    Postgrex.query!(db_conn, query, [])
+
+    query = """
+    CREATE TRIGGER broadcast_changes_for_#{random_name}_table
+    AFTER INSERT OR UPDATE OR DELETE ON #{random_name}
+    FOR EACH ROW
+    EXECUTE FUNCTION broadcast_changes_for_table_#{random_name}_trigger ();
+    """
+
+    Postgrex.query!(db_conn, query, [])
+
+    on_exit(fn ->
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
+      query = "DROP TABLE #{random_name} CASCADE"
+      Postgrex.query!(db_conn, query, [])
+      Realtime.Tenants.Connect.shutdown(@external_id)
+      :timer.sleep(500)
+    end)
+
+    context
+    |> Map.put(:db_conn, db_conn)
+    |> Map.put(:table_name, random_name)
   end
 end

@@ -147,7 +147,12 @@ defmodule Realtime.Repo do
 
     %{header: header, rows: rows} =
       Enum.reduce(changeset.changes, acc, fn {field, row}, %{header: header, rows: rows} ->
-        row = if is_atom(row), do: Atom.to_string(row), else: row
+        row =
+          case row do
+            row when is_boolean(row) -> row
+            row when is_atom(row) -> Atom.to_string(row)
+            _ -> row
+          end
 
         %{
           header: [Atom.to_string(field) | header],
@@ -181,7 +186,12 @@ defmodule Realtime.Repo do
       %{header: header, rows: rows} =
         Enum.reduce(changes, %{header: [], rows: []}, fn v, changes_acc ->
           Enum.reduce(v, changes_acc, fn {field, row}, %{header: header, rows: rows} ->
-            row = if is_atom(row), do: Atom.to_string(row), else: row
+            row =
+              case row do
+                row when is_boolean(row) -> row
+                row when is_atom(row) -> Atom.to_string(row)
+                _ -> row
+              end
 
             %{
               header: Enum.uniq([Atom.to_string(field) | header]),
@@ -208,7 +218,6 @@ defmodule Realtime.Repo do
 
       table = "\"#{prefix}\".\"#{source}\""
       header = "(#{Enum.map_join(header, ",", &"\"#{&1}\"")})"
-
       {:ok, {"INSERT INTO #{table} #{header} VALUES #{args_index} RETURNING *", rows}}
     end
   end

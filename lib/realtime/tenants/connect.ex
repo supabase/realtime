@@ -18,6 +18,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
+  alias Realtime.BroadcastChanges.Handler
 
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default 50_000
@@ -26,6 +27,7 @@ defmodule Realtime.Tenants.Connect do
   defstruct tenant_id: nil,
             db_conn_reference: nil,
             db_conn_pid: nil,
+            broadcast_changes_pid: nil,
             check_connected_user_interval: nil,
             connected_users_bucket: [1]
 
@@ -55,7 +57,7 @@ defmodule Realtime.Tenants.Connect do
   Returns the database connection pid from :syn if it exists.
   """
   @spec get_status(binary()) ::
-          {:ok, DBConnection.t()}
+          {:ok, pid()}
           | {:error,
              :tenant_database_unavailable
              | :initializing
@@ -93,6 +95,17 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
+  def shutdown(tenant_id) do
+    case get_status(tenant_id) do
+      {:ok, conn} ->
+        Process.exit(conn, :kill)
+        {:ok, :shutdown}
+
+      _ ->
+        {:error, :unable_to_shutdown}
+    end
+  end
+
   def start_link(opts) do
     tenant_id = Keyword.get(opts, :tenant_id)
 
@@ -121,14 +134,17 @@ defmodule Realtime.Tenants.Connect do
          {:ok, conn} <- Database.check_tenant_connection(tenant, @application_name),
          ref = Process.monitor(conn),
          [%{settings: settings} | _] <- tenant.extensions,
-         :ok <-
-           Migrations.run_migrations(%Migrations{
-             tenant_external_id: tenant.external_id,
-             settings: settings
-           }) do
+         migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings},
+         :ok <- Migrations.run_migrations(migrations) do
       :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
+
       state = %{state | db_conn_reference: ref, db_conn_pid: conn}
-      {:ok, state, {:continue, :setup_connected_user_events}}
+
+      if tenant.notify_private_alpha do
+        {:ok, state, {:continue, :setup_broadcast_changes}}
+      else
+        {:ok, state, {:continue, :setup_connected_user_events}}
+      end
     else
       nil ->
         log_error("TenantNotFound", "Tenant not found")
@@ -141,13 +157,39 @@ defmodule Realtime.Tenants.Connect do
   end
 
   @impl GenServer
-  def handle_continue(
-        :setup_connected_user_events,
-        %{
-          check_connected_user_interval: check_connected_user_interval,
-          connected_users_bucket: connected_users_bucket
-        } = state
-      ) do
+  def handle_continue(:setup_broadcast_changes, %{tenant_id: tenant_id} = state) do
+    tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
+    opts = %Handler{tenant_id: tenant.external_id}
+    supervisor_spec = Handler.supervisor_spec(tenant)
+
+    child_spec = %{
+      id: Handler,
+      start: {Handler, :start_link, [opts]},
+      restart: :transient,
+      type: :worker
+    }
+
+    case DynamicSupervisor.start_child(supervisor_spec, child_spec) do
+      {:ok, pid} ->
+        {:noreply, %{state | broadcast_changes_pid: pid},
+         {:continue, :setup_connected_user_events}}
+
+      {:error, {:already_started, pid}} ->
+        {:noreply, %{state | broadcast_changes_pid: pid},
+         {:continue, :setup_connected_user_events}}
+
+      error ->
+        log_error("UnableToStartHandler", error)
+        {:stop, :shutdown}
+    end
+  end
+
+  def handle_continue(:setup_connected_user_events, state) do
+    %{
+      check_connected_user_interval: check_connected_user_interval,
+      connected_users_bucket: connected_users_bucket
+    } = state
+
     :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:invalidate_cache")
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
     {:noreply, state}
@@ -170,18 +212,23 @@ defmodule Realtime.Tenants.Connect do
     {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
   end
 
-  def handle_info(:shutdown, %{db_conn_pid: db_conn_pid} = state) do
+  def handle_info(
+        :shutdown,
+        %{db_conn_pid: db_conn_pid, broadcast_changes_pid: broadcast_changes_pid} = state
+      ) do
     Logger.info("Tenant has no connected users, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 500)
+    broadcast_changes_pid && GenServer.stop(broadcast_changes_pid, :normal, 500)
     {:stop, :normal, state}
   end
 
   def handle_info(
         {:suspend_tenant, _},
-        %{db_conn_pid: db_conn_pid} = state
+        %{db_conn_pid: db_conn_pid, broadcast_changes_pid: broadcast_changes_pid} = state
       ) do
     Logger.warning("Tenant was suspended, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 500)
+    broadcast_changes_pid && GenServer.stop(broadcast_changes_pid, :normal, 500)
     {:stop, :normal, state}
   end
 
@@ -200,7 +247,7 @@ defmodule Realtime.Tenants.Connect do
         %{db_conn_reference: db_conn_reference} = state
       ) do
     Logger.info("Database connection has been terminated")
-    {:stop, :normal, state}
+    {:stop, :kill, state}
   end
 
   ## Private functions

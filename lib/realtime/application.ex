@@ -41,16 +41,6 @@ defmodule Realtime.Application do
 
     Realtime.PromEx.set_metrics_tags()
 
-    Registry.start_link(
-      keys: :duplicate,
-      name: Realtime.Registry
-    )
-
-    Registry.start_link(
-      keys: :unique,
-      name: Realtime.Registry.Unique
-    )
-
     :syn.set_event_handler(Realtime.SynHandler)
 
     :ok = :syn.add_node_to_scopes([Realtime.Tenants.Connect])
@@ -73,6 +63,8 @@ defmodule Realtime.Application do
         Realtime.GenCounter.DynamicSupervisor,
         Realtime.RateCounter.DynamicSupervisor,
         Realtime.Latency,
+        {Registry, keys: :duplicate, name: Realtime.Registry},
+        {Registry, keys: :unique, name: Realtime.Registry.Unique},
         {Task.Supervisor, name: Realtime.TaskSupervisor},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
@@ -85,6 +77,10 @@ defmodule Realtime.Application do
          max_restarts: 5},
         {DynamicSupervisor,
          name: Realtime.Tenants.Migrations.DynamicSupervisor, strategy: :one_for_one},
+        {PartitionSupervisor,
+         child_spec: DynamicSupervisor,
+         strategy: :one_for_one,
+         name: Realtime.BroadcastChanges.Handler.DynamicSupervisor},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
       ] ++ extensions_supervisors()

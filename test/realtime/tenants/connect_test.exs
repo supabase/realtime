@@ -90,7 +90,7 @@ defmodule Realtime.Tenants.ConnectTest do
       on_exit(fn -> Process.exit(db_conn, :shutdown) end)
 
       assert {pid, %{conn: conn_pid}} = :syn.lookup(Connect, tenant_id)
-      :timer.sleep(500)
+      :timer.sleep(300)
       assert {^pid, %{conn: ^conn_pid}} = :syn.lookup(Connect, tenant_id)
       assert Process.alive?(db_conn)
     end
@@ -104,9 +104,9 @@ defmodule Realtime.Tenants.ConnectTest do
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
       assert {_pid, %{conn: _conn_pid}} = :syn.lookup(Connect, tenant_id)
-      :timer.sleep(500)
+      :timer.sleep(300)
       :syn.leave(:users, tenant_id, self())
-      :timer.sleep(500)
+      :timer.sleep(300)
       assert :undefined = :syn.lookup(Connect, tenant_id)
       refute Process.alive?(db_conn)
     end
@@ -123,13 +123,13 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
 
-      :timer.sleep(500)
+      :timer.sleep(200)
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Process.alive?(db_conn) == false
 
       Realtime.Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
 
-      :timer.sleep(500)
+      :timer.sleep(200)
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       on_exit(fn -> Process.exit(db_conn, :shutdown) end)
     end
@@ -183,6 +183,15 @@ defmodule Realtime.Tenants.ConnectTest do
 
         assert_called(Ecto.Migrator.run(:_, :_, :_, :_))
       end
+    end
+
+    test "starts broadcast handler and does not fail on existing connection" do
+      tenant = tenant_fixture(%{notify_private_alpha: true})
+
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Process.alive?(db_conn)
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Process.alive?(db_conn)
     end
   end
 
