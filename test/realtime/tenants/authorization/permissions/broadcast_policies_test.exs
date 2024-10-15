@@ -7,6 +7,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Migrations
 
   alias RealtimeWeb.Joken.CurrentTime
 
@@ -146,6 +147,14 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
   def rls_context(context) do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
+    [%{settings: settings} | _] = tenant.extensions
+
+    migrations = %Migrations{
+      tenant_external_id: tenant.external_id,
+      settings: settings
+    }
+
+    Migrations.run_migrations(migrations)
 
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
 
