@@ -71,7 +71,7 @@ defmodule Realtime.BroadcastChanges.Handler do
     ssl =
       if connection_opts.ssl_enforced,
         do: [ssl: true, ssl_opts: [verify: :verify_none]],
-        else: false
+        else: [ssl: false]
 
     connection_opts =
       [
@@ -81,13 +81,12 @@ defmodule Realtime.BroadcastChanges.Handler do
         password: connection_opts.pass,
         database: connection_opts.name,
         port: String.to_integer(connection_opts.port),
-        ssl: ssl,
         socket_options: [ip_version],
         backoff_type: :stop,
         parameters: [
           application_name: connection_opts.application_name
         ]
-      ]
+      ] ++ ssl
 
     case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do
       {:ok, pid} -> {:ok, pid}
