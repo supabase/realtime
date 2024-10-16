@@ -20,7 +20,7 @@ defmodule Realtime.Api.Message do
 
   def changeset(message, attrs) do
     message
-    |> cast(attrs, [:topic, :extension, :payload, :event, :private])
+    |> cast(attrs, [:topic, :extension, :payload, :event, :private, :inserted_at, :updated_at])
     |> validate_required([:topic, :extension])
     |> put_timestamp(:updated_at)
     |> maybe_put_timestamp(:inserted_at)
@@ -31,7 +31,7 @@ defmodule Realtime.Api.Message do
   end
 
   defp maybe_put_timestamp(changeset, field) do
-    case Map.get(changeset.data, field, nil) do
+    case Map.get(changeset.changes, field) do
       nil -> put_timestamp(changeset, field)
       _ -> changeset
     end

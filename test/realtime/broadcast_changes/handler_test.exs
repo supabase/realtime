@@ -20,7 +20,13 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
 
     {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
     clean_table(conn, "realtime", "messages")
-    Postgrex.query(conn, "DROP PUBLICATION IF EXISTS realtime_messages_publication", [])
+
+    Postgrex.query(
+      conn,
+      "DROP PUBLICATION IF EXISTS realtime_messages_publication_#{Application.get_env(:realtime, :slot_suffix)}",
+      []
+    )
+
     Realtime.Database.replication_slot_teardown(tenant)
 
     :ok
