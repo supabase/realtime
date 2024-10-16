@@ -66,18 +66,23 @@ defmodule Realtime.BroadcastChanges.Handler do
   def start_link(%__MODULE__{tenant_id: tenant_id} = attrs) do
     tenant = Cache.get_tenant_by_external_id(tenant_id)
     connection_opts = Database.from_tenant(tenant, "realtime_broadcast_changes", :stop, true)
+    {:ok, ip_version} = Database.detect_ip_version(connection_opts.host)
 
-    connection_opts = [
-      name: {:via, Registry, {Realtime.Registry.Unique, tenant_id}},
-      hostname: connection_opts.host,
-      username: connection_opts.user,
-      password: connection_opts.pass,
-      database: connection_opts.name,
-      port: connection_opts.port,
-      parameters: [
-        application_name: connection_opts.application_name
+    connection_opts =
+      [
+        name: {:via, Registry, {Realtime.Registry.Unique, tenant_id}},
+        hostname: connection_opts.host,
+        username: connection_opts.user,
+        password: connection_opts.pass,
+        database: connection_opts.name,
+        port: String.to_integer(connection_opts.port),
+        ssl: connection_opts.ssl_enforced,
+        socket_options: [ip_version],
+        backoff_type: :stop,
+        parameters: [
+          application_name: connection_opts.application_name
+        ]
       ]
-    ]
 
     case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do
       {:ok, pid} -> {:ok, pid}
