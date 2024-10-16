@@ -68,6 +68,11 @@ defmodule Realtime.BroadcastChanges.Handler do
     connection_opts = Database.from_tenant(tenant, "realtime_broadcast_changes", :stop, true)
     {:ok, ip_version} = Database.detect_ip_version(connection_opts.host)
 
+    ssl =
+      if connection_opts.ssl_enforced,
+        do: [ssl: true, ssl_opts: [verify: :verify_none]],
+        else: false
+
     connection_opts =
       [
         name: {:via, Registry, {Realtime.Registry.Unique, tenant_id}},
@@ -76,7 +81,7 @@ defmodule Realtime.BroadcastChanges.Handler do
         password: connection_opts.pass,
         database: connection_opts.name,
         port: String.to_integer(connection_opts.port),
-        ssl: connection_opts.ssl_enforced,
+        ssl: ssl,
         socket_options: [ip_version],
         backoff_type: :stop,
         parameters: [
