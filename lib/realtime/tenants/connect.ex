@@ -135,7 +135,8 @@ defmodule Realtime.Tenants.Connect do
          ref = Process.monitor(conn),
          [%{settings: settings} | _] <- tenant.extensions,
          migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings},
-         :ok <- Migrations.run_migrations(migrations) do
+         :ok <- Migrations.run_migrations(migrations),
+         {:ok, _} <- Realtime.Messages.delete_old_messages(conn) do
       :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
 
       state = %{state | db_conn_reference: ref, db_conn_pid: conn}
