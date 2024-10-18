@@ -75,7 +75,7 @@ defmodule Realtime.BroadcastChanges.Handler do
 
     connection_opts =
       [
-        name: {:via, Registry, {Realtime.Registry.Unique, tenant_id}},
+        name: {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, tenant_id}}},
         hostname: connection_opts.host,
         username: connection_opts.user,
         password: connection_opts.pass,
@@ -98,7 +98,9 @@ defmodule Realtime.BroadcastChanges.Handler do
   end
 
   @impl true
-  def init(%__MODULE__{} = state) do
+  def init(%__MODULE__{tenant_id: tenant_id} = state) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+
     state = %{state | table: "messages", schema: "realtime"}
 
     state = %{
@@ -235,6 +237,11 @@ defmodule Realtime.BroadcastChanges.Handler do
   def handle_data(data, state) when is_write(data) do
     %Write{message: message} = parse(data)
     message |> decode_message() |> then(&send(self(), &1))
+    {:noreply, [], state}
+  end
+
+  def handle_data(_, state) do
+    Logger.warning("Unknown data received")
     {:noreply, [], state}
   end
 
