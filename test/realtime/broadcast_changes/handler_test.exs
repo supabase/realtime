@@ -12,7 +12,6 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
   alias Realtime.Tenants.Migrations
 
   setup do
-    Application.put_env(:realtime, :slot_name_suffix, random_string())
     start_supervised(Realtime.Tenants.CacheSupervisor)
     tenant = tenant_fixture()
     [%{settings: settings} | _] = tenant.extensions
