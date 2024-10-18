@@ -8,7 +8,7 @@ defmodule Realtime.Api.Message do
   @schema_prefix "realtime"
 
   schema "messages" do
-    field :uuid, :string
+    field :uuid, :string, default: Ecto.UUID.generate()
     field :topic, :string
     field :extension, Ecto.Enum, values: [:broadcast, :presence]
     field :payload, :map
