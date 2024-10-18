@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.UserSocket do
-  use Phoenix.Socket
+  use RealtimeWeb.Socket
 
   require Logger
 
