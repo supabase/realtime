@@ -252,6 +252,14 @@ defmodule Realtime.BroadcastChanges.Handler do
     relation = %{name: name, columns: columns, namespace: namespace}
     relations = Map.put(relations, id, relation)
     {:noreply, %{state | relations: relations}}
+  rescue
+    e ->
+      log_error("UnableToBroadcastChanges", e)
+      {:noreply, state}
+  catch
+    e ->
+      log_error("UnableToBroadcastChanges", e)
+      {:noreply, state}
   end
 
   def handle_info(%Decoder.Messages.Insert{} = msg, state) do
@@ -302,6 +310,14 @@ defmodule Realtime.BroadcastChanges.Handler do
         log_error("UnknownBroadcastChangesRelation", "Relation ID not found: #{relation_id}")
         {:noreply, state}
     end
+  rescue
+    e ->
+      log_error("UnableToBroadcastChanges", e)
+      {:noreply, state}
+  catch
+    e ->
+      log_error("UnableToBroadcastChanges", e)
+      {:noreply, state}
   end
 
   def handle_info(:shutdown, state) do
