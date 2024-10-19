@@ -36,5 +36,4 @@ defmodule Realtime.Api.Message do
       _ -> changeset
     end
   end
-
 end
