@@ -120,7 +120,11 @@ describe("broadcast extension", () => {
 describe("postgres changes extension", () => {
   it("user is able to receive INSERT only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
+    let accessToken = await signInUser(
+      supabase,
+      "filipe@supabase.io",
+      "test_test"
+    );
     await supabase.realtime.setAuth(accessToken);
 
     let result: Array<any> = [];
@@ -155,7 +159,11 @@ describe("postgres changes extension", () => {
 
   it("user is able to receive UPDATE only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
+    let accessToken = await signInUser(
+      supabase,
+      "filipe@supabase.io",
+      "test_test"
+    );
     await supabase.realtime.setAuth(accessToken);
 
     let result: Array<any> = [];
@@ -194,7 +202,11 @@ describe("postgres changes extension", () => {
 
   it("user is able to receive DELETE only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
+    let accessToken = await signInUser(
+      supabase,
+      "filipe@supabase.io",
+      "test_test"
+    );
     await supabase.realtime.setAuth(accessToken);
 
     let result: Array<any> = [];
@@ -258,7 +270,11 @@ describe("authorization check", () => {
 
   it("user using private channel can connect if they have enough permissions", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
+    let accessToken = await signInUser(
+      supabase,
+      "filipe@supabase.io",
+      "test_test"
+    );
     await supabase.realtime.setAuth(accessToken);
 
     const channel = supabase
@@ -275,11 +291,16 @@ describe("authorization check", () => {
 
 describe("broadcast changes", () => {
   const table = "broadcast_changes";
-  const id = 1;
+  const id = crypto.randomUUID();
 
   it("authenticated user receives insert broadcast change from a specific topic based on id", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(supabase, "test1@test.com", "test_test");
+    let accessToken = await signInUser(
+      supabase,
+      "filipe@supabase.io",
+      "test_test"
+    );
+    console.log(accessToken);
     await supabase.realtime.setAuth(accessToken);
 
     let insertResult: any, updateResult: any, deleteResult: any;
@@ -288,38 +309,38 @@ describe("broadcast changes", () => {
       .on("broadcast", { event: "INSERT" }, (res) => (insertResult = res))
       .on("broadcast", { event: "DELETE" }, (res) => (deleteResult = res))
       .on("broadcast", { event: "UPDATE" }, (res) => (updateResult = res))
-      .subscribe();
-    await sleep(2);
+      .subscribe((status, err) => console.log({ status, err }));
+    await sleep(1);
     const originalValue = crypto.randomUUID();
     const updatedValue = crypto.randomUUID();
 
-    await supabase.from(table).insert({ value: originalValue, id: 1 });
+    await supabase.from(table).insert({ value: originalValue, id });
     await supabase.from(table).update({ value: updatedValue }).eq("id", id);
     await supabase.from(table).delete().eq("id", id);
-
-    await supabase.auth.signOut();
-    await stopClient(supabase, [channel]);
-
-    assertEquals(insertResult.payload.record.id, 1);
+    await sleep(1);
+    assertEquals(insertResult.payload.record.id, id);
     assertEquals(insertResult.payload.record.value, originalValue);
     assertEquals(insertResult.payload.old_record, null);
     assertEquals(insertResult.payload.operation, "INSERT");
     assertEquals(insertResult.payload.schema, "public");
     assertEquals(insertResult.payload.table, "broadcast_changes");
 
-    assertEquals(updateResult.payload.record.id, 1);
+    assertEquals(updateResult.payload.record.id, id);
     assertEquals(updateResult.payload.record.value, updatedValue);
-    assertEquals(updateResult.payload.old_record.id, 1);
+    assertEquals(updateResult.payload.old_record.id, id);
     assertEquals(updateResult.payload.old_record.value, originalValue);
     assertEquals(updateResult.payload.operation, "UPDATE");
     assertEquals(updateResult.payload.schema, "public");
     assertEquals(updateResult.payload.table, "broadcast_changes");
 
     assertEquals(deleteResult.payload.record, null);
-    assertEquals(deleteResult.payload.old_record.id, 1);
+    assertEquals(deleteResult.payload.old_record.id, id);
     assertEquals(deleteResult.payload.old_record.value, updatedValue);
     assertEquals(deleteResult.payload.operation, "DELETE");
     assertEquals(deleteResult.payload.schema, "public");
     assertEquals(deleteResult.payload.table, "broadcast_changes");
+
+    await supabase.auth.signOut();
+    await stopClient(supabase, [channel]);
   });
 });

@@ -8,7 +8,7 @@ defmodule Realtime.Api.Message do
   @schema_prefix "realtime"
 
   schema "messages" do
-    field :uuid, :string, default: Ecto.UUID.generate()
+    field :uuid, :string
     field :topic, :string
     field :extension, Ecto.Enum, values: [:broadcast, :presence]
     field :payload, :map
@@ -20,7 +20,7 @@ defmodule Realtime.Api.Message do
 
   def changeset(message, attrs) do
     message
-    |> cast(attrs, [:topic, :extension, :payload, :event, :private])
+    |> cast(attrs, [:topic, :extension, :payload, :event, :private, :uuid])
     |> validate_required([:topic, :extension])
     |> put_timestamp(:updated_at)
     |> maybe_put_timestamp(:inserted_at)
