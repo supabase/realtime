@@ -180,7 +180,7 @@ defmodule Realtime.Tenants.Connect do
 
       error ->
         log_error("UnableToStartHandler", error)
-        {:stop, :shutdown}
+        {:stop, :shutdown, state}
     end
   end
 
@@ -218,7 +218,10 @@ defmodule Realtime.Tenants.Connect do
       ) do
     Logger.info("Tenant has no connected users, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 500)
-    broadcast_changes_pid && GenServer.stop(broadcast_changes_pid, :normal, 500)
+
+    broadcast_changes_pid && Process.alive?(broadcast_changes_pid) &&
+      GenServer.stop(broadcast_changes_pid, :normal, 500)
+
     {:stop, :normal, state}
   end
 
@@ -228,7 +231,10 @@ defmodule Realtime.Tenants.Connect do
       ) do
     Logger.warning("Tenant was suspended, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 500)
-    broadcast_changes_pid && GenServer.stop(broadcast_changes_pid, :normal, 500)
+
+    broadcast_changes_pid && Process.alive?(broadcast_changes_pid) &&
+      GenServer.stop(broadcast_changes_pid, :normal, 500)
+
     {:stop, :normal, state}
   end
 
