@@ -83,7 +83,7 @@ defmodule Realtime.Application do
          name: Realtime.BroadcastChanges.Handler.DynamicSupervisor},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
-      ] ++ extensions_supervisors()
+      ] ++ extensions_supervisors() ++ scheduled_tasks()
 
     children =
       case Replica.replica() do
@@ -111,5 +111,11 @@ defmodule Realtime.Application do
       _, acc ->
         acc
     end)
+  end
+
+  defp scheduled_tasks() do
+    if Application.fetch_env!(:realtime, :run_scheduled),
+      do: [Realtime.Tenants.ScheduledMessageCleanup],
+      else: []
   end
 end

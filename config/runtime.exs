@@ -24,6 +24,10 @@ config :realtime,
     System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer(),
   rpc_timeout: System.get_env("RPC_TIMEOUT", "30000") |> String.to_integer()
 
+if config_env() == :test,
+  do: config(:realtime, run_scheduled: false),
+  else: config(:realtime, run_scheduled: System.get_env("RUN_SCHEDULED", "true") == "true")
+
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||

@@ -303,39 +303,25 @@ describe("broadcast changes", () => {
       "filipe@supabase.io",
       "test_test"
     );
-    console.log(accessToken);
     await supabase.realtime.setAuth(accessToken);
 
     const channel = supabase
       .channel(`event:${id}`, { config: { ...config, private: true } })
-      .on("broadcast", { event: "INSERT" }, (res) => {
-        console.log(res);
-        insertResult = res;
-      })
-      .on("broadcast", { event: "DELETE" }, (res) => {
-        console.log(res);
-        deleteResult = res;
-      })
-      .on("broadcast", { event: "UPDATE" }, (res) => {
-        console.log(res);
-        updateResult = res;
-      })
-      .subscribe(async (status, err) => {
-        console.log({ status, err });
-
+      .on("broadcast", { event: "INSERT" }, (res) => (insertResult = res))
+      .on("broadcast", { event: "DELETE" }, (res) => (deleteResult = res))
+      .on("broadcast", { event: "UPDATE" }, (res) => (updateResult = res))
+      .subscribe(async (status) => {
         if (status == "SUBSCRIBED") {
-          await sleep(2);
+          await sleep(1);
 
-          console.log(
-            await supabase.from(table).insert({ value: originalValue, id })
-          );
-          console.log(
-            await supabase
-              .from(table)
-              .update({ value: updatedValue })
-              .eq("id", id)
-          );
-          console.log(await supabase.from(table).delete().eq("id", id));
+          await supabase.from(table).insert({ value: originalValue, id });
+
+          await supabase
+            .from(table)
+            .update({ value: updatedValue })
+            .eq("id", id);
+
+          await supabase.from(table).delete().eq("id", id);
         }
       });
     await sleep(5);
