@@ -8,10 +8,16 @@ defmodule Realtime.RepoTest do
   alias Realtime.Crypto
   alias Realtime.Repo
   alias Realtime.Database
+  alias Realtime.Tenants.Migrations
 
   setup do
     tenant = tenant_fixture()
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
+
+    [%{settings: settings} | _] = tenant.extensions
+    migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
+    Migrations.run_migrations(migrations)
+
     clean_table(db_conn, "realtime", "messages")
     %{db_conn: db_conn, tenant: tenant}
   end
