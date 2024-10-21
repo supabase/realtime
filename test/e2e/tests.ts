@@ -292,6 +292,9 @@ describe("authorization check", () => {
 describe("broadcast changes", () => {
   const table = "broadcast_changes";
   const id = crypto.randomUUID();
+  const originalValue = crypto.randomUUID();
+  const updatedValue = crypto.randomUUID();
+  let insertResult: any, updateResult: any, deleteResult: any;
 
   it("authenticated user receives insert broadcast change from a specific topic based on id", async () => {
     let supabase = await createClient(url, token, { realtime });
@@ -303,21 +306,39 @@ describe("broadcast changes", () => {
     console.log(accessToken);
     await supabase.realtime.setAuth(accessToken);
 
-    let insertResult: any, updateResult: any, deleteResult: any;
     const channel = supabase
       .channel(`event:${id}`, { config: { ...config, private: true } })
-      .on("broadcast", { event: "INSERT" }, (res) => (insertResult = res))
-      .on("broadcast", { event: "DELETE" }, (res) => (deleteResult = res))
-      .on("broadcast", { event: "UPDATE" }, (res) => (updateResult = res))
-      .subscribe((status, err) => console.log({ status, err }));
-    await sleep(1);
-    const originalValue = crypto.randomUUID();
-    const updatedValue = crypto.randomUUID();
+      .on("broadcast", { event: "INSERT" }, (res) => {
+        console.log(res);
+        insertResult = res;
+      })
+      .on("broadcast", { event: "DELETE" }, (res) => {
+        console.log(res);
+        deleteResult = res;
+      })
+      .on("broadcast", { event: "UPDATE" }, (res) => {
+        console.log(res);
+        updateResult = res;
+      })
+      .subscribe(async (status, err) => {
+        console.log({ status, err });
 
-    await supabase.from(table).insert({ value: originalValue, id });
-    await supabase.from(table).update({ value: updatedValue }).eq("id", id);
-    await supabase.from(table).delete().eq("id", id);
-    await sleep(1);
+        if (status == "SUBSCRIBED") {
+          await sleep(2);
+
+          console.log(
+            await supabase.from(table).insert({ value: originalValue, id })
+          );
+          console.log(
+            await supabase
+              .from(table)
+              .update({ value: updatedValue })
+              .eq("id", id)
+          );
+          console.log(await supabase.from(table).delete().eq("id", id));
+        }
+      });
+    await sleep(5);
     assertEquals(insertResult.payload.record.id, id);
     assertEquals(insertResult.payload.record.value, originalValue);
     assertEquals(insertResult.payload.old_record, null);

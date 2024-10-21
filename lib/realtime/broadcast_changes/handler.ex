@@ -296,7 +296,7 @@ defmodule Realtime.BroadcastChanges.Handler do
                 payload: Map.put(payload, "id", id)
               }
 
-            tenant = Cache.get_tenant_by_external_id(tenant_id)
+            %Tenant{} = tenant = Cache.get_tenant_by_external_id(tenant_id)
 
             case BatchBroadcast.broadcast(nil, tenant, %{messages: [to_broadcast]}, true) do
               :ok -> :ok
