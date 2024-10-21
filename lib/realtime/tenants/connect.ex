@@ -13,17 +13,30 @@ defmodule Realtime.Tenants.Connect do
   import Realtime.Helpers, only: [log_error: 2]
 
   alias Realtime.Api.Tenant
-  alias Realtime.Database
   alias Realtime.Rpc
   alias Realtime.Tenants
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
-  alias Realtime.BroadcastChanges.Handler
+  alias Realtime.Tenants.Connect.Piper
+  alias Realtime.Tenants.Connect.CheckConnection
+  alias Realtime.Tenants.Connect.StartReplication
+  alias Realtime.Tenants.Connect.Migrations
+  alias Realtime.Tenants.Connect.GetTenant
+  alias Realtime.Tenants.Connect.RegisterProcess
+  alias Realtime.Tenants.Connect.StartCounters
 
+  @pipes [
+    GetTenant,
+    CheckConnection,
+    Migrations,
+    StartCounters,
+    StartReplication,
+    RegisterProcess
+  ]
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default 50_000
   @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
-  @application_name "realtime_connect"
+
   defstruct tenant_id: nil,
             db_conn_reference: nil,
             db_conn_pid: nil,
@@ -130,23 +143,10 @@ defmodule Realtime.Tenants.Connect do
   def init(%{tenant_id: tenant_id} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    with %Tenant{} = tenant <- Tenants.get_tenant_by_external_id(tenant_id),
-         {:ok, conn} <- Database.check_tenant_connection(tenant, @application_name),
-         ref = Process.monitor(conn),
-         [%{settings: settings} | _] <- tenant.extensions,
-         migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings},
-         :ok <- Migrations.run_migrations(migrations) do
-      :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | conn: conn} end)
-
-      state = %{state | db_conn_reference: ref, db_conn_pid: conn}
-
-      if tenant.notify_private_alpha do
-        {:ok, state, {:continue, :setup_broadcast_changes}}
-      else
-        {:ok, state, {:continue, :setup_connected_user_events}}
-      end
+    with {:ok, acc} <- Piper.run(@pipes, state) do
+      {:ok, acc, {:continue, :setup_connected_user_events}}
     else
-      nil ->
+      {:error, :tenant_not_found} ->
         log_error("TenantNotFound", "Tenant not found")
         {:stop, :shutdown}
 
@@ -156,34 +156,7 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  @impl GenServer
-  def handle_continue(:setup_broadcast_changes, %{tenant_id: tenant_id} = state) do
-    tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
-    opts = %Handler{tenant_id: tenant.external_id}
-    supervisor_spec = Handler.supervisor_spec(tenant)
-
-    child_spec = %{
-      id: Handler,
-      start: {Handler, :start_link, [opts]},
-      restart: :transient,
-      type: :worker
-    }
-
-    case DynamicSupervisor.start_child(supervisor_spec, child_spec) do
-      {:ok, pid} ->
-        {:noreply, %{state | broadcast_changes_pid: pid},
-         {:continue, :setup_connected_user_events}}
-
-      {:error, {:already_started, pid}} ->
-        {:noreply, %{state | broadcast_changes_pid: pid},
-         {:continue, :setup_connected_user_events}}
-
-      error ->
-        log_error("UnableToStartHandler", error)
-        {:stop, :shutdown, state}
-    end
-  end
-
+  @impl true
   def handle_continue(:setup_connected_user_events, state) do
     %{
       check_connected_user_interval: check_connected_user_interval,

@@ -85,8 +85,8 @@ defmodule Realtime.Tenants do
         {:ok, %{healthy: true, db_connected: true, connected_cluster: connected_cluster}}
 
       connected_cluster when is_integer(connected_cluster) ->
-        {:ok, db_conn} = Connect.lookup_or_start_connection(external_id)
-        %{extensions: [%{settings: settings} | _]} = Cache.get_tenant_by_external_id(external_id)
+        tenant = Cache.get_tenant_by_external_id(external_id)
+        {:ok, db_conn} = Database.connect(tenant, "realtime_health_check", 1)
 
         Database.transaction(db_conn, fn transaction_conn ->
           query =
@@ -95,6 +95,8 @@ defmodule Realtime.Tenants do
           res = Postgrex.query!(transaction_conn, query, [])
 
           if res.rows == [] do
+            %{extensions: [%{settings: settings} | _]} = tenant
+
             Migrations.run_migrations(%Migrations{
               tenant_external_id: external_id,
               settings: settings
