@@ -1,5 +1,5 @@
 defmodule Realtime.Tenants.Connect.PiperTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   alias Realtime.Tenants.Connect.Piper
 
   defmodule Piper1 do
