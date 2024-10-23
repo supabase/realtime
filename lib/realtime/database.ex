@@ -139,8 +139,7 @@ defmodule Realtime.Database do
           {:error, e} ->
             Process.exit(conn, :kill)
             Helpers.log_error("UnableToConnectToTenantDatabase", e)
-
-            {:error, :tenant_database_unavailable}
+            {:error, e}
         end
       end
     end)

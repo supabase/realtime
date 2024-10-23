@@ -216,7 +216,6 @@ defmodule Realtime.BroadcastChanges.Handler do
   @impl true
   def handle_disconnect(state) do
     Logger.error("Disconnected from the server: #{inspect(state, pretty: true)}")
-
     {:noreply, %{state | step: :disconnected}}
   end
 
@@ -240,8 +239,8 @@ defmodule Realtime.BroadcastChanges.Handler do
     {:noreply, [], state}
   end
 
-  def handle_data(_, state) do
-    Logger.warning("Unknown data received")
+  def handle_data(e, state) do
+    log_error("UnexpectedMessageReceived", e)
     {:noreply, [], state}
   end
 

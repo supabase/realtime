@@ -15,6 +15,7 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
     slot = Application.get_env(:realtime, :slot_name_suffix)
     Application.put_env(:realtime, :slot_name_suffix, "test")
     start_supervised(Realtime.Tenants.CacheSupervisor)
+
     tenant = tenant_fixture()
     [%{settings: settings} | _] = tenant.extensions
     migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
@@ -22,8 +23,15 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
 
     {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
     clean_table(conn, "realtime", "messages")
-    Postgrex.query(conn, "DROP PUBLICATION IF EXISTS realtime_messages_publication", [])
-    Realtime.Database.replication_slot_teardown(tenant)
+
+    publication =
+      Handler.publication_name(%Handler{
+        tenant_id: tenant.external_id,
+        schema: "realtime",
+        table: "messages"
+      })
+
+    Postgrex.query(conn, "DROP PUBLICATION #{publication}", [])
 
     on_exit(fn -> Application.put_env(:realtime, :slot_name_suffix, slot) end)
 
@@ -68,15 +76,12 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
                  broadcast: fn _, _, _, _ -> :ok end do
     tenant = tenant_fixture()
 
-    assert {:ok, _pid} =
-             start_supervised(%{
-               id: Handler,
-               start: {Handler, :start_link, [%Handler{tenant_id: tenant.external_id}]},
-               restart: :transient,
-               type: :worker
-             })
-
-    :timer.sleep(1000)
+    start_supervised!(%{
+      id: Handler,
+      start: {Handler, :start_link, [%Handler{tenant_id: tenant.external_id}]},
+      restart: :transient,
+      type: :worker
+    })
 
     total_messages = 5
     # Works with one insert per transaction
@@ -89,7 +94,7 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
       })
     end
 
-    :timer.sleep(1000)
+    :timer.sleep(500)
 
     assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
     # Works with batch inserts
@@ -105,7 +110,7 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
 
     Database.connect(tenant, "realtime_test", 1)
     Realtime.Repo.insert_all_entries(Message, messages, Message)
-    :timer.sleep(1000)
+    :timer.sleep(500)
 
     assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
   end
