@@ -1,5 +1,15 @@
 import Config
 
+detect_ip_version = fn host when is_binary(host) ->
+  host = String.to_charlist(host)
+
+  cond do
+    match?({:ok, _}, :inet6_tcp.getaddr(host)) -> {:ok, :inet6}
+    match?({:ok, _}, :inet.gethostbyname(host)) -> {:ok, :inet}
+    true -> {:error, :nxdomain}
+  end
+end
+
 config :logflare_logger_backend,
   url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 
@@ -9,6 +19,10 @@ username = System.get_env("DB_USER", "postgres")
 password = System.get_env("DB_PASSWORD", "postgres")
 database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
+socket_options = case detect_ip_version.(default_db_host) do
+  {:ok, ip_version} -> [ ip_version ]
+  {:error, reason} -> raise "Failed to detect IP version for DB_HOST: #{reason}"
+end
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
 
 config :realtime,
@@ -90,6 +104,7 @@ if config_env() != :test do
     password: password,
     database: database,
     port: port,
+    socket_options: socket_options,
     pool_size: System.get_env("DB_POOL_SIZE", "5") |> String.to_integer(),
     queue_target: queue_target,
     queue_interval: queue_interval,
@@ -167,6 +182,7 @@ cluster_topologies =
               password: password,
               database: database,
               port: port,
+              socket_options: socket_options,
               parameters: [
                 application_name: "cluster_node_#{node()}"
               ],
