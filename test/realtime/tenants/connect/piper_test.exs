@@ -54,13 +54,15 @@ defmodule Realtime.Tenants.Connect.PiperTest do
              })
   end
 
-  test "runs pipeline and handles bad return" do
-    assert {:error, :invalid_pipe_result} =
-             Piper.run(@pipeline ++ [Realtime.Tenants.Connect.PiperTest.PiperBadReturn], %{})
+  test "runs pipeline and handles bad return with raise" do
+    assert_raise ArgumentError, fn ->
+      Piper.run(@pipeline ++ [Realtime.Tenants.Connect.PiperTest.PiperBadReturn], %{})
+    end
   end
 
-  test "runs pipeline and handles exceptions" do
-    assert {:error, %RuntimeError{message: "PiperException"}} =
-             Piper.run(@pipeline ++ [Realtime.Tenants.Connect.PiperTest.PiperException], %{})
+  test "on pipeline job function, raises exception" do
+    assert_raise RuntimeError, fn ->
+      Piper.run(@pipeline ++ [Realtime.Tenants.Connect.PiperTest.PiperException], %{})
+    end
   end
 end

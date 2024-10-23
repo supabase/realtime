@@ -14,10 +14,8 @@ defmodule Realtime.Tenants.Connect.Piper do
           {:halt, {:error, error}}
 
         _e ->
-          {:halt, {:error, :invalid_pipe_result}}
+          raise ArgumentError, "must return {:ok, _} or {:error, _}"
       end
     end)
-  rescue
-    e -> {:error, e}
   end
 end
