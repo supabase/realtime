@@ -15,6 +15,12 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
   alias Realtime.Nodes
   alias Realtime.Repo
 
+  @type t :: %__MODULE__{
+          timer: non_neg_integer() | nil,
+          region: String.t() | nil,
+          chunks: pos_integer() | nil
+        }
+
   defstruct timer: nil, region: nil, chunks: nil
 
   def start_link(_args) do
