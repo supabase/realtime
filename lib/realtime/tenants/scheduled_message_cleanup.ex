@@ -16,12 +16,13 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
   alias Realtime.Repo
 
   @type t :: %__MODULE__{
-          timer: non_neg_integer() | nil,
+          timer: pos_integer() | nil,
           region: String.t() | nil,
-          chunks: pos_integer() | nil
+          chunks: pos_integer() | nil,
+          start_after: pos_integer() | nil
         }
 
-  defstruct timer: nil, region: nil, chunks: nil
+  defstruct timer: nil, region: nil, chunks: nil, start_after: nil
 
   def start_link(_args) do
     timer =
@@ -31,15 +32,17 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
         :timer.hours(4)
       )
 
+    start_after = Application.get_env(:realtime, :scheduled_start_after, 0)
     region = Application.get_env(:realtime, :region)
     chunks = Application.get_env(:realtime, :chunks, 10)
-    state = %__MODULE__{timer: timer, region: region, chunks: chunks}
+    state = %__MODULE__{timer: timer, region: region, chunks: chunks, start_after: start_after}
     GenServer.start_link(__MODULE__, state, name: __MODULE__)
   end
 
   @impl true
-  def init(%__MODULE__{} = state) do
-    Process.send_after(self(), :delete_old_messages, timer(state))
+  def init(%__MODULE__{start_after: start_after} = state) do
+    timer = timer(state) + start_after
+    Process.send_after(self(), :delete_old_messages, timer)
     Logger.info("ScheduledMessageCleanup started")
     {:ok, state}
   end
