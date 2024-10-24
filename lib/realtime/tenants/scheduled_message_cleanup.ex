@@ -24,7 +24,13 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
   defstruct timer: nil, region: nil, chunks: nil
 
   def start_link(_args) do
-    timer = Application.get_env(:realtime, :schedule_clean, :timer.hours(5))
+    timer =
+      Application.get_env(
+        :realtime,
+        :schedule_clean,
+        :timer.hours(4)
+      )
+
     region = Application.get_env(:realtime, :region)
     chunks = Application.get_env(:realtime, :chunks, 10)
     state = %__MODULE__{timer: timer, region: region, chunks: chunks}
@@ -32,15 +38,16 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
   end
 
   @impl true
-  def init(%__MODULE__{timer: timer} = state) do
-    Process.send_after(self(), :delete_old_messages, timer)
+  def init(%__MODULE__{} = state) do
+    Process.send_after(self(), :delete_old_messages, timer(state))
     Logger.info("ScheduledMessageCleanup started")
     {:ok, state}
   end
 
   @impl true
   def handle_info(:delete_old_messages, state) do
-    %{region: region, chunks: chunks, timer: timer} = state
+    Logger.info("ScheduledMessageCleanup started")
+    %{region: region, chunks: chunks} = state
     regions = Nodes.region_to_tenant_regions(region)
     region_nodes = Nodes.region_nodes(region)
 
@@ -62,9 +69,11 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
       |> Enum.each(&run_cleanup_on_tenants/1)
     end)
 
-    Process.send_after(self(), :delete_old_messages, timer)
+    Process.send_after(self(), :delete_old_messages, timer(state))
     {:noreply, state}
   end
+
+  defp timer(%{timer: timer}), do: timer + :timer.minutes(Enum.random(1..59))
 
   defp node_responsible_for_cleanup?(%Tenant{external_id: external_id}, region_nodes) do
     case Node.self() do
@@ -88,6 +97,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
   defp run_cleanup_on_tenant(tenant) do
     Logger.metadata(project: tenant.external_id, external_id: tenant.external_id)
     tenant = Repo.preload(tenant, :extensions)
+    Logger.info("ScheduledMessageCleanup cleaned realtime.messages")
 
     with {:ok, conn} <-
            Database.connect(tenant, "realtime_clean_messages", 1),
