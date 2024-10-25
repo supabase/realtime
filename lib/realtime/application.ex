@@ -58,7 +58,6 @@ defmodule Realtime.Application do
         RealtimeWeb.Telemetry,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
-        {Cachex, name: Realtime.RateCounter},
         Realtime.Tenants.CacheSupervisor,
         Realtime.GenCounter.DynamicSupervisor,
         Realtime.RateCounter.DynamicSupervisor,
@@ -83,7 +82,7 @@ defmodule Realtime.Application do
          name: Realtime.BroadcastChanges.Handler.DynamicSupervisor},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
-      ] ++ extensions_supervisors() ++ scheduled_tasks()
+      ] ++ distributed_cache() ++ extensions_supervisors() ++ scheduled_tasks()
 
     children =
       case Replica.replica() do
@@ -116,6 +115,12 @@ defmodule Realtime.Application do
   defp scheduled_tasks() do
     if Application.fetch_env!(:realtime, :run_scheduled),
       do: [Realtime.Tenants.ScheduledMessageCleanup],
+      else: []
+  end
+
+  defp distributed_cache() do
+    if node() != :nonode@nohost,
+      do: [{Cachex, name: Realtime.RateCounter}],
       else: []
   end
 end
