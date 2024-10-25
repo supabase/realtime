@@ -148,8 +148,9 @@ If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000
 | TENANT_MAX_EVENTS_PER_SECOND   | string  | The default value of maximum events per second that each tenant can support, used when creating a tenant for the first time. Defaults to '100'.                                                                                                                                                                                 |
 | TENANT_MAX_JOINS_PER_SECOND    | string  | The default value of maximum channel joins per second that each tenant can support, used when creating a tenant for the first time. Defaults to '100'.                                                                                                                                                                          |
 | SEED_SELF_HOST                 | boolean | Seeds the system with default tenant                                                                                                                                                                                                                                                                                            |
-| RUN_SCHEDULED_AFTER_IN_MS | number | Tells system when to start scheduled tasks after boot |
-| RUN_SCHEDULED | boolean | Do you want to scheduled tasks to run |
+| RUN_SCHEDULED_AFTER_IN_MS      | number  | Tells system when to start scheduled tasks after boot                                                                                                                                                                                                                                                                           |
+| RUN_SCHEDULED                  | boolean | Do you want to scheduled tasks to run                                                                                                                                                                                                                                                                                           |
+
 ## WebSocket URL
 
 The WebSocket URL is in the following format for local development: `ws://[external_id].localhost:4000/socket/websocket`

@@ -59,25 +59,24 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
     region_nodes = Nodes.region_nodes(region)
 
     Realtime.Repo.transaction(fn ->
-      base = from(t in Tenant, select: t)
-
-      query =
-        if regions != nil,
-          do:
-            base
-            |> join(:inner, [t], e in assoc(t, :extensions))
-            |> where([t, e], fragment("? -> 'region' in (?)", e.settings, splice(^regions))),
-          else: base
-
-      query
+      from(t in Tenant, select: t)
+      |> where_region(regions)
       |> Repo.stream()
       |> Stream.filter(&node_responsible_for_cleanup?(&1, region_nodes))
       |> Stream.chunk_every(chunks)
-      |> Enum.each(&run_cleanup_on_tenants/1)
+      |> Enum.map(&run_cleanup_on_tenants/1)
     end)
 
     Process.send_after(self(), :delete_old_messages, timer(state))
     {:noreply, state}
+  end
+
+  defp where_region(query, nil), do: query
+
+  defp where_region(query, regions) do
+    query
+    |> join(:inner, [t], e in assoc(t, :extensions))
+    |> where([t, e], fragment("? -> 'region' in (?)", e.settings, splice(^regions)))
   end
 
   defp timer(%{timer: timer, randomize: true}), do: timer + :timer.minutes(Enum.random(1..59))
@@ -94,26 +93,18 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
     end
   end
 
-  defp run_cleanup_on_tenants(tenants) do
-    Task.start(fn ->
-      Repo.transaction(fn ->
-        Enum.each(tenants, &run_cleanup_on_tenant/1)
-      end)
-    end)
-  end
+  defp run_cleanup_on_tenants(tenants), do: Enum.map(tenants, &run_cleanup_on_tenant/1)
 
   defp run_cleanup_on_tenant(tenant) do
     Logger.metadata(project: tenant.external_id, external_id: tenant.external_id)
     tenant = Repo.preload(tenant, :extensions)
     Logger.info("ScheduledMessageCleanup cleaned realtime.messages")
 
-    with {:ok, conn} <-
-           Database.connect(tenant, "realtime_clean_messages", 1),
+    with {:ok, conn} <- Database.connect(tenant, "realtime_clean_messages", 1),
          {:ok, _} <- Messages.delete_old_messages(conn) do
       :ok
     else
-      e ->
-        log_error("FailedToDeleteOldMessages", e)
+      e -> log_error("FailedToDeleteOldMessages", e)
     end
   end
 end

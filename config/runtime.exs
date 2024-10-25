@@ -35,6 +35,10 @@ else
       System.get_env("RUN_SCHEDULED_AFTER_IN_MS", "600000") |> String.to_integer()
 end
 
+config :realtime,
+       :max_children_scheduled_cleanup,
+       System.get_env("MAX_CHILDREN_SCHEDULED_CLEANUP", "5") |> String.to_integer()
+
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||

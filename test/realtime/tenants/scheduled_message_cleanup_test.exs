@@ -18,6 +18,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
     Application.put_env(:realtime, :schedule_clean, 200)
     Application.put_env(:realtime, :platform, :aws)
     Application.put_env(:realtime, :scheduled_randomize, false)
+    Application.put_env(:realtime, :max_children_scheduled_cleanup, 1)
 
     tenants =
       Enum.map(
