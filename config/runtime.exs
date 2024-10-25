@@ -29,6 +29,7 @@ if config_env() == :test do
 else
   config :realtime,
     run_scheduled: System.get_env("RUN_SCHEDULED", "true") == "true",
+    scheduled_randomize: System.get_env("RUN_SCHEDULED", "true") == "true",
     # defaults the runner to only start after 10 minutes
     scheduled_start_after:
       System.get_env("RUN_SCHEDULED_AFTER_IN_MS", "600000") |> String.to_integer()

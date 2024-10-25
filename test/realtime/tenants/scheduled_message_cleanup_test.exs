@@ -12,13 +12,12 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
   alias Realtime.Tenants.ScheduledMessageCleanup
 
   setup do
-    :net_kernel.stop()
     dev_tenant = Tenant |> Repo.all() |> hd()
-
     timer = Application.get_env(:realtime, :schedule_clean)
     platform = Application.get_env(:realtime, :platform)
     Application.put_env(:realtime, :schedule_clean, 200)
     Application.put_env(:realtime, :platform, :aws)
+    Application.put_env(:realtime, :scheduled_randomize, false)
 
     tenants =
       Enum.map(
@@ -56,11 +55,11 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
       region = Application.get_env(:realtime, :region)
       Application.put_env(:realtime, :region, "us-east-1")
 
-      {:ok, pid} = :net_kernel.start([:"primary@127.0.0.1"])
+      {:ok, _} = :net_kernel.start([:"primary@127.0.0.1"])
       :syn.join(RegionNodes, "us-east-1", self(), node: node())
 
       on_exit(fn ->
-        :net_kernel.disconnect(pid)
+        :net_kernel.stop()
         :syn.leave(RegionNodes, "us-east-1", self())
         Application.put_env(:realtime, :region, region)
       end)

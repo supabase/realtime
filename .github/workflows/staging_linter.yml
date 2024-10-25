@@ -52,4 +52,4 @@ jobs:
       - name: Start epmd
         run: epmd -daemon
       - name: Run tests
-        run: mix test --trace
+        run: mix test --trace --max-cases 1

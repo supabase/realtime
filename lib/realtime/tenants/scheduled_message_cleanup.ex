@@ -19,23 +19,27 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
           timer: pos_integer() | nil,
           region: String.t() | nil,
           chunks: pos_integer() | nil,
-          start_after: pos_integer() | nil
+          start_after: pos_integer() | nil,
+          randomize: boolean() | nil
         }
 
-  defstruct timer: nil, region: nil, chunks: nil, start_after: nil
+  defstruct timer: nil, region: nil, chunks: nil, start_after: nil, randomize: nil
 
   def start_link(_args) do
-    timer =
-      Application.get_env(
-        :realtime,
-        :schedule_clean,
-        :timer.hours(4)
-      )
-
+    timer = Application.get_env(:realtime, :schedule_clean, :timer.hours(4))
     start_after = Application.get_env(:realtime, :scheduled_start_after, 0)
     region = Application.get_env(:realtime, :region)
     chunks = Application.get_env(:realtime, :chunks, 10)
-    state = %__MODULE__{timer: timer, region: region, chunks: chunks, start_after: start_after}
+    randomize = Application.get_env(:realtime, :scheduled_randomize, true)
+
+    state = %__MODULE__{
+      timer: timer,
+      region: region,
+      chunks: chunks,
+      start_after: start_after,
+      randomize: randomize
+    }
+
     GenServer.start_link(__MODULE__, state, name: __MODULE__)
   end
 
@@ -76,7 +80,8 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
     {:noreply, state}
   end
 
-  defp timer(%{timer: timer}), do: timer + :timer.minutes(Enum.random(1..59))
+  defp timer(%{timer: timer, randomize: true}), do: timer + :timer.minutes(Enum.random(1..59))
+  defp timer(%{timer: timer}), do: timer
 
   defp node_responsible_for_cleanup?(%Tenant{external_id: external_id}, region_nodes) do
     case Node.self() do
