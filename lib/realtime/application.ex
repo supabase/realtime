@@ -12,6 +12,9 @@ defmodule Realtime.Application do
   def start(_type, _args) do
     primary_config = :logger.get_primary_config()
 
+    max_children_scheduled_cleanup =
+      Application.get_env(:realtime, :max_children_scheduled_cleanup)
+
     # add the region to logs
     :ok =
       :logger.set_primary_config(
@@ -66,6 +69,9 @@ defmodule Realtime.Application do
         {Registry, keys: :duplicate, name: Realtime.Registry},
         {Registry, keys: :unique, name: Realtime.Registry.Unique},
         {Task.Supervisor, name: Realtime.TaskSupervisor},
+        {Task.Supervisor,
+         name: Realtime.Tenants.ScheduledMessageCleanup.TaskSupervisor,
+         max_children: max_children_scheduled_cleanup},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,

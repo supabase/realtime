@@ -36,8 +36,10 @@ else
 end
 
 config :realtime,
-       :max_children_scheduled_cleanup,
-       System.get_env("MAX_CHILDREN_SCHEDULED_CLEANUP", "5") |> String.to_integer()
+  max_children_scheduled_cleanup:
+    System.get_env("MAX_CHILDREN_SCHEDULED_CLEANUP", "5") |> String.to_integer(),
+  scheduled_cleanup_task_timeout:
+    System.get_env("SCHEDULED_CLEANUP_TASK_TIMEOUT", "5000") |> String.to_integer()
 
 if config_env() == :prod do
   secret_key_base =

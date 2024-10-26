@@ -23,7 +23,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
     tenants =
       Enum.map(
         [
-          tenant_fixture(),
+          tenant_fixture(notify_private_alpha: true),
           dev_tenant
         ],
         fn tenant ->
