@@ -115,7 +115,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
     Logger.metadata(project: tenant.external_id, external_id: tenant.external_id)
     Logger.info("ScheduledMessageCleanup cleaned realtime.messages")
 
-    with {:ok, conn} <- Database.connect(tenant, "realtime_clean_messages", 1),
+    with {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1),
          {:ok, _} <- Messages.delete_old_messages(conn) do
       :ok
     else
