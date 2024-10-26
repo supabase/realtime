@@ -177,7 +177,7 @@ defmodule Realtime.Nodes do
   @doc """
   Fetches the tenant regions for a given realtime reagion
   """
-  @spec region_to_tenant_regions(String.t()) :: list()
+  @spec region_to_tenant_regions(String.t()) :: list() | nil
   def region_to_tenant_regions(region) do
     platform = Application.get_env(:realtime, :platform)
 

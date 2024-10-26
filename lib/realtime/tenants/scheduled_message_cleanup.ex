@@ -66,12 +66,15 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
     regions = Nodes.region_to_tenant_regions(region)
     region_nodes = Nodes.region_nodes(region)
 
-    Realtime.Repo.transaction(fn ->
+    query =
       from(t in Tenant,
         join: e in assoc(t, :extensions),
-        preload: :extensions,
-        where: t.notify_private_alpha == true
+        where: t.notify_private_alpha == true,
+        preload: :extensions
       )
+
+    Realtime.Repo.transaction(fn ->
+      query
       |> where_region(regions)
       |> Repo.all()
       |> Stream.filter(&node_responsible_for_cleanup?(&1, region_nodes))
