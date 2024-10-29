@@ -15,6 +15,9 @@ defmodule Realtime.Application do
     max_children_scheduled_cleanup =
       Application.get_env(:realtime, :max_children_scheduled_cleanup)
 
+    scheduled_cleanup_task_timeout =
+      Application.get_env(:realtime, :scheduled_cleanup_task_timeout)
+
     # add the region to logs
     :ok =
       :logger.set_primary_config(
@@ -71,7 +74,9 @@ defmodule Realtime.Application do
         {Task.Supervisor, name: Realtime.TaskSupervisor},
         {Task.Supervisor,
          name: Realtime.Tenants.ScheduledMessageCleanup.TaskSupervisor,
-         max_children: max_children_scheduled_cleanup},
+         max_children: max_children_scheduled_cleanup,
+         max_seconds: scheduled_cleanup_task_timeout,
+         max_restarts: 1},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,

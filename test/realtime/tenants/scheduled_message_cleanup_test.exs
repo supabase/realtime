@@ -15,10 +15,12 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
     dev_tenant = Tenant |> Repo.all() |> hd()
     timer = Application.get_env(:realtime, :schedule_clean)
     platform = Application.get_env(:realtime, :platform)
+
     Application.put_env(:realtime, :schedule_clean, 200)
     Application.put_env(:realtime, :platform, :aws)
     Application.put_env(:realtime, :scheduled_randomize, false)
     Application.put_env(:realtime, :max_children_scheduled_cleanup, 1)
+    Application.put_env(:realtime, :chunks, 2)
 
     tenants =
       Enum.map(
@@ -77,9 +79,9 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
         "type" => "postgres_cdc_rls",
         "settings" => %{
           "db_host" => "localhost",
-          "db_name" => "false",
-          "db_user" => "false",
-          "db_password" => "false",
+          "db_name" => "postgres",
+          "db_user" => "supabase_admin",
+          "db_password" => "bad",
           "db_port" => "5433",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
@@ -90,15 +92,20 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
       }
     ]
 
-    tenant_fixture(%{"extensions" => extensions})
+    tenant_fixture(%{"extensions" => extensions, notify_private_alpha: true})
 
-    capture_log(fn ->
-      start_supervised!(ScheduledMessageCleanup)
-      Process.sleep(500)
-    end) =~ "FailedToDeleteOldMessages"
+    log =
+      capture_log(fn ->
+        start_supervised!(ScheduledMessageCleanup) |> IO.inspect()
+        Process.sleep(1000)
+      end)
+
+    IO.puts(log)
+    assert log =~ "FailedToDeleteOldMessages"
   end
 
   defp run_test(tenants) do
+    IO.inspect(Enum.map(tenants, & &1.external_id))
     utc_now = NaiveDateTime.utc_now()
     limit = NaiveDateTime.add(utc_now, -72, :hour)
 
@@ -115,7 +122,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
       |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gt))
       |> MapSet.new()
 
-    start_supervised!(ScheduledMessageCleanup)
+    start_supervised!(ScheduledMessageCleanup) |> IO.inspect()
     Process.sleep(500)
 
     current =

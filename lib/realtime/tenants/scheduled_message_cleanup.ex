@@ -21,7 +21,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
           chunks: pos_integer() | nil,
           start_after: pos_integer() | nil,
           randomize: boolean() | nil,
-          task_timeout: pos_integer() | nil
+          tasks: MapSet.t(Task.t())
         }
 
   defstruct timer: nil,
@@ -29,7 +29,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
             chunks: nil,
             start_after: nil,
             randomize: nil,
-            task_timeout: nil
+            tasks: MapSet.new()
 
   def start_link(_args) do
     timer = Application.get_env(:realtime, :schedule_clean, :timer.hours(4))
@@ -37,15 +37,13 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
     region = Application.get_env(:realtime, :region)
     chunks = Application.get_env(:realtime, :chunks, 10)
     randomize = Application.get_env(:realtime, :scheduled_randomize, true)
-    task_timeout = Application.get_env(:realtime, :scheduled_cleanup_task_timeout)
 
     state = %__MODULE__{
       timer: timer,
       region: region,
       chunks: chunks,
       start_after: start_after,
-      randomize: randomize,
-      task_timeout: task_timeout
+      randomize: randomize
     }
 
     GenServer.start_link(__MODULE__, state, name: __MODULE__)
@@ -62,7 +60,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
   @impl true
   def handle_info(:delete_old_messages, state) do
     Logger.info("ScheduledMessageCleanup started")
-    %{region: region, chunks: chunks, task_timeout: task_timeout} = state
+    %{region: region, chunks: chunks, tasks: tasks} = state
     regions = Nodes.region_to_tenant_regions(region)
     region_nodes = Nodes.region_nodes(region)
 
@@ -73,22 +71,31 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
         preload: :extensions
       )
 
-    Realtime.Repo.transaction(fn ->
+    new_tasks =
       query
       |> where_region(regions)
       |> Repo.all()
       |> Stream.filter(&node_responsible_for_cleanup?(&1, region_nodes))
       |> Stream.chunk_every(chunks)
       |> Enum.map(fn chunks ->
-        Task.Supervisor.async(
-          __MODULE__.TaskSupervisor,
-          fn -> run_cleanup_on_tenants(chunks) end
-        )
+        %{
+          tenants: Enum.map(chunks, & &1.external_id),
+          task:
+            Task.Supervisor.async_nolink(
+              __MODULE__.TaskSupervisor,
+              fn -> run_cleanup_on_tenants(chunks) end,
+              ordered: false
+            )
+        }
       end)
-      |> Task.await_many(task_timeout)
-    end)
 
     Process.send_after(self(), :delete_old_messages, timer(state))
+
+    {:noreply, state}
+  end
+
+  def handle_info(msg, state) do
+    IO.inspect(msg)
     {:noreply, state}
   end
 
@@ -117,12 +124,12 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
   defp run_cleanup_on_tenant(tenant) do
     Logger.metadata(project: tenant.external_id, external_id: tenant.external_id)
     Logger.info("ScheduledMessageCleanup cleaned realtime.messages")
+    IO.inspect("!!!")
 
-    with {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1),
+    with {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1) |> IO.inspect(),
          {:ok, _} <- Messages.delete_old_messages(conn) do
+      Logger.info("ScheduledMessageCleanup finished")
       :ok
-    else
-      e -> log_error("FailedToDeleteOldMessages", e)
     end
   end
 end
