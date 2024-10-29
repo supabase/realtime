@@ -5,6 +5,46 @@ defmodule Realtime.Nodes do
   require Logger
   alias Realtime.Api.Tenant
 
+  @mapping_realtime_region_to_tenant_region_aws %{
+    "ap-southeast-1" => [
+      "ap-east-1",
+      "ap-northeast-1",
+      "ap-northeast-2",
+      "ap-south-1",
+      "ap-southeast-1"
+    ],
+    "ap-southeast-2" => ["ap-southeast-2"],
+    "eu-west-2" => [
+      "eu-central-1",
+      "eu-central-2",
+      "eu-north-1",
+      "eu-west-1",
+      "eu-west-2",
+      "eu-west-3"
+    ],
+    "us-east-1" => [
+      "ca-central-1",
+      "sa-east-1",
+      "us-east-1",
+      "us-east-2"
+    ],
+    "us-west-1" => ["us-west-1", "us-west-2"]
+  }
+
+  @mapping_realtime_region_to_tenant_region_fly %{
+    "iad" => ["ca-central-1", "sa-east-1", "us-east-1"],
+    "lhr" => ["eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3"],
+    "sea" => ["us-west-1"],
+    "syd" => [
+      "ap-east-1",
+      "ap-northeast-1",
+      "ap-northeast-2",
+      "ap-south-1",
+      "ap-southeast-1",
+      "ap-southeast-2"
+    ]
+  }
+
   @doc """
   Gets the node to launch the Postgres connection on for a tenant.
   """
@@ -35,51 +75,23 @@ defmodule Realtime.Nodes do
     region_mapping(platform, tenant_region)
   end
 
-  defp region_mapping(:aws, tenant_region) do
-    case tenant_region do
-      "ap-east-1" -> "ap-southeast-1"
-      "ap-northeast-1" -> "ap-southeast-1"
-      "ap-northeast-2" -> "ap-southeast-1"
-      "ap-south-1" -> "ap-southeast-1"
-      "ap-southeast-1" -> "ap-southeast-1"
-      "ap-southeast-2" -> "ap-southeast-2"
-      "ca-central-1" -> "us-east-1"
-      "eu-central-1" -> "eu-west-2"
-      "eu-central-2" -> "eu-west-2"
-      "eu-north-1" -> "eu-west-2"
-      "eu-west-1" -> "eu-west-2"
-      "eu-west-2" -> "eu-west-2"
-      "eu-west-3" -> "eu-west-2"
-      "sa-east-1" -> "us-east-1"
-      "us-east-1" -> "us-east-1"
-      "us-east-2" -> "us-east-1"
-      "us-west-1" -> "us-west-1"
-      "us-west-2" -> "us-west-1"
-      _ -> nil
-    end
-  end
+  defp region_mapping(nil, tenant_region), do: tenant_region
 
-  defp region_mapping(:fly, tenant_region) do
-    case tenant_region do
-      "us-east-1" -> "iad"
-      "us-west-1" -> "sea"
-      "sa-east-1" -> "iad"
-      "ca-central-1" -> "iad"
-      "ap-southeast-1" -> "syd"
-      "ap-northeast-1" -> "syd"
-      "ap-northeast-2" -> "syd"
-      "ap-southeast-2" -> "syd"
-      "ap-east-1" -> "syd"
-      "ap-south-1" -> "syd"
-      "eu-west-1" -> "lhr"
-      "eu-west-2" -> "lhr"
-      "eu-west-3" -> "lhr"
-      "eu-central-1" -> "lhr"
-      _ -> nil
-    end
-  end
+  defp region_mapping(platform, tenant_region) do
+    mappings =
+      case platform do
+        :aws -> @mapping_realtime_region_to_tenant_region_aws
+        :fly -> @mapping_realtime_region_to_tenant_region_fly
+        _ -> []
+      end
 
-  defp region_mapping(_, tenant_region), do: tenant_region
+    mappings
+    |> Enum.flat_map(fn {realtime_region, tenant_regions} ->
+      Enum.map(tenant_regions, fn tenant_region -> {tenant_region, realtime_region} end)
+    end)
+    |> Map.new()
+    |> Map.get(tenant_region)
+  end
 
   @doc """
   Lists the nodes in a region. Sorts by node name in case the list order
@@ -160,5 +172,22 @@ defmodule Realtime.Nodes do
       _other ->
         host
     end
+  end
+
+  @doc """
+  Fetches the tenant regions for a given realtime reagion
+  """
+  @spec region_to_tenant_regions(String.t()) :: list() | nil
+  def region_to_tenant_regions(region) do
+    platform = Application.get_env(:realtime, :platform)
+
+    mappings =
+      case platform do
+        :aws -> @mapping_realtime_region_to_tenant_region_aws
+        :fly -> @mapping_realtime_region_to_tenant_region_fly
+        _ -> %{}
+      end
+
+    Map.get(mappings, region)
   end
 end

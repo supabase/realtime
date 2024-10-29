@@ -12,6 +12,12 @@ defmodule Realtime.Application do
   def start(_type, _args) do
     primary_config = :logger.get_primary_config()
 
+    max_children_scheduled_cleanup =
+      Application.get_env(:realtime, :max_children_scheduled_cleanup)
+
+    scheduled_cleanup_task_timeout =
+      Application.get_env(:realtime, :scheduled_cleanup_task_timeout)
+
     # add the region to logs
     :ok =
       :logger.set_primary_config(
@@ -66,6 +72,11 @@ defmodule Realtime.Application do
         {Registry, keys: :duplicate, name: Realtime.Registry},
         {Registry, keys: :unique, name: Realtime.Registry.Unique},
         {Task.Supervisor, name: Realtime.TaskSupervisor},
+        {Task.Supervisor,
+         name: Realtime.Tenants.ScheduledMessageCleanup.TaskSupervisor,
+         max_children: max_children_scheduled_cleanup,
+         max_seconds: scheduled_cleanup_task_timeout,
+         max_restarts: 1},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,
@@ -83,7 +94,7 @@ defmodule Realtime.Application do
          name: Realtime.BroadcastChanges.Handler.DynamicSupervisor},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
-      ] ++ extensions_supervisors()
+      ] ++ extensions_supervisors() ++ scheduled_tasks()
 
     children =
       case Replica.replica() do
@@ -111,5 +122,11 @@ defmodule Realtime.Application do
       _, acc ->
         acc
     end)
+  end
+
+  defp scheduled_tasks() do
+    if Application.fetch_env!(:realtime, :run_scheduled),
+      do: [Realtime.Tenants.ScheduledMessageCleanup],
+      else: []
   end
 end

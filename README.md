@@ -148,6 +148,10 @@ If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000
 | TENANT_MAX_EVENTS_PER_SECOND   | string  | The default value of maximum events per second that each tenant can support, used when creating a tenant for the first time. Defaults to '100'.                                                                                                                                                                                 |
 | TENANT_MAX_JOINS_PER_SECOND    | string  | The default value of maximum channel joins per second that each tenant can support, used when creating a tenant for the first time. Defaults to '100'.                                                                                                                                                                          |
 | SEED_SELF_HOST                 | boolean | Seeds the system with default tenant                                                                                                                                                                                                                                                                                            |
+| RUN_JANITOR_AFTER_IN_MS        | number  | Tells system when to start janitor tasks after boot                                                                                                                                                                                                                                                                           |
+| RUN_JANITOR                    | boolean | Do you want to janitor tasks to run                                                                                                                                                                                                                                                                                           |
+| MAX_CHILDREN_JANITOR_CLEANUP   | number  | Maximum number of concurrent tasks working on janitor cleanup                                                                                                                                                                                                                                                                 |
+| JANITOR_CLEANUP_TASK_TIMEOUT   | number  | Timeout for each async task for janitor cleanup                                                                                                                                                                                                                                                                               |
 
 ## WebSocket URL
 
@@ -218,6 +222,7 @@ This is the list of operational codes that can help you understand your deployme
 | ErrorOnRpcCall                     | Error when calling another realtime node                                                                                            |
 | ErrorExecutingTransaction          | Error executing a database transaction in tenant database                                                                           |
 | SynInitializationError             | Our framework to syncronize processes has failed to properly startup a connection to the database                                   |
+| JanitorFailedToDeleteOldMessages   | Scheduled task for realtime.message cleanup was unable to run                                                                       |
 | UnknownError                       | An unknown error occurred                                                                                                           |
 
 ## License

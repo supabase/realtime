@@ -49,5 +49,7 @@ jobs:
           mix dialyzer.build
       - name: Run dialyzer
         run: mix dialyzer
+      - name: Start epmd
+        run: epmd -daemon
       - name: Run tests
-        run: mix test --trace
+        run: mix test --trace --max-cases 1

@@ -24,6 +24,23 @@ config :realtime,
     System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer(),
   rpc_timeout: System.get_env("RPC_TIMEOUT", "30000") |> String.to_integer()
 
+if config_env() == :test do
+  config :realtime, run_scheduled: false
+else
+  config :realtime,
+    run_scheduled: System.get_env("RUN_SCHEDULED", "true") == "true",
+    scheduled_randomize: System.get_env("RUN_SCHEDULED", "true") == "true",
+    # defaults the runner to only start after 10 minutes
+    scheduled_start_after:
+      System.get_env("RUN_SCHEDULED_AFTER_IN_MS", "600000") |> String.to_integer()
+end
+
+config :realtime,
+  max_children_scheduled_cleanup:
+    System.get_env("MAX_CHILDREN_SCHEDULED_CLEANUP", "5") |> String.to_integer(),
+  scheduled_cleanup_task_timeout:
+    System.get_env("SCHEDULED_CLEANUP_TASK_TIMEOUT", "5000") |> String.to_integer()
+
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||

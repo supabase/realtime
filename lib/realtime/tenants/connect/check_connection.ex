@@ -7,7 +7,6 @@ defmodule Realtime.Tenants.Connect.CheckConnection do
 
   @application_name "realtime_connect"
   @behaviour Realtime.Tenants.Connect.Piper
-
   @impl true
   def run(acc) do
     %{tenant_id: tenant_id} = acc

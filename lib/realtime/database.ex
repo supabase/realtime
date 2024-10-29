@@ -309,9 +309,7 @@ defmodule Realtime.Database do
       username: user,
       pool_size: pool,
       queue_target: queue_target,
-      parameters: [
-        application_name: application_name
-      ],
+      parameters: [application_name: application_name],
       socket_options: [addrtype],
       backoff_type: backoff_type,
       configure: fn args ->
