@@ -218,6 +218,7 @@ This is the list of operational codes that can help you understand your deployme
 | ErrorOnRpcCall                     | Error when calling another realtime node                                                                                            |
 | ErrorExecutingTransaction          | Error executing a database transaction in tenant database                                                                           |
 | SynInitializationError             | Our framework to syncronize processes has failed to properly startup a connection to the database                                   |
+| PrivateKeyPublicChannelError       | Incoming private message found on public Channel                                                                                    |
 | UnknownError                       | An unknown error occurred                                                                                                           |
 
 ## License
