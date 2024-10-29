@@ -105,7 +105,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
     {tenants, tasks} = Map.pop(tasks, ref)
 
     log_error(
-      "FailedToDeleteOldMessages",
+      "JanitorFailedToDeleteOldMessages",
       "Scheduled cleanup failed for tenants: #{inspect(tenants)}"
     )
 

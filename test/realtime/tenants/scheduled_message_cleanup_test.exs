@@ -97,7 +97,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
     assert capture_log(fn ->
              start_supervised!(ScheduledMessageCleanup)
              Process.sleep(1000)
-           end) =~ "FailedToDeleteOldMessages"
+           end) =~ "JanitorFailedToDeleteOldMessages"
   end
 
   defp run_test(tenants) do
