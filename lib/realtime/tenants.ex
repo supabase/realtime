@@ -104,6 +104,7 @@ defmodule Realtime.Tenants do
           end
         end)
 
+        Process.exit(db_conn, :kill)
         {:ok, %{healthy: true, db_connected: false, connected_cluster: connected_cluster}}
     end
   end
