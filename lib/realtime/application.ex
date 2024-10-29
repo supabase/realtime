@@ -12,11 +12,11 @@ defmodule Realtime.Application do
   def start(_type, _args) do
     primary_config = :logger.get_primary_config()
 
-    max_children_scheduled_cleanup =
-      Application.get_env(:realtime, :max_children_scheduled_cleanup)
+    janitor_max_children =
+      Application.get_env(:realtime, :janitor_max_children)
 
-    scheduled_cleanup_task_timeout =
-      Application.get_env(:realtime, :scheduled_cleanup_task_timeout)
+    janitor_children_timeout =
+      Application.get_env(:realtime, :janitor_children_timeout)
 
     # add the region to logs
     :ok =
@@ -73,9 +73,9 @@ defmodule Realtime.Application do
         {Registry, keys: :unique, name: Realtime.Registry.Unique},
         {Task.Supervisor, name: Realtime.TaskSupervisor},
         {Task.Supervisor,
-         name: Realtime.Tenants.ScheduledMessageCleanup.TaskSupervisor,
-         max_children: max_children_scheduled_cleanup,
-         max_seconds: scheduled_cleanup_task_timeout,
+         name: Realtime.Tenants.Janitor.TaskSupervisor,
+         max_children: janitor_max_children,
+         max_seconds: janitor_children_timeout,
          max_restarts: 1},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
@@ -125,8 +125,8 @@ defmodule Realtime.Application do
   end
 
   defp scheduled_tasks() do
-    if Application.fetch_env!(:realtime, :run_scheduled),
-      do: [Realtime.Tenants.ScheduledMessageCleanup],
+    if Application.fetch_env!(:realtime, :run_janitor),
+      do: [Realtime.Tenants.Janitor],
       else: []
   end
 end

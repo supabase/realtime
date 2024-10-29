@@ -1,4 +1,4 @@
-defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
+defmodule Realtime.Tenants.JanitorTest do
   # async: false due to using database process
   use Realtime.DataCase, async: false
 
@@ -9,18 +9,17 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
   alias Realtime.Database
   alias Realtime.Repo
   alias Realtime.Tenants.Migrations
-  alias Realtime.Tenants.ScheduledMessageCleanup
+  alias Realtime.Tenants.Janitor
 
   setup do
     dev_tenant = Tenant |> Repo.all() |> hd()
-    timer = Application.get_env(:realtime, :schedule_clean)
+    timer = Application.get_env(:realtime, :janitor_schedule_timer)
     platform = Application.get_env(:realtime, :platform)
 
-    Application.put_env(:realtime, :schedule_clean, 200)
+    Application.put_env(:realtime, :janitor_schedule_timer, 200)
+    Application.put_env(:realtime, :janitor_schedule_randomize, false)
+    Application.put_env(:realtime, :janitor_chunk_size, 2)
     Application.put_env(:realtime, :platform, :aws)
-    Application.put_env(:realtime, :scheduled_randomize, false)
-    Application.put_env(:realtime, :max_children_scheduled_cleanup, 1)
-    Application.put_env(:realtime, :chunks, 2)
 
     tenants =
       Enum.map(
@@ -40,7 +39,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
       )
 
     on_exit(fn ->
-      Application.put_env(:realtime, :schedule_clean, timer)
+      Application.put_env(:realtime, :janitor_schedule_timer, timer)
       Application.put_env(:realtime, :platform, platform)
     end)
 
@@ -95,7 +94,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
     tenant_fixture(%{"extensions" => extensions, notify_private_alpha: true})
 
     assert capture_log(fn ->
-             start_supervised!(ScheduledMessageCleanup)
+             start_supervised!(Janitor)
              Process.sleep(1000)
            end) =~ "JanitorFailedToDeleteOldMessages"
   end
@@ -117,7 +116,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
       |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gt))
       |> MapSet.new()
 
-    start_supervised!(ScheduledMessageCleanup)
+    start_supervised!(Janitor)
     Process.sleep(500)
 
     current =

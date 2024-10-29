@@ -1,4 +1,4 @@
-defmodule Realtime.Tenants.ScheduledMessageCleanup do
+defmodule Realtime.Tenants.Janitor do
   @moduledoc """
   Scheduled tasks for the Tenants.
   """
@@ -32,11 +32,11 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
             tasks: %{}
 
   def start_link(_args) do
-    timer = Application.get_env(:realtime, :schedule_clean, :timer.hours(4))
-    start_after = Application.get_env(:realtime, :scheduled_start_after, 0)
+    timer = Application.get_env(:realtime, :janitor_schedule_timer)
+    start_after = Application.get_env(:realtime, :janitor_run_after_in_ms, 0)
+    chunks = Application.get_env(:realtime, :janitor_chunk_size)
+    randomize = Application.get_env(:realtime, :janitor_schedule_randomize)
     region = Application.get_env(:realtime, :region)
-    chunks = Application.get_env(:realtime, :chunks, 10)
-    randomize = Application.get_env(:realtime, :scheduled_randomize, true)
 
     state = %__MODULE__{
       timer: timer,
@@ -53,13 +53,13 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
   def init(%__MODULE__{start_after: start_after} = state) do
     timer = timer(state) + start_after
     Process.send_after(self(), :delete_old_messages, timer)
-    Logger.info("ScheduledMessageCleanup started")
+    Logger.info("Janitor started")
     {:ok, state}
   end
 
   @impl true
   def handle_info(:delete_old_messages, state) do
-    Logger.info("ScheduledMessageCleanup started")
+    Logger.info("Janitor started")
     %{region: region, chunks: chunks, tasks: tasks} = state
     regions = Nodes.region_to_tenant_regions(region)
     region_nodes = Nodes.region_nodes(region)
@@ -140,11 +140,11 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
 
   defp run_cleanup_on_tenant(tenant) do
     Logger.metadata(project: tenant.external_id, external_id: tenant.external_id)
-    Logger.info("ScheduledMessageCleanup cleaned realtime.messages")
+    Logger.info("Janitor cleaned realtime.messages")
 
     with {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1),
          {:ok, _} <- Messages.delete_old_messages(conn) do
-      Logger.info("ScheduledMessageCleanup finished")
+      Logger.info("Janitor finished")
       :ok
     end
   end
