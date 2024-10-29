@@ -41,3 +41,4 @@ services:
       RLIMIT_NOFILE: 1000000
       DNS_NODES: "''"
       APP_NAME: realtime
+      LOG_LEVEL: "error"
