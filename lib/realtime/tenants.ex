@@ -104,6 +104,7 @@ defmodule Realtime.Tenants do
           end
         end)
 
+        Process.alive?(db_conn) && GenServer.stop(db_conn)
         {:ok, %{healthy: true, db_connected: false, connected_cluster: connected_cluster}}
     end
   end
