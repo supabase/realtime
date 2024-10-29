@@ -94,18 +94,13 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
 
     tenant_fixture(%{"extensions" => extensions, notify_private_alpha: true})
 
-    log =
-      capture_log(fn ->
-        start_supervised!(ScheduledMessageCleanup) |> IO.inspect()
-        Process.sleep(1000)
-      end)
-
-    IO.puts(log)
-    assert log =~ "FailedToDeleteOldMessages"
+    assert capture_log(fn ->
+             start_supervised!(ScheduledMessageCleanup)
+             Process.sleep(1000)
+           end) =~ "FailedToDeleteOldMessages"
   end
 
   defp run_test(tenants) do
-    IO.inspect(Enum.map(tenants, & &1.external_id))
     utc_now = NaiveDateTime.utc_now()
     limit = NaiveDateTime.add(utc_now, -72, :hour)
 
@@ -122,7 +117,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanupTest do
       |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gt))
       |> MapSet.new()
 
-    start_supervised!(ScheduledMessageCleanup) |> IO.inspect()
+    start_supervised!(ScheduledMessageCleanup)
     Process.sleep(500)
 
     current =

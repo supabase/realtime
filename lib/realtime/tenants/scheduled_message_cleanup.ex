@@ -21,7 +21,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
           chunks: pos_integer() | nil,
           start_after: pos_integer() | nil,
           randomize: boolean() | nil,
-          tasks: MapSet.t(Task.t())
+          tasks: map()
         }
 
   defstruct timer: nil,
@@ -29,7 +29,7 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
             chunks: nil,
             start_after: nil,
             randomize: nil,
-            tasks: MapSet.new()
+            tasks: %{}
 
   def start_link(_args) do
     timer = Application.get_env(:realtime, :schedule_clean, :timer.hours(4))
@@ -78,24 +78,41 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
       |> Stream.filter(&node_responsible_for_cleanup?(&1, region_nodes))
       |> Stream.chunk_every(chunks)
       |> Enum.map(fn chunks ->
-        %{
-          tenants: Enum.map(chunks, & &1.external_id),
-          task:
-            Task.Supervisor.async_nolink(
-              __MODULE__.TaskSupervisor,
-              fn -> run_cleanup_on_tenants(chunks) end,
-              ordered: false
-            )
-        }
+        task =
+          Task.Supervisor.async_nolink(
+            __MODULE__.TaskSupervisor,
+            fn -> run_cleanup_on_tenants(chunks) end,
+            ordered: false
+          )
+
+        {task.ref, Enum.map(chunks, & &1.external_id)}
       end)
+      |> Map.new()
 
     Process.send_after(self(), :delete_old_messages, timer(state))
 
-    {:noreply, state}
+    {:noreply, %{state | tasks: Map.merge(tasks, new_tasks)}}
   end
 
-  def handle_info(msg, state) do
-    IO.inspect(msg)
+  def handle_info({:DOWN, ref, _, _, :normal}, state) do
+    %{tasks: tasks} = state
+    {_, tasks} = Map.pop(tasks, ref)
+    {:noreply, %{state | tasks: tasks}}
+  end
+
+  def handle_info({:DOWN, ref, _, _, :killed}, state) do
+    %{tasks: tasks} = state
+    {tenants, tasks} = Map.pop(tasks, ref)
+
+    log_error(
+      "FailedToDeleteOldMessages",
+      "Scheduled cleanup failed for tenants: #{inspect(tenants)}"
+    )
+
+    {:noreply, %{state | tasks: tasks}}
+  end
+
+  def handle_info(_, state) do
     {:noreply, state}
   end
 
@@ -124,9 +141,8 @@ defmodule Realtime.Tenants.ScheduledMessageCleanup do
   defp run_cleanup_on_tenant(tenant) do
     Logger.metadata(project: tenant.external_id, external_id: tenant.external_id)
     Logger.info("ScheduledMessageCleanup cleaned realtime.messages")
-    IO.inspect("!!!")
 
-    with {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1) |> IO.inspect(),
+    with {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1),
          {:ok, _} <- Messages.delete_old_messages(conn) do
       Logger.info("ScheduledMessageCleanup finished")
       :ok
