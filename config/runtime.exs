@@ -227,3 +227,5 @@ if System.get_env("LOGS_ENGINE") == "logflare" do
   config :logger,
     backends: [LogflareLogger.HttpBackend]
 end
+
+config :logger, level: System.get_env("LOG_LEVEL", "warning") |> String.to_existing_atom()
