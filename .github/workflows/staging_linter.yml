@@ -6,7 +6,8 @@ on:
 jobs:
   format:
     name: Formatting Checks
-    runs-on: [self-hosted, X64]
+    runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v2
       - name: Setup elixir
