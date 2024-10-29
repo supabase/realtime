@@ -25,21 +25,27 @@ config :realtime,
   rpc_timeout: System.get_env("RPC_TIMEOUT", "30000") |> String.to_integer()
 
 if config_env() == :test do
-  config :realtime, run_scheduled: false
+  config :realtime, run_janitor: false
 else
   config :realtime,
-    run_scheduled: System.get_env("RUN_SCHEDULED", "true") == "true",
-    scheduled_randomize: System.get_env("RUN_SCHEDULED", "true") == "true",
+    run_janitor: System.get_env("RUN_JANITOR", "true") == "true",
+    # defaults to 4 hours
+    janitor_schedule_timer:
+      :timer.hours(4)
+      |> to_string()
+      |> then(&System.get_env("JANITOR_SCHEDULE_TIMER_IN_MS", &1))
+      |> String.to_integer(),
+    janitor_schedule_randomize: System.get_env("JANITOR_SCHEDULE_RANDOMIZE", "true") == "true",
     # defaults the runner to only start after 10 minutes
-    scheduled_start_after:
-      System.get_env("RUN_SCHEDULED_AFTER_IN_MS", "600000") |> String.to_integer()
+    janitor_run_after_in_ms:
+      System.get_env("JANITOR_RUN_AFTER_IN_MS", "600000") |> String.to_integer()
 end
 
 config :realtime,
-  max_children_scheduled_cleanup:
-    System.get_env("MAX_CHILDREN_SCHEDULED_CLEANUP", "5") |> String.to_integer(),
-  scheduled_cleanup_task_timeout:
-    System.get_env("SCHEDULED_CLEANUP_TASK_TIMEOUT", "5000") |> String.to_integer()
+  janitor_max_children: System.get_env("JANITOR_MAX_CHILDREN", "5") |> String.to_integer(),
+  janitor_children_timeout:
+    System.get_env("JANITOR_CHILDREN_TIMEOUT", "5000") |> String.to_integer(),
+  janitor_chunk_size: System.get_env("JANITOR_CHUNK_SIZE", "10") |> String.to_integer()
 
 if config_env() == :prod do
   secret_key_base =
@@ -228,4 +234,4 @@ if System.get_env("LOGS_ENGINE") == "logflare" do
     backends: [LogflareLogger.HttpBackend]
 end
 
-config :logger, level: System.get_env("LOG_LEVEL", "warning") |> String.to_existing_atom()
+config :logger, level: System.get_env("LOG_LEVEL", "warn") |> String.to_existing_atom()
