@@ -98,7 +98,9 @@ defmodule Realtime.Tenants.Connect do
   """
   @spec connect(binary(), keyword()) :: {:ok, DBConnection.t()} | {:error, term()}
   def connect(tenant_id, opts \\ []) do
-    supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, self()}}
+    supervisor =
+      {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, tenant_id}}
+
     spec = {__MODULE__, [tenant_id: tenant_id] ++ opts}
 
     case DynamicSupervisor.start_child(supervisor, spec) do
