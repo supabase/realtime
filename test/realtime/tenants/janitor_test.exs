@@ -38,6 +38,14 @@ defmodule Realtime.Tenants.JanitorTest do
         end
       )
 
+    start_supervised!(
+      {Task.Supervisor,
+       name: Realtime.Tenants.Janitor.TaskSupervisor,
+       max_children: 2,
+       max_seconds: 500,
+       max_restarts: 1}
+    )
+
     on_exit(fn ->
       Application.put_env(:realtime, :janitor_schedule_timer, timer)
       Application.put_env(:realtime, :platform, platform)

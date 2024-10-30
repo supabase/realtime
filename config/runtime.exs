@@ -24,28 +24,29 @@ config :realtime,
     System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer(),
   rpc_timeout: System.get_env("RPC_TIMEOUT", "30000") |> String.to_integer()
 
-if config_env() == :test do
+run_janitor? = System.get_env("RUN_JANITOR", "false") == "true"
+
+if config_env() == :test || run_janitor? do
   config :realtime, run_janitor: false
 else
   config :realtime,
-    run_janitor: System.get_env("RUN_JANITOR", "true") == "true",
+    # disabled for now by default
+    run_janitor: System.get_env("RUN_JANITOR", "false") == "true",
+    janitor_schedule_randomize: System.get_env("JANITOR_SCHEDULE_RANDOMIZE", "true") == "true",
+    janitor_max_children: System.get_env("JANITOR_MAX_CHILDREN", "5") |> String.to_integer(),
+    janitor_chunk_size: System.get_env("JANITOR_CHUNK_SIZE", "10") |> String.to_integer(),
+    # defaults the runner to only start after 10 minutes
+    janitor_run_after_in_ms:
+      System.get_env("JANITOR_RUN_AFTER_IN_MS", "600000") |> String.to_integer(),
+    janitor_children_timeout:
+      System.get_env("JANITOR_CHILDREN_TIMEOUT", "5000") |> String.to_integer(),
     # defaults to 4 hours
     janitor_schedule_timer:
       :timer.hours(4)
       |> to_string()
       |> then(&System.get_env("JANITOR_SCHEDULE_TIMER_IN_MS", &1))
-      |> String.to_integer(),
-    janitor_schedule_randomize: System.get_env("JANITOR_SCHEDULE_RANDOMIZE", "true") == "true",
-    # defaults the runner to only start after 10 minutes
-    janitor_run_after_in_ms:
-      System.get_env("JANITOR_RUN_AFTER_IN_MS", "600000") |> String.to_integer()
+      |> String.to_integer()
 end
-
-config :realtime,
-  janitor_max_children: System.get_env("JANITOR_MAX_CHILDREN", "5") |> String.to_integer(),
-  janitor_children_timeout:
-    System.get_env("JANITOR_CHILDREN_TIMEOUT", "5000") |> String.to_integer(),
-  janitor_chunk_size: System.get_env("JANITOR_CHUNK_SIZE", "10") |> String.to_integer()
 
 if config_env() == :prod do
   secret_key_base =
