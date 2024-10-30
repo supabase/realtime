@@ -26,7 +26,7 @@ config :realtime,
 
 run_janitor? = System.get_env("RUN_JANITOR", "false") == "true"
 
-if config_env() == :test || run_janitor? do
+if config_env() == :test || !run_janitor? do
   config :realtime, run_janitor: false
 else
   config :realtime,
