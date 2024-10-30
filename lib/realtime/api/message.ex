@@ -8,12 +8,12 @@ defmodule Realtime.Api.Message do
   @schema_prefix "realtime"
 
   schema "messages" do
-    field(:uuid, :string)
-    field(:topic, :string)
-    field(:extension, Ecto.Enum, values: [:broadcast, :presence])
-    field(:payload, :map)
-    field(:event, :string)
-    field(:private, :boolean)
+    field :uuid, :string
+    field :topic, :string
+    field :extension, Ecto.Enum, values: [:broadcast, :presence]
+    field :payload, :map
+    field :event, :string
+    field :private, :boolean
 
     timestamps()
   end
@@ -36,11 +36,11 @@ defmodule Realtime.Api.Message do
   end
 
   defp put_timestamp(changeset, field) do
-    put_change(changeset, field, NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second))
+    changeset |> put_change(field, NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second))
   end
 
   defp maybe_put_timestamp(changeset, field) do
-    case Map.get(changeset.changes, field) do
+    case Map.get(changeset.data, field) do
       nil -> put_timestamp(changeset, field)
       _ -> changeset
     end
