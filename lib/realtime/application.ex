@@ -4,7 +4,7 @@ defmodule Realtime.Application do
   @moduledoc false
 
   use Application
-  require Logger, warn: false
+  require Logger
   alias Realtime.Repo.Replica
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
