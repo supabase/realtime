@@ -90,7 +90,7 @@ defmodule Extensions.PostgresCdcStream do
     Logger.debug("Starting #{__MODULE__} extension with args: #{inspect(args, pretty: true)}")
 
     DynamicSupervisor.start_child(
-      {:via, PartitionSupervisor, {Stream.DynamicSupervisor, self()}},
+      {:via, PartitionSupervisor, {Stream.DynamicSupervisor, tenant}},
       %{
         id: tenant,
         start: {Stream.WorkerSupervisor, :start_link, [args]},

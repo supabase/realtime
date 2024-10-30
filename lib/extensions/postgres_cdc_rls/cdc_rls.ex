@@ -102,7 +102,7 @@ defmodule Extensions.PostgresCdcRls do
     Logger.debug("Starting #{__MODULE__} extension with args: #{inspect(args, pretty: true)}")
 
     DynamicSupervisor.start_child(
-      {:via, PartitionSupervisor, {Rls.DynamicSupervisor, self()}},
+      {:via, PartitionSupervisor, {Rls.DynamicSupervisor, tenant}},
       %{
         id: tenant,
         start: {Rls.WorkerSupervisor, :start_link, [args]},
