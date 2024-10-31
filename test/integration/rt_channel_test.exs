@@ -641,8 +641,6 @@ defmodule Realtime.Integration.RtChannelTest do
       table_name: table_name
     } do
       value = random_string()
-      Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
-      :timer.sleep(500)
 
       {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}, private: true}
@@ -653,6 +651,8 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "presence_state"}, 500
       :timer.sleep(500)
       new_value = random_string()
+
+      Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
 
       Postgrex.query!(db_conn, "UPDATE #{table_name} SET details = $1 WHERE details = $2", [
         new_value,
@@ -691,10 +691,6 @@ defmodule Realtime.Integration.RtChannelTest do
       db_conn: db_conn,
       table_name: table_name
     } do
-      value = random_string()
-      Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
-      :timer.sleep(500)
-
       {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
@@ -703,6 +699,9 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
       :timer.sleep(500)
+      value = random_string()
+
+      Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
       Postgrex.query!(db_conn, "DELETE FROM #{table_name} WHERE details = $1", [value])
 
       record = %{"details" => value, "id" => 1}
