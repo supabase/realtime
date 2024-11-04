@@ -19,10 +19,13 @@ username = System.get_env("DB_USER", "postgres")
 password = System.get_env("DB_PASSWORD", "postgres")
 database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
-socket_options = case detect_ip_version.(default_db_host) do
-  {:ok, ip_version} -> [ ip_version ]
-  {:error, reason} -> raise "Failed to detect IP version for DB_HOST: #{reason}"
-end
+
+socket_options =
+  case detect_ip_version.(default_db_host) do
+    {:ok, ip_version} -> [ip_version]
+    {:error, reason} -> raise "Failed to detect IP version for DB_HOST: #{reason}"
+  end
+
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
 
 config :realtime,
