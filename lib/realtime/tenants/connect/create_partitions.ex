@@ -17,7 +17,7 @@ defmodule Realtime.Tenants.Connect.CreatePartitions do
       end_timestamp = Date.to_string(Date.add(date, 1))
 
       Database.transaction(db_conn_pid, fn conn ->
-        Postgrex.query!(
+        Postgrex.query(
           conn,
           """
           CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
