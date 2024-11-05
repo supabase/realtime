@@ -143,7 +143,7 @@ defmodule Realtime.Tenants.Janitor do
     Logger.info("Janitor cleaned realtime.messages")
 
     with {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1),
-         {:ok, _} <- Messages.delete_old_messages(conn) do
+         :ok <- Messages.delete_old_messages(conn) do
       Logger.info("Janitor finished")
       :ok
     end

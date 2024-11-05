@@ -15,7 +15,7 @@ defmodule Realtime.MessagesTest do
 
     {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
     clean_table(conn, "realtime", "messages")
-
+    create_messages_partitions(conn, Date.utc_today() |> Date.add(-10), Date.utc_today())
     %{conn: conn, tenant: tenant}
   end
 
@@ -35,7 +35,7 @@ defmodule Realtime.MessagesTest do
         &(NaiveDateTime.compare(limit, &1.inserted_at) == :gt)
       )
 
-    Messages.delete_old_messages(conn)
+    assert :ok = Messages.delete_old_messages(conn)
     {:ok, current} = Repo.all(conn, from(m in Message), Message)
 
     assert current == to_keep

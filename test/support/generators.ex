@@ -92,6 +92,24 @@ defmodule Generators do
     end)
   end
 
+  def create_messages_partitions(db_conn, start_date, end_date) do
+    Enum.each(Date.range(start_date, end_date), fn date ->
+      partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"
+      start_timestamp = Date.to_string(date)
+      end_timestamp = Date.to_string(Date.add(date, 1))
+
+      Postgrex.query!(
+        db_conn,
+        """
+        CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
+        PARTITION OF realtime.messages
+        FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
+        """,
+        []
+      )
+    end)
+  end
+
   @doc """
   Creates support RLS policies given a name and params to be used by the policies
   Supported:

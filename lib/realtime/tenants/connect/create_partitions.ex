@@ -12,7 +12,7 @@ defmodule Realtime.Tenants.Connect.CreatePartitions do
     dates = [yesterday, today, tomorrow]
 
     Enum.each(dates, fn date ->
-      partition_name = "messages_#{Date.to_iso8601(date, :basic)}"
+      partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"
       start_timestamp = Date.to_string(date)
       end_timestamp = Date.to_string(Date.add(date, 1))
 
