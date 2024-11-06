@@ -26,6 +26,7 @@ defmodule Realtime.Api.Tenant do
     field(:events_per_second_rolling, :float, virtual: true)
     field(:events_per_second_now, :integer, virtual: true)
     field(:notify_private_alpha, :boolean, default: false)
+    field(:private_only, :boolean, default: false)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -101,5 +102,18 @@ defmodule Realtime.Api.Tenant do
 
   def encrypt_jwt_secret(changeset) do
     update_change(changeset, :jwt_secret, &Crypto.encrypt!/1)
+  end
+
+  def management_changeset(tenant, attrs) do
+    cast(tenant, attrs, [
+      :max_concurrent_users,
+      :max_events_per_second,
+      :max_bytes_per_second,
+      :max_channels_per_client,
+      :max_joins_per_second,
+      :suspend,
+      :notify_private_alpha,
+      :private_only
+    ])
   end
 end

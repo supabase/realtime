@@ -90,6 +90,7 @@ defmodule RealtimeWeb.Router do
     pipe_through(:api)
 
     resources("/tenants", TenantController, param: "tenant_id", except: [:edit, :new])
+    patch("/tenants/:tenant_id", TenantController, :patch)
     post("/tenants/:tenant_id/reload", TenantController, :reload)
     get("/tenants/:tenant_id/health", TenantController, :health)
   end
