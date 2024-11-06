@@ -288,7 +288,7 @@ defmodule RealtimeWeb.TenantController do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     case Tenants.update_management(tenant_id, attrs) do
-      {:ok, %Tenant{} = tenant} ->
+      %Tenant{} = tenant ->
         render(conn, "show.json", tenant: tenant)
 
       {:error, :tenant_not_found} ->
