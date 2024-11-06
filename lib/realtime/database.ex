@@ -179,7 +179,7 @@ defmodule Realtime.Database do
   end
 
   defp enforce_ssl_config(db_config) when is_list(db_config) do
-    db_config ++ [ssl: true, ssl_opts: [verify: :verify_none]]
+    db_config ++ [ssl: [verify: :verify_none]]
   end
 
   @doc """

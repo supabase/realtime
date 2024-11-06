@@ -70,7 +70,7 @@ defmodule Realtime.BroadcastChanges.Handler do
 
     ssl =
       if connection_opts.ssl_enforced,
-        do: [ssl: true, ssl_opts: [verify: :verify_none]],
+        do: [ssl: [verify: :verify_none]],
         else: [ssl: false]
 
     connection_opts =
