@@ -300,20 +300,20 @@ defmodule RealtimeWeb.TenantControllerTest do
           "private_only" => true
         }
 
-        conn = patch(conn, Routes.tenant_path(conn, :patch, tenant.external_id, tenant: attrs))
+        conn = patch(conn, Routes.tenant_path(conn, :patch, tenant.external_id), attrs)
         data = json_response(conn, 200)["data"]
         assert data["max_concurrent_users"] == 300
         assert data["max_channels_per_client"] == 150
         assert data["max_events_per_second"] == 250
         assert data["max_joins_per_second"] == 50
-        assert data["private_only"] == false
+        assert data["private_only"] == true
 
-        tenant = Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
+        tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
         assert tenant.max_concurrent_users == 300
         assert tenant.max_channels_per_client == 150
         assert tenant.max_events_per_second == 250
         assert tenant.max_joins_per_second == 50
-        assert tenant.private_only == false
+        assert tenant.private_only == true
       end
     end
   end
