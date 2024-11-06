@@ -24,7 +24,8 @@ defmodule RealtimeWeb.TenantView do
       max_events_per_second: tenant.max_events_per_second,
       max_joins_per_second: tenant.max_joins_per_second,
       inserted_at: tenant.inserted_at,
-      extensions: tenant.extensions
+      extensions: tenant.extensions,
+      private_only: tenant.private_only
     }
   end
 end
