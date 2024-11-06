@@ -291,7 +291,7 @@ defmodule RealtimeWeb.TenantController do
       %Tenant{} = tenant ->
         render(conn, "show.json", tenant: tenant)
 
-      {:error, :tenant_not_found} ->
+      nil ->
         Helpers.log_error("TenantNotFound", "Tenant not found")
 
         conn
