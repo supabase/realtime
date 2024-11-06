@@ -62,7 +62,8 @@ defmodule Realtime.Tenants.Migrations do
     FilterDeletePostgresChanges,
     AddPayloadToMessages,
     ChangeMessagesIdType,
-    UuidAutoGeneration
+    UuidAutoGeneration,
+    MessagesPartitioning
   }
 
   @migrations [
@@ -115,7 +116,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_827_160_934, FilterDeletePostgresChanges},
     {20_240_919_163_303, AddPayloadToMessages},
     {20_240_919_163_305, ChangeMessagesIdType},
-    {20_241_019_105_805, UuidAutoGeneration}
+    {20_241_019_105_805, UuidAutoGeneration},
+    {20_241_030_150_047, MessagesPartitioning}
   ]
   defstruct [:tenant_external_id, :settings]
   @spec run_migrations(map()) :: :ok | {:error, any()}

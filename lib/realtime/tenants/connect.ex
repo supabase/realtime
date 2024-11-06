@@ -24,6 +24,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants.Connect.GetTenant
   alias Realtime.Tenants.Connect.RegisterProcess
   alias Realtime.Tenants.Connect.StartCounters
+  alias Realtime.Tenants.Connect.CreatePartitions
 
   @pipes [
     GetTenant,
@@ -31,7 +32,8 @@ defmodule Realtime.Tenants.Connect do
     Migrations,
     StartCounters,
     StartReplication,
-    RegisterProcess
+    RegisterProcess,
+    CreatePartitions
   ]
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default 50_000
