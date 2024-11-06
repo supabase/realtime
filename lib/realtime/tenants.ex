@@ -278,7 +278,7 @@ defmodule Realtime.Tenants do
     :notify_private_alpha
     :private_only
   """
-  @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
+  @spec update_management(String.t(), map()) :: Tenant.t() | nil
   def update_management(tenant_id, attrs) do
     tenant_id
     |> Cache.get_tenant_by_external_id()
