@@ -70,4 +70,20 @@ defmodule Realtime.TenantsTest do
       assert_receive {:unsuspend_tenant, ^external_id}, 1000
     end
   end
+
+  describe "update_management/2" do
+    setup do
+      tenant = tenant_fixture()
+      topic = "realtime:operations:invalidate_cache"
+      Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
+      %{topic: topic, tenant: tenant}
+    end
+
+    test "sets private_only flag to true and invalidates cache" do
+      %{external_id: external_id} = tenant_fixture(%{private_only: false})
+      tenant = Tenants.update_management(external_id, %{private_only: true})
+      assert tenant.private_only == true
+      assert_receive {:invalidate_cache, ^external_id}, 1000
+    end
+  end
 end

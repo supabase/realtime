@@ -284,6 +284,35 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
   end
 
+  describe "update tenant management information" do
+    setup [:create_tenant]
+
+    test "changes management information and returns updated values", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        attrs = %{
+          "max_concurrent_users" => 300,
+          "max_channels_per_client" => 150,
+          "max_events_per_second" => 250,
+          "max_joins_per_second" => 50,
+          "private_only" => true
+        }
+
+        conn = patch(conn, Routes.tenant_path(conn, :patch, tenant.external_id, tenant: attrs))
+        data = json_response(conn, 200)["data"]
+
+        tenant = Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
+        assert tenant.max_concurrent_users == 300
+        assert tenant.max_channels_per_client == 150
+        assert tenant.max_events_per_second == 250
+        assert tenant.max_joins_per_second == 50
+        assert tenant.private_only == false
+      end
+    end
+  end
+
   defp create_tenant(_) do
     %{tenant: tenant_fixture()}
   end

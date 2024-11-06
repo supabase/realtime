@@ -283,4 +283,20 @@ defmodule RealtimeWeb.TenantController do
         |> render("not_found.json", tenant: nil)
     end
   end
+
+  def patch(conn, %{"tenant_id" => tenant_id} = attrs) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+
+    case Tenants.update_management(tenant_id, attrs) do
+      {:ok, %Tenant{} = tenant} ->
+        render(conn, "show.json", tenant: tenant)
+
+      {:error, :tenant_not_found} ->
+        Helpers.log_error("TenantNotFound", "Tenant not found")
+
+        conn
+        |> put_status(404)
+        |> render("not_found.json", tenant: nil)
+    end
+  end
 end
