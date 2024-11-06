@@ -150,6 +150,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
         role: claims.role
       })
 
+    Realtime.Tenants.Connect.CreatePartitions.run(%{db_conn_pid: db_conn})
+
     on_exit(fn -> Process.exit(db_conn, :normal) end)
 
     %{
