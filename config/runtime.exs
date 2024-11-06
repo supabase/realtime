@@ -232,5 +232,7 @@ if System.get_env("LOGS_ENGINE") == "logflare" do
   end
 
   config :logger,
+    sync_threshold: 1_000,
+    discard_threshold: 1_000,
     backends: [LogflareLogger.HttpBackend]
 end
