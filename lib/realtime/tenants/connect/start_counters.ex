@@ -36,7 +36,7 @@ defmodule Realtime.Tenants.Connect.StartCounters do
         telemetry: %{
           event_name: [:channel, :joins],
           measurements: %{limit: max_joins_per_second},
-          metadata: %{tenant: tenant}
+          metadata: %{tenant: tenant.external_id}
         }
       )
 
@@ -60,7 +60,7 @@ defmodule Realtime.Tenants.Connect.StartCounters do
         telemetry: %{
           event_name: [:channel, :events],
           measurements: %{limit: max_events_per_second},
-          metadata: %{tenant: tenant}
+          metadata: %{tenant: tenant.external_id}
         }
       )
 
@@ -81,7 +81,7 @@ defmodule Realtime.Tenants.Connect.StartCounters do
         telemetry: %{
           event_name: [:channel, :db_events],
           measurements: %{},
-          metadata: %{tenant: tenant}
+          metadata: %{tenant: tenant.external_id}
         }
       )
 
