@@ -74,7 +74,8 @@ defmodule Realtime.Api.Tenant do
       :max_channels_per_client,
       :max_joins_per_second,
       :suspend,
-      :notify_private_alpha
+      :notify_private_alpha,
+      :private_only
     ])
     |> validate_required([
       :external_id,

@@ -801,6 +801,56 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
+  describe "only private channels" do
+    setup [:rls_context]
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "user with only private channels enabled will not be able to join public channels", %{
+      topic: topic
+    } do
+      Realtime.Tenants.update_management(@external_id, %{private_only: true})
+      :timer.sleep(100)
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{"reason" => "This project only allows private channels"},
+                         "status" => "error"
+                       }
+                     },
+                     500
+
+      Realtime.Tenants.update_management(@external_id, %{private_only: false})
+      :timer.sleep(100)
+    end
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "user with only private channels enabled will be able to join private channels", %{
+      topic: topic
+    } do
+      Realtime.Tenants.update_management(@external_id, %{private_only: true})
+      :timer.sleep(100)
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: true}
+      topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      Realtime.Tenants.update_management(@external_id, %{private_only: false})
+      :timer.sleep(100)
+    end
+  end
+
   defp token_valid(role), do: generate_token(%{role: role})
   defp token_no_role(), do: generate_token()
 

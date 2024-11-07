@@ -154,7 +154,7 @@ defmodule Realtime.RepoTest do
     test "fetches one entry and loads a given struct", %{db_conn: db_conn, tenant: tenant} do
       message_1 = message_fixture(tenant)
       _message_2 = message_fixture(tenant)
-      query = from c in Message, where: c.id == ^message_1.id
+      query = from(c in Message, where: c.id == ^message_1.id)
       assert {:ok, ^message_1} = Repo.one(db_conn, query, Message)
       assert Ecto.get_meta(message_1, :state) == :loaded
     end
@@ -169,19 +169,23 @@ defmodule Realtime.RepoTest do
     end
 
     test "if not found, returns not found error", %{db_conn: db_conn} do
-      query = from c in Message, where: c.topic == "potato"
+      query = from(c in Message, where: c.topic == "potato")
       assert {:error, :not_found} = Repo.one(db_conn, query, Message)
     end
 
     test "handles exceptions", %{db_conn: db_conn} do
       Process.unlink(db_conn)
       Process.exit(db_conn, :kill)
-      query = from c in Message, where: c.topic == "potato"
+      query = from(c in Message, where: c.topic == "potato")
       assert {:error, :postgrex_exception} = Repo.one(db_conn, query, Message)
     end
   end
 
   describe "insert/3" do
+    setup %{db_conn: db_conn} do
+      Realtime.Tenants.Connect.CreatePartitions.run(%{db_conn_pid: db_conn})
+    end
+
     test "inserts a new entry with a given changeset and returns struct", %{db_conn: db_conn} do
       changeset = Message.changeset(%Message{}, %{topic: "foo", extension: :presence})
 
@@ -271,7 +275,7 @@ defmodule Realtime.RepoTest do
 
     test "raises error on bad queries", %{db_conn: db_conn} do
       # wrong id type
-      query = from c in Message, where: c.id == "potato"
+      query = from(c in Message, where: c.id == "potato")
 
       assert_raise Ecto.QueryError, fn ->
         Repo.del(db_conn, query)

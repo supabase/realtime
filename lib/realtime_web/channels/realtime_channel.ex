@@ -49,6 +49,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     start_db_rate_counter(tenant_id)
 
     with false <- SignalHandler.shutdown_in_progress?(),
+         :ok <- only_private?(tenant_id, socket),
          :ok <- limit_joins(socket.assigns),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket.assigns),
@@ -129,6 +130,13 @@ defmodule RealtimeWeb.RealtimeChannel do
           :error,
           "InvalidJWTExpiration",
           "Token expiration time is invalid"
+        )
+
+      {:error, :private_only} ->
+        Logging.log_error_message(
+          :error,
+          "PrivateOnly",
+          "This project only allows private channels"
         )
 
       {:error, error} ->
@@ -675,5 +683,15 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp maybe_assign_policies(_, _, _, _, socket) do
     {:ok, assign(socket, policies: nil)}
+  end
+
+  @spec only_private?(String.t(), map()) :: :ok | {:error, :private_only}
+  defp only_private?(tenant_id, %{assigns: %{check_authorization?: check_authorization?}}) do
+    tenant = Tenants.get_tenant_by_external_id(tenant_id)
+
+    cond do
+      tenant.private_only and !check_authorization? -> {:error, :private_only}
+      true -> :ok
+    end
   end
 end
