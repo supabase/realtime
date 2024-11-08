@@ -8,6 +8,7 @@ defmodule Realtime.Tenants.Janitor do
 
   import Realtime.Helpers, only: [log_error: 2]
 
+  alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Messages
   alias Realtime.Repo
@@ -62,9 +63,10 @@ defmodule Realtime.Tenants.Janitor do
 
     {:ok, new_tasks} =
       Repo.transaction(fn ->
-        Tenants.stream_active_tenants()
+        Tenants.list_active_tenants()
+        |> Stream.map(&elem(&1, 0))
         |> Stream.chunk_every(chunks)
-        |> Enum.map(fn chunks ->
+        |> Stream.map(fn chunks ->
           task =
             Task.Supervisor.async_nolink(
               __MODULE__.TaskSupervisor,
@@ -72,7 +74,7 @@ defmodule Realtime.Tenants.Janitor do
               ordered: false
             )
 
-          {task.ref, Enum.map(chunks, & &1.external_id)}
+          {task.ref, chunks}
         end)
         |> Map.new()
       end)
@@ -110,13 +112,15 @@ defmodule Realtime.Tenants.Janitor do
 
   defp run_cleanup_on_tenants(tenants), do: Enum.map(tenants, &run_cleanup_on_tenant/1)
 
-  defp run_cleanup_on_tenant(tenant) do
-    Logger.metadata(project: tenant.external_id, external_id: tenant.external_id)
+  defp run_cleanup_on_tenant(tenant_external_id) do
+    Logger.metadata(project: tenant_external_id, external_id: tenant_external_id)
     Logger.info("Janitor cleaned realtime.messages")
 
-    with {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1),
+    with %Tenant{} = tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_external_id),
+         {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1),
          :ok <- Messages.delete_old_messages(conn) do
       Logger.info("Janitor finished")
+      Tenants.untrack_active_tenant(tenant_external_id)
       :ok
     end
   end

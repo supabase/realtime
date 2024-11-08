@@ -5,18 +5,14 @@ defmodule Realtime.Tenants do
 
   require Logger
 
-  import Ecto.Query
-
   alias Realtime.Tenants.Migrations
   alias Realtime.Api.Tenant
-  alias Realtime.Api.Extensions
   alias Realtime.Tenants.Connect
   alias Realtime.Repo
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.Cache
   alias Realtime.UsersCounter
   alias Realtime.Database
-  alias Realtime.Nodes
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
@@ -293,37 +289,32 @@ defmodule Realtime.Tenants do
   end
 
   @doc """
-  Sets last active at to a given tenant by external_id
+  Tracks the active tenant by external_id and stores the time when it was tracked in the ETS table named `:active_tenants`.
   """
-  @spec set_last_active_at(String.t() | nil) :: Tenant.t() | nil
-  def set_last_active_at(nil), do: nil
+  @spec track_active_tenant(String.t()) :: :ok
+  def track_active_tenant(external_id) do
+    if :ets.whereis(:active_tenants) == :undefined,
+      do: :ets.new(:active_tenants, [:named_table, :set, :public])
 
-  def set_last_active_at(external_id) do
-    external_id
-    |> get_tenant_by_external_id()
-    |> Tenant.last_active_at_changeset(%{last_active_at: NaiveDateTime.utc_now()})
-    |> Repo.update!()
+    :ets.insert(:active_tenants, {external_id, NaiveDateTime.utc_now()})
+    :ok
   end
 
   @doc """
-  Returns list of active tenants as a Stream that are allocated to this node. The stream will also preload the extensions.
-
-  An active tenant is a tenant that has `last_active_at` higher than the given days.
-
-  Defaults to 5 days.
+  Lists all active tenants from the ETS table named `:active_tenants`.
   """
-  def stream_active_tenants(days \\ 5) do
-    region = Application.get_env(:realtime, :region)
-    regions = Nodes.region_to_tenant_regions(region)
-    region_nodes = Nodes.region_nodes(region)
+  @spec track_active_tenant(String.t()) :: list({String.t(), NaiveDateTime.t()})
+  def list_active_tenants() do
+    :ets.tab2list(:active_tenants)
+  end
 
-    from(t in Tenant,
-      where: t.last_active_at > ^(NaiveDateTime.utc_now() |> NaiveDateTime.add(-days, :day))
-    )
-    |> where_region(regions)
-    |> Repo.stream()
-    |> Stream.filter(&is_node_responsible?(&1, region_nodes))
-    |> Stream.map(&Repo.preload(&1, :extensions))
+  @doc """
+  Untracks the active tenant by external_id from the ETS table named `:active_tenants`.
+  """
+  @spec untrack_active_tenant(String.t()) :: :ok
+  def untrack_active_tenant(external_id) do
+    :ets.delete(:active_tenants, external_id)
+    :ok
   end
 
   defp broadcast_operation_event(action, external_id) do
@@ -332,24 +323,5 @@ defmodule Realtime.Tenants do
       "realtime:operations:invalidate_cache",
       {action, external_id}
     )
-  end
-
-  defp where_region(query, nil), do: query
-
-  defp where_region(query, regions) do
-    query
-    |> join(:inner, [t], e in Extensions, on: t.external_id == e.tenant_external_id)
-    |> where([t, e], fragment("? -> 'region' in (?)", e.settings, splice(^regions)))
-  end
-
-  defp is_node_responsible?(%Tenant{external_id: external_id}, region_nodes) do
-    case Node.self() do
-      :nonode@nohost ->
-        true
-
-      _ ->
-        index = :erlang.phash2(external_id, length(region_nodes))
-        Enum.at(region_nodes, index) == Node.self()
-    end
   end
 end
