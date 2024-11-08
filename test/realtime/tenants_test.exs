@@ -82,8 +82,8 @@ defmodule Realtime.TenantsTest do
     test "sets private_only flag to true and invalidates cache" do
       %{external_id: external_id} = tenant_fixture(%{private_only: false})
       tenant = Tenants.update_management(external_id, %{private_only: true})
-      assert tenant.private_only == true
-      assert_receive {:invalidate_cache, ^external_id}, 1000
+      assert tenant.private_only
+      assert Tenants.Cache.get_tenant_by_external_id(external_id).private_only
     end
   end
 end
