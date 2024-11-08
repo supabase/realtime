@@ -27,6 +27,7 @@ defmodule Realtime.Api.Tenant do
     field(:events_per_second_now, :integer, virtual: true)
     field(:notify_private_alpha, :boolean, default: false)
     field(:private_only, :boolean, default: false)
+    field(:last_active_at, :naive_datetime)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -75,7 +76,8 @@ defmodule Realtime.Api.Tenant do
       :max_joins_per_second,
       :suspend,
       :notify_private_alpha,
-      :private_only
+      :private_only,
+      :last_active_at
     ])
     |> validate_required([
       :external_id,
@@ -116,5 +118,9 @@ defmodule Realtime.Api.Tenant do
       :notify_private_alpha,
       :private_only
     ])
+  end
+
+  def last_active_at_changeset(tenant, attrs) do
+    cast(tenant, attrs, [:last_active_at])
   end
 end

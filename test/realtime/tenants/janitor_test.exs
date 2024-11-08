@@ -24,7 +24,8 @@ defmodule Realtime.Tenants.JanitorTest do
     tenants =
       Enum.map(
         [
-          tenant_fixture(notify_private_alpha: true),
+          tenant_fixture(),
+          tenant_fixture(last_active_at: NaiveDateTime.add(NaiveDateTime.utc_now(), -6, :day)),
           dev_tenant
         ],
         fn tenant ->
@@ -55,7 +56,9 @@ defmodule Realtime.Tenants.JanitorTest do
   end
 
   describe "single node setup" do
-    test "cleans messages of multiple tenants", %{tenants: tenants} do
+    test "cleans messages of multiple tenants that have active in the last 5 days", %{
+      tenants: tenants
+    } do
       run_test(tenants)
     end
   end

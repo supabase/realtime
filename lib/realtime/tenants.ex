@@ -4,14 +4,19 @@ defmodule Realtime.Tenants do
   """
 
   require Logger
+
+  import Ecto.Query
+
   alias Realtime.Tenants.Migrations
   alias Realtime.Api.Tenant
+  alias Realtime.Api.Extensions
   alias Realtime.Tenants.Connect
   alias Realtime.Repo
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.Cache
   alias Realtime.UsersCounter
   alias Realtime.Database
+  alias Realtime.Nodes
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
@@ -287,11 +292,62 @@ defmodule Realtime.Tenants do
     |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(tenant_id) end)
   end
 
+  @doc """
+  Sets last active at to a given tenant by external_id
+  """
+  @spec set_last_active_at(String.t()) :: Tenant.t() | nil
+  def set_last_active_at(external_id) do
+    external_id
+    |> get_tenant_by_external_id()
+    |> Tenant.last_active_at_changeset(%{last_active_at: NaiveDateTime.utc_now()})
+    |> Repo.update!()
+  end
+
+  @doc """
+  Returns list of active tenants as a Stream that are allocated to this node. The stream will also preload the extensions.
+
+  An active tenant is a tenant that has `last_active_at` higher than the given days.
+
+  Defaults to 5 days.
+  """
+  def stream_active_tenants(days \\ 5) do
+    region = Application.get_env(:realtime, :region)
+    regions = Nodes.region_to_tenant_regions(region)
+    region_nodes = Nodes.region_nodes(region)
+
+    from(t in Tenant,
+      where: t.last_active_at > ^(NaiveDateTime.utc_now() |> NaiveDateTime.add(-days, :day))
+    )
+    |> where_region(regions)
+    |> Repo.stream()
+    |> Stream.filter(&is_node_responsible?(&1, region_nodes))
+    |> Stream.map(&Repo.preload(&1, :extensions))
+  end
+
   defp broadcast_operation_event(action, external_id) do
     Phoenix.PubSub.broadcast!(
       Realtime.PubSub,
       "realtime:operations:invalidate_cache",
       {action, external_id}
     )
+  end
+
+  defp where_region(query, nil), do: query
+
+  defp where_region(query, regions) do
+    query
+    |> join(:inner, [t], e in Extensions, on: t.external_id == e.tenant_external_id)
+    |> where([t, e], fragment("? -> 'region' in (?)", e.settings, splice(^regions)))
+  end
+
+  defp is_node_responsible?(%Tenant{external_id: external_id}, region_nodes) do
+    case Node.self() do
+      :nonode@nohost ->
+        true
+
+      _ ->
+        index = :erlang.phash2(external_id, length(region_nodes))
+        Enum.at(region_nodes, index) == Node.self()
+    end
   end
 end

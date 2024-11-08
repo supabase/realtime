@@ -233,6 +233,13 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :kill, state}
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    Realtime.Tenants.set_last_active_at(state.tenant_id)
+
+    :ok
+  end
+
   ## Private functions
 
   defp call_external_node(tenant_id, opts) do

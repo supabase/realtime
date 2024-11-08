@@ -66,6 +66,9 @@ defmodule Realtime.Tenants.ConnectTest do
     test "if no users are connected to a tenant channel, stop the connection", %{
       tenant: %{external_id: tenant_id}
     } do
+      tenant = Realtime.Tenants.get_tenant_by_external_id(tenant_id)
+      assert is_nil(tenant.last_active_at)
+
       {:ok, db_conn} =
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 50)
 
@@ -77,6 +80,9 @@ defmodule Realtime.Tenants.ConnectTest do
       :timer.sleep(1000)
       assert :undefined = :syn.lookup(Connect, tenant_id)
       refute Process.alive?(db_conn)
+      # Updates last_active_at
+      tenant = Repo.reload!(tenant)
+      assert tenant.last_active_at
     end
 
     test "if users are connected to a tenant channel, keep the connection", %{
@@ -131,7 +137,11 @@ defmodule Realtime.Tenants.ConnectTest do
 
       :timer.sleep(200)
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      on_exit(fn -> Process.exit(db_conn, :shutdown) end)
+
+      on_exit(fn ->
+        Process.exit(db_conn, :shutdown)
+        :timer.sleep(200)
+      end)
     end
 
     test "properly handles of failing calls by avoid creating too many connections" do
