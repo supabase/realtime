@@ -61,7 +61,7 @@ defmodule Realtime.Tenants.ConnectTest do
         }
       ]
 
-      tenant = tenant_fixture(%{"extensions" => extensions})
+      tenant = tenant_fixture(%{extensions: extensions})
 
       assert {:error, :tenant_database_unavailable} =
                Connect.lookup_or_start_connection(tenant.external_id)

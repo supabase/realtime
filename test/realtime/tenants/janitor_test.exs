@@ -108,7 +108,7 @@ defmodule Realtime.Tenants.JanitorTest do
       }
     ]
 
-    tenant = tenant_fixture(%{"extensions" => extensions})
+    tenant = tenant_fixture(%{extensions: extensions})
     Tenants.track_active_tenant(tenant.external_id)
 
     assert capture_log(fn ->
