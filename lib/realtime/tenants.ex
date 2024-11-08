@@ -293,9 +293,6 @@ defmodule Realtime.Tenants do
   """
   @spec track_active_tenant(String.t()) :: :ok
   def track_active_tenant(external_id) do
-    if :ets.whereis(:active_tenants) == :undefined,
-      do: :ets.new(:active_tenants, [:named_table, :set, :public])
-
     :ets.insert(:active_tenants, {external_id, NaiveDateTime.utc_now()})
     :ok
   end
