@@ -48,6 +48,7 @@ defmodule Realtime.Application do
 
     region = Application.get_env(:realtime, :region)
     :syn.join(RegionNodes, region, self(), node: node())
+    :ets.new(:active_tenants, [:named_table, :set, :public])
 
     children =
       [

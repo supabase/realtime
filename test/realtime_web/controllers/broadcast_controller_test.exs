@@ -132,7 +132,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       start_supervised(Realtime.RateCounter.DynamicSupervisor)
       start_supervised(Realtime.GenCounter.DynamicSupervisor)
 
-      tenant = tenant_fixture(%{"max_events_per_second" => 1})
+      tenant = tenant_fixture(%{max_events_per_second: 1})
       GenCounter.new(Tenants.events_per_second_key(tenant.external_id))
 
       conn =

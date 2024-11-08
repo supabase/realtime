@@ -1,5 +1,6 @@
 defmodule Realtime.Tenants.JanitorTest do
   # async: false due to using database process
+  alias Realtime.Tenants
   use Realtime.DataCase, async: false
 
   import ExUnit.CaptureLog
@@ -14,17 +15,15 @@ defmodule Realtime.Tenants.JanitorTest do
   setup do
     dev_tenant = Tenant |> Repo.all() |> hd()
     timer = Application.get_env(:realtime, :janitor_schedule_timer)
-    platform = Application.get_env(:realtime, :platform)
 
     Application.put_env(:realtime, :janitor_schedule_timer, 200)
     Application.put_env(:realtime, :janitor_schedule_randomize, false)
     Application.put_env(:realtime, :janitor_chunk_size, 2)
-    Application.put_env(:realtime, :platform, :aws)
 
     tenants =
       Enum.map(
         [
-          tenant_fixture(notify_private_alpha: true),
+          tenant_fixture(),
           dev_tenant
         ],
         fn tenant ->
@@ -34,6 +33,7 @@ defmodule Realtime.Tenants.JanitorTest do
           Migrations.run_migrations(migrations)
           {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
           clean_table(conn, "realtime", "messages")
+          Tenants.track_active_tenant(tenant.external_id)
           tenant
         end
       )
@@ -48,66 +48,15 @@ defmodule Realtime.Tenants.JanitorTest do
 
     on_exit(fn ->
       Application.put_env(:realtime, :janitor_schedule_timer, timer)
-      Application.put_env(:realtime, :platform, platform)
     end)
 
     %{tenants: tenants}
   end
 
-  describe "single node setup" do
-    test "cleans messages of multiple tenants", %{tenants: tenants} do
-      run_test(tenants)
-    end
-  end
-
-  describe "multi node setup" do
-    setup do
-      region = Application.get_env(:realtime, :region)
-      Application.put_env(:realtime, :region, "us-east-1")
-
-      {:ok, _} = :net_kernel.start([:"primary@127.0.0.1"])
-      :syn.join(RegionNodes, "us-east-1", self(), node: node())
-
-      on_exit(fn ->
-        :net_kernel.stop()
-        :syn.leave(RegionNodes, "us-east-1", self())
-        Application.put_env(:realtime, :region, region)
-      end)
-    end
-
-    test "cleans messages of multiple tenants", %{tenants: tenants} do
-      run_test(tenants)
-    end
-  end
-
-  test "logs error if fails to connect to tenant" do
-    extensions = [
-      %{
-        "type" => "postgres_cdc_rls",
-        "settings" => %{
-          "db_host" => "localhost",
-          "db_name" => "postgres",
-          "db_user" => "supabase_admin",
-          "db_password" => "bad",
-          "db_port" => "5433",
-          "poll_interval" => 100,
-          "poll_max_changes" => 100,
-          "poll_max_record_bytes" => 1_048_576,
-          "region" => "us-east-1",
-          "ssl_enforced" => false
-        }
-      }
-    ]
-
-    tenant_fixture(%{"extensions" => extensions, notify_private_alpha: true})
-
-    assert capture_log(fn ->
-             start_supervised!(Janitor)
-             Process.sleep(1000)
-           end) =~ "JanitorFailedToDeleteOldMessages"
-  end
-
-  defp run_test(tenants) do
+  test "cleans messages older than 72 hours from tenants that were active and untracks the user",
+       %{
+         tenants: tenants
+       } do
     utc_now = NaiveDateTime.utc_now()
     limit = NaiveDateTime.add(utc_now, -72, :hour)
 
@@ -137,5 +86,34 @@ defmodule Realtime.Tenants.JanitorTest do
       |> MapSet.new()
 
     assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
+    assert Tenants.list_active_tenants() == []
+  end
+
+  test "logs error if fails to connect to tenant" do
+    extensions = [
+      %{
+        "type" => "postgres_cdc_rls",
+        "settings" => %{
+          "db_host" => "localhost",
+          "db_name" => "postgres",
+          "db_user" => "supabase_admin",
+          "db_password" => "bad",
+          "db_port" => "5433",
+          "poll_interval" => 100,
+          "poll_max_changes" => 100,
+          "poll_max_record_bytes" => 1_048_576,
+          "region" => "us-east-1",
+          "ssl_enforced" => false
+        }
+      }
+    ]
+
+    tenant = tenant_fixture(%{extensions: extensions})
+    Tenants.track_active_tenant(tenant.external_id)
+
+    assert capture_log(fn ->
+             start_supervised!(Janitor)
+             Process.sleep(1000)
+           end) =~ "JanitorFailedToDeleteOldMessages"
   end
 end
