@@ -295,7 +295,9 @@ defmodule Realtime.Tenants do
   @doc """
   Sets last active at to a given tenant by external_id
   """
-  @spec set_last_active_at(String.t()) :: Tenant.t() | nil
+  @spec set_last_active_at(String.t() | nil) :: Tenant.t() | nil
+  def set_last_active_at(nil), do: nil
+
   def set_last_active_at(external_id) do
     external_id
     |> get_tenant_by_external_id()

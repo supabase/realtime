@@ -167,8 +167,10 @@ defmodule Realtime.Tenants.Connect do
       connected_users_bucket: connected_users_bucket
     } = state
 
+    Tenants.set_last_active_at(state.tenant_id)
     :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:invalidate_cache")
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
+
     {:noreply, state}
   end
 
@@ -231,13 +233,6 @@ defmodule Realtime.Tenants.Connect do
       ) do
     Logger.info("Database connection has been terminated")
     {:stop, :kill, state}
-  end
-
-  @impl true
-  def terminate(_reason, state) do
-    Realtime.Tenants.set_last_active_at(state.tenant_id)
-
-    :ok
   end
 
   ## Private functions

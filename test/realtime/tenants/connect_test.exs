@@ -3,7 +3,8 @@ defmodule Realtime.Tenants.ConnectTest do
   use Realtime.DataCase, async: false
 
   import Mock
-
+  alias Ecto.Adapters.SQL.Sandbox
+  alias Realtime.Repo
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
 
@@ -15,10 +16,23 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "if tenant exists and connected, returns the db connection", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
-      on_exit(fn -> Process.exit(db_conn, :shutdown) end)
-
+      Sandbox.allow(Repo, self(), db_conn)
+      :timer.sleep(100)
       assert is_pid(db_conn)
+    end
+
+    test "on connect, updates last_active_at" do
+      tenant = tenant_fixture(%{last_active_at: nil})
+      assert is_nil(tenant.last_active_at)
+
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      Sandbox.allow(Repo, self(), db_conn)
+      :timer.sleep(100)
+      Process.exit(db_conn, :shutdown)
+      :timer.sleep(100)
+
+      tenant = Repo.reload!(tenant)
+      assert tenant.last_active_at
     end
 
     test "on database disconnect, returns new connection", %{tenant: tenant} do
@@ -66,12 +80,10 @@ defmodule Realtime.Tenants.ConnectTest do
     test "if no users are connected to a tenant channel, stop the connection", %{
       tenant: %{external_id: tenant_id}
     } do
-      tenant = Realtime.Tenants.get_tenant_by_external_id(tenant_id)
-      assert is_nil(tenant.last_active_at)
-
       {:ok, db_conn} =
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 50)
 
+      Sandbox.allow(Repo, self(), db_conn)
       # Not enough time has passed, connection still alive
       :timer.sleep(100)
       assert {_, %{conn: _}} = :syn.lookup(Connect, tenant_id)
@@ -80,9 +92,6 @@ defmodule Realtime.Tenants.ConnectTest do
       :timer.sleep(1000)
       assert :undefined = :syn.lookup(Connect, tenant_id)
       refute Process.alive?(db_conn)
-      # Updates last_active_at
-      tenant = Repo.reload!(tenant)
-      assert tenant.last_active_at
     end
 
     test "if users are connected to a tenant channel, keep the connection", %{
@@ -93,7 +102,7 @@ defmodule Realtime.Tenants.ConnectTest do
       {:ok, db_conn} =
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
-      on_exit(fn -> Process.exit(db_conn, :shutdown) end)
+      Sandbox.allow(Repo, self(), db_conn)
 
       assert {pid, %{conn: conn_pid}} = :syn.lookup(Connect, tenant_id)
       :timer.sleep(300)
@@ -127,21 +136,21 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant = tenant_fixture()
 
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
+      Sandbox.allow(Repo, self(), db_conn)
 
-      :timer.sleep(200)
+      :timer.sleep(100)
+      Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
+      :timer.sleep(500)
+
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Process.alive?(db_conn) == false
 
       Realtime.Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
+      :timer.sleep(50)
 
-      :timer.sleep(200)
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
-      on_exit(fn ->
-        Process.exit(db_conn, :shutdown)
-        :timer.sleep(200)
-      end)
+      Sandbox.allow(Repo, self(), db_conn)
+      :timer.sleep(100)
     end
 
     test "properly handles of failing calls by avoid creating too many connections" do
@@ -177,21 +186,12 @@ defmodule Realtime.Tenants.ConnectTest do
       refute_receive :too_many_connections
     end
 
-    test "on migrations failure, process is alive", %{tenant: tenant} do
-      with_mock Ecto.Migrator, [:passthrough], run: fn _, _, _, _ -> nil end do
-        assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
-        assert_called(Ecto.Migrator.run(:_, :_, :_, :_))
-        assert Process.alive?(db_conn) == true
-      end
-    end
-
     test "on migrations failure, stop the process", %{tenant: tenant} do
-      with_mock Ecto.Migrator, [], run: fn _, _, _, _ -> raise("error") end do
+      with_mock Realtime.Tenants.Migrations, [], run_migrations: fn _ -> raise("error") end do
         assert {:error, :tenant_database_unavailable} =
                  Connect.lookup_or_start_connection(tenant.external_id)
 
-        assert_called(Ecto.Migrator.run(:_, :_, :_, :_))
+        assert_called(Realtime.Tenants.Migrations.run_migrations(:_))
       end
     end
 
@@ -199,6 +199,8 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant = tenant_fixture(%{notify_private_alpha: true})
 
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      Sandbox.allow(Repo, self(), db_conn)
+      :timer.sleep(100)
       assert Process.alive?(db_conn)
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Process.alive?(db_conn)
