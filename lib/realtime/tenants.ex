@@ -284,7 +284,7 @@ defmodule Realtime.Tenants do
     |> Cache.get_tenant_by_external_id()
     |> Tenant.management_changeset(attrs)
     |> Repo.update!()
-    |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(tenant_id) end)
+    |> tap(fn _ -> Cache.invalidate_tenant_cache(tenant_id) end)
   end
 
   defp broadcast_operation_event(action, external_id) do

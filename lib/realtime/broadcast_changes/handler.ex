@@ -285,7 +285,7 @@ defmodule Realtime.BroadcastChanges.Handler do
             {:noreply, state}
 
           payload ->
-            id = Map.fetch!(to_broadcast, "uuid")
+            id = Map.fetch!(to_broadcast, "id")
 
             to_broadcast =
               %{
