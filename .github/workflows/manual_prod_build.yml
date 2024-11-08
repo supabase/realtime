@@ -1,0 +1,128 @@
+name: Manual Build Production
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to run the workflow"
+        required: true
+      docker_tag:
+        description: "Tag to be used by the docker image on push"
+        required: true
+jobs:
+  docker_x86_release:
+    runs-on: ubuntu-20.04
+    timeout-minutes: 120
+    env:
+      arch: amd64
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            supabase/realtime
+          tags: |
+            type=raw,value=${{ github.event.inputs.docker_tag }}_${{ env.arch }}
+
+      - uses: docker/setup-buildx-action@v2
+
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - id: build
+        uses: docker/build-push-action@v3
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/${{ env.arch }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  docker_arm_release:
+    runs-on: arm-runner
+    timeout-minutes: 120
+    env:
+      arch: arm64
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            supabase/realtime
+          tags: |
+            type=raw,value=${{ github.event.inputs.docker_tag }}_${{ env.arch }}
+
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - uses: docker/setup-buildx-action@v2
+        with:
+          driver: docker
+          driver-opts: |
+            image=moby/buildkit:master
+            network=host
+
+      - id: build
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/${{ env.arch }}
+          no-cache: true
+
+  merge_manifest:
+    needs: [docker_x86_release, docker_arm_release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: docker/setup-buildx-action@v2
+
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Merge multi-arch manifests for custom output
+        run: |
+          docker buildx imagetools create -t supabase/realtime:${{ github.event.inputs.docker_tag }} \
+          supabase/realtime@${{ needs.docker_x86_release.outputs.image_digest }} \
+          supabase/realtime@${{ needs.docker_arm_release.outputs.image_digest }}
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.PROD_AWS_ROLE }}
+          aws-region: us-east-1
+
+      - name: Login to ECR
+        uses: docker/login-action@v2
+        with:
+          registry: public.ecr.aws
+
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mirror to ECR
+        uses: akhilerm/tag-push-action@v2.0.0
+        with:
+          src: docker.io/supabase/realtime:v${{ github.event.inputs.docker_tag }}
+          dst: |
+            public.ecr.aws/supabase/realtime:v${{ github.event.inputs.docker_tag }}
+            ghcr.io/supabase/realtime:v${{ github.event.inputs.docker_tag }}
