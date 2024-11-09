@@ -163,7 +163,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         }
       ]
 
-      tenant = tenant_fixture(%{"extensions" => extensions})
+      tenant = tenant_fixture(%{extensions: extensions})
 
       conn_opts = [
         connect_info: %{

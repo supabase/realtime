@@ -7,7 +7,6 @@ defmodule Realtime.Integration.RtChannelTest do
 
   require Logger
 
-  alias Ecto.Adapters.SQL.Sandbox
   alias Extensions.PostgresCdcRls, as: Rls
   alias Phoenix.Socket.{V1, Message}
   alias Postgrex, as: P
@@ -80,7 +79,6 @@ defmodule Realtime.Integration.RtChannelTest do
   end
 
   setup_all do
-    Sandbox.mode(Realtime.Repo, {:shared, self()})
     capture_log(fn -> start_supervised!(Endpoint) end)
     start_supervised!({Phoenix.PubSub, name: __MODULE__})
     :ok
@@ -892,7 +890,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
   def setup_trigger(%{tenant: tenant, topic: topic} = context) do
     Realtime.Tenants.Connect.shutdown(@external_id)
-    :timer.sleep(1000)
+    :timer.sleep(500)
+
     {:ok, db_conn} = Realtime.Tenants.Connect.connect(@external_id)
 
     random_name = String.downcase("test_#{random_string()}")
@@ -930,7 +929,8 @@ defmodule Realtime.Integration.RtChannelTest do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
       query = "DROP TABLE #{random_name} CASCADE"
       Postgrex.query!(db_conn, query, [])
-      Realtime.Tenants.Connect.shutdown(@external_id)
+      Realtime.Tenants.Connect.shutdown(db_conn)
+
       :timer.sleep(500)
     end)
 
