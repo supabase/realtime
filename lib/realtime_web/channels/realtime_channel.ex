@@ -62,6 +62,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
       Realtime.UsersCounter.add(transport_pid, tenant_id)
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
+      Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
 
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
 
@@ -306,6 +307,12 @@ defmodule RealtimeWeb.RealtimeChannel do
         message = "Access token has expired: " <> to_log(error)
         shutdown_response(socket, message)
     end
+  end
+
+  def handle_info(:disconnect, %{assigns: %{channel_name: channel_name}} = socket) do
+    Logger.info("Received operational call to disconnect channel")
+    push_system_message("system", socket, "ok", "Server requested disconnect", channel_name)
+    {:stop, :shutdown, socket}
   end
 
   def handle_info(msg, socket) do
