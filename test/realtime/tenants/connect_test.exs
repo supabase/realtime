@@ -181,11 +181,12 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "on migrations failure, stop the process", %{tenant: tenant} do
-      with_mock Realtime.Tenants.Migrations, [], run_migrations: fn _ -> raise("error") end do
+      with_mock Realtime.Tenants.Migrations, [],
+        maybe_run_migrations: fn _, _ -> raise("error") end do
         assert {:error, :tenant_database_unavailable} =
                  Connect.lookup_or_start_connection(tenant.external_id)
 
-        assert_called(Realtime.Tenants.Migrations.run_migrations(:_))
+        assert_called(Realtime.Tenants.Migrations.maybe_run_migrations(:_, :_))
       end
     end
 

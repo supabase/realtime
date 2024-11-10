@@ -67,44 +67,13 @@ defmodule Realtime.Tenants do
 
       {:ok, health_conn} ->
         connected_cluster = UsersCounter.tenant_users(external_id)
-        %{extensions: [%{settings: settings} | _]} = Cache.get_tenant_by_external_id(external_id)
-
-        query =
-          "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
-
-        Database.transaction(health_conn, fn transaction_conn ->
-          res = Postgrex.query!(transaction_conn, query, [])
-
-          if res.rows == [] do
-            Migrations.run_migrations(%Migrations{
-              tenant_external_id: external_id,
-              settings: settings
-            })
-          end
-        end)
-
+        Migrations.maybe_run_migrations(health_conn, external_id)
         {:ok, %{healthy: true, db_connected: true, connected_cluster: connected_cluster}}
 
       connected_cluster when is_integer(connected_cluster) ->
         tenant = Cache.get_tenant_by_external_id(external_id)
         {:ok, db_conn} = Database.connect(tenant, "realtime_health_check", 1)
-
-        Database.transaction(db_conn, fn transaction_conn ->
-          query =
-            "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
-
-          res = Postgrex.query!(transaction_conn, query, [])
-
-          if res.rows == [] do
-            %{extensions: [%{settings: settings} | _]} = tenant
-
-            Migrations.run_migrations(%Migrations{
-              tenant_external_id: external_id,
-              settings: settings
-            })
-          end
-        end)
-
+        Migrations.maybe_run_migrations(db_conn, external_id)
         Process.alive?(db_conn) && GenServer.stop(db_conn)
         {:ok, %{healthy: true, db_connected: false, connected_cluster: connected_cluster}}
     end
