@@ -10,8 +10,9 @@ defmodule Realtime.Tenants.Migrations do
 
   alias Realtime.Crypto
   alias Realtime.Database
-  alias Realtime.Repo
   alias Realtime.Registry.Unique
+  alias Realtime.Repo
+  alias Realtime.Tenants.Cache
 
   alias Realtime.Tenants.Migrations.{
     CreateRealtimeSubscriptionTable,
@@ -121,6 +122,9 @@ defmodule Realtime.Tenants.Migrations do
     {20_241_030_150_047, MessagesPartitioning},
     {20_241_108_114_728, MessagesUsingUuid}
   ]
+
+  @expected_migration_count length(@migrations)
+
   defstruct [:tenant_external_id, :settings]
   @spec run_migrations(map()) :: :ok | {:error, any()}
   def run_migrations(%__MODULE__{} = attrs) do
@@ -183,6 +187,28 @@ defmodule Realtime.Tenants.Migrations do
         error ->
           log_error("MigrationsFailedToRun", error)
           {:error, error}
+      end
+    end)
+  end
+
+  @doc """
+  Checks if the number of migrations ran in the database is equal to the expected number of migrations.
+
+  If not all migrations have been run, it will run the missing migrations.
+  """
+  @spec maybe_run_migrations(pid(), String.t()) :: {:ok, any()} | {:error, any()}
+  def maybe_run_migrations(db_conn, tenant_external_id) do
+    query =
+      "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
+
+    %{extensions: [%{settings: settings} | _]} =
+      Cache.get_tenant_by_external_id(tenant_external_id)
+
+    Database.transaction(db_conn, fn transaction_conn ->
+      %{num_rows: num_rows} = Postgrex.query!(transaction_conn, query, [])
+
+      if num_rows < @expected_migration_count do
+        run_migrations(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings})
       end
     end)
   end
