@@ -56,14 +56,13 @@ defmodule Realtime.Tenants.Connect do
       {:ok, conn} ->
         {:ok, conn}
 
-      {:error, :tenant_database_unavailable} ->
-        call_external_node(tenant_id, opts)
-
-      {:error, :tenant_database_connection_initializing} ->
-        :timer.sleep(100)
+      {:error, :not_found} ->
         call_external_node(tenant_id, opts)
 
       {:error, :initializing} ->
+        {:error, :initializing}
+
+      {:error, :unknown_error} ->
         {:error, :tenant_database_unavailable}
     end
   end
@@ -74,24 +73,26 @@ defmodule Realtime.Tenants.Connect do
   @spec get_status(binary()) ::
           {:ok, pid()}
           | {:error,
-             :tenant_database_unavailable
+             :unknown_error
              | :initializing
-             | :tenant_database_connection_initializing}
+             | :not_found}
   def get_status(tenant_id) do
     case :syn.lookup(__MODULE__, tenant_id) do
       {_, %{conn: conn}} when not is_nil(conn) ->
+        # we have the database connection pid in syn
         {:ok, conn}
 
       {_, %{conn: nil}} ->
+        # syn has registred the tenant process but we haven't updated the registry with the database connection pid
         {:error, :initializing}
 
       :undefined ->
-        Logger.warning("Connection process starting up")
-        {:error, :tenant_database_connection_initializing}
+        # syn hasn't registered anything we need to start the database connection supervision tree
+        {:error, :not_found}
 
       error ->
         log_error("SynInitializationError", error)
-        {:error, :tenant_database_unavailable}
+        {:error, :unknown_error}
     end
   end
 
