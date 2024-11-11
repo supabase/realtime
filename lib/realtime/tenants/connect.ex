@@ -51,18 +51,9 @@ defmodule Realtime.Tenants.Connect do
           {:ok, DBConnection.t()} | {:error, term()}
   def lookup_or_start_connection(tenant_id, opts \\ []) do
     case get_status(tenant_id) do
-      {:ok, conn} ->
-        {:ok, conn}
-
-      {:error, :tenant_database_unavailable} ->
-        call_external_node(tenant_id, opts)
-
-      {:error, :tenant_database_connection_initializing} ->
-        :timer.sleep(100)
-        call_external_node(tenant_id, opts)
-
-      {:error, :initializing} ->
-        {:error, :tenant_database_unavailable}
+      {:ok, conn} -> {:ok, conn}
+      {:error, :tenant_database_unavailable} -> call_external_node(tenant_id, opts)
+      {:error, :initializing} -> {:error, :tenant_database_unavailable}
     end
   end
 
@@ -82,10 +73,6 @@ defmodule Realtime.Tenants.Connect do
 
       {_, %{conn: nil}} ->
         {:error, :initializing}
-
-      :undefined ->
-        Logger.warning("Connection process starting up")
-        {:error, :tenant_database_connection_initializing}
 
       error ->
         log_error("SynInitializationError", error)

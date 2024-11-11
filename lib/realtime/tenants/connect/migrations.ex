@@ -4,7 +4,6 @@ defmodule Realtime.Tenants.Connect.Migrations do
   """
   @behaviour Realtime.Tenants.Connect.Piper
   alias Realtime.Tenants.Migrations
-  alias Realtime.Tenants.Cache
 
   @impl true
   def run(%{db_conn_pid: db_conn_pid, tenant_id: tenant_id} = acc) do
