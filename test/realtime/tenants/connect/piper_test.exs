@@ -68,8 +68,8 @@ defmodule Realtime.Tenants.Connect.PiperTest do
 
   test "logs pipe execution times" do
     assert capture_log(fn ->
-             assert {:ok, %{piper1: "Piper1"}} =
-                      Piper.run([__MODULE__.PiperException], %{initial: "state"})
-           end) =~ "Realtime.Tenants.Connect.PiperTest.Piper1 executed in "
+             assert {:error, "PiperErr"} =
+                      Piper.run([__MODULE__.PiperErr], %{initial: "state"})
+           end) =~ "Realtime.Tenants.Connect.PiperTest.PiperErr failed in "
   end
 end
