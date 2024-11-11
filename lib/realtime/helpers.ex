@@ -43,7 +43,8 @@ defmodule Realtime.Helpers do
   @doc """
   Logs error with a given Operational Code
   """
-  def log_error(code, error) do
-    Logger.error("#{code}: #{to_log(error)}", error_code: code)
+  @spec log_error(String.t(), any(), keyword()) :: :ok
+  def log_error(code, error, metadata \\ []) do
+    Logger.error("#{code}: #{to_log(error)}", [error_code: code] ++ metadata)
   end
 end
