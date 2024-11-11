@@ -2,18 +2,21 @@ defmodule Realtime.Tenants.Connect.Piper do
   @moduledoc """
   Pipes different commands to execute specific actions during the connection process.
   """
+  require Logger
   @callback run(any()) :: {:ok, any()} | {:error, any()}
 
   def run(pipers, init) do
     Enum.reduce_while(pipers, {:ok, init}, fn piper, {:ok, acc} ->
-      case piper.run(acc) do
-        {:ok, result} ->
+      case :timer.tc(fn -> piper.run(acc) end) do
+        {exec_time, {:ok, result}} ->
+          Logger.info("#{inspect(piper)} executed in #{exec_time} ms")
           {:cont, {:ok, result}}
 
-        {:error, error} ->
+        {exec_time, {:error, error}} ->
+          Logger.error("#{inspect(piper)} failed in #{exec_time} ms")
           {:halt, {:error, error}}
 
-        _e ->
+        _ ->
           raise ArgumentError, "must return {:ok, _} or {:error, _}"
       end
     end)
