@@ -114,12 +114,13 @@ defmodule Realtime.Tenants.Janitor do
 
   defp run_cleanup_on_tenant(tenant_external_id) do
     Logger.metadata(project: tenant_external_id, external_id: tenant_external_id)
-    Logger.info("Janitor cleaned realtime.messages")
+    Logger.info("Janitor starting realtime.messages cleanup")
 
     with %Tenant{} = tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_external_id),
          {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1),
          :ok <- Messages.delete_old_messages(conn) do
       Logger.info("Janitor finished")
+      GenServer.stop(conn)
       Tenants.untrack_active_tenant(tenant_external_id)
       :ok
     end
