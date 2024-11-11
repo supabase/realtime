@@ -3,7 +3,7 @@ defmodule Realtime.Rpc do
   RPC module for Realtime with the intent of standardizing the RPC interface and collect telemetry
   """
   alias Realtime.Telemetry
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Helpers
 
   @doc """
   Calls external node using :rpc.call/5 and collects telemetry
@@ -44,7 +44,12 @@ defmodule Realtime.Rpc do
         {:error, "RPC call error"}
     else
       {_, {:EXIT, reason}} ->
-        log_error("ErrorOnRpcCall", %{target: node, mod: mod, func: func, error: {:EXIT, reason}})
+        log_error("ErrorOnRpcCall", %{target: node, mod: mod, func: func, error: {:EXIT, reason}},
+          mod: mod,
+          func: func,
+          target: node
+        )
+
         {:error, "RPC call error"}
 
       {latency, response} ->
