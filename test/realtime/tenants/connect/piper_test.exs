@@ -1,5 +1,9 @@
 defmodule Realtime.Tenants.Connect.PiperTest do
-  use ExUnit.Case, async: true
+  # async: false due to the change of the error log level
+  use ExUnit.Case, async: false
+
+  import ExUnit.CaptureLog
+
   alias Realtime.Tenants.Connect.Piper
 
   defmodule Piper1 do
@@ -32,11 +36,7 @@ defmodule Realtime.Tenants.Connect.PiperTest do
     def run(_acc), do: raise("PiperException")
   end
 
-  @pipeline [
-    Realtime.Tenants.Connect.PiperTest.Piper1,
-    Realtime.Tenants.Connect.PiperTest.Piper2,
-    Realtime.Tenants.Connect.PiperTest.Piper3
-  ]
+  @pipeline [__MODULE__.Piper1, __MODULE__.Piper2, __MODULE__.Piper3]
   test "runs pipeline as expected and accumlates outputs" do
     assert {:ok,
             %{
@@ -49,20 +49,27 @@ defmodule Realtime.Tenants.Connect.PiperTest do
 
   test "runs pipeline and handles error" do
     assert {:error, "PiperErr"} =
-             Piper.run(@pipeline ++ [Realtime.Tenants.Connect.PiperTest.PiperErr], %{
+             Piper.run(@pipeline ++ [__MODULE__.PiperErr], %{
                initial: "state"
              })
   end
 
   test "runs pipeline and handles bad return with raise" do
     assert_raise ArgumentError, fn ->
-      Piper.run(@pipeline ++ [Realtime.Tenants.Connect.PiperTest.PiperBadReturn], %{})
+      Piper.run(@pipeline ++ [__MODULE__.PiperBadReturn], %{})
     end
   end
 
   test "on pipeline job function, raises exception" do
     assert_raise RuntimeError, fn ->
-      Piper.run(@pipeline ++ [Realtime.Tenants.Connect.PiperTest.PiperException], %{})
+      Piper.run(@pipeline ++ [__MODULE__.PiperException], %{})
     end
+  end
+
+  test "logs pipe execution times" do
+    assert capture_log(fn ->
+             assert {:error, "PiperErr"} =
+                      Piper.run([__MODULE__.PiperErr], %{initial: "state"})
+           end) =~ "Realtime.Tenants.Connect.PiperTest.PiperErr failed in "
   end
 end
