@@ -5,14 +5,13 @@ defmodule Realtime.Tenants.Connect.StartReplication do
 
   @behaviour Realtime.Tenants.Connect.Piper
   alias Realtime.BroadcastChanges.Handler
-  alias Realtime.Tenants.Cache
+
   @impl true
   def run(acc) do
-    %{tenant_id: tenant_id} = acc
-    tenant = Cache.get_tenant_by_external_id(tenant_id)
+    %{tenant: tenant} = acc
 
     if tenant.notify_private_alpha do
-      opts = %Handler{tenant_id: tenant_id}
+      opts = %Handler{tenant_id: tenant.external_id}
       supervisor_spec = Handler.supervisor_spec(tenant)
 
       child_spec = %{

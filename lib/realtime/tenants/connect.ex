@@ -148,6 +148,7 @@ defmodule Realtime.Tenants.Connect do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     with {:ok, acc} <- Piper.run(@pipes, state) do
+      acc = Map.delete(acc, :tenant)
       {:ok, acc, {:continue, :setup_connected_user_events}}
     else
       {:error, :tenant_not_found} ->

@@ -12,7 +12,7 @@ defmodule Realtime.Tenants.Connect.GetTenant do
     %{tenant_id: tenant_id} = acc
 
     case Tenants.Cache.get_tenant_by_external_id(tenant_id) do
-      %Tenant{} -> {:ok, acc}
+      %Tenant{} = tenant -> {:ok, Map.put(acc, :tenant, tenant)}
       _ -> {:error, :tenant_not_found}
     end
   end

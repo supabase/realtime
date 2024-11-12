@@ -6,16 +6,14 @@ defmodule Realtime.Tenants.Connect.StartCounters do
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
-  alias Realtime.Tenants.Cache
 
   @behaviour Realtime.Tenants.Connect.Piper
 
   @impl true
   def run(acc) do
-    %{tenant_id: tenant_id} = acc
+    %{tenant: tenant} = acc
 
-    with tenant when not is_nil(tenant) <- Cache.get_tenant_by_external_id(tenant_id),
-         :ok <- start_joins_per_second_counter(tenant),
+    with :ok <- start_joins_per_second_counter(tenant),
          :ok <- start_max_events_counter(tenant),
          :ok <- start_db_events_counter(tenant) do
       {:ok, acc}

@@ -13,6 +13,7 @@ defmodule Realtime.Tenants do
   alias Realtime.Tenants.Cache
   alias Realtime.UsersCounter
   alias Realtime.Database
+  alias Realtime.Tenants.Cache
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
@@ -67,13 +68,14 @@ defmodule Realtime.Tenants do
 
       {:ok, health_conn} ->
         connected_cluster = UsersCounter.tenant_users(external_id)
-        Migrations.maybe_run_migrations(health_conn, external_id)
+        tenant = Cache.get_tenant_by_external_id(external_id)
+        Migrations.maybe_run_migrations(health_conn, tenant)
         {:ok, %{healthy: true, db_connected: true, connected_cluster: connected_cluster}}
 
       connected_cluster when is_integer(connected_cluster) ->
         tenant = Cache.get_tenant_by_external_id(external_id)
         {:ok, db_conn} = Database.connect(tenant, "realtime_health_check", 1)
-        Migrations.maybe_run_migrations(db_conn, external_id)
+        Migrations.maybe_run_migrations(db_conn, tenant)
         Process.alive?(db_conn) && GenServer.stop(db_conn)
         {:ok, %{healthy: true, db_connected: false, connected_cluster: connected_cluster}}
     end
