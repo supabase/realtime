@@ -13,6 +13,7 @@ defmodule Realtime.Tenants.Connect do
   import Realtime.Helpers, only: [log_error: 2]
 
   alias Realtime.Api.Tenant
+  alias Realtime.BroadcastChanges.Handler
   alias Realtime.Rpc
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect.CheckConnection
@@ -20,7 +21,6 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants.Connect.Piper
   alias Realtime.Tenants.Connect.RegisterProcess
   alias Realtime.Tenants.Connect.StartCounters
-  alias Realtime.Tenants.Connect.StartReplication
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
@@ -28,7 +28,6 @@ defmodule Realtime.Tenants.Connect do
     GetTenant,
     CheckConnection,
     StartCounters,
-    StartReplication,
     RegisterProcess
   ]
   @rpc_timeout_default 30_000
@@ -160,7 +159,10 @@ defmodule Realtime.Tenants.Connect do
     %{tenant: tenant, db_conn_pid: db_conn_pid} = state
     :ok = Migrations.maybe_run_migrations(db_conn_pid, tenant)
     :ok = Migrations.create_partitions(db_conn_pid)
-    {:noreply, state, {:continue, :setup_connected_user_events}}
+    {:ok, broadcast_changes_pid} = start_replication(tenant)
+
+    {:noreply, %{state | broadcast_changes_pid: broadcast_changes_pid},
+     {:continue, :setup_connected_user_events}}
   end
 
   @impl true
@@ -273,4 +275,24 @@ defmodule Realtime.Tenants.Connect do
 
   defp tenant_suspended?(%Tenant{suspend: true}), do: {:error, :tenant_suspended}
   defp tenant_suspended?(_), do: :ok
+
+  defp start_replication(%{notify_private_alpha: false}), do: {:ok, nil}
+
+  defp start_replication(tenant) do
+    opts = %Handler{tenant_id: tenant.external_id}
+    supervisor_spec = Handler.supervisor_spec(tenant)
+
+    child_spec = %{
+      id: Handler,
+      start: {Handler, :start_link, [opts]},
+      restart: :transient,
+      type: :worker
+    }
+
+    case DynamicSupervisor.start_child(supervisor_spec, child_spec) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, {:already_started, pid}} -> {:ok, pid}
+      error -> {:error, error}
+    end
+  end
 end
