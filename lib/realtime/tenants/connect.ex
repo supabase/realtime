@@ -83,7 +83,6 @@ defmodule Realtime.Tenants.Connect do
 
       :undefined ->
         Logger.warning("Connection process starting up")
-        :timer.sleep(100)
         {:error, :tenant_database_connection_initializing}
 
       error ->
