@@ -208,7 +208,9 @@ defmodule Realtime.Tenants.Migrations do
       "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
 
     %{extensions: [%{settings: settings} | _]} = tenant
-    %{num_rows: num_rows} = Postgrex.query!(db_conn, query, [])
+
+    {:ok, %{num_rows: num_rows}} =
+      Database.transaction(db_conn, fn db_conn -> Postgrex.query!(db_conn, query, []) end)
 
     if num_rows < @expected_migration_count do
       run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
