@@ -5,7 +5,7 @@ defmodule Realtime.Tenants.Cache do
   require Cachex.Spec
 
   alias Realtime.Tenants
-  @expiration :timer.hours(6)
+  @expiration :timer.seconds(30)
   def child_spec(_) do
     %{
       id: __MODULE__,
