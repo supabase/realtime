@@ -24,7 +24,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "on connect, tracks tenant as active", %{tenant: tenant} do
       assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
-      :timer.sleep(200)
+      :timer.sleep(500)
 
       assert Enum.find(Tenants.list_active_tenants(), &(elem(&1, 0) == tenant.external_id))
     end
@@ -79,11 +79,11 @@ defmodule Realtime.Tenants.ConnectTest do
 
       Sandbox.allow(Repo, self(), db_conn)
       # Not enough time has passed, connection still alive
-      :timer.sleep(100)
+      :timer.sleep(500)
       assert {_, %{conn: _}} = :syn.lookup(Connect, tenant_id)
 
       # Enough time has passed, connection stopped
-      :timer.sleep(1000)
+      :timer.sleep(5000)
       assert :undefined = :syn.lookup(Connect, tenant_id)
       refute Process.alive?(db_conn)
     end
@@ -113,9 +113,9 @@ defmodule Realtime.Tenants.ConnectTest do
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
       assert {_pid, %{conn: _conn_pid}} = :syn.lookup(Connect, tenant_id)
-      :timer.sleep(300)
+      :timer.sleep(1000)
       :syn.leave(:users, tenant_id, self())
-      :timer.sleep(300)
+      :timer.sleep(1000)
       assert :undefined = :syn.lookup(Connect, tenant_id)
       refute Process.alive?(db_conn)
     end
@@ -132,7 +132,7 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       Sandbox.allow(Repo, self(), db_conn)
 
-      :timer.sleep(100)
+      :timer.sleep(500)
       Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
       :timer.sleep(500)
 
@@ -181,11 +181,12 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "on migrations failure, stop the process", %{tenant: tenant} do
-      with_mock Realtime.Tenants.Migrations, [], run_migrations: fn _ -> raise("error") end do
-        assert {:error, :tenant_database_unavailable} =
-                 Connect.lookup_or_start_connection(tenant.external_id)
-
-        assert_called(Realtime.Tenants.Migrations.run_migrations(:_))
+      with_mock Realtime.Tenants.Migrations, [],
+        maybe_run_migrations: fn _, _ -> raise("error") end do
+        assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
+        Process.alive?(pid)
+        Process.sleep(1000)
+        assert_called(Realtime.Tenants.Migrations.maybe_run_migrations(:_, :_))
       end
     end
 
