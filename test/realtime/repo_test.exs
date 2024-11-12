@@ -183,7 +183,7 @@ defmodule Realtime.RepoTest do
 
   describe "insert/3" do
     setup %{db_conn: db_conn} do
-      Realtime.Tenants.Connect.CreatePartitions.run(%{db_conn_pid: db_conn})
+      Realtime.Tenants.Migrations.create_partitions(db_conn)
     end
 
     test "inserts a new entry with a given changeset and returns struct", %{db_conn: db_conn} do

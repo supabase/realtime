@@ -15,25 +15,21 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Api.Tenant
   alias Realtime.Rpc
   alias Realtime.Tenants
-  alias Realtime.Tenants.Migrations
-  alias Realtime.UsersCounter
-  alias Realtime.Tenants.Connect.Piper
   alias Realtime.Tenants.Connect.CheckConnection
-  alias Realtime.Tenants.Connect.StartReplication
-  alias Realtime.Tenants.Connect.Migrations
   alias Realtime.Tenants.Connect.GetTenant
+  alias Realtime.Tenants.Connect.Piper
   alias Realtime.Tenants.Connect.RegisterProcess
   alias Realtime.Tenants.Connect.StartCounters
-  alias Realtime.Tenants.Connect.CreatePartitions
+  alias Realtime.Tenants.Connect.StartReplication
+  alias Realtime.Tenants.Migrations
+  alias Realtime.UsersCounter
 
   @pipes [
     GetTenant,
     CheckConnection,
-    Migrations,
     StartCounters,
     StartReplication,
-    RegisterProcess,
-    CreatePartitions
+    RegisterProcess
   ]
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default 50_000
@@ -149,8 +145,7 @@ defmodule Realtime.Tenants.Connect do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     with {:ok, acc} <- Piper.run(@pipes, state) do
-      acc = Map.delete(acc, :tenant)
-      {:ok, acc, {:continue, :setup_connected_user_events}}
+      {:ok, acc, {:continue, :run_migrations}}
     else
       {:error, :tenant_not_found} ->
         log_error("TenantNotFound", "Tenant not found")
@@ -160,6 +155,13 @@ defmodule Realtime.Tenants.Connect do
         log_error("UnableToConnectToTenantDatabase", error)
         {:stop, :shutdown}
     end
+  end
+
+  def handle_continue(:run_migrations, state) do
+    %{tenant: tenant, db_conn_pid: db_conn_pid} = state
+    :ok = Migrations.maybe_run_migrations(db_conn_pid, tenant)
+    :ok = Migrations.create_partitions(db_conn_pid)
+    {:noreply, state, {:continue, :setup_connected_user_events}}
   end
 
   @impl true

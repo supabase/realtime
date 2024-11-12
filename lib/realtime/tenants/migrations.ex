@@ -127,8 +127,14 @@ defmodule Realtime.Tenants.Migrations do
 
   defstruct [:tenant_external_id, :settings]
   @spec run_migrations(map()) :: :ok | {:error, any()}
-  def run_migrations(%__MODULE__{} = attrs) do
-    case DynamicSupervisor.start_child(__MODULE__.DynamicSupervisor, {__MODULE__, attrs}) do
+  def run_migrations(%__MODULE__{tenant_external_id: tenant_external_id} = attrs) do
+    supervisor =
+      {:via, PartitionSupervisor,
+       {Realtime.Tenants.Migrations.DynamicSupervisor, tenant_external_id}}
+
+    spec = {__MODULE__, attrs}
+
+    case DynamicSupervisor.start_child(supervisor, spec) do
       :ignore -> :ok
       error -> error
     end
@@ -202,13 +208,42 @@ defmodule Realtime.Tenants.Migrations do
       "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
 
     %{extensions: [%{settings: settings} | _]} = tenant
+    %{num_rows: num_rows} = Postgrex.query!(db_conn, query, [])
 
-    Database.transaction(db_conn, fn transaction_conn ->
-      %{num_rows: num_rows} = Postgrex.query!(transaction_conn, query, [])
+    if num_rows < @expected_migration_count do
+      run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
+    end
+  end
 
-      if num_rows < @expected_migration_count do
-        run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
-      end
+  @doc """
+  Create partitions against tenant db connection
+  """
+  @spec create_partitions(pid()) :: :ok
+  def create_partitions(db_conn_pid) do
+    today = Date.utc_today()
+    yesterday = Date.add(today, -1)
+    tomorrow = Date.add(today, 1)
+
+    dates = [yesterday, today, tomorrow]
+
+    Enum.each(dates, fn date ->
+      partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"
+      start_timestamp = Date.to_string(date)
+      end_timestamp = Date.to_string(Date.add(date, 1))
+
+      Database.transaction(db_conn_pid, fn conn ->
+        Postgrex.query(
+          conn,
+          """
+          CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
+          PARTITION OF realtime.messages
+          FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
+          """,
+          []
+        )
+      end)
     end)
+
+    :ok
   end
 end
