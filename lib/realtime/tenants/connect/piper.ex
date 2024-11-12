@@ -7,7 +7,7 @@ defmodule Realtime.Tenants.Connect.Piper do
 
   def run(pipers, init) do
     Enum.reduce_while(pipers, {:ok, init}, fn piper, {:ok, acc} ->
-      case :timer.tc(fn -> piper.run(acc) end) do
+      case :timer.tc(fn -> piper.run(acc) end, :millisecond) do
         {exec_time, {:ok, result}} ->
           Logger.info("#{inspect(piper)} executed in #{exec_time} ms")
           {:cont, {:ok, result}}
