@@ -55,14 +55,14 @@ defmodule Realtime.Tenants.BatchBroadcast do
         send_message_and_count(tenant, sub_topic, event, payload, true)
       end)
 
+      tenant_db_conn =
+        Connect.lookup_or_start_connection(tenant.external_id)
+
       # Handle events for private channel
       events
       |> Map.get(true, [])
       |> Enum.group_by(fn event -> Map.get(event, :topic) end)
       |> Enum.each(fn {topic, events} ->
-        tenant_db_conn =
-          Connect.lookup_or_start_connection(tenant.external_id)
-
         if super_user do
           Enum.each(events, fn %{topic: sub_topic, payload: payload, event: event} ->
             send_message_and_count(tenant, sub_topic, event, payload, false)
