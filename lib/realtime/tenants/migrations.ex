@@ -202,7 +202,7 @@ defmodule Realtime.Tenants.Migrations do
 
   If not all migrations have been run, it will run the missing migrations.
   """
-  @spec maybe_run_migrations(pid(), Tenant.t()) :: {:ok, any()} | {:error, any()}
+  @spec maybe_run_migrations(pid(), Tenant.t()) :: :ok
   def maybe_run_migrations(db_conn, tenant) do
     query =
       "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
@@ -213,6 +213,8 @@ defmodule Realtime.Tenants.Migrations do
     if num_rows < @expected_migration_count do
       run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
     end
+
+    :ok
   end
 
   @doc """
