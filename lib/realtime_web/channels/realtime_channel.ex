@@ -687,7 +687,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @spec only_private?(String.t(), map()) :: :ok | {:error, :private_only}
   defp only_private?(tenant_id, %{assigns: %{check_authorization?: check_authorization?}}) do
-    tenant = Tenants.get_tenant_by_external_id(tenant_id)
+    tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
 
     cond do
       tenant.private_only and !check_authorization? -> {:error, :private_only}
