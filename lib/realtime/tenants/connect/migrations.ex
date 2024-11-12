@@ -7,12 +7,13 @@ defmodule Realtime.Tenants.Connect.Migrations do
 
   @impl true
   def run(%{tenant: tenant} = acc) do
-    [%{settings: settings} | _] = tenant.extensions
-    migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
+    # [%{settings: settings} | _] = tenant.extensions
+    # migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
 
-    case Migrations.run_migrations(migrations) do
-      :ok -> {:ok, acc}
-      {:error, error} -> {:error, error}
-    end
+    # case Migrations.run_migrations(migrations) do
+    #   :ok -> {:ok, acc}
+    #   {:error, error} -> {:error, error}
+    # end
+    {:ok, acc}
   end
 end
