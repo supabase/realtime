@@ -34,7 +34,7 @@ defmodule Realtime.Tenants do
   ## Examples
 
       iex> Realtime.Tenants.get_health_conn(%Realtime.Api.Tenant{external_id: "not_found_tenant"})
-      {:error, :not_found}
+      {:error, :tenant_database_connection_initializing}
   """
 
   @spec get_health_conn(Tenant.t()) :: {:error, term()} | {:ok, pid()}
