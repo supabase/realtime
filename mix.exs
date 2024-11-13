@@ -4,8 +4,8 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.33.54",
-      elixir: "~> 1.16.0",
+      version: "2.33.55",
+      elixir: "~> 1.17.3",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -74,9 +74,9 @@ defmodule Realtime.MixProject do
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
       {:observer_cli, "~> 1.7"},
-      {:credo, "~> 1.6.4", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:mint_web_socket, "~> 1.0", only: :test},
-      {:dialyxir, "~> 1.1.0", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       {:benchee, "~> 1.1.0", only: :dev}
     ]
   end
