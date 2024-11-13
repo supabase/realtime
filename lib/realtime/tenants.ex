@@ -59,17 +59,20 @@ defmodule Realtime.Tenants do
                connected_cluster: pos_integer,
                db_connected: false,
                healthy: false,
-               region: String.t()
+               region: String.t(),
+               node: String.t()
              }}
           | {:ok,
              %{
                connected_cluster: non_neg_integer,
                db_connected: true,
                healthy: true,
-               region: String.t()
+               region: String.t(),
+               node: String.t()
              }}
   def health_check(external_id) when is_binary(external_id) do
     region = Application.get_env(:realtime, :region)
+    node = Node.self() |> to_string()
 
     with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(external_id),
          {:error, _} <- get_health_conn(tenant),
@@ -79,7 +82,8 @@ defmodule Realtime.Tenants do
          healthy: false,
          db_connected: false,
          connected_cluster: connected_cluster,
-         region: region
+         region: region,
+         node: node
        }}
     else
       nil ->
@@ -95,7 +99,8 @@ defmodule Realtime.Tenants do
            healthy: true,
            db_connected: true,
            connected_cluster: connected_cluster,
-           region: region
+           region: region,
+           node: node
          }}
 
       connected_cluster when is_integer(connected_cluster) ->
@@ -109,7 +114,8 @@ defmodule Realtime.Tenants do
            healthy: true,
            db_connected: false,
            connected_cluster: connected_cluster,
-           region: region
+           region: region,
+           node: node
          }}
     end
   end

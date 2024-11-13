@@ -226,7 +226,8 @@ defmodule RealtimeWeb.TenantControllerTest do
                  "healthy" => true,
                  "db_connected" => false,
                  "connected_cluster" => 0,
-                 "region" => "us-east-1"
+                 "region" => "us-east-1",
+                 "node" => "nonode@nohost"
                } == data
       end
     end
@@ -247,7 +248,8 @@ defmodule RealtimeWeb.TenantControllerTest do
                  "healthy" => false,
                  "db_connected" => false,
                  "connected_cluster" => 1,
-                 "region" => "us-east-1"
+                 "region" => "us-east-1",
+                 "node" => "nonode@nohost"
                } == data
       end
     end
@@ -275,7 +277,8 @@ defmodule RealtimeWeb.TenantControllerTest do
                  "healthy" => true,
                  "db_connected" => true,
                  "connected_cluster" => 1,
-                 "region" => "us-east-1"
+                 "region" => "us-east-1",
+                 "node" => "nonode@nohost"
                } == data
       end
     end
