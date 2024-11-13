@@ -55,8 +55,19 @@ defmodule Realtime.Tenants do
           {:error,
            :tenant_not_found
            | String.t()
-           | %{connected_cluster: pos_integer, db_connected: false, healthy: false}}
-          | {:ok, %{connected_cluster: non_neg_integer, db_connected: true, healthy: true}}
+           | %{
+               connected_cluster: pos_integer,
+               db_connected: false,
+               healthy: false,
+               region: String.t()
+             }}
+          | {:ok,
+             %{
+               connected_cluster: non_neg_integer,
+               db_connected: true,
+               healthy: true,
+               region: String.t()
+             }}
   def health_check(external_id) when is_binary(external_id) do
     region = Application.get_env(:realtime, :region)
 
