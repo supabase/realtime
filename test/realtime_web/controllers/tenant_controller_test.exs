@@ -201,6 +201,11 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "health check tenant" do
     setup [:create_tenant]
 
+    setup do
+      Application.put_env(:realtime, :region, "us-east-1")
+      on_exit(fn -> Application.put_env(:realtime, :region, nil) end)
+    end
+
     test "health check when tenant does not exist", %{conn: conn} do
       with_mock ChannelsAuthorization, authorize: fn _, _, _ -> {:ok, %{}} end do
         Routes.tenant_path(conn, :reload, "wrong_external_id")
@@ -216,7 +221,14 @@ defmodule RealtimeWeb.TenantControllerTest do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
-        assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
+
+        assert %{
+                 "healthy" => true,
+                 "db_connected" => false,
+                 "connected_cluster" => 0,
+                 "region" => "us-east-1",
+                 "node" => "nonode@nohost"
+               } == data
       end
     end
 
@@ -232,7 +244,13 @@ defmodule RealtimeWeb.TenantControllerTest do
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
 
-        assert %{"healthy" => false, "db_connected" => false, "connected_cluster" => 1} = data
+        assert %{
+                 "healthy" => false,
+                 "db_connected" => false,
+                 "connected_cluster" => 1,
+                 "region" => "us-east-1",
+                 "node" => "nonode@nohost"
+               } == data
       end
     end
 
@@ -255,7 +273,13 @@ defmodule RealtimeWeb.TenantControllerTest do
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
 
-        assert %{"healthy" => true, "db_connected" => true, "connected_cluster" => 1} = data
+        assert %{
+                 "healthy" => true,
+                 "db_connected" => true,
+                 "connected_cluster" => 1,
+                 "region" => "us-east-1",
+                 "node" => "nonode@nohost"
+               } == data
       end
     end
 

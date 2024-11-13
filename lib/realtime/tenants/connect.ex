@@ -157,12 +157,17 @@ defmodule Realtime.Tenants.Connect do
 
   def handle_continue(:run_migrations, state) do
     %{tenant: tenant, db_conn_pid: db_conn_pid} = state
-    :ok = Migrations.maybe_run_migrations(db_conn_pid, tenant)
-    :ok = Migrations.create_partitions(db_conn_pid)
-    {:ok, broadcast_changes_pid} = start_replication(tenant)
 
-    {:noreply, %{state | broadcast_changes_pid: broadcast_changes_pid},
-     {:continue, :setup_connected_user_events}}
+    with :ok <- Migrations.maybe_run_migrations(db_conn_pid, tenant),
+         :ok <- Migrations.create_partitions(db_conn_pid),
+         {:ok, broadcast_changes_pid} <- start_replication(tenant) do
+      {:noreply, %{state | broadcast_changes_pid: broadcast_changes_pid},
+       {:continue, :setup_connected_user_events}}
+    else
+      error ->
+        log_error("MigrationsFailedToRun", error)
+        {:stop, :shutdown}
+    end
   end
 
   @impl true

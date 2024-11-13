@@ -55,13 +55,36 @@ defmodule Realtime.Tenants do
           {:error,
            :tenant_not_found
            | String.t()
-           | %{connected_cluster: pos_integer, db_connected: false, healthy: false}}
-          | {:ok, %{connected_cluster: non_neg_integer, db_connected: true, healthy: true}}
+           | %{
+               connected_cluster: pos_integer,
+               db_connected: false,
+               healthy: false,
+               region: String.t(),
+               node: String.t()
+             }}
+          | {:ok,
+             %{
+               connected_cluster: non_neg_integer,
+               db_connected: true,
+               healthy: true,
+               region: String.t(),
+               node: String.t()
+             }}
   def health_check(external_id) when is_binary(external_id) do
+    region = Application.get_env(:realtime, :region)
+    node = Node.self() |> to_string()
+
     with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(external_id),
          {:error, _} <- get_health_conn(tenant),
          connected_cluster when connected_cluster > 0 <- UsersCounter.tenant_users(external_id) do
-      {:error, %{healthy: false, db_connected: false, connected_cluster: connected_cluster}}
+      {:error,
+       %{
+         healthy: false,
+         db_connected: false,
+         connected_cluster: connected_cluster,
+         region: region,
+         node: node
+       }}
     else
       nil ->
         {:error, :tenant_not_found}
@@ -70,14 +93,30 @@ defmodule Realtime.Tenants do
         connected_cluster = UsersCounter.tenant_users(external_id)
         tenant = Cache.get_tenant_by_external_id(external_id)
         Migrations.maybe_run_migrations(health_conn, tenant)
-        {:ok, %{healthy: true, db_connected: true, connected_cluster: connected_cluster}}
+
+        {:ok,
+         %{
+           healthy: true,
+           db_connected: true,
+           connected_cluster: connected_cluster,
+           region: region,
+           node: node
+         }}
 
       connected_cluster when is_integer(connected_cluster) ->
         tenant = Cache.get_tenant_by_external_id(external_id)
         {:ok, db_conn} = Database.connect(tenant, "realtime_health_check", 1)
         Migrations.maybe_run_migrations(db_conn, tenant)
         Process.alive?(db_conn) && GenServer.stop(db_conn)
-        {:ok, %{healthy: true, db_connected: false, connected_cluster: connected_cluster}}
+
+        {:ok,
+         %{
+           healthy: true,
+           db_connected: false,
+           connected_cluster: connected_cluster,
+           region: region,
+           node: node
+         }}
     end
   end
 

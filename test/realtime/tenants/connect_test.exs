@@ -31,7 +31,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "on database disconnect, returns new connection", %{tenant: tenant} do
       assert {:ok, old_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-
+      :timer.sleep(500)
       GenServer.stop(old_conn)
       :timer.sleep(500)
 
@@ -75,7 +75,7 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant: %{external_id: tenant_id}
     } do
       {:ok, db_conn} =
-        Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 50)
+        Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 200)
 
       Sandbox.allow(Repo, self(), db_conn)
       # Not enough time has passed, connection still alive
@@ -184,8 +184,8 @@ defmodule Realtime.Tenants.ConnectTest do
       with_mock Realtime.Tenants.Migrations, [],
         maybe_run_migrations: fn _, _ -> raise("error") end do
         assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
-        Process.alive?(pid)
-        Process.sleep(1000)
+        Process.sleep(200)
+        refute Process.alive?(pid)
         assert_called(Realtime.Tenants.Migrations.maybe_run_migrations(:_, :_))
       end
     end
