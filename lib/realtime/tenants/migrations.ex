@@ -224,6 +224,7 @@ defmodule Realtime.Tenants.Migrations do
   """
   @spec create_partitions(pid()) :: :ok
   def create_partitions(db_conn_pid) do
+    Logger.info("Creating partitions for realtime.messages")
     today = Date.utc_today()
     yesterday = Date.add(today, -1)
     tomorrow = Date.add(today, 1)
@@ -236,15 +237,16 @@ defmodule Realtime.Tenants.Migrations do
       end_timestamp = Date.to_string(Date.add(date, 1))
 
       Database.transaction(db_conn_pid, fn conn ->
-        Postgrex.query(
-          conn,
-          """
-          CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
-          PARTITION OF realtime.messages
-          FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
-          """,
-          []
-        )
+        query = """
+        CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
+        PARTITION OF realtime.messages
+        FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
+        """
+
+        case Postgrex.query(conn, query, []) do
+          {:ok, _} -> Logger.info("Partition #{partition_name} created")
+          {:error, error} -> log_error("PartitionCreationFailed", error)
+        end
       end)
     end)
 
