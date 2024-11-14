@@ -204,19 +204,26 @@ defmodule Realtime.Tenants.Migrations do
   """
   @spec maybe_run_migrations(pid(), Tenant.t()) :: :ok
   def maybe_run_migrations(db_conn, tenant) do
+    Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
+
     query =
-      "select * from pg_catalog.pg_tables where schemaname = 'realtime' and tablename = 'schema_migrations';"
+      "select count(version) from realtime.schema_migrations"
 
     %{extensions: [%{settings: settings} | _]} = tenant
 
-    {:ok, %{num_rows: num_rows}} =
-      Database.transaction(db_conn, fn db_conn -> Postgrex.query!(db_conn, query, []) end)
+    case Database.transaction(db_conn, fn db_conn -> Postgrex.query!(db_conn, query, []) end) do
+      {:ok, %{num_rows: num_rows}} ->
+        if num_rows < @expected_migration_count do
+          Logger.info("Running missing migrations")
+          run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
+        end
 
-    if num_rows < @expected_migration_count do
-      run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
+        :ok
+
+      {:error, error} ->
+        log_error("MigrationCheckFailed", error)
+        {:error, :migration_check_failed}
     end
-
-    :ok
   end
 
   @doc """
