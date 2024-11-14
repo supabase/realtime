@@ -206,14 +206,13 @@ defmodule Realtime.Tenants.Migrations do
   def maybe_run_migrations(db_conn, tenant) do
     Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
 
-    query =
-      "select count(version) from realtime.schema_migrations"
+    query = "select version from realtime.schema_migrations"
 
     %{extensions: [%{settings: settings} | _]} = tenant
 
     case Database.transaction(db_conn, fn db_conn -> Postgrex.query!(db_conn, query, []) end) do
-      {:ok, %{num_rows: num_rows}} ->
-        if num_rows < @expected_migration_count do
+      {:ok, %{num_rows: [num_rows]}} ->
+        if String.to_integer(num_rows) < @expected_migration_count do
           Logger.info("Running missing migrations")
           run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
         end
