@@ -207,13 +207,13 @@ defmodule Realtime.Tenants.Migrations do
     Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
 
     check_migrations_exist_query =
-      "select from information_schema.tables where table_schema = 'realtime' and table_name = 'schema_migrations'"
+      "select * from information_schema.tables where table_schema = 'realtime' and table_name = 'schema_migrations'"
 
     check_number_migrations_query = "select count(version) from realtime.schema_migrations"
 
     %{extensions: [%{settings: settings} | _]} = tenant
 
-    with {:ok, %{num_rows: 1}} <-
+    with {:ok, %Postgrex.Result{num_rows: 1}} <-
            Database.transaction(db_conn, fn db_conn ->
              Postgrex.query!(db_conn, check_migrations_exist_query, [])
            end),
