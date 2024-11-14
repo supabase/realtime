@@ -7,7 +7,7 @@ defmodule Extensions.PostgresCdcStream.Replication do
   use Postgrex.ReplicationConnection
   require Logger
 
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Logs
   import Realtime.Adapters.Postgres.Protocol
 
   alias Extensions.PostgresCdcStream

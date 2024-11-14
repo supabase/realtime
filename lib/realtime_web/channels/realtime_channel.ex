@@ -4,6 +4,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   """
   use RealtimeWeb, :channel
   require Logger
+  import Realtime.Logs
 
   alias DBConnection.Backoff
 
@@ -240,7 +241,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
           error ->
-            Helpers.log_error("UnableToSubscribeToPostgres", error)
+            log_error("UnableToSubscribeToPostgres", error)
             push_system_message("postgres_changes", socket, "error", error, channel_name)
             {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
         end
@@ -267,13 +268,13 @@ defmodule RealtimeWeb.RealtimeChannel do
         shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
 
       {:error, error} ->
-        message = "Access token has expired: " <> Helpers.to_log(error)
+        message = "Access token has expired: " <> to_log(error)
         shutdown_response(socket, message)
     end
   end
 
   def handle_info(msg, socket) do
-    Helpers.log_error("UnhandledSystemMessage", msg)
+    log_error("UnhandledSystemMessage", msg)
     {:noreply, socket}
   end
 
@@ -522,7 +523,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp shutdown_response(%{assigns: %{channel_name: channel_name}} = socket, message)
        when is_binary(message) do
-    Helpers.log_error("ChannelShutdown", message)
+    log_error("ChannelShutdown", message)
     push_system_message("system", socket, "error", message, channel_name)
     {:stop, :shutdown, socket}
   end

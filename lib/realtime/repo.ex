@@ -6,7 +6,7 @@ defmodule Realtime.Repo do
     adapter: Ecto.Adapters.Postgres
 
   import Ecto.Query
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Logs
 
   def with_dynamic_repo(config, callback) do
     default_dynamic_repo = get_dynamic_repo()

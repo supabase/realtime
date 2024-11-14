@@ -6,7 +6,7 @@ defmodule Realtime.Tenants.Migrations do
 
   require Logger
 
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Logs
 
   alias Realtime.Crypto
   alias Realtime.Database
@@ -203,7 +203,7 @@ defmodule Realtime.Tenants.Migrations do
   If not all migrations have been run, it will run the missing migrations.
   """
   @spec maybe_run_migrations(pid(), Tenant.t()) :: :ok
-  def maybe_run_migrations(db_conn, tenant) do
+  def maybe_run_migrations(_db_conn, tenant) do
     # Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
 
     # check_migrations_exist_query =

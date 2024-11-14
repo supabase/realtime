@@ -8,7 +8,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   require Logger
 
-  import Realtime.Helpers, only: [cancel_timer: 1, log_error: 2]
+  import Realtime.Logs
+  import Realtime.Helpers
 
   alias DBConnection.Backoff
 

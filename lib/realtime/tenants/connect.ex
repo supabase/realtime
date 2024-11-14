@@ -10,7 +10,7 @@ defmodule Realtime.Tenants.Connect do
 
   require Logger
 
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Logs
 
   alias Realtime.Api.Tenant
   alias Realtime.BroadcastChanges.Handler

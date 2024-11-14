@@ -2,11 +2,10 @@ defmodule Realtime.Database do
   @moduledoc """
   Handles tenant database operations
   """
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Logs
 
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
-  alias Realtime.Helpers
   alias Realtime.PostgresCdc
   alias Realtime.Rpc
 
@@ -138,7 +137,7 @@ defmodule Realtime.Database do
 
           {:error, e} ->
             Process.exit(conn, :kill)
-            Helpers.log_error("UnableToConnectToTenantDatabase", e)
+            log_error("UnableToConnectToTenantDatabase", e)
             {:error, e}
         end
       end

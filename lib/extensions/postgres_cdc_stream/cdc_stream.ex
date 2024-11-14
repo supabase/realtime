@@ -3,7 +3,7 @@ defmodule Extensions.PostgresCdcStream do
   @behaviour Realtime.PostgresCdc
 
   require Logger
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Logs
   alias Extensions.PostgresCdcStream, as: Stream
   alias Realtime.Rpc
 

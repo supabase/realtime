@@ -4,6 +4,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   """
   use GenServer
   require Logger
+  import Realtime.Logs
 
   alias Extensions.PostgresCdcRls, as: Rls
 
@@ -165,7 +166,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
             q1
 
           {:error, reason} ->
-            Helpers.log_error("SubscriptionDeletionFailed", reason)
+            log_error("SubscriptionDeletionFailed", reason)
 
             q
         end
@@ -204,7 +205,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   end
 
   def handle_info(msg, state) do
-    Helpers.log_error("UnhandledProcessMessage", msg)
+    log_error("UnhandledProcessMessage", msg)
 
     {:noreply, state}
   end

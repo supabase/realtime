@@ -3,7 +3,7 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   Check connection is authorized to access channel
   """
   require Logger
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Logs
 
   def authorize(token, jwt_secret, jwt_jwks) when is_binary(token) do
     token

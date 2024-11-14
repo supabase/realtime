@@ -8,7 +8,7 @@ defmodule Realtime.GenCounter do
   """
   use GenServer
   require Logger
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Logs
   alias Realtime.GenCounter
 
   defstruct id: nil, counters: []

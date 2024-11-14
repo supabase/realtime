@@ -5,7 +5,7 @@ defmodule Extensions.PostgresCdcRls do
 
   @behaviour Realtime.PostgresCdc
   require Logger
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Logs
 
   alias RealtimeWeb.Endpoint
   alias Extensions.PostgresCdcRls, as: Rls

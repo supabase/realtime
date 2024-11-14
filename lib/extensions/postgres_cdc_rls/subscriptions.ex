@@ -4,7 +4,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   """
   require Logger
   import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
-  import Realtime.Helpers, only: [to_log: 1, log_error: 2]
+  import Realtime.Logs
 
   @type conn() :: Postgrex.conn()
 
