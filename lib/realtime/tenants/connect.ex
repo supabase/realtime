@@ -166,8 +166,12 @@ defmodule Realtime.Tenants.Connect do
     else
       error ->
         log_error("MigrationsFailedToRun", error)
-        {:stop, :shutdown}
+        {:stop, :shutdown, state}
     end
+  rescue
+    error ->
+      log_error("MigrationsFailedToRun", error)
+      {:stop, :shutdown, state}
   end
 
   @impl true

@@ -245,6 +245,7 @@ defmodule Realtime.Tenants.Migrations do
 
         case Postgrex.query(conn, query, []) do
           {:ok, _} -> Logger.info("Partition #{partition_name} created")
+          {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> :ok
           {:error, error} -> log_error("PartitionCreationFailed", error)
         end
       end)
