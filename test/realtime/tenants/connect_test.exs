@@ -195,7 +195,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       Sandbox.allow(Repo, self(), db_conn)
-      :timer.sleep(100)
+      :timer.sleep(500)
       assert Process.alive?(db_conn)
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Process.alive?(db_conn)

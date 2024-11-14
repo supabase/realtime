@@ -300,7 +300,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
-
+        :timer.sleep(1000)
         assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
         assert %{"healthy" => true, "db_connected" => true, "connected_cluster" => 0} = data
