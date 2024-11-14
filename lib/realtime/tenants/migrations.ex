@@ -212,7 +212,7 @@ defmodule Realtime.Tenants.Migrations do
 
     case Database.transaction(db_conn, fn db_conn -> Postgrex.query!(db_conn, query, []) end) do
       {:ok, %{num_rows: [num_rows]}} ->
-        if String.to_integer(num_rows) < @expected_migration_count do
+        if num_rows < @expected_migration_count do
           Logger.info("Running missing migrations")
           run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
         end
