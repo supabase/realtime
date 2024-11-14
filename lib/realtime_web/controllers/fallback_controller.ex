@@ -6,7 +6,7 @@ defmodule RealtimeWeb.FallbackController do
   """
   use RealtimeWeb, :controller
   import RealtimeWeb.ErrorHelpers
-  alias Realtime.Helpers
+  import Realtime.Logs
 
   def call(conn, {:error, :not_found}) do
     conn
@@ -16,7 +16,7 @@ defmodule RealtimeWeb.FallbackController do
   end
 
   def call(conn, {:error, %Ecto.Changeset{} = changeset}) do
-    Helpers.log_error(
+    log_error(
       "UnprocessableEntity",
       Ecto.Changeset.traverse_errors(changeset, &translate_error/1)
     )
@@ -35,7 +35,7 @@ defmodule RealtimeWeb.FallbackController do
   end
 
   def call(conn, {:error, status, message}) when is_atom(status) and is_binary(message) do
-    Helpers.log_error("UnprocessableEntity", message)
+    log_error("UnprocessableEntity", message)
 
     conn
     |> put_status(status)
@@ -44,7 +44,7 @@ defmodule RealtimeWeb.FallbackController do
   end
 
   def call(conn, %Ecto.Changeset{valid?: true} = changeset) do
-    Helpers.log_error(
+    log_error(
       "UnprocessableEntity",
       Ecto.Changeset.traverse_errors(changeset, &translate_error/1)
     )
@@ -56,7 +56,7 @@ defmodule RealtimeWeb.FallbackController do
   end
 
   def call(conn, %Ecto.Changeset{valid?: false} = changeset) do
-    Helpers.log_error(
+    log_error(
       "UnprocessableEntity",
       Ecto.Changeset.traverse_errors(changeset, &translate_error/1)
     )
@@ -68,7 +68,7 @@ defmodule RealtimeWeb.FallbackController do
   end
 
   def call(conn, response) do
-    Helpers.log_error("UnknownError", response)
+    log_error("UnknownError", response)
 
     conn
     |> put_status(:unprocessable_entity)

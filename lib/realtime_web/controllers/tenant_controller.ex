@@ -1,15 +1,12 @@
 defmodule RealtimeWeb.TenantController do
-  alias RealtimeWeb.OpenApiSchemas.UnauthorizedResponse
-  alias RealtimeWeb.OpenApiSchemas.ErrorResponse
   use RealtimeWeb, :controller
   use OpenApiSpex.ControllerSpecs
-
   require Logger
+  import Realtime.Logs
 
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Database
-  alias Realtime.Helpers
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
@@ -19,11 +16,13 @@ defmodule RealtimeWeb.TenantController do
 
   alias RealtimeWeb.OpenApiSchemas.{
     EmptyResponse,
+    ErrorResponse,
     NotFoundResponse,
+    TenantHealthResponse,
+    TenantParams,
     TenantResponse,
     TenantResponseList,
-    TenantParams,
-    TenantHealthResponse
+    UnauthorizedResponse
   }
 
   @stop_timeout 10_000
@@ -199,11 +198,11 @@ defmodule RealtimeWeb.TenantController do
       send_resp(conn, 204, "")
     else
       nil ->
-        Helpers.log_error("TenantNotFound", "Tenant not found")
+        log_error("TenantNotFound", "Tenant not found")
         send_resp(conn, 204, "")
 
       err ->
-        Helpers.log_error("UnableToDeleteTenant", err)
+        log_error("UnableToDeleteTenant", err)
         conn |> put_status(500) |> json(err) |> halt()
     end
   end
@@ -233,7 +232,7 @@ defmodule RealtimeWeb.TenantController do
 
     case Tenants.get_tenant_by_external_id(tenant_id) do
       nil ->
-        Helpers.log_error("TenantNotFound", "Tenant not found")
+        log_error("TenantNotFound", "Tenant not found")
 
         conn
         |> put_status(404)
@@ -276,7 +275,7 @@ defmodule RealtimeWeb.TenantController do
         json(conn, %{data: response})
 
       {:error, :tenant_not_found} ->
-        Helpers.log_error("TenantNotFound", "Tenant not found")
+        log_error("TenantNotFound", "Tenant not found")
 
         conn
         |> put_status(404)
@@ -292,7 +291,7 @@ defmodule RealtimeWeb.TenantController do
         render(conn, "show.json", tenant: tenant)
 
       nil ->
-        Helpers.log_error("TenantNotFound", "Tenant not found")
+        log_error("TenantNotFound", "Tenant not found")
 
         conn
         |> put_status(404)

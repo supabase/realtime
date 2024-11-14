@@ -8,7 +8,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePolicies do
   """
   require Logger
   import Ecto.Query
-  import Realtime.Helpers, only: [to_log: 1, log_error: 2]
+  import Realtime.Logs
 
   alias Realtime.Api.Message
   alias Realtime.Repo

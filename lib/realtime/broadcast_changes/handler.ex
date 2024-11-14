@@ -21,7 +21,7 @@ defmodule Realtime.BroadcastChanges.Handler do
 
   import Realtime.Adapters.Postgres.Protocol
   import Realtime.Adapters.Postgres.Decoder
-  import Realtime.Helpers, only: [log_error: 2]
+  import Realtime.Logs
 
   alias Realtime.Adapters.Postgres.Decoder
   alias Realtime.Adapters.Postgres.Protocol.KeepAlive

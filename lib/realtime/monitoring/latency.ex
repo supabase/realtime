@@ -4,10 +4,9 @@ defmodule Realtime.Latency do
   """
 
   use GenServer
-
   require Logger
+  import Realtime.Logs
 
-  alias Realtime.Helpers
   alias Realtime.Nodes
   alias Realtime.Rpc
 
@@ -107,7 +106,7 @@ defmodule Realtime.Latency do
 
           case response do
             {:badrpc, reason} ->
-              Helpers.log_error(
+              log_error(
                 "RealtimeNodeDisconnected",
                 "Unable to connect to #{short_name} from #{region}: #{reason}"
               )

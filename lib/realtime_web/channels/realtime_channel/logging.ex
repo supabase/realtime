@@ -3,7 +3,7 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   Log functions for Realtime channels to ensure
   """
   require Logger
-  import Realtime.Helpers, only: [log_error: 2, to_log: 1]
+  import Realtime.Logs
 
   @doc """
   Logs messages according to user options given on config

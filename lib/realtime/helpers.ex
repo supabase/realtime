@@ -33,18 +33,4 @@ defmodule Realtime.Helpers do
       end
     end)
   end
-
-  @doc """
-  Prepares a value to be logged
-  """
-  def to_log(value) when is_binary(value), do: value
-  def to_log(value), do: inspect(value, pretty: true)
-
-  @doc """
-  Logs error with a given Operational Code
-  """
-  @spec log_error(String.t(), any(), keyword()) :: :ok
-  def log_error(code, error, metadata \\ []) do
-    Logger.error("#{code}: #{to_log(error)}", [error_code: code] ++ metadata)
-  end
 end

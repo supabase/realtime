@@ -2,7 +2,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
   @moduledoc false
   use GenServer
   require Logger
-
+  import Realtime.Logs
   alias Extensions.PostgresCdcRls, as: Rls
 
   alias Realtime.Database
@@ -107,7 +107,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
             q1
 
           {:error, reason} ->
-            Helpers.log_error("UnableToDeletePhantomSubscriptions", reason)
+            log_error("UnableToDeletePhantomSubscriptions", reason)
 
             q
         end
@@ -177,7 +177,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       else
         case Rpc.call(node, __MODULE__, :not_alive_pids, [pids], timeout: 15_000) do
           {:badrpc, _} = error ->
-            Helpers.log_error("UnableToCheckProcessesOnRemoteNode", error)
+            log_error("UnableToCheckProcessesOnRemoteNode", error)
             acc
 
           pids ->
