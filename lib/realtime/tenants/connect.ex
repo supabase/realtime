@@ -166,8 +166,12 @@ defmodule Realtime.Tenants.Connect do
     else
       error ->
         log_error("MigrationsFailedToRun", error)
-        {:stop, :shutdown}
+        {:stop, :shutdown, state}
     end
+  rescue
+    error ->
+      log_error("MigrationsFailedToRun", error)
+      {:stop, :shutdown, state}
   end
 
   @impl true
@@ -284,6 +288,7 @@ defmodule Realtime.Tenants.Connect do
   defp start_replication(%{notify_private_alpha: false}), do: {:ok, nil}
 
   defp start_replication(tenant) do
+    Logger.info("Starting replication for Broadcast Changes")
     opts = %Handler{tenant_id: tenant.external_id}
     supervisor_spec = Handler.supervisor_spec(tenant)
 
