@@ -206,18 +206,31 @@ defmodule Realtime.Tenants.Migrations do
   def maybe_run_migrations(db_conn, tenant) do
     Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
 
-    query = "select version from realtime.schema_migrations"
+    check_migrations_exist_query =
+      "select from information_schema.tables where table_schema = 'realtime' and table_name = 'schema_migrations'"
+
+    check_number_migrations_query = "select count(version) from realtime.schema_migrations"
 
     %{extensions: [%{settings: settings} | _]} = tenant
 
-    case Database.transaction(db_conn, fn db_conn -> Postgrex.query!(db_conn, query, []) end) do
-      {:ok, %{num_rows: [num_rows]}} ->
-        if num_rows < @expected_migration_count do
-          Logger.info("Running missing migrations")
-          run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
-        end
+    with {:ok, %{num_rows: 1}} <-
+           Database.transaction(db_conn, fn db_conn ->
+             Postgrex.query!(db_conn, check_migrations_exist_query, [])
+           end),
+         {:ok, %Postgrex.Result{rows: [[count]]}} <-
+           Database.transaction(db_conn, fn db_conn ->
+             Postgrex.query!(db_conn, check_number_migrations_query, [])
+           end) do
+      if count < @expected_migration_count do
+        Logger.error("Running missing migrations")
+        run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
+      end
 
-        :ok
+      :ok
+    else
+      {:ok, %{num_rows: 0}} ->
+        Logger.error("Running migrations")
+        run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
 
       {:error, error} ->
         log_error("MigrationCheckFailed", error)
