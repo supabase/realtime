@@ -68,7 +68,7 @@ defmodule RealtimeWeb.FallbackController do
   end
 
   def call(conn, response) do
-    log_error("UnknownError", response)
+    log_error("UnknownErrorOnController", response)
 
     conn
     |> put_status(:unprocessable_entity)

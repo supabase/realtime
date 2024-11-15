@@ -237,14 +237,18 @@ defmodule Realtime.Database do
   def transaction(db_conn, func, opts) when node() == node(db_conn),
     do: transaction_catched(db_conn, func, opts)
 
-  def transaction(db_conn, func, opts),
-    do: Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func, opts])
+  def transaction(db_conn, func, opts) do
+    metadata = Keyword.take(Logger.metadata(), [:project_id, :tenant_id])
+    metadata = Keyword.put(metadata, :target, node(db_conn))
 
-  defp transaction_catched(db_conn, func, opts) do
+    Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func, opts, metadata])
+  end
+
+  defp transaction_catched(db_conn, func, opts, metadata \\ []) do
     Postgrex.transaction(db_conn, func, opts)
   rescue
     e ->
-      log_error("ErrorExecutingTransaction", e)
+      log_error("ErrorExecutingTransaction", e, metadata)
       {:error, e}
   end
 
