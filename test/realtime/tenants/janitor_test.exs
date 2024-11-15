@@ -30,7 +30,7 @@ defmodule Realtime.Tenants.JanitorTest do
         fn tenant ->
           tenant = Repo.preload(tenant, :extensions)
           Connect.lookup_or_start_connection(tenant.external_id)
-          :timer.sleep(250)
+          :timer.sleep(1000)
           {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
           clean_table(conn, "realtime", "messages")
           tenant

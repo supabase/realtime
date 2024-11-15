@@ -73,8 +73,8 @@ defmodule Realtime.Integration.RtChannelTest do
     [tenant] = Tenant |> Repo.all() |> Repo.preload(:extensions)
     [%{settings: settings} | _] = tenant.extensions
     migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
-    :ok = Migrations.run_migrations(migrations)
-
+    Migrations.run_migrations(migrations)
+    :timer.sleep(1000)
     %{tenant: tenant}
   end
 

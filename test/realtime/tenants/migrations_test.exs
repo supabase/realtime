@@ -28,9 +28,10 @@ defmodule Realtime.Tenants.MigrationsTest do
           end)
         end
         |> Task.await_many()
-        |> Enum.uniq()
+        |> MapSet.new()
 
-      assert [:ok] = res
+      expected = MapSet.new([:ok, {:error, :migration_already_running}])
+      assert ^expected = res
     end
   end
 end

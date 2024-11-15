@@ -155,6 +155,7 @@ defmodule Realtime.Tenants.Authorization.Policies.PresencePoliciesTest do
     }
 
     Migrations.run_migrations(migrations)
+    :timer.sleep(1000)
     {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
     {:ok, db_conn} = Connect.get_status(tenant.external_id)
 

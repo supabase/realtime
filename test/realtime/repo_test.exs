@@ -17,7 +17,7 @@ defmodule Realtime.RepoTest do
     [%{settings: settings} | _] = tenant.extensions
     migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
     Migrations.run_migrations(migrations)
-
+    :timer.sleep(1000)
     clean_table(db_conn, "realtime", "messages")
     %{db_conn: db_conn, tenant: tenant}
   end

@@ -155,7 +155,7 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPoliciesTest do
     }
 
     Migrations.run_migrations(migrations)
-
+    :timer.sleep(1000)
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
 
     clean_table(db_conn, "realtime", "messages")

@@ -133,7 +133,8 @@ defmodule Realtime.Tenants.Migrations do
     spec = {__MODULE__, attrs}
 
     case DynamicSupervisor.start_child(supervisor, spec) do
-      :ignore -> :ok
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> {:error, :migration_already_running}
       error -> error
     end
   end
@@ -143,24 +144,27 @@ defmodule Realtime.Tenants.Migrations do
     GenServer.start_link(__MODULE__, attrs, name: name)
   end
 
-  def init(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings}) do
+  def init(%__MODULE__{tenant_external_id: tenant_external_id} = state) do
     Logger.metadata(external_id: tenant_external_id, project: tenant_external_id)
+    {:ok, state, {:continue, :run_migration}}
+  end
 
+  def handle_continue(:run_migration, %{settings: settings} = state) do
     case migrate(settings) do
-      {:ok, _} -> :ignore
-      {:error, error} -> {:stop, error}
+      {:ok, _} -> {:stop, :normal, state}
+      {:error, error} -> {:stop, {:shutdown, error}, state}
     end
   end
 
-  defp migrate(
-         %{
-           "db_host" => db_host,
-           "db_port" => db_port,
-           "db_name" => db_name,
-           "db_user" => db_user,
-           "db_password" => db_password
-         } = settings
-       ) do
+  defp migrate(settings) do
+    %{
+      "db_host" => db_host,
+      "db_port" => db_port,
+      "db_name" => db_name,
+      "db_user" => db_user,
+      "db_password" => db_password
+    } = settings
+
     {host, port, name, user, pass} =
       Crypto.decrypt_creds(db_host, db_port, db_name, db_user, db_password)
 
@@ -193,6 +197,17 @@ defmodule Realtime.Tenants.Migrations do
           {:error, error}
       end
     end)
+  end
+
+  def terminate(:normal, _) do
+    Logger.info("Migrations ran successfully")
+
+    :ok
+  end
+
+  def terminate({:shutdown, error}, _) do
+    log_error("MigrationsFailedToRun", error)
+    :ok
   end
 
   # @expected_migration_count length(@migrations)
