@@ -36,38 +36,29 @@ defmodule Realtime.Rpc do
   def enhanced_call(node, mod, func, args \\ [], opts \\ []) do
     timeout = Keyword.get(opts, :timeout, Application.get_env(:realtime, :rpc_timeout))
 
-    try do
-      :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end)
-    catch
-      kind, reason ->
-        log_error("ErrorOnRpcCall", %{target: node, mod: mod, func: func, error: {kind, reason}})
-        {:error, "RPC call error"}
-    else
-      {_, {:EXIT, reason}} ->
-        log_error("ErrorOnRpcCall", %{target: node, mod: mod, func: func, error: {:EXIT, reason}},
-          mod: mod,
-          func: func,
-          target: node
-        )
+    with {latency, {status, _} = response} <-
+           :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end) do
+      Telemetry.execute(
+        [:realtime, :rpc],
+        %{latency: latency, success?: status == :ok},
+        %{mod: mod, func: func, target_node: node, origin_node: node()}
+      )
 
-        {:error, "RPC call error"}
-
-      {latency, response} ->
-        Telemetry.execute(
-          [:realtime, :rpc],
-          %{latency: latency},
-          %{
-            mod: mod,
-            func: func,
-            target_node: node,
-            origin_node: node()
-          }
-        )
-
-        case response do
-          {status, _} when status in [:ok, :error] -> response
-          _ -> {:error, response}
-        end
+      case response do
+        {status, _} when status in [:ok, :error] -> response
+        _ -> {:error, response}
+      end
     end
+  catch
+    kind, reason ->
+      log_error(
+        "ErrorOnRpcCall",
+        %{target: node, mod: mod, func: func, error: {kind, reason}},
+        mod: mod,
+        func: func,
+        target: node
+      )
+
+      {:error, "RPC call error"}
   end
 end

@@ -141,10 +141,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         )
 
       {:error, error} ->
-        Logging.log_error_message(:error, "UnknownError", error)
+        Logging.log_error_message(:error, "UnknownErrorOnChannel", error)
 
       error ->
-        Logging.log_error_message(:error, "UnknownError", error)
+        Logging.log_error_message(:error, "UnknownErrorOnChannel", error)
     end
   end
 
@@ -419,7 +419,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         {:error, :too_many_joins}
 
       error ->
-        Logging.log_error_message(:error, "UnknownError", error)
+        Logging.log_error_message(:error, "UnknownErrorOnCounter", error)
         {:error, error}
     end
   end
