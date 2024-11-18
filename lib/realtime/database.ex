@@ -239,7 +239,7 @@ defmodule Realtime.Database do
 
   def transaction(db_conn, func, opts) do
     metadata = Keyword.take(Logger.metadata(), [:project_id, :tenant_id])
-    metadata = Keyword.put(metadata, :target, node(db_conn))
+    |> Keyword.put(:target, node(db_conn))
 
     Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func, opts, metadata])
   end
