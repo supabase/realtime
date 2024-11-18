@@ -1,6 +1,5 @@
 defmodule Realtime.Tenants.ConnectTest do
   # async: false due to the fact that multiple operations against the database will use the same connection
-  alias Realtime.Tenants
   use Realtime.DataCase, async: false
 
   import Mock
@@ -20,13 +19,6 @@ defmodule Realtime.Tenants.ConnectTest do
       Sandbox.allow(Repo, self(), db_conn)
       :timer.sleep(100)
       assert is_pid(db_conn)
-    end
-
-    test "on connect, tracks tenant as active", %{tenant: tenant} do
-      assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
-      :timer.sleep(500)
-
-      assert Enum.find(Tenants.list_active_tenants(), &(elem(&1, 0) == tenant.external_id))
     end
 
     test "on database disconnect, returns new connection", %{tenant: tenant} do

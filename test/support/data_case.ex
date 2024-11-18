@@ -35,8 +35,6 @@ defmodule Realtime.DataCase do
       Sandbox.mode(Realtime.Repo, {:shared, self()})
     end
 
-    :ets.match_delete(:active_tenants, :_)
-
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 

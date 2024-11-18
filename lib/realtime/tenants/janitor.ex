@@ -11,8 +11,8 @@ defmodule Realtime.Tenants.Janitor do
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Messages
-  alias Realtime.Repo
   alias Realtime.Tenants
+  alias Realtime.Tenants.Migrations
 
   @type t :: %__MODULE__{
           timer: pos_integer() | nil,
@@ -52,32 +52,35 @@ defmodule Realtime.Tenants.Janitor do
   def init(%__MODULE__{start_after: start_after} = state) do
     timer = timer(state) + start_after
     Process.send_after(self(), :delete_old_messages, timer)
+
     Logger.info("Janitor started")
     {:ok, state}
   end
 
+  @table_name :"syn_registry_by_name_Elixir.Realtime.Tenants.Connect"
   @impl true
   def handle_info(:delete_old_messages, state) do
     Logger.info("Janitor started")
     %{chunks: chunks, tasks: tasks} = state
 
-    {:ok, new_tasks} =
-      Repo.transaction(fn ->
-        Tenants.list_active_tenants()
-        |> Stream.map(&elem(&1, 0))
-        |> Stream.chunk_every(chunks)
-        |> Stream.map(fn chunks ->
-          task =
-            Task.Supervisor.async_nolink(
-              __MODULE__.TaskSupervisor,
-              fn -> run_cleanup_on_tenants(chunks) end,
-              ordered: false
-            )
+    matchspec = [
+      {{:"$1", :"$2", :"$3", :"$4", :"$5", Node.self()}, [], [:"$1"]}
+    ]
 
-          {task.ref, chunks}
-        end)
-        |> Map.new()
+    new_tasks =
+      :ets.select(@table_name, matchspec)
+      |> Stream.chunk_every(chunks)
+      |> Stream.map(fn chunks ->
+        task =
+          Task.Supervisor.async_nolink(
+            __MODULE__.TaskSupervisor,
+            fn -> perform_mantaince_tasks(chunks) end,
+            ordered: false
+          )
+
+        {task.ref, chunks}
       end)
+      |> Map.new()
 
     Process.send_after(self(), :delete_old_messages, timer(state))
 
@@ -93,7 +96,7 @@ defmodule Realtime.Tenants.Janitor do
 
   def handle_info({:DOWN, ref, _, _, :killed}, state) do
     %{tasks: tasks} = state
-    {tenants, tasks} = Map.pop(tasks, ref)
+    tenants = Map.get(tasks, ref)
 
     log_error(
       "JanitorFailedToDeleteOldMessages",
@@ -110,18 +113,19 @@ defmodule Realtime.Tenants.Janitor do
   defp timer(%{timer: timer, randomize: true}), do: timer + :timer.minutes(Enum.random(1..59))
   defp timer(%{timer: timer}), do: timer
 
-  defp run_cleanup_on_tenants(tenants), do: Enum.map(tenants, &run_cleanup_on_tenant/1)
+  defp perform_mantaince_tasks(tenants), do: Enum.map(tenants, &perform_mantaince_task/1)
 
-  defp run_cleanup_on_tenant(tenant_external_id) do
+  defp perform_mantaince_task(tenant_external_id) do
     Logger.metadata(project: tenant_external_id, external_id: tenant_external_id)
     Logger.info("Janitor starting realtime.messages cleanup")
 
     with %Tenant{} = tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_external_id),
          {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1),
-         :ok <- Messages.delete_old_messages(conn) do
+         :ok <- Messages.delete_old_messages(conn),
+         :ok <- Migrations.create_partitions(conn) do
       Logger.info("Janitor finished")
+
       GenServer.stop(conn)
-      Tenants.untrack_active_tenant(tenant_external_id)
       :ok
     end
   end

@@ -298,32 +298,6 @@ defmodule Realtime.Tenants do
     |> tap(fn _ -> Cache.invalidate_tenant_cache(tenant_id) end)
   end
 
-  @doc """
-  Tracks the active tenant by external_id and stores the time when it was tracked in the ETS table named `:active_tenants`.
-  """
-  @spec track_active_tenant(String.t()) :: :ok
-  def track_active_tenant(external_id) do
-    :ets.insert(:active_tenants, {external_id, NaiveDateTime.utc_now()})
-    :ok
-  end
-
-  @doc """
-  Lists all active tenants from the ETS table named `:active_tenants`.
-  """
-  @spec track_active_tenant(String.t()) :: list({String.t(), NaiveDateTime.t()})
-  def list_active_tenants() do
-    :ets.tab2list(:active_tenants)
-  end
-
-  @doc """
-  Untracks the active tenant by external_id from the ETS table named `:active_tenants`.
-  """
-  @spec untrack_active_tenant(String.t()) :: :ok
-  def untrack_active_tenant(external_id) do
-    :ets.delete(:active_tenants, external_id)
-    :ok
-  end
-
   defp broadcast_operation_event(action, external_id) do
     Phoenix.PubSub.broadcast!(
       Realtime.PubSub,
