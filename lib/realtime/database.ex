@@ -228,8 +228,11 @@ defmodule Realtime.Database do
   @doc """
   Runs database transaction in local node or against a target node withing a Postgrex transaction
   """
-  @spec transaction(pid, fun(), keyword()) :: {:ok, any()} | {:error, any()}
+  @spec transaction(pid | DBConnection.t(), fun(), keyword()) :: {:ok, any()} | {:error, any()}
   def transaction(db_conn, func, opts \\ [], metadata \\ [])
+
+  def transaction(%DBConnection{} = db_conn, func, opts, metadata),
+    do: transaction_catched(db_conn, func, opts, metadata)
 
   def transaction(db_conn, func, opts, metadata) when node() == node(db_conn),
     do: transaction_catched(db_conn, func, opts, metadata)
