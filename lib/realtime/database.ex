@@ -228,24 +228,19 @@ defmodule Realtime.Database do
   @doc """
   Runs database transaction in local node or against a target node withing a Postgrex transaction
   """
-  @spec transaction(pid | DBConnection.t(), fun(), keyword()) :: {:ok, any()} | {:error, any()}
-  def transaction(db_conn, func, opts \\ [])
+  @spec transaction(pid, fun(), keyword()) :: {:ok, any()} | {:error, any()}
+  def transaction(db_conn, func, opts \\ [], metadata \\ [])
 
-  def transaction(%DBConnection{} = db_conn, func, opts),
-    do: transaction_catched(db_conn, func, opts)
+  def transaction(db_conn, func, opts, metadata) when node() == node(db_conn),
+    do: transaction_catched(db_conn, func, opts, metadata)
 
-  def transaction(db_conn, func, opts) when node() == node(db_conn),
-    do: transaction_catched(db_conn, func, opts)
-
-  def transaction(db_conn, func, opts) do
-    metadata =
-      Keyword.take(Logger.metadata(), [:project_id, :tenant_id])
-      |> Keyword.put(:target, node(db_conn))
-
-    Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, [db_conn, func, opts, metadata])
+  def transaction(db_conn, func, opts, metadata) do
+    metadata = Keyword.put(metadata, :target, node(db_conn))
+    args = [db_conn, func, opts, metadata]
+    Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, args)
   end
 
-  defp transaction_catched(db_conn, func, opts, metadata \\ []) do
+  defp transaction_catched(db_conn, func, opts, metadata) do
     Postgrex.transaction(db_conn, func, opts)
   rescue
     e ->

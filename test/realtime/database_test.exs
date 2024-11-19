@@ -62,5 +62,13 @@ defmodule Realtime.DatabaseTest do
                         |> Task.await(15000)
              end) =~ "ErrorExecutingTransaction"
     end
+
+    test "run call using RPC", %{db_conn: db_conn} do
+      func = fn db_conn -> Postgrex.query!(db_conn, "SELECT 1", []) end
+      args = [db_conn, func, [backoff: :stop], [tenant_id: "test"]]
+
+      assert {:ok, %{rows: [[1]]}} =
+               Realtime.Rpc.enhanced_call(node(db_conn), Database, :transaction, args)
+    end
   end
 end
