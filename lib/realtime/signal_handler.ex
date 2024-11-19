@@ -5,7 +5,10 @@ defmodule Realtime.SignalHandler do
 
   @spec shutdown_in_progress? :: boolean()
   def shutdown_in_progress? do
-    !!Application.get_env(:realtime, :shutdown_in_progress)
+    case !!Application.get_env(:realtime, :shutdown_in_progress) do
+      true -> {:error, :shutdown_in_progress}
+      false -> :ok
+    end
   end
 
   @impl true
