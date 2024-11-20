@@ -3,7 +3,7 @@ defmodule Realtime.SignalHandler do
   @behaviour :gen_event
   require Logger
 
-  @spec shutdown_in_progress? :: boolean()
+  @spec shutdown_in_progress? :: :ok | {:error, :shutdown_in_progress}
   def shutdown_in_progress? do
     case !!Application.get_env(:realtime, :shutdown_in_progress) do
       true -> {:error, :shutdown_in_progress}
