@@ -65,16 +65,12 @@ defmodule Realtime.PromEx do
     poll_rate = Application.get_env(:realtime, :prom_poll_rate)
 
     [
-      # PromEx built in plugins
-      # Plugins.Application,
       {Plugins.Beam, poll_rate: poll_rate, metric_prefix: [:beam]},
       {Phoenix, router: RealtimeWeb.Router, poll_rate: poll_rate, metric_prefix: [:phoenix]},
-      # {Plugins.Ecto, poll_rate: poll_rate, metric_prefix: [:ecto]},
-      # Plugins.Oban,
-      # Plugins.PhoenixLiveView
       {OsMon, poll_rate: poll_rate},
       {Tenants, poll_rate: poll_rate},
-      {Tenant, poll_rate: poll_rate}
+      {Tenant, poll_rate: poll_rate},
+      {PromEx.Plugins.Ecto, otp_app: :realtime, poll_rate: poll_rate, metric_prefix: [:ecto]}
     ]
   end
 
