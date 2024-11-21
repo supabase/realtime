@@ -65,7 +65,8 @@ defmodule Realtime.Tenants.Migrations do
     ChangeMessagesIdType,
     UuidAutoGeneration,
     MessagesPartitioning,
-    MessagesUsingUuid
+    MessagesUsingUuid,
+    FixSendFunction
   }
 
   @migrations [
@@ -120,7 +121,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_240_919_163_305, ChangeMessagesIdType},
     {20_241_019_105_805, UuidAutoGeneration},
     {20_241_030_150_047, MessagesPartitioning},
-    {20_241_108_114_728, MessagesUsingUuid}
+    {20_241_108_114_728, MessagesUsingUuid},
+    {20_241_121_104_152, FixSendFunction}
   ]
 
   defstruct [:tenant_external_id, :settings]
