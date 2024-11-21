@@ -17,9 +17,6 @@ defmodule Realtime.Tenants.Connect.StartCounters do
          :ok <- start_max_events_counter(tenant),
          :ok <- start_db_events_counter(tenant) do
       {:ok, acc}
-    else
-      nil -> {:error, "Tenant not found"}
-      {:error, reason} -> {:error, reason}
     end
   end
 

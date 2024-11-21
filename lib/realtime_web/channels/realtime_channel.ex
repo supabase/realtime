@@ -175,9 +175,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, error} ->
         Logging.log_error_message(:error, "UnknownErrorOnChannel", error)
-
-      error ->
-        Logging.log_error_message(:error, "UnknownErrorOnChannel", error)
     end
   end
 
@@ -383,11 +380,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:noreply, assign(socket, assigns)}
     else
       {:error, :unauthorized, msg} ->
-        shutdown_response(socket, msg)
-
-      {:error, error} when is_binary(error) ->
-        msg = "Received an invalid access token from client: " <> error
-
         shutdown_response(socket, msg)
 
       {:error, error} ->
