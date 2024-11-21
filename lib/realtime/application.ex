@@ -84,7 +84,8 @@ defmodule Realtime.Application do
          strategy: :one_for_one,
          name: Realtime.BroadcastChanges.Handler.DynamicSupervisor},
         RealtimeWeb.Endpoint,
-        RealtimeWeb.Presence
+        RealtimeWeb.Presence,
+        Realtime.MetricsCleaner
       ] ++ extensions_supervisors() ++ janitor_tasks()
 
     children =
