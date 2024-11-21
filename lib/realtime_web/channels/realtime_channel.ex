@@ -49,7 +49,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     start_db_rate_counter(tenant_id)
 
-    with false <- SignalHandler.shutdown_in_progress?(),
+    with :ok <- SignalHandler.shutdown_in_progress?(),
          :ok <- only_private?(tenant_id, socket),
          :ok <- limit_joins(socket.assigns),
          :ok <- limit_channels(socket),
@@ -126,6 +126,13 @@ defmodule RealtimeWeb.RealtimeChannel do
           "Realtime is initializing the project connection"
         )
 
+      {:error, :tenant_database_connection_initializing} ->
+        Logging.log_error_message(
+          :warning,
+          "InitializingProjectConnection",
+          "Connecting to the project database"
+        )
+
       {:error, invalid_exp} when is_integer(invalid_exp) and invalid_exp <= 0 ->
         Logging.log_error_message(
           :error,
@@ -139,6 +146,32 @@ defmodule RealtimeWeb.RealtimeChannel do
           "PrivateOnly",
           "This project only allows private channels"
         )
+
+      {:error, :signature_error} ->
+        Logging.log_error_message(:error, "JwtSignatureError", "Failed to validate JWT signature")
+
+      {:error, %Postgrex.Error{} = error} ->
+        Logging.log_error_message(:error, "DatabaseConnectionIssue", error)
+
+      {:error, %DBConnection.ConnectionError{} = error} ->
+        Logging.log_error_message(:error, "DatabaseConnectionIssue", error)
+
+      {:error, :shutdown_in_progress} ->
+        Logging.log_error_message(
+          :error,
+          "RealtimeRestarting",
+          "Realtime is restarting, please standby"
+        )
+
+      {:error, :unable_to_set_policies} ->
+        Logging.log_error_message(
+          :error,
+          "UnableToSetPolicies",
+          "Unable to set policies for connection"
+        )
+
+      {:error, :unauthorized, msg} ->
+        Logging.log_error_message(:error, "Unauthorized", msg)
 
       {:error, error} ->
         Logging.log_error_message(:error, "UnknownErrorOnChannel", error)
@@ -349,15 +382,18 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:noreply, assign(socket, assigns)}
     else
-      {:error, error} when is_binary(error) ->
-        message = "Received an invalid access token from client: " <> error
+      {:error, :unauthorized, msg} ->
+        shutdown_response(socket, msg)
 
-        shutdown_response(socket, message)
+      {:error, error} when is_binary(error) ->
+        msg = "Received an invalid access token from client: " <> error
+
+        shutdown_response(socket, msg)
 
       {:error, error} ->
-        message = "Received an invalid access token from client: " <> inspect(error)
+        msg = "Received an invalid access token from client: " <> inspect(error)
 
-        shutdown_response(socket, message)
+        shutdown_response(socket, msg)
     end
   end
 
@@ -670,15 +706,21 @@ defmodule RealtimeWeb.RealtimeChannel do
     with {:ok, socket} <- Authorization.get_authorizations(socket, db_conn, authorization_context) do
       cond do
         match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-          {:error, "You do not have permissions to read from this Channel topic: #{topic}"}
+          {:error, :unauthorized,
+           "You do not have permissions to read from this Channel topic: #{topic}"}
 
         using_broadcast? and
             match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-          {:error, "You do not have permissions to read from this Channel topic: #{topic}"}
+          {:error, :unauthorized,
+           "You do not have permissions to read from this Channel topic: #{topic}"}
 
         true ->
           {:ok, socket}
       end
+    else
+      {:error, error} ->
+        log_error("UnableToSetPolicies", error)
+        {:error, :unable_to_set_policies}
     end
   end
 

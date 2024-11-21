@@ -220,6 +220,14 @@ This is the list of operational codes that can help you understand your deployme
 | UnableToUpdateCounter              | Error when trying to update a counter to track rate limits for a tenant                                                             |
 | UnableToFindCounter                | Error when trying to find a counter to track rate limits for a tenant                                                               |
 | UnhandledProcessMessage            | Unhandled message received by a Realtime process                                                                                    |
+| UnableToSetPolicies                | We were not able to set policies for this connection                                                                                |
+| ConnectionInitializing             | Database is initializing connection                                                                                                 |
+| DatabaseConnectionIssue            | Database had connection issues and connection was not able to be established                                                        |
+| UnableToConnectToProject           | Unable to connect to Project database                                                                                               |
+| InvalidJWTExpiration               | JWT exp claim value it's incorrect                                                                                                  |
+| JwtSignatureError                  | JWT signature was not able to be validated                                                                                          |
+| Unauthorized                       | Unauthorized access to Realtime channel                                                                                             |
+| RealtimeRestarting                 | Realtime is currently restarting                                                                                                    |
 | UnableToProcessListenPayload       | Payload sent in NOTIFY operation was JSON parsable                                                                                  |
 | UnableToListenToTenantDatabase     | Unable to LISTEN for notifications against the Tenant Database                                                                      |
 | UnprocessableEntity                | Received a HTTP request with a body that was not able to be processed by the endpoint                                               |
