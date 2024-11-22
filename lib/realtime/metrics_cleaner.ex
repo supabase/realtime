@@ -10,7 +10,7 @@ defmodule Realtime.MetricsCleaner do
     do: GenServer.start_link(__MODULE__, args, name: __MODULE__)
 
   def init(_args) do
-    interval = Application.get_env(:realtime, :metrics_cleaner_scheduke_timer_in_ms)
+    interval = Application.get_env(:realtime, :metrics_cleaner_schedule_timer_in_ms)
 
     Logger.info("Starting MetricsCleaner")
     {:ok, %{check_ref: check(interval), interval: interval}}
