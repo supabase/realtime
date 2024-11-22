@@ -248,6 +248,12 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :kill, state}
   end
 
+  @impl true
+  def terminate(_, %{tenant_id: tenant_id}) do
+    Realtime.MetricsCleaner.delete_metric(tenant_id)
+    :ok
+  end
+
   ## Private functions
 
   defp call_external_node(tenant_id, opts) do

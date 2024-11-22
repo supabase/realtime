@@ -22,6 +22,8 @@ config :realtime,
     System.get_env("TENANT_MAX_EVENTS_PER_SECOND", "100") |> String.to_integer(),
   tenant_max_joins_per_second:
     System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer(),
+  metrics_cleaner_schedule_timer_in_ms:
+    System.get_env("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", "1800000") |> String.to_integer(),
   rpc_timeout: System.get_env("RPC_TIMEOUT", "30000") |> String.to_integer()
 
 run_janitor? = System.get_env("RUN_JANITOR", "false") == "true"
