@@ -279,6 +279,11 @@ defmodule RealtimeWeb.RealtimeChannel do
       nil ->
         Logger.warning("Re-connecting to PostgreSQL with params: " <> inspect(pg_change_params))
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
+
+      error ->
+        log_error("UnableToSubscribeToPostgres", error)
+        push_system_message("postgres_changes", socket, "error", error, channel_name)
+        {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
     end
   end
 
