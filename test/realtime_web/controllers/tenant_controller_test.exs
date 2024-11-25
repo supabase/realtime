@@ -64,6 +64,17 @@ defmodule RealtimeWeb.TenantControllerTest do
     {:ok, conn: new_conn}
   end
 
+  describe "show tenant" do
+    test "removes db_password", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        conn = get(conn, Routes.tenant_path(conn, :show, "dev_tenant"))
+        response = json_response(conn, 200)
+
+        refute get_in(response, ["data", "extensions", Access.at(0), "settings", "db_password"])
+      end
+    end
+  end
+
   describe "create tenant" do
     test "renders tenant when data is valid", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
@@ -87,6 +98,10 @@ defmodule RealtimeWeb.TenantControllerTest do
         assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
         assert Crypto.encrypt!("postgres") == settings["db_name"]
         assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
+        refute settings["db_password"]
+
+        %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id("external_id")
+
         assert Crypto.encrypt!("postgres") == settings["db_password"]
       end
     end

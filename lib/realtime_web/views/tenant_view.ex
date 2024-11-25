@@ -24,7 +24,12 @@ defmodule RealtimeWeb.TenantView do
       max_events_per_second: tenant.max_events_per_second,
       max_joins_per_second: tenant.max_joins_per_second,
       inserted_at: tenant.inserted_at,
-      extensions: tenant.extensions,
+      extensions:
+        Enum.map(tenant.extensions, fn extension ->
+          Map.update(extension, :settings, %{}, fn settings ->
+            Map.drop(settings, ["db_password"])
+          end)
+        end),
       private_only: tenant.private_only
     }
   end
