@@ -98,6 +98,10 @@ defmodule RealtimeWeb.TenantControllerTest do
         assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
         assert Crypto.encrypt!("postgres") == settings["db_name"]
         assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
+        refute settings["db_password"]
+
+        %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id("external_id")
+
         assert Crypto.encrypt!("postgres") == settings["db_password"]
       end
     end
