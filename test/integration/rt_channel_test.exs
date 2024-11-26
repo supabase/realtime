@@ -2,21 +2,21 @@ Code.require_file("../support/websocket_client.exs", __DIR__)
 
 defmodule Realtime.Integration.RtChannelTest do
   # async: false due to the fact that multiple operations against the database will use the same connection
+
   use RealtimeWeb.ConnCase, async: false
   import ExUnit.CaptureLog
 
   require Logger
 
+  alias __MODULE__.Endpoint
   alias Extensions.PostgresCdcRls, as: Rls
   alias Phoenix.Socket.{V1, Message}
   alias Postgrex, as: P
-
-  alias __MODULE__.Endpoint
-
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Repo
+  alias Realtime.Tenants
   alias Realtime.Tenants.Migrations
 
   @moduletag :capture_log
@@ -581,6 +581,30 @@ defmodule Realtime.Integration.RtChannelTest do
 
       refute_receive %Phoenix.Socket.Message{}
     end
+
+    test "on empty string access_token the socket sends an error message",
+         %{topic: topic} do
+      {socket, access_token} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => ""})
+
+      assert_receive %Phoenix.Socket.Message{
+        topic: ^realtime_topic,
+        event: "system",
+        payload: %{
+          "extension" => "system",
+          "message" => "Received an invalid access token from client: :expected_claims_map",
+          "status" => "error"
+        }
+      }
+    end
   end
 
   describe "handle broadcast changes" do
@@ -846,6 +870,84 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
       Realtime.Tenants.update_management(@external_id, %{private_only: false})
       :timer.sleep(100)
+    end
+  end
+
+  describe "sensitive information updates" do
+    setup [:rls_context]
+
+    test "on jwks the socket closes and sends a system message", %{topic: topic} do
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      tenant = Tenants.get_tenant_by_external_id(@external_id)
+      Realtime.Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["potato"]}})
+
+      assert_receive %Phoenix.Socket.Message{
+                       topic: ^realtime_topic,
+                       event: "system",
+                       payload: %{
+                         "extension" => "system",
+                         "message" => "Server requested disconnect",
+                         "status" => "ok"
+                       }
+                     },
+                     500
+    end
+
+    test "on jwt_secret the socket closes and sends a system message", %{topic: topic} do
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+
+      tenant = Tenants.get_tenant_by_external_id(@external_id)
+      Realtime.Api.update_tenant(tenant, %{jwt_secret: "potato"})
+
+      assert_receive %Phoenix.Socket.Message{
+                       topic: ^realtime_topic,
+                       event: "system",
+                       payload: %{
+                         "extension" => "system",
+                         "message" => "Server requested disconnect",
+                         "status" => "ok"
+                       }
+                     },
+                     500
+    end
+
+    test "on other param changes the socket won't close and no message is sent", %{topic: topic} do
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+
+      tenant = Tenants.get_tenant_by_external_id(@external_id)
+      Realtime.Api.update_tenant(tenant, %{max_concurrent_users: 100})
+
+      refute_receive %Phoenix.Socket.Message{
+                       topic: ^realtime_topic,
+                       event: "system",
+                       payload: %{
+                         "extension" => "system",
+                         "message" => "Server requested disconnect",
+                         "status" => "ok"
+                       }
+                     },
+                     500
     end
   end
 

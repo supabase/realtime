@@ -59,6 +59,11 @@ defmodule Realtime.ApiTest do
     dev_tenant = Api.list_tenants(search: "dev_tenant")
     tenants = tenants ++ dev_tenant
 
+    Enum.each(tenants, fn tenant ->
+      :ok =
+        Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
+    end)
+
     %{tenants: tenants}
   end
 
@@ -117,6 +122,28 @@ defmodule Realtime.ApiTest do
 
     test "update_tenant/2 with invalid data returns error changeset", %{tenants: [tenant | _]} do
       assert {:error, %Ecto.Changeset{}} = Api.update_tenant(tenant, @invalid_attrs)
+    end
+
+    test "update_tenant/2 with valid data and jwks change will send disconnect event", %{
+      tenants: [tenant | _]
+    } do
+      assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["test"]}})
+      assert_receive :disconnect
+    end
+
+    test "update_tenant/2 with valid data and jwt_secret change will send disconnect event", %{
+      tenants: [tenant | _]
+    } do
+      assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{jwt_secret: "potato"})
+      assert_receive :disconnect
+    end
+
+    test "update_tenant/2 with valid data but not updating jwt_secret or jwt_jwks won't send event",
+         %{
+           tenants: [tenant | _]
+         } do
+      assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{max_events_per_second: 100})
+      refute_receive :disconnect
     end
 
     test "delete_tenant/1 deletes the tenant", %{tenants: [tenant | _]} do
