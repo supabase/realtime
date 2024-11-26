@@ -312,6 +312,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_info(:disconnect, %{assigns: %{channel_name: channel_name}} = socket) do
     Logger.info("Received operational call to disconnect channel")
     push_system_message("system", socket, "ok", "Server requested disconnect", channel_name)
+    RealtimeWeb.Endpoint.broadcast(channel_name, "disconnect", %{})
     {:stop, :shutdown, socket}
   end
 
