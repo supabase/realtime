@@ -246,14 +246,13 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def handle_info(:postgres_subscribe, socket) do
+  def handle_info(:postgres_subscribe, %{assigns: %{channel_name: channel_name}} = socket) do
     %{
       assigns: %{
         tenant: tenant,
         pg_sub_ref: pg_sub_ref,
         pg_change_params: pg_change_params,
         postgres_extension: postgres_extension,
-        channel_name: channel_name,
         postgres_cdc_module: module
       }
     } = socket
@@ -286,6 +285,11 @@ defmodule RealtimeWeb.RealtimeChannel do
         push_system_message("postgres_changes", socket, "error", error, channel_name)
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
     end
+  rescue
+    error ->
+      log_error("UnableToSubscribeToPostgres", error)
+      push_system_message("postgres_changes", socket, "error", error, channel_name)
+      {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
   end
 
   @impl true
