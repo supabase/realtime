@@ -14,6 +14,8 @@ defmodule Realtime.Api do
   alias Realtime.GenCounter
   alias Realtime.Tenants
 
+  alias RealtimeWeb.UserSocket
+
   @doc """
   Returns the list of tenants.
 
@@ -124,7 +126,11 @@ defmodule Realtime.Api do
          data: %{external_id: external_id}
        })
        when is_map_key(changes, :jwt_jwks) or is_map_key(changes, :jwt_secret) do
-    Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> external_id, :disconnect)
+    Phoenix.PubSub.broadcast!(
+      Realtime.PubSub,
+      UserSocket.subscribers_id(external_id),
+      "disconnect"
+    )
   end
 
   defp maybe_trigger_disconnect(_), do: nil
