@@ -272,6 +272,8 @@ describe("authorization check", () => {
     await signInUser(supabase, "filipe@supabase.io", "test_test");
     await supabase.realtime.setAuth();
 
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
     const channel = supabase
       .channel(topic, { config: { private: true } })
       .subscribe((status: string) => {
