@@ -66,7 +66,8 @@ defmodule Realtime.Tenants.Migrations do
     UuidAutoGeneration,
     MessagesPartitioning,
     MessagesUsingUuid,
-    FixSendFunction
+    FixSendFunction,
+    RecreateEntityIndexUsingBtree
   }
 
   @migrations [
@@ -122,7 +123,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_241_019_105_805, UuidAutoGeneration},
     {20_241_030_150_047, MessagesPartitioning},
     {20_241_108_114_728, MessagesUsingUuid},
-    {20_241_121_104_152, FixSendFunction}
+    {20_241_121_104_152, FixSendFunction},
+    {20_241_130_184_212, RecreateEntityIndexUsingBtree}
   ]
 
   defstruct [:tenant_external_id, :settings]
