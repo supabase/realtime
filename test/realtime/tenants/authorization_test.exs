@@ -20,7 +20,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
   describe "get_authorizations for Plug.Conn" do
     @tag role: "authenticated",
          policies: [
-           :authenticated_read_topic,
            :authenticated_read_broadcast,
            :authenticated_read_presence
          ]
@@ -38,10 +37,45 @@ defmodule Realtime.Tenants.AuthorizationTest do
              } = conn.assigns.policies
     end
 
+    @tag role: "authenticated",
+         policies: [
+           :authenticated_read_broadcast
+         ]
+    test "authenticated user has expected mixed policies", context do
+      {:ok, conn} =
+        Authorization.get_authorizations(
+          Phoenix.ConnTest.build_conn(),
+          context.db_conn,
+          context.authorization_context
+        )
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: true, write: false},
+               presence: %PresencePolicies{read: false, write: false}
+             } = conn.assigns.policies
+    end
+
+    @tag role: "authenticated",
+         policies: [
+           :authenticated_read_broadcast,
+           :authenticated_write_broadcast
+         ]
+    test "authenticated user has expected mixed extensions policies", context do
+      {:ok, conn} =
+        Authorization.get_authorizations(
+          Phoenix.ConnTest.build_conn(),
+          context.db_conn,
+          context.authorization_context
+        )
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: true, write: true},
+               presence: %PresencePolicies{read: false, write: false}
+             } = conn.assigns.policies
+    end
+
     @tag role: "anon",
          policies: [
-           :authenticated_read_topic,
-           :authenticated_write_topic,
            :authenticated_read_broadcast,
            :authenticated_write_broadcast,
            :authenticated_read_presence,
