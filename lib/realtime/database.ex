@@ -17,8 +17,8 @@ defmodule Realtime.Database do
     :pass,
     :pool,
     :queue_target,
+    :application_name,
     ssl_enforced: true,
-    application_name: "realtime_supabase",
     backoff: :rand_exp
   ]
 
@@ -39,9 +39,14 @@ defmodule Realtime.Database do
 
   @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp, boolean()) ::
           Realtime.Database.t()
-  def from_settings(settings, application_name, backoff \\ :rand_exp, decrypt \\ false) do
-    pool =
-      settings["subs_pool_size"] || settings["subcriber_pool_size"] || settings["db_pool"] || 1
+  def from_settings(
+        settings,
+        application_name,
+        backoff \\ :rand_exp,
+        decrypt \\ false,
+        pool \\ nil
+      ) do
+    pool = pool_size_by_application_name(application_name, settings, pool)
 
     settings =
       if decrypt do
@@ -66,6 +71,44 @@ defmodule Realtime.Database do
       application_name: application_name,
       backoff: backoff
     }
+  end
+
+  @doc """
+  Returns the pool size for a given application name. Override pool size if provided.
+
+  ## Examples
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_rls", %{}, 1)
+      1
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_rls", %{"db_pool" => 10}, 1)
+      1
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_rls", %{"db_pool" => 10}, nil)
+      10
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_potato", %{}, nil)
+      1
+
+  """
+  @spec pool_size_by_application_name(binary(), map(), non_neg_integer() | nil) ::
+          non_neg_integer()
+  def pool_size_by_application_name(application_name, settings, override_pool \\ nil) do
+    pool =
+      case application_name do
+        "realtime_subscription_manager" -> settings["subcriber_pool_size"]
+        "realtime_subscription_manager_pub" -> settings["subs_pool_size"]
+        "realtime_subscription_checker" -> settings["subs_pool_size"]
+        "realtime_rls" -> settings["db_pool"]
+        "realtime_connect" -> settings["db_pool"]
+        "realtime_health_check" -> 1
+        "realtime_broadcast_changes" -> 1
+        "realtime_migrations" -> 2
+        "realtime_janitor" -> 1
+        _ -> 1
+      end
+
+    if override_pool, do: override_pool, else: pool
   end
 
   @spec from_tenant(
@@ -147,8 +190,7 @@ defmodule Realtime.Database do
   def connect(tenant, application_name, pool, backoff \\ :stop) do
     tenant
     |> then(&Realtime.PostgresCdc.filter_settings(@cdc, &1.extensions))
-    |> then(&Realtime.Database.from_settings(&1, application_name, backoff))
-    |> then(&%{&1 | pool: pool})
+    |> then(&Realtime.Database.from_settings(&1, application_name, backoff, false, pool))
     |> connect_db()
   end
 

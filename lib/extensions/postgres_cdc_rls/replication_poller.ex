@@ -28,13 +28,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   def init(args) do
     tenant = args["id"]
     Logger.metadata(external_id: tenant, project: tenant)
-
-    # higher number of pool connections leads to issues
-    realtime_rls_settings =
-      args
-      |> Database.from_settings("realtime_rls")
-      |> Map.put(:pool, 1)
-
+    realtime_rls_settings = Database.from_settings(args, "realtime_rls")
     {:ok, conn} = Database.connect_db(realtime_rls_settings)
 
     state = %{
