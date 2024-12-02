@@ -15,8 +15,6 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Api.Message
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization.Policies
-  alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.PresencePolicies
 
   defstruct [:topic, :headers, :jwt, :claims, :role]
 
@@ -85,7 +83,6 @@ defmodule Realtime.Tenants.Authorization do
   * role: The role of the user
   * realtime.topic: The name of the channel being accessed
   * request.jwt.claim.role: The role of the user
-  * request.jwt: The JWT token
   * request.jwt.claim.sub: The sub claim of the JWT token
   * request.jwt.claims: The claims of the JWT token
   * request.headers: The headers of the request
@@ -96,7 +93,6 @@ defmodule Realtime.Tenants.Authorization do
     %__MODULE__{
       topic: topic,
       headers: headers,
-      jwt: jwt,
       claims: claims,
       role: role
     } = authorization_context
@@ -110,15 +106,13 @@ defmodule Realtime.Tenants.Authorization do
       SELECT
        set_config('role', $1, true),
        set_config('realtime.topic', $2, true),
-       set_config('request.jwt', $3, true),
-       set_config('request.jwt.claims', $4, true),
-       set_config('request.headers', $5, true)
+       set_config('request.jwt.claims', $3, true),
+       set_config('request.headers', $4, true)
       """,
-      [role, topic, jwt, claims, headers]
+      [role, topic, claims, headers]
     )
   end
 
-  @policies_mods [BroadcastPolicies, PresencePolicies]
   defp get_policies_for_connection(conn, authorization_context) do
     Database.transaction(conn, fn transaction_conn ->
       messages = [
@@ -131,24 +125,23 @@ defmodule Realtime.Tenants.Authorization do
       {[%{id: broadcast_id}], [%{id: presence_id}]} =
         Enum.split_with(messages, &(&1.extension == :broadcast))
 
-      ids = %{presence_id: presence_id, broadcast_id: broadcast_id}
-
       set_conn_config(transaction_conn, authorization_context)
       policies = %Policies{}
 
       policies =
         get_read_policy_for_connection_and_extension(
           transaction_conn,
-          ids,
-          policies,
-          authorization_context
+          authorization_context,
+          broadcast_id,
+          presence_id,
+          policies
         )
 
       policies =
         get_write_policy_for_connection_and_extension(
           transaction_conn,
-          policies,
-          authorization_context
+          authorization_context,
+          policies
         )
 
       Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
@@ -157,27 +150,47 @@ defmodule Realtime.Tenants.Authorization do
     end)
   end
 
-  defp get_read_policy_for_connection_and_extension(conn, ids, policies, authorization_context) do
-    Enum.reduce_while(@policies_mods, policies, fn policy_mod, policies ->
-      res = policy_mod.check_read_policies(conn, ids, policies, authorization_context)
+  import Ecto.Query
 
-      case res do
-        {:error, error} -> {:halt, {:error, error}}
-        %DBConnection.TransactionError{} = err -> {:halt, err}
-        {:ok, policy} -> {:cont, policy}
-      end
-    end)
+  defp get_read_policy_for_connection_and_extension(
+         conn,
+         authorization_context,
+         broadcast_id,
+         presence_id,
+         policies
+       ) do
+    query =
+      from(m in Message,
+        where: [topic: ^authorization_context.topic],
+        where: [extension: :broadcast, id: ^broadcast_id],
+        or_where: [extension: :presence, id: ^presence_id]
+      )
+
+    {:ok, res} = Repo.all(conn, query, Message)
+    can_presence? = Enum.any?(res, fn %{id: id} -> id == presence_id end)
+    can_broadcast? = Enum.any?(res, fn %{id: id} -> id == broadcast_id end)
+
+    policies
+    |> Policies.update_policies(:presence, :read, can_presence?)
+    |> Policies.update_policies(:broadcast, :read, can_broadcast?)
   end
 
-  defp get_write_policy_for_connection_and_extension(conn, policies, authorization_context) do
-    Enum.reduce_while(@policies_mods, policies, fn policy_mod, policies ->
-      res = policy_mod.check_write_policies(conn, policies, authorization_context)
+  defp get_write_policy_for_connection_and_extension(
+         conn,
+         authorization_context,
+         policies
+       ) do
+    broadcast_changeset =
+      Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: :broadcast})
 
-      case res do
-        {:error, error} -> {:halt, {:error, error}}
-        %DBConnection.TransactionError{} = err -> {:halt, err}
-        {:ok, policy} -> {:cont, policy}
-      end
-    end)
+    presence_changeset =
+      Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: :presence})
+
+    broadcast_result = Repo.insert(conn, broadcast_changeset, Message, mode: :savepoint)
+    presence_result = Repo.insert(conn, presence_changeset, Message, mode: :savepoint)
+
+    policies
+    |> Policies.update_policies(:presence, :write, match?({:ok, _}, presence_result))
+    |> Policies.update_policies(:broadcast, :write, match?({:ok, _}, broadcast_result))
   end
 end
