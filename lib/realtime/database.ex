@@ -91,7 +91,8 @@ defmodule Realtime.Database do
       1
 
   """
-  @spec pool_size_by_application_name(binary(), map(), non_neg_integer()) :: non_neg_integer()
+  @spec pool_size_by_application_name(binary(), map(), non_neg_integer() | nil) ::
+          non_neg_integer()
   def pool_size_by_application_name(application_name, settings, override_pool \\ nil) do
     pool =
       case application_name do
