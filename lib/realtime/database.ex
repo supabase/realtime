@@ -99,11 +99,11 @@ defmodule Realtime.Database do
         "realtime_subscription_manager_pub" -> settings["subs_pool_size"]
         "realtime_subscription_checker" -> settings["subs_pool_size"]
         "realtime_rls" -> settings["db_pool"]
-        "realtime_health_check" -> settings["db_pool"]
+        "realtime_connect" -> settings["db_pool"]
+        "realtime_health_check" -> 1
         "realtime_broadcast_changes" -> 1
         "realtime_migrations" -> 2
         "realtime_janitor" -> 1
-        "realtime_connect" -> 1
         _ -> 1
       end
 
