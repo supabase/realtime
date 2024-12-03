@@ -76,20 +76,51 @@ defmodule Realtime.Database do
   @doc """
   Returns the pool size for a given application name. Override pool size if provided.
 
+  `realtime_rls` and `realtime_broadcast_changes` will be handled as a special scenario as it will need to be hardcoded as 1 otherwise replication slots will be tried to be reused leading to errors
+  `realtime_migrations` will be handled as a special scenario as it requires 2 connections.
   ## Examples
 
-      iex> Realtime.Database.pool_size_by_application_name("realtime_rls", %{}, 1)
+      iex> Realtime.Database.pool_size_by_application_name("realtime_connect", %{}, 1)
       1
 
-      iex> Realtime.Database.pool_size_by_application_name("realtime_rls", %{"db_pool" => 10}, 1)
+      iex> Realtime.Database.pool_size_by_application_name("realtime_connect", %{})
       1
 
-      iex> Realtime.Database.pool_size_by_application_name("realtime_rls", %{"db_pool" => 10}, nil)
+      iex> Realtime.Database.pool_size_by_application_name("realtime_connect", %{"db_pool" => 10}, 1)
+      1
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_connect", %{"db_pool" => 10}, nil)
       10
 
       iex> Realtime.Database.pool_size_by_application_name("realtime_potato", %{}, nil)
       1
 
+      iex> Realtime.Database.pool_size_by_application_name("realtime_rls", %{"db_pool" => 10}, nil)
+      1
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_rls", %{"db_pool" => 10}, 10)
+      1
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_rls", %{"db_pool" => 10})
+      1
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_broadcast_changes", %{"db_pool" => 10}, nil)
+      1
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_broadcast_changes", %{"db_pool" => 10}, 10)
+      1
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_broadcast_changes", %{"db_pool" => 10})
+      1
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_migrations", %{"db_pool" => 10}, nil)
+      2
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_migrations", %{"db_pool" => 10}, 10)
+      2
+
+      iex> Realtime.Database.pool_size_by_application_name("realtime_migrations", %{"db_pool" => 10})
+      2
   """
   @spec pool_size_by_application_name(binary(), map(), non_neg_integer() | nil) ::
           non_neg_integer()
@@ -99,16 +130,18 @@ defmodule Realtime.Database do
         "realtime_subscription_manager" -> settings["subcriber_pool_size"]
         "realtime_subscription_manager_pub" -> settings["subs_pool_size"]
         "realtime_subscription_checker" -> settings["subs_pool_size"]
-        "realtime_rls" -> settings["db_pool"]
         "realtime_connect" -> settings["db_pool"]
         "realtime_health_check" -> 1
-        "realtime_broadcast_changes" -> 1
-        "realtime_migrations" -> 2
         "realtime_janitor" -> 1
         _ -> 1
       end
 
-    if override_pool, do: override_pool, else: pool
+    case application_name do
+      "realtime_rls" -> 1
+      "realtime_broadcast_changes" -> 1
+      "realtime_migrations" -> 2
+      _ -> if override_pool, do: override_pool, else: pool || 1
+    end
   end
 
   @spec from_tenant(
