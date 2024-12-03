@@ -124,25 +124,41 @@ defmodule Realtime.Database do
   """
   @spec pool_size_by_application_name(binary(), map(), non_neg_integer() | nil) ::
           non_neg_integer()
-  def pool_size_by_application_name(application_name, settings, override_pool \\ nil) do
-    pool =
-      case application_name do
-        "realtime_subscription_manager" -> settings["subcriber_pool_size"]
-        "realtime_subscription_manager_pub" -> settings["subs_pool_size"]
-        "realtime_subscription_checker" -> settings["subs_pool_size"]
-        "realtime_connect" -> settings["db_pool"]
-        "realtime_health_check" -> 1
-        "realtime_janitor" -> 1
-        _ -> 1
-      end
-
+  def pool_size_by_application_name(application_name, settings, override \\ nil) do
     case application_name do
-      "realtime_rls" -> 1
-      "realtime_broadcast_changes" -> 1
-      "realtime_migrations" -> 2
-      _ -> if override_pool, do: override_pool, else: pool || 1
+      "realtime_subscription_manager" ->
+        override_or_get_or_default("subcriber_pool_size", settings, override)
+
+      "realtime_subscription_manager_pub" ->
+        override_or_get_or_default("subs_pool_size", settings, override)
+
+      "realtime_subscription_checker" ->
+        override_or_get_or_default("subs_pool_size", settings, override)
+
+      "realtime_connect" ->
+        override_or_get_or_default("db_pool", settings, override)
+
+      "realtime_health_check" ->
+        override || 1
+
+      "realtime_janitor" ->
+        override || 1
+
+      "realtime_migrations" ->
+        2
+
+      "realtime_broadcast_changes" ->
+        1
+
+      "realtime_rls" ->
+        1
+
+      _ ->
+        1
     end
   end
+
+  defp override_or_get_or_default(key, settings, override), do: override || settings[key] || 1
 
   @spec from_tenant(
           Realtime.Api.Tenant.t(),
