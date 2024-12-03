@@ -19,7 +19,7 @@ defmodule Realtime.DatabaseTest do
       pid =
         start_supervised!({Extensions.PostgresCdcStream.Replication, args}, restart: :transient)
 
-      {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
+      {:ok, conn} = Database.connect(tenant, "realtime_test")
       # Check replication slot was created
       assert %{rows: [["supabase_realtime_replication_slot"]]} =
                Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
@@ -34,7 +34,7 @@ defmodule Realtime.DatabaseTest do
   describe "transaction/1" do
     setup do
       tenant = tenant_fixture()
-      {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1, :stop)
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       %{db_conn: db_conn}
     end
 

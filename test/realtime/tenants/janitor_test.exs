@@ -31,7 +31,7 @@ defmodule Realtime.Tenants.JanitorTest do
           tenant = Repo.preload(tenant, :extensions)
           Connect.lookup_or_start_connection(tenant.external_id)
           :timer.sleep(250)
-          {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
+          {:ok, conn} = Database.connect(tenant, "realtime_test")
           clean_table(conn, "realtime", "messages")
           tenant
         end
@@ -80,7 +80,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
       current =
         Enum.map(tenants, fn tenant ->
-          {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
+          {:ok, conn} = Database.connect(tenant, "realtime_test")
           {:ok, res} = Repo.all(conn, from(m in Message), Message)
           res
         end)

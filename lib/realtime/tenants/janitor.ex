@@ -120,7 +120,7 @@ defmodule Realtime.Tenants.Janitor do
     Logger.info("Janitor starting realtime.messages cleanup")
 
     with %Tenant{} = tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_external_id),
-         {:ok, conn} <- Database.connect(tenant, "realtime_janitor", 1),
+         {:ok, conn} <- Database.connect(tenant, "realtime_janitor"),
          :ok <- Messages.delete_old_messages(conn),
          :ok <- Migrations.create_partitions(conn) do
       Logger.info("Janitor finished")

@@ -977,7 +977,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
   def rls_context(%{tenant: tenant} = context) do
     {:ok, db_conn} =
-      Database.connect(tenant, "realtime_test", 1)
+      Database.connect(tenant, "realtime_test")
 
     clean_table(db_conn, "realtime", "messages")
     topic = Map.get(context, :topic, random_string())
@@ -1028,7 +1028,7 @@ defmodule Realtime.Integration.RtChannelTest do
     Postgrex.query!(db_conn, query, [])
 
     on_exit(fn ->
-      {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test")
       query = "DROP TABLE #{random_name} CASCADE"
       Postgrex.query!(db_conn, query, [])
       Realtime.Tenants.Connect.shutdown(db_conn)

@@ -12,7 +12,7 @@ defmodule Realtime.RepoTest do
 
   setup do
     tenant = tenant_fixture()
-    {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test")
 
     [%{settings: settings} | _] = tenant.extensions
     migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
