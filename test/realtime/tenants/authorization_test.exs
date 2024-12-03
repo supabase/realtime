@@ -150,7 +150,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
           context.authorization_context
         )
 
-      {:ok, db_conn} = Database.connect(context.tenant, "realtime_test", 1)
+      {:ok, db_conn} = Database.connect(context.tenant, "realtime_test")
       assert {:ok, []} = Repo.all(db_conn, Message, Message)
     end
   end
@@ -163,7 +163,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
     Migrations.run_migrations(migrations)
 
-    {:ok, db_conn} = Database.connect(tenant, "realtime_test", 1)
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test")
 
     clean_table(db_conn, "realtime", "messages")
     topic = random_string()

@@ -13,7 +13,7 @@ defmodule Realtime.Tenants.MigrationsTest do
 
     test "migrations for a given tenant only run once", %{tenant: tenant} do
       %{extensions: [%{settings: settings}]} = tenant
-      {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
+      {:ok, conn} = Database.connect(tenant, "realtime_test")
 
       Postgrex.query!(conn, "DROP SCHEMA realtime CASCADE", [])
       Postgrex.query!(conn, "CREATE SCHEMA realtime", [])

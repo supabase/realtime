@@ -21,7 +21,7 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
     migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
     Migrations.run_migrations(migrations)
 
-    {:ok, conn} = Database.connect(tenant, "realtime_test", 1)
+    {:ok, conn} = Database.connect(tenant, "realtime_test")
     clean_table(conn, "realtime", "messages")
 
     publication =
@@ -108,7 +108,7 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
         })
       end
 
-    Database.connect(tenant, "realtime_test", 1)
+    Database.connect(tenant, "realtime_test")
     Realtime.Repo.insert_all_entries(Message, messages, Message)
     :timer.sleep(500)
 
