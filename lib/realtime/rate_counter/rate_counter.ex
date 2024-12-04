@@ -70,8 +70,8 @@ defmodule Realtime.RateCounter do
   """
 
   @spec new(term(), keyword()) :: DynamicSupervisor.on_start_child()
-  def new({_, _, tenant_id} = term, opts \\ []) do
-    opts = [id: term, tenant_id: tenant_id] ++ opts
+  def new(term, opts \\ []) do
+    opts = [id: term] ++ opts
 
     DynamicSupervisor.start_child(RateCounter.DynamicSupervisor, %{
       id: term,
@@ -94,13 +94,12 @@ defmodule Realtime.RateCounter do
 
   @impl true
   def init(args) do
-    tenant_id = Keyword.fetch!(args, :tenant_id)
     id = Keyword.fetch!(args, :id)
     telem_opts = Keyword.get(args, :telemetry)
     every = Keyword.get(args, :tick, @tick)
     max_bucket_len = Keyword.get(args, :max_bucket_len, @max_bucket_len)
     idle_shutdown_ms = Keyword.get(args, :idle_shutdown, @idle_shutdown)
-
+    tenant_id = get_in(telem_opts, [:metadata, :tenant])
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     telemetry =

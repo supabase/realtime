@@ -30,7 +30,8 @@ defmodule Realtime.GenCounter do
   @doc """
   Creates a new counter from any Erlang term.
   """
-  @spec new(term) :: {:ok, {:write_concurrency, reference()}} | {:error, term()}
+  @spec new({atom(), atom(), term()}) ::
+          {:ok, {:write_concurrency, reference()}} | {:error, term()}
   def new({_, _, tenant_id} = term) do
     id = :erlang.phash2(term)
 
