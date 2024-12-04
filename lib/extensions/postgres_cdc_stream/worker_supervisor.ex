@@ -13,7 +13,8 @@ defmodule Extensions.PostgresCdcStream.WorkerSupervisor do
 
   @impl true
   def init(%{"id" => tenant} = args) when is_binary(tenant) do
-    unless Api.get_tenant_by_external_id(tenant, :primary), do: raise(Exception)
+    if !Api.get_tenant_by_external_id(tenant, :primary), do: raise(Exception)
+    Logger.metadata(external_id: tenant, project: tenant)
 
     children = [
       %{
