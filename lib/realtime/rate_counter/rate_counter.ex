@@ -12,6 +12,7 @@ defmodule Realtime.RateCounter do
   use GenServer
 
   require Logger
+  import Realtime.Logs
 
   alias Realtime.GenCounter
   alias Realtime.RateCounter
@@ -57,7 +58,7 @@ defmodule Realtime.RateCounter do
   @spec start_link([keyword()]) :: {:ok, pid()} | {:error, {:already_started, pid()}}
   def start_link(args) do
     id = Keyword.get(args, :id)
-    unless id, do: raise("Supply an identifier to start a counter!")
+    if !id, do: raise("Supply an identifier to start a counter!")
 
     GenServer.start_link(__MODULE__, args,
       name: {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, :rate_counter, id}}}
@@ -93,12 +94,13 @@ defmodule Realtime.RateCounter do
 
   @impl true
   def init(args) do
-    id = Keyword.get(args, :id)
+    id = Keyword.fetch!(args, :id)
+    telem_opts = Keyword.get(args, :telemetry)
     every = Keyword.get(args, :tick, @tick)
     max_bucket_len = Keyword.get(args, :max_bucket_len, @max_bucket_len)
     idle_shutdown_ms = Keyword.get(args, :idle_shutdown, @idle_shutdown)
-
-    telem_opts = Keyword.get(args, :telemetry)
+    tenant_id = get_in(telem_opts, [:metadata, :tenant])
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     telemetry =
       if telem_opts,
@@ -138,35 +140,42 @@ defmodule Realtime.RateCounter do
   def handle_info(:tick, state) do
     Process.cancel_timer(state.tick_ref)
 
-    {:ok, count} = GenCounter.get(state.id)
-    :ok = GenCounter.put(state.id, 0)
+    state =
+      case GenCounter.get(state.id) do
+        {:ok, count} ->
+          :ok = GenCounter.put(state.id, 0)
 
-    if state.telemetry.emit and count > 0,
-      do:
-        Telemetry.execute(
-          state.telemetry.event_name,
-          %{state.telemetry.measurements | sum: count},
-          state.telemetry.metadata
-        )
+          if state.telemetry.emit and count > 0,
+            do:
+              Telemetry.execute(
+                state.telemetry.event_name,
+                %{state.telemetry.measurements | sum: count},
+                state.telemetry.metadata
+              )
 
-    if is_reference(state.idle_shutdown_ref) and count > 0 do
-      Process.cancel_timer(state.idle_shutdown_ref)
-      shutdown_after(state.idle_shutdown)
-    end
+          bucket = Enum.take([count | state.bucket], state.max_bucket_len)
+          bucket_len = Enum.count(bucket)
 
-    bucket = [count | state.bucket] |> Enum.take(state.max_bucket_len)
-    bucket_len = Enum.count(bucket)
+          avg =
+            bucket
+            |> Enum.sum()
+            |> Kernel./(bucket_len)
 
-    avg =
-      bucket
-      |> Enum.sum()
-      |> Kernel./(bucket_len)
+          if is_reference(state.idle_shutdown_ref) and count > 0 do
+            Process.cancel_timer(state.idle_shutdown_ref)
+            shutdown_after(state.idle_shutdown)
+          end
 
-    state = %{state | bucket: bucket, avg: avg}
+          %{state | bucket: bucket, avg: avg}
+
+        {:error, :counter_not_found} ->
+          log_error("UnableToFindCounter", "Counter not found")
+          state
+      end
+
     tick(state.tick)
 
     Cachex.put!(@cache, state.id, state)
-
     {:noreply, state}
   end
 

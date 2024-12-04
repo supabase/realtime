@@ -30,14 +30,15 @@ defmodule Realtime.GenCounter do
   @doc """
   Creates a new counter from any Erlang term.
   """
-  @spec new(term) :: {:ok, {:write_concurrency, reference()}} | {:error, term()}
-  def new(term) do
+  @spec new({atom(), atom(), term()}) ::
+          {:ok, {:write_concurrency, reference()}} | {:error, term()}
+  def new({_, _, tenant_id} = term) do
     id = :erlang.phash2(term)
 
     worker =
       DynamicSupervisor.start_child(GenCounter.DynamicSupervisor, %{
         id: id,
-        start: {__MODULE__, :start_link, [[id: id]]},
+        start: {__MODULE__, :start_link, [[id: id, tenant_id: tenant_id]]},
         restart: :transient
       })
 
@@ -166,7 +167,9 @@ defmodule Realtime.GenCounter do
 
   @impl true
   def init(args) do
-    id = Keyword.get(args, :id)
+    tenant_id = Keyword.fetch!(args, :tenant_id)
+    id = Keyword.fetch!(args, :id)
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
 
     state = %__MODULE__{id: id, counters: []}
 
