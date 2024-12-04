@@ -6,25 +6,25 @@ defmodule Realtime.RateCounterTest do
 
   describe "new/1" do
     test "starts a new rate counter from an Erlang term" do
-      term = Ecto.UUID.generate()
+      term = {:domain, :metric, Ecto.UUID.generate()}
       assert {:ok, _} = RateCounter.new(term)
     end
 
     test "rate counters are unique for an Erlang term" do
-      term = Ecto.UUID.generate()
+      term = {:domain, :metric, Ecto.UUID.generate()}
       {:ok, _} = RateCounter.new(term)
       assert {:error, {:already_started, _pid}} = RateCounter.new(term)
     end
 
     test "rate counters shut themselves down when no activity occurs on the GenCounter" do
-      term = Ecto.UUID.generate()
+      term = {:domain, :metric, Ecto.UUID.generate()}
       {:ok, _} = RateCounter.new(term, idle_shutdown: 5)
       Process.sleep(25)
       assert {:error, _term} = RateCounter.get(term)
     end
 
     test "rate counters reset GenCounter to zero after one tick and average the bucket" do
-      term = Ecto.UUID.generate()
+      term = {:domain, :metric, Ecto.UUID.generate()}
       {:ok, _} = RateCounter.new(term, tick: 5)
       :ok = GenCounter.add(term)
       Process.sleep(10)
@@ -45,10 +45,21 @@ defmodule Realtime.RateCounterTest do
 
   describe "get/1" do
     test "gets the state of a rate counter" do
-      term = Ecto.UUID.generate()
+      term = {:domain, :metric, Ecto.UUID.generate()}
       {:ok, _} = RateCounter.new(term)
 
       assert {:ok, %RateCounter{}} = RateCounter.get(term)
     end
+  end
+
+  test "handle handles counter shutdown and dies" do
+    term = {:domain, :metric, Ecto.UUID.generate()}
+    {:ok, pid} = RateCounter.new(term)
+
+    assert {:ok, %RateCounter{}} = RateCounter.get(term)
+    {_, _, counter_pid} = GenCounter.find_counter(term)
+    Process.exit(counter_pid, :shutdown)
+    :timer.sleep(10)
+    refute Process.alive?(pid)
   end
 end

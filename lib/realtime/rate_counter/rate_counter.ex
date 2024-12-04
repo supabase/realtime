@@ -35,7 +35,8 @@ defmodule Realtime.RateCounter do
               event_name: [@app_name] ++ [:rate_counter],
               measurements: %{sum: 0},
               metadata: %{}
-            }
+            },
+            counter_pid: nil
 
   @type t :: %__MODULE__{
           id: term(),
@@ -51,13 +52,14 @@ defmodule Realtime.RateCounter do
             event_name: :telemetry.event_name(),
             measurements: :telemetry.event_measurements(),
             metadata: :telemetry.event_metadata()
-          }
+          },
+          counter_pid: pid()
         }
 
   @spec start_link([keyword()]) :: {:ok, pid()} | {:error, {:already_started, pid()}}
   def start_link(args) do
     id = Keyword.get(args, :id)
-    unless id, do: raise("Supply an identifier to start a counter!")
+    if !id, do: raise("Supply an identifier to start a counter!")
 
     GenServer.start_link(__MODULE__, args,
       name: {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, :rate_counter, id}}}
@@ -93,51 +95,59 @@ defmodule Realtime.RateCounter do
 
   @impl true
   def init(args) do
-    id = Keyword.get(args, :id)
+    id = Keyword.fetch!(args, :id)
+    telem_opts = Keyword.get(args, :telemetry)
     every = Keyword.get(args, :tick, @tick)
     max_bucket_len = Keyword.get(args, :max_bucket_len, @max_bucket_len)
     idle_shutdown_ms = Keyword.get(args, :idle_shutdown, @idle_shutdown)
-
-    telem_opts = Keyword.get(args, :telemetry)
-
-    telemetry =
-      if telem_opts,
-        do: %{
-          emit: true,
-          event_name: [@app_name] ++ [:rate_counter] ++ telem_opts.event_name,
-          measurements: Map.merge(%{sum: 0}, telem_opts.measurements),
-          metadata: Map.merge(%{id: id}, telem_opts.metadata)
-        },
-        else: %{emit: false}
-
     Logger.info("Starting #{__MODULE__} for: #{inspect(id)}")
 
-    ensure_counter_started(id)
+    case ensure_counter_started(id) do
+      {:ok, _ref, pid} ->
+        Process.monitor(pid)
 
-    ticker = tick(0)
+        telemetry =
+          if telem_opts do
+            Logger.metadata(telem_opts.metadata)
 
-    idle_shutdown_ref =
-      unless idle_shutdown_ms == :infinity, do: shutdown_after(idle_shutdown_ms), else: nil
+            %{
+              emit: true,
+              event_name: [@app_name] ++ [:rate_counter] ++ telem_opts.event_name,
+              measurements: Map.merge(%{sum: 0}, telem_opts.measurements),
+              metadata: Map.merge(%{id: id}, telem_opts.metadata)
+            }
+          else
+            %{emit: false}
+          end
 
-    state = %__MODULE__{
-      id: id,
-      tick: every,
-      tick_ref: ticker,
-      max_bucket_len: max_bucket_len,
-      idle_shutdown: idle_shutdown_ms,
-      idle_shutdown_ref: idle_shutdown_ref,
-      telemetry: telemetry
-    }
+        ticker = tick(0)
 
-    Cachex.put!(@cache, id, state)
+        idle_shutdown_ref =
+          if idle_shutdown_ms != :infinity, do: shutdown_after(idle_shutdown_ms), else: nil
 
-    {:ok, state}
+        state = %__MODULE__{
+          id: id,
+          tick: every,
+          tick_ref: ticker,
+          max_bucket_len: max_bucket_len,
+          idle_shutdown: idle_shutdown_ms,
+          idle_shutdown_ref: idle_shutdown_ref,
+          telemetry: telemetry,
+          counter_pid: pid
+        }
+
+        Cachex.put!(@cache, id, state)
+
+        {:ok, state}
+
+      _ ->
+        {:shutdown, :kill, %{}}
+    end
   end
 
   @impl true
   def handle_info(:tick, state) do
     Process.cancel_timer(state.tick_ref)
-
     {:ok, count} = GenCounter.get(state.id)
     :ok = GenCounter.put(state.id, 0)
 
@@ -178,6 +188,13 @@ defmodule Realtime.RateCounter do
     {:stop, :normal, state}
   end
 
+  def handle_info(
+        {:DOWN, _, :process, counter_pid, _},
+        %{counter_pid: counter_pid} = state
+      ) do
+    {:stop, :shutdown, state}
+  end
+
   defp tick(every) do
     Process.send_after(self(), :tick, every)
   end
@@ -187,9 +204,7 @@ defmodule Realtime.RateCounter do
   end
 
   defp ensure_counter_started(id) do
-    case GenCounter.get(id) do
-      {:ok, _count} -> :ok
-      {:error, :counter_not_found} -> GenCounter.new(id)
-    end
+    GenCounter.new(id)
+    GenCounter.find_counter(id)
   end
 end

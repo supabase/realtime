@@ -30,7 +30,8 @@ defmodule Realtime.GenCounter do
   @doc """
   Creates a new counter from any Erlang term.
   """
-  @spec new(term) :: {:ok, {:write_concurrency, reference()}} | {:error, term()}
+  @spec new({atom(), atom(), term()}) ::
+          {:ok, {:write_concurrency, reference()}} | {:error, term()}
   def new(term) do
     id = :erlang.phash2(term)
 
@@ -70,7 +71,7 @@ defmodule Realtime.GenCounter do
   @spec add(term(), integer()) :: :ok | :error
   def add(term, count) when is_integer(count) do
     case find_counter(term) do
-      {:ok, counter_ref} ->
+      {:ok, counter_ref, _pid} ->
         :counters.add(counter_ref, 1, count)
 
       err ->
@@ -95,7 +96,7 @@ defmodule Realtime.GenCounter do
   @spec sub(term(), integer()) :: :ok | :error
   def sub(term, count) when is_integer(count) do
     case find_counter(term) do
-      {:ok, counter_ref} ->
+      {:ok, counter_ref, _pid} ->
         :counters.sub(counter_ref, 1, count)
 
       err ->
@@ -111,7 +112,7 @@ defmodule Realtime.GenCounter do
   @spec put(term(), integer()) :: :ok | :error
   def put(term, count) when is_integer(count) do
     case find_counter(term) do
-      {:ok, counter_ref} ->
+      {:ok, counter_ref, _pid} ->
         :counters.put(counter_ref, 1, count)
 
       err ->
@@ -127,7 +128,7 @@ defmodule Realtime.GenCounter do
   @spec info(term()) :: %{memory: integer(), size: integer()} | :error
   def info(term) do
     case find_counter(term) do
-      {:ok, counter_ref} ->
+      {:ok, counter_ref, _pid} ->
         :counters.info(counter_ref)
 
       _err ->
@@ -144,7 +145,7 @@ defmodule Realtime.GenCounter do
           {:ok, integer()} | {:error, :counter_not_found}
   def get(term) do
     case find_counter(term) do
-      {:ok, counter_ref} ->
+      {:ok, counter_ref, _pid} ->
         count = :counters.get(counter_ref, 1)
         {:ok, count}
 
@@ -162,14 +163,23 @@ defmodule Realtime.GenCounter do
     end
   end
 
+  @spec find_counter(term) ::
+          {:ok, :counters.counters_ref(), pid()} | {:error, :counter_not_found}
+  def find_counter(term) do
+    id = :erlang.phash2(term)
+
+    case Registry.lookup(Realtime.Registry.Unique, {__MODULE__, :counter, id}) do
+      [{pid, counter_ref}] -> {:ok, counter_ref, pid}
+      _error -> {:error, :counter_not_found}
+    end
+  end
+
   # Callbacks
 
   @impl true
   def init(args) do
-    id = Keyword.get(args, :id)
-
+    id = Keyword.fetch!(args, :id)
     state = %__MODULE__{id: id, counters: []}
-
     {:ok, state}
   end
 
@@ -190,15 +200,6 @@ defmodule Realtime.GenCounter do
     case Registry.lookup(Realtime.Registry.Unique, {__MODULE__, :worker, id}) do
       [{pid, _}] -> {:ok, pid}
       _error -> {:error, :worker_not_found}
-    end
-  end
-
-  defp find_counter(term) do
-    id = :erlang.phash2(term)
-
-    case Registry.lookup(Realtime.Registry.Unique, {__MODULE__, :counter, id}) do
-      [{_pid, counter_ref}] -> {:ok, counter_ref}
-      _error -> {:error, :counter_not_found}
     end
   end
 end

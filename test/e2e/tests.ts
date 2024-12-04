@@ -3,7 +3,7 @@ import {
   createClient,
   SupabaseClient,
   RealtimeChannel,
-} from "npm:@supabase/supabase-js@latest";
+} from "npm:@supabase/supabase-js@2.47.3";
 import {
   assert,
   assertEquals,
@@ -125,7 +125,6 @@ describe("postgres changes extension", () => {
       "filipe@supabase.io",
       "test_test"
     );
-    await supabase.realtime.setAuth(accessToken);
 
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
@@ -164,7 +163,6 @@ describe("postgres changes extension", () => {
       "filipe@supabase.io",
       "test_test"
     );
-    await supabase.realtime.setAuth(accessToken);
 
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
@@ -207,7 +205,6 @@ describe("postgres changes extension", () => {
       "filipe@supabase.io",
       "test_test"
     );
-    await supabase.realtime.setAuth(accessToken);
 
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
@@ -275,7 +272,6 @@ describe("authorization check", () => {
       "filipe@supabase.io",
       "test_test"
     );
-    await supabase.realtime.setAuth(accessToken);
 
     const channel = supabase
       .channel(crypto.randomUUID(), { config: { ...config, private: true } })
@@ -303,7 +299,6 @@ describe("broadcast changes", () => {
       "filipe@supabase.io",
       "test_test"
     );
-    await supabase.realtime.setAuth(accessToken);
 
     const channel = supabase
       .channel(`event:${id}`, { config: { ...config, private: true } })

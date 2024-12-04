@@ -20,6 +20,7 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
 
   @impl true
   def init(%{"id" => tenant} = args) when is_binary(tenant) do
+    Logger.metadata(external_id: tenant, project: tenant)
     unless Api.get_tenant_by_external_id(tenant, :primary), do: raise(Exception)
 
     tid_args = Map.merge(args, %{"subscribers_tid" => :ets.new(__MODULE__, [:public, :bag])})
