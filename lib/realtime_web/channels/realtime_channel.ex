@@ -29,6 +29,10 @@ defmodule RealtimeWeb.RealtimeChannel do
   @confirm_token_ms_interval :timer.minutes(5)
 
   @impl true
+  def join("realtime:", _params, _socket) do
+    Logging.log_error_message(:error, "TopicNameRequired", "You must provide a topic name")
+  end
+
   def join("realtime:" <> sub_topic = topic, params, socket) do
     %{
       assigns: %{tenant: tenant_id, log_level: log_level, postgres_cdc_module: module},
