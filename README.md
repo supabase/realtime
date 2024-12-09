@@ -188,6 +188,7 @@ This is the list of operational codes that can help you understand your deployme
 
 | Code                               | Description                                                                                                                         |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| TopicNameRequired                  | You are trying to use Realtime without a topic name set                                                                             |
 | RealtimeDisabledForConfiguration   | The configuration provided to Realtime on connect will not be able to provide you any Postgres Changes                              |
 | TenantNotFound                     | The tenant you are trying to connect to does not exist                                                                              |
 | ErrorConnectingToWebsocket         | Error when trying to connect to the WebSocket server                                                                                |

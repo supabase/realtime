@@ -951,6 +951,22 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
+  test "handle empty topic by closing the socket" do
+    {socket, _} = get_connection("authenticated")
+    config = %{broadcast: %{self: true}, private: false}
+    realtime_topic = "realtime:"
+
+    WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+    assert_receive %Phoenix.Socket.Message{
+      event: "phx_reply",
+      payload: %{
+        "response" => %{"reason" => "You must provide a topic name"},
+        "status" => "error"
+      }
+    }
+  end
+
   defp token_valid(role), do: generate_token(%{role: role})
   defp token_no_role(), do: generate_token()
 
