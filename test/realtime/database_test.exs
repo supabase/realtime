@@ -56,7 +56,7 @@ defmodule Realtime.DatabaseTest do
                assert {:error, %DBConnection.ConnectionError{reason: :queue_timeout}} =
                         Task.async(fn ->
                           Database.transaction(db_conn, fn conn ->
-                            Postgrex.query!(conn, "SELECT pg_sleep(5)", [])
+                            Postgrex.query!(conn, "SELECT pg_sleep(6)", [])
                           end)
                         end)
                         |> Task.await(15000)

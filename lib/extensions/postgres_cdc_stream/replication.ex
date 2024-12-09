@@ -49,7 +49,9 @@ defmodule Extensions.PostgresCdcStream.Replication do
   def stop(pid), do: GenServer.stop(pid)
 
   @impl true
-  def init(args) do
+  def init(%{tenant: id} = args) do
+    Logger.metadata(external_id: id, project: id)
+
     tid = :ets.new(__MODULE__, [:public, :set])
     state = %{tid: tid, step: nil, ts: nil}
     {:ok, Map.merge(args, state)}

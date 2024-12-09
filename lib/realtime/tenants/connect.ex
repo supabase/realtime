@@ -101,9 +101,15 @@ defmodule Realtime.Tenants.Connect do
     spec = {__MODULE__, [tenant_id: tenant_id] ++ opts}
 
     case DynamicSupervisor.start_child(supervisor, spec) do
-      {:ok, _} -> get_status(tenant_id)
-      {:error, {:already_started, _}} -> get_status(tenant_id)
-      _ -> {:error, :tenant_database_unavailable}
+      {:ok, _} ->
+        get_status(tenant_id)
+
+      {:error, {:already_started, _}} ->
+        get_status(tenant_id)
+
+      {:error, error} ->
+        log_error("UnableToConnectToTenantDatabase", error)
+        {:error, :tenant_database_unavailable}
     end
   end
 
