@@ -332,12 +332,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_info(:disconnect, %{assigns: %{channel_name: channel_name}} = socket) do
-    Logger.info("Received operational call to disconnect channel")
-    push_system_message("system", socket, "ok", "Server requested disconnect", channel_name)
-    {:stop, :shutdown, socket}
-  end
-
+  @impl true
   def handle_info(msg, socket) do
     log_error("UnhandledSystemMessage", msg)
     {:noreply, socket}
