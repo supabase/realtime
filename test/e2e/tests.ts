@@ -3,7 +3,7 @@ import {
   createClient,
   SupabaseClient,
   RealtimeChannel,
-} from "npm:@supabase/supabase-js@2.47.3";
+} from "npm:@supabase/supabase-js@latest";
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { describe, it } from "https://deno.land/std@0.224.0/testing/bdd.ts";
 import { sleep } from "https://deno.land/x/sleep/mod.ts";
