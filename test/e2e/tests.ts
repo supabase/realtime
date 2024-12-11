@@ -3,7 +3,7 @@ import {
   createClient,
   SupabaseClient,
   RealtimeChannel,
-} from "npm:@supabase/supabase-js@2.47.3";
+} from "npm:@supabase/supabase-js@latest";
 import {
   assert,
   assertEquals,

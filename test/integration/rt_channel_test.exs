@@ -885,11 +885,19 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
       assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
-
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["potato"]}})
-      :timer.sleep(5000)
-      refute Process.alive?(socket)
+
+      assert_receive %Phoenix.Socket.Message{
+                       topic: ^realtime_topic,
+                       event: "system",
+                       payload: %{
+                         "extension" => "system",
+                         "message" => "Server requested disconnect",
+                         "status" => "ok"
+                       }
+                     },
+                     500
     end
 
     test "on jwt_secret the socket closes and sends a system message", %{topic: topic} do
@@ -904,8 +912,17 @@ defmodule Realtime.Integration.RtChannelTest do
 
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_secret: "potato"})
-      :timer.sleep(5000)
-      refute Process.alive?(socket)
+
+      assert_receive %Phoenix.Socket.Message{
+                       topic: ^realtime_topic,
+                       event: "system",
+                       payload: %{
+                         "extension" => "system",
+                         "message" => "Server requested disconnect",
+                         "status" => "ok"
+                       }
+                     },
+                     500
     end
 
     test "on other param changes the socket won't close and no message is sent", %{topic: topic} do
@@ -920,8 +937,17 @@ defmodule Realtime.Integration.RtChannelTest do
 
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{max_concurrent_users: 100})
-      :timer.sleep(5000)
-      assert Process.alive?(socket)
+
+      refute_receive %Phoenix.Socket.Message{
+                       topic: ^realtime_topic,
+                       event: "system",
+                       payload: %{
+                         "extension" => "system",
+                         "message" => "Server requested disconnect",
+                         "status" => "ok"
+                       }
+                     },
+                     500
     end
   end
 
