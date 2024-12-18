@@ -238,3 +238,5 @@ if System.get_env("LOGS_ENGINE") == "logflare" do
     discard_threshold: 1_000,
     backends: [LogflareLogger.HttpBackend]
 end
+
+config :logger, level: System.get_env("LOG_LEVEL", "info") |> String.to_existing_atom()
