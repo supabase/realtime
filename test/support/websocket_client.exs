@@ -194,7 +194,8 @@ defmodule Realtime.Integration.WebsocketClient do
        when websocket != nil do
     case Mint.WebSocket.decode(websocket, data) do
       {:ok, websocket, frames} ->
-        put_in(state.websocket, websocket)
+        state.websocket
+        |> put_in(websocket)
         |> handle_frames(frames)
         |> handle_responses(rest)
 

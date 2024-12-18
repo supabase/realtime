@@ -3,7 +3,7 @@ import {
   createClient,
   SupabaseClient,
   RealtimeChannel,
-} from "npm:@supabase/supabase-js@2.47.3";
+} from "npm:@supabase/supabase-js@latest";
 import {
   assert,
   assertEquals,
@@ -120,11 +120,8 @@ describe("broadcast extension", () => {
 describe("postgres changes extension", () => {
   it("user is able to receive INSERT only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(
-      supabase,
-      "filipe@supabase.io",
-      "test_test"
-    );
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
 
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
@@ -158,11 +155,8 @@ describe("postgres changes extension", () => {
 
   it("user is able to receive UPDATE only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(
-      supabase,
-      "filipe@supabase.io",
-      "test_test"
-    );
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
 
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
@@ -200,11 +194,8 @@ describe("postgres changes extension", () => {
 
   it("user is able to receive DELETE only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(
-      supabase,
-      "filipe@supabase.io",
-      "test_test"
-    );
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
 
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
@@ -267,12 +258,9 @@ describe("authorization check", () => {
 
   it("user using private channel can connect if they have enough permissions", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(
-      supabase,
-      "filipe@supabase.io",
-      "test_test"
-    );
 
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
     const channel = supabase
       .channel(crypto.randomUUID(), { config: { ...config, private: true } })
       .subscribe((status: string) =>
@@ -294,12 +282,8 @@ describe("broadcast changes", () => {
 
   it("authenticated user receives insert broadcast change from a specific topic based on id", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(
-      supabase,
-      "filipe@supabase.io",
-      "test_test"
-    );
-
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
     const channel = supabase
       .channel(`event:${id}`, { config: { ...config, private: true } })
       .on("broadcast", { event: "INSERT" }, (res) => (insertResult = res))
