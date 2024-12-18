@@ -2,8 +2,7 @@ require Logger
 alias Realtime.{Api.Tenant, Repo}
 import Ecto.Adapters.SQL, only: [query: 3]
 
-tenant_name = "realtime-dev"
-
+tenant_name = System.get_env("SELF_HOST_TENANT_NAME", "realtime-dev")
 env = if :ets.whereis(Mix.State) != :undefined, do: Mix.env(), else: :prod
 default_db_host = if env in [:dev, :test], do: "localhost", else: "host.docker.internal"
 
