@@ -11,6 +11,12 @@ database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
 
+socket_options =
+  case Realtime.Database.detect_ip_version(default_db_host) do
+    {:ok, ip_version} -> [ip_version]
+    {:error, reason} -> raise "Failed to detect IP version for DB_HOST: #{reason}"
+  end
+
 config :realtime,
   tenant_max_bytes_per_second:
     System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100000") |> String.to_integer(),
@@ -122,7 +128,8 @@ if config_env() != :test do
     parameters: [
       application_name: "supabase_mt_realtime"
     ],
-    after_connect: after_connect_query_args
+    after_connect: after_connect_query_args,
+    socket_options: socket_options
 
   replica_repos = %{
     Realtime.Repo.Replica.FRA => System.get_env("DB_HOST_REPLICA_FRA", default_db_host),
