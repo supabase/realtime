@@ -1,4 +1,4 @@
-defmodule Realtime.BroadcastChanges.HandlerTest do
+defmodule Realtime.Tenants.BroadcastChanges.HandlerTest do
   # async: false due to the fact that we're using the database to intercept messages created which will interfer with other tests
   use Realtime.DataCase, async: false
 
@@ -6,7 +6,7 @@ defmodule Realtime.BroadcastChanges.HandlerTest do
   import Mock
 
   alias Realtime.Api.Message
-  alias Realtime.BroadcastChanges.Handler
+  alias Realtime.Tenants.BroadcastChanges.Handler
   alias Realtime.Database
   alias Realtime.Tenants.BatchBroadcast
   alias Realtime.Tenants.Migrations

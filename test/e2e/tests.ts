@@ -120,17 +120,14 @@ describe("broadcast extension", () => {
 describe("postgres changes extension", () => {
   it("user is able to receive INSERT only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(
-      supabase,
-      "filipe@supabase.io",
-      "test_test"
-    );
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
 
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
 
     let previousId = await executeCreateDatabaseActions(supabase, "pg_changes");
-    let dummyId = await executeCreateDatabaseActions(supabase, "dummy");
+    await executeCreateDatabaseActions(supabase, "dummy");
 
     const activeChannel = supabase
       .channel(topic, config)
@@ -145,10 +142,10 @@ describe("postgres changes extension", () => {
         (payload) => result.push(payload)
       )
       .subscribe();
-    await sleep(2);
+    await sleep(4);
     await executeCreateDatabaseActions(supabase, "pg_changes");
     await executeCreateDatabaseActions(supabase, "pg_changes");
-    await sleep(2);
+    await sleep(4);
     await stopClient(supabase, [activeChannel]);
 
     assertEquals(result.length, 1);
@@ -158,11 +155,8 @@ describe("postgres changes extension", () => {
 
   it("user is able to receive UPDATE only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(
-      supabase,
-      "filipe@supabase.io",
-      "test_test"
-    );
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
 
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
@@ -184,13 +178,13 @@ describe("postgres changes extension", () => {
         (payload) => result.push(payload)
       )
       .subscribe();
-    await sleep(2);
+    await sleep(4);
 
     executeModifyDatabaseActions(supabase, "pg_changes", mainId);
     executeModifyDatabaseActions(supabase, "pg_changes", fakeId);
     executeModifyDatabaseActions(supabase, "dummy", dummyId);
 
-    await sleep(2);
+    await sleep(4);
     await stopClient(supabase, [activeChannel]);
 
     assertEquals(result.length, 1);
@@ -200,11 +194,8 @@ describe("postgres changes extension", () => {
 
   it("user is able to receive DELETE only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(
-      supabase,
-      "filipe@supabase.io",
-      "test_test"
-    );
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
 
     let result: Array<any> = [];
     let topic = crypto.randomUUID();
@@ -226,13 +217,13 @@ describe("postgres changes extension", () => {
         (payload) => result.push(payload)
       )
       .subscribe();
-    await sleep(2);
+    await sleep(4);
 
     executeModifyDatabaseActions(supabase, "pg_changes", mainId);
     executeModifyDatabaseActions(supabase, "pg_changes", fakeId);
     executeModifyDatabaseActions(supabase, "dummy", dummyId);
 
-    await sleep(2);
+    await sleep(4);
     await stopClient(supabase, [activeChannel]);
 
     assertEquals(result.length, 1);
@@ -267,11 +258,8 @@ describe("authorization check", () => {
 
   it("user using private channel can connect if they have enough permissions", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(
-      supabase,
-      "filipe@supabase.io",
-      "test_test"
-    );
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
 
     const channel = supabase
       .channel(crypto.randomUUID(), { config: { ...config, private: true } })
@@ -294,14 +282,11 @@ describe("broadcast changes", () => {
 
   it("authenticated user receives insert broadcast change from a specific topic based on id", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let accessToken = await signInUser(
-      supabase,
-      "filipe@supabase.io",
-      "test_test"
-    );
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
 
     const channel = supabase
-      .channel(`event:${id}`, { config: { ...config, private: true } })
+      .channel(`event:${id}`, { config: { private: true } })
       .on("broadcast", { event: "INSERT" }, (res) => (insertResult = res))
       .on("broadcast", { event: "DELETE" }, (res) => (deleteResult = res))
       .on("broadcast", { event: "UPDATE" }, (res) => (updateResult = res))
