@@ -92,6 +92,8 @@ if config_env() == :prod do
 end
 
 if config_env() != :test do
+  config :logger, level: System.get_env("LOG_LEVEL", "info") |> String.to_existing_atom()
+
   platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws, else: :fly
 
   config :realtime,
@@ -245,5 +247,3 @@ if System.get_env("LOGS_ENGINE") == "logflare" do
     discard_threshold: 1_000,
     backends: [LogflareLogger.HttpBackend]
 end
-
-config :logger, level: System.get_env("LOG_LEVEL", "info") |> String.to_existing_atom()
