@@ -13,14 +13,15 @@ defmodule Realtime.Tenants.Connect do
   import Realtime.Logs
 
   alias Realtime.Api.Tenant
-  alias Realtime.BroadcastChanges.Handler
   alias Realtime.Rpc
   alias Realtime.Tenants
+  alias Realtime.Tenants.BroadcastChanges.Handler
   alias Realtime.Tenants.Connect.CheckConnection
   alias Realtime.Tenants.Connect.GetTenant
   alias Realtime.Tenants.Connect.Piper
   alias Realtime.Tenants.Connect.RegisterProcess
   alias Realtime.Tenants.Connect.StartCounters
+  alias Realtime.Tenants.Listen
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
@@ -38,6 +39,7 @@ defmodule Realtime.Tenants.Connect do
             db_conn_reference: nil,
             db_conn_pid: nil,
             broadcast_changes_pid: nil,
+            listen_pid: nil,
             check_connected_user_interval: nil,
             connected_users_bucket: [1]
 
@@ -166,8 +168,9 @@ defmodule Realtime.Tenants.Connect do
 
     with :ok <- Migrations.maybe_run_migrations(db_conn_pid, tenant),
          :ok <- Migrations.create_partitions(db_conn_pid),
-         {:ok, broadcast_changes_pid} <- start_replication(tenant) do
-      {:noreply, %{state | broadcast_changes_pid: broadcast_changes_pid},
+         {:ok, broadcast_changes_pid} <- start_replication(tenant),
+         {:ok, listen_pid} <- start_listen(tenant) do
+      {:noreply, %{state | broadcast_changes_pid: broadcast_changes_pid, listen_pid: listen_pid},
        {:continue, :setup_connected_user_events}}
     else
       error ->
@@ -210,28 +213,40 @@ defmodule Realtime.Tenants.Connect do
     {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
   end
 
-  def handle_info(
-        :shutdown,
-        %{db_conn_pid: db_conn_pid, broadcast_changes_pid: broadcast_changes_pid} = state
-      ) do
+  def handle_info(:shutdown, state) do
+    %{
+      db_conn_pid: db_conn_pid,
+      broadcast_changes_pid: broadcast_changes_pid,
+      listen_pid: listen_pid
+    } = state
+
     Logger.info("Tenant has no connected users, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 500)
 
     broadcast_changes_pid && Process.alive?(broadcast_changes_pid) &&
       GenServer.stop(broadcast_changes_pid, :normal, 500)
 
+    listen_pid && Process.alive?(listen_pid) &&
+      GenServer.stop(listen_pid, :normal, 500)
+
     {:stop, :normal, state}
   end
 
-  def handle_info(
-        {:suspend_tenant, _},
-        %{db_conn_pid: db_conn_pid, broadcast_changes_pid: broadcast_changes_pid} = state
-      ) do
+  def handle_info({:suspend_tenant, _}, state) do
+    %{
+      db_conn_pid: db_conn_pid,
+      broadcast_changes_pid: broadcast_changes_pid,
+      listen_pid: listen_pid
+    } = state
+
     Logger.warning("Tenant was suspended, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 500)
 
     broadcast_changes_pid && Process.alive?(broadcast_changes_pid) &&
       GenServer.stop(broadcast_changes_pid, :normal, 500)
+
+    listen_pid && Process.alive?(listen_pid) &&
+      GenServer.stop(listen_pid, :normal, 500)
 
     {:stop, :normal, state}
   end
@@ -316,4 +331,8 @@ defmodule Realtime.Tenants.Connect do
       error -> {:error, error}
     end
   end
+
+  defp start_listen(%{notify_private_alpha: false}), do: {:ok, nil}
+
+  defp start_listen(tenant), do: Listen.start(tenant)
 end

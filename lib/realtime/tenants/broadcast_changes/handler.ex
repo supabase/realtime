@@ -1,4 +1,4 @@
-defmodule Realtime.BroadcastChanges.Handler do
+defmodule Realtime.Tenants.BroadcastChanges.Handler do
   @moduledoc """
   BroadcastChanges is a module that provides a way to stream data from a PostgreSQL database using logical replication.
 
@@ -327,7 +327,8 @@ defmodule Realtime.BroadcastChanges.Handler do
 
   @spec supervisor_spec(Tenant.t()) :: term()
   def supervisor_spec(%Tenant{external_id: tenant_id}) do
-    {:via, PartitionSupervisor, {Realtime.BroadcastChanges.Handler.DynamicSupervisor, tenant_id}}
+    {:via, PartitionSupervisor,
+     {Realtime.Tenants.BroadcastChanges.Handler.DynamicSupervisor, tenant_id}}
   end
 
   def publication_name(%__MODULE__{table: table, schema: schema}) do
