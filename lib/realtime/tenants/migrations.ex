@@ -254,7 +254,7 @@ defmodule Realtime.Tenants.Migrations do
     Logger.info("Creating partitions for realtime.messages")
     today = Date.utc_today()
     yesterday = Date.add(today, -1)
-    future = Date.add(today, 10)
+    future = Date.add(today, 3)
 
     dates = Date.range(yesterday, future)
 
