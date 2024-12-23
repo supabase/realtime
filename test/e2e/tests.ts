@@ -4,16 +4,15 @@ import {
   SupabaseClient,
   RealtimeChannel,
 } from "npm:@supabase/supabase-js@2.47.3";
-import {
-  assert,
-  assertEquals,
-} from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { describe, it } from "https://deno.land/std@0.224.0/testing/bdd.ts";
 import { sleep } from "https://deno.land/x/sleep/mod.ts";
 
+import { JWTPayload, SignJWT } from "https://deno.land/x/jose@v5.9.4/index.ts";
 const env = await load();
 const url = env["PROJECT_URL"];
 const token = env["PROJECT_ANON_TOKEN"];
+const jwtSecret = env["PROJECT_JWT_SECRET"];
 const realtime = { heartbeatIntervalMs: 500, timeout: 1000 };
 const config = { config: { broadcast: { self: true } } };
 
@@ -64,13 +63,24 @@ const executeModifyDatabaseActions = async (
   await supabase.from(table).delete().eq("id", id);
 };
 
+const generateJwtToken = async (payload: JWTPayload) => {
+  const secret = new TextEncoder().encode(jwtSecret);
+  const jwt = await new SignJWT(payload)
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuedAt()
+    .setExpirationTime("1h")
+    .sign(secret);
+
+  return jwt;
+};
+
 describe("broadcast extension", () => {
   it("user is able to receive self broadcast", async () => {
     let supabase = await createClient(url, token, { realtime });
 
     let result = null;
     let event = crypto.randomUUID();
-    let topic = crypto.randomUUID();
+    let topic = "topic:" + crypto.randomUUID();
     let expectedPayload = { message: crypto.randomUUID() };
 
     const channel = supabase
@@ -96,7 +106,7 @@ describe("broadcast extension", () => {
 
     let result = null;
     let event = crypto.randomUUID();
-    let topic = crypto.randomUUID();
+    let topic = "topic:" + crypto.randomUUID();
     let expectedPayload = { message: crypto.randomUUID() };
 
     const activeChannel = supabase
@@ -122,9 +132,8 @@ describe("postgres changes extension", () => {
     let supabase = await createClient(url, token, { realtime });
     await signInUser(supabase, "filipe@supabase.io", "test_test");
     await supabase.realtime.setAuth();
-
     let result: Array<any> = [];
-    let topic = crypto.randomUUID();
+    let topic = "topic:" + crypto.randomUUID();
 
     let previousId = await executeCreateDatabaseActions(supabase, "pg_changes");
     await executeCreateDatabaseActions(supabase, "dummy");
@@ -159,7 +168,7 @@ describe("postgres changes extension", () => {
     await supabase.realtime.setAuth();
 
     let result: Array<any> = [];
-    let topic = crypto.randomUUID();
+    let topic = "topic:" + crypto.randomUUID();
 
     let mainId = await executeCreateDatabaseActions(supabase, "pg_changes");
     let fakeId = await executeCreateDatabaseActions(supabase, "pg_changes");
@@ -198,7 +207,7 @@ describe("postgres changes extension", () => {
     await supabase.realtime.setAuth();
 
     let result: Array<any> = [];
-    let topic = crypto.randomUUID();
+    let topic = "topic:" + crypto.randomUUID();
 
     let mainId = await executeCreateDatabaseActions(supabase, "pg_changes");
     let fakeId = await executeCreateDatabaseActions(supabase, "pg_changes");
@@ -235,41 +244,68 @@ describe("postgres changes extension", () => {
 describe("authorization check", () => {
   it("user using private channel cannot connect if does not have enough permissions", async () => {
     let supabase = await createClient(url, token, { realtime });
-    let result: any = null;
-    let topic = crypto.randomUUID();
+    let errMessage: any = null;
+
+    let topic = "topic:" + crypto.randomUUID();
 
     const channel = supabase
-      .channel(topic, { config: { ...config, private: true } })
+      .channel(topic, { config: { private: true } })
       .subscribe((status: string, err: any) => {
         if (status == "CHANNEL_ERROR") {
-          result = err.message;
+          errMessage = err.message;
         }
-        assert(status == "CHANNEL_ERROR" || status == "CLOSED");
       });
 
-    await sleep(2);
+    await sleep(1);
 
     await stopClient(supabase, [channel]);
     assertEquals(
-      result,
+      errMessage,
       `"You do not have permissions to read from this Channel topic: ${topic}"`
     );
   });
 
   it("user using private channel can connect if they have enough permissions", async () => {
+    let topic = "topic:" + crypto.randomUUID();
     let supabase = await createClient(url, token, { realtime });
+    let connected = false;
     await signInUser(supabase, "filipe@supabase.io", "test_test");
     await supabase.realtime.setAuth();
 
     const channel = supabase
-      .channel(crypto.randomUUID(), { config: { ...config, private: true } })
-      .subscribe((status: string) =>
-        assert(status == "SUBSCRIBED" || status == "CLOSED")
-      );
+      .channel(topic, { config: { private: true } })
+      .subscribe((status: string) => {
+        if (status == "SUBSCRIBED") {
+          connected = true;
+        }
+      });
 
-    await sleep(2);
+    await sleep(1);
     await supabase.auth.signOut();
     await stopClient(supabase, [channel]);
+    assertEquals(connected, true);
+  });
+
+  it("user using private channel for jwt connections can connect if they have enough permissions based on claims", async () => {
+    let topic = "jwt_topic:" + crypto.randomUUID();
+    let supabase = await createClient(url, token, { realtime });
+    let connected = false;
+    let claims = { role: "authenticated", sub: "wallet_1" };
+    let jwt_token = await generateJwtToken(claims);
+
+    await supabase.realtime.setAuth(jwt_token);
+
+    const channel = supabase
+      .channel(topic, { config: { private: true } })
+      .subscribe((status: string, err: any) => {
+        if (status == "SUBSCRIBED") {
+          connected = true;
+        }
+      });
+
+    await sleep(1);
+    await stopClient(supabase, [channel]);
+    assertEquals(connected, true);
   });
 });
 

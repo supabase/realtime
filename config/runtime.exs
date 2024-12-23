@@ -9,12 +9,25 @@ username = System.get_env("DB_USER", "postgres")
 password = System.get_env("DB_PASSWORD", "postgres")
 database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
+db_version = System.get_env("DB_IP_VERSION")
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
 
+if !(db_version in [nil, "ipv6", "ipv4"]),
+  do: raise("Invalid IP version, please set either ipv6 or ipv4")
+
 socket_options =
-  case Realtime.Database.detect_ip_version(default_db_host) do
-    {:ok, ip_version} -> [ip_version]
-    {:error, reason} -> raise "Failed to detect IP version for DB_HOST: #{reason}"
+  cond do
+    db_version == "ipv6" ->
+      [:inet6]
+
+    db_version == "ipv4" ->
+      [:inet]
+
+    true ->
+      case Realtime.Database.detect_ip_version(default_db_host) do
+        {:ok, ip_version} -> [ip_version]
+        {:error, reason} -> raise "Failed to detect IP version for DB_HOST: #{reason}"
+      end
   end
 
 config :realtime,
