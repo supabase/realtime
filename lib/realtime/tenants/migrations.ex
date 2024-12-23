@@ -68,7 +68,8 @@ defmodule Realtime.Tenants.Migrations do
     MessagesUsingUuid,
     FixSendFunction,
     RecreateEntityIndexUsingBtree,
-    FixSendFunctionPartitionCreation
+    FixSendFunctionPartitionCreation,
+    RealtimeSendHandleExceptionsRemovePartitionCreation
   }
 
   @migrations [
@@ -126,7 +127,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_241_108_114_728, MessagesUsingUuid},
     {20_241_121_104_152, FixSendFunction},
     {20_241_130_184_212, RecreateEntityIndexUsingBtree},
-    {20_241_220_035_512, FixSendFunctionPartitionCreation}
+    {20_241_220_035_512, FixSendFunctionPartitionCreation},
+    {20_241_220_123_912, RealtimeSendHandleExceptionsRemovePartitionCreation}
   ]
 
   defstruct [:tenant_external_id, :settings]
@@ -252,9 +254,9 @@ defmodule Realtime.Tenants.Migrations do
     Logger.info("Creating partitions for realtime.messages")
     today = Date.utc_today()
     yesterday = Date.add(today, -1)
-    tomorrow = Date.add(today, 1)
+    future = Date.add(today, 3)
 
-    dates = [yesterday, today, tomorrow]
+    dates = Date.range(yesterday, future)
 
     Enum.each(dates, fn date ->
       partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"

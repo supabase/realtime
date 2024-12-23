@@ -78,7 +78,11 @@ defmodule Realtime.Application do
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,
-         name: Realtime.BroadcastChanges.Handler.DynamicSupervisor},
+         name: Realtime.Tenants.BroadcastChanges.Handler.DynamicSupervisor},
+        {PartitionSupervisor,
+         child_spec: DynamicSupervisor,
+         strategy: :one_for_one,
+         name: Realtime.Tenants.Listen.DynamicSupervisor},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence,
         Realtime.MetricsCleaner
