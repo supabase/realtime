@@ -10,7 +10,7 @@ defmodule Realtime.Tenants.Migrations.RealtimeSendSetsConfig do
     BEGIN
       BEGIN
         -- Set the topic configuration
-        SET SESSION realtime.topic TO topic;
+        SET LOCAL realtime.topic TO topic;
 
         -- Attempt to insert the message
         INSERT INTO realtime.messages (payload, event, topic, private, extension)
