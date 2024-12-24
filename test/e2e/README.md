@@ -69,7 +69,7 @@ CREATE OR REPLACE FUNCTION broadcast_changes_for_table_trigger ()
 DECLARE
     topic text;
 BEGIN
-    topic = 'event:' || COALESCE(NEW.id::text, OLD.id::text);
+    topic = 'test';
     PERFORM
         realtime.broadcast_changes (topic, TG_OP, TG_OP, TG_TABLE_NAME, TG_TABLE_SCHEMA, NEW, OLD, TG_LEVEL);
     RETURN NULL;
