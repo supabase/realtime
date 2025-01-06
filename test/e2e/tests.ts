@@ -286,7 +286,7 @@ describe("broadcast changes", () => {
     await supabase.realtime.setAuth();
 
     const channel = supabase
-      .channel(`event:${id}`, { config: { private: true } })
+      .channel("test", { config: { private: true } })
       .on("broadcast", { event: "INSERT" }, (res) => (insertResult = res))
       .on("broadcast", { event: "DELETE" }, (res) => (deleteResult = res))
       .on("broadcast", { event: "UPDATE" }, (res) => (updateResult = res))
