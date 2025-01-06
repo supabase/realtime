@@ -50,11 +50,15 @@ defmodule Realtime.MetricsCleaner do
   end
 
   @doc """
-  Deletes all metrics that contain the given tenant.
+  Deletes all metrics that contain the given tenant or database_host.
   """
   @spec delete_metric(String.t()) :: :ok
   def delete_metric(tenant) do
-    :ets.select_delete(@metrics_table, [{{{:_, %{tenant: tenant}}, :_}, [], [true]}])
+    :ets.select_delete(@metrics_table, [
+      {{{:_, %{tenant: tenant}}, :_}, [], [true]},
+      {{{:_, %{database_host: "db.#{tenant}.supabase.co"}}, :_}, [], [true]}
+    ])
+
     :ok
   end
 end
