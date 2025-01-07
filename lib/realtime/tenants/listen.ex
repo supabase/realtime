@@ -40,7 +40,8 @@ defmodule Realtime.Tenants.Listen do
       |> Map.put(:username, "postgres")
       |> Map.put(:port, String.to_integer(settings[:port]))
       |> Map.put(:ssl, settings[:ssl_enforced])
-      |> Map.put(:auto_reconnect, true)
+      |> Map.put(:sync_connect, true)
+      |> Map.put(:auto_reconnect, false)
       |> Map.put(:name, name)
       |> Enum.to_list()
 

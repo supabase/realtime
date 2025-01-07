@@ -322,14 +322,12 @@ describe("broadcast changes", () => {
     await supabase.realtime.setAuth();
 
     const channel = supabase
-      .channel("test", { config: { private: true } })
+      .channel("topic:test", { config: { private: true } })
       .on("broadcast", { event: "INSERT" }, (res) => (insertResult = res))
       .on("broadcast", { event: "DELETE" }, (res) => (deleteResult = res))
       .on("broadcast", { event: "UPDATE" }, (res) => (updateResult = res))
       .subscribe(async (status) => {
         if (status == "SUBSCRIBED") {
-          await sleep(1);
-
           await supabase.from(table).insert({ value: originalValue, id });
 
           await supabase

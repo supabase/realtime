@@ -206,6 +206,7 @@ This is the list of operational codes that can help you understand your deployme
 | UnableToConnectToTenantDatabase    | Realtime was not able to connect to the tenant's database                                                                           |
 | RealtimeNodeDisconnected           | Realtime is a distributed application and this means that one the system is unable to communicate with one of the distributed nodes |
 | MigrationsFailedToRun              | Error when running the migrations against the Tenant database that are required by Realtime                                         |
+| StartListenAndReplicationFailed    | Error when starting the replication and listening of errors for database broadcasting                                               |
 | MigrationCheckFailed               | Check to see if we require to run migrations fails                                                                                  |
 | PartitionCreationFailed            | Error when creating partitions for realtime.messages                                                                                |
 | ErrorStartingPostgresCDCStream     | Error when starting the Postgres CDC stream which is used for Postgres Changes                                                      |

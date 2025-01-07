@@ -38,7 +38,7 @@ CREATE TABLE public.wallet (
     id text PRIMARY KEY,
     wallet_id text NOT NULL
 );
-INSERT INTO public.wallet (wallet_id) VALUES (1, 'wallet_1');
+INSERT INTO public.wallet (id, wallet_id) VALUES (1, 'wallet_1');
 
 ALTER TABLE public.pg_changes ENABLE ROW LEVEL SECURITY;
 
@@ -64,11 +64,11 @@ CREATE POLICY "authenticated broadcast on topic" ON "realtime"."messages" AS PER
 
 CREATE POLICY "authenticated jwt topic in wallet can receive" ON "realtime"."messages" AS PERMISSIVE
     FOR SELECT TO authenticated
-        USING ( realtime.topic() like 'jwt_topic:%' AND select wallet_id from public.wallet where wallet_id = (auth.jwt() -> 'sub'));
+        USING ( realtime.topic() like 'jwt_topic:%' AND exists (select wallet_id from public.wallet where wallet_id = (auth.jwt() -> 'sub')::text));
 
 CREATE POLICY "authenticated jwt topic in wallet can broadcast" ON "realtime"."messages" AS PERMISSIVE
     FOR INSERT TO authenticated
-        WITH CHECK ( realtime.topic() like 'jwt_topic:%' AND select wallet_id from public.wallet where wallet_id = (auth.jwt() -> 'sub'));
+        WITH CHECK ( realtime.topic() like 'jwt_topic:%' AND exists (select wallet_id from public.wallet where wallet_id = (auth.jwt() -> 'sub')::text));
 
 CREATE POLICY "allow authenticated users all access" ON "public"."pg_changes" AS PERMISSIVE
     FOR ALL TO authenticated
@@ -84,7 +84,7 @@ CREATE OR REPLACE FUNCTION broadcast_changes_for_table_trigger ()
 DECLARE
     topic text;
 BEGIN
-    topic = 'test';
+    topic = 'topic:test';
     PERFORM
         realtime.broadcast_changes (topic, TG_OP, TG_OP, TG_TABLE_NAME, TG_TABLE_SCHEMA, NEW, OLD, TG_LEVEL);
     RETURN NULL;
