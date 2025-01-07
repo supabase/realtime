@@ -28,12 +28,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   def init(args) do
     tenant = args["id"]
     Logger.metadata(external_id: tenant, project: tenant)
-    realtime_rls_settings = Database.from_settings(args, "realtime_rls")
-    {:ok, conn} = Database.connect_db(realtime_rls_settings)
 
     state = %{
       backoff: Backoff.new(backoff_min: 100, backoff_max: 5_000, backoff_type: :rand_exp),
-      conn: conn,
       db_host: args["db_host"],
       db_port: args["db_port"],
       db_name: args["db_name"],
@@ -50,10 +47,17 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       tenant: tenant
     }
 
-    {:ok, state, {:continue, :prepare}}
+    {:ok, state, {:continue, {:connect, args}}}
   end
 
   @impl true
+  def handle_continue({:connect, args}, state) do
+    realtime_rls_settings = Database.from_settings(args, "realtime_rls")
+    {:ok, conn} = Database.connect_db(realtime_rls_settings)
+    state = Map.put(state, :conn, conn)
+    {:noreply, state, {:continue, :prepare}}
+  end
+
   def handle_continue(:prepare, state) do
     {:noreply, prepare_replication(state)}
   end

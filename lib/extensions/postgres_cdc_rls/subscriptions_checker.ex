@@ -40,9 +40,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
   @impl true
   def init(args) do
-    %{"id" => id, "subscribers_tid" => subscribers_tid} = args
-
+    %{"id" => id} = args
     Logger.metadata(external_id: id, project: id)
+    {:ok, nil, {:continue, {:connect, args}}}
+  end
+
+  @impl true
+  def handle_continue({:connect, args}, _) do
+    %{"id" => id, "subscribers_tid" => subscribers_tid} = args
 
     realtime_subscription_checker_settings =
       Database.from_settings(args, "realtime_subscription_checker")
@@ -60,7 +65,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       }
     }
 
-    {:ok, state}
+    {:noreply, state}
   end
 
   @impl true
@@ -72,7 +77,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
     Helpers.cancel_timer(ref)
 
     ids =
-      subscribers_by_node(tid)
+      tid
+      |> subscribers_by_node()
       |> not_alive_pids_dist()
       |> pop_not_alive_pids(tid, id)
 
@@ -130,9 +136,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
           Telemetry.execute(
             [:realtime, :subscriptions_checker, :pid_not_found],
             %{quantity: 1},
-            %{
-              tenant_id: tenant_id
-            }
+            %{tenant_id: tenant_id}
           )
 
           acc
@@ -142,9 +146,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
             Telemetry.execute(
               [:realtime, :subscriptions_checker, :phantom_pid_detected],
               %{quantity: 1},
-              %{
-                tenant_id: tenant_id
-              }
+              %{tenant_id: tenant_id}
             )
 
             :ets.delete(tid, pid)
@@ -157,12 +159,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
   @spec subscribers_by_node(:ets.tid()) :: %{node() => MapSet.t(pid())}
   def subscribers_by_node(tid) do
     fn {pid, _postgres_id, _ref, node}, acc ->
-      set =
-        if Map.has_key?(acc, node) do
-          MapSet.put(acc[node], pid)
-        else
-          MapSet.new([pid])
-        end
+      set = if Map.has_key?(acc, node), do: MapSet.put(acc[node], pid), else: MapSet.new([pid])
 
       Map.put(acc, node, set)
     end
@@ -189,20 +186,10 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
   @spec not_alive_pids(MapSet.t(pid())) :: [pid()] | []
   def not_alive_pids(pids) do
-    Enum.reduce(pids, [], fn pid, acc ->
-      if Process.alive?(pid) do
-        acc
-      else
-        [pid | acc]
-      end
-    end)
+    Enum.reduce(pids, [], fn pid, acc -> if Process.alive?(pid), do: acc, else: [pid | acc] end)
   end
 
-  defp check_delete_queue() do
-    Process.send_after(self(), :check_delete_queue, 1000)
-  end
+  defp check_delete_queue(), do: Process.send_after(self(), :check_delete_queue, 1000)
 
-  defp check_active_pids() do
-    Process.send_after(self(), :check_active_pids, @timeout)
-  end
+  defp check_active_pids(), do: Process.send_after(self(), :check_active_pids, @timeout)
 end
