@@ -70,7 +70,8 @@ defmodule Realtime.Tenants.Migrations do
     RecreateEntityIndexUsingBtree,
     FixSendFunctionPartitionCreation,
     RealtimeSendHandleExceptionsRemovePartitionCreation,
-    RealtimeSendSetsConfig
+    RealtimeSendSetsConfig,
+    RealtimeSubscriptionUnlogged
   }
 
   @migrations [
@@ -130,7 +131,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_241_130_184_212, RecreateEntityIndexUsingBtree},
     {20_241_220_035_512, FixSendFunctionPartitionCreation},
     {20_241_220_123_912, RealtimeSendHandleExceptionsRemovePartitionCreation},
-    {20_241_224_161_212, RealtimeSendSetsConfig}
+    {20_241_224_161_212, RealtimeSendSetsConfig},
+    {20_250_107_150_512, RealtimeSubscriptionUnlogged}
   ]
 
   defstruct [:tenant_external_id, :settings]
