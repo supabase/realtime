@@ -25,24 +25,29 @@ defmodule Realtime.Tenants.Listen do
     settings =
       tenant
       |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
-      |> then(&Database.from_settings(&1, "realtime_listen", :rand_exp, true))
+      |> then(&Database.from_settings(&1, "realtime_listen", :stop, true))
       |> Map.from_struct()
 
     name =
       {:via, Registry,
        {Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant.external_id}}}
 
+    {:ok, ip_version} = Database.detect_ip_version(settings[:host])
+
+    ssl = if settings[:ssl_enforced], do: [verify: :verify_none], else: false
+
     settings =
       settings
       |> Map.put(:hostname, settings[:host])
       |> Map.put(:database, settings[:name])
       |> Map.put(:password, settings[:pass])
-      |> Map.put(:username, "postgres")
+      |> Map.put(:username, settings[:user])
       |> Map.put(:port, String.to_integer(settings[:port]))
-      |> Map.put(:ssl, settings[:ssl_enforced])
+      |> Map.put(:ssl, ssl)
       |> Map.put(:sync_connect, true)
       |> Map.put(:auto_reconnect, false)
       |> Map.put(:name, name)
+      |> Map.put(:socket_options, [ip_version])
       |> Enum.to_list()
 
     Logger.info("Listening for notifications on #{@topic}")
