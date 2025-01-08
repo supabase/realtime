@@ -58,8 +58,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
   @impl true
   def init(args) do
-    %{"id" => id, "publication" => publication, "subscribers_tid" => subscribers_tid} = args
+    %{"id" => id} = args
     Logger.metadata(external_id: id, project: id)
+    {:ok, nil, {:continue, {:connect, args}}}
+  end
+
+  @impl true
+  def handle_continue({:connect, args}, _) do
+    %{"id" => id, "publication" => publication, "subscribers_tid" => subscribers_tid} = args
 
     subscription_manager_settings = Database.from_settings(args, "realtime_subscription_manager")
 
@@ -88,18 +94,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     }
 
     send(self(), :check_oids)
-    {:ok, state}
+    {:noreply, state}
   end
 
   @impl true
   def handle_info({:subscribed, {pid, id}}, state) do
     case :ets.match(state.subscribers_tid, {pid, id, :"$1", :_}) do
-      [] ->
-        state.subscribers_tid
-        |> :ets.insert({pid, id, Process.monitor(pid), node(pid)})
-
-      _ ->
-        :ok
+      [] -> :ets.insert(state.subscribers_tid, {pid, id, Process.monitor(pid), node(pid)})
+      _ -> :ok
     end
 
     {:noreply, %{state | no_users_ts: nil}}
@@ -174,12 +176,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         q
       end
 
-    ref =
-      if :queue.is_empty(q1) do
-        check_delete_queue()
-      else
-        check_delete_queue(1_000)
-      end
+    ref = if :queue.is_empty(q1), do: check_delete_queue(), else: check_delete_queue(1_000)
 
     {:noreply, %{state | delete_queue: %{ref: ref, queue: q1}}}
   end
@@ -212,31 +209,12 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
   ## Internal functions
 
-  defp check_delete_queue(timeout \\ @timeout) do
-    Process.send_after(
-      self(),
-      :check_delete_queue,
-      timeout
-    )
-  end
+  defp check_oids(), do: Process.send_after(self(), :check_oids, @check_oids_interval)
 
-  defp check_oids() do
-    Process.send_after(
-      self(),
-      :check_oids,
-      @check_oids_interval
-    )
-  end
+  defp now(), do: System.system_time(:millisecond)
 
-  defp now() do
-    System.system_time(:millisecond)
-  end
+  defp check_no_users(), do: Process.send_after(self(), :check_no_users, @check_no_users_interval)
 
-  defp check_no_users() do
-    Process.send_after(
-      self(),
-      :check_no_users,
-      @check_no_users_interval
-    )
-  end
+  defp check_delete_queue(timeout \\ @timeout),
+    do: Process.send_after(self(), :check_delete_queue, timeout)
 end
