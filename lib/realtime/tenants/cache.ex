@@ -18,7 +18,7 @@ defmodule Realtime.Tenants.Cache do
   def get_tenant_by_external_id(keyword), do: apply_repo_fun(__ENV__.function, [keyword])
 
   @doc """
-    Invalidates the cache for a tenant in the local node
+  Invalidates the cache for a tenant in the local node
   """
   def invalidate_tenant_cache(tenant_id) do
     Cachex.del(__MODULE__, {{:get_tenant_by_external_id, 1}, [tenant_id]})

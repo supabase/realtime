@@ -21,7 +21,7 @@ defmodule Realtime.Tenants.ListenTest do
       tenant = tenant_fixture()
       RateCounter.new({:channel, :events, tenant.external_id})
 
-      {:ok, listen_conn} = Listen.start(tenant)
+      {:ok, listen_conn} = Listen.start(tenant, self())
       {:ok, db_conn} = Database.connect(tenant, "realtime_test")
       [%{settings: settings} | _] = tenant.extensions
       migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}

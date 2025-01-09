@@ -33,13 +33,7 @@ defmodule Extensions.PostgresCdcRls do
     conn_node = node(conn)
 
     if conn_node !== node() do
-      Rpc.call(
-        conn_node,
-        Subscriptions,
-        :create,
-        opts,
-        timeout: 15_000
-      )
+      Rpc.call(conn_node, Subscriptions, :create, opts, timeout: 15_000)
     else
       apply(Subscriptions, :create, opts)
     end
@@ -113,26 +107,16 @@ defmodule Extensions.PostgresCdcRls do
 
   @spec get_manager_conn(String.t()) :: {:error, nil | :wait} | {:ok, pid(), pid()}
   def get_manager_conn(id) do
-    :syn.lookup(__MODULE__, id)
-    |> case do
-      {_, %{manager: nil, subs_pool: nil}} ->
-        {:error, :wait}
-
-      {_, %{manager: manager, subs_pool: conn}} ->
-        {:ok, manager, conn}
-
-      _ ->
-        {:error, nil}
+    case :syn.lookup(__MODULE__, id) do
+      {_, %{manager: nil, subs_pool: nil}} -> {:error, :wait}
+      {_, %{manager: manager, subs_pool: conn}} -> {:ok, manager, conn}
+      _ -> {:error, nil}
     end
   end
 
   @spec supervisor_id(String.t(), String.t()) :: {atom(), String.t(), map()}
   def supervisor_id(tenant, region) do
-    {
-      __MODULE__,
-      tenant,
-      %{region: region, manager: nil, subs_pool: nil}
-    }
+    {__MODULE__, tenant, %{region: region, manager: nil, subs_pool: nil}}
   end
 
   @spec update_meta(String.t(), pid(), pid()) :: {:ok, {pid(), term()}} | {:error, term()}

@@ -1,6 +1,6 @@
-defmodule Realtime.Tenants.BroadcastChanges.Handler do
+defmodule Realtime.Tenants.ReplicationConnection do
   @moduledoc """
-  BroadcastChanges is a module that provides a way to stream data from a PostgreSQL database using logical replication.
+  ReplicationConnection it's the module that provides a way to stream data from a PostgreSQL database using logical replication.
 
   ## Struct parameters
   * `connection_opts` - The connection options to connect to the database.
@@ -49,7 +49,8 @@ defmodule Realtime.Tenants.BroadcastChanges.Handler do
           output_plugin: String.t(),
           proto_version: integer(),
           relations: map(),
-          buffer: list()
+          buffer: list(),
+          monitored_pid: pid()
         }
   defstruct tenant_id: nil,
             table: nil,
@@ -61,17 +62,50 @@ defmodule Realtime.Tenants.BroadcastChanges.Handler do
             output_plugin: "pgoutput",
             proto_version: 1,
             relations: %{},
-            buffer: []
+            buffer: [],
+            monitored_pid: nil
+
+  @doc """
+  Starts the replication connection for a tenant and monitors a given pid to stop the ReplicationConnection.
+  """
+  @spec start(Realtime.Api.Tenant.t(), pid()) :: {:ok, pid()} | {:error, any()}
+  def start(tenant, monitored_pid) do
+    Logger.info("Starting replication for Broadcast Changes")
+    opts = %__MODULE__{tenant_id: tenant.external_id, monitored_pid: monitored_pid}
+    supervisor_spec = supervisor_spec(tenant)
+
+    child_spec = %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :transient,
+      type: :worker
+    }
+
+    case DynamicSupervisor.start_child(supervisor_spec, child_spec) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, {:already_started, pid}} -> {:ok, pid}
+      {:error, {:bad_return_from_init, {:stop, error, _}}} -> {:error, error}
+      error -> {:error, error}
+    end
+  end
+
+  @doc """
+  Finds replication connection by tenant_id
+  """
+  @spec whereis(String.t()) :: pid() | nil
+  def whereis(tenant_id) do
+    case Registry.lookup(Realtime.Registry.Unique, {__MODULE__, tenant_id}) do
+      [{pid, _}] -> pid
+      [] -> nil
+    end
+  end
 
   def start_link(%__MODULE__{tenant_id: tenant_id} = attrs) do
     tenant = Cache.get_tenant_by_external_id(tenant_id)
     connection_opts = Database.from_tenant(tenant, "realtime_broadcast_changes", :stop, true)
     {:ok, ip_version} = Database.detect_ip_version(connection_opts.host)
 
-    ssl =
-      if connection_opts.ssl_enforced,
-        do: [ssl: [verify: :verify_none]],
-        else: [ssl: false]
+    ssl = if connection_opts.ssl_enforced, do: [verify: :verify_none], else: false
 
     connection_opts =
       [
@@ -83,24 +117,25 @@ defmodule Realtime.Tenants.BroadcastChanges.Handler do
         port: String.to_integer(connection_opts.port),
         socket_options: [ip_version],
         backoff_type: :stop,
+        sync_connect: true,
         parameters: [
           application_name: connection_opts.application_name
-        ]
-      ] ++ ssl
+        ],
+        ssl: ssl
+      ]
 
     case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
-      {:error, {:bad_return_from_init, {:stop, reason, _}}} -> {:error, reason}
-      {:error, {:case_clause, {:disconnect, reason, _}}} -> {:error, reason}
-      {:error, error} -> {:disconnect, error}
+      {:error, {:bad_return_from_init, {:stop, error}}} -> {:error, error}
+      {:error, error} -> {:error, error}
     end
   end
 
   @impl true
-  def init(%__MODULE__{tenant_id: tenant_id} = state) do
+  def init(%__MODULE__{tenant_id: tenant_id, monitored_pid: monitored_pid} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
-
+    Process.monitor(monitored_pid)
     state = %{state | table: "messages", schema: "realtime"}
 
     state = %{
@@ -126,11 +161,8 @@ defmodule Realtime.Tenants.BroadcastChanges.Handler do
   end
 
   @impl true
-  def handle_result(
-        [%Postgrex.Result{num_rows: 1}],
-        %__MODULE__{step: :check_replication_slot} = state
-      ) do
-    {:disconnect, "Temporary Replication slot already exists and in use", state}
+  def handle_result([%Postgrex.Result{num_rows: 1}], %__MODULE__{step: :check_replication_slot}) do
+    {:disconnect, "Temporary Replication slot already exists and in use"}
   end
 
   def handle_result(
@@ -151,10 +183,7 @@ defmodule Realtime.Tenants.BroadcastChanges.Handler do
     {:query, query, %{state | step: :check_publication}}
   end
 
-  def handle_result(
-        [%Postgrex.Result{}],
-        %__MODULE__{step: :check_publication} = state
-      ) do
+  def handle_result([%Postgrex.Result{}], %__MODULE__{step: :check_publication} = state) do
     %__MODULE__{table: table, schema: schema, publication_name: publication_name} = state
 
     Logger.info("Check publication #{publication_name} for table #{schema}.#{table} exists")
@@ -167,16 +196,10 @@ defmodule Realtime.Tenants.BroadcastChanges.Handler do
         [%Postgrex.Result{num_rows: 0}],
         %__MODULE__{step: :create_publication} = state
       ) do
-    %__MODULE__{
-      table: table,
-      schema: schema,
-      publication_name: publication_name
-    } = state
+    %__MODULE__{table: table, schema: schema, publication_name: publication_name} = state
 
     Logger.info("Create publication #{publication_name} for table #{schema}.#{table}")
-
-    query =
-      "CREATE PUBLICATION #{publication_name} FOR TABLE #{schema}.#{table}"
+    query = "CREATE PUBLICATION #{publication_name} FOR TABLE #{schema}.#{table}"
 
     {:query, query, %{state | step: :start_replication_slot}}
   end
@@ -215,7 +238,7 @@ defmodule Realtime.Tenants.BroadcastChanges.Handler do
 
   @impl true
   def handle_disconnect(state) do
-    Logger.error("Disconnected from the server: #{inspect(state, pretty: true)}")
+    Logger.warning("Disconnecting broadcast changes handler: #{inspect(state, pretty: true)}")
     {:noreply, %{state | step: :disconnected}}
   end
 
@@ -245,6 +268,7 @@ defmodule Realtime.Tenants.BroadcastChanges.Handler do
   end
 
   @impl true
+  @spec handle_info(any(), any()) :: {:disconnect, <<_::128>>} | {:noreply, any()}
   def handle_info(%Decoder.Messages.Relation{} = msg, state) do
     %Decoder.Messages.Relation{id: id, namespace: namespace, name: name, columns: columns} = msg
     %{relations: relations} = state
@@ -319,16 +343,15 @@ defmodule Realtime.Tenants.BroadcastChanges.Handler do
       {:noreply, state}
   end
 
-  def handle_info(:shutdown, state) do
-    {:disconnect, "shutdown", state}
-  end
+  def handle_info(:shutdown, _), do: {:disconnect, :normal}
+
+  def handle_info({:DOWN, _, :process, _, _}, _), do: {:disconnect, :normal}
 
   def handle_info(_, state), do: {:noreply, state}
 
   @spec supervisor_spec(Tenant.t()) :: term()
   def supervisor_spec(%Tenant{external_id: tenant_id}) do
-    {:via, PartitionSupervisor,
-     {Realtime.Tenants.BroadcastChanges.Handler.DynamicSupervisor, tenant_id}}
+    {:via, PartitionSupervisor, {__MODULE__.DynamicSupervisor, tenant_id}}
   end
 
   def publication_name(%__MODULE__{table: table, schema: schema}) do

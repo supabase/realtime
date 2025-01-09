@@ -1,11 +1,11 @@
-name: Staging Formatting Checks
+name: Tests
 on:
   pull_request:
     branches:
       - main
 jobs:
   format:
-    name: Formatting Checks
+    name: Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -52,4 +52,6 @@ jobs:
       - name: Start epmd
         run: epmd -daemon
       - name: Run tests
-        run: mix test --trace --max-cases 1
+        run: MIX_ENV=test mix coveralls.github --trace
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

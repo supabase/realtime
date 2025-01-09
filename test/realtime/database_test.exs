@@ -8,24 +8,19 @@ defmodule Realtime.DatabaseTest do
 
   describe "replication_slot_teardown/1" do
     setup do
-      %{tenant: tenant_fixture()}
+      %{tenant: tenant_fixture(%{notify_private_alpha: true})}
     end
 
     @tag skip: "tests too flaky at the moment"
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
-      [extension] = tenant.extensions
-      args = Map.put(extension.settings, "id", random_string())
+      {:ok, conn} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
 
-      pid =
-        start_supervised!({Extensions.PostgresCdcStream.Replication, args}, restart: :transient)
-
-      {:ok, conn} = Database.connect(tenant, "realtime_test")
       # Check replication slot was created
       assert %{rows: [["supabase_realtime_replication_slot"]]} =
                Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
 
       # Kill connections to database
-      Extensions.PostgresCdcStream.Replication.stop(pid)
+      Realtime.Tenants.Connect.shutdown(tenant.external_id)
       Database.replication_slot_teardown(tenant)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
