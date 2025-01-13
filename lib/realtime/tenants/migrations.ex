@@ -72,7 +72,8 @@ defmodule Realtime.Tenants.Migrations do
     RealtimeSendHandleExceptionsRemovePartitionCreation,
     RealtimeSendSetsConfig,
     RealtimeSubscriptionUnlogged,
-    RealtimeSubscriptionLogged
+    RealtimeSubscriptionLogged,
+    RealtimeSubscriptionCreateSequence
   }
 
   @migrations [
@@ -134,7 +135,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_241_220_123_912, RealtimeSendHandleExceptionsRemovePartitionCreation},
     {20_241_224_161_212, RealtimeSendSetsConfig},
     {20_250_107_150_512, RealtimeSubscriptionUnlogged},
-    {20_250_110_162_412, RealtimeSubscriptionLogged}
+    {20_250_110_162_412, RealtimeSubscriptionLogged},
+    {20_250_113_141_112, RealtimeSubscriptionCreateSequence}
   ]
 
   defstruct [:tenant_external_id, :settings]
