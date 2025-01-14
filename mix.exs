@@ -4,13 +4,14 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.33.80",
+      version: "2.33.81",
       elixir: "~> 1.17.3",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
-      dialyzer: dialyzer()
+      dialyzer: dialyzer(),
+      test_coverage: [tool: ExCoveralls]
     ]
   end
 
@@ -69,7 +70,6 @@ defmodule Realtime.MixProject do
       {:logflare_logger_backend, "~> 0.11"},
       {:httpoison, "~> 1.8"},
       {:syn, "~> 3.3"},
-      {:timex, "~> 3.0"},
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
@@ -77,7 +77,8 @@ defmodule Realtime.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:mint_web_socket, "~> 1.0", only: :test},
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
-      {:benchee, "~> 1.1.0", only: :dev}
+      {:benchee, "~> 1.1.0", only: :dev},
+      {:excoveralls, "~> 0.18", only: [:dev, :test], runtime: false}
     ]
   end
 

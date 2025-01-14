@@ -190,6 +190,7 @@ defmodule RealtimeWeb.TenantController do
     subs_id = UserSocket.subscribers_id(tenant_id)
 
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id, :primary),
+         _ <- Realtime.Tenants.Connect.shutdown(tenant_id),
          true <- Api.delete_tenant_by_external_id(tenant_id),
          :ok <- Cache.distributed_invalidate_tenant_cache(tenant_id),
          :ok <- PostgresCdc.stop_all(tenant, stop_all_timeout),

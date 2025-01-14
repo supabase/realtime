@@ -61,6 +61,8 @@ defmodule RealtimeWeb.TenantControllerTest do
         "Bearer auth_token"
       )
 
+    on_exit(fn -> Realtime.Tenants.Connect.shutdown("dev_tenant") end)
+
     {:ok, conn: new_conn}
   end
 
@@ -147,10 +149,9 @@ defmodule RealtimeWeb.TenantControllerTest do
     setup [:create_tenant]
 
     setup %{tenant: tenant} do
-      [extension] = tenant.extensions
-      args = Map.put(extension.settings, "id", tenant.external_id)
-      {:ok, _} = Realtime.PostgresCdc.connect(Extensions.PostgresCdcStream, args)
-      on_exit(fn -> Realtime.PostgresCdc.stop_all(tenant) end)
+      {:ok, _} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+      :timer.sleep(1000)
+      on_exit(fn -> Realtime.Tenants.Connect.shutdown(tenant.external_id) end)
       :ok
     end
 
@@ -158,25 +159,15 @@ defmodule RealtimeWeb.TenantControllerTest do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         assert Cache.get_tenant_by_external_id(tenant.external_id)
 
-        {:ok, db_conn} =
-          start_supervised(
-            {Postgrex,
-             [
-               host: "localhost",
-               username: "postgres",
-               password: "postgres",
-               database: "postgres",
-               port: 5433
-             ]}
-          )
+        {:ok, db_conn} = Database.connect(tenant, "realtime_test")
 
-        assert %{rows: [["supabase_realtime_replication_slot"]]} =
+        assert %{rows: [["realtime_messages_replication_slot_"]]} =
                  Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
 
         conn = delete(conn, Routes.tenant_path(conn, :delete, tenant.external_id))
         assert response(conn, 204)
 
-        :timer.sleep(5000)
+        :timer.sleep(2000)
         refute Cache.get_tenant_by_external_id(tenant.external_id)
         refute Tenants.get_tenant_by_external_id(tenant.external_id)
 
@@ -300,10 +291,10 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "runs migrations", %{
       conn: conn,
-      tenant: %Tenant{external_id: ext_id}
+      tenant: %Tenant{external_id: ext_id} = tenant
     } do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        {:ok, db_conn} = Connect.lookup_or_start_connection(ext_id)
+        {:ok, db_conn} = Database.connect(tenant, "realtime_test")
 
         Database.transaction(db_conn, fn transaction_conn ->
           Postgrex.query!(transaction_conn, "DROP SCHEMA realtime CASCADE", [])
@@ -315,10 +306,11 @@ defmodule RealtimeWeb.TenantControllerTest do
 
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
-        :timer.sleep(1000)
+        :timer.sleep(2000)
+
         assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
-        assert %{"healthy" => true, "db_connected" => true, "connected_cluster" => 0} = data
+        assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
       end
     end
   end
@@ -358,6 +350,6 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   defp create_tenant(_) do
-    %{tenant: tenant_fixture()}
+    %{tenant: tenant_fixture(%{notify_private_alpha: true})}
   end
 end

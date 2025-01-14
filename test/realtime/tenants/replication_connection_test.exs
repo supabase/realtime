@@ -1,4 +1,4 @@
-defmodule Realtime.Tenants.BroadcastChanges.HandlerTest do
+defmodule Realtime.Tenants.ReplicationConnectionTest do
   # async: false due to the fact that we're using the database to intercept messages created which will interfer with other tests
   use Realtime.DataCase, async: false
 
@@ -6,7 +6,7 @@ defmodule Realtime.Tenants.BroadcastChanges.HandlerTest do
   import Mock
 
   alias Realtime.Api.Message
-  alias Realtime.Tenants.BroadcastChanges.Handler
+  alias Realtime.Tenants.ReplicationConnection
   alias Realtime.Database
   alias Realtime.Tenants.BatchBroadcast
   alias Realtime.Tenants.Migrations
@@ -25,7 +25,7 @@ defmodule Realtime.Tenants.BroadcastChanges.HandlerTest do
     clean_table(conn, "realtime", "messages")
 
     publication =
-      Handler.publication_name(%Handler{
+      ReplicationConnection.publication_name(%ReplicationConnection{
         tenant_id: tenant.external_id,
         schema: "realtime",
         table: "messages"
@@ -61,13 +61,7 @@ defmodule Realtime.Tenants.BroadcastChanges.HandlerTest do
       })
 
     capture_log(fn ->
-      assert {:error, _} =
-               start_supervised(%{
-                 id: Handler,
-                 start: {Handler, :start_link, [%Handler{tenant_id: tenant.external_id}]},
-                 restart: :transient,
-                 type: :worker
-               })
+      assert {:error, _} = ReplicationConnection.start(tenant, self())
     end) =~ "UnableToStartHandler"
   end
 
@@ -76,12 +70,7 @@ defmodule Realtime.Tenants.BroadcastChanges.HandlerTest do
                  broadcast: fn _, _, _, _ -> :ok end do
     tenant = tenant_fixture()
 
-    start_supervised!(%{
-      id: Handler,
-      start: {Handler, :start_link, [%Handler{tenant_id: tenant.external_id}]},
-      restart: :transient,
-      type: :worker
-    })
+    {:ok, _pid} = ReplicationConnection.start(tenant, self())
 
     total_messages = 5
     # Works with one insert per transaction
@@ -115,24 +104,21 @@ defmodule Realtime.Tenants.BroadcastChanges.HandlerTest do
     assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
   end
 
-  test "handles duplicate replication slot by failing second worker" do
+  test "pid is associated to the same pid for a given tenant and guarantees uniqueness" do
     tenant = tenant_fixture()
 
-    start_supervised!(%{
-      id: Handler,
-      start: {Handler, :start_link, [%Handler{tenant_id: tenant.external_id}]},
-      restart: :transient,
-      type: :worker
-    })
+    assert {:ok, pid} = ReplicationConnection.start(tenant, self())
+    assert {:ok, ^pid} = ReplicationConnection.start(tenant, self())
+  end
 
-    capture_log(fn ->
-      assert {:error, _} =
-               start_supervised(%{
-                 id: Handler,
-                 start: {Handler, :start_link, [%Handler{tenant_id: tenant.external_id}]},
-                 restart: :transient,
-                 type: :worker
-               })
-    end) =~ "UnableToStartHandler"
+  test "fails on existing replication slot" do
+    # Warning: this will only work in testing environments as we are using the same database instance but different tenants so the replication slot will be shared
+    tenant1 = tenant_fixture()
+    tenant2 = tenant_fixture()
+
+    assert {:ok, _pid} = ReplicationConnection.start(tenant1, self())
+
+    assert {:error, "Temporary Replication slot already exists and in use"} =
+             ReplicationConnection.start(tenant2, self())
   end
 end

@@ -78,7 +78,7 @@ defmodule Realtime.Application do
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,
-         name: Realtime.Tenants.BroadcastChanges.Handler.DynamicSupervisor},
+         name: Realtime.Tenants.ReplicationConnection.DynamicSupervisor},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,

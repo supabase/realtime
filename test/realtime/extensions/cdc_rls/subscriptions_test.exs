@@ -39,6 +39,8 @@ defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
     assert {:ok, [%Postgrex.Result{}]} =
              S.create(conn, "supabase_realtime_test", params_list, self(), self())
 
+    Process.sleep(500)
+
     params_list = [
       %{
         claims: %{
@@ -51,6 +53,8 @@ defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
 
     assert {:ok, [%Postgrex.Result{}]} =
              S.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+    Process.sleep(500)
 
     params_list = [
       %{
@@ -65,6 +69,8 @@ defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
     assert {:error,
             "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: %{}"} =
              S.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+    Process.sleep(500)
 
     params_list = [
       %{
@@ -82,6 +88,8 @@ defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
             "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: <redacted>"} =
              S.create(conn, "supabase_realtime_test", params_list, self(), self())
 
+    Process.sleep(500)
+
     params_list = [
       %{
         claims: %{
@@ -97,6 +105,8 @@ defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
     assert {:error,
             "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: <redacted>"} =
              S.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+    Process.sleep(500)
 
     %Postgrex.Result{rows: [[num]]} =
       P.query!(conn, "select count(*) from realtime.subscription", [])
@@ -128,6 +138,7 @@ defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
     ]
 
     S.create(conn, "supabase_realtime_test", params_list, self(), self())
+    Process.sleep(500)
 
     assert {:ok, %P.Result{}} = S.delete(conn, bin_id)
 
@@ -161,6 +172,7 @@ defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
     ]
 
     S.create(conn, "supabase_realtime_test", params_list, self(), self())
+    Process.sleep(500)
 
     assert {:ok, %P.Result{}} = S.delete_multi(conn, [bin_id1, bin_id2])
 
@@ -202,5 +214,6 @@ defmodule Realtime.Extensions.CdcRlsSubscriptionsTest do
       end)
 
     S.create(conn, "supabase_realtime_test", params_list, self(), self())
+    Process.sleep(500)
   end
 end

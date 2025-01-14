@@ -15,7 +15,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Api.Tenant
   alias Realtime.Rpc
   alias Realtime.Tenants
-  alias Realtime.Tenants.BroadcastChanges.Handler
+  alias Realtime.Tenants.ReplicationConnection
   alias Realtime.Tenants.Connect.CheckConnection
   alias Realtime.Tenants.Connect.GetTenant
   alias Realtime.Tenants.Connect.Piper
@@ -115,14 +115,25 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  def shutdown(tenant_id) do
-    case get_status(tenant_id) do
-      {:ok, conn} ->
-        GenServer.stop(conn)
-        {:ok, :shutdown}
+  @doc """
+  Returns the pid of the tenant Connection process
+  """
+  @spec whereis(binary()) :: pid | nil
+  def whereis(tenant_id) do
+    case :syn.lookup(__MODULE__, tenant_id) do
+      {pid, _} -> pid
+      :undefined -> nil
+    end
+  end
 
-      _ ->
-        {:error, :unable_to_shutdown}
+  @doc """
+  Shutdown the tenant Connection and linked processes
+  """
+  @spec shutdown(binary()) :: :ok | nil
+  def shutdown(tenant_id) do
+    case whereis(tenant_id) do
+      nil -> nil
+      pid -> GenServer.stop(pid)
     end
   end
 
@@ -183,12 +194,12 @@ defmodule Realtime.Tenants.Connect do
   def handle_continue(:start_listen_and_replication, state) do
     %{tenant: tenant} = state
 
-    with {:ok, broadcast_changes_pid} <- start_replication(tenant),
-         {:ok, listen_pid} <- start_listen(tenant) do
+    with {:ok, broadcast_changes_pid} <- start_replication(tenant, self()),
+         {:ok, listen_pid} <- start_listen(tenant, self()) do
       {:noreply, %{state | broadcast_changes_pid: broadcast_changes_pid, listen_pid: listen_pid},
        {:continue, :setup_connected_user_events}}
     else
-      error ->
+      {:error, error} ->
         log_error("StartListenAndReplicationFailed", error)
         {:stop, :shutdown, state}
     end
@@ -281,7 +292,7 @@ defmodule Realtime.Tenants.Connect do
         %{db_conn_reference: db_conn_reference} = state
       ) do
     Logger.info("Database connection has been terminated")
-    {:stop, :kill, state}
+    {:stop, :normal, state}
   end
 
   @impl true
@@ -326,28 +337,11 @@ defmodule Realtime.Tenants.Connect do
   defp tenant_suspended?(%Tenant{suspend: true}), do: {:error, :tenant_suspended}
   defp tenant_suspended?(_), do: :ok
 
-  defp start_replication(%{notify_private_alpha: false}), do: {:ok, nil}
+  defp start_replication(%{notify_private_alpha: false}, _), do: {:ok, nil}
 
-  defp start_replication(tenant) do
-    Logger.info("Starting replication for Broadcast Changes")
-    opts = %Handler{tenant_id: tenant.external_id}
-    supervisor_spec = Handler.supervisor_spec(tenant)
+  defp start_replication(tenant, connect_pid),
+    do: ReplicationConnection.start(tenant, connect_pid)
 
-    child_spec = %{
-      id: Handler,
-      start: {Handler, :start_link, [opts]},
-      restart: :transient,
-      type: :worker
-    }
-
-    case DynamicSupervisor.start_child(supervisor_spec, child_spec) do
-      {:ok, pid} -> {:ok, pid}
-      {:error, {:already_started, pid}} -> {:ok, pid}
-      error -> {:error, error}
-    end
-  end
-
-  defp start_listen(%{notify_private_alpha: false}), do: {:ok, nil}
-
-  defp start_listen(tenant), do: Listen.start(tenant)
+  defp start_listen(%{notify_private_alpha: false}, _), do: {:ok, nil}
+  defp start_listen(tenant, connect_pid), do: Listen.start(tenant, connect_pid)
 end

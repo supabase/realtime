@@ -1,8 +1,10 @@
 defmodule Realtime.Tenants.ConnectTest do
   # async: false due to the fact that multiple operations against the database will use the same connection
+  alias Realtime.Tenants.ReplicationConnection
   use Realtime.DataCase, async: false
 
   import Mock
+
   alias Ecto.Adapters.SQL.Sandbox
   alias Realtime.Repo
   alias Realtime.Tenants.Connect
@@ -88,6 +90,7 @@ defmodule Realtime.Tenants.ConnectTest do
       {:ok, db_conn} =
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
+      Process.link(db_conn)
       Sandbox.allow(Repo, self(), db_conn)
 
       assert {pid, %{conn: conn_pid}} = :syn.lookup(Connect, tenant_id)
@@ -104,6 +107,7 @@ defmodule Realtime.Tenants.ConnectTest do
       {:ok, db_conn} =
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
+      Process.link(db_conn)
       assert {_pid, %{conn: _conn_pid}} = :syn.lookup(Connect, tenant_id)
       :timer.sleep(1000)
       :syn.leave(:users, tenant_id, self())
@@ -122,6 +126,7 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant = tenant_fixture()
 
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      Process.link(db_conn)
       Sandbox.allow(Repo, self(), db_conn)
 
       :timer.sleep(500)
@@ -184,13 +189,18 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "starts broadcast handler and does not fail on existing connection" do
       tenant = tenant_fixture(%{notify_private_alpha: true})
+      on_exit(fn -> Connect.shutdown(tenant.external_id) end)
 
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Sandbox.allow(Repo, self(), db_conn)
-      :timer.sleep(500)
-      assert Process.alive?(db_conn)
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      assert Process.alive?(db_conn)
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      :timer.sleep(2000)
+
+      replication_connection_before = ReplicationConnection.whereis(tenant.external_id)
+      assert Process.alive?(replication_connection_before)
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      replication_connection_after = ReplicationConnection.whereis(tenant.external_id)
+      assert Process.alive?(replication_connection_after)
+      assert replication_connection_before == replication_connection_after
     end
   end
 

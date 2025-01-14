@@ -26,13 +26,6 @@ config :realtime, :extensions,
     driver: Extensions.PostgresCdcRls,
     supervisor: Extensions.PostgresCdcRls.Supervisor,
     db_settings: Extensions.PostgresCdcRls.DbSettings
-  },
-  postgres_cdc_stream: %{
-    type: :postgres_cdc,
-    key: "postgres_cdc_stream",
-    driver: Extensions.PostgresCdcStream,
-    supervisor: Extensions.PostgresCdcStream.Supervisor,
-    db_settings: Extensions.PostgresCdcStream.DbSettings
   }
 
 config :esbuild,

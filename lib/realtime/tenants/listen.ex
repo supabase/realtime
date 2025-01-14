@@ -4,51 +4,52 @@ defmodule Realtime.Tenants.Listen do
   """
   use GenServer, restart: :transient
   require Logger
-  alias Realtime.Logs
   alias Realtime.Api.Tenant
   alias Realtime.Database
-  alias Realtime.PostgresCdc
+  alias Realtime.Logs
   alias Realtime.Registry.Unique
+  alias Realtime.Tenants.Cache
 
-  defstruct tenant_id: nil, listen_conn: nil
+  @type t :: %__MODULE__{
+          tenant_id: binary,
+          listen_conn: pid(),
+          monitored_pid: pid()
+        }
+  defstruct tenant_id: nil, listen_conn: nil, monitored_pid: nil
 
-  @cdc "postgres_cdc_rls"
   @topic "realtime:system"
-  def start_link(%Tenant{} = tenant) do
-    name = {:via, Registry, {Unique, {__MODULE__, :tenant_id, tenant.external_id}}}
-    GenServer.start_link(__MODULE__, tenant, name: name)
+  def start_link(%__MODULE__{tenant_id: tenant_id} = state) do
+    name = {:via, Registry, {Unique, {__MODULE__, :tenant_id, tenant_id}}}
+    GenServer.start_link(__MODULE__, state, name: name)
   end
 
-  def init(%Tenant{external_id: external_id} = tenant) do
-    Logger.metadata(external_id: external_id, project: external_id)
+  def init(%__MODULE__{tenant_id: tenant_id, monitored_pid: monitored_pid}) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+    Process.monitor(monitored_pid)
 
-    settings =
-      tenant
-      |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
-      |> then(&Database.from_settings(&1, "realtime_listen", :stop, true))
-      |> Map.from_struct()
+    tenant = Cache.get_tenant_by_external_id(tenant_id)
+    connection_opts = Database.from_tenant(tenant, "realtime_listen", :stop, true)
 
     name =
       {:via, Registry,
-       {Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant.external_id}}}
+       {Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant_id}}}
 
-    {:ok, ip_version} = Database.detect_ip_version(settings[:host])
+    {:ok, ip_version} = Database.detect_ip_version(connection_opts.host)
 
-    ssl = if settings[:ssl_enforced], do: [verify: :verify_none], else: false
+    ssl = if connection_opts.ssl_enforced, do: [verify: :verify_none], else: false
 
     settings =
-      settings
-      |> Map.put(:hostname, settings[:host])
-      |> Map.put(:database, settings[:name])
-      |> Map.put(:password, settings[:pass])
-      |> Map.put(:username, settings[:user])
-      |> Map.put(:port, String.to_integer(settings[:port]))
-      |> Map.put(:ssl, ssl)
-      |> Map.put(:sync_connect, true)
-      |> Map.put(:auto_reconnect, false)
-      |> Map.put(:name, name)
-      |> Map.put(:socket_options, [ip_version])
-      |> Enum.to_list()
+      []
+      |> Keyword.put(:hostname, connection_opts.host)
+      |> Keyword.put(:database, connection_opts.name)
+      |> Keyword.put(:password, connection_opts.pass)
+      |> Keyword.put(:username, connection_opts.user)
+      |> Keyword.put(:port, String.to_integer(connection_opts.port))
+      |> Keyword.put(:ssl, ssl)
+      |> Keyword.put(:sync_connect, true)
+      |> Keyword.put(:auto_reconnect, false)
+      |> Keyword.put(:name, name)
+      |> Keyword.put(:socket_options, [ip_version])
 
     Logger.info("Listening for notifications on #{@topic}")
 
@@ -68,10 +69,10 @@ defmodule Realtime.Tenants.Listen do
     e -> {:stop, e}
   end
 
-  @spec start(Realtime.Api.Tenant.t()) :: {:ok, pid()} | {:error, any()}
-  def start(%Tenant{} = tenant) do
+  @spec start(Realtime.Api.Tenant.t(), pid()) :: {:ok, pid()} | {:error, any()}
+  def start(%Tenant{} = tenant, pid) do
     supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Listen.DynamicSupervisor, self()}}
-    spec = {__MODULE__, tenant}
+    spec = {__MODULE__, %__MODULE__{tenant_id: tenant.external_id, monitored_pid: pid}}
 
     case DynamicSupervisor.start_child(supervisor, spec) do
       {:ok, pid} -> {:ok, pid}
@@ -97,5 +98,6 @@ defmodule Realtime.Tenants.Listen do
     {:noreply, state}
   end
 
+  def handle_info({:DOWN, _, :process, _, _}, state), do: {:stop, :normal, state}
   def handle_info(_, state), do: {:noreply, state}
 end
