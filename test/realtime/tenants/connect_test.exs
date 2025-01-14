@@ -1,6 +1,5 @@
 defmodule Realtime.Tenants.ConnectTest do
   # async: false due to the fact that multiple operations against the database will use the same connection
-  alias Realtime.Tenants.ReplicationConnection
   use Realtime.DataCase, async: false
 
   import Mock
@@ -8,6 +7,8 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Ecto.Adapters.SQL.Sandbox
   alias Realtime.Repo
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.Listen
+  alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
 
   describe "lookup_or_start_connection/1" do
@@ -201,6 +202,76 @@ defmodule Realtime.Tenants.ConnectTest do
       replication_connection_after = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_after)
       assert replication_connection_before == replication_connection_after
+    end
+
+    test "failed broadcast handler and listen recover from failure" do
+      tenant = tenant_fixture(%{notify_private_alpha: true})
+      on_exit(fn -> Connect.shutdown(tenant.external_id) end)
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      :timer.sleep(3000)
+
+      replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+      listen_pid = ReplicationConnection.whereis(tenant.external_id)
+      assert Process.alive?(replication_connection_pid)
+      assert Process.alive?(listen_pid)
+
+      Process.exit(replication_connection_pid, :kill)
+      Process.exit(listen_pid, :kill)
+
+      refute Process.alive?(replication_connection_pid)
+      refute Process.alive?(listen_pid)
+
+      :timer.sleep(1000)
+      replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+      listen_pid = ReplicationConnection.whereis(tenant.external_id)
+      assert Process.alive?(replication_connection_pid)
+      assert Process.alive?(listen_pid)
+    end
+
+    test "on database disconnect, connection is killed to all components" do
+      tenant = tenant_fixture(%{notify_private_alpha: true})
+      on_exit(fn -> Connect.shutdown(tenant.external_id) end)
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      old_pid = Connect.whereis(tenant.external_id)
+      :timer.sleep(3000)
+
+      old_replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+      old_listen_connection_pid = Listen.whereis(tenant.external_id)
+
+      assert Process.alive?(old_replication_connection_pid)
+      assert Process.alive?(old_listen_connection_pid)
+
+      System.cmd("docker", ["stop", "tenant-db"])
+      :timer.sleep(500)
+      System.cmd("docker", ["start", "tenant-db"])
+
+      :timer.sleep(3000)
+      refute Process.alive?(old_pid)
+      refute Process.alive?(old_replication_connection_pid)
+      refute Process.alive?(old_listen_connection_pid)
+
+      assert ReplicationConnection.whereis(tenant.external_id) == nil
+      assert Listen.whereis(tenant.external_id) == nil
+    end
+  end
+
+  describe "shutdown/1" do
+    test "shutdowns all associated connections" do
+      tenant = tenant_fixture(%{notify_private_alpha: true})
+
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      Process.sleep(1000)
+
+      assert Process.alive?(db_conn)
+      assert Process.alive?(Connect.whereis(tenant.external_id))
+      assert Process.alive?(ReplicationConnection.whereis(tenant.external_id))
+      assert Process.alive?(Listen.whereis(tenant.external_id))
+
+      Connect.shutdown(tenant.external_id)
+      Process.sleep(1000)
+      refute Connect.whereis(tenant.external_id)
+      refute ReplicationConnection.whereis(tenant.external_id)
+      refute Listen.whereis(tenant.external_id)
     end
   end
 

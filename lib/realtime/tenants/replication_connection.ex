@@ -85,7 +85,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
       {:error, {:bad_return_from_init, {:stop, error, _}}} -> {:error, error}
-      error -> {:error, error}
+      error -> error
     end
   end
 
@@ -118,9 +118,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
         socket_options: [ip_version],
         backoff_type: :stop,
         sync_connect: true,
-        parameters: [
-          application_name: connection_opts.application_name
-        ],
+        after_connect: fn conn ->
+          Postgrex.query!(conn, "SET application_name = 'realtime_replication_connection'", [])
+        end,
         ssl: ssl
       ]
 

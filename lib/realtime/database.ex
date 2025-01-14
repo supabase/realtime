@@ -18,6 +18,7 @@ defmodule Realtime.Database do
     :pool,
     :queue_target,
     :application_name,
+    :max_restarts,
     ssl_enforced: true,
     backoff: :rand_exp
   ]
@@ -34,6 +35,7 @@ defmodule Realtime.Database do
           queue_target: non_neg_integer(),
           ssl_enforced: boolean(),
           application_name: binary(),
+          max_restarts: non_neg_integer(),
           backoff: :stop | :exp | :rand | :rand_exp
         }
 
@@ -163,7 +165,8 @@ defmodule Realtime.Database do
       queue_target: queue_target,
       ssl_enforced: ssl_enforced,
       application_name: application_name,
-      backoff: backoff
+      backoff: backoff,
+      max_restarts: max_restarts
     } = settings
 
     connect_db(
@@ -176,7 +179,8 @@ defmodule Realtime.Database do
       queue_target,
       ssl_enforced,
       application_name,
-      backoff
+      backoff,
+      max_restarts
     )
   end
 
@@ -193,6 +197,7 @@ defmodule Realtime.Database do
     |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
     |> then(fn settings ->
       check_settings = from_settings(settings, application_name, :stop)
+      check_settings = Map.put(check_settings, :max_restarts, 0)
 
       with {:ok, conn} <- connect_db(check_settings) do
         case Postgrex.query(conn, "SELECT 1", []) do
@@ -283,9 +288,10 @@ defmodule Realtime.Database do
       Enum.each(rows, fn [pid] ->
         Postgrex.query!(conn, "select pg_terminate_backend(#{pid})", [])
       end)
-
-      :ok
     end
+
+    GenServer.stop(conn)
+    :ok
   end
 
   @doc """
@@ -359,7 +365,8 @@ defmodule Realtime.Database do
          queue_target,
          ssl_enforced,
          application_name,
-         backoff_type
+         backoff_type,
+         max_restarts
        ) do
     Logger.metadata(application_name: application_name)
     metadata = Logger.metadata()
@@ -382,6 +389,9 @@ defmodule Realtime.Database do
         args
       end
     ]
+    |> then(fn opts ->
+      if max_restarts, do: Keyword.put(opts, :max_restarts, max_restarts), else: opts
+    end)
     |> maybe_enforce_ssl_config(ssl_enforced)
     |> Postgrex.start_link()
   end

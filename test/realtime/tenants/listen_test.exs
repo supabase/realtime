@@ -65,4 +65,16 @@ defmodule Realtime.Tenants.ListenTest do
       end
     end
   end
+
+  describe "whereis/1" do
+    test "returns pid if exists" do
+      tenant = tenant_fixture()
+      Listen.start(tenant, self())
+      assert Listen.whereis(tenant.external_id)
+    end
+
+    test "returns nil if not exists" do
+      assert Listen.whereis(random_string()) == nil
+    end
+  end
 end

@@ -121,4 +121,16 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     assert {:error, "Temporary Replication slot already exists and in use"} =
              ReplicationConnection.start(tenant2, self())
   end
+
+  describe "whereis/1" do
+    test "returns pid if exists" do
+      tenant = tenant_fixture()
+      assert {:ok, pid} = ReplicationConnection.start(tenant, self())
+      assert ReplicationConnection.whereis(tenant.external_id) == pid
+    end
+
+    test "returns nil if not exists" do
+      assert ReplicationConnection.whereis(random_string()) == nil
+    end
+  end
 end

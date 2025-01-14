@@ -48,8 +48,13 @@ defmodule Realtime.Tenants.Listen do
       |> Keyword.put(:ssl, ssl)
       |> Keyword.put(:sync_connect, true)
       |> Keyword.put(:auto_reconnect, false)
+      |> Keyword.put(:backoff_type, :stop)
+      |> Keyword.put(:max_restarts, 0)
       |> Keyword.put(:name, name)
       |> Keyword.put(:socket_options, [ip_version])
+      |> Keyword.put(:after_connect, fn conn ->
+        Postgrex.query!(conn, "SET application_name = 'realtime_listen'", [])
+      end)
 
     Logger.info("Listening for notifications on #{@topic}")
 
@@ -81,6 +86,20 @@ defmodule Realtime.Tenants.Listen do
     end
   catch
     e -> {:error, e}
+  end
+
+  @doc """
+  Finds replication connection by tenant_id
+  """
+  @spec whereis(String.t()) :: pid() | nil
+  def whereis(tenant_id) do
+    case Registry.lookup(
+           Realtime.Registry.Unique,
+           {Postgrex.Notifications, :tenant_id, tenant_id}
+         ) do
+      [{pid, _}] -> pid
+      [] -> nil
+    end
   end
 
   def handle_info({:notification, _, _, @topic, payload}, state) do

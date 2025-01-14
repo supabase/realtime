@@ -183,12 +183,12 @@ defmodule Realtime.Tenants.Connect do
     else
       error ->
         log_error("MigrationsFailedToRun", error)
-        {:stop, :shutdown, state}
+        {:stop, :kill, state}
     end
   rescue
     error ->
       log_error("MigrationsFailedToRun", error)
-      {:stop, :shutdown, state}
+      {:stop, :kill, state}
   end
 
   def handle_continue(:start_listen_and_replication, state) do
@@ -201,12 +201,12 @@ defmodule Realtime.Tenants.Connect do
     else
       {:error, error} ->
         log_error("StartListenAndReplicationFailed", error)
-        {:stop, :shutdown, state}
+        {:stop, :kill, state}
     end
   rescue
     error ->
       log_error("StartListenAndReplicationFailed", error)
-      {:stop, :shutdown, state}
+      {:stop, :kill, state}
   end
 
   @impl true
