@@ -177,7 +177,7 @@ defmodule Realtime.Tenants.Connect do
   def handle_continue(:run_migrations, state) do
     %{tenant: tenant, db_conn_pid: db_conn_pid} = state
 
-    with :ok <- Migrations.maybe_run_migrations(db_conn_pid, tenant),
+    with :ok <- Migrations.run_migrations(tenant),
          :ok <- Migrations.create_partitions(db_conn_pid) do
       {:noreply, state, {:continue, :start_listen_and_replication}}
     else

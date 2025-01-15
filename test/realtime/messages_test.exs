@@ -9,9 +9,7 @@ defmodule Realtime.MessagesTest do
 
   setup do
     tenant = tenant_fixture()
-    [%{settings: settings} | _] = tenant.extensions
-    migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
-    Migrations.run_migrations(migrations)
+    Migrations.run_migrations(tenant)
 
     {:ok, conn} = Database.connect(tenant, "realtime_test")
     clean_table(conn, "realtime", "messages")

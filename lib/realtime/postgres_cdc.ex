@@ -58,6 +58,7 @@ defmodule Realtime.PostgresCdc do
     |> Enum.map(fn {_, e} -> e.driver end)
   end
 
+  @spec filter_settings(binary(), list()) :: map()
   def filter_settings(key, extensions) do
     [cdc] = Enum.filter(extensions, fn e -> e.type == key end)
 

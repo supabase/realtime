@@ -12,7 +12,6 @@ defmodule Realtime.Tenants.MigrationsTest do
     end
 
     test "migrations for a given tenant only run once", %{tenant: tenant} do
-      %{extensions: [%{settings: settings}]} = tenant
       {:ok, conn} = Database.connect(tenant, "realtime_test")
 
       Postgrex.query!(conn, "DROP SCHEMA realtime CASCADE", [])
@@ -21,10 +20,7 @@ defmodule Realtime.Tenants.MigrationsTest do
       res =
         for _ <- 0..10 do
           Task.async(fn ->
-            Migrations.run_migrations(%Migrations{
-              settings: settings,
-              tenant_external_id: tenant.external_id
-            })
+            Migrations.run_migrations(tenant)
           end)
         end
         |> Task.await_many()

@@ -179,12 +179,11 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "on migrations failure, stop the process", %{tenant: tenant} do
-      with_mock Realtime.Tenants.Migrations, [],
-        maybe_run_migrations: fn _, _ -> raise("error") end do
+      with_mock Realtime.Tenants.Migrations, [], run_migrations: fn _ -> raise("error") end do
         assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
         Process.sleep(200)
         refute Process.alive?(pid)
-        assert_called(Realtime.Tenants.Migrations.maybe_run_migrations(:_, :_))
+        assert_called(Realtime.Tenants.Migrations.run_migrations(tenant))
       end
     end
 

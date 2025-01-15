@@ -28,30 +28,26 @@ defmodule Realtime.Tenants.Listen do
     Process.monitor(monitored_pid)
 
     tenant = Cache.get_tenant_by_external_id(tenant_id)
-    connection_opts = Database.from_tenant(tenant, "realtime_listen", :stop, true)
+    connection_opts = Database.from_tenant(tenant, "realtime_listen", :stop)
 
     name =
       {:via, Registry,
        {Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant_id}}}
 
-    {:ok, ip_version} = Database.detect_ip_version(connection_opts.host)
-
-    ssl = if connection_opts.ssl_enforced, do: [verify: :verify_none], else: false
-
     settings =
       [
-        hostname: connection_opts.host,
-        database: connection_opts.name,
-        password: connection_opts.pass,
-        username: connection_opts.user,
-        port: String.to_integer(connection_opts.port),
-        ssl: ssl,
+        hostname: connection_opts.hostname,
+        database: connection_opts.database,
+        password: connection_opts.password,
+        username: connection_opts.username,
+        port: connection_opts.port,
+        ssl: connection_opts.ssl,
+        socket_options: connection_opts.socket_options,
         sync_connect: true,
         auto_reconnect: false,
         backoff_type: :stop,
         max_restarts: 0,
         name: name,
-        socket_options: [ip_version],
         parameters: [application_name: "realtime_listen"]
       ]
 

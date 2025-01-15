@@ -102,26 +102,23 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   def start_link(%__MODULE__{tenant_id: tenant_id} = attrs) do
     tenant = Cache.get_tenant_by_external_id(tenant_id)
-    connection_opts = Database.from_tenant(tenant, "realtime_broadcast_changes", :stop, true)
-    {:ok, ip_version} = Database.detect_ip_version(connection_opts.host)
-
-    ssl = if connection_opts.ssl_enforced, do: [verify: :verify_none], else: false
+    connection_opts = Database.from_tenant(tenant, "realtime_broadcast_changes", :stop)
 
     connection_opts =
       [
         name: {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, tenant_id}}},
-        hostname: connection_opts.host,
-        username: connection_opts.user,
-        password: connection_opts.pass,
-        database: connection_opts.name,
-        port: String.to_integer(connection_opts.port),
-        socket_options: [ip_version],
+        hostname: connection_opts.hostname,
+        username: connection_opts.username,
+        password: connection_opts.password,
+        database: connection_opts.database,
+        port: connection_opts.port,
+        socket_options: connection_opts.socket_options,
+        ssl: connection_opts.ssl,
         backoff_type: :stop,
         sync_connect: true,
         parameters: [
           application_name: "realtime_replication_connection"
-        ],
-        ssl: ssl
+        ]
       ]
 
     case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do

@@ -158,10 +158,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
   def rls_context(context) do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
-
-    [%{settings: settings} | _] = tenant.extensions
-    migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
-    Migrations.run_migrations(migrations)
+    Migrations.run_migrations(tenant)
 
     {:ok, db_conn} = Database.connect(tenant, "realtime_test")
 
