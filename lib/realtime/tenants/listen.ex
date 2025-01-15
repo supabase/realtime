@@ -39,22 +39,21 @@ defmodule Realtime.Tenants.Listen do
     ssl = if connection_opts.ssl_enforced, do: [verify: :verify_none], else: false
 
     settings =
-      []
-      |> Keyword.put(:hostname, connection_opts.host)
-      |> Keyword.put(:database, connection_opts.name)
-      |> Keyword.put(:password, connection_opts.pass)
-      |> Keyword.put(:username, connection_opts.user)
-      |> Keyword.put(:port, String.to_integer(connection_opts.port))
-      |> Keyword.put(:ssl, ssl)
-      |> Keyword.put(:sync_connect, true)
-      |> Keyword.put(:auto_reconnect, false)
-      |> Keyword.put(:backoff_type, :stop)
-      |> Keyword.put(:max_restarts, 0)
-      |> Keyword.put(:name, name)
-      |> Keyword.put(:socket_options, [ip_version])
-      |> Keyword.put(:after_connect, fn conn ->
-        Postgrex.query!(conn, "SET application_name = 'realtime_listen'", [])
-      end)
+      [
+        hostname: connection_opts.host,
+        database: connection_opts.name,
+        password: connection_opts.pass,
+        username: connection_opts.user,
+        port: String.to_integer(connection_opts.port),
+        ssl: ssl,
+        sync_connect: true,
+        auto_reconnect: false,
+        backoff_type: :stop,
+        max_restarts: 0,
+        name: name,
+        socket_options: [ip_version],
+        parameters: [application_name: "realtime_listen"]
+      ]
 
     Logger.info("Listening for notifications on #{@topic}")
 

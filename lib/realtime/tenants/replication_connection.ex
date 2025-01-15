@@ -118,9 +118,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
         socket_options: [ip_version],
         backoff_type: :stop,
         sync_connect: true,
-        after_connect: fn conn ->
-          Postgrex.query!(conn, "SET application_name = 'realtime_replication_connection'", [])
-        end,
+        parameters: [
+          application_name: "realtime_replication_connection"
+        ],
         ssl: ssl
       ]
 
