@@ -28,24 +28,24 @@ defmodule Realtime.Database do
 
   @type t :: %__MODULE__{
           hostname: binary(),
-          port: non_neg_integer(),
           database: binary(),
           username: binary(),
           password: binary(),
+          port: non_neg_integer(),
           pool_size: non_neg_integer(),
           queue_target: non_neg_integer(),
           application_name: binary(),
-          max_restarts: non_neg_integer(),
+          max_restarts: non_neg_integer() | nil,
           ssl: boolean(),
-          backoff_type: :stop | :exp | :rand | :rand_exp,
-          socket_options: [[:inet | :inet6]]
+          socket_options: list(),
+          backoff_type: :stop | :exp | :rand | :rand_exp
         }
 
   @cdc "postgres_cdc_rls"
   @doc """
   Creates a database connection struct from the given tenant.
   """
-  @spec from_tenant(Tenant.t(), binary(), :stop | :exp | :rand | :rand_exp) :: __MODULE__.t()
+  @spec from_tenant(Tenant.t(), binary(), :stop | :exp | :rand | :rand_exp) :: t()
   def from_tenant(%Tenant{} = tenant, application_name, backoff \\ :rand_exp) do
     tenant
     |> then(&Realtime.PostgresCdc.filter_settings(@cdc, &1.extensions))
@@ -55,7 +55,7 @@ defmodule Realtime.Database do
   @doc """
   Creates a database connection struct from the given settings.
   """
-  @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: any()
+  @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: t()
   def from_settings(settings, application_name, backoff \\ :rand_exp) do
     pool = pool_size_by_application_name(application_name, settings)
 
