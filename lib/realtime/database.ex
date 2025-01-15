@@ -282,16 +282,29 @@ defmodule Realtime.Database do
     {:ok, conn} = connect(tenant, "realtime_replication_slot_teardown")
 
     query =
-      "select active_pid from pg_replication_slots where slot_name ilike '%realtime%'"
+      "select slot_name from pg_replication_slots where slot_name like '%realtime%'"
 
-    with {:ok, %{rows: rows}} <- Postgrex.query(conn, query, []) do
-      Enum.each(rows, fn [pid] ->
-        Postgrex.query!(conn, "select pg_terminate_backend(#{pid})", [])
-      end)
+    with {:ok, %{rows: [rows]}} <- Postgrex.query(conn, query, []) do
+      rows
+      |> Enum.reject(&is_nil/1)
+      |> Enum.each(&replication_slot_teardown(conn, &1))
     end
 
     GenServer.stop(conn)
     :ok
+  end
+
+  @doc """
+  Terminates replication slot with a given name in the tenant database.
+  """
+  @spec replication_slot_teardown(pid() | Tenant.t(), String.t()) :: :ok
+  def replication_slot_teardown(%Tenant{} = tenant, slot_name) do
+    {:ok, conn} = connect(tenant, "realtime_replication_slot_teardown")
+    replication_slot_teardown(conn, slot_name)
+  end
+
+  def replication_slot_teardown(conn, slot_name) do
+    Postgrex.query(conn, "select pg_drop_replication_slot($1)", [slot_name])
   end
 
   @doc """

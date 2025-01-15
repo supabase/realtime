@@ -237,12 +237,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   @impl true
-  def handle_disconnect(state) do
-    Logger.warning("Disconnecting broadcast changes handler: #{inspect(state, pretty: true)}")
-    {:noreply, %{state | step: :disconnected}}
-  end
-
-  @impl true
   def handle_data(data, state) when is_keep_alive(data) do
     %KeepAlive{reply: reply, wal_end: wal_end} = parse(data)
     wal_end = wal_end + 1
@@ -268,7 +262,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   @impl true
-  @spec handle_info(any(), any()) :: {:disconnect, <<_::128>>} | {:noreply, any()}
   def handle_info(%Decoder.Messages.Relation{} = msg, state) do
     %Decoder.Messages.Relation{id: id, namespace: namespace, name: name, columns: columns} = msg
     %{relations: relations} = state
@@ -344,10 +337,17 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   def handle_info(:shutdown, _), do: {:disconnect, :normal}
-
   def handle_info({:DOWN, _, :process, _, _}, _), do: {:disconnect, :normal}
-
   def handle_info(_, state), do: {:noreply, state}
+
+  @impl true
+  def handle_disconnect(state) do
+    %{tenant_id: tenant_id, replication_slot_name: replication_slot_name} = state
+    Logger.warning("Disconnecting broadcast changes handler: #{inspect(state, pretty: true)}")
+    tenant = Cache.get_tenant_by_external_id(tenant_id)
+    Database.replication_slot_teardown(tenant, replication_slot_name)
+    {:noreply, %{state | step: :disconnected}}
+  end
 
   @spec supervisor_spec(Tenant.t()) :: term()
   def supervisor_spec(%Tenant{external_id: tenant_id}) do

@@ -6,29 +6,57 @@ defmodule Realtime.DatabaseTest do
   alias Realtime.Database
   doctest Realtime.Database
 
+  setup do
+    %{tenant: tenant_fixture(%{notify_private_alpha: true})}
+  end
+
   describe "replication_slot_teardown/1" do
-    setup do
-      %{tenant: tenant_fixture(%{notify_private_alpha: true})}
-    end
-
-    @tag skip: "tests too flaky at the moment"
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
-      {:ok, conn} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
-      # Check replication slot was created
-      assert %{rows: [["supabase_realtime_replication_slot"]]} =
-               Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+      Postgrex.query!(
+        conn,
+        "SELECT * FROM pg_create_logical_replication_slot('realtime_test_slot', 'pgoutput')",
+        []
+      )
 
-      # Kill connections to database
-      Realtime.Tenants.Connect.shutdown(tenant.external_id)
       Database.replication_slot_teardown(tenant)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
   end
 
+  describe "replication_slot_teardown/2" do
+    test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
+      name = String.downcase("slot_#{random_string()}")
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        conn,
+        "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')",
+        []
+      )
+
+      Database.replication_slot_teardown(conn, name)
+      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+    end
+
+    test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
+      name = String.downcase("slot_#{random_string()}")
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        conn,
+        "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')",
+        []
+      )
+
+      Database.replication_slot_teardown(tenant, name)
+      assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
+    end
+  end
+
   describe "transaction/1" do
-    setup do
-      tenant = tenant_fixture()
+    setup %{tenant: tenant} do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       %{db_conn: db_conn}
     end
