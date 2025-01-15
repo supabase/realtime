@@ -305,6 +305,7 @@ defmodule Realtime.Database do
 
   def replication_slot_teardown(conn, slot_name) do
     Postgrex.query(conn, "select pg_drop_replication_slot($1)", [slot_name])
+    :ok
   end
 
   @doc """
