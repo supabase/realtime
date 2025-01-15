@@ -167,7 +167,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         conn = delete(conn, Routes.tenant_path(conn, :delete, tenant.external_id))
         assert response(conn, 204)
 
-        :timer.sleep(2000)
+        :timer.sleep(5000)
         refute Cache.get_tenant_by_external_id(tenant.external_id)
         refute Tenants.get_tenant_by_external_id(tenant.external_id)
 

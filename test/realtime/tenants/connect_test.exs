@@ -5,6 +5,7 @@ defmodule Realtime.Tenants.ConnectTest do
   import Mock
 
   alias Ecto.Adapters.SQL.Sandbox
+
   alias Realtime.Repo
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Listen

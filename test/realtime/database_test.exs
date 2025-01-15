@@ -7,7 +7,12 @@ defmodule Realtime.DatabaseTest do
   doctest Realtime.Database
 
   setup do
-    %{tenant: tenant_fixture(%{notify_private_alpha: true})}
+    tenant = tenant_fixture()
+
+    # Ensure no replication slot is present before the test
+    ensure_no_replication_slot(tenant)
+
+    %{tenant: tenant}
   end
 
   describe "replication_slot_teardown/1" do
@@ -207,6 +212,30 @@ defmodule Realtime.DatabaseTest do
       settings = Map.put(settings, "ssl_enforced", false)
       settings = Database.from_settings(settings, application_name, backoff)
       assert settings.ssl == false
+    end
+  end
+
+  defp ensure_no_replication_slot(tenant, attempts \\ 5)
+  defp ensure_no_replication_slot(_tenant, 0), do: raise("Replication slot teardown failed")
+
+  defp ensure_no_replication_slot(tenant, attempts) do
+    {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+    Database.replication_slot_teardown(tenant)
+
+    case Postgrex.query(conn, "SELECT slot_name FROM pg_replication_slots", []) do
+      {:ok, %{rows: []}} ->
+        :ok
+
+      {:ok, %{rows: rows}} ->
+        IO.inspect(rows)
+        Database.replication_slot_teardown(tenant)
+        Process.sleep(1000)
+        ensure_no_replication_slot(tenant, attempts - 1)
+
+      {:error, _} ->
+        Process.sleep(1000)
+        ensure_no_replication_slot(tenant, attempts - 1)
     end
   end
 end

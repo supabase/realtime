@@ -281,6 +281,12 @@ defmodule Realtime.Database do
   end
 
   def replication_slot_teardown(conn, slot_name) do
+    Postgrex.query(
+      conn,
+      "select active_pid, pg_terminate_backend(active_pid), pg_drop_replication_slot(slot_name) from pg_replication_slots where slot_name = $1",
+      [slot_name]
+    )
+
     Postgrex.query(conn, "select pg_drop_replication_slot($1)", [slot_name])
     :ok
   end
