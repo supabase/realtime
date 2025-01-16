@@ -5,17 +5,17 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   require Logger
   import Realtime.Logs
 
+  @doc """
+  Authorize connection to access channel
+  """
+  @spec authorize(binary(), binary(), binary() | nil) :: {:ok, map()} | {:error, any()}
   def authorize(token, jwt_secret, jwt_jwks) when is_binary(token) do
     token
     |> clean_token()
     |> RealtimeWeb.JwtVerification.verify(jwt_secret, jwt_jwks)
   end
 
-  def authorize(_token, _jwt_secret, _jwt_jwks), do: :error
-
-  defp clean_token(token) do
-    Regex.replace(~r/\s|\n/, URI.decode(token), "")
-  end
+  def authorize(_token, _jwt_secret, _jwt_jwks), do: {:error, :invalid_token}
 
   def authorize_conn(token, jwt_secret, jwt_jwks) do
     case authorize(token, jwt_secret, jwt_jwks) do
@@ -30,11 +30,10 @@ defmodule RealtimeWeb.ChannelsAuthorization do
         end
 
       {:error, reason} ->
+        log_error("ErrorAuthorizingWebsocket", reason)
         {:error, reason}
-
-      error ->
-        log_error("ErrorAuthorizingWebsocket", error)
-        {:error, :unknown}
     end
   end
+
+  defp clean_token(token), do: Regex.replace(~r/\s|\n/, URI.decode(token), "")
 end
