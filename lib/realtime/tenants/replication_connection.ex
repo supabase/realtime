@@ -85,7 +85,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
       {:error, {:bad_return_from_init, {:stop, error, _}}} -> {:error, error}
-      error -> {:error, error}
+      error -> error
     end
   end
 
@@ -102,26 +102,23 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   def start_link(%__MODULE__{tenant_id: tenant_id} = attrs) do
     tenant = Cache.get_tenant_by_external_id(tenant_id)
-    connection_opts = Database.from_tenant(tenant, "realtime_broadcast_changes", :stop, true)
-    {:ok, ip_version} = Database.detect_ip_version(connection_opts.host)
-
-    ssl = if connection_opts.ssl_enforced, do: [verify: :verify_none], else: false
+    connection_opts = Database.from_tenant(tenant, "realtime_broadcast_changes", :stop)
 
     connection_opts =
       [
         name: {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, tenant_id}}},
-        hostname: connection_opts.host,
-        username: connection_opts.user,
-        password: connection_opts.pass,
-        database: connection_opts.name,
-        port: String.to_integer(connection_opts.port),
-        socket_options: [ip_version],
+        hostname: connection_opts.hostname,
+        username: connection_opts.username,
+        password: connection_opts.password,
+        database: connection_opts.database,
+        port: connection_opts.port,
+        socket_options: connection_opts.socket_options,
+        ssl: connection_opts.ssl,
         backoff_type: :stop,
         sync_connect: true,
         parameters: [
-          application_name: connection_opts.application_name
-        ],
-        ssl: ssl
+          application_name: "realtime_replication_connection"
+        ]
       ]
 
     case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do
@@ -237,12 +234,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   @impl true
-  def handle_disconnect(state) do
-    Logger.warning("Disconnecting broadcast changes handler: #{inspect(state, pretty: true)}")
-    {:noreply, %{state | step: :disconnected}}
-  end
-
-  @impl true
   def handle_data(data, state) when is_keep_alive(data) do
     %KeepAlive{reply: reply, wal_end: wal_end} = parse(data)
     wal_end = wal_end + 1
@@ -268,7 +259,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   @impl true
-  @spec handle_info(any(), any()) :: {:disconnect, <<_::128>>} | {:noreply, any()}
   def handle_info(%Decoder.Messages.Relation{} = msg, state) do
     %Decoder.Messages.Relation{id: id, namespace: namespace, name: name, columns: columns} = msg
     %{relations: relations} = state
@@ -344,10 +334,19 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   def handle_info(:shutdown, _), do: {:disconnect, :normal}
-
   def handle_info({:DOWN, _, :process, _, _}, _), do: {:disconnect, :normal}
-
   def handle_info(_, state), do: {:noreply, state}
+
+  @impl true
+  def handle_disconnect(state) do
+    %{tenant_id: tenant_id, replication_slot_name: replication_slot_name} = state
+
+    tenant = Cache.get_tenant_by_external_id(tenant_id)
+    Database.replication_slot_teardown(tenant, replication_slot_name)
+
+    Logger.warning("Disconnecting broadcast changes handler: #{inspect(state, pretty: true)}")
+    {:noreply, %{state | step: :disconnected}}
+  end
 
   @spec supervisor_spec(Tenant.t()) :: term()
   def supervisor_spec(%Tenant{external_id: tenant_id}) do

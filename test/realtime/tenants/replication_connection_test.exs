@@ -17,9 +17,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     start_supervised(Realtime.Tenants.CacheSupervisor)
 
     tenant = tenant_fixture()
-    [%{settings: settings} | _] = tenant.extensions
-    migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
-    Migrations.run_migrations(migrations)
+    Migrations.run_migrations(tenant)
 
     {:ok, conn} = Database.connect(tenant, "realtime_test")
     clean_table(conn, "realtime", "messages")
@@ -120,5 +118,17 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
     assert {:error, "Temporary Replication slot already exists and in use"} =
              ReplicationConnection.start(tenant2, self())
+  end
+
+  describe "whereis/1" do
+    test "returns pid if exists" do
+      tenant = tenant_fixture()
+      assert {:ok, pid} = ReplicationConnection.start(tenant, self())
+      assert ReplicationConnection.whereis(tenant.external_id) == pid
+    end
+
+    test "returns nil if not exists" do
+      assert ReplicationConnection.whereis(random_string()) == nil
+    end
   end
 end

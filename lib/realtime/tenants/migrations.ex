@@ -8,7 +8,6 @@ defmodule Realtime.Tenants.Migrations do
 
   import Realtime.Logs
 
-  alias Realtime.Crypto
   alias Realtime.Database
   alias Realtime.Registry.Unique
   alias Realtime.Repo
@@ -138,11 +137,23 @@ defmodule Realtime.Tenants.Migrations do
   ]
 
   defstruct [:tenant_external_id, :settings]
-  @spec run_migrations(map()) :: :ok | {:error, any()}
-  def run_migrations(%__MODULE__{tenant_external_id: tenant_external_id} = attrs) do
+
+  @type t :: %__MODULE__{
+          tenant_external_id: binary(),
+          settings: map()
+        }
+
+  @doc """
+  Run migrations for the given tenant.
+  """
+  @spec run_migrations(Tenant.t()) :: :ok | {:error, any()}
+  def run_migrations(%Tenant{} = tenant) do
+    %{extensions: [%{settings: settings} | _]} = tenant
+    attrs = %__MODULE__{tenant_external_id: tenant.external_id, settings: settings}
+
     supervisor =
       {:via, PartitionSupervisor,
-       {Realtime.Tenants.Migrations.DynamicSupervisor, tenant_external_id}}
+       {Realtime.Tenants.Migrations.DynamicSupervisor, tenant.external_id}}
 
     spec = {__MODULE__, attrs}
 
@@ -166,35 +177,23 @@ defmodule Realtime.Tenants.Migrations do
     end
   end
 
-  defp migrate(
-         %{
-           "db_host" => db_host,
-           "db_port" => db_port,
-           "db_name" => db_name,
-           "db_user" => db_user,
-           "db_password" => db_password
-         } = settings
-       ) do
-    {host, port, name, user, pass} =
-      Crypto.decrypt_creds(db_host, db_port, db_name, db_user, db_password)
-
-    {:ok, addrtype} = Database.detect_ip_version(host)
-    ssl_enforced = Database.default_ssl_param(settings)
+  defp migrate(settings) do
+    settings = Database.from_settings(settings, "realtime_migrations", :stop)
 
     [
-      hostname: host,
-      port: port,
-      database: name,
-      password: pass,
-      username: user,
-      pool_size: 2,
-      socket_options: [addrtype],
-      parameters: [application_name: "realtime_migrations"],
-      backoff_type: :stop
+      hostname: settings.hostname,
+      port: settings.port,
+      database: settings.database,
+      password: settings.password,
+      username: settings.username,
+      pool_size: settings.pool_size,
+      backoff_type: settings.backoff_type,
+      socket_options: settings.socket_options,
+      parameters: [application_name: settings.application_name],
+      ssl: settings.ssl
     ]
-    |> Database.maybe_enforce_ssl_config(ssl_enforced)
     |> Repo.with_dynamic_repo(fn repo ->
-      Logger.info("Applying migrations to #{host}")
+      Logger.info("Applying migrations to #{settings.hostname}")
 
       try do
         opts = [all: true, prefix: "realtime", dynamic_repo: repo]
@@ -207,49 +206,6 @@ defmodule Realtime.Tenants.Migrations do
           {:error, error}
       end
     end)
-  end
-
-  # @expected_migration_count length(@migrations)
-
-  @doc """
-  Checks if the number of migrations ran in the database is equal to the expected number of migrations.
-
-  If not all migrations have been run, it will run the missing migrations.
-  """
-  @spec maybe_run_migrations(pid(), Tenant.t()) :: :ok
-  def maybe_run_migrations(_db_conn, tenant) do
-    # Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
-
-    # check_migrations_exist_query =
-    #   "select * from information_schema.tables where table_schema = 'realtime' and table_name = 'schema_migrations'"
-
-    # check_number_migrations_query = "select count(version) from realtime.schema_migrations"
-
-    # with {:ok, %Postgrex.Result{num_rows: 1}} <-
-    #        Database.transaction(db_conn, fn db_conn ->
-    #          Postgrex.query!(db_conn, check_migrations_exist_query, [])
-    #        end),
-    #      {:ok, %Postgrex.Result{rows: [[count]]}} <-
-    #        Database.transaction(db_conn, fn db_conn ->
-    #          Postgrex.query!(db_conn, check_number_migrations_query, [])
-    #        end) do
-    #   if count < @expected_migration_count do
-    #     Logger.error("Running missing migrations")
-    #     run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
-    #   end
-
-    #   :ok
-    # else
-    #   {:ok, %{num_rows: 0}} ->
-    #     Logger.error("Running migrations")
-    #     run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
-
-    #   {:error, error} ->
-    #     log_error("MigrationCheckFailed", error)
-    #     {:error, :migration_check_failed}
-    # end
-    %{extensions: [%{settings: settings} | _]} = tenant
-    run_migrations(%__MODULE__{tenant_external_id: tenant.external_id, settings: settings})
   end
 
   @doc """

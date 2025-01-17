@@ -177,18 +177,18 @@ defmodule Realtime.Tenants.Connect do
   def handle_continue(:run_migrations, state) do
     %{tenant: tenant, db_conn_pid: db_conn_pid} = state
 
-    with :ok <- Migrations.maybe_run_migrations(db_conn_pid, tenant),
+    with :ok <- Migrations.run_migrations(tenant),
          :ok <- Migrations.create_partitions(db_conn_pid) do
       {:noreply, state, {:continue, :start_listen_and_replication}}
     else
       error ->
         log_error("MigrationsFailedToRun", error)
-        {:stop, :shutdown, state}
+        {:stop, :kill, state}
     end
   rescue
     error ->
       log_error("MigrationsFailedToRun", error)
-      {:stop, :shutdown, state}
+      {:stop, :kill, state}
   end
 
   def handle_continue(:start_listen_and_replication, state) do
@@ -201,12 +201,12 @@ defmodule Realtime.Tenants.Connect do
     else
       {:error, error} ->
         log_error("StartListenAndReplicationFailed", error)
-        {:stop, :shutdown, state}
+        {:stop, :kill, state}
     end
   rescue
     error ->
       log_error("StartListenAndReplicationFailed", error)
-      {:stop, :shutdown, state}
+      {:stop, :kill, state}
   end
 
   @impl true

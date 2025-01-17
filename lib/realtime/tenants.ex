@@ -89,10 +89,10 @@ defmodule Realtime.Tenants do
       nil ->
         {:error, :tenant_not_found}
 
-      {:ok, health_conn} ->
+      {:ok, _health_conn} ->
         connected_cluster = UsersCounter.tenant_users(external_id)
         tenant = Cache.get_tenant_by_external_id(external_id)
-        Migrations.maybe_run_migrations(health_conn, tenant)
+        Migrations.run_migrations(tenant)
 
         {:ok,
          %{
@@ -106,7 +106,7 @@ defmodule Realtime.Tenants do
       connected_cluster when is_integer(connected_cluster) ->
         tenant = Cache.get_tenant_by_external_id(external_id)
         {:ok, db_conn} = Database.connect(tenant, "realtime_health_check")
-        Migrations.maybe_run_migrations(db_conn, tenant)
+        Migrations.run_migrations(tenant)
         Process.alive?(db_conn) && GenServer.stop(db_conn)
 
         {:ok,

@@ -28,28 +28,28 @@ defmodule Realtime.Tenants.Listen do
     Process.monitor(monitored_pid)
 
     tenant = Cache.get_tenant_by_external_id(tenant_id)
-    connection_opts = Database.from_tenant(tenant, "realtime_listen", :stop, true)
+    connection_opts = Database.from_tenant(tenant, "realtime_listen", :stop)
 
     name =
       {:via, Registry,
        {Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant_id}}}
 
-    {:ok, ip_version} = Database.detect_ip_version(connection_opts.host)
-
-    ssl = if connection_opts.ssl_enforced, do: [verify: :verify_none], else: false
-
     settings =
-      []
-      |> Keyword.put(:hostname, connection_opts.host)
-      |> Keyword.put(:database, connection_opts.name)
-      |> Keyword.put(:password, connection_opts.pass)
-      |> Keyword.put(:username, connection_opts.user)
-      |> Keyword.put(:port, String.to_integer(connection_opts.port))
-      |> Keyword.put(:ssl, ssl)
-      |> Keyword.put(:sync_connect, true)
-      |> Keyword.put(:auto_reconnect, false)
-      |> Keyword.put(:name, name)
-      |> Keyword.put(:socket_options, [ip_version])
+      [
+        hostname: connection_opts.hostname,
+        database: connection_opts.database,
+        password: connection_opts.password,
+        username: connection_opts.username,
+        port: connection_opts.port,
+        ssl: connection_opts.ssl,
+        socket_options: connection_opts.socket_options,
+        sync_connect: true,
+        auto_reconnect: false,
+        backoff_type: :stop,
+        max_restarts: 0,
+        name: name,
+        parameters: [application_name: "realtime_listen"]
+      ]
 
     Logger.info("Listening for notifications on #{@topic}")
 
@@ -81,6 +81,20 @@ defmodule Realtime.Tenants.Listen do
     end
   catch
     e -> {:error, e}
+  end
+
+  @doc """
+  Finds replication connection by tenant_id
+  """
+  @spec whereis(String.t()) :: pid() | nil
+  def whereis(tenant_id) do
+    case Registry.lookup(
+           Realtime.Registry.Unique,
+           {Postgrex.Notifications, :tenant_id, tenant_id}
+         ) do
+      [{pid, _}] -> pid
+      [] -> nil
+    end
   end
 
   def handle_info({:notification, _, _, @topic, payload}, state) do

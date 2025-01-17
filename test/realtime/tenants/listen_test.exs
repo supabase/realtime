@@ -23,9 +23,7 @@ defmodule Realtime.Tenants.ListenTest do
 
       {:ok, listen_conn} = Listen.start(tenant, self())
       {:ok, db_conn} = Database.connect(tenant, "realtime_test")
-      [%{settings: settings} | _] = tenant.extensions
-      migrations = %Migrations{tenant_external_id: tenant.external_id, settings: settings}
-      Migrations.run_migrations(migrations)
+      Migrations.run_migrations(tenant)
 
       on_exit(fn ->
         Process.exit(listen_conn, :normal)
@@ -63,6 +61,18 @@ defmodule Realtime.Tenants.ListenTest do
                  :timer.sleep(100)
                end) =~ "FailedSendFromDatabase"
       end
+    end
+  end
+
+  describe "whereis/1" do
+    test "returns pid if exists" do
+      tenant = tenant_fixture()
+      Listen.start(tenant, self())
+      assert Listen.whereis(tenant.external_id)
+    end
+
+    test "returns nil if not exists" do
+      assert Listen.whereis(random_string()) == nil
     end
   end
 end
