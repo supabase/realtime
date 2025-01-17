@@ -29,6 +29,10 @@ defmodule RealtimeWeb.JwtVerification do
   @es_algorithms ["ES256", "ES384", "ES512"]
   @ed_algorithms ["Ed25519", "Ed448"]
 
+  @doc """
+  Verify JWT token and validate claims
+  """
+  @spec verify(binary(), binary(), binary() | nil) :: {:ok, map()} | {:error, any()}
   def verify(token, jwt_secret, jwt_jwks) when is_binary(token) do
     with {:ok, _claims} <- check_claims_format(token),
          {:ok, header} <- check_header_format(token),
