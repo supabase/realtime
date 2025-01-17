@@ -1,13 +1,12 @@
 defmodule RealtimeWeb.BroadcastControllerTest do
-  alias Realtime.Tenants.Connect
   use RealtimeWeb.ConnCase, async: false
-
   import Mock
 
   alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
+  alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.Endpoint
 

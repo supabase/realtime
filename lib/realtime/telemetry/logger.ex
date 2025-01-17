@@ -14,17 +14,12 @@ defmodule Realtime.Telemetry.Logger do
     [:realtime, :rate_counter, :channel, :db_events]
   ]
 
-  def start_link(args \\ []) do
-    GenServer.start_link(__MODULE__, args, name: __MODULE__)
+  def start_link(args) do
+    GenServer.start_link(__MODULE__, args)
   end
 
-  def init(_args) do
-    :telemetry.attach_many(
-      "telemetry-logger",
-      @events,
-      &__MODULE__.handle_event/4,
-      []
-    )
+  def init(handler_id: handler_id) do
+    :telemetry.attach_many(handler_id, @events, &__MODULE__.handle_event/4, [])
 
     {:ok, []}
   end

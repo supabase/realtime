@@ -36,7 +36,7 @@ defmodule Realtime.Application do
       :gen_event.swap_sup_handler(
         :erl_signal_server,
         {:erl_signal_handler, []},
-        {Realtime.SignalHandler, []}
+        {Realtime.SignalHandler, %{handler_mod: :erl_signal_handler}}
       )
 
     Realtime.PromEx.set_metrics_tags()
@@ -53,7 +53,7 @@ defmodule Realtime.Application do
       [
         Realtime.ErlSysMon,
         Realtime.PromEx,
-        Realtime.Telemetry.Logger,
+        {Realtime.Telemetry.Logger, handler_id: "telemetry-logger"},
         Realtime.Repo,
         RealtimeWeb.Telemetry,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
@@ -84,8 +84,7 @@ defmodule Realtime.Application do
          strategy: :one_for_one,
          name: Realtime.Tenants.Listen.DynamicSupervisor},
         RealtimeWeb.Endpoint,
-        RealtimeWeb.Presence,
-        Realtime.MetricsCleaner
+        RealtimeWeb.Presence
       ] ++ extensions_supervisors() ++ janitor_tasks()
 
     children =
@@ -130,7 +129,8 @@ defmodule Realtime.Application do
          max_children: janitor_max_children,
          max_seconds: janitor_children_timeout,
          max_restarts: 1},
-        Realtime.Tenants.Janitor
+        Realtime.Tenants.Janitor,
+        Realtime.MetricsCleaner
       ]
     else
       []

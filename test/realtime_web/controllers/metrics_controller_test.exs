@@ -1,26 +1,42 @@
 defmodule RealtimeWeb.MetricsControllerTest do
   use RealtimeWeb.ConnCase
 
-  import Mock
-  alias RealtimeWeb.JwtVerification
+  describe "GET /metrics" do
+    setup %{conn: conn} do
+      # The metrics pipeline requires authentication
+      jwt_secret = Application.fetch_env!(:realtime, :metrics_jwt_secret)
+      token = generate_jwt_token(jwt_secret, %{})
+      authenticated_conn = put_req_header(conn, "authorization", "Bearer #{token}")
 
-  setup %{conn: conn} do
-    new_conn =
-      conn
-      |> put_req_header(
-        "authorization",
-        "Bearer auth_token"
-      )
+      {:ok, conn: authenticated_conn}
+    end
 
-    {:ok, conn: new_conn}
-  end
+    test "returns 200 and metrics when tenant exists", %{conn: conn} do
+      assert response =
+               conn
+               |> get(~p"/metrics")
+               |> text_response(200)
 
-  test "exporting metrics", %{conn: conn} do
-    with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-      conn = get(conn, Routes.metrics_path(conn, :index))
-      assert conn.status == 200
-      lines = String.split(conn.resp_body, "\n") |> length()
-      assert lines > 0
+      # Check prometheus like metrics
+      assert response =~
+               "# HELP beam_system_schedulers_online_info The number of scheduler threads that are online."
+    end
+
+    test "returns 403 when authorization header is missing", %{conn: conn} do
+      assert conn
+             |> delete_req_header("authorization")
+             |> get(~p"/metrics")
+             |> response(403)
+    end
+
+    test "returns 403 when authorization header is wrong", %{conn: conn} do
+      token = generate_jwt_token("bad_secret", %{})
+
+      assert _ =
+               conn
+               |> put_req_header("authorization", "Bearer #{token}")
+               |> get(~p"/metrics")
+               |> response(403)
     end
   end
 end
