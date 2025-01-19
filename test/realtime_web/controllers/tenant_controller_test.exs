@@ -51,6 +51,9 @@ defmodule RealtimeWeb.TenantControllerTest do
   @invalid_attrs %{external_id: nil, jwt_secret: nil, extensions: [], name: nil}
 
   setup %{conn: conn} do
+    # Ensure no replication slot is present before the test
+    Cleanup.ensure_no_replication_slot()
+
     Application.put_env(:realtime, :db_enc_key, "1234567890123456")
 
     new_conn =

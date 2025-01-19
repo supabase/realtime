@@ -12,20 +12,19 @@ defmodule Realtime.SignalHandler do
   end
 
   @impl true
-  def init(_) do
-    Logger.info("#{__MODULE__} is being initialized...")
-    {:ok, %{}}
+  def init({%{handler_mod: _} = args, :ok}) do
+    {:ok, args}
   end
 
   @impl true
-  def handle_event(signal, state) do
+  def handle_event(signal, %{handler_mod: handler_mod} = state) do
     Logger.warning("#{__MODULE__}: #{inspect(signal)} received")
 
     if signal == :sigterm do
       Application.put_env(:realtime, :shutdown_in_progress, true)
     end
 
-    :erl_signal_handler.handle_event(signal, state)
+    handler_mod.handle_event(signal, state)
   end
 
   @impl true

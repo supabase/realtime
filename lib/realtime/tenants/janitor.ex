@@ -110,7 +110,11 @@ defmodule Realtime.Tenants.Janitor do
     {:noreply, state}
   end
 
+  # Ignore in coverage has the tests would require to await a random amount of minutes up to an hour
+  # coveralls-ignore-start
   defp timer(%{timer: timer, randomize: true}), do: timer + :timer.minutes(Enum.random(1..59))
+  # coveralls-ignore-stop
+
   defp timer(%{timer: timer}), do: timer
 
   defp perform_mantaince_tasks(tenants), do: Enum.map(tenants, &perform_mantaince_task/1)

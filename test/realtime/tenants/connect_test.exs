@@ -14,6 +14,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
   describe "lookup_or_start_connection/1" do
     setup do
+      Cleanup.ensure_no_replication_slot()
       tenant = tenant_fixture()
       %{tenant: tenant}
     end

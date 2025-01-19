@@ -16,6 +16,7 @@
         "lib/realtime/adapters/postgres/oid_database.ex",
         "lib/realtime/adapters/postgres/protocol/",
         "lib/realtime/application.ex",
+        "lib/realtime/monitoring/prom_ex/plugins/phoenix.ex",
         "lib/realtime/operations.ex",
         "lib/realtime/release.ex",
         "lib/realtime/tenants/authorization/policies/broadcast_policies.ex",
