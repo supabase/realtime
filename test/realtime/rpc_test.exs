@@ -5,7 +5,7 @@ defmodule Realtime.RpcTest do
 
   defmodule TestRpc do
     def test_raise, do: raise("test")
-    def test_timeout, do: :timer.sleep(1000)
+    def test_timeout, do: Process.sleep(1000)
     def test_success, do: {:ok, "success"}
   end
 

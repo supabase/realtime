@@ -6,12 +6,15 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
-  alias Realtime.Tenants.Connect
+  alias Realtime.Database
 
   alias RealtimeWeb.Endpoint
 
   @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE1MTYyMzkwMjIsInJvbGUiOiJmb28iLCJleHAiOiJiYXIifQ.Ret2CevUozCsPhpgW2FMeFL7RooLgoOvfQzNpLBj5ak"
   @expired_token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MjEwNzMyOTAsImlhdCI6MTYyNzg4NjQ0MCwicm9sZSI6ImFub24ifQ.AHmuaydSU3XAxwoIFhd3gwGwjnBIKsjFil0JQEOLtRw"
+  setup do
+    Cleanup.ensure_no_replication_slot()
+  end
 
   describe "broadcast" do
     setup %{conn: conn} do
@@ -115,7 +118,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         assert conn.status == 422
 
         # Wait for counters to increment
-        :timer.sleep(1000)
+        Process.sleep(1000)
         {:ok, rate_counter} = RateCounter.get(Tenants.requests_per_second_key(tenant))
         assert rate_counter.avg != 0.0
 
@@ -242,12 +245,11 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       start_supervised(Realtime.RateCounter.DynamicSupervisor)
       start_supervised(Realtime.GenCounter.DynamicSupervisor)
       start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
+
       tenant = tenant_fixture()
       jwt_secret = Crypto.decrypt!(tenant.jwt_secret)
 
-      {:ok, _} = start_supervised({Connect, tenant_id: tenant.external_id}, restart: :transient)
-      {:ok, db_conn} = Connect.get_status(tenant.external_id)
-
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       clean_table(db_conn, "realtime", "messages")
 
       claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}

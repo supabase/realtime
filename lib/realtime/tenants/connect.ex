@@ -57,7 +57,7 @@ defmodule Realtime.Tenants.Connect do
         call_external_node(tenant_id, opts)
 
       {:error, :tenant_database_connection_initializing} ->
-        :timer.sleep(100)
+        Process.sleep(100)
         call_external_node(tenant_id, opts)
 
       {:error, :initializing} ->
@@ -132,8 +132,8 @@ defmodule Realtime.Tenants.Connect do
   @spec shutdown(binary()) :: :ok | nil
   def shutdown(tenant_id) do
     case whereis(tenant_id) do
-      nil -> nil
-      pid -> GenServer.stop(pid)
+      pid when is_pid(pid) -> GenServer.stop(pid)
+      _ -> :ok
     end
   end
 
@@ -194,8 +194,8 @@ defmodule Realtime.Tenants.Connect do
   def handle_continue(:start_listen_and_replication, state) do
     %{tenant: tenant} = state
 
-    with {:ok, broadcast_changes_pid} <- start_replication(tenant, self()),
-         {:ok, listen_pid} <- start_listen(tenant, self()) do
+    with {:ok, broadcast_changes_pid} <- ReplicationConnection.start(tenant, self()),
+         {:ok, listen_pid} <- Listen.start(tenant, self()) do
       {:noreply, %{state | broadcast_changes_pid: broadcast_changes_pid, listen_pid: listen_pid},
        {:continue, :setup_connected_user_events}}
     else
@@ -336,12 +336,4 @@ defmodule Realtime.Tenants.Connect do
 
   defp tenant_suspended?(%Tenant{suspend: true}), do: {:error, :tenant_suspended}
   defp tenant_suspended?(_), do: :ok
-
-  defp start_replication(%{notify_private_alpha: false}, _), do: {:ok, nil}
-
-  defp start_replication(tenant, connect_pid),
-    do: ReplicationConnection.start(tenant, connect_pid)
-
-  defp start_listen(%{notify_private_alpha: false}, _), do: {:ok, nil}
-  defp start_listen(tenant, connect_pid), do: Listen.start(tenant, connect_pid)
 end

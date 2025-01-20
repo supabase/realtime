@@ -25,7 +25,7 @@ defmodule Realtime.Tenants.CacheSupervisorTest do
       {:suspend_tenant, external_id}
     )
 
-    :timer.sleep(500)
+    Process.sleep(500)
     assert %Tenant{suspend: true} = Cache.get_tenant_by_external_id(external_id)
   end
 end

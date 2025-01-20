@@ -610,8 +610,7 @@ defmodule Realtime.Integration.RtChannelTest do
     @tag policies: [
            :authenticated_read_broadcast_and_presence,
            :authenticated_write_broadcast_and_presence
-         ],
-         notify_private_alpha: true
+         ]
     test "broadcast insert event changes on insert in table with trigger", %{
       topic: topic,
       db_conn: db_conn,
@@ -624,7 +623,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
-      :timer.sleep(500)
+      Process.sleep(500)
       value = random_string()
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
 
@@ -652,7 +651,6 @@ defmodule Realtime.Integration.RtChannelTest do
            :authenticated_read_broadcast_and_presence,
            :authenticated_write_broadcast_and_presence
          ],
-         notify_private_alpha: true,
          requires_data: true
     test "broadcast update event changes on update in table with trigger", %{
       topic: topic,
@@ -668,7 +666,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
-      :timer.sleep(500)
+      Process.sleep(500)
       new_value = random_string()
 
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
@@ -678,7 +676,7 @@ defmodule Realtime.Integration.RtChannelTest do
         value
       ])
 
-      :timer.sleep(500)
+      Process.sleep(500)
       old_record = %{"details" => value, "id" => 1}
       record = %{"details" => new_value, "id" => 1}
 
@@ -703,8 +701,7 @@ defmodule Realtime.Integration.RtChannelTest do
     @tag policies: [
            :authenticated_read_broadcast_and_presence,
            :authenticated_write_broadcast_and_presence
-         ],
-         notify_private_alpha: true
+         ]
     test "broadcast delete event changes on delete in table with trigger", %{
       topic: topic,
       db_conn: db_conn,
@@ -717,7 +714,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
-      :timer.sleep(500)
+      Process.sleep(500)
       value = random_string()
 
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
@@ -746,8 +743,7 @@ defmodule Realtime.Integration.RtChannelTest do
     @tag policies: [
            :authenticated_read_broadcast_and_presence,
            :authenticated_write_broadcast_and_presence
-         ],
-         notify_private_alpha: true
+         ]
     test "broadcast event when function 'send' is called with private topic", %{
       topic: topic,
       db_conn: db_conn
@@ -760,7 +756,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
-      :timer.sleep(500)
+      Process.sleep(500)
       value = random_string()
       event = random_string()
 
@@ -784,7 +780,6 @@ defmodule Realtime.Integration.RtChannelTest do
                      500
     end
 
-    @tag notify_private_alpha: true
     test "broadcast event when function 'send' is called with public topic", %{
       topic: topic,
       db_conn: db_conn
@@ -797,7 +792,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
-      :timer.sleep(500)
+      Process.sleep(500)
       value = random_string()
       event = random_string()
 
@@ -831,7 +826,7 @@ defmodule Realtime.Integration.RtChannelTest do
       topic: topic
     } do
       Realtime.Tenants.update_management(@external_id, %{private_only: true})
-      :timer.sleep(100)
+      Process.sleep(100)
       {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}, private: false}
       topic = "realtime:#{topic}"
@@ -847,7 +842,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      500
 
       Realtime.Tenants.update_management(@external_id, %{private_only: false})
-      :timer.sleep(100)
+      Process.sleep(100)
     end
 
     @tag policies: [
@@ -858,7 +853,7 @@ defmodule Realtime.Integration.RtChannelTest do
       topic: topic
     } do
       Realtime.Tenants.update_management(@external_id, %{private_only: true})
-      :timer.sleep(100)
+      Process.sleep(100)
       {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
@@ -866,7 +861,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
       Realtime.Tenants.update_management(@external_id, %{private_only: false})
-      :timer.sleep(100)
+      Process.sleep(100)
     end
   end
 
@@ -989,8 +984,7 @@ defmodule Realtime.Integration.RtChannelTest do
   end
 
   def rls_context(%{tenant: tenant} = context) do
-    {:ok, db_conn} =
-      Database.connect(tenant, "realtime_test")
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
     clean_table(db_conn, "realtime", "messages")
     topic = Map.get(context, :topic, random_string())
@@ -1005,7 +999,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
   def setup_trigger(%{tenant: tenant, topic: topic} = context) do
     Realtime.Tenants.Connect.shutdown(@external_id)
-    :timer.sleep(500)
+    Process.sleep(500)
 
     {:ok, db_conn} = Realtime.Tenants.Connect.connect(@external_id)
 
@@ -1041,12 +1035,12 @@ defmodule Realtime.Integration.RtChannelTest do
     Postgrex.query!(db_conn, query, [])
 
     on_exit(fn ->
-      {:ok, db_conn} = Database.connect(tenant, "realtime_test")
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       query = "DROP TABLE #{random_name} CASCADE"
       Postgrex.query!(db_conn, query, [])
       Realtime.Tenants.Connect.shutdown(db_conn)
 
-      :timer.sleep(500)
+      Process.sleep(500)
     end)
 
     context

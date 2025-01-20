@@ -59,7 +59,7 @@ defmodule Realtime.RateCounterTest do
     assert {:ok, %RateCounter{}} = RateCounter.get(term)
     {_, _, counter_pid} = GenCounter.find_counter(term)
     Process.exit(counter_pid, :shutdown)
-    :timer.sleep(10)
+    Process.sleep(10)
     refute Process.alive?(pid)
   end
 end

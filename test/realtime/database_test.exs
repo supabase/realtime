@@ -42,6 +42,7 @@ defmodule Realtime.DatabaseTest do
       )
 
       Database.replication_slot_teardown(conn, name)
+      Process.sleep(1000)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
 

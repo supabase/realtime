@@ -30,8 +30,8 @@ defmodule Realtime.Tenants.JanitorTest do
         fn tenant ->
           tenant = Repo.preload(tenant, :extensions)
           Connect.lookup_or_start_connection(tenant.external_id)
-          :timer.sleep(250)
-          {:ok, conn} = Database.connect(tenant, "realtime_test")
+          Process.sleep(250)
+          {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
           clean_table(conn, "realtime", "messages")
           tenant
         end
@@ -47,7 +47,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
     on_exit(fn ->
       Enum.each(tenants, &Connect.shutdown(&1.external_id))
-      :timer.sleep(10)
+      Process.sleep(10)
       Application.put_env(:realtime, :janitor_schedule_timer, timer)
     end)
 
@@ -80,7 +80,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
       current =
         Enum.map(tenants, fn tenant ->
-          {:ok, conn} = Database.connect(tenant, "realtime_test")
+          {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
           {:ok, res} = Repo.all(conn, from(m in Message), Message)
           res
         end)
@@ -118,7 +118,7 @@ defmodule Realtime.Tenants.JanitorTest do
       {tenant.external_id, :undefined, :undefined, :undefined, :undefined, Node.self()}
     )
 
-    :timer.sleep(250)
+    Process.sleep(250)
 
     assert capture_log(fn ->
              start_supervised!(Janitor)

@@ -55,8 +55,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
         send_message_and_count(tenant, sub_topic, event, payload, true)
       end)
 
-      tenant_db_conn =
-        Connect.lookup_or_start_connection(tenant.external_id)
+      tenant_db_conn = Connect.lookup_or_start_connection(tenant.external_id)
 
       # Handle events for private channel
       events

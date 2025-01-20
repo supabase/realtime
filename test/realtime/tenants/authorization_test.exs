@@ -160,7 +160,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     tenant = tenant_fixture()
     Migrations.run_migrations(tenant)
 
-    {:ok, db_conn} = Database.connect(tenant, "realtime_test")
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
     clean_table(db_conn, "realtime", "messages")
     topic = random_string()

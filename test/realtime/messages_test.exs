@@ -11,7 +11,7 @@ defmodule Realtime.MessagesTest do
     tenant = tenant_fixture()
     Migrations.run_migrations(tenant)
 
-    {:ok, conn} = Database.connect(tenant, "realtime_test")
+    {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
     clean_table(conn, "realtime", "messages")
     date_start = Date.utc_today() |> Date.add(-10)
     date_end = Date.utc_today()

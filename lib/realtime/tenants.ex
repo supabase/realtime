@@ -280,7 +280,6 @@ defmodule Realtime.Tenants do
     :max_channels_per_client
     :max_joins_per_second
     :suspend
-    :notify_private_alpha
     :private_only
   """
   @spec update_management(String.t(), map()) :: Tenant.t() | nil

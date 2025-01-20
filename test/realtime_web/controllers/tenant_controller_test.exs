@@ -153,7 +153,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     setup %{tenant: tenant} do
       {:ok, _} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
-      :timer.sleep(1000)
+      Process.sleep(1000)
       on_exit(fn -> Realtime.Tenants.Connect.shutdown(tenant.external_id) end)
       :ok
     end
@@ -162,7 +162,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         assert Cache.get_tenant_by_external_id(tenant.external_id)
 
-        {:ok, db_conn} = Database.connect(tenant, "realtime_test")
+        {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
         assert %{rows: [["realtime_messages_replication_slot_"]]} =
                  Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
@@ -170,7 +170,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         conn = delete(conn, Routes.tenant_path(conn, :delete, tenant.external_id))
         assert response(conn, 204)
 
-        :timer.sleep(5000)
+        Process.sleep(5000)
         refute Cache.get_tenant_by_external_id(tenant.external_id)
         refute Tenants.get_tenant_by_external_id(tenant.external_id)
 
@@ -297,7 +297,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       tenant: %Tenant{external_id: ext_id} = tenant
     } do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        {:ok, db_conn} = Database.connect(tenant, "realtime_test")
+        {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
         Database.transaction(db_conn, fn transaction_conn ->
           Postgrex.query!(transaction_conn, "DROP SCHEMA realtime CASCADE", [])
@@ -309,7 +309,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
         conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
         data = json_response(conn, 200)["data"]
-        :timer.sleep(2000)
+        Process.sleep(2000)
 
         assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
@@ -353,6 +353,6 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   defp create_tenant(_) do
-    %{tenant: tenant_fixture(%{notify_private_alpha: true})}
+    %{tenant: tenant_fixture()}
   end
 end
