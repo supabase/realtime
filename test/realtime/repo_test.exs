@@ -12,7 +12,7 @@ defmodule Realtime.RepoTest do
 
   setup do
     tenant = tenant_fixture()
-    {:ok, db_conn} = Database.connect(tenant, "realtime_test")
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
     Migrations.run_migrations(tenant)
 
@@ -57,7 +57,7 @@ defmodule Realtime.RepoTest do
         end
 
       true = Process.exit(parent_pid, :kill)
-      :timer.sleep(1500)
+      Process.sleep(1500)
       assert Process.alive?(repo_pid) == false
     end
 
@@ -98,7 +98,7 @@ defmodule Realtime.RepoTest do
       assert_receive :query_success, 2000
       assert_receive :query_success, 2000
 
-      :timer.sleep(100)
+      Process.sleep(100)
       assert Process.alive?(repo_pid_1) == false
       assert Process.alive?(repo_pid_2) == false
       assert Process.alive?(pid_1) == false
@@ -112,7 +112,7 @@ defmodule Realtime.RepoTest do
         spawn(fn ->
           Repo.with_dynamic_repo(db_config(), fn repo ->
             send(test_pid, repo)
-            :timer.sleep(100)
+            Process.sleep(100)
             raise "💣"
           end)
         end)
@@ -126,7 +126,7 @@ defmodule Realtime.RepoTest do
         end
 
       assert Process.alive?(repo_pid) == true
-      :timer.sleep(300)
+      Process.sleep(300)
       assert Process.alive?(repo_pid) == false
     end
   end

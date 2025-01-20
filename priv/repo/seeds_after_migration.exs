@@ -33,8 +33,7 @@ end
     }
   ],
   "external_id" => tenant_name,
-  "jwt_secret" => "secure_jwt_secret",
-  "notify_private_alpha" => true
+  "jwt_secret" => "secure_jwt_secret"
 }
 |> Api.create_tenant()
 

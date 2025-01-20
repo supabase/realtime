@@ -19,7 +19,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     tenant = tenant_fixture()
     Migrations.run_migrations(tenant)
 
-    {:ok, conn} = Database.connect(tenant, "realtime_test")
+    {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
     clean_table(conn, "realtime", "messages")
 
     publication =
@@ -81,7 +81,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       })
     end
 
-    :timer.sleep(500)
+    Process.sleep(500)
 
     assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
     # Works with batch inserts
@@ -95,9 +95,9 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         })
       end
 
-    Database.connect(tenant, "realtime_test")
+    Database.connect(tenant, "realtime_test", :stop)
     Realtime.Repo.insert_all_entries(Message, messages, Message)
-    :timer.sleep(500)
+    Process.sleep(500)
 
     assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
   end

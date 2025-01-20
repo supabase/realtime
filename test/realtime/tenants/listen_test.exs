@@ -22,7 +22,7 @@ defmodule Realtime.Tenants.ListenTest do
       RateCounter.new({:channel, :events, tenant.external_id})
 
       {:ok, listen_conn} = Listen.start(tenant, self())
-      {:ok, db_conn} = Database.connect(tenant, "realtime_test")
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       Migrations.run_migrations(tenant)
 
       on_exit(fn ->
@@ -58,7 +58,7 @@ defmodule Realtime.Tenants.ListenTest do
                    []
                  )
 
-                 :timer.sleep(100)
+                 Process.sleep(100)
                end) =~ "FailedSendFromDatabase"
       end
     end

@@ -4,33 +4,29 @@ defmodule Realtime.Tenants.ConnectTest do
 
   import Mock
 
-  alias Ecto.Adapters.SQL.Sandbox
-
-  alias Realtime.Repo
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Listen
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
 
-  describe "lookup_or_start_connection/1" do
-    setup do
-      Cleanup.ensure_no_replication_slot()
-      tenant = tenant_fixture()
-      %{tenant: tenant}
-    end
+  setup do
+    Cleanup.ensure_no_replication_slot()
+    tenant = tenant_fixture()
+    %{tenant: tenant}
+  end
 
+  describe "lookup_or_start_connection/1" do
     test "if tenant exists and connected, returns the db connection", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Sandbox.allow(Repo, self(), db_conn)
-      :timer.sleep(100)
+      Process.sleep(100)
       assert is_pid(db_conn)
     end
 
     test "on database disconnect, returns new connection", %{tenant: tenant} do
       assert {:ok, old_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      :timer.sleep(500)
+      Process.sleep(500)
       GenServer.stop(old_conn)
-      :timer.sleep(500)
+      Process.sleep(500)
 
       assert {:ok, new_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
@@ -72,15 +68,14 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant: %{external_id: tenant_id}
     } do
       {:ok, db_conn} =
-        Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 200)
+        Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 100)
 
-      Sandbox.allow(Repo, self(), db_conn)
       # Not enough time has passed, connection still alive
-      :timer.sleep(500)
+      Process.sleep(500)
       assert {_, %{conn: _}} = :syn.lookup(Connect, tenant_id)
 
       # Enough time has passed, connection stopped
-      :timer.sleep(5000)
+      Process.sleep(1000)
       assert :undefined = :syn.lookup(Connect, tenant_id)
       refute Process.alive?(db_conn)
     end
@@ -93,11 +88,10 @@ defmodule Realtime.Tenants.ConnectTest do
       {:ok, db_conn} =
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
-      Process.link(db_conn)
-      Sandbox.allow(Repo, self(), db_conn)
-
+      # Emulate connected user
+      UsersCounter.add(self(), tenant_id)
       assert {pid, %{conn: conn_pid}} = :syn.lookup(Connect, tenant_id)
-      :timer.sleep(300)
+      Process.sleep(300)
       assert {^pid, %{conn: ^conn_pid}} = :syn.lookup(Connect, tenant_id)
       assert Process.alive?(db_conn)
     end
@@ -110,11 +104,10 @@ defmodule Realtime.Tenants.ConnectTest do
       {:ok, db_conn} =
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
-      Process.link(db_conn)
       assert {_pid, %{conn: _conn_pid}} = :syn.lookup(Connect, tenant_id)
-      :timer.sleep(1000)
+      Process.sleep(1000)
       :syn.leave(:users, tenant_id, self())
-      :timer.sleep(1000)
+      Process.sleep(1000)
       assert :undefined = :syn.lookup(Connect, tenant_id)
       refute Process.alive?(db_conn)
     end
@@ -129,22 +122,17 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant = tenant_fixture()
 
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.link(db_conn)
-      Sandbox.allow(Repo, self(), db_conn)
+      Process.sleep(500)
 
-      :timer.sleep(500)
       Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
-      :timer.sleep(500)
+      Process.sleep(500)
 
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Process.alive?(db_conn) == false
 
       Realtime.Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
-      :timer.sleep(50)
-
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Sandbox.allow(Repo, self(), db_conn)
-      :timer.sleep(100)
+      Process.sleep(50)
+      assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
     end
 
     test "properly handles of failing calls by avoid creating too many connections" do
@@ -176,7 +164,7 @@ defmodule Realtime.Tenants.ConnectTest do
       end)
 
       send(check_db_connections_created(self(), tenant.external_id), :check)
-      :timer.sleep(5000)
+      Process.sleep(5000)
       refute_receive :too_many_connections
     end
 
@@ -189,30 +177,36 @@ defmodule Realtime.Tenants.ConnectTest do
       end
     end
 
-    test "starts broadcast handler and does not fail on existing connection" do
-      tenant = tenant_fixture(%{notify_private_alpha: true})
+    test "starts broadcast handler and does not fail on existing connection", %{tenant: tenant} do
       on_exit(fn -> Connect.shutdown(tenant.external_id) end)
 
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      :timer.sleep(2000)
+      Process.sleep(3000)
 
       replication_connection_before = ReplicationConnection.whereis(tenant.external_id)
+      listen_before = Listen.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_before)
+      assert Process.alive?(listen_before)
+
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
       replication_connection_after = ReplicationConnection.whereis(tenant.external_id)
+      listen_after = Listen.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_after)
+      assert Process.alive?(listen_after)
+
       assert replication_connection_before == replication_connection_after
+      assert listen_before == listen_after
     end
 
-    test "failed broadcast handler and listen recover from failure" do
-      tenant = tenant_fixture(%{notify_private_alpha: true})
+    test "failed broadcast handler and listen recover from failure", %{tenant: tenant} do
       on_exit(fn -> Connect.shutdown(tenant.external_id) end)
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      :timer.sleep(3000)
+      Process.sleep(3000)
 
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
       listen_pid = ReplicationConnection.whereis(tenant.external_id)
+
       assert Process.alive?(replication_connection_pid)
       assert Process.alive?(listen_pid)
 
@@ -222,19 +216,18 @@ defmodule Realtime.Tenants.ConnectTest do
       refute Process.alive?(replication_connection_pid)
       refute Process.alive?(listen_pid)
 
-      :timer.sleep(1000)
+      Process.sleep(1000)
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
       listen_pid = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_pid)
       assert Process.alive?(listen_pid)
     end
 
-    test "on database disconnect, connection is killed to all components" do
-      tenant = tenant_fixture(%{notify_private_alpha: true})
+    test "on database disconnect, connection is killed to all components", %{tenant: tenant} do
       on_exit(fn -> Connect.shutdown(tenant.external_id) end)
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       old_pid = Connect.whereis(tenant.external_id)
-      :timer.sleep(3000)
+      Process.sleep(3000)
 
       old_replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
       old_listen_connection_pid = Listen.whereis(tenant.external_id)
@@ -243,10 +236,10 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Process.alive?(old_listen_connection_pid)
 
       System.cmd("docker", ["stop", "tenant-db"])
-      :timer.sleep(500)
+      Process.sleep(500)
       System.cmd("docker", ["start", "tenant-db"])
 
-      :timer.sleep(3000)
+      Process.sleep(3000)
       refute Process.alive?(old_pid)
       refute Process.alive?(old_replication_connection_pid)
       refute Process.alive?(old_listen_connection_pid)
@@ -257,9 +250,7 @@ defmodule Realtime.Tenants.ConnectTest do
   end
 
   describe "shutdown/1" do
-    test "shutdowns all associated connections" do
-      tenant = tenant_fixture(%{notify_private_alpha: true})
-
+    test "shutdowns all associated connections", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       Process.sleep(1000)
 
@@ -273,6 +264,10 @@ defmodule Realtime.Tenants.ConnectTest do
       refute Connect.whereis(tenant.external_id)
       refute ReplicationConnection.whereis(tenant.external_id)
       refute Listen.whereis(tenant.external_id)
+    end
+
+    test "if tenant does not exist, does nothing" do
+      assert :ok = Connect.shutdown("none")
     end
   end
 

@@ -34,8 +34,7 @@ Repo.transaction(fn ->
           "ssl_enforced" => false
         }
       }
-    ],
-    "notify_private_alpha" => true
+    ]
   })
   |> Repo.insert!()
 end)

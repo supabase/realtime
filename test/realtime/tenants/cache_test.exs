@@ -52,7 +52,7 @@ defmodule Realtime.Tenants.CacheTest do
 
       # Invalidate cache
       Tenants.Cache.distributed_invalidate_tenant_cache(external_id)
-      :timer.sleep(500)
+      Process.sleep(500)
       refute Tenants.Cache.get_tenant_by_external_id(external_id)
     end
   end

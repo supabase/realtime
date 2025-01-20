@@ -25,7 +25,6 @@ defmodule Realtime.Api.Tenant do
     field(:suspend, :boolean, default: false)
     field(:events_per_second_rolling, :float, virtual: true)
     field(:events_per_second_now, :integer, virtual: true)
-    field(:notify_private_alpha, :boolean, default: false)
     field(:private_only, :boolean, default: false)
 
     has_many(:extensions, Realtime.Api.Extensions,
@@ -74,7 +73,6 @@ defmodule Realtime.Api.Tenant do
       :max_channels_per_client,
       :max_joins_per_second,
       :suspend,
-      :notify_private_alpha,
       :private_only
     ])
     |> validate_required([
@@ -113,7 +111,6 @@ defmodule Realtime.Api.Tenant do
       :max_channels_per_client,
       :max_joins_per_second,
       :suspend,
-      :notify_private_alpha,
       :private_only
     ])
   end

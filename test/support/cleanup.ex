@@ -1,6 +1,8 @@
 defmodule Cleanup do
+  alias Realtime.Tenants.Connect
   def ensure_no_replication_slot(attempts \\ 5)
   def ensure_no_replication_slot(0), do: raise("Replication slot teardown failed")
+  @table_name :"syn_registry_by_name_Elixir.Realtime.Tenants.Connect"
 
   def ensure_no_replication_slot(attempts) do
     {:ok, conn} =
@@ -12,6 +14,13 @@ defmodule Cleanup do
         password: "postgres"
       )
 
+    # Stop lingering connections
+    Enum.each(:ets.tab2list(@table_name), fn {tenant_id, _, _, _, _, _} ->
+      IO.inspect("Shutting down tenant: #{tenant_id}")
+      Connect.shutdown(tenant_id)
+    end)
+
+    # Ensure no replication slots are active
     case Postgrex.query(conn, "SELECT active_pid, slot_name FROM pg_replication_slots", []) do
       {:ok, %{rows: []}} ->
         :ok
