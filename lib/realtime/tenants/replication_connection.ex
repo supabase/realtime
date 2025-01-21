@@ -339,11 +339,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @impl true
   def handle_disconnect(state) do
-    %{tenant_id: tenant_id, replication_slot_name: replication_slot_name} = state
-
-    tenant = Cache.get_tenant_by_external_id(tenant_id)
-    Database.replication_slot_teardown(tenant, replication_slot_name)
-
     Logger.warning("Disconnecting broadcast changes handler: #{inspect(state, pretty: true)}")
     {:noreply, %{state | step: :disconnected}}
   end
