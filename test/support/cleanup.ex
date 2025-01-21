@@ -16,7 +16,6 @@ defmodule Cleanup do
 
     # Stop lingering connections
     Enum.each(:ets.tab2list(@table_name), fn {tenant_id, _, _, _, _, _} ->
-      IO.inspect("Shutting down tenant: #{tenant_id}")
       Connect.shutdown(tenant_id)
     end)
 
