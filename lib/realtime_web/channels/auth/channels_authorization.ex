@@ -3,12 +3,12 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   Check connection is authorized to access channel
   """
   require Logger
-  import Realtime.Logs
 
   @doc """
   Authorize connection to access channel
   """
-  @spec authorize(binary(), binary(), binary() | nil) :: {:ok, map()} | {:error, any()}
+  @spec authorize(binary(), binary(), binary() | nil) ::
+          {:ok, map()} | {:error, any()} | {:error, :expired_token, String.t()}
   def authorize(token, jwt_secret, jwt_jwks) when is_binary(token) do
     token
     |> clean_token()
@@ -29,8 +29,12 @@ defmodule RealtimeWeb.ChannelsAuthorization do
           {:error, :missing_claims}
         end
 
+      {:error, [message: validation_timer, claim: "exp", claim_val: claim_val]}
+      when is_integer(validation_timer) ->
+        msg = "Token as expired #{validation_timer - claim_val} seconds ago"
+        {:error, :expired_token, msg}
+
       {:error, reason} ->
-        log_error("ErrorAuthorizingWebsocket", reason)
         {:error, reason}
     end
   end

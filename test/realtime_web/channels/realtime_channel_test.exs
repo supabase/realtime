@@ -4,8 +4,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   import Mock
   import ExUnit.CaptureLog
+
   alias Phoenix.Socket
-  alias RealtimeWeb.{ChannelsAuthorization, Joken.CurrentTime, UserSocket}
+  alias RealtimeWeb.ChannelsAuthorization
+  alias RealtimeWeb.UserSocket
+  alias RealtimeWeb.Joken.CurrentTime
 
   @tenant "dev_tenant"
 
@@ -99,8 +102,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
-        assert {:error, %{reason: "Token expiration time is invalid"}} =
-                 subscribe_and_join(socket, "realtime:test", %{})
+        assert capture_log(fn ->
+                 assert {:error, %{reason: "Token expiration time is invalid"}} =
+                          subscribe_and_join(socket, "realtime:test", %{})
+               end) =~ "InvalidJWTExpiration: Token expiration time is invalid"
       end
 
       with_mocks([
@@ -113,18 +118,20 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]) do
         {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
 
-        assert {:error, %{reason: "Token expiration time is invalid"}} =
-                 subscribe_and_join(socket, "realtime:test", %{})
+        assert capture_log(fn ->
+                 assert {:error, %{reason: "Token expiration time is invalid"}} =
+                          subscribe_and_join(socket, "realtime:test", %{})
+               end) =~ "InvalidJWTExpiration: Token expiration time is invalid"
       end
     end
 
     test "missing claims returns a informative error" do
       with_mock ChannelsAuthorization, [],
         authorize_conn: fn _, _, _ -> {:error, :missing_claims} end do
-        capture_log(fn ->
-          assert {:error, :missing_claims} =
-                   connect(UserSocket, %{}, @default_conn_opts)
-        end) =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
+        assert capture_log(fn ->
+                 assert {:error, :missing_claims} =
+                          connect(UserSocket, %{}, @default_conn_opts)
+               end) =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
       end
     end
   end

@@ -5,6 +5,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
   use RealtimeWeb.ConnCase, async: false
   import ExUnit.CaptureLog
+  import Generators
 
   require Logger
 
@@ -602,6 +603,38 @@ defmodule Realtime.Integration.RtChannelTest do
         }
       }
     end
+
+    test "on expired access_token the socket sends an error message",
+         %{topic: topic} do
+      {socket, access_token} =
+        get_connection("authenticated")
+
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      {:ok, token} = generate_token(%{:exp => System.system_time(:second) - 1000})
+
+      assert capture_log(fn ->
+               WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+                 "access_token" => token
+               })
+
+               assert_receive %Phoenix.Socket.Message{
+                 topic: ^realtime_topic,
+                 event: "system",
+                 payload: %{
+                   "extension" => "system",
+                   "message" => "Token as expired 1000 seconds ago",
+                   "status" => "error"
+                 }
+               }
+             end) =~
+               "ChannelShutdown: Token as expired 1000 seconds ago"
+    end
   end
 
   describe "handle broadcast changes" do
@@ -943,6 +976,20 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
+  describe "invalid jwt handling" do
+    setup [:rls_context]
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "invalid JWT with expired token" do
+      assert capture_log(fn ->
+               get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
+             end) =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
+    end
+  end
+
   test "handle empty topic by closing the socket" do
     {socket, _} = get_connection("authenticated")
     config = %{broadcast: %{self: true}, private: false}
@@ -959,7 +1006,7 @@ defmodule Realtime.Integration.RtChannelTest do
     }
   end
 
-  defp token_valid(role), do: generate_token(%{role: role})
+  defp token_valid(role, claims \\ %{}), do: generate_token(Map.put(claims, :role, role))
   defp token_no_role(), do: generate_token()
 
   defp generate_token(claims \\ %{}) do
@@ -973,14 +1020,15 @@ defmodule Realtime.Integration.RtChannelTest do
         claims
       )
 
-    signer = Joken.Signer.create("HS256", @secret)
-    Joken.Signer.sign(claims, signer)
+    {:ok, generate_jwt_token(@secret, claims)}
   end
 
-  defp get_connection(role \\ "anon") do
-    {:ok, token} = token_valid(role)
-    {:ok, socket} = WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
-    {socket, token}
+  defp get_connection(role \\ "anon", claims \\ %{}) do
+    with {:ok, token} <- token_valid(role, claims),
+         {:ok, socket} <-
+           WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}]) do
+      {socket, token}
+    end
   end
 
   def rls_context(%{tenant: tenant} = context) do
