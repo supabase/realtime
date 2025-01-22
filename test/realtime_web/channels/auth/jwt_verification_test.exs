@@ -89,7 +89,7 @@ defmodule RealtimeWeb.JwtVerificationTest do
       assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, nil)
     end
 
-    test "when token has expired" do
+    test "when token has expired we return current time as the message so we can use it in expiration calculations" do
       signer = Joken.Signer.create(@alg, @jwt_secret)
 
       current_time = 1_610_086_801
@@ -97,27 +97,27 @@ defmodule RealtimeWeb.JwtVerificationTest do
 
       token =
         Joken.generate_and_sign!(
-          %{
-            "exp" => %Joken.Claim{generate: fn -> current_time end}
-          },
+          %{"exp" => %Joken.Claim{generate: fn -> current_time end}},
           %{},
           signer
         )
 
-      assert {:error, [message: "Invalid token", claim: "exp", claim_val: 1_610_086_801]} =
+      assert {:error, [message: current_time, claim: "exp", claim_val: 1_610_086_801]} =
                JwtVerification.verify(token, @jwt_secret, nil)
+
+      assert is_integer(current_time)
 
       token =
         Joken.generate_and_sign!(
-          %{
-            "exp" => %Joken.Claim{generate: fn -> current_time - 1 end}
-          },
+          %{"exp" => %Joken.Claim{generate: fn -> current_time - 1 end}},
           %{},
           signer
         )
 
-      assert {:error, [message: "Invalid token", claim: "exp", claim_val: 1_610_086_800]} =
+      assert {:error, [message: current_time, claim: "exp", claim_val: _]} =
                JwtVerification.verify(token, @jwt_secret, nil)
+
+      assert is_integer(current_time)
     end
 
     test "when token has not expired" do

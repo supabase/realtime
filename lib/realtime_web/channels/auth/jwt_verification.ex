@@ -16,7 +16,8 @@ defmodule RealtimeWeb.JwtVerification do
     end
 
     defp add_claim_validator(claims, "exp") do
-      add_claim(claims, "exp", nil, &(&1 > current_time()))
+      current_time = current_time()
+      add_claim(claims, "exp", nil, &(&1 > current_time), message: current_time)
     end
 
     defp add_claim_validator(claims, claim_key, expected_val) do
