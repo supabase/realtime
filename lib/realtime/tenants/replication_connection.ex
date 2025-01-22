@@ -349,11 +349,11 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   def publication_name(%__MODULE__{table: table, schema: schema}) do
-    "#{schema}_#{table}_publication_#{slot_suffix()}"
+    "supabase_#{schema}_#{table}_publication_#{slot_suffix()}"
   end
 
   def replication_slot_name(%__MODULE__{table: table, schema: schema}) do
-    "#{schema}_#{table}_replication_slot_#{slot_suffix()}"
+    "supabase_#{schema}_#{table}_replication_slot_#{slot_suffix()}"
   end
 
   defp slot_suffix(), do: Application.get_env(:realtime, :slot_name_suffix)

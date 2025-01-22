@@ -164,7 +164,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
         {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
-        assert %{rows: [["realtime_messages_replication_slot_"]]} =
+        assert %{rows: [["supabase_realtime_messages_replication_slot_"]]} =
                  Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
 
         conn = delete(conn, Routes.tenant_path(conn, :delete, tenant.external_id))
