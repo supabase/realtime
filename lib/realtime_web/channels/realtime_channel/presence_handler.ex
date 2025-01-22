@@ -2,16 +2,18 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   @moduledoc """
   Handles the Presence feature from Realtime
   """
+  require Logger
+
   import Phoenix.Socket, only: [assign: 3]
   import Phoenix.Channel, only: [push: 3]
-  require Logger
-  alias Phoenix.Tracker.Shard
 
+  alias Phoenix.Socket
+  alias Phoenix.Tracker.Shard
   alias Realtime.GenCounter
   alias Realtime.RateCounter
+  alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
-
   alias RealtimeWeb.Presence
   alias RealtimeWeb.RealtimeChannel.Logging
 
@@ -51,10 +53,15 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     %{
       assigns: %{
         presence_key: presence_key,
-        tenant_topic: tenant_topic,
-        policies: policies
+        tenant_topic: tenant_topic
       }
     } = socket
+
+    authorization_context = socket.assigns.authorization_context
+    db_conn = socket.assigns.db_conn
+
+    {:ok, %{assigns: %{policies: policies}}} =
+      run_authorization_check(socket, db_conn, authorization_context)
 
     cond do
       match?(%Policies{presence: %PresencePolicies{write: false}}, policies) ->
@@ -100,5 +107,17 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     |> Shard.name_for_topic(topic, size)
     |> Shard.dirty_list(topic)
     |> Phoenix.Presence.group()
+  end
+
+  defp run_authorization_check(
+         %Socket{assigns: %{policies: %{presence: %PresencePolicies{write: nil}}}} = socket,
+         db_conn,
+         authorization_context
+       ) do
+    Authorization.get_write_authorizations(socket, db_conn, authorization_context)
+  end
+
+  defp run_authorization_check(socket, _db_conn, _authorization_context) do
+    {:ok, socket}
   end
 end

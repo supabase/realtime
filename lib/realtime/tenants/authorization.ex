@@ -9,10 +9,13 @@ defmodule Realtime.Tenants.Authorization do
   Check more information at Realtime.Tenants.Authorization.Policies
   """
   require Logger
+  import Ecto.Query
 
+  alias Phoenix.Socket
+  alias Plug.Conn
+  alias Realtime.Api.Message
   alias Realtime.Api.Message
   alias Realtime.Database
-  alias Realtime.Api.Message
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization.Policies
 
@@ -48,31 +51,59 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   @doc """
-  Runs validations based on RLS policies to set policies for a given connection (either Phoenix.Socket or Plug.Conn).
+  Runs validations based on RLS policies to set policies for read policies a given connection (either Phoenix.Socket or Plug.Conn).
   """
-  @spec get_authorizations(Phoenix.Socket.t() | Plug.Conn.t(), DBConnection.t(), __MODULE__.t()) ::
-          {:ok, Phoenix.Socket.t() | Plug.Conn.t()} | {:error, any()}
-  def get_authorizations(%Phoenix.Socket{} = socket, db_conn, authorization_context) do
-    case get_authorizations(db_conn, authorization_context) do
-      {:ok, %Policies{} = policies} -> {:ok, Phoenix.Socket.assign(socket, :policies, policies)}
-      {:error, error} -> {:error, error}
+  @spec get_read_authorizations(Socket.t() | Conn.t(), pid(), __MODULE__.t()) ::
+          {:ok, Socket.t() | Conn.t()} | {:error, any()}
+
+  def get_read_authorizations(%Socket{} = socket, db_conn, authorization_context) do
+    policies = Map.get(socket.assigns, :policies) || %Policies{}
+
+    with {:ok, %Policies{} = policies} <-
+           get_read_policies_for_connection(db_conn, authorization_context, policies) do
+      {:ok, Socket.assign(socket, :policies, policies)}
     end
   end
 
-  def get_authorizations(%Plug.Conn{} = conn, db_conn, authorization_context) do
-    case get_authorizations(db_conn, authorization_context) do
-      {:ok, %Policies{} = policies} -> {:ok, Plug.Conn.assign(conn, :policies, policies)}
+  def get_read_authorizations(%Conn{} = conn, db_conn, authorization_context) do
+    policies = Map.get(conn.assigns, :policies) || %Policies{}
+
+    case get_read_policies_for_connection(db_conn, authorization_context, policies) do
+      {:ok, %Policies{} = policies} -> {:ok, Conn.assign(conn, :policies, policies)}
       {:error, error} -> {:error, error}
     end
   end
 
   @doc """
-  Runs validations based on RLS policies and returns the policies
+  Runs validations based on RLS policies to set policies for read policies a given connection (either Phoenix.Socket or Conn).
   """
-  @spec get_authorizations(DBConnection.t(), __MODULE__.t()) ::
-          {:ok, %Policies{}} | {:error, any()}
-  def get_authorizations(db_conn, authorization_context) do
-    case get_policies_for_connection(db_conn, authorization_context) do
+  @spec get_write_authorizations(Socket.t() | Conn.t() | pid(), pid(), __MODULE__.t()) ::
+          {:ok, Socket.t() | Conn.t() | Policies.t()} | {:error, any()}
+
+  def get_write_authorizations(
+        %Socket{} = socket,
+        db_conn,
+        authorization_context
+      ) do
+    policies = Map.get(socket.assigns, :policies) || %Policies{}
+
+    case get_write_policies_for_connection(db_conn, authorization_context, policies) do
+      {:ok, %Policies{} = policies} -> {:ok, Socket.assign(socket, :policies, policies)}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  def get_write_authorizations(%Conn{} = conn, db_conn, authorization_context) do
+    policies = Map.get(conn.assigns, :policies) || %Policies{}
+
+    case get_write_policies_for_connection(db_conn, authorization_context, policies) do
+      {:ok, %Policies{} = policies} -> {:ok, Conn.assign(conn, :policies, policies)}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  def get_write_authorizations(db_conn, db_conn, authorization_context) when is_pid(db_conn) do
+    case get_write_policies_for_connection(db_conn, authorization_context, %Policies{}) do
       {:ok, %Policies{} = policies} -> {:ok, policies}
       {:error, error} -> {:error, error}
     end
@@ -113,44 +144,64 @@ defmodule Realtime.Tenants.Authorization do
     )
   end
 
-  defp get_policies_for_connection(conn, authorization_context) do
-    Database.transaction(conn, fn transaction_conn ->
-      messages = [
-        Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: :broadcast}),
-        Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: :presence})
-      ]
+  defp get_read_policies_for_connection(conn, authorization_context, policies) do
+    Database.transaction(
+      conn,
+      fn transaction_conn ->
+        messages = [
+          Message.changeset(%Message{}, %{
+            topic: authorization_context.topic,
+            extension: :broadcast
+          }),
+          Message.changeset(%Message{}, %{
+            topic: authorization_context.topic,
+            extension: :presence
+          })
+        ]
 
-      {:ok, messages} = Repo.insert_all_entries(transaction_conn, messages, Message)
+        {:ok, messages} = Repo.insert_all_entries(transaction_conn, messages, Message)
 
-      {[%{id: broadcast_id}], [%{id: presence_id}]} =
-        Enum.split_with(messages, &(&1.extension == :broadcast))
+        {[%{id: broadcast_id}], [%{id: presence_id}]} =
+          Enum.split_with(messages, &(&1.extension == :broadcast))
 
-      set_conn_config(transaction_conn, authorization_context)
-      policies = %Policies{}
+        set_conn_config(transaction_conn, authorization_context)
 
-      policies =
-        get_read_policy_for_connection_and_extension(
-          transaction_conn,
-          authorization_context,
-          broadcast_id,
-          presence_id,
-          policies
-        )
+        policies =
+          get_read_policy_for_connection_and_extension(
+            transaction_conn,
+            authorization_context,
+            broadcast_id,
+            presence_id,
+            policies
+          )
 
-      policies =
-        get_write_policy_for_connection_and_extension(
-          transaction_conn,
-          authorization_context,
-          policies
-        )
-
-      Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
-
-      policies
-    end)
+        Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
+        policies
+      end,
+      telemetry: [:realtime, :tenants, :read_authorization_check]
+    )
   end
 
-  import Ecto.Query
+  defp get_write_policies_for_connection(conn, authorization_context, policies) do
+    Database.transaction(
+      conn,
+      fn transaction_conn ->
+        set_conn_config(transaction_conn, authorization_context)
+
+        policies =
+          get_write_policy_for_connection_and_extension(
+            transaction_conn,
+            authorization_context,
+            policies
+          )
+
+        Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
+
+        policies
+      end,
+      telemetry: [:realtime, :tenants, :write_authorization_check]
+    )
+  end
 
   defp get_read_policy_for_connection_and_extension(
          conn,

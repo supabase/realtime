@@ -4,6 +4,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   require Phoenix.ChannelTest
 
+  import Mock
+
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.Repo
@@ -12,7 +14,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Migrations
-
   alias RealtimeWeb.Joken.CurrentTime
 
   setup [:rls_context]
@@ -25,15 +26,15 @@ defmodule Realtime.Tenants.AuthorizationTest do
          ]
     test "authenticated user has expected policies", context do
       {:ok, conn} =
-        Authorization.get_authorizations(
+        Authorization.get_read_authorizations(
           Phoenix.ConnTest.build_conn(),
           context.db_conn,
           context.authorization_context
         )
 
       assert %Policies{
-               broadcast: %BroadcastPolicies{read: true, write: false},
-               presence: %PresencePolicies{read: true, write: false}
+               broadcast: %BroadcastPolicies{read: true, write: nil},
+               presence: %PresencePolicies{read: true, write: nil}
              } = conn.assigns.policies
     end
 
@@ -43,15 +44,15 @@ defmodule Realtime.Tenants.AuthorizationTest do
          ]
     test "authenticated user has expected mixed policies", context do
       {:ok, conn} =
-        Authorization.get_authorizations(
+        Authorization.get_read_authorizations(
           Phoenix.ConnTest.build_conn(),
           context.db_conn,
           context.authorization_context
         )
 
       assert %Policies{
-               broadcast: %BroadcastPolicies{read: true, write: false},
-               presence: %PresencePolicies{read: false, write: false}
+               broadcast: %BroadcastPolicies{read: true, write: nil},
+               presence: %PresencePolicies{read: false, write: nil}
              } = conn.assigns.policies
     end
 
@@ -62,8 +63,15 @@ defmodule Realtime.Tenants.AuthorizationTest do
          ]
     test "authenticated user has expected mixed extensions policies", context do
       {:ok, conn} =
-        Authorization.get_authorizations(
+        Authorization.get_read_authorizations(
           Phoenix.ConnTest.build_conn(),
+          context.db_conn,
+          context.authorization_context
+        )
+
+      {:ok, conn} =
+        Authorization.get_write_authorizations(
+          conn,
           context.db_conn,
           context.authorization_context
         )
@@ -83,8 +91,15 @@ defmodule Realtime.Tenants.AuthorizationTest do
          ]
     test "anon user has no policies", context do
       {:ok, conn} =
-        Authorization.get_authorizations(
+        Authorization.get_read_authorizations(
           Phoenix.ConnTest.build_conn(),
+          context.db_conn,
+          context.authorization_context
+        )
+
+      {:ok, conn} =
+        Authorization.get_write_authorizations(
+          conn,
           context.db_conn,
           context.authorization_context
         )
@@ -103,9 +118,16 @@ defmodule Realtime.Tenants.AuthorizationTest do
            :authenticated_write_broadcast_and_presence
          ]
     test "authenticated user has expected policies", context do
-      {:ok, conn} =
-        Authorization.get_authorizations(
+      {:ok, socket} =
+        Authorization.get_read_authorizations(
           Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+          context.db_conn,
+          context.authorization_context
+        )
+
+      {:ok, socket} =
+        Authorization.get_write_authorizations(
+          socket,
           context.db_conn,
           context.authorization_context
         )
@@ -113,7 +135,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
       assert %Policies{
                broadcast: %BroadcastPolicies{read: true, write: true},
                presence: %PresencePolicies{read: true, write: true}
-             } = conn.assigns.policies
+             } = socket.assigns.policies
     end
 
     @tag role: "anon",
@@ -122,9 +144,16 @@ defmodule Realtime.Tenants.AuthorizationTest do
            :authenticated_write_broadcast_and_presence
          ]
     test "anon user has no policies", context do
-      {:ok, conn} =
-        Authorization.get_authorizations(
+      {:ok, socket} =
+        Authorization.get_read_authorizations(
           Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+          context.db_conn,
+          context.authorization_context
+        )
+
+      {:ok, socket} =
+        Authorization.get_write_authorizations(
+          socket,
           context.db_conn,
           context.authorization_context
         )
@@ -132,7 +161,47 @@ defmodule Realtime.Tenants.AuthorizationTest do
       assert %Policies{
                broadcast: %BroadcastPolicies{read: false, write: false},
                presence: %PresencePolicies{read: false, write: false}
-             } = conn.assigns.policies
+             } = socket.assigns.policies
+    end
+  end
+
+  describe "get_write_authorizations for DBConnection" do
+    @tag role: "authenticated",
+         policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "authenticated user has expected policies", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          context.db_conn,
+          context.db_conn,
+          context.authorization_context
+        )
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: nil, write: true},
+               presence: %PresencePolicies{read: nil, write: true}
+             } = policies
+    end
+
+    @tag role: "anon",
+         policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "anon user has no policies", context do
+      {:ok, policies} =
+        Authorization.get_write_authorizations(
+          context.db_conn,
+          context.db_conn,
+          context.authorization_context
+        )
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: nil, write: false},
+               presence: %PresencePolicies{read: nil, write: false}
+             } = policies
     end
   end
 
@@ -143,15 +212,63 @@ defmodule Realtime.Tenants.AuthorizationTest do
            :authenticated_write_broadcast_and_presence
          ]
     test "authenticated user has expected policies", context do
-      {:ok, _} =
-        Authorization.get_authorizations(
+      {:ok, socket} =
+        Authorization.get_read_authorizations(
           Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+          context.db_conn,
+          context.authorization_context
+        )
+
+      {:ok, _} =
+        Authorization.get_write_authorizations(
+          socket,
           context.db_conn,
           context.authorization_context
         )
 
       {:ok, db_conn} = Database.connect(context.tenant, "realtime_test")
       assert {:ok, []} = Repo.all(db_conn, Message, Message)
+    end
+  end
+
+  describe "telemetry" do
+    @tag role: "authenticated",
+         policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "sends telemetry event", context do
+      with_mock Realtime.Telemetry, execute: fn _, _, _ -> :ok end do
+        {:ok, conn} =
+          Authorization.get_read_authorizations(
+            Phoenix.ConnTest.build_conn(),
+            context.db_conn,
+            context.authorization_context
+          )
+
+        {:ok, _} =
+          Authorization.get_write_authorizations(
+            conn,
+            context.db_conn,
+            context.authorization_context
+          )
+
+        assert_called(
+          Realtime.Telemetry.execute(
+            [:realtime, :tenants, :read_authorization_check],
+            %{latency: :_},
+            %{}
+          )
+        )
+
+        assert_called(
+          Realtime.Telemetry.execute(
+            [:realtime, :tenants, :write_authorization_check],
+            %{latency: :_},
+            %{}
+          )
+        )
+      end
     end
   end
 

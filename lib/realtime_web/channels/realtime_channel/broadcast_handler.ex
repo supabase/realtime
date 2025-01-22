@@ -2,13 +2,15 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   @moduledoc """
   Handles the Broadcast feature from Realtime
   """
-  import Phoenix.Socket, only: [assign: 3]
   require Logger
+  import Phoenix.Socket, only: [assign: 3]
+
+  alias Phoenix.Socket
   alias Realtime.GenCounter
   alias Realtime.RateCounter
+  alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-
   alias RealtimeWeb.Endpoint
 
   @event_type "broadcast"
@@ -22,11 +24,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
             ack_broadcast: ack_broadcast,
             self_broadcast: self_broadcast,
             tenant_topic: tenant_topic,
-            policies: policies
+            authorization_context: authorization_context,
+            db_conn: db_conn
           }
         } = socket
       ) do
-    case policies do
+    {:ok, socket} = run_authorization_check(socket, db_conn, authorization_context)
+
+    case socket.assigns.policies do
       %Policies{broadcast: %BroadcastPolicies{write: false}} ->
         Logger.info("Broadcast message ignored on #{tenant_topic}")
 
@@ -66,5 +71,17 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     {:ok, rate_counter} = RateCounter.get(counter.id)
 
     assign(socket, :rate_counter, rate_counter)
+  end
+
+  defp run_authorization_check(
+         %Socket{assigns: %{policies: %{broadcast: %BroadcastPolicies{write: nil}}}} = socket,
+         db_conn,
+         authorization_context
+       ) do
+    Authorization.get_write_authorizations(socket, db_conn, authorization_context)
+  end
+
+  defp run_authorization_check(socket, _db_conn, _authorization_context) do
+    {:ok, socket}
   end
 end

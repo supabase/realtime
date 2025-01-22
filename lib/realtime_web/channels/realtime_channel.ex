@@ -50,6 +50,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign_counter()
       |> assign(:using_broadcast?, !!params["config"]["broadcast"])
       |> assign(:check_authorization?, !!params["config"]["private"])
+      |> assign(:policies, nil)
 
     start_db_rate_counter(tenant_id)
 
@@ -60,7 +61,8 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_max_users(socket.assigns),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, access_token, claims, socket) do
+         socket = assign_authorization_context(socket, sub_topic, access_token, claims),
+         {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       public? = !socket.assigns.check_authorization?
       is_new_api = is_new_api(params)
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
@@ -380,8 +382,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     socket = assign(socket, :access_token, refresh_token)
 
     with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
-         {:ok, socket} <-
-           maybe_assign_policies(channel_name, db_conn, access_token, claims, socket) do
+         socket = assign_authorization_context(socket, channel_name, access_token, claims),
+         {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket) do
       Helpers.cancel_timer(pg_sub_ref)
       pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
@@ -696,26 +698,31 @@ defmodule RealtimeWeb.RealtimeChannel do
     end)
   end
 
-  defp maybe_assign_policies(
-         topic,
-         db_conn,
-         access_token,
-         claims,
-         %{assigns: %{check_authorization?: true}} = socket
-       )
-       when not is_nil(topic) do
-    %{using_broadcast?: using_broadcast?} = socket.assigns
-
+  defp assign_authorization_context(socket, topic, access_token, claims) do
     authorization_context =
       Authorization.build_authorization_params(%{
         topic: topic,
-        headers: socket.assigns.headers,
+        headers: Map.get(socket.assigns, :headers, []),
         jwt: access_token,
         claims: claims,
         role: claims["role"]
       })
 
-    with {:ok, socket} <- Authorization.get_authorizations(socket, db_conn, authorization_context) do
+    assign(socket, :authorization_context, authorization_context)
+  end
+
+  defp maybe_assign_policies(
+         topic,
+         db_conn,
+         %{assigns: %{check_authorization?: true}} = socket
+       )
+       when not is_nil(topic) do
+    %{using_broadcast?: using_broadcast?} = socket.assigns
+
+    authorization_context = socket.assigns.authorization_context
+
+    with {:ok, socket} <-
+           Authorization.get_read_authorizations(socket, db_conn, authorization_context) do
       cond do
         match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
           {:error, :unauthorized,
@@ -736,7 +743,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp maybe_assign_policies(_, _, _, _, socket) do
+  defp maybe_assign_policies(_, _, socket) do
     {:ok, assign(socket, policies: nil)}
   end
 

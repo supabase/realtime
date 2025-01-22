@@ -4,10 +4,10 @@ defmodule Realtime.Tenants.Authorization.Policies.BroadcastPolicies do
   """
   require Logger
 
-  defstruct read: false, write: false
+  defstruct read: nil, write: nil
 
   @type t :: %__MODULE__{
-          read: boolean(),
-          write: boolean()
+          read: boolean() | nil,
+          write: boolean() | nil
         }
 end

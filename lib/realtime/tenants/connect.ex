@@ -47,7 +47,7 @@ defmodule Realtime.Tenants.Connect do
   Returns the database connection for a tenant. If the tenant is not connected, it will attempt to connect to the tenant's database.
   """
   @spec lookup_or_start_connection(binary(), keyword()) ::
-          {:ok, DBConnection.t()} | {:error, term()}
+          {:ok, pid()} | {:error, term()}
   def lookup_or_start_connection(tenant_id, opts \\ []) do
     case get_status(tenant_id) do
       {:ok, conn} ->

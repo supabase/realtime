@@ -2,8 +2,8 @@ defmodule Realtime.Rpc do
   @moduledoc """
   RPC module for Realtime with the intent of standardizing the RPC interface and collect telemetry
   """
-  alias Realtime.Telemetry
   import Realtime.Logs
+  alias Realtime.Telemetry
 
   @doc """
   Calls external node using :rpc.call/5 and collects telemetry

@@ -10,6 +10,7 @@ defmodule Realtime.Database do
   alias Realtime.Crypto
   alias Realtime.PostgresCdc
   alias Realtime.Rpc
+  alias Realtime.Telemetry
 
   defstruct [
     :hostname,
@@ -151,7 +152,15 @@ defmodule Realtime.Database do
   end
 
   defp transaction_catched(db_conn, func, opts, metadata) do
-    Postgrex.transaction(db_conn, func, opts)
+    telemetry = Keyword.get(opts, :telemetry, nil)
+
+    if telemetry do
+      {latency, value} = :timer.tc(Postgrex, :transaction, [db_conn, func, opts], :millisecond)
+      Telemetry.execute(telemetry, %{latency: latency}, %{})
+      value
+    else
+      Postgrex.transaction(db_conn, func, opts)
+    end
   rescue
     e ->
       log_error("ErrorExecutingTransaction", e, metadata)
