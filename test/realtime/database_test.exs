@@ -3,6 +3,8 @@ defmodule Realtime.DatabaseTest do
   use Realtime.DataCase, async: false
 
   import ExUnit.CaptureLog
+  import Mock
+
   alias Realtime.Database
   doctest Realtime.Database
 
@@ -105,6 +107,20 @@ defmodule Realtime.DatabaseTest do
                    [tenant_id: "test"]
                  ]
                )
+    end
+
+    test "with telemetry event defined, emits telemetry event", %{db_conn: db_conn} do
+      event = [:realtime, :database, :transaction]
+
+      with_mock Realtime.Telemetry, execute: fn _, _, _ -> :ok end do
+        Database.transaction(
+          db_conn,
+          fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(6)", []) end,
+          telemetry: event
+        )
+
+        assert_called(Realtime.Telemetry.execute(event, %{latency: :_}, %{}))
+      end
     end
   end
 
