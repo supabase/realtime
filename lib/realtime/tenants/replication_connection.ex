@@ -349,7 +349,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   def publication_name(%__MODULE__{table: table, schema: schema}) do
-    "supabase_#{schema}_#{table}_publication_#{slot_suffix()}"
+    "supabase_#{schema}_#{table}_publication"
   end
 
   def replication_slot_name(%__MODULE__{table: table, schema: schema}) do
