@@ -1,9 +1,11 @@
 defmodule RealtimeWeb.MetricsControllerTest do
   use RealtimeWeb.ConnCase
 
+  alias RealtimeWeb.Joken.CurrentTime.Mock
+
   describe "GET /metrics" do
     setup %{conn: conn} do
-      # The metrics pipeline requires authentication
+      {:ok, _pid} = start_supervised(Mock)
       jwt_secret = Application.fetch_env!(:realtime, :metrics_jwt_secret)
       token = generate_jwt_token(jwt_secret, %{})
       authenticated_conn = put_req_header(conn, "authorization", "Bearer #{token}")

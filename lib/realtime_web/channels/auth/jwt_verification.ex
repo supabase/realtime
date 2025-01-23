@@ -33,14 +33,20 @@ defmodule RealtimeWeb.JwtVerification do
   @doc """
   Verify JWT token and validate claims
   """
-  @spec verify(binary(), binary(), binary() | nil) :: {:ok, map()} | {:error, any()}
+  @spec verify(binary(), binary(), binary() | nil) ::
+          {:ok, map()} | {:error, any()} | {:error, any(), map()}
   def verify(token, jwt_secret, jwt_jwks) when is_binary(token) do
     with {:ok, _claims} <- check_claims_format(token),
          {:ok, header} <- check_header_format(token),
-         {:ok, signer} <- generate_signer(header, jwt_secret, jwt_jwks) do
-      JwtAuthToken.verify_and_validate(token, signer)
+         {:ok, signer} <- generate_signer(header, jwt_secret, jwt_jwks),
+         {:ok, _} = res <- JwtAuthToken.verify_and_validate(token, signer) do
+      res
     else
-      {:error, _e} = error -> error
+      {:error, error} ->
+        case Joken.peek_claims(token) do
+          {:ok, claims} -> {:error, error, claims}
+          _ -> {:error, error}
+        end
     end
   end
 

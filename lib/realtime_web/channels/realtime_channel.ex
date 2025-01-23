@@ -3,11 +3,11 @@ defmodule RealtimeWeb.RealtimeChannel do
   Used for handling channels and subscriptions.
   """
   use RealtimeWeb, :channel
+
   require Logger
   import Realtime.Logs
 
   alias DBConnection.Backoff
-
   alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.Helpers
@@ -20,7 +20,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
-
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.Logging
@@ -404,13 +403,12 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :unauthorized, msg} ->
         shutdown_response(socket, msg)
 
-      {:error, {:error, :expired_token, msg}} ->
-        shutdown_response(socket, msg)
+      {:error, {:error, :expired_token, msg, claims}} ->
+        metadata = claims |> Map.get("sub") |> then(&[sub: &1])
+        shutdown_response(socket, msg, metadata)
 
       {:error, error} ->
-        IO.inspect(error)
         msg = "Received an invalid access token from client: " <> inspect(error)
-
         shutdown_response(socket, msg)
     end
   end
@@ -575,9 +573,13 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp shutdown_response(%{assigns: %{channel_name: channel_name}} = socket, message)
+  defp shutdown_response(
+         %{assigns: %{channel_name: channel_name}} = socket,
+         message,
+         metadata \\ []
+       )
        when is_binary(message) do
-    log_error("ChannelShutdown", message)
+    log_error("ChannelShutdown", message, metadata)
     push_system_message("system", socket, "error", message, channel_name)
     {:stop, :shutdown, socket}
   end

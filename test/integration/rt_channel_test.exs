@@ -1015,7 +1015,8 @@ defmodule Realtime.Integration.RtChannelTest do
         %{
           ref: "localhost",
           iat: System.system_time(:second),
-          exp: System.system_time(:second) + 604_800
+          exp: System.system_time(:second) + 604_800,
+          sub: "test"
         },
         claims
       )

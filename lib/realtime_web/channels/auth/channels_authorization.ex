@@ -8,7 +8,7 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   Authorize connection to access channel
   """
   @spec authorize(binary(), binary(), binary() | nil) ::
-          {:ok, map()} | {:error, any()} | {:error, :expired_token, String.t()}
+          {:ok, map()} | {:error, any()} | {:error, :expired_token, String.t(), map()}
   def authorize(token, jwt_secret, jwt_jwks) when is_binary(token) do
     token
     |> clean_token()
@@ -29,10 +29,10 @@ defmodule RealtimeWeb.ChannelsAuthorization do
           {:error, :missing_claims}
         end
 
-      {:error, [message: validation_timer, claim: "exp", claim_val: claim_val]}
+      {:error, [message: validation_timer, claim: "exp", claim_val: claim_val], claims}
       when is_integer(validation_timer) ->
         msg = "Token as expired #{validation_timer - claim_val} seconds ago"
-        {:error, :expired_token, msg}
+        {:error, :expired_token, msg, claims}
 
       {:error, reason} ->
         {:error, reason}

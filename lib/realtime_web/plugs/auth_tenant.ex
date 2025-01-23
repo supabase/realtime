@@ -27,8 +27,7 @@ defmodule RealtimeWeb.AuthTenant do
       |> assign(:role, claims["role"])
     else
       _error ->
-        conn
-        |> unauthorized()
+        unauthorized(conn)
     end
   end
 

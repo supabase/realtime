@@ -79,8 +79,9 @@ defmodule RealtimeWeb.UserSocket do
           log_error("TenantNotFound", "Tenant not found: #{external_id}")
           {:error, :tenant_not_found}
 
-        {:error, :expired_token, msg} ->
-          log_error("InvalidJWTToken", msg)
+        {:error, :expired_token, msg, claims} ->
+          sub = Map.get(claims, "sub", nil)
+          log_error("InvalidJWTToken", msg, sub: sub)
           {:error, :expired_token}
 
         {:error, :missing_claims} ->

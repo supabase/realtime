@@ -64,11 +64,11 @@ CREATE POLICY "authenticated broadcast on topic" ON "realtime"."messages" AS PER
 
 CREATE POLICY "authenticated jwt topic in wallet can receive" ON "realtime"."messages" AS PERMISSIVE
     FOR SELECT TO authenticated
-        USING ( realtime.topic() like 'jwt_topic:%' AND exists (select wallet_id from public.wallet where wallet_id = (auth.jwt() -> 'sub')::text));
+        USING ( realtime.topic() like 'jwt_topic:%' AND (select true from public.wallet where wallet_id = (select auth.jwt() ->> 'wallet')));
 
 CREATE POLICY "authenticated jwt topic in wallet can broadcast" ON "realtime"."messages" AS PERMISSIVE
     FOR INSERT TO authenticated
-        WITH CHECK ( realtime.topic() like 'jwt_topic:%' AND exists (select wallet_id from public.wallet where wallet_id = (auth.jwt() -> 'sub')::text));
+        WITH CHECK ( realtime.topic() like 'jwt_topic:%' AND (select true from public.wallet where wallet_id = (select auth.jwt() ->> 'wallet')));
 
 CREATE POLICY "allow authenticated users all access" ON "public"."pg_changes" AS PERMISSIVE
     FOR ALL TO authenticated

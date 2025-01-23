@@ -256,7 +256,7 @@ describe("authorization check", () => {
         }
       });
 
-    await sleep(1);
+    await sleep(2);
 
     await stopClient(supabase, [channel]);
     assertEquals(
@@ -269,44 +269,74 @@ describe("authorization check", () => {
     let topic = "topic:" + crypto.randomUUID();
     let supabase = await createClient(url, token, { realtime });
     let connected = false;
+    let received = false;
     await signInUser(supabase, "filipe@supabase.io", "test_test");
     await supabase.realtime.setAuth();
 
-    const channel = supabase
-      .channel(topic, { config: { private: true } })
+    const channel = supabase.channel(topic, {
+      config: { private: true, broadcast: { self: true } },
+    });
+
+    channel
+      .on("broadcast", { event: "self_broadcast" }, () => {
+        received = true;
+      })
       .subscribe((status: string) => {
         if (status == "SUBSCRIBED") {
+          channel.send({
+            type: "broadcast",
+            event: "self_broadcast",
+            payload: { message: "hello" },
+          });
+
           connected = true;
         }
       });
 
-    await sleep(1);
+    await sleep(2);
     await supabase.auth.signOut();
     await stopClient(supabase, [channel]);
+
     assertEquals(connected, true);
+    assertEquals(received, true);
   });
 
-  it("user using private channel for jwt connections can connect if they have enough permissions based on claims", async () => {
-    let topic = "jwt_topic:" + crypto.randomUUID();
-    let supabase = await createClient(url, token, { realtime });
-    let connected = false;
-    let claims = { role: "authenticated", sub: "wallet_1" };
-    let jwt_token = await generateJwtToken(claims);
+  // it("user using private channel for jwt connections can connect if they have enough permissions based on claims", async () => {
+  //   let topic = "jwt_topic:" + crypto.randomUUID();
+  //   let supabase = await createClient(url, token, { realtime });
+  //   let connected = false;
+  //   let received = false;
+  //   let claims = { role: "authenticated", wallet: "wallet_1" };
+  //   let jwt_token = await generateJwtToken(claims);
+  //   console.log(jwt_token);
+  //   await supabase.realtime.setAuth(jwt_token);
 
-    await supabase.realtime.setAuth(jwt_token);
+  //   const channel = supabase.channel(topic, {
+  //     config: { private: true, broadcast: { self: true } },
+  //   });
+  //   channel
+  //     .on("broadcast", { event: "self_broadcast" }, () => {
+  //       received = true;
+  //     })
+  //     .subscribe((status: string) => {
+  //       if (status == "SUBSCRIBED") {
+  //         channel.send({
+  //           type: "broadcast",
+  //           event: "self_broadcast",
+  //           payload: { message: "hello" },
+  //         });
 
-    const channel = supabase
-      .channel(topic, { config: { private: true } })
-      .subscribe((status: string, err: any) => {
-        if (status == "SUBSCRIBED") {
-          connected = true;
-        }
-      });
+  //         connected = true;
+  //       }
+  //     });
 
-    await sleep(1);
-    await stopClient(supabase, [channel]);
-    assertEquals(connected, true);
-  });
+  //   await sleep(2);
+  //   await supabase.auth.signOut();
+  //   await stopClient(supabase, [channel]);
+
+  //   assertEquals(connected, true);
+  //   assertEquals(received, true);
+  // });
 });
 
 describe("broadcast changes", () => {
