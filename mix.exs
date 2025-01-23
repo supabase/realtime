@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.34.4",
+      version: "2.34.5",
       elixir: "~> 1.17.3",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -78,7 +78,8 @@ defmodule Realtime.MixProject do
       {:mint_web_socket, "~> 1.0", only: :test},
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       {:benchee, "~> 1.1.0", only: :dev},
-      {:excoveralls, "~> 0.18", only: [:dev, :test], runtime: false}
+      {:excoveralls, "~> 0.18", only: [:dev, :test], runtime: false},
+      {:floki, ">= 0.30.0", only: :test}
     ]
   end
 

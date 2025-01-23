@@ -408,7 +408,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         shutdown_response(socket, msg)
 
       {:error, error} ->
-        IO.inspect(error)
         msg = "Received an invalid access token from client: " <> inspect(error)
 
         shutdown_response(socket, msg)

@@ -64,13 +64,7 @@ defmodule RealtimeWeb.Router do
   end
 
   scope "/admin", RealtimeWeb do
-    pipe_through(:browser)
-
-    unless Mix.env() in [:dev, :test] do
-      pipe_through(:dashboard_admin)
-    end
-
-    live("/", AdminLive.Index, :index)
+    pipe_through [:browser, :dashboard_admin]
     live("/tenants", TenantsLive.Index, :index)
   end
 
@@ -92,7 +86,6 @@ defmodule RealtimeWeb.Router do
     resources("/tenants", TenantController, param: "tenant_id", except: [:edit, :new])
     post("/tenants/:tenant_id/reload", TenantController, :reload)
     get("/tenants/:tenant_id/health", TenantController, :health)
-    patch("/tenants/:tenant_id/management", TenantController, :patch)
   end
 
   scope "/api", RealtimeWeb do
@@ -115,11 +108,7 @@ defmodule RealtimeWeb.Router do
   # you can use Plug.BasicAuth to set up some basic authentication
   # as long as you are also using SSL (which you should anyway).
   scope "/admin" do
-    pipe_through(:browser)
-
-    unless Mix.env() in [:dev, :test] do
-      pipe_through(:dashboard_admin)
-    end
+    pipe_through [:browser, :dashboard_admin]
 
     live_dashboard("/dashboard",
       ecto_repos: [

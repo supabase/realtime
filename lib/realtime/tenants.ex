@@ -272,25 +272,6 @@ defmodule Realtime.Tenants do
     |> tap(fn _ -> broadcast_operation_event(:unsuspend_tenant, external_id) end)
   end
 
-  @doc """
-  Changes only information regading user managent:
-    :max_concurrent_users
-    :max_events_per_second
-    :max_bytes_per_second
-    :max_channels_per_client
-    :max_joins_per_second
-    :suspend
-    :private_only
-  """
-  @spec update_management(String.t(), map()) :: Tenant.t() | nil
-  def update_management(tenant_id, attrs) do
-    tenant_id
-    |> Cache.get_tenant_by_external_id()
-    |> Tenant.management_changeset(attrs)
-    |> Repo.update!()
-    |> tap(fn _ -> Cache.invalidate_tenant_cache(tenant_id) end)
-  end
-
   defp broadcast_operation_event(action, external_id) do
     Phoenix.PubSub.broadcast!(
       Realtime.PubSub,

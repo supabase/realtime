@@ -78,6 +78,14 @@ defmodule RealtimeWeb.TenantControllerTest do
         refute get_in(response, ["data", "extensions", Access.at(0), "settings", "db_password"])
       end
     end
+
+    test "returns not found on non existing tenant", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        conn = get(conn, Routes.tenant_path(conn, :show, "nope"))
+        response = json_response(conn, 404)
+        assert response == %{"error" => "not found"}
+      end
+    end
   end
 
   describe "create tenant" do
@@ -98,7 +106,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     test "encrypt creds", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         ext_id = @default_tenant_attrs["external_id"]
-        conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @default_tenant_attrs)
+        conn = put(conn, ~p"/api/tenants/#{ext_id}", tenant: @default_tenant_attrs)
         [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
         assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
         assert Crypto.encrypt!("postgres") == settings["db_name"]
@@ -113,8 +121,15 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "renders errors when data is invalid", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        conn = post(conn, Routes.tenant_path(conn, :create), tenant: @invalid_attrs)
+        conn = post(conn, ~p"/api/tenants", tenant: @invalid_attrs)
         assert json_response(conn, 422)["errors"] != %{}
+      end
+    end
+
+    test "returns 403 when jwt is invalid", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:error, "invalid"} end do
+        conn = post(conn, ~p"/api/tenants", tenant: @default_tenant_attrs)
+        assert response(conn, 403)
       end
     end
   end
@@ -127,7 +142,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       tenant: %Tenant{id: id, external_id: ext_id} = _tenant
     } do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @update_attrs)
+        conn = put(conn, ~p"/api/tenants/#{ext_id}", tenant: @update_attrs)
         assert %{"id" => ^id, "external_id" => ^ext_id} = json_response(conn, 200)["data"]
         conn = get(conn, Routes.tenant_path(conn, :show, ext_id))
         assert "some updated name" = json_response(conn, 200)["data"]["name"]
@@ -140,10 +155,15 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "renders errors when data is invalid", %{conn: conn, tenant: tenant} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        conn =
-          put(conn, Routes.tenant_path(conn, :update, tenant.external_id), tenant: @invalid_attrs)
-
+        conn = put(conn, ~p"/api/tenants/#{tenant.external_id}", tenant: @invalid_attrs)
         assert json_response(conn, 422)["errors"] != %{}
+      end
+    end
+
+    test "returns 404 when jwt is invalid", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:error, "invalid"} end do
+        conn = put(conn, ~p"/api/tenants", tenant: @default_tenant_attrs)
+        assert json_response(conn, 404) == "Not Found"
       end
     end
   end
@@ -167,7 +187,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         assert %{rows: [["supabase_realtime_messages_replication_slot_"]]} =
                  Postgrex.query!(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
 
-        conn = delete(conn, Routes.tenant_path(conn, :delete, tenant.external_id))
+        conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
         assert response(conn, 204)
 
         Process.sleep(5000)
@@ -181,8 +201,15 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "tenant doesn't exist", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        conn = delete(conn, Routes.tenant_path(conn, :delete, "wrong_external_id"))
+        conn = delete(conn, ~p"/api/tenants/nope")
         assert response(conn, 204)
+      end
+    end
+
+    test "returns 404 when jwt is invalid", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:error, "invalid"} end do
+        conn = delete(conn, ~p"/api/tenants")
+        assert json_response(conn, 404) == "Not Found"
       end
     end
   end
@@ -192,17 +219,22 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "reload when tenant does exist", %{conn: conn, tenant: tenant} do
       with_mock ChannelsAuthorization, authorize: fn _, _, _ -> {:ok, %{}} end do
-        Routes.tenant_path(conn, :reload, tenant.external_id)
-        %{status: status} = post(conn, Routes.tenant_path(conn, :reload, "wrong_external_id"))
-        assert status == 404
+        %{status: status} = post(conn, ~p"/api/tenants/#{tenant.external_id}/reload")
+        assert status == 204
       end
     end
 
     test "reload when tenant does not exist", %{conn: conn} do
       with_mock ChannelsAuthorization, authorize: fn _, _, _ -> {:ok, %{}} end do
-        Routes.tenant_path(conn, :reload, "wrong_external_id")
-        %{status: status} = post(conn, Routes.tenant_path(conn, :reload, "wrong_external_id"))
+        %{status: status} = post(conn, ~p"/api/tenants/nope/reload")
         assert status == 404
+      end
+    end
+
+    test "returns 404 when jwt is invalid", %{conn: conn, tenant: tenant} do
+      with_mock ChannelsAuthorization, authorize: fn _, _, _ -> {:error, "invalid"} end do
+        conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}/reload")
+        assert json_response(conn, 404) == "Not Found"
       end
     end
   end
@@ -217,8 +249,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "health check when tenant does not exist", %{conn: conn} do
       with_mock ChannelsAuthorization, authorize: fn _, _, _ -> {:ok, %{}} end do
-        Routes.tenant_path(conn, :reload, "wrong_external_id")
-        %{status: status} = get(conn, Routes.tenant_path(conn, :health, "wrong_external_id"))
+        %{status: status} = get(conn, ~p"/api/tenants/nope/health")
         assert status == 404
       end
     end
@@ -228,7 +259,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       tenant: %Tenant{external_id: ext_id}
     } do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
+        conn = get(conn, ~p"/api/tenants/#{ext_id}/health")
         data = json_response(conn, 200)["data"]
 
         assert %{
@@ -250,7 +281,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         # No connection to the tenant database
         UsersCounter.add(self(), ext_id)
 
-        conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
+        conn = get(conn, ~p"/api/tenants/#{ext_id}/health")
         data = json_response(conn, 200)["data"]
 
         assert %{
@@ -279,7 +310,7 @@ defmodule RealtimeWeb.TenantControllerTest do
           %{meta | conn: db_conn}
         end)
 
-        conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
+        conn = get(conn, ~p"/api/tenants/#{ext_id}/health")
         data = json_response(conn, 200)["data"]
 
         assert %{
@@ -307,7 +338,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
         assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
-        conn = get(conn, Routes.tenant_path(conn, :health, ext_id))
+        conn = get(conn, ~p"/api/tenants/#{ext_id}/health")
         data = json_response(conn, 200)["data"]
         Process.sleep(2000)
 
@@ -316,38 +347,11 @@ defmodule RealtimeWeb.TenantControllerTest do
         assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
       end
     end
-  end
 
-  describe "update tenant management information" do
-    setup [:create_tenant]
-
-    test "changes management information and returns updated values", %{
-      conn: conn,
-      tenant: tenant
-    } do
-      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        attrs = %{
-          "max_concurrent_users" => 300,
-          "max_channels_per_client" => 150,
-          "max_events_per_second" => 250,
-          "max_joins_per_second" => 50,
-          "private_only" => true
-        }
-
-        conn = patch(conn, Routes.tenant_path(conn, :patch, tenant.external_id), attrs)
-        data = json_response(conn, 200)["data"]
-        assert data["max_concurrent_users"] == 300
-        assert data["max_channels_per_client"] == 150
-        assert data["max_events_per_second"] == 250
-        assert data["max_joins_per_second"] == 50
-        assert data["private_only"] == true
-
-        tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
-        assert tenant.max_concurrent_users == 300
-        assert tenant.max_channels_per_client == 150
-        assert tenant.max_events_per_second == 250
-        assert tenant.max_joins_per_second == 50
-        assert tenant.private_only == true
+    test "returns 404 when jwt is invalid", %{conn: conn, tenant: tenant} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:error, "invalid"} end do
+        conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+        assert json_response(conn, 404) == "Not Found"
       end
     end
   end

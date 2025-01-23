@@ -102,16 +102,4 @@ defmodule Realtime.Api.Tenant do
   def encrypt_jwt_secret(changeset) do
     update_change(changeset, :jwt_secret, &Crypto.encrypt!/1)
   end
-
-  def management_changeset(tenant, attrs) do
-    cast(tenant, attrs, [
-      :max_concurrent_users,
-      :max_events_per_second,
-      :max_bytes_per_second,
-      :max_channels_per_client,
-      :max_joins_per_second,
-      :suspend,
-      :private_only
-    ])
-  end
 end
