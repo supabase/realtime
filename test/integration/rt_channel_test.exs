@@ -858,8 +858,8 @@ defmodule Realtime.Integration.RtChannelTest do
     test "user with only private channels enabled will not be able to join public channels", %{
       topic: topic
     } do
-      Realtime.Tenants.update_management(@external_id, %{private_only: true})
-      Process.sleep(100)
+      set_private_only(true)
+
       {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}, private: false}
       topic = "realtime:#{topic}"
@@ -874,8 +874,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
 
-      Realtime.Tenants.update_management(@external_id, %{private_only: false})
-      Process.sleep(100)
+      set_private_only(false)
     end
 
     @tag policies: [
@@ -885,16 +884,19 @@ defmodule Realtime.Integration.RtChannelTest do
     test "user with only private channels enabled will be able to join private channels", %{
       topic: topic
     } do
-      Realtime.Tenants.update_management(@external_id, %{private_only: true})
+      set_private_only(true)
+
+      Realtime.Tenants.Cache.invalidate_tenant_cache(@external_id)
+
       Process.sleep(100)
+
       {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      Realtime.Tenants.update_management(@external_id, %{private_only: false})
-      Process.sleep(100)
+      set_private_only(false)
     end
   end
 
@@ -1094,5 +1096,14 @@ defmodule Realtime.Integration.RtChannelTest do
     context
     |> Map.put(:db_conn, db_conn)
     |> Map.put(:table_name, random_name)
+  end
+
+  defp set_private_only(value) do
+    @external_id
+    |> Realtime.Tenants.get_tenant_by_external_id()
+    |> Realtime.Api.Tenant.changeset(%{private_only: value})
+    |> Realtime.Repo.update!()
+
+    Realtime.Tenants.Cache.invalidate_tenant_cache(@external_id)
   end
 end
