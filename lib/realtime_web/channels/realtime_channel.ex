@@ -180,6 +180,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :unauthorized, msg} ->
         Logging.log_error_message(:error, "Unauthorized", msg)
 
+      {:error, :expired_token, msg} ->
+        Logging.log_error_message(:error, "InvalidJWTToken", msg)
+
       {:error, error} ->
         Logging.log_error_message(:error, "UnknownErrorOnChannel", error)
     end
