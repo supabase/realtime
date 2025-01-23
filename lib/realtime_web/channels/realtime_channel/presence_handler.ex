@@ -24,7 +24,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         %{assigns: %{is_new_api: true, presence_key: _, tenant_topic: _}} = socket
       ) do
     socket = count(socket)
-    result = handle_presence_event(event, payload, socket)
+    {result, socket} = handle_presence_event(event, payload, socket)
 
     {:reply, result, socket}
   end
@@ -60,36 +60,37 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     authorization_context = socket.assigns.authorization_context
     db_conn = socket.assigns.db_conn
 
-    {:ok, %{assigns: %{policies: policies}}} =
-      run_authorization_check(socket, db_conn, authorization_context)
+    {:ok, socket} = run_authorization_check(socket, db_conn, authorization_context)
+
+    %{assigns: %{policies: policies}} = socket
 
     cond do
       match?(%Policies{presence: %PresencePolicies{write: false}}, policies) ->
         Logger.info("Presence message ignored on #{tenant_topic}")
-        :ok
+        {:ok, socket}
 
       String.downcase(event) == "track" ->
         payload = Map.get(payload, "payload", %{})
 
         case Presence.track(self(), tenant_topic, presence_key, payload) do
           {:ok, _} ->
-            :ok
+            {:ok, socket}
 
           {:error, {:already_tracked, _, _, _}} ->
             case Presence.update(self(), tenant_topic, presence_key, payload) do
-              {:ok, _} -> :ok
-              {:error, _} -> :error
+              {:ok, _} -> {:ok, socket}
+              {:error, _} -> {:error, socket}
             end
 
           {:error, _} ->
-            :error
+            {:error, socket}
         end
 
       String.downcase(event) == "untrack" ->
-        Presence.untrack(self(), tenant_topic, presence_key)
+        {Presence.untrack(self(), tenant_topic, presence_key), socket}
 
       true ->
-        :error
+        {:error, socket}
     end
   end
 
