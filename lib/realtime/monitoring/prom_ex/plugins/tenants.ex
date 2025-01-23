@@ -45,6 +45,16 @@ defmodule Realtime.PromEx.Plugins.Tenants do
           event_name: @event_connected,
           description: "The total count of connected tenants.",
           measurement: :connected
+        ),
+        last_value([:realtime, :tenants, :read_authorization_check],
+          event_name: [:prom_ex, :plugin, :realtime, :tenants, :read_authorization_check],
+          description: "The total count of read authorization checks.",
+          measurement: :read_authorization_check
+        ),
+        last_value([:realtime, :tenants, :write_authorization_check],
+          event_name: [:prom_ex, :plugin, :realtime, :tenants, :write_authorization_check],
+          description: "The total count of write authorization checks.",
+          measurement: :write_authorization_check
         )
       ]
     )
