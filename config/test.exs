@@ -44,3 +44,8 @@ config :joken,
 
 # Print only errors during test
 config :logger, level: :error
+
+# Configures Elixir's Logger
+config :logger, :console,
+  format: "$time $metadata[$level] $message\n",
+  metadata: [:request_id, :project, :external_id, :application_name, :sub]

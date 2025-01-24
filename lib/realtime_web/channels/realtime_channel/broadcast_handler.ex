@@ -69,7 +69,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   defp increment_rate_counter(%{assigns: %{rate_counter: counter}} = socket) do
     GenCounter.add(counter.id)
     {:ok, rate_counter} = RateCounter.get(counter.id)
-
     assign(socket, :rate_counter, rate_counter)
   end
 
