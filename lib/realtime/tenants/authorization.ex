@@ -177,8 +177,7 @@ defmodule Realtime.Tenants.Authorization do
 
         Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
         policies
-      end,
-      telemetry: [:realtime, :tenants, :read_authorization_check]
+      end
     )
   end
 
@@ -198,8 +197,7 @@ defmodule Realtime.Tenants.Authorization do
         Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
 
         policies
-      end,
-      telemetry: [:realtime, :tenants, :write_authorization_check]
+      end
     )
   end
 

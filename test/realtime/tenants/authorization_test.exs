@@ -232,6 +232,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
   end
 
   describe "telemetry" do
+    @tag :skip
     @tag role: "authenticated",
          policies: [
            :authenticated_read_broadcast_and_presence,
