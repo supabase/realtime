@@ -354,6 +354,33 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
     end
+
+    @tag policies: []
+    test "private broadcast with valid channel and no read permissions won't join",
+         %{topic: topic} do
+      config = %{private: true}
+
+      expected = "You do not have permissions to read from this Channel topic: #{topic}"
+
+      topic = "realtime:#{topic}"
+      {socket, _} = get_connection("authenticated")
+
+      assert capture_log(fn ->
+               WebsocketClient.join(socket, topic, %{config: config})
+               Process.sleep(500)
+             end) =~ "Unauthorized: #{expected}"
+
+      assert_receive %Message{
+                       topic: ^topic,
+                       event: "phx_reply",
+                       payload: %{"response" => %{"reason" => reason}, "status" => "error"}
+                     },
+                     1000
+
+      assert reason == expected
+      refute_receive %Message{event: "phx_reply", topic: ^topic}, 1000
+      refute_receive %Message{event: "presence_state"}, 1000
+    end
   end
 
   describe "handle presence extension" do
@@ -461,7 +488,7 @@ defmodule Realtime.Integration.RtChannelTest do
       # This will be ignored
       WebsocketClient.send_event(socket, topic, "presence", payload)
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        topic: ^topic,
                        event: "phx_reply",
                        payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"},
@@ -494,7 +521,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        topic: ^topic,
                        event: "presence_diff",
                        join_ref: nil
@@ -547,8 +574,8 @@ defmodule Realtime.Integration.RtChannelTest do
         access_token: access_token
       })
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
         "access_token" => new_token
@@ -557,7 +584,7 @@ defmodule Realtime.Integration.RtChannelTest do
       error_message =
         "You do not have permissions to read from this Channel topic: #{topic}"
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
         event: "system",
         payload: %{
           "channel" => ^topic,
@@ -568,7 +595,7 @@ defmodule Realtime.Integration.RtChannelTest do
         topic: ^realtime_topic
       }
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_close", topic: ^realtime_topic}
+      assert_receive %Message{event: "phx_close", topic: ^realtime_topic}
     end
 
     test "on new access_token and channel is public policies are not reevaluated",
@@ -580,14 +607,14 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
         "access_token" => new_token
       })
 
-      refute_receive %Phoenix.Socket.Message{}
+      refute_receive %Message{}
     end
 
     test "on empty string access_token the socket sends an error message",
@@ -598,12 +625,12 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => ""})
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
         topic: ^realtime_topic,
         event: "system",
         payload: %{
@@ -626,8 +653,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
       {:ok, token} = generate_token(%{:exp => System.system_time(:second) - 1000, sub: sub})
 
       assert capture_log(fn ->
@@ -635,7 +662,7 @@ defmodule Realtime.Integration.RtChannelTest do
                  "access_token" => token
                })
 
-               assert_receive %Phoenix.Socket.Message{
+               assert_receive %Message{
                  topic: ^realtime_topic,
                  event: "system",
                  payload: %{
@@ -666,7 +693,7 @@ defmodule Realtime.Integration.RtChannelTest do
             "access_token" => token
           })
 
-          assert_receive %Phoenix.Socket.Message{event: "system"}, 500
+          assert_receive %Message{event: "system"}, 500
         end)
 
       assert log =~ "ChannelShutdown"
@@ -683,15 +710,15 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
       {:ok, token} = generate_token(%{:exp => System.system_time(:second) + 2000})
       # Update token to be a near expiring token
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
         "access_token" => token
       })
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "system",
                        payload: %{
                          "extension" => "system",
@@ -701,7 +728,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+      assert_receive %Message{event: "phx_close"}
     end
 
     test "checks token periodically",
@@ -714,8 +741,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, token} =
         generate_token(%{:exp => System.system_time(:second) + 2, role: "authenticated"})
@@ -726,7 +753,7 @@ defmodule Realtime.Integration.RtChannelTest do
       })
 
       # Awaits to see if connection closes automatically
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "system",
                        payload: %{
                          "extension" => "system",
@@ -736,7 +763,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      3000
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+      assert_receive %Message{event: "phx_close"}
 
       assert msg =~ "Token as expired"
     end
@@ -748,8 +775,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, access_token} =
         generate_token(%{:exp => System.system_time(:second) + 1, role: "authenticated"})
@@ -759,7 +786,7 @@ defmodule Realtime.Integration.RtChannelTest do
       realtime_topic = "realtime:#{topic}"
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "phx_reply",
                        payload: %{
                          "status" => "error",
@@ -769,7 +796,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+      assert_receive %Message{event: "phx_close"}
     end
 
     test "token loses claims in between joins", %{topic: topic} do
@@ -779,8 +806,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, access_token} = generate_token(%{:exp => System.system_time(:second) + 10})
 
@@ -789,7 +816,7 @@ defmodule Realtime.Integration.RtChannelTest do
       realtime_topic = "realtime:#{topic}"
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "phx_reply",
                        payload: %{
                          "status" => "error",
@@ -801,7 +828,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+      assert_receive %Message{event: "phx_close"}
     end
 
     test "token is badly formatted in between joins", %{topic: topic} do
@@ -811,15 +838,15 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
       # token beconmes a string in between joins so it needs to be handled by the channel and not the socket
       Process.sleep(1000)
       realtime_topic = "realtime:#{topic}"
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: "potato"})
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "phx_reply",
                        payload: %{
                          "status" => "error",
@@ -829,7 +856,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+      assert_receive %Message{event: "phx_close"}
     end
   end
 
@@ -1061,7 +1088,7 @@ defmodule Realtime.Integration.RtChannelTest do
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "phx_reply",
                        payload: %{
                          "response" => %{"reason" => "This project only allows private channels"},
@@ -1091,7 +1118,7 @@ defmodule Realtime.Integration.RtChannelTest do
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
       change_tenant_configuration(:private_only, false)
     end
   end
@@ -1106,12 +1133,12 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["potato"]}})
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        topic: ^realtime_topic,
                        event: "system",
                        payload: %{
@@ -1130,13 +1157,13 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_secret: "potato"})
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        topic: ^realtime_topic,
                        event: "system",
                        payload: %{
@@ -1155,13 +1182,13 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{max_concurrent_users: 100})
 
-      refute_receive %Phoenix.Socket.Message{
+      refute_receive %Message{
                        topic: ^realtime_topic,
                        event: "system",
                        payload: %{
@@ -1172,15 +1199,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
     end
-  end
 
-  describe "invalid jwt handling" do
-    setup [:rls_context]
-
-    @tag policies: [
-           :authenticated_read_broadcast_and_presence,
-           :authenticated_write_broadcast_and_presence
-         ]
     test "invalid JWT with expired token" do
       assert capture_log(fn ->
                get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
@@ -1203,7 +1222,7 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config})
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "phx_reply",
                        payload: %{
                          "response" => %{
@@ -1214,7 +1233,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+      assert_receive %Message{event: "phx_close"}
 
       change_tenant_configuration(:max_concurrent_users, max_concurrent_users)
     end
@@ -1236,7 +1255,7 @@ defmodule Realtime.Integration.RtChannelTest do
         WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
       end
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "system",
                        payload: %{
                          "status" => "error",
@@ -1246,7 +1265,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      2000
 
-      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+      assert_receive %Message{event: "phx_close"}
 
       change_tenant_configuration(:max_events_per_second, max_concurrent_users)
     end
@@ -1265,17 +1284,17 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, realtime_topic_1, %{config: config})
       WebsocketClient.join(socket, realtime_topic_2, %{config: config})
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "phx_reply",
                        payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"},
                        topic: ^realtime_topic_1
                      },
                      500
 
-      assert_receive %Phoenix.Socket.Message{event: "presence_state", topic: ^realtime_topic_1},
+      assert_receive %Message{event: "presence_state", topic: ^realtime_topic_1},
                      500
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "phx_reply",
                        payload: %{
                          "status" => "error",
@@ -1286,10 +1305,10 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
 
-      refute_receive %Phoenix.Socket.Message{event: "phx_reply", topic: ^realtime_topic_2},
+      refute_receive %Message{event: "phx_reply", topic: ^realtime_topic_2},
                      500
 
-      refute_receive %Phoenix.Socket.Message{event: "presence_state", topic: ^realtime_topic_2},
+      refute_receive %Message{event: "presence_state", topic: ^realtime_topic_2},
                      500
 
       change_tenant_configuration(:max_channels_per_client, max_concurrent_users)
@@ -1309,7 +1328,7 @@ defmodule Realtime.Integration.RtChannelTest do
         WebsocketClient.join(socket, realtime_topic, %{config: config})
       end
 
-      assert_receive %Phoenix.Socket.Message{
+      assert_receive %Message{
                        event: "phx_reply",
                        payload: %{
                          "response" => %{
@@ -1331,7 +1350,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
     WebsocketClient.join(socket, realtime_topic, %{config: config})
 
-    assert_receive %Phoenix.Socket.Message{
+    assert_receive %Message{
                      event: "phx_reply",
                      payload: %{
                        "response" => %{"reason" => "You must provide a topic name"},
@@ -1340,8 +1359,8 @@ defmodule Realtime.Integration.RtChannelTest do
                    },
                    500
 
-    refute_receive %Phoenix.Socket.Message{event: "phx_reply"}
-    refute_receive %Phoenix.Socket.Message{event: "presence_state"}
+    refute_receive %Message{event: "phx_reply"}
+    refute_receive %Message{event: "presence_state"}
   end
 
   defp token_valid(role, claims \\ %{}), do: generate_token(Map.put(claims, :role, role))

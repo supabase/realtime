@@ -114,6 +114,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "Token claims must be a map"
         Logging.log_error_message(:error, "InvalidJWTToken", msg)
 
+      {:error, :unauthorized, msg} ->
+        Logging.log_error_message(:error, "Unauthorized", msg)
+
       {:error, :too_many_channels} ->
         msg = "Too many channels"
         Logging.log_error_message(:error, "ChannelRateLimitReached", msg)
