@@ -20,13 +20,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     max_bytes_per_second: 100_000
   }
 
-  @default_conn_opts [
-    connect_info: %{
-      uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
-      x_headers: [{"x-api-key", "token123"}]
-    }
-  ]
-
   setup do
     start_supervised!(CurrentTime.Mock)
     :ok
@@ -42,7 +35,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]}
       ]) do
-        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts())
 
         socket = Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 1}})
         assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
@@ -58,7 +51,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]}
       ]) do
-        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts())
 
         socket_at_capacity =
           Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 0}})
@@ -85,7 +78,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]}
       ]) do
-        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts())
 
         assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
       end
@@ -100,7 +93,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]}
       ]) do
-        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts())
 
         assert capture_log(fn ->
                  assert {:error, %{reason: "Token expiration time is invalid"}} =
@@ -116,7 +109,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
            end
          ]}
       ]) do
-        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+        {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts())
 
         assert capture_log(fn ->
                  assert {:error, %{reason: "Token expiration time is invalid"}} =
@@ -125,13 +118,61 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       end
     end
 
-    test "missing claims returns a informative error" do
+    test "missing claims returns a error" do
       with_mock ChannelsAuthorization, [],
         authorize_conn: fn _, _, _ -> {:error, :missing_claims} end do
-        assert capture_log(fn ->
-                 assert {:error, :missing_claims} =
-                          connect(UserSocket, %{}, @default_conn_opts)
-               end) =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
+        log =
+          capture_log(fn ->
+            assert {:error, :missing_claims} = connect(UserSocket, %{}, conn_opts())
+          end)
+
+        assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
+      end
+    end
+
+    test "missing claims returns a error with sub in metadata if available" do
+      with_mock ChannelsAuthorization, [],
+        authorize_conn: fn _, _, _ -> {:error, :missing_claims} end do
+        sub = random_string()
+
+        log =
+          capture_log(fn ->
+            assert {:error, :missing_claims} = connect(UserSocket, %{}, conn_opts(%{sub: sub}))
+          end)
+
+        assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
+        assert log =~ "sub=#{sub}"
+      end
+    end
+
+    test "expired token returns a error" do
+      with_mock ChannelsAuthorization, [],
+        authorize_conn: fn _, _, _ ->
+          {:error, :expired_token, "InvalidJWTToken: Token as expired 1000 seconds ago"}
+        end do
+        sub = random_string()
+
+        log =
+          capture_log(fn ->
+            assert {:error, :expired_token} = connect(UserSocket, %{}, conn_opts(%{sub: sub}))
+          end)
+
+        assert log =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
+        assert log =~ "sub=#{sub}"
+      end
+    end
+
+    test "expired token returns a error with sub in metadata if available" do
+      with_mock ChannelsAuthorization, [],
+        authorize_conn: fn _, _, _ ->
+          {:error, :expired_token, "InvalidJWTToken: Token as expired 1000 seconds ago"}
+        end do
+        log =
+          capture_log(fn ->
+            assert {:error, :expired_token} = connect(UserSocket, %{}, conn_opts())
+          end)
+
+        assert log =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
       end
     end
   end
@@ -147,7 +188,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
 
     test "successful connection proceeds with join" do
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, @default_conn_opts)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts())
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
@@ -184,5 +225,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:error, %{reason: "Realtime was unable to connect to the project database"}} =
                subscribe_and_join(socket, "realtime:test", %{})
     end
+  end
+
+  defp conn_opts(claims \\ %{}) do
+    [
+      connect_info: %{
+        uri: %{host: "#{@tenant}.localhost:4000/socket/websocket", query: ""},
+        x_headers: [{"x-api-key", generate_jwt_token("secret", claims)}]
+      }
+    ]
   end
 end

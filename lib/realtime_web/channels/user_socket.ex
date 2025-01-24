@@ -19,6 +19,12 @@ defmodule RealtimeWeb.UserSocket do
   @default_log_level "error"
 
   @impl true
+  def id(%{assigns: %{tenant: tenant}}), do: subscribers_id(tenant)
+
+  @spec subscribers_id(String.t()) :: String.t()
+  def subscribers_id(tenant), do: "user_socket:" <> tenant
+
+  @impl true
   def connect(params, socket, opts) do
     if Application.fetch_env!(:realtime, :secure_channels) do
       %{uri: %{host: host}, x_headers: headers} = opts
@@ -36,6 +42,7 @@ defmodule RealtimeWeb.UserSocket do
 
       Logger.metadata(external_id: external_id, project: external_id)
       Logger.put_process_level(self(), log_level)
+      token = access_token(params, headers)
 
       with %Tenant{
              extensions: extensions,
@@ -48,7 +55,7 @@ defmodule RealtimeWeb.UserSocket do
              max_channels_per_client: max_channels_per_client,
              postgres_cdc_default: postgres_cdc_default
            } <- Tenants.Cache.get_tenant_by_external_id(external_id),
-           token when is_binary(token) <- access_token(params, headers),
+           token when is_binary(token) <- token,
            jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
            {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
@@ -80,11 +87,11 @@ defmodule RealtimeWeb.UserSocket do
           {:error, :tenant_not_found}
 
         {:error, :expired_token, msg} ->
-          log_error("InvalidJWTToken", msg)
+          log_error_with_token_metadata(msg, token)
           {:error, :expired_token}
 
         {:error, :missing_claims} ->
-          log_error("InvalidJWTToken", "Fields `role` and `exp` are required in JWT")
+          log_error_with_token_metadata("Fields `role` and `exp` are required in JWT", token)
           {:error, :missing_claims}
 
         error ->
@@ -94,16 +101,21 @@ defmodule RealtimeWeb.UserSocket do
     end
   end
 
-  def access_token(params, headers) do
+  defp access_token(params, headers) do
     case :proplists.lookup("x-api-key", headers) do
       :none -> Map.get(params, "apikey")
       {"x-api-key", token} -> token
     end
   end
 
-  @impl true
-  def id(%{assigns: %{tenant: tenant}}), do: subscribers_id(tenant)
+  defp log_error_with_token_metadata(msg, token) do
+    case Joken.peek_claims(token) do
+      {:ok, claims} ->
+        sub = Map.get(claims, "sub")
+        log_error("InvalidJWTToken", msg, sub: sub)
 
-  @spec subscribers_id(String.t()) :: String.t()
-  def subscribers_id(tenant), do: "user_socket:" <> tenant
+      _ ->
+        log_error("InvalidJWTToken", msg)
+    end
+  end
 end

@@ -616,8 +616,10 @@ defmodule Realtime.Integration.RtChannelTest do
 
     test "on expired access_token the socket sends an error message",
          %{topic: topic} do
+      sub = random_string()
+
       {socket, access_token} =
-        get_connection("authenticated")
+        get_connection("authenticated", %{sub: sub})
 
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
@@ -626,7 +628,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
       assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
-      {:ok, token} = generate_token(%{:exp => System.system_time(:second) - 1000})
+      {:ok, token} = generate_token(%{:exp => System.system_time(:second) - 1000, sub: sub})
 
       assert capture_log(fn ->
                WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
@@ -642,8 +644,33 @@ defmodule Realtime.Integration.RtChannelTest do
                    "status" => "error"
                  }
                }
-             end) =~
-               "ChannelShutdown: Token as expired 1000 seconds ago"
+             end) =~ "ChannelShutdown: Token as expired 1000 seconds ago"
+    end
+
+    test "ChannelShutdown include sub if available in jwt claims",
+         %{topic: topic} do
+      sub = random_string()
+
+      {socket, access_token} =
+        get_connection("authenticated", %{sub: sub})
+
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+      {:ok, token} = generate_token(%{:exp => System.system_time(:second) - 1000, sub: sub})
+
+      log =
+        capture_log(fn ->
+          WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+            "access_token" => token
+          })
+
+          assert_receive %Phoenix.Socket.Message{event: "system"}, 500
+        end)
+
+      assert log =~ "ChannelShutdown"
+      assert log =~ "sub=#{sub}"
     end
 
     test "missing claims close connection",
@@ -712,6 +739,97 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Phoenix.Socket.Message{event: "phx_close"}
 
       assert msg =~ "Token as expired"
+    end
+
+    test "token expires in between joins", %{topic: topic} do
+      {socket, access_token} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+
+      {:ok, access_token} =
+        generate_token(%{:exp => System.system_time(:second) + 1, role: "authenticated"})
+
+      # token expires in between joins so it needs to be handled by the channel and not the socket
+      Process.sleep(1000)
+      realtime_topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "status" => "error",
+                         "response" => %{"reason" => "Token as expired 0 seconds ago"}
+                       },
+                       topic: ^realtime_topic
+                     },
+                     500
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+    end
+
+    test "token loses claims in between joins", %{topic: topic} do
+      {socket, access_token} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+
+      {:ok, access_token} = generate_token(%{:exp => System.system_time(:second) + 10})
+
+      # token breaks claims in between joins so it needs to be handled by the channel and not the socket
+      Process.sleep(1000)
+      realtime_topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "status" => "error",
+                         "response" => %{
+                           "reason" => "Fields `role` and `exp` are required in JWT"
+                         }
+                       },
+                       topic: ^realtime_topic
+                     },
+                     500
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+    end
+
+    test "token is badly formatted in between joins", %{topic: topic} do
+      {socket, access_token} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+
+      # token beconmes a string in between joins so it needs to be handled by the channel and not the socket
+      Process.sleep(1000)
+      realtime_topic = "realtime:#{topic}"
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: "potato"})
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "status" => "error",
+                         "response" => %{"reason" => "Token claims must be a map"}
+                       },
+                       topic: ^realtime_topic
+                     },
+                     500
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
     end
   end
 
@@ -936,7 +1054,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "user with only private channels enabled will not be able to join public channels", %{
       topic: topic
     } do
-      set_private_only(true)
+      change_tenant_configuration(:private_only, true)
 
       {socket, _} = get_connection("authenticated")
       config = %{broadcast: %{self: true}, private: false}
@@ -952,7 +1070,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
 
-      set_private_only(false)
+      change_tenant_configuration(:private_only, false)
     end
 
     @tag policies: [
@@ -962,7 +1080,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "user with only private channels enabled will be able to join private channels", %{
       topic: topic
     } do
-      set_private_only(true)
+      change_tenant_configuration(:private_only, true)
 
       Realtime.Tenants.Cache.invalidate_tenant_cache(@external_id)
 
@@ -974,7 +1092,7 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-      set_private_only(false)
+      change_tenant_configuration(:private_only, false)
     end
   end
 
@@ -1056,6 +1174,156 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
+  describe "invalid jwt handling" do
+    setup [:rls_context]
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "invalid JWT with expired token" do
+      assert capture_log(fn ->
+               get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
+             end) =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
+    end
+  end
+
+  describe "rate limits" do
+    setup [:rls_context]
+
+    test "max_concurrent_users limit respected" do
+      %{max_concurrent_users: max_concurrent_users} =
+        Tenants.get_tenant_by_external_id(@external_id)
+
+      change_tenant_configuration(:max_concurrent_users, 1)
+
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{random_string()}"
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "reason" => "Too many connected users"
+                         },
+                         "status" => "error"
+                       }
+                     },
+                     500
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+
+      change_tenant_configuration(:max_concurrent_users, max_concurrent_users)
+    end
+
+    test "max_events_per_second limit respected" do
+      %{max_events_per_second: max_concurrent_users} =
+        Tenants.get_tenant_by_external_id(@external_id)
+
+      change_tenant_configuration(:max_events_per_second, 1)
+
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{random_string()}"
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+      for _ <- 1..10 do
+        Process.sleep(100)
+
+        WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
+      end
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "system",
+                       payload: %{
+                         "status" => "error",
+                         "extension" => "system",
+                         "message" => "Too many messages per second"
+                       }
+                     },
+                     2000
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+
+      change_tenant_configuration(:max_events_per_second, max_concurrent_users)
+    end
+
+    test "max_channels_per_client limit respected" do
+      %{max_events_per_second: max_concurrent_users} =
+        Tenants.get_tenant_by_external_id(@external_id)
+
+      change_tenant_configuration(:max_channels_per_client, 1)
+
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic_1 = "realtime:#{random_string()}"
+      realtime_topic_2 = "realtime:#{random_string()}"
+
+      WebsocketClient.join(socket, realtime_topic_1, %{config: config})
+      WebsocketClient.join(socket, realtime_topic_2, %{config: config})
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "phx_reply",
+                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"},
+                       topic: ^realtime_topic_1
+                     },
+                     500
+
+      assert_receive %Phoenix.Socket.Message{event: "presence_state", topic: ^realtime_topic_1},
+                     500
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "status" => "error",
+                         "response" => %{"reason" => "Too many channels"}
+                       },
+                       join_ref: nil,
+                       topic: ^realtime_topic_2
+                     },
+                     500
+
+      refute_receive %Phoenix.Socket.Message{event: "phx_reply", topic: ^realtime_topic_2},
+                     500
+
+      refute_receive %Phoenix.Socket.Message{event: "presence_state", topic: ^realtime_topic_2},
+                     500
+
+      change_tenant_configuration(:max_channels_per_client, max_concurrent_users)
+    end
+
+    test "max_joins_per_second limit respected" do
+      %{max_joins_per_second: max_joins_per_second} =
+        Tenants.get_tenant_by_external_id(@external_id)
+
+      change_tenant_configuration(:max_joins_per_second, 1)
+
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{random_string()}"
+
+      for _ <- 1..10 do
+        WebsocketClient.join(socket, realtime_topic, %{config: config})
+      end
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "reason" => "Too many joins per second"
+                         },
+                         "status" => "error"
+                       }
+                     },
+                     2000
+
+      change_tenant_configuration(:max_joins_per_second, max_joins_per_second)
+    end
+  end
+
   test "handle empty topic by closing the socket" do
     {socket, _} = get_connection("authenticated")
     config = %{broadcast: %{self: true}, private: false}
@@ -1064,12 +1332,16 @@ defmodule Realtime.Integration.RtChannelTest do
     WebsocketClient.join(socket, realtime_topic, %{config: config})
 
     assert_receive %Phoenix.Socket.Message{
-      event: "phx_reply",
-      payload: %{
-        "response" => %{"reason" => "You must provide a topic name"},
-        "status" => "error"
-      }
-    }
+                     event: "phx_reply",
+                     payload: %{
+                       "response" => %{"reason" => "You must provide a topic name"},
+                       "status" => "error"
+                     }
+                   },
+                   500
+
+    refute_receive %Phoenix.Socket.Message{event: "phx_reply"}
+    refute_receive %Phoenix.Socket.Message{event: "presence_state"}
   end
 
   defp token_valid(role, claims \\ %{}), do: generate_token(Map.put(claims, :role, role))
@@ -1162,10 +1434,10 @@ defmodule Realtime.Integration.RtChannelTest do
     |> Map.put(:table_name, random_name)
   end
 
-  defp set_private_only(value) do
+  defp change_tenant_configuration(limit, value) do
     @external_id
     |> Realtime.Tenants.get_tenant_by_external_id()
-    |> Realtime.Api.Tenant.changeset(%{private_only: value})
+    |> Realtime.Api.Tenant.changeset(%{limit => value})
     |> Realtime.Repo.update!()
 
     Realtime.Tenants.Cache.invalidate_tenant_cache(@external_id)

@@ -23,14 +23,22 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   @doc """
   Logs errors in an expected format
   """
-  def log_error_message(:warning, _code, error) do
+  @spec log_error_message(
+          level :: :error | :warning,
+          code :: binary(),
+          error :: term(),
+          keyword()
+        ) :: {:error, %{reason: binary()}}
+  def log_error_message(level, code, error, metadata \\ [])
+
+  def log_error_message(:warning, _code, error, metadata) do
     error_msg = "Start channel error: " <> to_log(error)
-    Logger.warning(error_msg)
+    Logger.warning(error_msg, metadata)
     {:error, %{reason: error_msg}}
   end
 
-  def log_error_message(:error, code, error) do
-    log_error(code, error)
+  def log_error_message(:error, code, error, metadata) do
+    log_error(code, error, metadata)
     {:error, %{reason: error}}
   end
 end

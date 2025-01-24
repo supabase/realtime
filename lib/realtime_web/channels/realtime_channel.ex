@@ -103,14 +103,15 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:ok, state, assign(socket, assigns)}
     else
-      {:error, :unauthorized, msg} ->
-        Logging.log_error_message(:error, "Unauthorized", msg)
-
       {:error, :expired_token, msg} ->
         Logging.log_error_message(:error, "InvalidJWTToken", msg)
 
-      {:error, [message: "Invalid token", claim: claim, claim_val: value]} ->
-        msg = "Invalid value for JWT claim #{inspect(claim)} with value #{inspect(value)}"
+      {:error, :missing_claims} ->
+        msg = "Fields `role` and `exp` are required in JWT"
+        Logging.log_error_message(:error, "InvalidJWTToken", msg)
+
+      {:error, :expected_claims_map} ->
+        msg = "Token claims must be a map"
         Logging.log_error_message(:error, "InvalidJWTToken", msg)
 
       {:error, :too_many_channels} ->
@@ -370,20 +371,18 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  def handle_in(
-        "access_token",
-        %{"access_token" => refresh_token},
-        %{
-          assigns: %{
-            access_token: access_token,
-            pg_sub_ref: pg_sub_ref,
-            db_conn: db_conn,
-            channel_name: channel_name,
-            pg_change_params: pg_change_params
-          }
-        } = socket
-      )
+  def handle_in("access_token", %{"access_token" => refresh_token}, socket)
       when is_binary(refresh_token) do
+    %{
+      assigns: %{
+        access_token: access_token,
+        pg_sub_ref: pg_sub_ref,
+        db_conn: db_conn,
+        channel_name: channel_name,
+        pg_change_params: pg_change_params
+      }
+    } = socket
+
     socket = assign(socket, :access_token, refresh_token)
 
     with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
@@ -485,7 +484,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   def limit_channels(%{assigns: %{tenant: tenant, limits: limits}, transport_pid: pid}) do
     key = Tenants.channels_per_client_key(tenant)
 
-    if Registry.count_match(Realtime.Registry, key, pid) > limits.max_channels_per_client do
+    if Registry.count_match(Realtime.Registry, key, pid) + 1 > limits.max_channels_per_client do
       {:error, :too_many_channels}
     else
       Registry.register(Realtime.Registry, Tenants.channels_per_client_key(tenant), pid)
@@ -580,9 +579,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp shutdown_response(%{assigns: %{channel_name: channel_name}} = socket, message)
-       when is_binary(message) do
-    log_error("ChannelShutdown", message)
+  defp shutdown_response(socket, message) when is_binary(message) do
+    %{assigns: %{channel_name: channel_name, access_token: access_token}} = socket
+    metadata = log_metadata(access_token)
+    log_error("ChannelShutdown", message, metadata)
     push_system_message("system", socket, "error", message, channel_name)
     {:stop, :shutdown, socket}
   end
@@ -756,7 +756,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:ok, assign(socket, policies: nil)}
   end
 
-  @spec only_private?(String.t(), map()) :: :ok | {:error, :private_only}
   defp only_private?(tenant_id, %{assigns: %{check_authorization?: check_authorization?}}) do
     tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
 
@@ -764,5 +763,18 @@ defmodule RealtimeWeb.RealtimeChannel do
       tenant.private_only and !check_authorization? -> {:error, :private_only}
       true -> :ok
     end
+  end
+
+  defp log_metadata(access_token) do
+    access_token
+    |> Joken.peek_claims()
+    |> then(fn
+      {:ok, claims} -> Map.get(claims, "sub")
+      _ -> nil
+    end)
+    |> then(fn
+      nil -> []
+      sub -> [sub: sub]
+    end)
   end
 end
