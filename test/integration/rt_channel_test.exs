@@ -511,15 +511,25 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
-  test "token required the role key" do
-    {:ok, token} = token_no_role()
-
-    assert {:error, %{status_code: 403}} =
-             WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
-  end
-
-  describe "handle refresh token messages" do
+  describe "token handling" do
     setup [:rls_context]
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "invalid JWT with expired token" do
+      assert capture_log(fn ->
+               get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
+             end) =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
+    end
+
+    test "token required the role key" do
+      {:ok, token} = token_no_role()
+
+      assert {:error, %{status_code: 403}} =
+               WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
+    end
 
     @tag policies: [
            :authenticated_read_broadcast_and_presence,
@@ -598,7 +608,7 @@ defmodule Realtime.Integration.RtChannelTest do
         event: "system",
         payload: %{
           "extension" => "system",
-          "message" => "Received an invalid access token from client: :expected_claims_map",
+          "message" => "Token claims must be a map",
           "status" => "error"
         }
       }
@@ -634,6 +644,74 @@ defmodule Realtime.Integration.RtChannelTest do
                }
              end) =~
                "ChannelShutdown: Token as expired 1000 seconds ago"
+    end
+
+    test "missing claims close connection",
+         %{topic: topic} do
+      {socket, access_token} =
+        get_connection("authenticated")
+
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      {:ok, token} = generate_token(%{:exp => System.system_time(:second) + 2000})
+      # Update token to be a near expiring token
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+        "access_token" => token
+      })
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "system",
+                       payload: %{
+                         "extension" => "system",
+                         "message" => "Fields `role` and `exp` are required in JWT",
+                         "status" => "error"
+                       }
+                     },
+                     500
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+    end
+
+    test "checks token periodically",
+         %{topic: topic} do
+      {socket, access_token} =
+        get_connection("authenticated")
+
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+
+      {:ok, token} =
+        generate_token(%{:exp => System.system_time(:second) + 2, role: "authenticated"})
+
+      # Update token to be a near expiring token
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+        "access_token" => token
+      })
+
+      # Awaits to see if connection closes automatically
+      assert_receive %Phoenix.Socket.Message{
+                       event: "system",
+                       payload: %{
+                         "extension" => "system",
+                         "message" => msg,
+                         "status" => "error"
+                       }
+                     },
+                     3000
+
+      assert_receive %Phoenix.Socket.Message{event: "phx_close"}
+
+      assert msg =~ "Token as expired"
     end
   end
 
@@ -975,20 +1053,6 @@ defmodule Realtime.Integration.RtChannelTest do
                        }
                      },
                      500
-    end
-  end
-
-  describe "invalid jwt handling" do
-    setup [:rls_context]
-
-    @tag policies: [
-           :authenticated_read_broadcast_and_presence,
-           :authenticated_write_broadcast_and_presence
-         ]
-    test "invalid JWT with expired token" do
-      assert capture_log(fn ->
-               get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
-             end) =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
     end
   end
 

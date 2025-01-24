@@ -316,9 +316,11 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :missing_claims} ->
         shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
 
+      {:error, :expired_token, msg} ->
+        shutdown_response(socket, msg)
+
       {:error, error} ->
-        message = "Access token has expired: " <> to_log(error)
-        shutdown_response(socket, message)
+        shutdown_response(socket, to_log(error))
     end
   end
 
@@ -410,20 +412,20 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :expired_token, msg} ->
         shutdown_response(socket, msg)
 
-      {:error, error} ->
-        msg = "Received an invalid access token from client: " <> inspect(error)
+      {:error, :missing_claims} ->
+        shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
 
-        shutdown_response(socket, msg)
+      {:error, :expected_claims_map} ->
+        shutdown_response(socket, "Token claims must be a map")
+
+      {:error, error} ->
+        shutdown_response(socket, inspect(error))
     end
   end
 
-  def handle_in("broadcast", payload, socket) do
-    BroadcastHandler.call(payload, socket)
-  end
+  def handle_in("broadcast", payload, socket), do: BroadcastHandler.call(payload, socket)
 
-  def handle_in("presence", payload, socket) do
-    PresenceHandler.call(payload, socket)
-  end
+  def handle_in("presence", payload, socket), do: PresenceHandler.call(payload, socket)
 
   def handle_in(type, payload, socket) do
     socket = count(socket)
