@@ -4,6 +4,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   """
   require Logger
   import Phoenix.Socket, only: [assign: 3]
+  import Realtime.Logs
 
   alias Phoenix.Socket
   alias Realtime.GenCounter
@@ -29,14 +30,23 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
           }
         } = socket
       ) do
-    {:ok, socket} = run_authorization_check(socket, db_conn, authorization_context)
+    with {:ok, %{assigns: %{policies: policies}}} <-
+           run_authorization_check(socket, db_conn, authorization_context) do
+      case policies do
+        %Policies{broadcast: %BroadcastPolicies{write: false}} ->
+          Logger.info("Broadcast message ignored on #{tenant_topic}")
 
-    case socket.assigns.policies do
-      %Policies{broadcast: %BroadcastPolicies{write: false}} ->
-        Logger.info("Broadcast message ignored on #{tenant_topic}")
+        _ ->
+          send_message(self_broadcast, tenant_topic, payload)
+      end
+    else
+      {:error, :increase_connection_pool} ->
+        log_error("IncreaseConnectionPool", "Please increase your connection pool size")
+        {:error, :unable_to_set_policies}
 
-      _ ->
-        send_message(self_broadcast, tenant_topic, payload)
+      {:error, error} ->
+        log_error("UnableToSetPolicies", error)
+        {:error, :unable_to_set_policies}
     end
 
     socket = increment_rate_counter(socket)

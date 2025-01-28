@@ -2,7 +2,7 @@ defmodule Realtime.Tenants.Migrations do
   @moduledoc """
   Run Realtime database migrations for tenant's database.
   """
-  use GenServer
+  use GenServer, restart: :transient
 
   require Logger
 

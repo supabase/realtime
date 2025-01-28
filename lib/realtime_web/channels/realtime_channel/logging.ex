@@ -31,14 +31,13 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
         ) :: {:error, %{reason: binary()}}
   def log_error_message(level, code, error, metadata \\ [])
 
-  def log_error_message(:warning, _code, error, metadata) do
-    error_msg = "Start channel error: " <> to_log(error)
-    Logger.warning(error_msg, metadata)
-    {:error, %{reason: error_msg}}
-  end
-
   def log_error_message(:error, code, error, metadata) do
     log_error(code, error, metadata)
+    {:error, %{reason: error}}
+  end
+
+  def log_error_message(:warning, code, error, metadata) do
+    log_warning(code, error, metadata)
     {:error, %{reason: error}}
   end
 end

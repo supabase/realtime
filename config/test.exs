@@ -43,7 +43,7 @@ config :joken,
   current_time_adapter: RealtimeWeb.Joken.CurrentTime.Mock
 
 # Print only errors during test
-config :logger, level: :error
+config :logger, level: :warning
 
 # Configures Elixir's Logger
 config :logger, :console,

@@ -18,7 +18,7 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Database
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization.Policies
-
+  alias DBConnection.ConnectionError
   defstruct [:topic, :headers, :jwt, :claims, :role]
 
   @type t :: %__MODULE__{
@@ -59,9 +59,10 @@ defmodule Realtime.Tenants.Authorization do
   def get_read_authorizations(%Socket{} = socket, db_conn, authorization_context) do
     policies = Map.get(socket.assigns, :policies) || %Policies{}
 
-    with {:ok, %Policies{} = policies} <-
-           get_read_policies_for_connection(db_conn, authorization_context, policies) do
-      {:ok, Socket.assign(socket, :policies, policies)}
+    case get_read_policies_for_connection(db_conn, authorization_context, policies) do
+      {:ok, %Policies{} = policies} -> {:ok, Socket.assign(socket, :policies, policies)}
+      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
+      {:error, error} -> {:error, error}
     end
   end
 
@@ -70,6 +71,7 @@ defmodule Realtime.Tenants.Authorization do
 
     case get_read_policies_for_connection(db_conn, authorization_context, policies) do
       {:ok, %Policies{} = policies} -> {:ok, Conn.assign(conn, :policies, policies)}
+      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
     end
   end
@@ -89,6 +91,7 @@ defmodule Realtime.Tenants.Authorization do
 
     case get_write_policies_for_connection(db_conn, authorization_context, policies) do
       {:ok, %Policies{} = policies} -> {:ok, Socket.assign(socket, :policies, policies)}
+      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
     end
   end
@@ -98,6 +101,7 @@ defmodule Realtime.Tenants.Authorization do
 
     case get_write_policies_for_connection(db_conn, authorization_context, policies) do
       {:ok, %Policies{} = policies} -> {:ok, Conn.assign(conn, :policies, policies)}
+      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
     end
   end
@@ -105,6 +109,7 @@ defmodule Realtime.Tenants.Authorization do
   def get_write_authorizations(db_conn, db_conn, authorization_context) when is_pid(db_conn) do
     case get_write_policies_for_connection(db_conn, authorization_context, %Policies{}) do
       {:ok, %Policies{} = policies} -> {:ok, policies}
+      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
     end
   end
