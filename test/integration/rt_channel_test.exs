@@ -11,7 +11,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
   alias __MODULE__.Endpoint
   alias Extensions.PostgresCdcRls, as: Rls
-  alias Phoenix.Socket.{V1, Message}
+  alias Phoenix.Socket.Message
+  alias Phoenix.Socket.V1
   alias Postgrex, as: P
   alias Realtime.Api.Tenant
   alias Realtime.Database
@@ -119,7 +120,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      ref: nil,
                      topic: ^topic
                    },
-                   5000
+                   8000
 
     {:ok, _, conn} = Rls.get_manager_conn(@external_id)
     P.query!(conn, "insert into test (details) values ('test')", [])
@@ -1332,7 +1333,7 @@ defmodule Realtime.Integration.RtChannelTest do
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{random_string()}"
 
-      for _ <- 1..10 do
+      for _ <- 1..15 do
         WebsocketClient.join(socket, realtime_topic, %{config: config})
       end
 

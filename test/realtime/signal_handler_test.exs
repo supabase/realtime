@@ -9,10 +9,7 @@ defmodule Realtime.SignalHandlerTest do
   end
 
   setup do
-    Logger.configure(level: :warning)
-
     on_exit(fn ->
-      Logger.configure(level: :error)
       Application.put_env(:realtime, :shutdown_in_progress, false)
     end)
   end

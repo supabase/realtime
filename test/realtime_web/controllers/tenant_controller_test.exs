@@ -4,6 +4,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
   import Mock
 
+  alias Ecto.Adapters.SQL.Sandbox
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.Database
@@ -12,7 +13,6 @@ defmodule RealtimeWeb.TenantControllerTest do
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
-
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.JwtVerification
 
@@ -53,6 +53,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   setup %{conn: conn} do
     # Ensure no replication slot is present before the test
     Cleanup.ensure_no_replication_slot()
+    Sandbox.checkout(Realtime.Repo)
 
     Application.put_env(:realtime, :db_enc_key, "1234567890123456")
 

@@ -5,8 +5,9 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
   alias RealtimeWeb.RealtimeChannel.Logging
 
   setup do
+    level = Logger.level()
     Logger.configure(level: :debug)
-    on_exit(fn -> Logger.configure(level: :error) end)
+    on_exit(fn -> Logger.configure(level: level) end)
   end
 
   describe "maybe_log_handle_info/2" do
