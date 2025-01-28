@@ -136,9 +136,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :unable_to_set_policies, error} ->
         Logging.log_error_message(:warning, "UnableToSetPolicies", error)
 
-      {:error, :rls_policy_error, error} ->
-        Logging.log_error_message(:warning, "UnableToSetPolicies", error)
-
       {:error, :tenant_database_unavailable} ->
         Logging.log_error_message(
           :error,

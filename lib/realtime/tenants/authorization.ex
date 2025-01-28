@@ -54,7 +54,7 @@ defmodule Realtime.Tenants.Authorization do
   Runs validations based on RLS policies to set policies for read policies a given connection (either Phoenix.Socket or Plug.Conn).
   """
   @spec get_read_authorizations(Socket.t() | Conn.t(), pid(), __MODULE__.t()) ::
-          {:ok, Socket.t() | Conn.t()} | {:error, any()}
+          {:ok, Socket.t() | Conn.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
 
   def get_read_authorizations(%Socket{} = socket, db_conn, authorization_context) do
     policies = Map.get(socket.assigns, :policies) || %Policies{}
@@ -82,7 +82,9 @@ defmodule Realtime.Tenants.Authorization do
   Runs validations based on RLS policies to set policies for read policies a given connection (either Phoenix.Socket or Conn).
   """
   @spec get_write_authorizations(Socket.t() | Conn.t() | pid(), pid(), __MODULE__.t()) ::
-          {:ok, Socket.t() | Conn.t() | Policies.t()} | {:error, any()}
+          {:ok, Socket.t() | Conn.t() | Policies.t()}
+          | {:error, any()}
+          | {:error, :rls_policy_error, any()}
 
   def get_write_authorizations(
         %Socket{} = socket,
