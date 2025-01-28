@@ -72,7 +72,8 @@ defmodule Realtime.Tenants.Migrations do
     RealtimeSendSetsConfig,
     RealtimeSubscriptionUnlogged,
     RealtimeSubscriptionLogged,
-    RemoveUnusedPublications
+    RemoveUnusedPublications,
+    RealtimeSendSetsTopicConfig
   }
 
   @migrations [
@@ -135,7 +136,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_241_224_161_212, RealtimeSendSetsConfig},
     {20_250_107_150_512, RealtimeSubscriptionUnlogged},
     {20_250_110_162_412, RealtimeSubscriptionLogged},
-    {20_250_123_174_212, RemoveUnusedPublications}
+    {20_250_123_174_212, RemoveUnusedPublications},
+    {20_250_128_220_012, RealtimeSendSetsTopicConfig}
   ]
 
   defstruct [:tenant_external_id, :settings]
