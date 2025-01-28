@@ -129,6 +129,16 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "Too many joins per second"
         Logging.log_error_message(:error, "ClientJoinRateLimitReached", msg)
 
+      {:error, :increase_connection_pool} ->
+        msg = "Please increase your connection pool size"
+        Logging.log_error_message(:warning, "IncreaseConnectionPool", msg)
+
+      {:error, :unable_to_set_policies, error} ->
+        Logging.log_error_message(:warning, "UnableToSetPolicies", error)
+
+      {:error, :rls_policy_error, error} ->
+        Logging.log_error_message(:warning, "UnableToSetPolicies", error)
+
       {:error, :tenant_database_unavailable} ->
         Logging.log_error_message(
           :error,
@@ -149,13 +159,6 @@ defmodule RealtimeWeb.RealtimeChannel do
           "InitializingProjectConnection",
           "Connecting to the project database"
         )
-
-      {:error, :increase_connection_pool} ->
-        msg = "Please increase your connection pool size"
-        Logging.log_error_message(:warning, "IncreaseConnectionPool", msg)
-
-      {:error, :unable_to_set_policies, error} ->
-        Logging.log_error_message(:warning, "UnableToSetPolicies", error)
 
       {:error, invalid_exp} when is_integer(invalid_exp) and invalid_exp <= 0 ->
         Logging.log_error_message(
@@ -751,6 +754,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       {:error, :increase_connection_pool} ->
         {:error, :increase_connection_pool}
+
+      {:error, :rls_policy_error, error} ->
+        log_error("RlsPolicyError", error)
+
+        {:error, :unauthorized,
+         "You do not have permissions to read from this Channel topic: #{topic}"}
 
       {:error, error} ->
         {:error, :unable_to_set_policies, error}

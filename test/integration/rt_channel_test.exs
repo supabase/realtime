@@ -1351,6 +1351,40 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
+  describe "authorization handling" do
+    setup [:rls_context]
+
+    @tag role: "authenticated",
+         policies: [:broken_read_presence, :broken_write_presence]
+    test "handle failing rls policy" do
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: true}
+      topic = random_string()
+      realtime_topic = "realtime:#{topic}"
+
+      log =
+        capture_log(fn ->
+          WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+          msg = "You do not have permissions to read from this Channel topic: #{topic}"
+
+          assert_receive %Message{
+                           event: "phx_reply",
+                           payload: %{
+                             "response" => %{"reason" => ^msg},
+                             "status" => "error"
+                           }
+                         },
+                         500
+
+          refute_receive %Message{event: "phx_reply"}
+          refute_receive %Message{event: "presence_state"}
+        end)
+
+      assert log =~ "RlsPolicyError"
+    end
+  end
+
   test "handle empty topic by closing the socket" do
     {socket, _} = get_connection("authenticated")
     config = %{broadcast: %{self: true}, private: false}

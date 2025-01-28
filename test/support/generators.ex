@@ -120,6 +120,16 @@ defmodule Generators do
   * write_broadcast - Sets write broadcast policy for authenticated role
   """
   def create_rls_policies(conn, policies, params) do
+    query = """
+    CREATE OR REPLACE FUNCTION test_log_error() RETURNS boolean AS $$
+    BEGIN
+    RAISE EXCEPTION 'test error';
+    RETURN TRUE;
+    END$$ LANGUAGE plpgsql;
+    """
+
+    Postgrex.query!(conn, query, [])
+
     Enum.each(policies, fn policy ->
       query = policy_query(policy, params)
       Postgrex.query!(conn, query, [])
@@ -215,6 +225,24 @@ defmodule Generators do
     ON realtime.messages FOR INSERT
     TO authenticated
     WITH CHECK ( realtime.topic() = '#{name}' AND realtime.messages.extension IN ('presence', 'broadcast') );
+    """
+  end
+
+  def policy_query(:broken_read_presence, _) do
+    """
+    CREATE POLICY "authenticated_read_presence"
+    ON realtime.messages FOR SELECT
+    TO authenticated
+    USING (  (SELECT test_log_error())  );
+    """
+  end
+
+  def policy_query(:broken_write_presence, _) do
+    """
+    CREATE POLICY "authenticated_write_presence"
+    ON realtime.messages FOR INSERT
+    TO authenticated
+    WITH CHECK ( (SELECT test_log_error()) );
     """
   end
 

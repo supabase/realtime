@@ -205,7 +205,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
   end
 
-  describe "database connection issues" do
+  describe "database error" do
     @tag role: "authenticated",
          policies: [
            :authenticated_read_broadcast_and_presence,
@@ -228,22 +228,22 @@ defmodule Realtime.Tenants.AuthorizationTest do
                )
 
       assert {:error, :increase_connection_pool} =
+               Authorization.get_write_authorizations(
+                 Phoenix.ConnTest.build_conn(),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :increase_connection_pool} =
                Authorization.get_read_authorizations(
-                 Phoenix.ConnTest.build_conn(),
+                 Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
                  context.db_conn,
                  context.authorization_context
                )
 
       assert {:error, :increase_connection_pool} =
                Authorization.get_write_authorizations(
-                 Phoenix.ConnTest.build_conn(),
-                 context.db_conn,
-                 context.authorization_context
-               )
-
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_write_authorizations(
-                 Phoenix.ConnTest.build_conn(),
+                 Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
                  context.db_conn,
                  context.authorization_context
                )
@@ -256,6 +256,45 @@ defmodule Realtime.Tenants.AuthorizationTest do
                )
 
       Task.await(task, :timer.minutes(1))
+    end
+
+    @tag role: "authenticated",
+         policies: [:broken_read_presence, :broken_write_presence]
+    test "broken RLS policy sets policies to false and shows error to user", context do
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_read_authorizations(
+                 Phoenix.ConnTest.build_conn(),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_write_authorizations(
+                 Phoenix.ConnTest.build_conn(),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_read_authorizations(
+                 Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_write_authorizations(
+                 Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_write_authorizations(
+                 context.db_conn,
+                 context.db_conn,
+                 context.authorization_context
+               )
     end
   end
 
