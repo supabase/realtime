@@ -23,7 +23,7 @@ defmodule Realtime.Logs do
   """
   @spec log_error(String.t(), any(), keyword()) :: :ok
   def log_warning(code, warning, metadata \\ []) do
-    Logger.warning("#{code}: #{to_log(warning)}", [error_code: code] ++ metadata)
+    Logger.warning("#{code}: #{to_log(warning)}", [{:error_code, code} | metadata])
   end
 end
 
