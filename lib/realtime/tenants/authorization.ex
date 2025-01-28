@@ -18,7 +18,7 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Database
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization.Policies
-
+  alias DBConnection.ConnectionError
   defstruct [:topic, :headers, :jwt, :claims, :role]
 
   @type t :: %__MODULE__{
@@ -54,14 +54,16 @@ defmodule Realtime.Tenants.Authorization do
   Runs validations based on RLS policies to set policies for read policies a given connection (either Phoenix.Socket or Plug.Conn).
   """
   @spec get_read_authorizations(Socket.t() | Conn.t(), pid(), __MODULE__.t()) ::
-          {:ok, Socket.t() | Conn.t()} | {:error, any()}
+          {:ok, Socket.t() | Conn.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
 
   def get_read_authorizations(%Socket{} = socket, db_conn, authorization_context) do
     policies = Map.get(socket.assigns, :policies) || %Policies{}
 
-    with {:ok, %Policies{} = policies} <-
-           get_read_policies_for_connection(db_conn, authorization_context, policies) do
-      {:ok, Socket.assign(socket, :policies, policies)}
+    case get_read_policies_for_connection(db_conn, authorization_context, policies) do
+      {:ok, %Policies{} = policies} -> {:ok, Socket.assign(socket, :policies, policies)}
+      {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
+      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
+      {:error, error} -> {:error, error}
     end
   end
 
@@ -70,6 +72,8 @@ defmodule Realtime.Tenants.Authorization do
 
     case get_read_policies_for_connection(db_conn, authorization_context, policies) do
       {:ok, %Policies{} = policies} -> {:ok, Conn.assign(conn, :policies, policies)}
+      {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
+      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
     end
   end
@@ -78,7 +82,9 @@ defmodule Realtime.Tenants.Authorization do
   Runs validations based on RLS policies to set policies for read policies a given connection (either Phoenix.Socket or Conn).
   """
   @spec get_write_authorizations(Socket.t() | Conn.t() | pid(), pid(), __MODULE__.t()) ::
-          {:ok, Socket.t() | Conn.t() | Policies.t()} | {:error, any()}
+          {:ok, Socket.t() | Conn.t() | Policies.t()}
+          | {:error, any()}
+          | {:error, :rls_policy_error, any()}
 
   def get_write_authorizations(
         %Socket{} = socket,
@@ -89,6 +95,8 @@ defmodule Realtime.Tenants.Authorization do
 
     case get_write_policies_for_connection(db_conn, authorization_context, policies) do
       {:ok, %Policies{} = policies} -> {:ok, Socket.assign(socket, :policies, policies)}
+      {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
+      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
     end
   end
@@ -98,6 +106,8 @@ defmodule Realtime.Tenants.Authorization do
 
     case get_write_policies_for_connection(db_conn, authorization_context, policies) do
       {:ok, %Policies{} = policies} -> {:ok, Conn.assign(conn, :policies, policies)}
+      {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
+      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
     end
   end
@@ -105,6 +115,8 @@ defmodule Realtime.Tenants.Authorization do
   def get_write_authorizations(db_conn, db_conn, authorization_context) when is_pid(db_conn) do
     case get_write_policies_for_connection(db_conn, authorization_context, %Policies{}) do
       {:ok, %Policies{} = policies} -> {:ok, policies}
+      {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
+      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
     end
   end
@@ -217,13 +229,14 @@ defmodule Realtime.Tenants.Authorization do
         or_where: [extension: :presence, id: ^presence_id]
       )
 
-    {:ok, res} = Repo.all(conn, query, Message)
-    can_presence? = Enum.any?(res, fn %{id: id} -> id == presence_id end)
-    can_broadcast? = Enum.any?(res, fn %{id: id} -> id == broadcast_id end)
+    with {:ok, res} <- Repo.all(conn, query, Message) do
+      can_presence? = Enum.any?(res, fn %{id: id} -> id == presence_id end)
+      can_broadcast? = Enum.any?(res, fn %{id: id} -> id == broadcast_id end)
 
-    policies
-    |> Policies.update_policies(:presence, :read, can_presence?)
-    |> Policies.update_policies(:broadcast, :read, can_broadcast?)
+      policies
+      |> Policies.update_policies(:presence, :read, can_presence?)
+      |> Policies.update_policies(:broadcast, :read, can_broadcast?)
+    end
   end
 
   defp get_write_policy_for_connection_and_extension(
@@ -237,11 +250,27 @@ defmodule Realtime.Tenants.Authorization do
     presence_changeset =
       Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: :presence})
 
-    broadcast_result = Repo.insert(conn, broadcast_changeset, Message, mode: :savepoint)
-    presence_result = Repo.insert(conn, presence_changeset, Message, mode: :savepoint)
+    policies =
+      case Repo.insert(conn, broadcast_changeset, Message, mode: :savepoint) do
+        {:ok, _} ->
+          Policies.update_policies(policies, :broadcast, :write, true)
 
-    policies
-    |> Policies.update_policies(:presence, :write, match?({:ok, _}, presence_result))
-    |> Policies.update_policies(:broadcast, :write, match?({:ok, _}, broadcast_result))
+        {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+          Policies.update_policies(policies, :broadcast, :write, false)
+
+        e ->
+          e
+      end
+
+    case Repo.insert(conn, presence_changeset, Message, mode: :savepoint) do
+      {:ok, _} ->
+        Policies.update_policies(policies, :presence, :write, true)
+
+      {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
+        Policies.update_policies(policies, :presence, :write, false)
+
+      e ->
+        e
+    end
   end
 end

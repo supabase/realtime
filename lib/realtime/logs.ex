@@ -17,6 +17,14 @@ defmodule Realtime.Logs do
   def log_error(code, error, metadata \\ []) do
     Logger.error("#{code}: #{to_log(error)}", [error_code: code] ++ metadata)
   end
+
+  @doc """
+  Logs warning with a given Operational Code
+  """
+  @spec log_error(String.t(), any(), keyword()) :: :ok
+  def log_warning(code, warning, metadata \\ []) do
+    Logger.warning("#{code}: #{to_log(warning)}", [{:error_code, code} | metadata])
+  end
 end
 
 defimpl Jason.Encoder, for: DBConnection.ConnectionError do

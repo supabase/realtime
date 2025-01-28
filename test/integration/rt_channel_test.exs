@@ -24,7 +24,7 @@ defmodule Realtime.Integration.RtChannelTest do
   @port 4002
   @serializer V1.JSONSerializer
   @external_id "dev_tenant"
-  @uri "ws://#{@external_id}.localhost:#{@port}/socket/websocket?vsn=1.0.0"
+  @uri "ws://#{@external_id}.localhost:#{@port}/socket/websocket"
   @secret "secure_jwt_secret"
 
   Application.put_env(:phoenix, Endpoint,
@@ -365,21 +365,23 @@ defmodule Realtime.Integration.RtChannelTest do
       topic = "realtime:#{topic}"
       {socket, _} = get_connection("authenticated")
 
-      assert capture_log(fn ->
-               WebsocketClient.join(socket, topic, %{config: config})
-               Process.sleep(500)
-             end) =~ "Unauthorized: #{expected}"
+      log =
+        capture_log(fn ->
+          WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{
-                       topic: ^topic,
-                       event: "phx_reply",
-                       payload: %{"response" => %{"reason" => reason}, "status" => "error"}
-                     },
-                     1000
+          assert_receive %Message{
+                           topic: ^topic,
+                           event: "phx_reply",
+                           payload: %{"response" => %{"reason" => reason}, "status" => "error"}
+                         },
+                         1000
 
-      assert reason == expected
-      refute_receive %Message{event: "phx_reply", topic: ^topic}, 1000
-      refute_receive %Message{event: "presence_state"}, 1000
+          assert reason == expected
+          refute_receive %Message{event: "phx_reply", topic: ^topic}, 1000
+          refute_receive %Message{event: "presence_state"}, 1000
+        end)
+
+      assert log =~ "Unauthorized: #{expected}"
     end
   end
 
@@ -657,21 +659,24 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "presence_state"}, 500
       {:ok, token} = generate_token(%{:exp => System.system_time(:second) - 1000, sub: sub})
 
-      assert capture_log(fn ->
-               WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
-                 "access_token" => token
-               })
+      log =
+        capture_log(fn ->
+          WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+            "access_token" => token
+          })
 
-               assert_receive %Message{
-                 topic: ^realtime_topic,
-                 event: "system",
-                 payload: %{
-                   "extension" => "system",
-                   "message" => "Token as expired 1000 seconds ago",
-                   "status" => "error"
-                 }
-               }
-             end) =~ "ChannelShutdown: Token as expired 1000 seconds ago"
+          assert_receive %Message{
+            topic: ^realtime_topic,
+            event: "system",
+            payload: %{
+              "extension" => "system",
+              "message" => "Token as expired 1000 seconds ago",
+              "status" => "error"
+            }
+          }
+        end)
+
+      assert log =~ "ChannelShutdown: Token as expired 1000 seconds ago"
     end
 
     test "ChannelShutdown include sub if available in jwt claims",
@@ -679,7 +684,7 @@ defmodule Realtime.Integration.RtChannelTest do
       sub = random_string()
 
       {socket, access_token} =
-        get_connection("authenticated", %{sub: sub})
+        get_connection("authenticated", %{sub: sub}, %{log_level: :warning})
 
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
@@ -841,7 +846,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      # token beconmes a string in between joins so it needs to be handled by the channel and not the socket
+      # token becomes a string in between joins so it needs to be handled by the channel and not the socket
       Process.sleep(1000)
       realtime_topic = "realtime:#{topic}"
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: "potato"})
@@ -1201,9 +1206,12 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     test "invalid JWT with expired token" do
-      assert capture_log(fn ->
-               get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
-             end) =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
+      log =
+        capture_log(fn ->
+          get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
+        end)
+
+      assert log =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
     end
   end
 
@@ -1343,6 +1351,40 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
+  describe "authorization handling" do
+    setup [:rls_context]
+
+    @tag role: "authenticated",
+         policies: [:broken_read_presence, :broken_write_presence]
+    test "handle failing rls policy" do
+      {socket, _} = get_connection("authenticated")
+      config = %{broadcast: %{self: true}, private: true}
+      topic = random_string()
+      realtime_topic = "realtime:#{topic}"
+
+      log =
+        capture_log(fn ->
+          WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+          msg = "You do not have permissions to read from this Channel topic: #{topic}"
+
+          assert_receive %Message{
+                           event: "phx_reply",
+                           payload: %{
+                             "response" => %{"reason" => ^msg},
+                             "status" => "error"
+                           }
+                         },
+                         500
+
+          refute_receive %Message{event: "phx_reply"}
+          refute_receive %Message{event: "presence_state"}
+        end)
+
+      assert log =~ "RlsPolicyError"
+    end
+  end
+
   test "handle empty topic by closing the socket" do
     {socket, _} = get_connection("authenticated")
     config = %{broadcast: %{self: true}, private: false}
@@ -1380,10 +1422,17 @@ defmodule Realtime.Integration.RtChannelTest do
     {:ok, generate_jwt_token(@secret, claims)}
   end
 
-  defp get_connection(role \\ "anon", claims \\ %{}) do
+  defp get_connection(
+         role \\ "anon",
+         claims \\ %{},
+         params \\ %{vsn: "1.0.0", log_level: :warning}
+       ) do
+    params = Enum.reduce(params, "", fn {k, v}, acc -> "#{acc}&#{k}=#{v}" end)
+    uri = "#{@uri}?#{params}"
+
     with {:ok, token} <- token_valid(role, claims),
          {:ok, socket} <-
-           WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}]) do
+           WebsocketClient.connect(self(), uri, @serializer, [{"x-api-key", token}]) do
       {socket, token}
     end
   end

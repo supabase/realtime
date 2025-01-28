@@ -29,10 +29,10 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
   describe "log_error_message/3" do
     test "handles warning level errors" do
-      assert capture_log(fn ->
-               result = Logging.log_error_message(:warning, :test_code, "test error")
-               assert {:error, %{reason: "Start channel error: test error"}} = result
-             end) =~ "Start channel error: test error"
+      assert capture_log([level: :warning], fn ->
+               result = Logging.log_error_message(:warning, "TestError", "test error")
+               assert {:error, %{reason: "test error"}} = result
+             end) =~ "TestError: test error"
     end
 
     test "handles error level errors" do

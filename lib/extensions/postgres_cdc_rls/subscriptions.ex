@@ -63,7 +63,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
                 msg =
                   "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [#{params_to_log(params)}]"
 
-                log_error("RealtimeDisabledForConfiguration", msg)
+                log_warning("RealtimeDisabledForConfiguration", msg)
                 rollback(conn, msg)
 
               {:error, exception} ->

@@ -205,6 +205,99 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
   end
 
+  describe "database error" do
+    @tag role: "authenticated",
+         policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ],
+         timeout: :timer.minutes(2)
+    test "handles small pool size", context do
+      task =
+        Task.async(fn ->
+          Postgrex.query!(context.db_conn, "SELECT pg_sleep(59)", [], timeout: :timer.minutes(1))
+        end)
+
+      Process.sleep(100)
+
+      assert {:error, :increase_connection_pool} =
+               Authorization.get_read_authorizations(
+                 Phoenix.ConnTest.build_conn(),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :increase_connection_pool} =
+               Authorization.get_write_authorizations(
+                 Phoenix.ConnTest.build_conn(),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :increase_connection_pool} =
+               Authorization.get_read_authorizations(
+                 Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :increase_connection_pool} =
+               Authorization.get_write_authorizations(
+                 Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :increase_connection_pool} =
+               Authorization.get_write_authorizations(
+                 context.db_conn,
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      Task.await(task, :timer.minutes(1))
+    end
+
+    @tag role: "authenticated",
+         policies: [:broken_read_presence, :broken_write_presence]
+    test "broken RLS policy sets policies to false and shows error to user", context do
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_read_authorizations(
+                 Phoenix.ConnTest.build_conn(),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_write_authorizations(
+                 Phoenix.ConnTest.build_conn(),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_read_authorizations(
+                 Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_write_authorizations(
+                 Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_write_authorizations(
+                 context.db_conn,
+                 context.db_conn,
+                 context.authorization_context
+               )
+    end
+  end
+
   describe "ensure database stays clean" do
     @tag role: "authenticated",
          policies: [
@@ -275,7 +368,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
   def rls_context(context) do
     start_supervised!(CurrentTime.Mock)
     tenant = tenant_fixture()
-    Migrations.run_migrations(tenant)
+    :ok = Migrations.run_migrations(tenant)
 
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -300,7 +393,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
     Realtime.Tenants.Migrations.create_partitions(db_conn)
 
-    on_exit(fn -> Process.exit(db_conn, :normal) end)
+    on_exit(fn -> Process.exit(db_conn, :kill) end)
 
     %{
       tenant: tenant,

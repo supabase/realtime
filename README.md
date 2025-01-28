@@ -225,6 +225,8 @@ This is the list of operational codes that can help you understand your deployme
 | UnableToFindCounter                | Error when trying to find a counter to track rate limits for a tenant                                                               |
 | UnhandledProcessMessage            | Unhandled message received by a Realtime process                                                                                    |
 | UnableToSetPolicies                | We were not able to set policies for this connection                                                                                |
+| IncreaseConnectionPool             | The number of connections you have set for Realtime are not enough to handle your current use case                                  |
+| RlsPolicyError                     | Error on RLS policy used for authorization                                                                                          |
 | ConnectionInitializing             | Database is initializing connection                                                                                                 |
 | DatabaseConnectionIssue            | Database had connection issues and connection was not able to be established                                                        |
 | UnableToConnectToProject           | Unable to connect to Project database                                                                                               |

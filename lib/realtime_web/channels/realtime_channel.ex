@@ -104,18 +104,18 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:ok, state, assign(socket, assigns)}
     else
       {:error, :expired_token, msg} ->
-        Logging.log_error_message(:error, "InvalidJWTToken", msg)
+        Logging.log_error_message(:warning, "InvalidJWTToken", msg)
 
       {:error, :missing_claims} ->
         msg = "Fields `role` and `exp` are required in JWT"
-        Logging.log_error_message(:error, "InvalidJWTToken", msg)
+        Logging.log_error_message(:warning, "InvalidJWTToken", msg)
 
       {:error, :expected_claims_map} ->
         msg = "Token claims must be a map"
-        Logging.log_error_message(:error, "InvalidJWTToken", msg)
+        Logging.log_error_message(:warning, "InvalidJWTToken", msg)
 
       {:error, :unauthorized, msg} ->
-        Logging.log_error_message(:error, "Unauthorized", msg)
+        Logging.log_error_message(:warning, "Unauthorized", msg)
 
       {:error, :too_many_channels} ->
         msg = "Too many channels"
@@ -128,6 +128,13 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :too_many_joins} ->
         msg = "Too many joins per second"
         Logging.log_error_message(:error, "ClientJoinRateLimitReached", msg)
+
+      {:error, :increase_connection_pool} ->
+        msg = "Please increase your connection pool size"
+        Logging.log_error_message(:warning, "IncreaseConnectionPool", msg)
+
+      {:error, :unable_to_set_policies, error} ->
+        Logging.log_error_message(:warning, "UnableToSetPolicies", error)
 
       {:error, :tenant_database_unavailable} ->
         Logging.log_error_message(
@@ -178,13 +185,6 @@ defmodule RealtimeWeb.RealtimeChannel do
           :error,
           "RealtimeRestarting",
           "Realtime is restarting, please standby"
-        )
-
-      {:error, :unable_to_set_policies} ->
-        Logging.log_error_message(
-          :error,
-          "UnableToSetPolicies",
-          "Unable to set policies for connection"
         )
 
       {:error, error} ->
@@ -284,7 +284,7 @@ defmodule RealtimeWeb.RealtimeChannel do
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
           error ->
-            log_error("UnableToSubscribeToPostgres", error)
+            log_warning("UnableToSubscribeToPostgres", error)
             push_system_message("postgres_changes", socket, "error", error, channel_name)
             {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
         end
@@ -294,13 +294,13 @@ defmodule RealtimeWeb.RealtimeChannel do
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
 
       error ->
-        log_error("UnableToSubscribeToPostgres", error)
+        log_warning("UnableToSubscribeToPostgres", error)
         push_system_message("postgres_changes", socket, "error", error, channel_name)
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
     end
   rescue
     error ->
-      log_error("UnableToSubscribeToPostgres", error)
+      log_warning("UnableToSubscribeToPostgres", error)
       push_system_message("postgres_changes", socket, "error", error, channel_name)
       {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
   end
@@ -585,8 +585,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp shutdown_response(socket, message) when is_binary(message) do
     %{assigns: %{channel_name: channel_name, access_token: access_token}} = socket
     metadata = log_metadata(access_token)
-    log_error("ChannelShutdown", message, metadata)
     push_system_message("system", socket, "error", message, channel_name)
+    log_warning("ChannelShutdown", message, metadata)
     {:stop, :shutdown, socket}
   end
 
@@ -749,9 +749,17 @@ defmodule RealtimeWeb.RealtimeChannel do
           {:ok, socket}
       end
     else
+      {:error, :increase_connection_pool} ->
+        {:error, :increase_connection_pool}
+
+      {:error, :rls_policy_error, error} ->
+        log_error("RlsPolicyError", error)
+
+        {:error, :unauthorized,
+         "You do not have permissions to read from this Channel topic: #{topic}"}
+
       {:error, error} ->
-        log_error("UnableToSetPolicies", error)
-        {:error, :unable_to_set_policies}
+        {:error, :unable_to_set_policies, error}
     end
   end
 
