@@ -4,8 +4,9 @@ defmodule Realtime.Telemetry.LoggerTest do
   alias Realtime.Telemetry.Logger, as: TelemetryLogger
 
   setup do
+    level = Logger.level()
     Logger.configure(level: :info)
-    on_exit(fn -> Logger.configure(level: :error) end)
+    on_exit(fn -> Logger.configure(level: level) end)
   end
 
   describe "logger backend initialization" do

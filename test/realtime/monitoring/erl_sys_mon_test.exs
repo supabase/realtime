@@ -4,11 +4,6 @@ defmodule Realtime.ErlSysMonTest do
   alias Realtime.ErlSysMon
 
   describe "system monitoring" do
-    setup do
-      Logger.configure(level: :warning)
-      on_exit(fn -> Logger.configure(level: :error) end)
-    end
-
     test "logs system monitor events" do
       start_supervised!({ErlSysMon, [{:long_message_queue, {1, 10}}]})
 

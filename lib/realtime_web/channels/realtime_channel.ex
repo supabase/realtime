@@ -587,7 +587,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     metadata = log_metadata(access_token)
     push_system_message("system", socket, "error", message, channel_name)
     log_warning("ChannelShutdown", message, metadata)
-    {:stop, :shutdown, socket}
+    {:stop, :normal, socket}
   end
 
   defp push_system_message(extension, socket, status, error, channel_name)

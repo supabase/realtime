@@ -339,7 +339,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @impl true
   def handle_disconnect(state) do
-    Logger.warning("Disconnecting broadcast changes handler: #{inspect(state, pretty: true)}")
+    Logger.warning("Disconnecting broadcast changes handler in the step : #{inspect(state.step)}")
     {:noreply, %{state | step: :disconnected}}
   end
 

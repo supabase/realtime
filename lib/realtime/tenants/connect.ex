@@ -109,6 +109,10 @@ defmodule Realtime.Tenants.Connect do
       {:error, {:already_started, _}} ->
         get_status(tenant_id)
 
+      {:error, :killed} ->
+        log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database")
+        {:error, :tenant_database_unavailable}
+
       {:error, error} ->
         log_error("UnableToConnectToTenantDatabase", error)
         {:error, :tenant_database_unavailable}
@@ -183,12 +187,12 @@ defmodule Realtime.Tenants.Connect do
     else
       error ->
         log_error("MigrationsFailedToRun", error)
-        {:stop, :kill, state}
+        {:stop, :shutdown, state}
     end
   rescue
     error ->
       log_error("MigrationsFailedToRun", error)
-      {:stop, :kill, state}
+      {:stop, :shutdown, state}
   end
 
   def handle_continue(:start_listen_and_replication, state) do
@@ -201,12 +205,12 @@ defmodule Realtime.Tenants.Connect do
     else
       {:error, error} ->
         log_error("StartListenAndReplicationFailed", error)
-        {:stop, :kill, state}
+        {:stop, :shutdown, state}
     end
   rescue
     error ->
       log_error("StartListenAndReplicationFailed", error)
-      {:stop, :kill, state}
+      {:stop, :shutdown, state}
   end
 
   @impl true
