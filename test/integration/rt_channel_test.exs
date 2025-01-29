@@ -565,10 +565,9 @@ defmodule Realtime.Integration.RtChannelTest do
            :authenticated_read_broadcast_and_presence,
            :authenticated_write_broadcast_and_presence
          ]
-    test "on new access_token and channel is private policies are reevaluated",
+    test "on new access_token and channel is private policies are reevaluated for read policy",
          %{topic: topic} do
       {socket, access_token} = get_connection("authenticated")
-      {:ok, new_token} = token_valid("anon")
 
       realtime_topic = "realtime:#{topic}"
 
@@ -579,6 +578,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
+
+      {:ok, new_token} = token_valid("anon")
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
         "access_token" => new_token
@@ -599,6 +600,65 @@ defmodule Realtime.Integration.RtChannelTest do
       }
 
       assert_receive %Message{event: "phx_close", topic: ^realtime_topic}
+    end
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "on new access_token and channel is private policies are reevaluated for write policy",
+         %{topic: topic, tenant: tenant} do
+      {socket, access_token} = get_connection("authenticated")
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{
+        config: %{broadcast: %{self: true}, private: true},
+        access_token: access_token
+      })
+
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+      # Checks first send which will set write policy to true
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, realtime_topic, "broadcast", payload)
+      Process.sleep(1000)
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       payload: ^payload,
+                       topic: ^realtime_topic
+                     },
+                     500
+
+      # RLS policies changed to only allow read
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test")
+      clean_table(db_conn, "realtime", "messages")
+      create_rls_policies(db_conn, [:authenticated_read_broadcast_and_presence], %{topic: topic})
+
+      # Set new token to recheck policies
+      {:ok, new_token} =
+        generate_token(%{
+          exp: System.system_time(:second) + 1000,
+          role: "authenticated",
+          sub: random_string()
+        })
+
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+        "access_token" => new_token
+      })
+
+      # Send message to be ignored
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, realtime_topic, "broadcast", payload)
+
+      Process.sleep(1000)
+
+      refute_receive %Message{
+                       event: "broadcast",
+                       payload: ^payload,
+                       topic: ^realtime_topic
+                     },
+                     500
     end
 
     test "on new access_token and channel is public policies are not reevaluated",
