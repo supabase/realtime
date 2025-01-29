@@ -420,6 +420,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :expected_claims_map} ->
         shutdown_response(socket, "Token claims must be a map")
 
+      {:error, :unable_to_set_policies, _msg} ->
+        shutdown_response(socket, "Realtime was unable to connect to the project database")
+
       {:error, error} ->
         shutdown_response(socket, inspect(error))
     end

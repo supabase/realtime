@@ -6,9 +6,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   import ExUnit.CaptureLog
 
   alias Phoenix.Socket
+  alias Realtime.Tenants.Authorization
   alias RealtimeWeb.ChannelsAuthorization
-  alias RealtimeWeb.UserSocket
   alias RealtimeWeb.Joken.CurrentTime
+  alias RealtimeWeb.UserSocket
 
   @tenant_external_id "dev_tenant"
 
