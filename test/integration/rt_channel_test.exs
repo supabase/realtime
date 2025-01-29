@@ -6,6 +6,7 @@ defmodule Realtime.Integration.RtChannelTest do
   use RealtimeWeb.ConnCase, async: false
   import ExUnit.CaptureLog
   import Generators
+  import Mock
 
   require Logger
 
@@ -19,6 +20,7 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Repo
   alias Realtime.Tenants
+  alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Migrations
 
   @moduletag :capture_log
@@ -909,7 +911,6 @@ defmodule Realtime.Integration.RtChannelTest do
 
       # token becomes a string in between joins so it needs to be handled by the channel and not the socket
       Process.sleep(1000)
-      realtime_topic = "realtime:#{topic}"
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: "potato"})
 
       assert_receive %Message{
@@ -923,6 +924,58 @@ defmodule Realtime.Integration.RtChannelTest do
                      500
 
       assert_receive %Message{event: "phx_close"}
+    end
+
+    @tag policies: [
+           :authenticated_read_broadcast_and_presence,
+           :authenticated_write_broadcast_and_presence
+         ]
+    test "handles RPC error on token refreshed", %{topic: topic} do
+      with_mocks [
+        {Authorization, [:passthrough], build_authorization_params: &passthrough([&1])},
+        {Authorization, [:passthrough],
+         get_read_authorizations: [
+           in_series([:_, :_, :_], [&passthrough([&1, &2, &3]), {:error, "RPC Error"}])
+         ]}
+      ] do
+        {socket, access_token} = get_connection("authenticated")
+        config = %{broadcast: %{self: true}, private: true}
+        realtime_topic = "realtime:#{topic}"
+
+        WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+        assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+        assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+
+        # Update token to force update
+        {:ok, access_token} =
+          generate_token(%{:exp => System.system_time(:second) + 1000, role: "authenticated"})
+
+        log =
+          capture_log(fn ->
+            WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+              "access_token" => access_token
+            })
+
+            assert_receive %Phoenix.Socket.Message{
+                             event: "system",
+                             payload: %{
+                               "status" => "error",
+                               "extension" => "system",
+                               "message" =>
+                                 "Realtime was unable to connect to the project database"
+                             },
+                             topic: ^realtime_topic,
+                             join_ref: nil,
+                             ref: nil
+                           },
+                           500
+
+            assert_receive %Phoenix.Socket.Message{event: "phx_close", topic: ^realtime_topic}
+          end)
+
+        assert log =~ "Realtime was unable to connect to the project database"
+      end
     end
   end
 
