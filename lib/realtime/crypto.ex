@@ -28,21 +28,6 @@ defmodule Realtime.Crypto do
     |> unpad()
   end
 
-  @doc "
-  Decrypts the given credentials
-  "
-  @spec decrypt_creds(binary(), binary(), binary(), binary(), binary()) ::
-          {binary(), binary(), binary(), binary(), binary()}
-  def decrypt_creds(host, port, name, user, pass) do
-    {
-      decrypt!(host),
-      decrypt!(port),
-      decrypt!(name),
-      decrypt!(user),
-      decrypt!(pass)
-    }
-  end
-
   defp pad(data) do
     to_add = 16 - rem(byte_size(data), 16)
     data <> :binary.copy(<<to_add>>, to_add)

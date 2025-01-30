@@ -49,7 +49,7 @@ defmodule Realtime.Tenants.Connect do
   @spec lookup_or_start_connection(binary(), keyword()) ::
           {:ok, pid()} | {:error, term()}
   def lookup_or_start_connection(tenant_id, opts \\ []) do
-    case get_status(tenant_id) do
+    case get_status(tenant_id) |> IO.inspect() do
       {:ok, conn} ->
         {:ok, conn}
 
@@ -76,11 +76,11 @@ defmodule Realtime.Tenants.Connect do
              | :tenant_database_connection_initializing}
   def get_status(tenant_id) do
     case :syn.lookup(__MODULE__, tenant_id) do
-      {_, %{conn: conn}} when not is_nil(conn) ->
-        {:ok, conn}
-
       {_, %{conn: nil}} ->
         {:error, :initializing}
+
+      {_, %{conn: conn}} ->
+        {:ok, conn}
 
       :undefined ->
         Logger.warning("Connection process starting up")
@@ -109,7 +109,13 @@ defmodule Realtime.Tenants.Connect do
       {:error, {:already_started, _}} ->
         get_status(tenant_id)
 
-      {:error, :killed} ->
+      {:error, {:shutdown, :tenant_db_too_many_connections}} ->
+        {:error, :tenant_db_too_many_connections}
+
+      {:error, {:shutdown, :tenant_not_found}} ->
+        {:error, :tenant_not_found}
+
+      {:error, :shutdown} ->
         log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database")
         {:error, :tenant_database_unavailable}
 
@@ -165,12 +171,14 @@ defmodule Realtime.Tenants.Connect do
   def init(%{tenant_id: tenant_id} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    with {:ok, acc} <- Piper.run(@pipes, state) do
+    with {:ok, acc} <- Piper.run(@pipes, state) |> IO.inspect() do
       {:ok, acc, {:continue, :run_migrations}}
     else
       {:error, :tenant_not_found} ->
-        log_error("TenantNotFound", "Tenant not found")
-        {:stop, :shutdown}
+        {:stop, {:shutdown, :tenant_not_found}}
+
+      {:error, :tenant_db_too_many_connections} ->
+        {:stop, {:shutdown, :tenant_db_too_many_connections}}
 
       {:error, error} ->
         log_error("UnableToConnectToTenantDatabase", error)

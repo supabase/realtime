@@ -251,6 +251,16 @@ defmodule Realtime.Tenants.ConnectTest do
       assert ReplicationConnection.whereis(tenant.external_id) == nil
       assert Listen.whereis(tenant.external_id) == nil
     end
+
+    test "syn with no connection", %{tenant: tenant} do
+      with_mock :syn, [], lookup: fn _, _ -> {nil, %{conn: nil}} end do
+        assert {:error, :tenant_database_unavailable} =
+                 Connect.lookup_or_start_connection(tenant.external_id)
+
+        assert {:error, :initializing} =
+                 Connect.get_status(tenant.external_id)
+      end
+    end
   end
 
   describe "shutdown/1" do
@@ -271,6 +281,34 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "if tenant does not exist, does nothing" do
       assert :ok = Connect.shutdown("none")
+    end
+
+    test "tenant not able to connect if database has not enough connections" do
+      extensions = [
+        %{
+          "type" => "postgres_cdc_rls",
+          "settings" => %{
+            "db_host" => "localhost",
+            "db_name" => "postgres",
+            "db_user" => "supabase_admin",
+            "db_password" => "postgres",
+            "db_port" => "5433",
+            "poll_interval" => 100,
+            "poll_max_changes" => 100,
+            "poll_max_record_bytes" => 1_048_576,
+            "region" => "us-east-1",
+            "ssl_enforced" => false,
+            "db_pool" => 100,
+            "subcriber_pool_size" => 100,
+            "subs_pool_size" => 100
+          }
+        }
+      ]
+
+      tenant = tenant_fixture(%{extensions: extensions})
+
+      assert {:error, :tenant_db_too_many_connections} =
+               Connect.lookup_or_start_connection(tenant.external_id)
     end
   end
 
