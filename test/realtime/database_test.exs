@@ -121,9 +121,13 @@ defmodule Realtime.DatabaseTest do
     test "on checkout error, handles raised exception as an error", %{db_conn: db_conn} do
       assert capture_log(fn ->
                Task.start(fn ->
-                 Database.transaction(db_conn, fn conn ->
-                   Postgrex.query!(conn, "SELECT pg_sleep(14)", [])
-                 end)
+                 Database.transaction(
+                   db_conn,
+                   fn conn ->
+                     Postgrex.query!(conn, "SELECT pg_sleep(20)", [])
+                   end,
+                   timeout: 20000
+                 )
                end)
 
                assert {:error, %DBConnection.ConnectionError{reason: :queue_timeout}} =
