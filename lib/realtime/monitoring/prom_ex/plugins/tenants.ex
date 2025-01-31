@@ -50,7 +50,7 @@ defmodule Realtime.PromEx.Plugins.Tenants do
     )
   end
 
-  def execute_metrics() do
+  def execute_metrics do
     connected =
       if Enum.member?(:syn.node_scopes(), Extensions.PostgresCdcRls) do
         :syn.local_registry_count(Extensions.PostgresCdcRls)

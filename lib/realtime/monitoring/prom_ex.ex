@@ -97,7 +97,7 @@ defmodule Realtime.PromEx do
     ]
   end
 
-  def get_metrics() do
+  def get_metrics do
     %{
       region: region,
       node_host: node_host,
@@ -127,7 +127,7 @@ defmodule Realtime.PromEx do
     metrics
   end
 
-  def set_metrics_tags() do
+  def set_metrics_tags do
     [_, node_host] = node() |> Atom.to_string() |> String.split("@")
 
     metrics_tags = %{
@@ -139,7 +139,7 @@ defmodule Realtime.PromEx do
     Application.put_env(:realtime, :metrics_tags, metrics_tags)
   end
 
-  def get_metrics_tags() do
+  def get_metrics_tags do
     Application.get_env(:realtime, :metrics_tags)
   end
 end

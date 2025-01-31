@@ -7,7 +7,7 @@ defmodule Realtime.Operations do
   @doc """
   Ensures connected users are connected to the closest region by killing and restart the connection process.
   """
-  def rebalance() do
+  def rebalance do
     Enum.reduce(:syn.group_names(:users), 0, fn tenant, acc ->
       case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
         {pid, %{region: region}} ->
@@ -69,7 +69,7 @@ defmodule Realtime.Operations do
   Kills all Ecto.Migration.Runner processes that are linked only to Ecto.MigratorSupervisor
   """
   @spec dirty_terminate_runners :: list()
-  def dirty_terminate_runners() do
+  def dirty_terminate_runners do
     Ecto.MigratorSupervisor
     |> DynamicSupervisor.which_children()
     |> Enum.reduce([], fn

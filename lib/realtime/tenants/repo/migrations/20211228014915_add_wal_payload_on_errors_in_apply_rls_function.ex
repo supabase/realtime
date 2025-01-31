@@ -4,8 +4,7 @@ defmodule Realtime.Tenants.Migrations.AddWalPayloadOnErrorsInApplyRlsFunction do
   use Ecto.Migration
 
   def change do
-    execute(
-      "create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
+    execute("create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
       returns setof realtime.wal_rls
       language plpgsql
       volatile
@@ -245,7 +244,6 @@ defmodule Realtime.Tenants.Migrations.AddWalPayloadOnErrorsInApplyRlsFunction do
 
     perform set_config('role', null, true);
   end;
-  $$;"
-    )
+  $$;")
   end
 end

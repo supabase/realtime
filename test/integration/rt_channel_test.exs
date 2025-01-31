@@ -965,8 +965,7 @@ defmodule Realtime.Integration.RtChannelTest do
                              payload: %{
                                "status" => "error",
                                "extension" => "system",
-                               "message" =>
-                                 "Realtime was unable to connect to the project database"
+                               "message" => "Realtime was unable to connect to the project database"
                              },
                              topic: ^realtime_topic,
                              join_ref: nil,
@@ -1523,7 +1522,7 @@ defmodule Realtime.Integration.RtChannelTest do
   end
 
   defp token_valid(role, claims \\ %{}), do: generate_token(Map.put(claims, :role, role))
-  defp token_no_role(), do: generate_token()
+  defp token_no_role, do: generate_token()
 
   defp generate_token(claims \\ %{}) do
     claims =

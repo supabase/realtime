@@ -12,18 +12,10 @@
         <.select form={f} field={:order} list={[:desc, :asc]} selected={:desc} />
       </div>
       <div class="my-4">
-        <.text_input
-          form={f}
-          field={:search}
-          opts={[phx_change: "validate", placeholder: "tenant"]}
-        />
+        <.text_input form={f} field={:search} opts={[phx_change: "validate", placeholder: "tenant"]} />
       </div>
       <div class="my-4">
-        <.text_input
-          form={f}
-          field={:limit}
-          opts={[phx_change: "validate", placeholder: "limit"]}
-        />
+        <.text_input form={f} field={:limit} opts={[phx_change: "validate", placeholder: "limit"]} />
       </div>
     </.form>
   </div>

@@ -80,15 +80,11 @@ defmodule Realtime.Tenants.Migrations.MessagesPartitioning do
 
     execute("CREATE SEQUENCE IF NOT EXISTS realtime.messages_id_seq")
 
-    execute(
-      "ALTER TABLE realtime.messages ALTER COLUMN id SET DEFAULT nextval('realtime.messages_id_seq')"
-    )
+    execute("ALTER TABLE realtime.messages ALTER COLUMN id SET DEFAULT nextval('realtime.messages_id_seq')")
 
     execute("ALTER table realtime.messages OWNER to supabase_realtime_admin")
 
-    execute(
-      "GRANT USAGE ON SEQUENCE realtime.messages_id_seq TO postgres, anon, authenticated, service_role"
-    )
+    execute("GRANT USAGE ON SEQUENCE realtime.messages_id_seq TO postgres, anon, authenticated, service_role")
 
     execute("GRANT SELECT ON realtime.messages TO postgres, anon, authenticated, service_role")
     execute("GRANT UPDATE ON realtime.messages TO postgres, anon, authenticated, service_role")

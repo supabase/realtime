@@ -125,9 +125,7 @@ defmodule Extensions.PostgresCdcRls do
       if node(pid) == node(manager_pid) do
         %{meta | manager: manager_pid, subs_pool: subs_pool}
       else
-        Logger.warning(
-          "Node mismatch for tenant #{tenant} #{inspect(node(pid))} #{inspect(node(manager_pid))}"
-        )
+        Logger.warning("Node mismatch for tenant #{tenant} #{inspect(node(pid))} #{inspect(node(manager_pid))}")
 
         meta
       end

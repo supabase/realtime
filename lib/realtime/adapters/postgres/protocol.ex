@@ -1,13 +1,14 @@
 defmodule Realtime.Adapters.Postgres.Protocol do
+  @moduledoc """
+  This module is responsible for parsing the Postgres WAL messages.
+  """
   alias Realtime.Adapters.Postgres.Protocol.Write
   alias Realtime.Adapters.Postgres.Protocol.KeepAlive
 
   defguard is_write(value) when binary_part(value, 0, 1) == <<?w>>
   defguard is_keep_alive(value) when binary_part(value, 0, 1) == <<?k>>
 
-  def parse(
-        <<?w, server_wal_start::64, server_wal_end::64, server_system_clock::64, message::binary>>
-      ) do
+  def parse(<<?w, server_wal_start::64, server_wal_end::64, server_system_clock::64, message::binary>>) do
     %Write{
       server_wal_start: server_wal_start,
       server_wal_end: server_wal_end,
@@ -48,16 +49,15 @@ defmodule Realtime.Adapters.Postgres.Protocol do
       end
 
     [
-      <<?r, last_wal_received::64, last_wal_flushed::64, last_wal_applied::64, clock::64,
-        reply::8>>
+      <<?r, last_wal_received::64, last_wal_flushed::64, last_wal_applied::64, clock::64, reply::8>>
     ]
   end
 
   @doc """
   Message to send the server to not do any operation since the server can wait
   """
-  def hold(), do: []
+  def hold, do: []
 
   @epoch DateTime.to_unix(~U[2000-01-01 00:00:00Z], :microsecond)
-  def current_time(), do: System.os_time(:microsecond) - @epoch
+  def current_time, do: System.os_time(:microsecond) - @epoch
 end

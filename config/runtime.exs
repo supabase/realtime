@@ -31,16 +31,11 @@ socket_options =
   end
 
 config :realtime,
-  tenant_max_bytes_per_second:
-    System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100000") |> String.to_integer(),
-  tenant_max_channels_per_client:
-    System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer(),
-  tenant_max_concurrent_users:
-    System.get_env("TENANT_MAX_CONCURRENT_USERS", "200") |> String.to_integer(),
-  tenant_max_events_per_second:
-    System.get_env("TENANT_MAX_EVENTS_PER_SECOND", "100") |> String.to_integer(),
-  tenant_max_joins_per_second:
-    System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer(),
+  tenant_max_bytes_per_second: System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100000") |> String.to_integer(),
+  tenant_max_channels_per_client: System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer(),
+  tenant_max_concurrent_users: System.get_env("TENANT_MAX_CONCURRENT_USERS", "200") |> String.to_integer(),
+  tenant_max_events_per_second: System.get_env("TENANT_MAX_EVENTS_PER_SECOND", "100") |> String.to_integer(),
+  tenant_max_joins_per_second: System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer(),
   metrics_cleaner_schedule_timer_in_ms:
     System.get_env("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", "1800000") |> String.to_integer(),
   rpc_timeout: System.get_env("RPC_TIMEOUT", "30000") |> String.to_integer()
@@ -57,10 +52,8 @@ else
     janitor_max_children: System.get_env("JANITOR_MAX_CHILDREN", "5") |> String.to_integer(),
     janitor_chunk_size: System.get_env("JANITOR_CHUNK_SIZE", "10") |> String.to_integer(),
     # defaults the runner to only start after 10 minutes
-    janitor_run_after_in_ms:
-      System.get_env("JANITOR_RUN_AFTER_IN_MS", "600000") |> String.to_integer(),
-    janitor_children_timeout:
-      System.get_env("JANITOR_CHILDREN_TIMEOUT", "5000") |> String.to_integer(),
+    janitor_run_after_in_ms: System.get_env("JANITOR_RUN_AFTER_IN_MS", "600000") |> String.to_integer(),
+    janitor_children_timeout: System.get_env("JANITOR_CHILDREN_TIMEOUT", "5000") |> String.to_integer(),
     # defaults to 4 hours
     janitor_schedule_timer:
       :timer.hours(4)
@@ -220,8 +213,7 @@ cluster_topologies =
               ],
               heartbeat_interval: 5_000,
               node_timeout: 15_000,
-              channel_name:
-                System.get_env("POSTGRES_CLUSTER_CHANNEL_NAME", "realtime_cluster_#{version}")
+              channel_name: System.get_env("POSTGRES_CLUSTER_CHANNEL_NAME", "realtime_cluster_#{version}")
             ]
           ]
         ] ++ acc

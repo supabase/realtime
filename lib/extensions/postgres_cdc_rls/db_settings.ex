@@ -3,7 +3,7 @@ defmodule Extensions.PostgresCdcRls.DbSettings do
   Schema callbacks for CDC RLS implementation.
   """
 
-  def default() do
+  def default do
     %{
       "poll_interval_ms" => 100,
       "poll_max_changes" => 100,
@@ -13,7 +13,7 @@ defmodule Extensions.PostgresCdcRls.DbSettings do
     }
   end
 
-  def required() do
+  def required do
     [
       {"region", &is_binary/1, false},
       {"db_host", &is_binary/1, true},

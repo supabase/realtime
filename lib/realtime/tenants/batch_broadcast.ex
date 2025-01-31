@@ -118,11 +118,10 @@ defmodule Realtime.Tenants.BatchBroadcast do
   defp permissions_for_message(nil, _, _), do: nil
 
   defp permissions_for_message(auth_params, {:ok, db_conn}, topic) do
-    with auth_params = Map.put(auth_params, :topic, topic),
-         auth_params = Authorization.build_authorization_params(auth_params),
-         {:ok, policies} <- Authorization.get_write_authorizations(db_conn, db_conn, auth_params) do
-      policies
-    else
+    auth_params = auth_params |> Map.put(:topic, topic) |> Authorization.build_authorization_params()
+
+    case Authorization.get_write_authorizations(db_conn, db_conn, auth_params) do
+      {:ok, policies} -> policies
       {:error, :not_found} -> nil
       error -> error
     end
@@ -137,8 +136,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
         {:error, :too_many_requests, "You have exceeded your rate limit"}
 
       total_messages_to_broadcast + events_per_second > max_events_per_second ->
-        {:error, :too_many_requests,
-         "Too many messages to broadcast, please reduce the batch size"}
+        {:error, :too_many_requests, "Too many messages to broadcast, please reduce the batch size"}
 
       true ->
         :ok

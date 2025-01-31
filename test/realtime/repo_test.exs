@@ -326,7 +326,7 @@ defmodule Realtime.RepoTest do
     end
   end
 
-  defp db_config() do
+  defp db_config do
     tenant_fixture()
     |> Realtime.Database.from_tenant("realtime_test")
     |> Map.to_list()

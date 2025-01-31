@@ -7,7 +7,7 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
   alias Extensions.PostgresCdcRls
 
   @spec start_link :: :ignore | {:error, any} | {:ok, pid}
-  def start_link() do
+  def start_link do
     Supervisor.start_link(__MODULE__, [], name: __MODULE__)
   end
 
@@ -20,17 +20,14 @@ defmodule Extensions.PostgresCdcRls.Supervisor do
     children = [
       {
         PartitionSupervisor,
-        partitions: 20,
-        child_spec: DynamicSupervisor,
-        strategy: :one_for_one,
-        name: PostgresCdcRls.DynamicSupervisor
+        partitions: 20, child_spec: DynamicSupervisor, strategy: :one_for_one, name: PostgresCdcRls.DynamicSupervisor
       }
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
   end
 
-  defp load_migrations_modules() do
+  defp load_migrations_modules do
     {:ok, modules} = :application.get_key(:realtime, :modules)
 
     modules

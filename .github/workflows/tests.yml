@@ -38,7 +38,7 @@ jobs:
       - name: Run format check
         run: mix format --check-formatted
       - name: Credo checks
-        run: mix credo --strict --mute-exit-status
+        run: mix credo
       - name: Retrieve PLT Cache
         uses: actions/cache@v1
         id: plt-cache

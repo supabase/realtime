@@ -105,9 +105,7 @@ defmodule Realtime.Nodes do
   def launch_node(tenant_id, region, default) do
     case region_nodes(region) do
       [node] ->
-        Logger.warning(
-          "Only one region node (#{inspect(node)}) for #{region} using default #{inspect(default)}"
-        )
+        Logger.warning("Only one region node (#{inspect(node)}) for #{region} using default #{inspect(default)}")
 
         default
 

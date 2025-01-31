@@ -3,6 +3,7 @@ defmodule RealtimeWeb.BroadcastController do
   use OpenApiSpex.ControllerSpecs
   require Logger
 
+  alias Realtime.Tenants.BatchBroadcast
   alias RealtimeWeb.OpenApiSchemas.EmptyResponse
   alias RealtimeWeb.OpenApiSchemas.TenantBatchParams
   alias RealtimeWeb.OpenApiSchemas.TooManyRequestsResponse
@@ -32,7 +33,7 @@ defmodule RealtimeWeb.BroadcastController do
   )
 
   def broadcast(%{assigns: %{tenant: tenant}} = conn, attrs) do
-    with :ok <- Realtime.Tenants.BatchBroadcast.broadcast(conn, tenant, attrs) do
+    with :ok <- BatchBroadcast.broadcast(conn, tenant, attrs) do
       send_resp(conn, :accepted, "")
     end
   end

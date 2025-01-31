@@ -7,9 +7,13 @@ defmodule Realtime.Adapters.Changes do
   @moduledoc """
   This module provides structures of CDC changes.
   """
-  defmodule(Transaction, do: defstruct([:changes, :commit_timestamp]))
+  defmodule Transaction do
+    @moduledoc false
+    defstruct [:changes, :commit_timestamp]
+  end
 
   defmodule NewRecord do
+    @moduledoc false
     @derive {Jason.Encoder, except: [:subscription_ids]}
     defstruct [
       :columns,
@@ -24,6 +28,7 @@ defmodule Realtime.Adapters.Changes do
   end
 
   defmodule UpdatedRecord do
+    @moduledoc false
     @derive {Jason.Encoder, except: [:subscription_ids]}
     defstruct [
       :columns,
@@ -39,6 +44,7 @@ defmodule Realtime.Adapters.Changes do
   end
 
   defmodule DeletedRecord do
+    @moduledoc false
     @derive {Jason.Encoder, except: [:subscription_ids]}
     defstruct [
       :columns,
@@ -52,7 +58,10 @@ defmodule Realtime.Adapters.Changes do
     ]
   end
 
-  defmodule(TruncatedRelation, do: defstruct([:type, :schema, :table, :commit_timestamp]))
+  defmodule TruncatedRelation do
+    @moduledoc false
+    defstruct [:type, :schema, :table, :commit_timestamp]
+  end
 end
 
 Protocol.derive(Jason.Encoder, Realtime.Adapters.Changes.Transaction)

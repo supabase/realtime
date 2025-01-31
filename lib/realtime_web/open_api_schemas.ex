@@ -20,7 +20,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       }
     })
 
-    def params(), do: {"Channel Params", "application/json", __MODULE__}
+    def params, do: {"Channel Params", "application/json", __MODULE__}
   end
 
   defmodule TenantBatchParams do
@@ -52,7 +52,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       }
     })
 
-    def params(), do: {"Tenant Batch Params", "application/json", __MODULE__}
+    def params, do: {"Tenant Batch Params", "application/json", __MODULE__}
   end
 
   defmodule TenantParams do
@@ -163,7 +163,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       }
     })
 
-    def params(), do: {"Tenant Params", "application/json", __MODULE__}
+    def params, do: {"Tenant Params", "application/json", __MODULE__}
   end
 
   defmodule TenantResponseValue do
@@ -186,8 +186,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
         },
         max_events_per_second: %Schema{
           type: :number,
-          description:
-            "Maximum number of events, or messages, that all connected clients are permitted to send"
+          description: "Maximum number of events, or messages, that all connected clients are permitted to send"
         },
         max_joins_per_second: %Schema{
           type: :number,
@@ -308,8 +307,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
         },
         connected_cluster: %Schema{
           type: :integer,
-          description:
-            "The count of currently connected clients for a tenant on the Realtime cluster"
+          description: "The count of currently connected clients for a tenant on the Realtime cluster"
         }
       },
       required: [
@@ -333,7 +331,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       properties: %{data: TenantHealthResponseValue}
     })
 
-    def response(), do: {"Tenant Response", "application/json", __MODULE__}
+    def response, do: {"Tenant Response", "application/json", __MODULE__}
   end
 
   defmodule TenantResponse do
@@ -345,7 +343,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       properties: %{data: TenantResponseValue}
     })
 
-    def response(), do: {"Tenant Response", "application/json", __MODULE__}
+    def response, do: {"Tenant Response", "application/json", __MODULE__}
   end
 
   defmodule TenantResponseList do
@@ -357,7 +355,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       properties: %{data: %Schema{type: :array, items: TenantResponseValue}}
     })
 
-    def response(), do: {"Tenant List Response", "application/json", __MODULE__}
+    def response, do: {"Tenant List Response", "application/json", __MODULE__}
   end
 
   defmodule ChannelResponse do
@@ -369,7 +367,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       properties: %{data: ChannelResponseValue}
     })
 
-    def response(), do: {"Tenant Response", "application/json", __MODULE__}
+    def response, do: {"Tenant Response", "application/json", __MODULE__}
   end
 
   defmodule ChannelResponseList do
@@ -381,7 +379,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       properties: %{data: %Schema{type: :array, items: ChannelResponseValue}}
     })
 
-    def response(), do: {"Tenant List Response", "application/json", __MODULE__}
+    def response, do: {"Tenant List Response", "application/json", __MODULE__}
   end
 
   defmodule EmptyResponse do
@@ -393,7 +391,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       default: ""
     })
 
-    def response(), do: {"Empty Response", "application/json", __MODULE__}
+    def response, do: {"Empty Response", "application/json", __MODULE__}
   end
 
   defmodule NotFoundResponse do
@@ -407,7 +405,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       }
     })
 
-    def response(), do: {"Not Found", "application/json", __MODULE__}
+    def response, do: {"Not Found", "application/json", __MODULE__}
   end
 
   defmodule ErrorResponse do
@@ -421,7 +419,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       }
     })
 
-    def response(), do: {"Error", "application/json", __MODULE__}
+    def response, do: {"Error", "application/json", __MODULE__}
   end
 
   defmodule UnauthorizedResponse do
@@ -435,7 +433,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       }
     })
 
-    def response(), do: {"Unauthorized", "application/json", __MODULE__}
+    def response, do: {"Unauthorized", "application/json", __MODULE__}
   end
 
   defmodule UnprocessableEntityResponse do
@@ -457,7 +455,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
       }
     })
 
-    def response(), do: {"Unprocessable Entity", "application/json", __MODULE__}
+    def response, do: {"Unprocessable Entity", "application/json", __MODULE__}
   end
 
   defmodule TooManyRequestsResponse do
@@ -479,6 +477,6 @@ defmodule RealtimeWeb.OpenApiSchemas do
       }
     })
 
-    def response(), do: {"Too Many Requests", "application/json", __MODULE__}
+    def response, do: {"Too Many Requests", "application/json", __MODULE__}
   end
 end

@@ -171,9 +171,10 @@ defmodule Realtime.Tenants.Connect do
   def init(%{tenant_id: tenant_id} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    with {:ok, acc} <- Piper.run(@pipes, state) do
-      {:ok, acc, {:continue, :run_migrations}}
-    else
+    case Piper.run(@pipes, state) do
+      {:ok, acc} ->
+        {:ok, acc, {:continue, :run_migrations}}
+
       {:error, :tenant_not_found} ->
         {:stop, {:shutdown, :tenant_not_found}}
 

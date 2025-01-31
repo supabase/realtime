@@ -162,7 +162,7 @@ defmodule Realtime.Latency do
   """
 
   @spec pong :: {:ok, {:pong, String.t()}}
-  def pong() do
+  def pong do
     region = Application.get_env(:realtime, :region, "not_set")
     {:ok, {:pong, region}}
   end
@@ -173,7 +173,7 @@ defmodule Realtime.Latency do
     pong()
   end
 
-  defp ping_after() do
+  defp ping_after do
     Process.send_after(self(), :ping, @every)
   end
 end

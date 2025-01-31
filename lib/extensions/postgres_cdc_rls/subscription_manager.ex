@@ -159,7 +159,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     Helpers.cancel_timer(ref)
 
     q1 =
-      if !:queue.is_empty(q) do
+      if :queue.is_empty(q) do
+        q
+      else
         {ids, q1} = Helpers.queue_take(q, @max_delete_records)
         Logger.debug("delete sub id #{inspect(ids)}")
 
@@ -172,8 +174,6 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
             q
         end
-      else
-        q
       end
 
     ref = if :queue.is_empty(q1), do: check_delete_queue(), else: check_delete_queue(1_000)
@@ -209,11 +209,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
   ## Internal functions
 
-  defp check_oids(), do: Process.send_after(self(), :check_oids, @check_oids_interval)
+  defp check_oids, do: Process.send_after(self(), :check_oids, @check_oids_interval)
 
-  defp now(), do: System.system_time(:millisecond)
+  defp now, do: System.system_time(:millisecond)
 
-  defp check_no_users(), do: Process.send_after(self(), :check_no_users, @check_no_users_interval)
+  defp check_no_users, do: Process.send_after(self(), :check_no_users, @check_no_users_interval)
 
   defp check_delete_queue(timeout \\ @timeout),
     do: Process.send_after(self(), :check_delete_queue, timeout)

@@ -72,17 +72,13 @@ defmodule Realtime.Application do
          name: Realtime.Tenants.Migrations.DynamicSupervisor,
          partitions: System.schedulers_online() * 2},
         {PartitionSupervisor,
-         child_spec: DynamicSupervisor,
-         strategy: :one_for_one,
-         name: Realtime.Tenants.Connect.DynamicSupervisor},
+         child_spec: DynamicSupervisor, strategy: :one_for_one, name: Realtime.Tenants.Connect.DynamicSupervisor},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,
          name: Realtime.Tenants.ReplicationConnection.DynamicSupervisor},
         {PartitionSupervisor,
-         child_spec: DynamicSupervisor,
-         strategy: :one_for_one,
-         name: Realtime.Tenants.Listen.DynamicSupervisor},
+         child_spec: DynamicSupervisor, strategy: :one_for_one, name: Realtime.Tenants.Listen.DynamicSupervisor},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
       ] ++ extensions_supervisors() ++ janitor_tasks()
@@ -99,7 +95,7 @@ defmodule Realtime.Application do
     Supervisor.start_link(children, opts)
   end
 
-  defp extensions_supervisors() do
+  defp extensions_supervisors do
     Enum.reduce(Application.get_env(:realtime, :extensions), [], fn
       {_, %{supervisor: name}}, acc ->
         opts = %{
@@ -115,7 +111,7 @@ defmodule Realtime.Application do
     end)
   end
 
-  defp janitor_tasks() do
+  defp janitor_tasks do
     if Application.fetch_env!(:realtime, :run_janitor) do
       janitor_max_children =
         Application.get_env(:realtime, :janitor_max_children)

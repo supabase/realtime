@@ -16,9 +16,7 @@ defmodule RealtimeWeb.MetricsController do
       |> Enum.reduce(PromEx.get_metrics(), fn {_, {node, response}}, acc ->
         case response do
           {:badrpc, reason} ->
-            Logger.error(
-              "Cannot fetch metrics from the node #{inspect(node)} because #{inspect(reason)}"
-            )
+            Logger.error("Cannot fetch metrics from the node #{inspect(node)} because #{inspect(reason)}")
 
             acc
 
