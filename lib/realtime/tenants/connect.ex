@@ -49,7 +49,7 @@ defmodule Realtime.Tenants.Connect do
   @spec lookup_or_start_connection(binary(), keyword()) ::
           {:ok, pid()} | {:error, term()}
   def lookup_or_start_connection(tenant_id, opts \\ []) do
-    case get_status(tenant_id) |> IO.inspect() do
+    case get_status(tenant_id) do
       {:ok, conn} ->
         {:ok, conn}
 
