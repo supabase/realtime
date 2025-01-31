@@ -14,6 +14,7 @@ defmodule Realtime.Tenants.JanitorTest do
   alias Realtime.Tenants.Connect
 
   setup do
+    :ets.delete_all_objects(Connect)
     dev_tenant = Tenant |> Repo.all() |> hd()
     timer = Application.get_env(:realtime, :janitor_schedule_timer)
 
@@ -89,6 +90,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
       assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
       assert_called(Migrations.create_partitions(:_))
+      assert :ets.tab2list(Connect) == []
     end
   end
 
@@ -113,10 +115,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
     tenant = tenant_fixture(%{extensions: extensions})
     # Force add a bad tenant
-    :ets.insert(
-      :"syn_registry_by_name_Elixir.Realtime.Tenants.Connect",
-      {tenant.external_id, :undefined, :undefined, :undefined, :undefined, Node.self()}
-    )
+    :ets.insert(Connect, {tenant.external_id})
 
     Process.sleep(250)
 
@@ -124,5 +123,7 @@ defmodule Realtime.Tenants.JanitorTest do
              start_supervised!(Janitor)
              Process.sleep(1000)
            end) =~ "JanitorFailedToDeleteOldMessages"
+
+    assert :ets.tab2list(Connect) == []
   end
 end

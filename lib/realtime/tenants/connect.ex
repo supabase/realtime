@@ -225,12 +225,13 @@ defmodule Realtime.Tenants.Connect do
   def handle_continue(:setup_connected_user_events, state) do
     %{
       check_connected_user_interval: check_connected_user_interval,
-      connected_users_bucket: connected_users_bucket
+      connected_users_bucket: connected_users_bucket,
+      tenant_id: tenant_id
     } = state
 
     :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:invalidate_cache")
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
-
+    :ets.insert(__MODULE__, {tenant_id})
     {:noreply, state}
   end
 
