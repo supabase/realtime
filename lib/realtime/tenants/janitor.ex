@@ -14,6 +14,9 @@ defmodule Realtime.Tenants.Janitor do
   alias Realtime.Tenants
   alias Realtime.Tenants.Migrations
 
+  @table_name Realtime.Tenants.Connect
+  @matchspec [{:"$1", [], [:"$1"]}]
+
   @type t :: %__MODULE__{
           timer: pos_integer() | nil,
           region: String.t() | nil,
@@ -57,18 +60,13 @@ defmodule Realtime.Tenants.Janitor do
     {:ok, state}
   end
 
-  @table_name :"syn_registry_by_name_Elixir.Realtime.Tenants.Connect"
   @impl true
   def handle_info(:delete_old_messages, state) do
     Logger.info("Janitor started")
     %{chunks: chunks, tasks: tasks} = state
 
-    matchspec = [
-      {{:"$1", :"$2", :"$3", :"$4", :"$5", Node.self()}, [], [:"$1"]}
-    ]
-
     new_tasks =
-      :ets.select(@table_name, matchspec)
+      :ets.select(@table_name, @matchspec)
       |> Stream.chunk_every(chunks)
       |> Stream.map(fn chunks ->
         task =
@@ -119,9 +117,10 @@ defmodule Realtime.Tenants.Janitor do
 
   defp perform_mantaince_tasks(tenants), do: Enum.map(tenants, &perform_mantaince_task/1)
 
-  defp perform_mantaince_task(tenant_external_id) do
+  defp perform_mantaince_task({tenant_external_id}) do
     Logger.metadata(project: tenant_external_id, external_id: tenant_external_id)
     Logger.info("Janitor starting realtime.messages cleanup")
+    :ets.delete(@table_name, tenant_external_id)
 
     with %Tenant{} = tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_external_id),
          {:ok, conn} <- Database.connect(tenant, "realtime_janitor"),

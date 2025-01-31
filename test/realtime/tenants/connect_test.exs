@@ -10,17 +10,36 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Realtime.UsersCounter
 
   setup do
+    :ets.delete_all_objects(Connect)
     tenant = tenant_fixture()
     Cleanup.ensure_no_replication_slot()
     %{tenant: tenant}
   end
 
   describe "lookup_or_start_connection/1" do
-    test "if tenant exists and connected, returns the db connection", %{tenant: tenant} do
+    test "if tenant exists and connected, returns the db connection and tracks it in ets", %{
+      tenant: tenant
+    } do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       Process.sleep(100)
       assert is_pid(db_conn)
       Connect.shutdown(tenant.external_id)
+    end
+
+    test "tracks multiple users that connect and disconnect" do
+      expected =
+        for _ <- 1..10 do
+          tenant = tenant_fixture()
+          assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+          Process.sleep(100)
+          assert is_pid(db_conn)
+          Connect.shutdown(tenant.external_id)
+          {tenant.external_id}
+        end
+
+      result = :ets.select(Connect, [{:"$1", [], [:"$1"]}]) |> Enum.sort()
+      expected = Enum.sort(expected)
+      assert result == expected
     end
 
     test "on database disconnect, returns new connection", %{tenant: tenant} do
