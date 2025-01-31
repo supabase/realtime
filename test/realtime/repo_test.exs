@@ -5,7 +5,6 @@ defmodule Realtime.RepoTest do
   import Ecto.Query
 
   alias Realtime.Api.Message
-  alias Realtime.Crypto
   alias Realtime.Repo
   alias Realtime.Database
   alias Realtime.Tenants.Migrations
@@ -328,34 +327,9 @@ defmodule Realtime.RepoTest do
   end
 
   defp db_config() do
-    tenant = tenant_fixture()
-
-    %{
-      "db_host" => db_host,
-      "db_name" => db_name,
-      "db_password" => db_password,
-      "db_port" => db_port,
-      "db_user" => db_user
-    } = args = tenant.extensions |> hd() |> then(& &1.settings)
-
-    {host, port, name, user, pass} =
-      Crypto.decrypt_creds(
-        db_host,
-        db_port,
-        db_name,
-        db_user,
-        db_password
-      )
-
-    ssl_enforced = Database.default_ssl_param(args)
-
-    [
-      hostname: host,
-      port: port,
-      database: name,
-      password: pass,
-      username: user,
-      ssl_enforced: ssl_enforced
-    ]
+    tenant_fixture()
+    |> Realtime.Database.from_tenant("realtime_test")
+    |> Map.to_list()
+    |> Keyword.new()
   end
 end

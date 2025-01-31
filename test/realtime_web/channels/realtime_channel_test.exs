@@ -6,7 +6,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   import ExUnit.CaptureLog
 
   alias Phoenix.Socket
-  alias Realtime.Tenants.Authorization
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.Joken.CurrentTime
   alias RealtimeWeb.UserSocket
@@ -216,6 +215,37 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant.external_id))
 
       assert {:error, %{reason: "Realtime was unable to connect to the project database"}} =
+               subscribe_and_join(socket, "realtime:test", %{})
+    end
+
+    test "lack of connections halts join" do
+      extensions = [
+        %{
+          "type" => "postgres_cdc_rls",
+          "settings" => %{
+            "db_host" => "localhost",
+            "db_name" => "postgres",
+            "db_user" => "supabase_admin",
+            "db_password" => "postgres",
+            "db_port" => "5433",
+            "poll_interval" => 100,
+            "poll_max_changes" => 100,
+            "poll_max_record_bytes" => 1_048_576,
+            "region" => "us-east-1",
+            "ssl_enforced" => false,
+            "db_pool" => 100,
+            "subcriber_pool_size" => 100,
+            "subs_pool_size" => 100
+          }
+        }
+      ]
+
+      tenant = tenant_fixture(%{extensions: extensions})
+
+      {:ok, %Socket{} = socket} =
+        connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant.external_id))
+
+      assert {:error, %{reason: "Database can't accept more connections, Realtime won't connect"}} =
                subscribe_and_join(socket, "realtime:test", %{})
     end
   end

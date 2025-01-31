@@ -85,24 +85,37 @@ defmodule Realtime.Database do
     }
   end
 
+  @available_connection_factor 0.95
+
+  defguardp can_connect?(available_connections, required_pool)
+            when required_pool * @available_connection_factor < available_connections
+
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
   """
-  @spec check_tenant_connection(Tenant.t() | nil, binary()) :: {:error, atom()} | {:ok, pid()}
-  def check_tenant_connection(tenant, application_name)
-  def check_tenant_connection(nil, _), do: {:error, :tenant_not_found}
 
-  def check_tenant_connection(tenant, application_name) do
+  @spec check_tenant_connection(Tenant.t() | nil) :: {:error, atom()} | {:ok, pid()}
+  def check_tenant_connection(nil), do: {:error, :tenant_not_found}
+
+  def check_tenant_connection(tenant) do
     tenant
     |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
     |> then(fn settings ->
-      check_settings = from_settings(settings, application_name, :stop)
+      required_pool = tenant_pool_requirements(settings)
+      check_settings = from_settings(settings, "realtime_connect", :stop)
       check_settings = Map.put(check_settings, :max_restarts, 0)
 
       with {:ok, conn} <- connect_db(check_settings) do
-        case Postgrex.query(conn, "SELECT 1", []) do
-          {:ok, _} ->
+        query =
+          "select (current_setting('max_connections')::int - count(*))::int from pg_stat_activity"
+
+        case Postgrex.query(conn, query, []) do
+          {:ok, %{rows: [[available_connections]]}}
+          when can_connect?(available_connections, required_pool) ->
             {:ok, conn}
+
+          {:ok, _} ->
+            {:error, :tenant_db_too_many_connections}
 
           {:error, e} ->
             Process.exit(conn, :kill)
@@ -239,7 +252,6 @@ defmodule Realtime.Database do
   @spec get_external_id(String.t()) :: {:ok, String.t()} | {:error, atom()}
   def get_external_id(host) when is_binary(host) do
     case String.split(host, ".", parts: 2) do
-      [] -> {:error, :tenant_not_found_in_host}
       [id] -> {:ok, id}
       [id, _] -> {:ok, id}
     end
@@ -298,5 +310,24 @@ defmodule Realtime.Database do
 
     Postgrex.query(conn, "select pg_drop_replication_slot($1)", [slot_name])
     :ok
+  end
+
+  defp tenant_pool_requirements(settings) do
+    application_names = [
+      "realtime_subscription_manager",
+      "realtime_subscription_manager_pub",
+      "realtime_subscription_checker",
+      "realtime_connect",
+      "realtime_health_check",
+      "realtime_janitor",
+      "realtime_migrations",
+      "realtime_broadcast_changes",
+      "realtime_rls",
+      "realtime_replication_slot_teardown"
+    ]
+
+    Enum.reduce(application_names, 0, fn application_name, acc ->
+      acc + pool_size_by_application_name(application_name, settings)
+    end)
   end
 end

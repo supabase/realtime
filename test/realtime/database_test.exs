@@ -17,6 +17,48 @@ defmodule Realtime.DatabaseTest do
     %{tenant: tenant}
   end
 
+  describe "check_tenant_connection/1" do
+    setup context do
+      extensions = [
+        %{
+          "type" => "postgres_cdc_rls",
+          "settings" => %{
+            "db_host" => "localhost",
+            "db_name" => "postgres",
+            "db_user" => "supabase_admin",
+            "db_password" => "postgres",
+            "db_port" => "5433",
+            "poll_interval" => 100,
+            "poll_max_changes" => 100,
+            "poll_max_record_bytes" => 1_048_576,
+            "region" => "us-east-1",
+            "ssl_enforced" => false,
+            "db_pool" => Map.get(context, :db_pool),
+            "subcriber_pool_size" => Map.get(context, :subcriber_pool),
+            "subs_pool_size" => Map.get(context, :db_pool)
+          }
+        }
+      ]
+
+      tenant = tenant_fixture(%{extensions: extensions})
+
+      %{tenant: tenant}
+    end
+
+    test "connects to a tenant database", %{tenant: tenant} do
+      assert {:ok, _} = Database.check_tenant_connection(tenant)
+    end
+
+    # Connection limit for docker tenant db is 100
+    @tag db_pool: 50,
+         subs_pool_size: 50,
+         subcriber_pool_size: 50
+    test "restricts connection if tenant database cannot receive more connections based on tenant pool",
+         %{tenant: tenant} do
+      assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
+    end
+  end
+
   describe "replication_slot_teardown/1" do
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)

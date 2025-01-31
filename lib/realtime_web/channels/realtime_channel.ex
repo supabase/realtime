@@ -133,6 +133,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "Please increase your connection pool size"
         Logging.log_error_message(:warning, "IncreaseConnectionPool", msg)
 
+      {:error, :tenant_db_too_many_connections} ->
+        msg = "Database can't accept more connections, Realtime won't connect"
+        Logging.log_error_message(:warning, "DatabaseLackOfConnections", msg)
+
       {:error, :unable_to_set_policies, error} ->
         Logging.log_error_message(:warning, "UnableToSetPolicies", error)
 
