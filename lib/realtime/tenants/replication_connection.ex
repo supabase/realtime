@@ -356,5 +356,5 @@ defmodule Realtime.Tenants.ReplicationConnection do
     "supabase_#{schema}_#{table}_replication_slot_#{slot_suffix()}"
   end
 
-  defp slot_suffix(), do: Application.get_env(:realtime, :slot_name_suffix)
+  defp slot_suffix, do: Application.get_env(:realtime, :slot_name_suffix)
 end

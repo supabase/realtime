@@ -4,8 +4,8 @@ defmodule RealtimeWeb.Components do
   """
 
   use Phoenix.Component
-  alias Phoenix.LiveView.JS
   alias Phoenix.HTML.Form
+  alias Phoenix.LiveView.JS
 
   @doc """
   Renders an h1 tag.
@@ -259,10 +259,7 @@ defmodule RealtimeWeb.Components do
   def badge(assigns) do
     ~H"""
     <div>
-      <span
-        class="text-xs font-semibold inline-block uppercase py-[3px] px-[5px] rounded bg-gray-100"
-        {@rest}
-      >
+      <span class="text-xs font-semibold inline-block uppercase py-[3px] px-[5px] rounded bg-gray-100" {@rest}>
         <%= render_slot(@inner_block) %>
       </span>
     </div>
@@ -350,8 +347,7 @@ defmodule RealtimeWeb.Components do
       to: selector,
       time: 50,
       transition:
-        {"transition-all transform ease-out duration-300",
-         "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95",
+        {"transition-all transform ease-out duration-300", "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95",
          "opacity-100 translate-y-0 sm:scale-100"}
     )
   end
@@ -361,8 +357,7 @@ defmodule RealtimeWeb.Components do
       to: selector,
       time: 50,
       transition:
-        {"transition-all transform ease-in duration-200",
-         "opacity-100 translate-y-0 sm:scale-100",
+        {"transition-all transform ease-in duration-200", "opacity-100 translate-y-0 sm:scale-100",
          "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"}
     )
   end

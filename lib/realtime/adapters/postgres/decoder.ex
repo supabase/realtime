@@ -174,9 +174,7 @@ defmodule Realtime.Adapters.Postgres.Decoder do
     }
   end
 
-  defp decode_message_impl(
-         <<"C", _flags::binary-1, lsn::binary-8, end_lsn::binary-8, timestamp::integer-64>>
-       ) do
+  defp decode_message_impl(<<"C", _flags::binary-1, lsn::binary-8, end_lsn::binary-8, timestamp::integer-64>>) do
     %Commit{
       flags: [],
       lsn: decode_lsn(lsn),
@@ -217,9 +215,7 @@ defmodule Realtime.Adapters.Postgres.Decoder do
     }
   end
 
-  defp decode_message_impl(
-         <<"I", relation_id::integer-32, "N", number_of_columns::integer-16, tuple_data::binary>>
-       ) do
+  defp decode_message_impl(<<"I", relation_id::integer-32, "N", number_of_columns::integer-16, tuple_data::binary>>) do
     {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns)
 
     %Insert{
@@ -228,9 +224,7 @@ defmodule Realtime.Adapters.Postgres.Decoder do
     }
   end
 
-  defp decode_message_impl(
-         <<"U", relation_id::integer-32, "N", number_of_columns::integer-16, tuple_data::binary>>
-       ) do
+  defp decode_message_impl(<<"U", relation_id::integer-32, "N", number_of_columns::integer-16, tuple_data::binary>>) do
     {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns)
 
     %Update{
@@ -240,8 +234,7 @@ defmodule Realtime.Adapters.Postgres.Decoder do
   end
 
   defp decode_message_impl(
-         <<"U", relation_id::integer-32, key_or_old::binary-1, number_of_columns::integer-16,
-           tuple_data::binary>>
+         <<"U", relation_id::integer-32, key_or_old::binary-1, number_of_columns::integer-16, tuple_data::binary>>
        )
        when key_or_old == "O" or key_or_old == "K" do
     {<<"N", new_number_of_columns::integer-16, new_tuple_binary::binary>>, old_decoded_tuple_data} =
@@ -261,8 +254,7 @@ defmodule Realtime.Adapters.Postgres.Decoder do
   end
 
   defp decode_message_impl(
-         <<"D", relation_id::integer-32, key_or_old::binary-1, number_of_columns::integer-16,
-           tuple_data::binary>>
+         <<"D", relation_id::integer-32, key_or_old::binary-1, number_of_columns::integer-16, tuple_data::binary>>
        )
        when key_or_old == "K" or key_or_old == "O" do
     {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns)
@@ -277,9 +269,7 @@ defmodule Realtime.Adapters.Postgres.Decoder do
     end
   end
 
-  defp decode_message_impl(
-         <<"T", number_of_relations::integer-32, options::integer-8, column_ids::binary>>
-       ) do
+  defp decode_message_impl(<<"T", number_of_relations::integer-32, options::integer-8, column_ids::binary>>) do
     truncated_relations =
       for relation_id_bin <- column_ids |> :binary.bin_to_list() |> Enum.chunk_every(4),
           do: relation_id_bin |> :binary.list_to_bin() |> :binary.decode_unsigned()

@@ -103,8 +103,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
 
     test "missing claims returns a error" do
-      with_mock ChannelsAuthorization, [],
-        authorize_conn: fn _, _, _ -> {:error, :missing_claims} end do
+      with_mock ChannelsAuthorization, [], authorize_conn: fn _, _, _ -> {:error, :missing_claims} end do
         log =
           capture_log(fn ->
             assert {:error, :missing_claims} =
@@ -118,8 +117,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
 
     test "missing claims returns a error with sub in metadata if available" do
-      with_mock ChannelsAuthorization, [],
-        authorize_conn: fn _, _, _ -> {:error, :missing_claims} end do
+      with_mock ChannelsAuthorization, [], authorize_conn: fn _, _, _ -> {:error, :missing_claims} end do
         sub = random_string()
         conn_opts = conn_opts(@tenant_external_id, %{sub: sub})
 

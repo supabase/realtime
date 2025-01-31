@@ -40,10 +40,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
     start_supervised!(
       {Task.Supervisor,
-       name: Realtime.Tenants.Janitor.TaskSupervisor,
-       max_children: 5,
-       max_seconds: 500,
-       max_restarts: 1}
+       name: Realtime.Tenants.Janitor.TaskSupervisor, max_children: 5, max_seconds: 500, max_restarts: 1}
     )
 
     on_exit(fn ->

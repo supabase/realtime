@@ -1,4 +1,7 @@
 defmodule Realtime.Extensions do
+  @moduledoc """
+  This module provides functions to get extension settings.
+  """
   def db_settings(type) do
     db_settings =
       Application.get_env(:realtime, :extensions)

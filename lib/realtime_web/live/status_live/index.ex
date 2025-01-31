@@ -30,11 +30,11 @@ defmodule RealtimeWeb.StatusLive.Index do
     |> assign(:page_title, "Status - Supabase Realtime")
   end
 
-  defp all_nodes() do
+  defp all_nodes do
     [Node.self() | Node.list()] |> Enum.map(&Nodes.short_node_id_from_name/1)
   end
 
-  defp default_pings() do
+  defp default_pings do
     for n <- all_nodes(), f <- all_nodes(), into: %{} do
       pair = n <> "_" <> f
       {pair, %Payload{from_node: f, latency: "Loading...", node: n, timestamp: "Loading..."}}

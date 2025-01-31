@@ -9,9 +9,7 @@ defmodule Realtime.Tenants.Cache do
   def child_spec(_) do
     %{
       id: __MODULE__,
-      start:
-        {Cachex, :start_link,
-         [__MODULE__, [expiration: Cachex.Spec.expiration(default: @expiration)]]}
+      start: {Cachex, :start_link, [__MODULE__, [expiration: Cachex.Spec.expiration(default: @expiration)]]}
     }
   end
 

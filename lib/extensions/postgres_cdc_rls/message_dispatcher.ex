@@ -15,9 +15,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
 
     _ =
       Enum.reduce(topic_subscriptions, %{}, fn
-        {_pid,
-         {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, tenant, is_new_api}},
-        cache ->
+        {_pid, {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, tenant, is_new_api}}, cache ->
           for {bin_id, id} <- ids, reduce: [] do
             acc ->
               if MapSet.member?(sub_ids, bin_id) do

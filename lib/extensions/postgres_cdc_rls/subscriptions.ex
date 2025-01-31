@@ -12,8 +12,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   @spec create(conn(), String.t(), [map()], pid(), pid()) ::
           {:ok, Postgrex.Result.t()}
-          | {:error,
-             Exception.t() | :malformed_subscription_params | {:subscription_insert_failed, map()}}
+          | {:error, Exception.t() | :malformed_subscription_params | {:subscription_insert_failed, map()}}
   def create(conn, publication, params_list, manager, caller) do
     sql = "with sub_tables as (
         select
@@ -85,8 +84,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   defp params_to_log(map) do
     map
     |> Map.to_list()
-    |> Enum.map(fn {k, v} -> "#{k}: #{to_log(v)}" end)
-    |> Enum.join(", ")
+    |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{to_log(v)}" end)
   end
 
   @spec delete(conn(), String.t()) :: any()

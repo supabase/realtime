@@ -104,7 +104,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
     Helpers.cancel_timer(ref)
 
     new_queue =
-      if !:queue.is_empty(q) do
+      if :queue.is_empty(q) do
+        q
+      else
         {ids, q1} = Helpers.queue_take(q, @max_delete_records)
         Logger.warning("Delete #{length(ids)} phantom subscribers from db")
 
@@ -117,11 +119,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
             q
         end
-      else
-        q
       end
 
-    new_ref = if !:queue.is_empty(new_queue), do: check_delete_queue(), else: ref
+    new_ref = if :queue.is_empty(new_queue), do: ref, else: check_delete_queue()
 
     {:noreply, %{state | delete_queue: %{ref: new_ref, queue: new_queue}}}
   end
@@ -189,7 +189,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
     Enum.reduce(pids, [], fn pid, acc -> if Process.alive?(pid), do: acc, else: [pid | acc] end)
   end
 
-  defp check_delete_queue(), do: Process.send_after(self(), :check_delete_queue, 1000)
+  defp check_delete_queue, do: Process.send_after(self(), :check_delete_queue, 1000)
 
-  defp check_active_pids(), do: Process.send_after(self(), :check_active_pids, @timeout)
+  defp check_active_pids, do: Process.send_after(self(), :check_active_pids, @timeout)
 end

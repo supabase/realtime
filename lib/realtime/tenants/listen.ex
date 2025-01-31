@@ -31,8 +31,7 @@ defmodule Realtime.Tenants.Listen do
     connection_opts = Database.from_tenant(tenant, "realtime_listen", :stop)
 
     name =
-      {:via, Registry,
-       {Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant_id}}}
+      {:via, Registry, {Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant_id}}}
 
     settings =
       [

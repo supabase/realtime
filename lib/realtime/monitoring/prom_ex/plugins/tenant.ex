@@ -57,7 +57,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     )
   end
 
-  def execute_tenant_metrics() do
+  def execute_tenant_metrics do
     tenants = Tenants.list_connected_tenants(Node.self())
 
     for t <- tenants do
@@ -73,7 +73,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     end
   end
 
-  defp replication_metrics() do
+  defp replication_metrics do
     Event.build(
       :realtime_tenant_replication_event_metrics,
       [
@@ -92,7 +92,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     )
   end
 
-  defp subscription_metrics() do
+  defp subscription_metrics do
     Event.build(
       :realtime_tenant_channel_event_metrics,
       [
@@ -114,7 +114,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     )
   end
 
-  defp channel_events() do
+  defp channel_events do
     Event.build(
       :realtime_tenant_channel_event_metrics,
       [

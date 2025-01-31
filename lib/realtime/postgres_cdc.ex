@@ -52,7 +52,7 @@ defmodule Realtime.PostgresCdc do
   end
 
   @spec available_drivers :: list
-  def available_drivers() do
+  def available_drivers do
     @extensions
     |> Enum.filter(fn {_, e} -> e.type == :postgres_cdc end)
     |> Enum.map(fn {_, e} -> e.driver end)

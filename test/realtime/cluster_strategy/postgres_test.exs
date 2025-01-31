@@ -27,7 +27,7 @@ defmodule Realtime.Cluster.Strategy.PostgresTest do
     assert_receive {:notification, _, _, ^channel_name, ^node}, 10_000
   end
 
-  defp libcluster_state() do
+  defp libcluster_state do
     %State{
       topology: [],
       connect: {__MODULE__, :connect, [self()]},
@@ -43,7 +43,7 @@ defmodule Realtime.Cluster.Strategy.PostgresTest do
     }
   end
 
-  defp opts() do
+  defp opts do
     [
       hostname: "localhost",
       username: "postgres",

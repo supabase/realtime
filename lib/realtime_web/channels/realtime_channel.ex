@@ -64,7 +64,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          socket = assign_authorization_context(socket, sub_topic, access_token, claims),
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       public? = !socket.assigns.check_authorization?
-      is_new_api = is_new_api(params)
+      is_new_api = new_api?(params)
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
       Realtime.UsersCounter.add(transport_pid, tenant_id)
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
@@ -640,8 +640,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     )
   end
 
-  defp is_new_api(%{"config" => _}), do: true
-  defp is_new_api(_), do: false
+  defp new_api?(%{"config" => _}), do: true
+  defp new_api?(_), do: false
 
   defp pg_change_params(true, params, channel_pid, claims, _) do
     send(self(), :sync_presence)
@@ -744,13 +744,11 @@ defmodule RealtimeWeb.RealtimeChannel do
            Authorization.get_read_authorizations(socket, db_conn, authorization_context) do
       cond do
         match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-          {:error, :unauthorized,
-           "You do not have permissions to read from this Channel topic: #{topic}"}
+          {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"}
 
         using_broadcast? and
             match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-          {:error, :unauthorized,
-           "You do not have permissions to read from this Channel topic: #{topic}"}
+          {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"}
 
         true ->
           {:ok, socket}
@@ -762,8 +760,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :rls_policy_error, error} ->
         log_error("RlsPolicyError", error)
 
-        {:error, :unauthorized,
-         "You do not have permissions to read from this Channel topic: #{topic}"}
+        {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"}
 
       {:error, error} ->
         {:error, :unable_to_set_policies, error}
@@ -777,10 +774,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp only_private?(tenant_id, %{assigns: %{check_authorization?: check_authorization?}}) do
     tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
 
-    cond do
-      tenant.private_only and !check_authorization? -> {:error, :private_only}
-      true -> :ok
-    end
+    if tenant.private_only and !check_authorization?,
+      do: {:error, :private_only},
+      else: :ok
   end
 
   defp log_metadata(access_token) do

@@ -109,8 +109,7 @@ defmodule Realtime.Repo do
   end
 
   defp result_to_single_struct(
-         {:error,
-          %Postgrex.Error{postgres: %{code: :unique_violation, constraint: "channels_name_index"}}},
+         {:error, %Postgrex.Error{postgres: %{code: :unique_violation, constraint: "channels_name_index"}}},
          _struct,
          changeset
        ) do

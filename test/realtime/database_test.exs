@@ -119,25 +119,30 @@ defmodule Realtime.DatabaseTest do
     end
 
     test "on checkout error, handles raised exception as an error", %{db_conn: db_conn} do
-      assert capture_log(fn ->
-               Task.start(fn ->
-                 Database.transaction(
-                   db_conn,
-                   fn conn ->
-                     Postgrex.query!(conn, "SELECT pg_sleep(20)", [])
-                   end,
-                   timeout: 20000
-                 )
-               end)
+      for _ <- 1..5 do
+        Task.start(fn ->
+          Database.transaction(
+            db_conn,
+            fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(20)", []) end,
+            timeout: 20000
+          )
+        end)
+      end
 
-               assert {:error, %DBConnection.ConnectionError{reason: :queue_timeout}} =
-                        Task.async(fn ->
-                          Database.transaction(db_conn, fn conn ->
-                            Postgrex.query!(conn, "SELECT pg_sleep(6)", [])
-                          end)
-                        end)
-                        |> Task.await(15000)
-             end) =~ "ErrorExecutingTransaction"
+      log =
+        capture_log(fn ->
+          assert {:error, %DBConnection.ConnectionError{reason: :queue_timeout}} =
+                   Task.async(fn ->
+                     Database.transaction(
+                       db_conn,
+                       fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(11)", []) end,
+                       timeout: 15000
+                     )
+                   end)
+                   |> Task.await(20000)
+        end)
+
+      assert log =~ "ErrorExecutingTransaction"
     end
 
     test "run call using RPC", %{db_conn: db_conn} do

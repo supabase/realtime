@@ -88,8 +88,7 @@ defmodule Realtime.Tenants.Migrations do
     {20_211_122_062_447, GrantRealtimeUsageToAuthenticatedRole},
     {20_211_124_070_109, EnableRealtimeApplyRlsFunctionPostgrest9Compatibility},
     {20_211_202_204_204, UpdateRealtimeSubscriptionCheckFiltersFunctionSecurity},
-    {20_211_202_204_605,
-     UpdateRealtimeBuildPreparedStatementSqlFunctionForCompatibilityWithAllTypes},
+    {20_211_202_204_605, UpdateRealtimeBuildPreparedStatementSqlFunctionForCompatibilityWithAllTypes},
     {20_211_210_212_804, EnableGenericSubscriptionClaims},
     {20_211_228_014_915, AddWalPayloadOnErrorsInApplyRlsFunction},
     {20_220_107_221_237, UpdateChangeTimestampToIso8601ZuluFormat},
@@ -156,8 +155,7 @@ defmodule Realtime.Tenants.Migrations do
     attrs = %__MODULE__{tenant_external_id: tenant.external_id, settings: settings}
 
     supervisor =
-      {:via, PartitionSupervisor,
-       {Realtime.Tenants.Migrations.DynamicSupervisor, tenant.external_id}}
+      {:via, PartitionSupervisor, {Realtime.Tenants.Migrations.DynamicSupervisor, tenant.external_id}}
 
     spec = {__MODULE__, attrs}
 

@@ -23,7 +23,7 @@ defmodule Realtime.Api do
       [%Tenant{}, ...]
 
   """
-  def list_tenants() do
+  def list_tenants do
     repo_replica = Replica.replica()
 
     Tenant

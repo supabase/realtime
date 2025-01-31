@@ -10,12 +10,7 @@
       <%= assigns[:page_title] || "Supabase Realtime" %>
     </.live_title>
     <link phx-track-static rel="stylesheet" href={Routes.static_path(@conn, "/assets/app.css")} />
-    <script
-      defer
-      phx-track-static
-      type="text/javascript"
-      src={Routes.static_path(@conn, "/assets/app.js")}
-    >
+    <script defer phx-track-static type="text/javascript" src={Routes.static_path(@conn, "/assets/app.js")}>
     </script>
   </head>
   <body class="bg-white antialiased">

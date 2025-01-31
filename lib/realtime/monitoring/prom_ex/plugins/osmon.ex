@@ -61,7 +61,7 @@ defmodule Realtime.PromEx.Plugins.OsMon do
     )
   end
 
-  def execute_metrics() do
+  def execute_metrics do
     execute_metrics(@event_ram_usage, %{ram: OsMetrics.ram_usage()})
     execute_metrics(@event_cpu_util, %{cpu: OsMetrics.cpu_util()})
     execute_metrics(@event_cpu_la, OsMetrics.cpu_la())

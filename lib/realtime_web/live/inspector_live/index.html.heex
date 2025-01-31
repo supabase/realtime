@@ -67,13 +67,7 @@
   <aside class="w-full sm:w-1/3 md:w-1/4 pr-2 mb-8">
     <.h3>Broadcast an Event</.h3>
     <div class="mb-6">
-      <.form
-        :let={m}
-        id="message_form"
-        for={@changeset}
-        class="bg-white rounded mt-4"
-        phx-submit="send_message"
-      >
+      <.form :let={m} id="message_form" for={@changeset} class="bg-white rounded mt-4" phx-submit="send_message">
         <div class="mb-4">
           <%= label(m, :event, class: "block text-gray-700 text-sm font-bold mb-2") %>
           <%= text_input(m, :event, class: "
@@ -105,8 +99,7 @@
 
         <%= submit("Send",
           phx_disable_with: "Sending...",
-          class:
-            "bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
+          class: "bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded focus:outline-none"
         ) %>
       </.form>
     </div>
@@ -115,12 +108,7 @@
   </aside>
 
   <div class="w-full sm:w-2/3 md:w-3/4 pt-1 pl-2">
-    <div
-      id="payload"
-      phx-update="ignore"
-      phx-hook="payload"
-      class="overflow-x-auto relative rounded"
-    >
+    <div id="payload" phx-update="ignore" phx-hook="payload" class="overflow-x-auto relative rounded">
       <table class="table-fixed w-full text-md text-left text-gray-700">
         <thead class="text-xs text-gray-700 uppercase bg-gray-50">
           <tr>

@@ -107,9 +107,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
         {:ok, diff} = Replications.get_pg_stat_activity_diff(conn, db_pid)
 
-        Logger.warning(
-          "Database PID #{db_pid} found in pg_stat_activity with state_change diff of #{diff}"
-        )
+        Logger.warning("Database PID #{db_pid} found in pg_stat_activity with state_change diff of #{diff}")
 
         if retry_count > 3 do
           case Replications.terminate_backend(conn, slot_name) do
@@ -122,8 +120,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         {timeout, backoff} = Backoff.backoff(backoff)
         retry_ref = Process.send_after(self(), :retry, timeout)
 
-        {:noreply,
-         %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
+        {:noreply, %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
 
       {:error, reason} ->
         log_error("PoolingReplicationError", reason)
@@ -131,8 +128,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         {timeout, backoff} = Backoff.backoff(backoff)
         retry_ref = Process.send_after(self(), :retry, timeout)
 
-        {:noreply,
-         %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
+        {:noreply, %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
     end
   end
 
@@ -142,7 +138,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     {:noreply, prepare_replication(state)}
   end
 
-  def slot_name_suffix() do
+  def slot_name_suffix do
     case Application.get_env(:realtime, :slot_name_suffix) do
       nil -> ""
       slot_name_suffix -> "_" <> slot_name_suffix
@@ -153,9 +149,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   defp convert_errors(_), do: nil
 
-  defp prepare_replication(
-         %{backoff: backoff, conn: conn, slot_name: slot_name, retry_count: retry_count} = state
-       ) do
+  defp prepare_replication(%{backoff: backoff, conn: conn, slot_name: slot_name, retry_count: retry_count} = state) do
     case Replications.prepare_replication(conn, slot_name) do
       {:ok, _} ->
         send(self(), :poll)

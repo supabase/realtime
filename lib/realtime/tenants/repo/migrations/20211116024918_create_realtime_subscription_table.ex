@@ -42,8 +42,6 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeSubscriptionTable do
       unique (entity, user_id, filters)
     )")
 
-    execute(
-      "create index if not exists ix_realtime_subscription_entity on realtime.subscription using hash (entity)"
-    )
+    execute("create index if not exists ix_realtime_subscription_entity on realtime.subscription using hash (entity)")
   end
 end

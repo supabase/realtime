@@ -76,9 +76,7 @@ defmodule Realtime.SynHandler do
     topic = topic(mod)
     Endpoint.broadcast(topic <> ":" <> name, topic <> "_down", nil)
 
-    Logger.warning(
-      "Resolving #{name} conflict, stop local pid: #{inspect(stop)}, response: #{inspect(resp)}"
-    )
+    Logger.warning("Resolving #{name} conflict, stop local pid: #{inspect(stop)}, response: #{inspect(resp)}")
   end
 
   defp topic(mod) do
