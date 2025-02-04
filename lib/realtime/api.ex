@@ -124,7 +124,7 @@ defmodule Realtime.Api do
          data: %{external_id: external_id}
        })
        when is_map_key(changes, :jwt_jwks) or is_map_key(changes, :jwt_secret) do
-    Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> external_id, :disconnect)
+    RealtimeWeb.Endpoint.broadcast("user_socket:" <> external_id, "disconnect", %{})
   end
 
   defp maybe_trigger_disconnect(_), do: nil
@@ -198,7 +198,8 @@ defmodule Realtime.Api do
       {value, settings} = Map.pop(extension.settings, from)
       new_settings = Map.put(settings, to, value)
 
-      Ecto.Changeset.cast(extension, %{settings: new_settings}, [:settings])
+      extension
+      |> Ecto.Changeset.cast(%{settings: new_settings}, [:settings])
       |> Repo.update!()
     end
   end

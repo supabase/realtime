@@ -59,6 +59,8 @@ defmodule RealtimeWeb.UserSocket do
            jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
            {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
+        RealtimeWeb.Endpoint.subscribe(subscribers_id(external_id))
+
         assigns = %RealtimeChannel.Assigns{
           claims: claims,
           jwt_secret: jwt_secret,
