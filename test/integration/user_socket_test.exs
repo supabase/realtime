@@ -119,59 +119,29 @@ defmodule RealtimeWeb.UserSocketTest do
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["potato"]}})
 
-      for _socket <- sockets do
-        # assert_receive %Message{
-        #                  topic: ^topic,
-        #                  event: "system",
-        #                  payload: %{
-        #                    "extension" => "system",
-        #                    "message" => "Server requested disconnect",
-        #                    "status" => "ok"
-        #                  }
-        #                },
-        #                500
-
-        assert_receive %Message{event: "phx_close"}, 500
+      for socket <- sockets do
+        WebsocketClient.send_heartbeat(socket)
+        refute_receive %Message{event: "phx_reply"}, 500
       end
     end
 
-    test "on jwt_secret the socket closes and sends a system message", %{topics: topics} do
+    test "on jwt_secret the socket closes and sends a system message", %{sockets: sockets} do
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_secret: "potato"})
 
-      for _topic <- topics do
-        # assert_receive %Message{
-        #                  topic: ^topic,
-        #                  event: "system",
-        #                  payload: %{
-        #                    "extension" => "system",
-        #                    "message" => "Server requested disconnect",
-        #                    "status" => "ok"
-        #                  }
-        #                },
-        #                500
-
-        assert_receive %Message{event: "phx_close"}, 500
+      for socket <- sockets do
+        WebsocketClient.send_heartbeat(socket)
+        refute_receive %Message{event: "phx_reply"}, 500
       end
     end
 
-    test "on other param changes the socket won't close and no message is sent", %{topics: topics} do
+    test "on other param changes the socket won't close and no message is sent", %{sockets: sockets} do
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{max_concurrent_users: 100})
 
-      for _topic <- topics do
-        # refute_receive %Message{
-        #                  topic: ^topic,
-        #                  event: "system",
-        #                  payload: %{
-        #                    "extension" => "system",
-        #                    "message" => "Server requested disconnect",
-        #                    "status" => "ok"
-        #                  }
-        #                },
-        #                500
-
-        refute_receive %Message{event: "phx_close"}, 500
+      for socket <- sockets do
+        WebsocketClient.send_heartbeat(socket)
+        assert_receive %Message{event: "phx_reply"}, 500
       end
     end
   end
