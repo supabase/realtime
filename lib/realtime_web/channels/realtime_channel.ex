@@ -69,6 +69,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       Realtime.UsersCounter.add(transport_pid, tenant_id)
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
       Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
+      Process.monitor(transport_pid)
 
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
 
@@ -196,6 +197,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
+  @impl true
   def handle_info(
         _any,
         %{
@@ -211,27 +213,22 @@ defmodule RealtimeWeb.RealtimeChannel do
     shutdown_response(socket, message)
   end
 
-  @impl true
-
   def handle_info(:sync_presence = msg, socket) do
     PresenceHandler.track(msg, socket)
   end
 
-  @impl true
   def handle_info(%{event: "postgres_cdc_rls_down"}, socket) do
     pg_sub_ref = postgres_subscribe()
 
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
   end
 
-  @impl true
   def handle_info(%{event: "postgres_cdc_down"}, socket) do
     pg_sub_ref = postgres_subscribe()
 
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
   end
 
-  @impl true
   def handle_info(
         %{event: type, payload: payload} = msg,
         %{assigns: %{policies: policies}} = socket
@@ -262,7 +259,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
-  @impl true
   def handle_info(:postgres_subscribe, %{assigns: %{channel_name: channel_name}} = socket) do
     %{
       assigns: %{
@@ -309,7 +305,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
   end
 
-  @impl true
   def handle_info(:confirm_token, %{assigns: %{pg_change_params: pg_change_params}} = socket) do
     case confirm_token(socket) do
       {:ok, claims, confirm_token_ref, _, _} ->
@@ -332,13 +327,15 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_info(:disconnect, %{assigns: %{channel_name: channel_name}} = socket) do
+  def handle_info(%{event: "phx_leave"}, %{assigns: %{channel_name: channel_name}} = socket) do
+    IO.inspect("!!!!")
     Logger.info("Received operational call to disconnect channel")
     push_system_message("system", socket, "ok", "Server requested disconnect", channel_name)
-    {:stop, :shutdown, socket}
+    {:stop, {:shutdown, :left}, socket}
   end
 
   def handle_info(msg, socket) do
+    IO.inspect(msg)
     log_error("UnhandledSystemMessage", msg)
     {:noreply, socket}
   end
