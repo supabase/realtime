@@ -12,6 +12,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   alias Realtime.Tenants.Migrations
 
   setup do
+    Cleanup.ensure_no_replication_slot()
     slot = Application.get_env(:realtime, :slot_name_suffix)
     Application.put_env(:realtime, :slot_name_suffix, "test")
     start_supervised(Realtime.Tenants.CacheSupervisor)

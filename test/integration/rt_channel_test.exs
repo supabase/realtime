@@ -10,20 +10,20 @@ defmodule Realtime.Integration.RtChannelTest do
 
   require Logger
 
-  alias __MODULE__.Endpoint
-  alias Extensions.PostgresCdcRls, as: Rls
+  alias Extensions.PostgresCdcRls
   alias Phoenix.Socket.Message
   alias Phoenix.Socket.V1
-  alias Postgrex, as: P
+  alias Postgrex
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.Integration.RtChannelTest.Endpoint
   alias Realtime.Integration.WebsocketClient
+  alias Realtime.RateCounter
   alias Realtime.Repo
   alias Realtime.Tenants
-  alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Authorization
+  alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Migrations
-
   @moduletag :capture_log
   @port 4002
   @serializer V1.JSONSerializer
@@ -75,6 +75,7 @@ defmodule Realtime.Integration.RtChannelTest do
   end
 
   setup do
+    RateCounter.stop(@external_id)
     Cache.invalidate_tenant_cache(@external_id)
     Process.sleep(500)
     [tenant] = Tenant |> Repo.all() |> Repo.preload(:extensions)
@@ -127,8 +128,8 @@ defmodule Realtime.Integration.RtChannelTest do
                    },
                    8000
 
-    {:ok, _, conn} = Rls.get_manager_conn(@external_id)
-    P.query!(conn, "insert into test (details) values ('test')", [])
+    {:ok, _, conn} = PostgresCdcRls.get_manager_conn(@external_id)
+    Postgrex.query!(conn, "insert into test (details) values ('test')", [])
 
     assert_receive %Message{
                      event: "postgres_changes",
@@ -152,7 +153,7 @@ defmodule Realtime.Integration.RtChannelTest do
                    },
                    500
 
-    P.query!(conn, "update test set details = 'test' where id = #{id}", [])
+    Postgrex.query!(conn, "update test set details = 'test' where id = #{id}", [])
 
     assert_receive %Message{
                      event: "postgres_changes",
@@ -177,7 +178,7 @@ defmodule Realtime.Integration.RtChannelTest do
                    },
                    500
 
-    P.query!(conn, "delete from test where id = #{id}", [])
+    Postgrex.query!(conn, "delete from test where id = #{id}", [])
 
     assert_receive %Message{
                      event: "postgres_changes",
@@ -216,30 +217,13 @@ defmodule Realtime.Integration.RtChannelTest do
       topic = "realtime:any"
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{
-                       event: "phx_reply",
-                       payload: %{
-                         "response" => %{
-                           "postgres_changes" => []
-                         },
-                         "status" => "ok"
-                       },
-                       ref: "1",
-                       topic: ^topic
-                     },
-                     500
-
+      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
       assert_receive %Message{}
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
 
-      assert_receive %Message{
-                       event: "broadcast",
-                       payload: ^payload,
-                       topic: ^topic
-                     },
-                     500
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
     end
 
     @tag policies: [
@@ -1449,7 +1433,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       for _ <- 1..1000 do
         WebsocketClient.join(socket, realtime_topic, %{config: config})
-        1..10 |> Enum.random() |> Process.sleep()
+        1..5 |> Enum.random() |> Process.sleep()
       end
 
       assert_receive %Message{

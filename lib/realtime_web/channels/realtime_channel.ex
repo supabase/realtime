@@ -49,7 +49,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign_access_token(params)
       |> assign_counter()
       |> assign(:using_broadcast?, !!params["config"]["broadcast"])
-      |> assign(:check_authorization?, !!params["config"]["private"])
+      |> assign(:private?, !!params["config"]["private"])
       |> assign(:policies, nil)
 
     start_db_rate_counter(tenant_id)
@@ -63,13 +63,12 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          socket = assign_authorization_context(socket, sub_topic, access_token, claims),
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
-      public? = !socket.assigns.check_authorization?
-      is_new_api = new_api?(params)
-      tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, public?)
+      tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
       Realtime.UsersCounter.add(transport_pid, tenant_id)
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
       Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
 
+      is_new_api = new_api?(params)
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
 
       opts = %{
@@ -314,12 +313,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     case confirm_token(socket) do
       {:ok, claims, confirm_token_ref, _, _} ->
         pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
-
-        {:noreply,
-         assign(socket, %{
-           confirm_token_ref: confirm_token_ref,
-           pg_change_params: pg_change_params
-         })}
+        {:noreply, assign(socket, %{confirm_token_ref: confirm_token_ref, pg_change_params: pg_change_params})}
 
       {:error, :missing_claims} ->
         shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
@@ -570,12 +564,16 @@ defmodule RealtimeWeb.RealtimeChannel do
       access_token: access_token
     } = assigns
 
+    topic = Map.get(assigns, :topic)
+    db_conn = Map.get(assigns, :db_conn)
+    socket = Map.put(socket, :policies, nil)
     jwt_jwks = Map.get(assigns, :jwt_jwks)
 
     with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
-         exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
+         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
+         {:ok, socket} <- maybe_assign_policies(topic, db_conn, socket) do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 
       interval = min(@confirm_token_ms_interval, exp_diff * 1_000)
@@ -733,9 +731,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp maybe_assign_policies(
          topic,
          db_conn,
-         %{assigns: %{check_authorization?: true}} = socket
+         %{assigns: %{private?: true}} = socket
        )
-       when not is_nil(topic) do
+       when not is_nil(topic) and not is_nil(db_conn) do
     %{using_broadcast?: using_broadcast?} = socket.assigns
 
     authorization_context = socket.assigns.authorization_context
@@ -771,10 +769,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:ok, assign(socket, policies: nil)}
   end
 
-  defp only_private?(tenant_id, %{assigns: %{check_authorization?: check_authorization?}}) do
+  defp only_private?(tenant_id, %{assigns: %{private?: private?}}) do
     tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
 
-    if tenant.private_only and !check_authorization?,
+    if tenant.private_only and !private?,
       do: {:error, :private_only},
       else: :ok
   end
