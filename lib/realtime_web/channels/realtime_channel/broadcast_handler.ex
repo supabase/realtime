@@ -17,47 +17,52 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   @event_type "broadcast"
   @spec call(map(), Phoenix.Socket.t()) ::
           {:reply, :ok, Phoenix.Socket.t()} | {:noreply, Phoenix.Socket.t()}
-  def call(
-        payload,
-        %{
-          assigns: %{
-            is_new_api: true,
-            ack_broadcast: ack_broadcast,
-            self_broadcast: self_broadcast,
-            tenant_topic: tenant_topic,
-            authorization_context: authorization_context,
-            db_conn: db_conn
-          }
-        } = socket
-      ) do
-    with {:ok, %{assigns: %{policies: policies}}} <-
-           run_authorization_check(socket, db_conn, authorization_context) do
-      case policies do
-        %Policies{broadcast: %BroadcastPolicies{write: false}} ->
-          Logger.info("Broadcast message ignored on #{tenant_topic}")
+  def call(payload, %{assigns: %{private?: true}} = socket) do
+    %{
+      assigns: %{
+        self_broadcast: self_broadcast,
+        tenant_topic: tenant_topic,
+        authorization_context: authorization_context,
+        db_conn: db_conn
+      }
+    } = socket
 
-        _ ->
-          send_message(self_broadcast, tenant_topic, payload)
-      end
-    else
+    case run_authorization_check(socket, db_conn, authorization_context) do
+      {:ok,
+       %{assigns: %{ack_broadcast: ack_broadcast, policies: %Policies{broadcast: %BroadcastPolicies{write: true}}}} =
+           socket} ->
+        socket = increment_rate_counter(socket)
+        send_message(self_broadcast, tenant_topic, payload)
+        if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
+
+      {:ok, socket} ->
+        {:noreply, socket}
+
       {:error, :increase_connection_pool} ->
         log_error("IncreaseConnectionPool", "Please increase your connection pool size")
-        {:error, :unable_to_set_policies}
+        {:noreply, socket}
 
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
-        {:error, :unable_to_set_policies}
+        {:noreply, socket}
     end
+  end
+
+  def call(payload, %{assigns: %{private?: false}} = socket) do
+    %{
+      assigns: %{
+        tenant_topic: tenant_topic,
+        self_broadcast: self_broadcast,
+        ack_broadcast: ack_broadcast
+      }
+    } = socket
 
     socket = increment_rate_counter(socket)
+    send_message(self_broadcast, tenant_topic, payload)
 
     if ack_broadcast,
       do: {:reply, :ok, socket},
       else: {:noreply, socket}
-  end
-
-  def call(_payload, socket) do
-    {:noreply, socket}
   end
 
   defp send_message(self_broadcast, tenant_topic, payload) do

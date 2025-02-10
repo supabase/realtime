@@ -52,6 +52,34 @@ defmodule Realtime.RateCounterTest do
     end
   end
 
+  describe "stop/1" do
+    test "stops rate counters for a given entity" do
+      entity_id = Ecto.UUID.generate()
+      fake_terms = Enum.map(1..10, fn _ -> {:domain, :"metric_#{random_string()}", Ecto.UUID.generate()} end)
+      terms = Enum.map(1..10, fn _ -> {:domain, :"metric_#{random_string()}", entity_id} end)
+
+      for term <- terms do
+        {:ok, _} = RateCounter.new(term)
+        assert {:ok, %RateCounter{}} = RateCounter.get(term)
+      end
+
+      for term <- fake_terms do
+        {:ok, _} = RateCounter.new(term)
+        assert {:ok, %RateCounter{}} = RateCounter.get(term)
+      end
+
+      assert :ok = RateCounter.stop(entity_id)
+
+      for term <- terms do
+        assert {:error, _} = RateCounter.get(term)
+      end
+
+      for term <- fake_terms do
+        assert {:ok, %RateCounter{}} = RateCounter.get(term)
+      end
+    end
+  end
+
   test "handle handles counter shutdown and dies" do
     term = {:domain, :metric, Ecto.UUID.generate()}
     {:ok, pid} = RateCounter.new(term)

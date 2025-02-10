@@ -66,6 +66,21 @@ defmodule Realtime.RateCounter do
     )
   end
 
+  @spec stop(term()) :: :ok
+  def stop(tenant_id) do
+    keys =
+      Registry.select(Realtime.Registry.Unique, [
+        {{{:"$1", :_, {:_, :_, :"$2"}}, :"$3", :_}, [{:==, :"$1", __MODULE__}, {:==, :"$2", tenant_id}], [:"$_"]}
+      ])
+
+    Enum.each(keys, fn {{_, _, key}, {pid, _}} ->
+      GenServer.stop(pid)
+      Cachex.del!(@cache, key)
+    end)
+
+    :ok
+  end
+
   @doc """
   Starts a new RateCounter under a DynamicSupervisor
   """
