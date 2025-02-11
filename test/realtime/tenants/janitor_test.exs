@@ -52,10 +52,52 @@ defmodule Realtime.Tenants.JanitorTest do
     %{tenants: tenants}
   end
 
-  test "cleans messages older than 72 hours and creates partitions from tenants that were active and untracks the user",
+  test "cleans messages older than 72 hours and creates partitions from tenants that were active and untracks the user and test tenant is connected",
        %{
          tenants: tenants
        } do
+    utc_now = NaiveDateTime.utc_now()
+    limit = NaiveDateTime.add(utc_now, -72, :hour)
+
+    messages =
+      for days <- -5..0 do
+        inserted_at = NaiveDateTime.add(utc_now, days, :day)
+        Enum.map(tenants, &message_fixture(&1, %{inserted_at: inserted_at}))
+      end
+      |> List.flatten()
+      |> MapSet.new()
+
+    to_keep =
+      messages
+      |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gt))
+      |> MapSet.new()
+
+    with_mock Migrations, create_partitions: fn _ -> :ok end do
+      start_supervised!(Janitor)
+      Process.sleep(500)
+
+      current =
+        Enum.map(tenants, fn tenant ->
+          {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+          {:ok, res} = Repo.all(conn, from(m in Message), Message)
+          res
+        end)
+        |> List.flatten()
+        |> MapSet.new()
+
+      assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
+      assert_called(Migrations.create_partitions(:_))
+      assert :ets.tab2list(Connect) == []
+    end
+  end
+
+  test "cleans messages older than 72 hours and creates partitions from tenants that were active and untracks the user and test tenant has disconnected",
+       %{
+         tenants: tenants
+       } do
+    Realtime.Tenants.Connect.shutdown(hd(tenants).external_id)
+    Process.sleep(100)
+
     utc_now = NaiveDateTime.utc_now()
     limit = NaiveDateTime.add(utc_now, -72, :hour)
 
