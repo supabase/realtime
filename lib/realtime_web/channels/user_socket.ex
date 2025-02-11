@@ -87,11 +87,11 @@ defmodule RealtimeWeb.UserSocket do
           {:error, :tenant_not_found}
 
         {:error, :expired_token, msg} ->
-          log_warning_with_token_metadata(msg, token)
+          log_error_with_token_metadata(msg, token)
           {:error, :expired_token}
 
         {:error, :missing_claims} ->
-          log_warning_with_token_metadata("Fields `role` and `exp` are required in JWT", token)
+          log_error_with_token_metadata("Fields `role` and `exp` are required in JWT", token)
           {:error, :missing_claims}
 
         error ->
@@ -108,14 +108,14 @@ defmodule RealtimeWeb.UserSocket do
     end
   end
 
-  defp log_warning_with_token_metadata(msg, token) do
+  defp log_error_with_token_metadata(msg, token) do
     case Joken.peek_claims(token) do
       {:ok, claims} ->
         sub = Map.get(claims, "sub")
-        log_warning("InvalidJWTToken", msg, sub: sub)
+        log_error("InvalidJWTToken", msg, sub: sub)
 
       _ ->
-        log_warning("InvalidJWTToken", msg)
+        log_error("InvalidJWTToken", msg)
     end
   end
 end
