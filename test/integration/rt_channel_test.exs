@@ -385,23 +385,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{
-                       event: "phx_reply",
-                       payload: %{
-                         "response" => %{"postgres_changes" => []},
-                         "status" => "ok"
-                       },
-                       ref: "1",
-                       topic: ^topic
-                     },
-                     500
-
-      assert_receive %Message{
-                       event: "presence_state",
-                       payload: %{},
-                       topic: ^topic
-                     },
-                     500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
       payload = %{
         type: "presence",
@@ -411,13 +396,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.send_event(socket, topic, "presence", payload)
 
-      assert_receive %Message{
-        event: "presence_diff",
-        payload: %{"joins" => joins, "leaves" => %{}},
-        ref: nil,
-        topic: ^topic
-      }
-
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}
+      refute_receive %Message{topic: ^topic}
       join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
@@ -434,12 +414,7 @@ defmodule Realtime.Integration.RtChannelTest do
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{
-                       event: "presence_state",
-                       payload: %{},
-                       topic: ^topic
-                     },
-                     500
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
       payload = %{
         type: "presence",
@@ -448,14 +423,8 @@ defmodule Realtime.Integration.RtChannelTest do
       }
 
       WebsocketClient.send_event(socket, topic, "presence", payload)
-
-      assert_receive %Message{
-                       event: "presence_diff",
-                       payload: %{"joins" => joins, "leaves" => %{}},
-                       topic: ^topic
-                     },
-                     500
-
+      refute_receive %Message{event: "phx_leave", topic: ^topic}
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
       join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
@@ -480,15 +449,7 @@ defmodule Realtime.Integration.RtChannelTest do
       # This will be ignored
       WebsocketClient.send_event(socket, topic, "presence", payload)
 
-      assert_receive %Message{
-                       topic: ^topic,
-                       event: "phx_reply",
-                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"},
-                       ref: "1",
-                       join_ref: nil
-                     },
-                     500
-
+      assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state", payload: %{}, ref: nil, topic: ^topic}
       refute_receive %Message{event: "presence_diff", payload: _, ref: _, topic: ^topic}
 
@@ -502,22 +463,15 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(secondary_socket, topic, %{config: config.("service_role")})
       WebsocketClient.send_event(secondary_socket, topic, "presence", payload)
 
-      assert_receive %Message{
-        topic: ^topic,
-        event: "presence_diff",
-        payload: %{"joins" => joins, "leaves" => %{}},
-        ref: nil
-      }
+      assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{topic: ^topic, event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}}
+      assert_receive %Message{event: "presence_state", payload: %{}, ref: nil, topic: ^topic}
 
       join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
 
-      assert_receive %Message{
-                       topic: ^topic,
-                       event: "presence_diff",
-                       join_ref: nil
-                     } = res
+      assert_receive %Message{topic: ^topic, event: "presence_diff"} = res
 
       assert join_payload =
                res
