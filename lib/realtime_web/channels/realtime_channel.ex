@@ -103,15 +103,15 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:ok, state, assign(socket, assigns)}
     else
       {:error, :expired_token, msg} ->
-        Logging.log_error_message(:warning, "InvalidJWTToken", msg)
+        Logging.log_error_message(:error, "InvalidJWTToken", msg)
 
       {:error, :missing_claims} ->
         msg = "Fields `role` and `exp` are required in JWT"
-        Logging.log_error_message(:warning, "InvalidJWTToken", msg)
+        Logging.log_error_message(:error, "InvalidJWTToken", msg)
 
       {:error, :expected_claims_map} ->
         msg = "Token claims must be a map"
-        Logging.log_error_message(:warning, "InvalidJWTToken", msg)
+        Logging.log_error_message(:error, "InvalidJWTToken", msg)
 
       {:error, :unauthorized, msg} ->
         Logging.log_error_message(:warning, "Unauthorized", msg)
