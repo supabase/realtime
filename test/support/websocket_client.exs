@@ -93,24 +93,10 @@ defmodule Realtime.Integration.WebsocketClient do
   @doc false
   def handle_call({:connect, url, headers}, from, state) do
     uri = URI.parse(url)
-
-    http_scheme =
-      case uri.scheme do
-        "ws" -> :http
-        "wss" -> :https
-      end
-
-    ws_scheme =
-      case uri.scheme do
-        "ws" -> :ws
-        "wss" -> :wss
-      end
-
-    path =
-      case uri.query do
-        nil -> uri.path
-        query -> uri.path <> "?" <> query
-      end
+    http_scheme = :http
+    ws_scheme = :ws
+    query = if uri.query, do: "?" <> uri.query, else: ""
+    path = uri.path <> "?" <> query
 
     with {:ok, conn} <- Mint.HTTP.connect(http_scheme, uri.host, uri.port),
          {:ok, conn, ref} <- Mint.WebSocket.upgrade(ws_scheme, conn, path, headers) do

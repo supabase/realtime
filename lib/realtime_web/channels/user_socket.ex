@@ -26,6 +26,8 @@ defmodule RealtimeWeb.UserSocket do
 
   @impl true
   def connect(params, socket, opts) do
+    IO.inspect("connect")
+
     if Application.fetch_env!(:realtime, :secure_channels) do
       %{uri: %{host: host}, x_headers: headers} = opts
 

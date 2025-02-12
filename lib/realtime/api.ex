@@ -124,7 +124,8 @@ defmodule Realtime.Api do
          data: %{external_id: external_id}
        })
        when is_map_key(changes, :jwt_jwks) or is_map_key(changes, :jwt_secret) do
-    RealtimeWeb.Endpoint.broadcast("user_socket:" <> external_id, "disconnect", %{})
+    IO.inspect("trigger_disconnect")
+    RealtimeWeb.Endpoint.broadcast("user_socket:#{external_id}", "disconnect", %{})
   end
 
   defp maybe_trigger_disconnect(_), do: nil

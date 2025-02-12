@@ -14,7 +14,6 @@ defmodule Realtime.Integration.RtChannelTest do
 
   alias Extensions.PostgresCdcRls
   alias Phoenix.Socket.Message
-  alias Phoenix.Socket.V1
   alias Postgrex
   alias Realtime.Api.Tenant
   alias Realtime.Database

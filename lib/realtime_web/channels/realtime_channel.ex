@@ -198,7 +198,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(
-        _any,
+        any,
         %{
           assigns: %{
             rate_counter: %{avg: avg},
@@ -207,6 +207,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         } = socket
       )
       when avg > max do
+    IO.inspect(any)
     message = "Too many messages per second"
 
     shutdown_response(socket, message)
@@ -327,7 +328,13 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:stop, {:shutdown, :left}, socket}
   end
 
+  def handle_info({:shutdown, :closed}, %{assigns: %{channel_name: channel_name}} = socket) do
+    push_system_message("system", socket, "ok", "Server requested disconnect", channel_name)
+    {:stop, {:shutdown, :closed}, socket}
+  end
+
   def handle_info(msg, socket) do
+    IO.inspect(msg)
     log_error("UnhandledSystemMessage", msg)
     {:noreply, socket}
   end
@@ -427,7 +434,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_in(type, payload, socket) do
     socket = count(socket)
-
     # Log info here so that bad messages from clients won't flood Logflare
     # Can subscribe to a Channel with `log_level` `info` to see these messages
     message = "Unexpected message from client of type `#{type}` with payload: #{inspect(payload)}"
@@ -437,8 +443,16 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def terminate(reason, _state) do
+  def terminate({:shutdown, :closed}, %{assigns: %{channel_name: channel_name}} = socket) do
+    IO.inspect("Channel terminated with reason: shutdown")
+    push_system_message("system", socket, "ok", "Server requested disconnect", channel_name)
+    :ok
+  end
+
+  def terminate(reason, %{assigns: %{channel_name: channel_name}} = socket) do
+    IO.inspect("Channel terminated with reason: #{inspect(reason)}")
     Logger.debug("Channel terminated with reason: " <> inspect(reason))
+    push_system_message("system", socket, "ok", "Server requested disconnect", channel_name)
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
     :ok
   end

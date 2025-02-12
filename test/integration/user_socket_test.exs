@@ -6,7 +6,6 @@ defmodule RealtimeWeb.UserSocketTest do
   import ExUnit.CaptureLog
   import Integration
 
-  alias __MODULE__.Endpoint
   alias Phoenix.Socket.Message
   alias Phoenix.Socket.V1
   alias Realtime.Api.Tenant
@@ -15,6 +14,7 @@ defmodule RealtimeWeb.UserSocketTest do
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Migrations
+  alias RealtimeWeb.UserSocketTest.Endpoint
 
   @moduletag :capture_log
   @port 4003
@@ -102,46 +102,82 @@ defmodule RealtimeWeb.UserSocketTest do
 
   describe "disconnecting users" do
     setup do
-      for _ <- 1..3, reduce: %{topics: [], sockets: []} do
-        %{topics: topics, sockets: sockets} ->
-          topic = random_string()
-          {socket, _} = get_connection(@port, "authenticated")
-          config = %{broadcast: %{self: true}, private: false}
-          WebsocketClient.join(socket, "realtime:#{random_string()}", %{config: config})
-          assert_receive %Message{event: "phx_reply"}, 500
-          assert_receive %Message{event: "presence_state"}, 500
-          Process.sleep(500)
-          %{topics: [topic | topics], sockets: [socket | sockets]}
-      end
+      {socket, _} = get_connection(@port, "authenticated")
+      on_exit(fn -> WebsocketClient.close(socket) end)
+      %{socket: socket}
     end
 
-    test "on jwt_jwks the socket closes and sends a system message", %{sockets: sockets} do
+    test "on jwt_jwks the socket closes and sends a system message", %{socket: socket} do
+      config = %{broadcast: %{self: true}, private: false}
+
+      topics =
+        for _ <- 1..3, reduce: [] do
+          acc ->
+            topic = "realtime:#{random_string()}"
+            WebsocketClient.join(socket, topic, %{config: config})
+            assert_receive %Message{topic: ^topic, event: "phx_reply"}, 500
+            assert_receive %Message{topic: ^topic, event: "presence_state"}, 500
+
+            [topic | acc]
+        end
+
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["potato"]}})
+      IO.inspect("Sleeping for 1 second")
+      Process.sleep(1000)
 
-      for socket <- sockets do
-        WebsocketClient.send_heartbeat(socket)
-        refute_receive %Message{event: "phx_reply"}, 500
+      for topic <- topics do
+        WebsocketClient.send_event(socket, topic, "broadcast", %{event: random_string()})
+        refute_receive %Message{topic: ^topic}
       end
     end
 
-    test "on jwt_secret the socket closes and sends a system message", %{sockets: sockets} do
+    test "on jwt_secret the socket closes and sends a system message", %{socket: socket} do
+      config = %{broadcast: %{self: true}, private: false}
+
+      topics =
+        for _ <- 1..3, reduce: [] do
+          acc ->
+            topic = "realtime:#{random_string()}"
+            WebsocketClient.join(socket, topic, %{config: config})
+            assert_receive %Message{topic: ^topic, event: "phx_reply"}, 500
+            assert_receive %Message{topic: ^topic, event: "presence_state"}, 500
+
+            [topic | acc]
+        end
+
       tenant = Tenants.get_tenant_by_external_id(@external_id)
-      Realtime.Api.update_tenant(tenant, %{jwt_secret: "potato"})
+      Realtime.Api.update_tenant(tenant, %{jwt_secret: random_string()})
+      IO.inspect("Sleeping for 1 second")
+      Process.sleep(1000)
 
-      for socket <- sockets do
-        WebsocketClient.send_heartbeat(socket)
-        refute_receive %Message{event: "phx_reply"}, 500
+      for topic <- topics do
+        WebsocketClient.send_event(socket, topic, "broadcast", %{event: random_string()})
+        refute_receive %Message{topic: ^topic}
       end
     end
 
-    test "on other param changes the socket won't close and no message is sent", %{sockets: sockets} do
+    test "on other param changes the socket won't close and no message is sent", %{socket: socket} do
+      config = %{broadcast: %{self: true}, private: false}
+
+      topics =
+        for _ <- 1..3, reduce: [] do
+          acc ->
+            topic = "realtime:#{random_string()}"
+            WebsocketClient.join(socket, topic, %{config: config})
+            assert_receive %Message{topic: ^topic, event: "phx_reply"}, 500
+            assert_receive %Message{topic: ^topic, event: "presence_state"}, 500
+
+            [topic | acc]
+        end
+
       tenant = Tenants.get_tenant_by_external_id(@external_id)
       Realtime.Api.update_tenant(tenant, %{max_concurrent_users: 100})
+      Process.sleep(1000)
 
-      for socket <- sockets do
-        WebsocketClient.send_heartbeat(socket)
-        assert_receive %Message{event: "phx_reply"}, 500
+      for topic <- topics do
+        WebsocketClient.send_event(socket, topic, "broadcast", %{event: random_string()})
+        assert_receive %Message{topic: ^topic}
       end
     end
   end
