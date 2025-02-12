@@ -3,6 +3,7 @@ defmodule Realtime.ApiTest do
 
   import Mock
 
+  alias Phoenix.Socket.Broadcast
   alias Realtime.Api
   alias Realtime.Api.Extensions
   alias Realtime.Api.Tenant
@@ -60,8 +61,8 @@ defmodule Realtime.ApiTest do
     tenants = tenants ++ dev_tenant
 
     Enum.each(tenants, fn tenant ->
-      :ok =
-        Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
+      RealtimeWeb.Endpoint.subscribe("user_socket:" <> tenant.external_id)
+      Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
     end)
 
     %{tenants: tenants}
@@ -128,14 +129,14 @@ defmodule Realtime.ApiTest do
       tenants: [tenant | _]
     } do
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["test"]}})
-      assert_receive :disconnect
+      assert_receive %Broadcast{topic: "user_socket:external_id1", event: "disconnect", payload: %{}}
     end
 
     test "update_tenant/2 with valid data and jwt_secret change will send disconnect event", %{
       tenants: [tenant | _]
     } do
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{jwt_secret: "potato"})
-      assert_receive :disconnect
+      assert_receive %Broadcast{topic: "user_socket:external_id1", event: "disconnect", payload: %{}}
     end
 
     test "update_tenant/2 with valid data but not updating jwt_secret or jwt_jwks won't send event",
