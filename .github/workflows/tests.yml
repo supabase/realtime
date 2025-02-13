@@ -39,6 +39,12 @@ jobs:
         run: mix format --check-formatted
       - name: Credo checks
         run: mix credo
+      - name: Run hex audit
+        run: mix hex.audit
+      - name: Run mix_audit
+        run: mix deps.audit --ignore-advisory-ids GHSA-vq52-99r9-h5pw
+      - name: Run sobelow
+        run: mix sobelow --config .sobelow-conf
       - name: Retrieve PLT Cache
         uses: actions/cache@v1
         id: plt-cache
