@@ -195,6 +195,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
+  @impl true
   def handle_info(
         _any,
         %{
@@ -210,58 +211,37 @@ defmodule RealtimeWeb.RealtimeChannel do
     shutdown_response(socket, message)
   end
 
-  @impl true
-
-  def handle_info(:sync_presence = msg, socket) do
-    PresenceHandler.track(msg, socket)
-  end
-
-  @impl true
   def handle_info(%{event: "postgres_cdc_rls_down"}, socket) do
     pg_sub_ref = postgres_subscribe()
 
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
   end
 
-  @impl true
   def handle_info(%{event: "postgres_cdc_down"}, socket) do
     pg_sub_ref = postgres_subscribe()
 
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
   end
 
-  @impl true
   def handle_info(
-        %{event: type, payload: payload} = msg,
-        %{assigns: %{policies: policies}} = socket
+        %{event: "presence_diff"},
+        %{assigns: %{policies: %Policies{presence: %PresencePolicies{read: false}}}} = socket
       ) do
-    socket =
-      cond do
-        type == "presence_diff" and
-            match?(%Policies{broadcast: %PresencePolicies{read: false}}, policies) ->
-          Logger.warning("Presence message ignored")
-
-          socket
-
-        type != "presence_diff" and
-            match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, policies) ->
-          Logger.warning("Broadcast message ignored")
-
-          socket
-
-        true ->
-          socket
-          |> count()
-          |> Logging.maybe_log_handle_info(msg)
-
-          push(socket, type, payload)
-          socket
-      end
-
+    Logger.warning("Presence message ignored")
     {:noreply, socket}
   end
 
-  @impl true
+  def handle_info(_msg, %{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{read: false}}}} = socket) do
+    Logger.warning("Broadcast message ignored")
+    {:noreply, socket}
+  end
+
+  def handle_info(%{event: type, payload: payload} = msg, socket) do
+    socket = socket |> count() |> Logging.maybe_log_handle_info(msg)
+    push(socket, type, payload)
+    {:noreply, socket}
+  end
+
   def handle_info(:postgres_subscribe, %{assigns: %{channel_name: channel_name}} = socket) do
     %{
       assigns: %{
@@ -308,7 +288,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
   end
 
-  @impl true
   def handle_info(:confirm_token, %{assigns: %{pg_change_params: pg_change_params}} = socket) do
     case confirm_token(socket) do
       {:ok, claims, confirm_token_ref, _, _} ->
@@ -332,48 +311,35 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:stop, :shutdown, socket}
   end
 
+  def handle_info(:sync_presence, socket), do: PresenceHandler.sync(socket)
+
   def handle_info(msg, socket) do
     log_error("UnhandledSystemMessage", msg)
     {:noreply, socket}
   end
 
   @impl true
-  def handle_in(
-        _,
-        _,
-        %{
-          assigns: %{
-            rate_counter: %{avg: avg},
-            limits: %{max_events_per_second: max}
-          }
-        } = socket
-      )
+  def handle_in("broadcast", payload, socket), do: BroadcastHandler.handle(payload, socket)
+  def handle_in("presence", payload, socket), do: PresenceHandler.handle(payload, socket)
+
+  def handle_in(_, _, %{assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}} = socket)
       when avg > max do
     message = "Too many messages per second"
 
     shutdown_response(socket, message)
   end
 
-  def handle_in(
-        "access_token",
-        %{"access_token" => refresh_token},
-        %{assigns: %{access_token: access_token}} = socket
-      )
+  def handle_in("access_token", %{"access_token" => refresh_token}, %{assigns: %{access_token: access_token}} = socket)
       when refresh_token == access_token do
     {:noreply, socket}
   end
 
-  def handle_in(
-        "access_token",
-        %{"access_token" => refresh_token},
-        %{assigns: %{access_token: _access_token}} = socket
-      )
+  def handle_in("access_token", %{"access_token" => refresh_token}, %{assigns: %{access_token: _access_token}} = socket)
       when is_nil(refresh_token) do
     {:noreply, socket}
   end
 
-  def handle_in("access_token", %{"access_token" => refresh_token}, socket)
-      when is_binary(refresh_token) do
+  def handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
     %{
       assigns: %{
         access_token: access_token,
@@ -425,10 +391,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         shutdown_response(socket, inspect(error))
     end
   end
-
-  def handle_in("broadcast", payload, socket), do: BroadcastHandler.call(payload, socket)
-
-  def handle_in("presence", payload, socket), do: PresenceHandler.call(payload, socket)
 
   def handle_in(type, payload, socket) do
     socket = count(socket)

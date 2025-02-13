@@ -15,9 +15,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias RealtimeWeb.Endpoint
 
   @event_type "broadcast"
-  @spec call(map(), Phoenix.Socket.t()) ::
+  @spec handle(map(), Phoenix.Socket.t()) ::
           {:reply, :ok, Phoenix.Socket.t()} | {:noreply, Phoenix.Socket.t()}
-  def call(payload, %{assigns: %{private?: true}} = socket) do
+  def handle(payload, %{assigns: %{private?: true}} = socket) do
     %{
       assigns: %{
         self_broadcast: self_broadcast,
@@ -38,17 +38,13 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       {:ok, socket} ->
         {:noreply, socket}
 
-      {:error, :increase_connection_pool} ->
-        log_error("IncreaseConnectionPool", "Please increase your connection pool size")
-        {:noreply, socket}
-
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
         {:noreply, socket}
     end
   end
 
-  def call(payload, %{assigns: %{private?: false}} = socket) do
+  def handle(payload, %{assigns: %{private?: false}} = socket) do
     %{
       assigns: %{
         tenant_topic: tenant_topic,

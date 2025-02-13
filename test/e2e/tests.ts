@@ -127,6 +127,70 @@ describe("broadcast extension", () => {
   });
 });
 
+describe("presence extension", () => {
+  it("user is able to receive presence updates", async () => {
+    let supabase = await createClient(url, token, { realtime });
+
+    let result: any = [];
+    let topic = "topic:" + crypto.randomUUID();
+    let message = crypto.randomUUID();
+    let key = crypto.randomUUID();
+    let expectedPayload = { message };
+
+    const config = { config: { broadcast: { self: true }, presence: { key } } };
+    const channel = supabase
+      .channel(topic, config)
+      .on("presence", { event: "join" }, ({ key, newPresences }) =>
+        result.push({ key, newPresences })
+      )
+      .subscribe(async (status: string) => {
+        if (status == "SUBSCRIBED") {
+          await channel.track(expectedPayload);
+        }
+      });
+
+    await sleep(2);
+    await stopClient(supabase, [channel]);
+
+    let presences = result[0].newPresences[0];
+    assertEquals(result[0].key, key);
+    assertEquals(presences.message, message);
+  });
+
+  it("user is able to receive presence updates on private channels", async () => {
+    let supabase = await createClient(url, token, { realtime });
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
+
+    let result: any = [];
+    let topic = "topic:" + crypto.randomUUID();
+    let message = crypto.randomUUID();
+    let key = crypto.randomUUID();
+    let expectedPayload = { message };
+
+    const config = {
+      config: { private: true, broadcast: { self: true }, presence: { key } },
+    };
+    const channel = supabase
+      .channel(topic, config)
+      .on("presence", { event: "join" }, ({ key, newPresences }) =>
+        result.push({ key, newPresences })
+      )
+      .subscribe(async (status: string) => {
+        if (status == "SUBSCRIBED") {
+          await channel.track(expectedPayload);
+        }
+      });
+
+    await sleep(2);
+    await stopClient(supabase, [channel]);
+
+    let presences = result[0].newPresences[0];
+    assertEquals(result[0].key, key);
+    assertEquals(presences.message, message);
+  });
+});
+
 describe("postgres changes extension", () => {
   it("user is able to receive INSERT only events from a subscribed table with filter applied", async () => {
     let supabase = await createClient(url, token, { realtime });

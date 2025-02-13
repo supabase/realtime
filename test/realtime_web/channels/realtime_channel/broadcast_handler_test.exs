@@ -25,7 +25,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.call(%{}, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(%{}, socket)
           topic = "realtime:#{topic}"
           assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
@@ -41,7 +41,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.call(%{}, socket)
+          {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
           topic = "realtime:#{topic}"
           refute_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
@@ -62,7 +62,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.call(%{}, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(%{}, socket)
           topic = "realtime:#{topic}"
           assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
@@ -82,7 +82,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.call(%{}, socket)
+          {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
           topic = "realtime:#{topic}"
           refute_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
@@ -105,7 +105,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       with_mock Authorization, [:passthrough], [] do
         for _ <- 1..100, reduce: socket do
           socket ->
-            {:reply, :ok, socket} = BroadcastHandler.call(%{}, socket)
+            {:reply, :ok, socket} = BroadcastHandler.handle(%{}, socket)
             topic = "realtime:#{topic}"
             assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
             socket
@@ -125,7 +125,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       with_mock Authorization, [:passthrough], [] do
         for _ <- 1..100, reduce: socket do
           socket ->
-            {:noreply, socket} = BroadcastHandler.call(%{}, socket)
+            {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
             topic = "realtime:#{topic}"
             refute_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
             socket
@@ -144,7 +144,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.call(%{}, socket)
+          {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
           topic = "realtime:#{topic}"
           assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
@@ -156,7 +156,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.call(%{}, socket)
+          {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
           topic = "realtime:#{topic}"
           assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
@@ -172,7 +172,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.call(%{}, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(%{}, socket)
           topic = "realtime:#{topic}"
           assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket

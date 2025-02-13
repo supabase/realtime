@@ -121,7 +121,7 @@ If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000
 **Environment Variables**
 
 | Variable                             | Type    | Description                                                                                                                                                                                                                                                                                                                     |
-| -----------------------------------  | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ------------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | PORT                                 | number  | Port which you can connect your client/listeners                                                                                                                                                                                                                                                                                |
 | DB_HOST                              | string  | Database host URL                                                                                                                                                                                                                                                                                                               |
 | DB_PORT                              | number  | Database port                                                                                                                                                                                                                                                                                                                   |
@@ -159,7 +159,9 @@ If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000
 | JANITOR_CLEANUP_CHILDREN_TIMEOUT     | number  | Timeout for each async task for janitor cleanup                                                                                                                                                                                                                                                                                 |
 | JANITOR_CHUNK_SIZE                   | number  | Number of tenants to process per chunk. Each chunk will be processed by a Task                                                                                                                                                                                                                                                  |
 | METRICS_CLEANER_SCHEDULE_TIMER_IN_MS | number  | Time in ms to run the Metric Cleaner task                                                                                                                                                                                                                                                                                       |
+
 ## WebSocket URL
+
 The WebSocket URL is in the following format for local development: `ws://[external_id].localhost:4000/socket/websocket`
 
 If you're using Supabase's hosted Realtime in production the URL is `wss://[project-ref].supabase.co/realtime/v1/websocket?apikey=[anon-token]&log_level=info&vsn=1.0.0"`
@@ -225,6 +227,7 @@ This is the list of operational codes that can help you understand your deployme
 | UnableToFindCounter                | Error when trying to find a counter to track rate limits for a tenant                                                               |
 | UnhandledProcessMessage            | Unhandled message received by a Realtime process                                                                                    |
 | UnableToSetPolicies                | We were not able to set policies for this connection                                                                                |
+| UnableToTrackPresence              | Error when handling track presence for this socket                                                                                  |
 | IncreaseConnectionPool             | The number of connections you have set for Realtime are not enough to handle your current use case                                  |
 | RlsPolicyError                     | Error on RLS policy used for authorization                                                                                          |
 | ConnectionInitializing             | Database is initializing connection                                                                                                 |

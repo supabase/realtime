@@ -6,6 +6,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   import Phoenix.Socket, only: [assign: 3]
   import Phoenix.Channel, only: [push: 3]
+  import Realtime.Logs
 
   alias Phoenix.Socket
   alias Phoenix.Tracker.Shard
@@ -17,79 +18,110 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias RealtimeWeb.Presence
   alias RealtimeWeb.RealtimeChannel.Logging
 
-  @spec call(map(), Phoenix.Socket.t()) ::
+  @spec handle(map(), Phoenix.Socket.t()) ::
           {:noreply, Phoenix.Socket.t()} | {:reply, :error | :ok, Phoenix.Socket.t()}
-  def call(
-        %{"event" => event} = payload,
-        %{assigns: %{is_new_api: true, presence_key: _, tenant_topic: _}} = socket
-      ) do
-    socket = count(socket)
-    {result, socket} = handle_presence_event(event, payload, socket)
+  def handle(%{"event" => event} = payload, socket) do
+    event = String.downcase(event, :ascii)
 
-    {:reply, result, socket}
-  end
-
-  def call(_payload, socket) do
-    {:noreply, socket}
-  end
-
-  def track(msg, %{assigns: assigns} = socket) do
-    %{tenant_topic: topic, policies: policies} = assigns
-
-    case policies do
-      %Policies{presence: %PresencePolicies{read: false}} ->
-        Logger.info("Presence track message ignored on #{topic}")
+    case handle_presence_event(event, payload, socket) do
+      {:ok, socket} ->
         {:noreply, socket}
 
-      _ ->
-        socket = Logging.maybe_log_handle_info(socket, msg)
-        push(socket, "presence_state", presence_dirty_list(topic))
-
+      {:error, socket} ->
         {:noreply, socket}
     end
   end
 
-  defp handle_presence_event(event, payload, socket) do
-    %{
-      assigns: %{
-        presence_key: presence_key,
-        tenant_topic: tenant_topic
-      }
-    } = socket
+  def handle(_payload, socket), do: {:noreply, socket}
 
-    authorization_context = socket.assigns.authorization_context
-    db_conn = socket.assigns.db_conn
+  @doc """
+  Sends presence state to connected clients
+  """
+  @spec sync(Phoenix.Socket.t()) :: {:noreply, Phoenix.Socket.t()}
+  def sync(%{assigns: %{private?: false}} = socket) do
+    %{assigns: %{tenant_topic: topic}} = socket
+    socket = count(socket)
+    push(socket, "presence_state", presence_dirty_list(topic))
+    {:noreply, socket}
+  end
 
-    {:ok, socket} = run_authorization_check(socket, db_conn, authorization_context)
+  def sync(%{assigns: assigns} = socket) do
+    %{tenant_topic: topic, policies: policies} = assigns
 
-    %{assigns: %{policies: policies}} = socket
+    socket =
+      case policies do
+        %Policies{presence: %PresencePolicies{read: false}} ->
+          Logger.info("Presence track message ignored on #{topic}")
+          socket
 
-    cond do
-      match?(%Policies{presence: %PresencePolicies{write: false}}, policies) ->
-        Logger.info("Presence message ignored on #{tenant_topic}")
+        _ ->
+          socket = Logging.maybe_log_handle_info(socket, :sync_presence)
+          push(socket, "presence_state", presence_dirty_list(topic))
+          socket
+      end
+
+    {:noreply, socket}
+  end
+
+  defp handle_presence_event("track", payload, %{assigns: %{private?: false}} = socket) do
+    track(socket, payload)
+  end
+
+  defp handle_presence_event(
+         "track",
+         payload,
+         %{assigns: %{private?: true, policies: %Policies{presence: %PresencePolicies{write: nil}}}} = socket
+       ) do
+    %{assigns: %{db_conn: db_conn, authorization_context: authorization_context}} = socket
+
+    case run_authorization_check(socket, db_conn, authorization_context) do
+      {:ok, socket} ->
+        handle_presence_event("track", payload, socket)
+
+      {:error, error} ->
+        log_error("UnableToSetPolicies", error)
+        {:error, socket}
+    end
+  end
+
+  defp handle_presence_event(
+         "track",
+         payload,
+         %{assigns: %{private?: true, policies: %Policies{presence: %PresencePolicies{write: true}}}} = socket
+       ) do
+    track(socket, payload)
+  end
+
+  defp handle_presence_event(
+         "track",
+         _,
+         %{assigns: %{private?: true, policies: %Policies{presence: %PresencePolicies{write: false}}}} = socket
+       ) do
+    {:error, socket}
+  end
+
+  defp handle_presence_event("untrack", _, socket) do
+    %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
+    {Presence.untrack(self(), tenant_topic, presence_key), socket}
+  end
+
+  defp track(socket, payload) do
+    %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
+    socket = count(socket)
+    payload = Map.get(payload, "payload", %{})
+
+    case Presence.track(self(), tenant_topic, presence_key, payload) do
+      {:ok, _} ->
         {:ok, socket}
 
-      String.downcase(event) == "track" ->
-        payload = Map.get(payload, "payload", %{})
-
-        case Presence.track(self(), tenant_topic, presence_key, payload) do
-          {:ok, _} ->
-            {:ok, socket}
-
-          {:error, {:already_tracked, _, _, _}} ->
-            case Presence.update(self(), tenant_topic, presence_key, payload) do
-              {:ok, _} -> {:ok, socket}
-              {:error, _} -> {:error, socket}
-            end
-
-          {:error, _} ->
-            {:error, socket}
+      {:error, {:already_tracked, pid, _, _}} ->
+        case Presence.update(pid, tenant_topic, presence_key, payload) do
+          {:ok, _} -> {:ok, socket}
+          {:error, _} -> {:error, socket}
         end
 
-      String.downcase(event) == "untrack" ->
-        {Presence.untrack(self(), tenant_topic, presence_key), socket}
-
-      true ->
+      {:error, error} ->
+        log_error("UnableToTrackPresence", error)
         {:error, socket}
     end
   end
@@ -111,7 +143,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp run_authorization_check(
-         %Socket{assigns: %{policies: %{presence: %PresencePolicies{write: nil}}}} = socket,
+         %Socket{assigns: %{private?: true, policies: %{presence: %PresencePolicies{write: nil}}}} = socket,
          db_conn,
          authorization_context
        ) do
