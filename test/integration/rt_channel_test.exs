@@ -540,7 +540,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "invalid JWT with expired token" do
       assert capture_log(fn ->
                get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
-             end) =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
+             end) =~ "InvalidJWTToken: Token has expired 1000 seconds ago"
     end
 
     test "token required the role key" do
@@ -720,13 +720,13 @@ defmodule Realtime.Integration.RtChannelTest do
             event: "system",
             payload: %{
               "extension" => "system",
-              "message" => "Token as expired 1000 seconds ago",
+              "message" => "Token has expired 1000 seconds ago",
               "status" => "error"
             }
           }
         end)
 
-      assert log =~ "ChannelShutdown: Token as expired 1000 seconds ago"
+      assert log =~ "ChannelShutdown: Token has expired 1000 seconds ago"
     end
 
     test "ChannelShutdown include sub if available in jwt claims",
@@ -820,7 +820,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_close"}
 
-      assert msg =~ "Token as expired"
+      assert msg =~ "Token has expired"
     end
 
     test "token expires in between joins", %{topic: topic} do
@@ -845,7 +845,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        event: "phx_reply",
                        payload: %{
                          "status" => "error",
-                         "response" => %{"reason" => "Token as expired 0 seconds ago"}
+                         "response" => %{"reason" => "Token has expired 0 seconds ago"}
                        },
                        topic: ^realtime_topic
                      },
@@ -1311,7 +1311,7 @@ defmodule Realtime.Integration.RtChannelTest do
           get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
         end)
 
-      assert log =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
+      assert log =~ "InvalidJWTToken: Token has expired 1000 seconds ago"
     end
   end
 
