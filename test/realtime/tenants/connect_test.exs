@@ -276,20 +276,27 @@ defmodule Realtime.Tenants.ConnectTest do
       opts = Database.from_tenant(tenant, "realtime_test", :stop) |> Database.opts()
 
       # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
-      for i <- 0..4 do
-        replication_slot_opts =
-          %PostgresReplication{
-            connection_opts: opts,
-            table: :all,
-            output_plugin: "pgoutput",
-            output_plugin_options: [],
-            handler_module: TestHandler,
-            publication_name: "test_#{i}_publication",
-            replication_slot_name: "test_#{i}_slot"
-          }
+      pids =
+        for i <- 0..4 do
+          replication_slot_opts =
+            %PostgresReplication{
+              connection_opts: opts,
+              table: :all,
+              output_plugin: "pgoutput",
+              output_plugin_options: [],
+              handler_module: TestHandler,
+              publication_name: "test_#{i}_publication",
+              replication_slot_name: "test_#{i}_slot"
+            }
 
-        {:ok, _} = PostgresReplication.start_link(replication_slot_opts)
-      end
+          {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
+          pid
+        end
+
+      on_exit(fn ->
+        Enum.each(pids, &Process.exit(&1, :kill))
+        Process.sleep(2000)
+      end)
 
       log =
         capture_log(fn ->
