@@ -101,7 +101,6 @@ defmodule Realtime.MixProject do
         "ecto.create --quiet",
         "run priv/repo/seeds_before_migration.exs",
         "ecto.migrate --migrations-path=priv/repo/migrations",
-        "run priv/repo/seeds_after_migration.exs",
         "test"
       ],
       "assets.deploy": ["esbuild default --minify", "tailwind default --minify", "phx.digest"]

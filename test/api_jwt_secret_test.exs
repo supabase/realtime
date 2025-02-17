@@ -1,5 +1,6 @@
 defmodule RealtimeWeb.ApiJwtSecretTest do
-  use RealtimeWeb.ConnCase
+  # async: false due to usage of mock
+  use RealtimeWeb.ConnCase, async: false
   import Mock
   alias RealtimeWeb.JwtVerification
 

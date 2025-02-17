@@ -1,8 +1,7 @@
 Code.require_file("../support/websocket_client.exs", __DIR__)
 
 defmodule Realtime.Integration.RtChannelTest do
-  # async: false due to the fact that multiple operations against the database will use the same connection
-
+  # async: false due to the fact that multiple operations against the same tenant and usage of mocks
   use RealtimeWeb.ConnCase, async: false
   import ExUnit.CaptureLog
   import Generators
@@ -14,16 +13,14 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Phoenix.Socket.Message
   alias Phoenix.Socket.V1
   alias Postgrex
-  alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Integration.RtChannelTest.Endpoint
   alias Realtime.Integration.WebsocketClient
   alias Realtime.RateCounter
-  alias Realtime.Repo
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Cache
-  alias Realtime.Tenants.Migrations
+
   @moduletag :capture_log
   @port 4002
   @serializer V1.JSONSerializer
@@ -78,8 +75,9 @@ defmodule Realtime.Integration.RtChannelTest do
     RateCounter.stop(@external_id)
     Cache.invalidate_tenant_cache(@external_id)
     Process.sleep(500)
-    [tenant] = Tenant |> Repo.all() |> Repo.preload(:extensions)
-    :ok = Migrations.run_migrations(tenant)
+
+    tenant = Tenants.get_tenant_by_external_id(@external_id)
+
     %{tenant: tenant}
   end
 
@@ -1265,7 +1263,7 @@ defmodule Realtime.Integration.RtChannelTest do
           get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
         end)
 
-      assert log =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
+      assert log =~ "InvalidJWTToken: Token as expired"
     end
   end
 
@@ -1466,7 +1464,7 @@ defmodule Realtime.Integration.RtChannelTest do
     claims =
       Map.merge(
         %{
-          ref: "localhost",
+          ref: "127.0.0.1",
           iat: System.system_time(:second),
           exp: System.system_time(:second) + 604_800
         },

@@ -2,10 +2,9 @@ defmodule Realtime.SignalHandlerTest do
   use ExUnit.Case
   import ExUnit.CaptureLog
   alias Realtime.SignalHandler
-  import Mock
 
   defmodule FakeHandler do
-    def handle_event(:sigterm, _state), do: :ok
+    def handle_event(:sigterm, _state), do: send(self(), :ok)
   end
 
   setup do
@@ -16,14 +15,12 @@ defmodule Realtime.SignalHandlerTest do
 
   describe "signal handling" do
     test "sends signal to handler_mod" do
-      with_mock FakeHandler, handle_event: fn :sigterm, _state -> :ok end do
-        {:ok, state} = SignalHandler.init({%{handler_mod: FakeHandler}, :ok})
+      {:ok, state} = SignalHandler.init({%{handler_mod: FakeHandler}, :ok})
 
-        assert capture_log(fn -> SignalHandler.handle_event(:sigterm, state) end) =~
-                 "SignalHandler: :sigterm received"
+      assert capture_log(fn -> SignalHandler.handle_event(:sigterm, state) end) =~
+               "SignalHandler: :sigterm received"
 
-        assert_called_exactly(FakeHandler.handle_event(:sigterm, :_), 1)
-      end
+      assert_receive :ok
     end
   end
 

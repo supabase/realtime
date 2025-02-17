@@ -7,22 +7,25 @@ defmodule Generators do
 
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
+    port = Enum.random(5500..9000)
+
     create_attrs = %{
       "external_id" => random_string(),
-      "name" => "localhost",
+      "name" => "tenant",
       "extensions" => [
         %{
           "type" => "postgres_cdc_rls",
           "settings" => %{
-            "db_host" => "localhost",
+            "db_host" => "127.0.0.1",
             "db_name" => "postgres",
             "db_user" => "supabase_admin",
             "db_password" => "postgres",
-            "db_port" => "5433",
+            "db_port" => "#{port}",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
             "region" => "us-east-1",
+            "publication" => "supabase_realtime_test",
             "ssl_enforced" => false
           }
         }
@@ -62,7 +65,7 @@ defmodule Generators do
     channel
   end
 
-  def random_string(length \\ 10) do
+  def random_string(length \\ 20) do
     length
     |> :crypto.strong_rand_bytes()
     |> Base.encode32()

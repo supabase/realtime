@@ -1,10 +1,9 @@
 defmodule RealtimeWeb.TenantControllerTest do
-  # async: false required due to the delete tests that connects to the database directly and might interfere with other tests
+  # async: false due to the usage of mocks
   use RealtimeWeb.ConnCase, async: false
 
   import Mock
 
-  alias Ecto.Adapters.SQL.Sandbox
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.Database
@@ -27,7 +26,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
   @default_tenant_attrs %{
     "external_id" => "external_id",
-    "name" => "localhost",
+    "name" => "external_id",
     "extensions" => [
       %{
         "type" => "postgres_cdc_rls",
@@ -51,10 +50,6 @@ defmodule RealtimeWeb.TenantControllerTest do
   @invalid_attrs %{external_id: nil, jwt_secret: nil, extensions: [], name: nil}
 
   setup %{conn: conn} do
-    # Ensure no replication slot is present before the test
-    Cleanup.ensure_no_replication_slot()
-    Sandbox.checkout(Realtime.Repo)
-
     Application.put_env(:realtime, :db_enc_key, "1234567890123456")
 
     new_conn =
@@ -136,7 +131,14 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   describe "update tenant" do
-    setup [:create_tenant]
+    setup do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true, true)
+      {:ok, _} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
+      Process.sleep(1000)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+      %{tenant: tenant}
+    end
 
     test "renders tenant when data is valid", %{
       conn: conn,
@@ -170,13 +172,13 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   describe "delete tenant" do
-    setup [:create_tenant]
-
-    setup %{tenant: tenant} do
+    setup do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true, true)
       {:ok, _} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
       Process.sleep(1000)
-      on_exit(fn -> Realtime.Tenants.Connect.shutdown(tenant.external_id) end)
-      :ok
+      on_exit(fn -> Containers.stop_container(tenant) end)
+      %{tenant: tenant}
     end
 
     test "deletes chosen tenant", %{conn: conn, tenant: tenant} do
@@ -256,11 +258,12 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "healthy tenant with 0 client connections", %{
       conn: conn,
-      tenant: %Tenant{external_id: ext_id}
+      tenant: %Tenant{external_id: external_id}
     } do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        conn = get(conn, ~p"/api/tenants/#{ext_id}/health")
+        conn = get(conn, ~p"/api/tenants/#{external_id}/health")
         data = json_response(conn, 200)["data"]
+        Connect.shutdown(external_id)
 
         assert %{
                  "healthy" => true,
@@ -323,22 +326,16 @@ defmodule RealtimeWeb.TenantControllerTest do
       end
     end
 
-    test "runs migrations", %{
-      conn: conn,
-      tenant: %Tenant{external_id: ext_id} = tenant
-    } do
+    test "runs migrations", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        tenant = tenant_fixture()
+        tenant = Containers.initialize(tenant, true)
+        on_exit(fn -> Containers.stop_container(tenant) end)
+
         {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-
-        Database.transaction(db_conn, fn transaction_conn ->
-          Postgrex.query!(transaction_conn, "DROP SCHEMA realtime CASCADE", [])
-          Postgrex.query!(transaction_conn, "CREATE SCHEMA realtime", [])
-          Postgrex.query!(transaction_conn, "DROP ROLE supabase_realtime_admin", [])
-        end)
-
         assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
-        conn = get(conn, ~p"/api/tenants/#{ext_id}/health")
+        conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
         data = json_response(conn, 200)["data"]
         Process.sleep(2000)
 
@@ -357,6 +354,8 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   defp create_tenant(_) do
-    %{tenant: tenant_fixture()}
+    tenant = Containers.checkout_tenant(true)
+    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    %{tenant: tenant}
   end
 end
