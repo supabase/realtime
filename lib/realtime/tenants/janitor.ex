@@ -60,9 +60,7 @@ defmodule Realtime.Tenants.Janitor do
   @table_name Realtime.Tenants.Connect
   @syn_table :"syn_registry_by_name_Elixir.Realtime.Tenants.Connect"
   @matchspec [{{:"$1"}, [], [:"$1"]}]
-  @syn_matchspec [
-    {{:"$1", :"$2", :"$3", :"$4", :"$5", Node.self()}, [], [:"$1"]}
-  ]
+  @syn_matchspec [{{:"$1", :"$2", :"$3", :"$4", :"$5", Node.self()}, [], [:"$1"]}]
 
   @impl true
   def handle_info(:delete_old_messages, state) do

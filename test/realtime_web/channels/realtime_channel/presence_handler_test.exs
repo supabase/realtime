@@ -1,6 +1,7 @@
 defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
-  # async: false as we are using the database to test RLS policies
+  # async: false due to the usage of mocks
   use Realtime.DataCase, async: false
+
   import Generators
   import Mock
 
@@ -19,7 +20,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
 
   setup [:initiate_tenant]
-  setup %{topic: topic}, do: Endpoint.subscribe("realtime:#{topic}")
 
   describe "handle/2" do
     test "with true policy and is private, user can track their presence and changes", %{
@@ -146,19 +146,27 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   end
 
   defp initiate_tenant(context) do
-    start_supervised(Realtime.GenCounter)
-    start_supervised(Realtime.RateCounter)
+    start_supervised(Realtime.GenCounter.DynamicSupervisor)
+    start_supervised(Realtime.RateCounter.DynamicSupervisor)
     start_supervised(CurrentTime.Mock)
 
-    tenant = tenant_fixture()
+    tenant = Containers.checkout_tenant(true)
+    RateCounter.stop(tenant.external_id)
+    GenCounter.stop(tenant.external_id)
+    RateCounter.new(tenant.external_id)
+    GenCounter.new(tenant.external_id)
+
+    on_exit(fn ->
+      Containers.checkin_tenant(tenant)
+    end)
+
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    Process.sleep(500)
+
     topic = random_string()
+    Endpoint.subscribe("realtime:#{topic}")
+    if policies = context[:policies], do: create_rls_policies(db_conn, policies, %{topic: topic})
 
-    if policies = context[:policies] do
-      create_rls_policies(db_conn, policies, %{topic: topic})
-    end
-
-    on_exit(fn -> Connect.shutdown(tenant.external_id) end)
     {:ok, tenant: tenant, db_conn: db_conn, topic: topic}
   end
 
