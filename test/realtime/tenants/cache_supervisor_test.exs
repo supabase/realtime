@@ -1,5 +1,5 @@
 defmodule Realtime.Tenants.CacheSupervisorTest do
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
 
   alias Realtime.Api.Tenant
   alias Realtime.Tenants.Cache

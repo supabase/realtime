@@ -1,4 +1,5 @@
 defmodule RealtimeWeb.RealtimeChannelTest do
+  # async: false due to usage of mocks
   use ExUnit.Case, async: false
   use RealtimeWeb.ChannelCase
 
@@ -189,6 +190,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
 
     test "unsuccessful connection halts join" do
+      port = Enum.random(5500..9000)
+
       extensions = [
         %{
           "type" => "postgres_cdc_rls",
@@ -197,7 +200,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
             "db_name" => "false",
             "db_user" => "false",
             "db_password" => "false",
-            "db_port" => "5433",
+            "db_port" => "#{port}",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
@@ -208,24 +211,24 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]
 
       tenant = tenant_fixture(%{extensions: extensions})
-
-      {:ok, %Socket{} = socket} =
-        connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant.external_id))
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant.external_id))
 
       assert {:error, %{reason: "Realtime was unable to connect to the project database"}} =
                subscribe_and_join(socket, "realtime:test", %{})
     end
 
     test "lack of connections halts join" do
+      port = Enum.random(5500..9000)
+
       extensions = [
         %{
           "type" => "postgres_cdc_rls",
           "settings" => %{
-            "db_host" => "localhost",
+            "db_host" => "127.0.0.1",
             "db_name" => "postgres",
             "db_user" => "supabase_admin",
             "db_password" => "postgres",
-            "db_port" => "5433",
+            "db_port" => "#{port}",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
@@ -239,6 +242,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       ]
 
       tenant = tenant_fixture(%{extensions: extensions})
+      tenant = Containers.initialize(tenant, true, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
 
       {:ok, %Socket{} = socket} =
         connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant.external_id))
