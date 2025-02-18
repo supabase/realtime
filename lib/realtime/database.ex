@@ -333,7 +333,7 @@ defmodule Realtime.Database do
   ]
   """
 
-  @spec opts(__MODULE__.t()) :: Postgrex.start_option()
+  @spec opts(__MODULE__.t()) :: keyword()
   def opts(%__MODULE__{} = settings) do
     settings
     |> Map.from_struct()
