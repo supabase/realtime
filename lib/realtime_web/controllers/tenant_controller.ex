@@ -1,6 +1,7 @@
 defmodule RealtimeWeb.TenantController do
   use RealtimeWeb, :controller
   use OpenApiSpex.ControllerSpecs
+
   require Logger
   import Realtime.Logs
 
@@ -10,21 +11,15 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
-  alias Realtime.Tenants.Connect
-
-  alias RealtimeWeb.Endpoint
+  alias RealtimeWeb.OpenApiSchemas.EmptyResponse
+  alias RealtimeWeb.OpenApiSchemas.ErrorResponse
+  alias RealtimeWeb.OpenApiSchemas.NotFoundResponse
+  alias RealtimeWeb.OpenApiSchemas.TenantHealthResponse
+  alias RealtimeWeb.OpenApiSchemas.TenantParams
+  alias RealtimeWeb.OpenApiSchemas.TenantResponse
+  alias RealtimeWeb.OpenApiSchemas.TenantResponseList
+  alias RealtimeWeb.OpenApiSchemas.UnauthorizedResponse
   alias RealtimeWeb.UserSocket
-
-  alias RealtimeWeb.OpenApiSchemas.{
-    EmptyResponse,
-    ErrorResponse,
-    NotFoundResponse,
-    TenantHealthResponse,
-    TenantParams,
-    TenantResponse,
-    TenantResponseList,
-    UnauthorizedResponse
-  }
 
   @stop_timeout 10_000
 
@@ -188,15 +183,12 @@ defmodule RealtimeWeb.TenantController do
 
     stop_all_timeout = Enum.count(PostgresCdc.available_drivers()) * 1_000
 
-    subs_id = UserSocket.subscribers_id(tenant_id)
-
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id, :primary),
-         _ <- Connect.shutdown(tenant_id),
-         true <- Api.delete_tenant_by_external_id(tenant_id),
+         _ <- Tenants.suspend_tenant_by_external_id(tenant_id),
          :ok <- Cache.distributed_invalidate_tenant_cache(tenant_id),
          :ok <- PostgresCdc.stop_all(tenant, stop_all_timeout),
-         :ok <- Endpoint.broadcast(subs_id, "disconnect", %{}),
-         :ok <- Database.replication_slot_teardown(tenant) do
+         :ok <- Database.replication_slot_teardown(tenant),
+         true <- Api.delete_tenant_by_external_id(tenant_id) do
       send_resp(conn, 204, "")
     else
       nil ->
