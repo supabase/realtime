@@ -1,6 +1,6 @@
 endpoint_port: 4000
 db_repo:
-  - hostname: "localhost"
+  - hostname: "127.0.0.1"
     username: "postgres"
     password: "postgres"
     database: "postgres"

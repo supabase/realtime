@@ -25,12 +25,6 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
-  @pipes [
-    GetTenant,
-    CheckConnection,
-    StartCounters,
-    RegisterProcess
-  ]
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default 50_000
   @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
@@ -48,7 +42,7 @@ defmodule Realtime.Tenants.Connect do
   """
   @spec lookup_or_start_connection(binary(), keyword()) ::
           {:ok, pid()} | {:error, term()}
-  def lookup_or_start_connection(tenant_id, opts \\ []) do
+  def lookup_or_start_connection(tenant_id, opts \\ []) when is_binary(tenant_id) do
     case get_status(tenant_id) do
       {:ok, conn} ->
         {:ok, conn}
@@ -171,7 +165,14 @@ defmodule Realtime.Tenants.Connect do
   def init(%{tenant_id: tenant_id} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    case Piper.run(@pipes, state) do
+    pipes = [
+      GetTenant,
+      CheckConnection,
+      StartCounters,
+      RegisterProcess
+    ]
+
+    case Piper.run(pipes, state) do
       {:ok, acc} ->
         {:ok, acc, {:continue, :run_migrations}}
 

@@ -45,7 +45,7 @@ defmodule Realtime.Cluster.Strategy.PostgresTest do
 
   defp opts do
     [
-      hostname: "localhost",
+      hostname: "127.0.0.1",
       username: "postgres",
       password: "postgres",
       database: "realtime_test",

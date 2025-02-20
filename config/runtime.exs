@@ -4,7 +4,7 @@ config :logflare_logger_backend,
   url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 
 app_name = System.get_env("APP_NAME", "")
-default_db_host = System.get_env("DB_HOST", "localhost")
+default_db_host = System.get_env("DB_HOST", "127.0.0.1")
 username = System.get_env("DB_USER", "postgres")
 password = System.get_env("DB_PASSWORD", "postgres")
 database = System.get_env("DB_NAME", "postgres")

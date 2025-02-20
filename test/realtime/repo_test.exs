@@ -1,133 +1,17 @@
 defmodule Realtime.RepoTest do
-  # async: false due to the fact that multiple operations against the database will use the same connection
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
 
   import Ecto.Query
 
   alias Realtime.Api.Message
   alias Realtime.Repo
   alias Realtime.Database
-  alias Realtime.Tenants.Migrations
 
   setup do
-    tenant = tenant_fixture()
+    tenant = Containers.checkout_tenant(true)
+    on_exit(fn -> Containers.checkin_tenant(tenant) end)
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-
-    Migrations.run_migrations(tenant)
-
-    clean_table(db_conn, "realtime", "messages")
-    %{db_conn: db_conn, tenant: tenant}
-  end
-
-  describe "with_dynamic_repo/2" do
-    test "starts a repo with the given config and kills it in the end of the command" do
-      test_pid = self()
-
-      Repo.with_dynamic_repo(db_config(), fn repo ->
-        Ecto.Adapters.SQL.query(repo, "SELECT 1", [])
-        send(test_pid, repo)
-        send(test_pid, :query_success)
-      end)
-
-      repo_pid =
-        receive do
-          repo_pid -> repo_pid
-        end
-
-      assert_receive :query_success
-      assert Process.alive?(repo_pid) == false
-    end
-
-    test "kills repo pid when we kill parent pid" do
-      test_pid = self()
-
-      parent_pid =
-        spawn(fn ->
-          Repo.with_dynamic_repo(db_config(), fn repo ->
-            send(test_pid, repo)
-            Ecto.Adapters.SQL.query(repo, "SELECT pg_sleep(1)", [])
-            raise("Should not run query")
-          end)
-        end)
-
-      repo_pid =
-        receive do
-          repo_pid -> repo_pid
-        end
-
-      true = Process.exit(parent_pid, :kill)
-      Process.sleep(1500)
-      assert Process.alive?(repo_pid) == false
-    end
-
-    test "concurrent repos can coexist" do
-      test_pid = self()
-
-      pid_1 =
-        spawn(fn ->
-          Repo.with_dynamic_repo(db_config(), fn repo ->
-            send(test_pid, repo)
-            Ecto.Adapters.SQL.query(repo, "SELECT pg_sleep(1)", [])
-            send(test_pid, :query_success)
-          end)
-        end)
-
-      pid_2 =
-        spawn(fn ->
-          Repo.with_dynamic_repo(db_config(), fn repo ->
-            send(test_pid, repo)
-            Ecto.Adapters.SQL.query(repo, "SELECT pg_sleep(1)", [])
-            send(test_pid, :query_success)
-          end)
-        end)
-
-      repo_pid_1 =
-        receive do
-          repo_pid -> repo_pid
-        end
-
-      repo_pid_2 =
-        receive do
-          repo_pid -> repo_pid
-        end
-
-      assert Process.alive?(repo_pid_1) == true
-      assert Process.alive?(repo_pid_2) == true
-
-      assert_receive :query_success, 2000
-      assert_receive :query_success, 2000
-
-      Process.sleep(100)
-      assert Process.alive?(repo_pid_1) == false
-      assert Process.alive?(repo_pid_2) == false
-      assert Process.alive?(pid_1) == false
-      assert Process.alive?(pid_2) == false
-    end
-
-    test "on exception from query" do
-      test_pid = self()
-
-      try do
-        spawn(fn ->
-          Repo.with_dynamic_repo(db_config(), fn repo ->
-            send(test_pid, repo)
-            Process.sleep(100)
-            raise "💣"
-          end)
-        end)
-      catch
-        _ -> :ok
-      end
-
-      repo_pid =
-        receive do
-          repo_pid -> repo_pid
-        end
-
-      assert Process.alive?(repo_pid) == true
-      Process.sleep(300)
-      assert Process.alive?(repo_pid) == false
-    end
+    %{tenant: tenant, db_conn: db_conn}
   end
 
   describe "all/3" do
@@ -179,10 +63,6 @@ defmodule Realtime.RepoTest do
   end
 
   describe "insert/3" do
-    setup %{db_conn: db_conn} do
-      Realtime.Tenants.Migrations.create_partitions(db_conn)
-    end
-
     test "inserts a new entry with a given changeset and returns struct", %{db_conn: db_conn} do
       changeset = Message.changeset(%Message{}, %{topic: "foo", extension: :presence})
 
@@ -324,12 +204,5 @@ defmodule Realtime.RepoTest do
 
       assert {:error, :postgrex_exception} = Repo.update(db_conn, changeset, Message)
     end
-  end
-
-  defp db_config do
-    tenant_fixture()
-    |> Realtime.Database.from_tenant("realtime_test")
-    |> Map.to_list()
-    |> Keyword.new()
   end
 end

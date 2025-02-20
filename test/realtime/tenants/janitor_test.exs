@@ -1,12 +1,11 @@
 defmodule Realtime.Tenants.JanitorTest do
-  # async: false due to using database process
+  # async: false due to the fact that we're checking ets tables that can be modified by other tests and we are using mocks
   use Realtime.DataCase, async: false
 
   import Mock
   import ExUnit.CaptureLog
 
   alias Realtime.Api.Message
-  alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Repo
   alias Realtime.Tenants.Janitor
@@ -15,7 +14,6 @@ defmodule Realtime.Tenants.JanitorTest do
 
   setup do
     :ets.delete_all_objects(Connect)
-    dev_tenant = Tenant |> Repo.all() |> hd()
     timer = Application.get_env(:realtime, :janitor_schedule_timer)
 
     Application.put_env(:realtime, :janitor_schedule_timer, 200)
@@ -24,16 +22,14 @@ defmodule Realtime.Tenants.JanitorTest do
 
     tenants =
       Enum.map(
-        [
-          tenant_fixture(),
-          dev_tenant
-        ],
+        [tenant_fixture(), tenant_fixture()],
         fn tenant ->
+          Containers.initialize(tenant, true, true)
+          on_exit(fn -> Containers.stop_container(tenant) end)
+
           tenant = Repo.preload(tenant, :extensions)
           Connect.lookup_or_start_connection(tenant.external_id)
-          Process.sleep(250)
-          {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-          clean_table(conn, "realtime", "messages")
+          Process.sleep(500)
           tenant
         end
       )
@@ -134,15 +130,17 @@ defmodule Realtime.Tenants.JanitorTest do
   end
 
   test "logs error if fails to connect to tenant" do
+    port = Enum.random(5500..8000)
+
     extensions = [
       %{
         "type" => "postgres_cdc_rls",
         "settings" => %{
-          "db_host" => "localhost",
+          "db_host" => "127.0.0.1",
           "db_name" => "postgres",
           "db_user" => "supabase_admin",
-          "db_password" => "bad",
-          "db_port" => "5433",
+          "db_password" => "postgres",
+          "db_port" => "#{port}",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
           "poll_max_record_bytes" => 1_048_576,
