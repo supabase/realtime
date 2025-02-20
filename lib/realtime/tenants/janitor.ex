@@ -65,7 +65,9 @@ defmodule Realtime.Tenants.Janitor do
     Logger.info("Janitor started")
     %{chunks: chunks, tasks: tasks} = state
     all_tenants = :ets.select(@table_name, [{{:"$1"}, [], [:"$1"]}])
-    connected_tenants = :ets.select(@syn_table, [{{:"$1", :_, :_, :_, :_, :_}, [], [:"$1"]}])
+
+    connected_tenants =
+      :ets.select(@syn_table, [{{:"$1", :_, :_, :_, :_, :"$2"}, [{:==, :"$2", {:const, Node.self()}}], [:"$1"]}])
 
     new_tasks =
       MapSet.new(all_tenants ++ connected_tenants)
