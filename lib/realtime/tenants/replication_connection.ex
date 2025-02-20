@@ -85,7 +85,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
       {:error, {:bad_return_from_init, {:stop, error, _}}} -> {:error, error}
-      {:error, %Postgrex.Error{postgres: %{pg_code: "53300"}}} -> {:error, :max_wal_senders_reached}
       error -> error
     end
   end
