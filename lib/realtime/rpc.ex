@@ -12,18 +12,11 @@ defmodule Realtime.Rpc do
   def call(node, mod, func, args, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, Application.get_env(:realtime, :rpc_timeout))
     {latency, response} = :timer.tc(fn -> :rpc.call(node, mod, func, args, timeout) end)
-    tenant = Keyword.get(opts, :tenant, nil)
 
     Telemetry.execute(
-      [:realtime, :tenants, :rpc],
+      [:realtime, :rpc],
       %{latency: latency},
-      %{
-        tenant: tenant,
-        mod: mod,
-        func: func,
-        target_node: node,
-        origin_node: node()
-      }
+      %{mod: mod, func: func, target_node: node, origin_node: node()}
     )
 
     response
@@ -36,21 +29,36 @@ defmodule Realtime.Rpc do
   def enhanced_call(node, mod, func, args \\ [], opts \\ []) do
     timeout = Keyword.get(opts, :timeout, Application.get_env(:realtime, :rpc_timeout))
 
-    with {latency, {status, _} = response} <-
+    with {latency, response} <-
            :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end) do
-      Telemetry.execute(
-        [:realtime, :rpc],
-        %{latency: latency, success?: status == :ok},
-        %{mod: mod, func: func, target_node: node, origin_node: node()}
-      )
-
       case response do
-        {status, _} when status in [:ok, :error] -> response
-        _ -> {:error, response}
+        {:ok, _} ->
+          Telemetry.execute(
+            [:realtime, :rpc],
+            %{latency: latency, success?: true},
+            %{mod: mod, func: func, target_node: node, origin_node: node()}
+          )
+
+          response
+
+        {:error, response} ->
+          Telemetry.execute(
+            [:realtime, :rpc],
+            %{latency: latency, success?: false},
+            %{mod: mod, func: func, target_node: node, origin_node: node()}
+          )
+
+          {:error, response}
       end
     end
   catch
     kind, reason ->
+      Telemetry.execute(
+        [:realtime, :rpc],
+        %{latency: 0, success?: false},
+        %{mod: mod, func: func, target_node: node, origin_node: node()}
+      )
+
       log_error(
         "ErrorOnRpcCall",
         %{target: node, mod: mod, func: func, error: {kind, reason}},
@@ -59,6 +67,10 @@ defmodule Realtime.Rpc do
         target: node
       )
 
-      {:error, "RPC call error"}
+      case reason do
+        {:erpc, :timeout} -> {:error, :rpc_error, :timeout}
+        {:exception, error, _} -> {:error, :rpc_error, error}
+        _ -> {:error, reason}
+      end
   end
 end
