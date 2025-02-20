@@ -59,17 +59,13 @@ defmodule Realtime.Tenants.Janitor do
 
   @table_name Realtime.Tenants.Connect
   @syn_table :"syn_registry_by_name_Elixir.Realtime.Tenants.Connect"
-  @matchspec [{{:"$1"}, [], [:"$1"]}]
-  @syn_matchspec [
-    {{:"$1", :"$2", :"$3", :"$4", :"$5", Node.self()}, [], [:"$1"]}
-  ]
 
   @impl true
   def handle_info(:delete_old_messages, state) do
     Logger.info("Janitor started")
     %{chunks: chunks, tasks: tasks} = state
-    all_tenants = :ets.select(@table_name, @matchspec)
-    connected_tenants = :ets.select(@syn_table, @syn_matchspec)
+    all_tenants = :ets.select(@table_name, [{{:"$1"}, [], [:"$1"]}])
+    connected_tenants = :ets.select(@syn_table, [{{:"$1", :_, :_, :_, :_, :_}, [], [:"$1"]}])
 
     new_tasks =
       MapSet.new(all_tenants ++ connected_tenants)
