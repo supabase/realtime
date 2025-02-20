@@ -191,7 +191,6 @@ defmodule RealtimeWeb.TenantControllerTest do
         conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
         assert response(conn, 204)
 
-        Process.sleep(5000)
         refute Cache.get_tenant_by_external_id(tenant.external_id)
         refute Tenants.get_tenant_by_external_id(tenant.external_id)
 
