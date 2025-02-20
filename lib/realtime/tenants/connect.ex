@@ -212,10 +212,6 @@ defmodule Realtime.Tenants.Connect do
       {:noreply, %{state | broadcast_changes_pid: broadcast_changes_pid, listen_pid: listen_pid},
        {:continue, :setup_connected_user_events}}
     else
-      {:error, :max_wal_senders_reached} ->
-        log_error("ReplicationMaxWalSendersReached", "Tenant database has reached the maximum number of WAL senders")
-        {:stop, :shutdown, state}
-
       {:error, error} ->
         log_error("StartListenAndReplicationFailed", error)
         {:stop, :shutdown, state}

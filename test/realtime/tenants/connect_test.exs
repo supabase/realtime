@@ -1,10 +1,9 @@
 defmodule Realtime.Tenants.ConnectTest do
   # async: false due to the fact that multiple operations against the database will use the same connection
   use Realtime.DataCase, async: false
-  import ExUnit.CaptureLog
+
   import Mock
 
-  alias Realtime.Database
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Listen
   alias Realtime.Tenants.ReplicationConnection
@@ -270,41 +269,6 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert ReplicationConnection.whereis(tenant.external_id) == nil
       assert Listen.whereis(tenant.external_id) == nil
-    end
-
-    test "handles max_wal_senders by logging the correct operational code", %{tenant: tenant} do
-      opts = Database.from_tenant(tenant, "realtime_test", :stop) |> Database.opts()
-
-      # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
-      pids =
-        for i <- 0..4 do
-          replication_slot_opts =
-            %PostgresReplication{
-              connection_opts: opts,
-              table: :all,
-              output_plugin: "pgoutput",
-              output_plugin_options: [],
-              handler_module: TestHandler,
-              publication_name: "test_#{i}_publication",
-              replication_slot_name: "test_#{i}_slot"
-            }
-
-          {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
-          pid
-        end
-
-      on_exit(fn ->
-        Enum.each(pids, &Process.exit(&1, :kill))
-        Process.sleep(2000)
-      end)
-
-      log =
-        capture_log(fn ->
-          assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-          Process.sleep(3000)
-        end)
-
-      assert log =~ "ReplicationMaxWalSendersReached"
     end
 
     test "syn with no connection", %{tenant: tenant} do

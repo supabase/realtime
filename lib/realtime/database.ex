@@ -312,35 +312,6 @@ defmodule Realtime.Database do
     :ok
   end
 
-  @doc """
-  Transforms database settings into keyword list to be used by Postgrex.
-  ## Examples
-
-  iex> Database.opts(%Database{hostname: "localhost", port: 5432, database: "realtime", username: "postgres", password: "postgres", application_name: "test", backoff_type: :stop, pool_size: 10, queue_target: 10_000, socket_options: [:inet], ssl: true}) |> Enum.sort()
-  [
-    application_name: "test",
-    backoff_type: :stop,
-    database: "realtime",
-    hostname: "localhost",
-    max_restarts: nil,
-    password: "postgres",
-    pool_size: 10,
-    port: 5432,
-    queue_target: 10000,
-    socket_options: [:inet],
-    ssl: true,
-    username: "postgres"
-  ]
-  """
-
-  @spec opts(__MODULE__.t()) :: keyword()
-  def opts(%__MODULE__{} = settings) do
-    settings
-    |> Map.from_struct()
-    |> Map.to_list()
-    |> Keyword.new()
-  end
-
   defp tenant_pool_requirements(settings) do
     application_names = [
       "realtime_subscription_manager",
