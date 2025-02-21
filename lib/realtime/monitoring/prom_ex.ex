@@ -73,8 +73,7 @@ defmodule Realtime.PromEx do
       {OsMon, poll_rate: poll_rate},
       {Tenants, poll_rate: poll_rate},
       {Tenant, poll_rate: poll_rate},
-      {Channels, poll_rate: poll_rate},
-      {PromEx.Plugins.Ecto, otp_app: :realtime, poll_rate: poll_rate, metric_prefix: [:ecto]}
+      {Channels, poll_rate: poll_rate}
     ]
   end
 

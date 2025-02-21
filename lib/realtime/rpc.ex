@@ -35,8 +35,8 @@ defmodule Realtime.Rpc do
         {:ok, _} ->
           Telemetry.execute(
             [:realtime, :rpc],
-            %{latency: latency, success?: true},
-            %{mod: mod, func: func, target_node: node, origin_node: node()}
+            %{latency: latency},
+            %{mod: mod, func: func, target_node: node, origin_node: node(), success: true}
           )
 
           response
@@ -44,8 +44,8 @@ defmodule Realtime.Rpc do
         {:error, response} ->
           Telemetry.execute(
             [:realtime, :rpc],
-            %{latency: latency, success?: false},
-            %{mod: mod, func: func, target_node: node, origin_node: node()}
+            %{latency: latency},
+            %{mod: mod, func: func, target_node: node, origin_node: node(), success: false}
           )
 
           {:error, response}
@@ -55,8 +55,8 @@ defmodule Realtime.Rpc do
     kind, reason ->
       Telemetry.execute(
         [:realtime, :rpc],
-        %{latency: 0, success?: false},
-        %{mod: mod, func: func, target_node: node, origin_node: node()}
+        %{latency: 0},
+        %{mod: mod, func: func, target_node: node, origin_node: node(), success: false}
       )
 
       log_error(
