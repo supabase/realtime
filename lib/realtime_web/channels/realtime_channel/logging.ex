@@ -4,6 +4,7 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   """
   require Logger
   import Realtime.Logs
+  alias Realtime.Telemetry
 
   @doc """
   Logs messages according to user options given on config
@@ -21,6 +22,17 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   end
 
   @doc """
+  List of errors that are system triggered and not user driven
+  """
+  def system_errors,
+    do: [
+      "UnableToSetPolicies",
+      "InitializingProjectConnection",
+      "DatabaseConnectionIssue",
+      "UnknownErrorOnChannel"
+    ]
+
+  @doc """
   Logs errors in an expected format
   """
   @spec log_error_message(
@@ -32,6 +44,8 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   def log_error_message(level, code, error, metadata \\ [])
 
   def log_error_message(:error, code, error, metadata) do
+    if code in system_errors(), do: Telemetry.execute([:realtime, :channel, :error], %{code: code}, %{code: code})
+
     log_error(code, error, metadata)
     {:error, %{reason: error}}
   end

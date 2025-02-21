@@ -4,7 +4,12 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
   import ExUnit.CaptureLog
   alias RealtimeWeb.RealtimeChannel.Logging
 
+  def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {event, measures, metadata})
+
   setup do
+    :telemetry.attach(__MODULE__, [:realtime, :channel, :error], &__MODULE__.handle_telemetry/4, pid: self())
+    on_exit(fn -> :telemetry.detach(__MODULE__) end)
+
     level = Logger.level()
     Logger.configure(level: :debug)
     on_exit(fn -> Logger.configure(level: level) end)
@@ -38,9 +43,21 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
     test "handles error level errors" do
       assert capture_log(fn ->
-               result = Logging.log_error_message(:error, :test_code, "test error")
+               result = Logging.log_error_message(:error, "TestCodeError", "test error")
                assert {:error, %{reason: "test error"}} = result
              end) =~ "test error"
+    end
+
+    test "only emits telemetry for system errors" do
+      errors = Logging.system_errors()
+
+      for error <- errors do
+        Logging.log_error_message(:error, error, "test error")
+        assert_receive {[:realtime, :channel, :error], %{code: ^error}, %{code: ^error}}
+      end
+
+      Logging.log_error_message(:error, "DatabaseConnectionIssue", "test error")
+      refute_receive {[:realtime, :channel, :error], %{code: "DatabaseConnectionIssue"}, %{code: "UnableToSetPolicies"}}
     end
   end
 end

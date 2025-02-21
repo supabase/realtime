@@ -3,14 +3,15 @@ defmodule Realtime.DatabaseTest do
   use Realtime.DataCase, async: false
 
   import ExUnit.CaptureLog
-  import Mock
 
   alias Realtime.Database
   doctest Realtime.Database
+  def handle_telemetry(event, metadata, _, pid: pid), do: send(pid, {event, metadata})
 
   setup do
     tenant = tenant_fixture()
-
+    :telemetry.attach(__MODULE__, [:realtime, :database, :transaction], &__MODULE__.handle_telemetry/4, pid: self())
+    on_exit(fn -> :telemetry.detach(__MODULE__) end)
     # Ensure no replication slot is present before the test
     Cleanup.ensure_no_replication_slot()
 
@@ -163,15 +164,13 @@ defmodule Realtime.DatabaseTest do
     test "with telemetry event defined, emits telemetry event", %{db_conn: db_conn} do
       event = [:realtime, :database, :transaction]
 
-      with_mock Realtime.Telemetry, execute: fn _, _, _ -> :ok end do
-        Database.transaction(
-          db_conn,
-          fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(6)", []) end,
-          telemetry: event
-        )
+      Database.transaction(
+        db_conn,
+        fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(6)", []) end,
+        telemetry: event
+      )
 
-        assert_called(Realtime.Telemetry.execute(event, %{latency: :_}, %{}))
-      end
+      assert_receive {^event, %{latency: _}}
     end
   end
 

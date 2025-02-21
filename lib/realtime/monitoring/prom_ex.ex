@@ -1,7 +1,10 @@
 defmodule Realtime.PromEx do
-  alias Realtime.PromEx.Plugins.{OsMon, Phoenix, Tenants, Tenant}
-
   alias Realtime.Nodes
+  alias Realtime.PromEx.Plugins.Channels
+  alias Realtime.PromEx.Plugins.OsMon
+  alias Realtime.PromEx.Plugins.Phoenix
+  alias Realtime.PromEx.Plugins.Tenant
+  alias Realtime.PromEx.Plugins.Tenants
 
   @moduledoc """
   Be sure to add the following to finish setting up PromEx:
@@ -70,6 +73,7 @@ defmodule Realtime.PromEx do
       {OsMon, poll_rate: poll_rate},
       {Tenants, poll_rate: poll_rate},
       {Tenant, poll_rate: poll_rate},
+      {Channels, poll_rate: poll_rate},
       {PromEx.Plugins.Ecto, otp_app: :realtime, poll_rate: poll_rate, metric_prefix: [:ecto]}
     ]
   end
