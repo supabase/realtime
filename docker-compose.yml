@@ -26,6 +26,8 @@ services:
     container_name: realtime-server
     ports:
       - "4000:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       PORT: 4000
       DB_HOST: host.docker.internal
