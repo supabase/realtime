@@ -233,7 +233,7 @@ defmodule Realtime.Tenants.Connect do
       tenant_id: tenant_id
     } = state
 
-    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:invalidate_cache")
+    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
     :ets.insert(__MODULE__, {tenant_id})
     {:noreply, state}
@@ -275,7 +275,7 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :normal, state}
   end
 
-  def handle_info({:suspend_tenant, tenant_id}, %{tenant_id: tenant_id} = state) do
+  def handle_info(:suspend_tenant, state) do
     %{
       db_conn_pid: db_conn_pid,
       broadcast_changes_pid: broadcast_changes_pid,
@@ -294,18 +294,8 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :normal, state}
   end
 
-  # Ignore suspend messages to avoid handle_info unmatched functions
-  def handle_info({:suspend_tenant, _}, state) do
-    {:noreply, state}
-  end
-
   # Ignore unsuspend messages to avoid handle_info unmatched functions
-  def handle_info({:unsuspend_tenant, _}, state) do
-    {:noreply, state}
-  end
-
-  # Ignore invalidate_cache messages to avoid handle_info unmatched functions
-  def handle_info({:invalidate_cache, _}, state) do
+  def handle_info(:unsuspend_tenant, state) do
     {:noreply, state}
   end
 

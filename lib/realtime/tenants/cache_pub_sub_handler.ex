@@ -13,14 +13,13 @@ defmodule Realtime.Tenants.CachePubSubHandler do
   end
 
   @impl true
-  def init(topics: topics) do
-    Enum.each(topics, fn topic -> Phoenix.PubSub.subscribe(Realtime.PubSub, topic) end)
+  def init(_) do
+    Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:invalidate_cache")
     {:ok, []}
   end
 
   @impl true
-  def handle_info({action, tenant_id}, state)
-      when action in [:suspend_tenant, :unsuspend_tenant, :invalidate_cache] do
+  def handle_info(tenant_id, state) do
     Logger.warning("Triggering cache invalidation", external_id: tenant_id)
     Cache.invalidate_tenant_cache(tenant_id)
     {:noreply, state}

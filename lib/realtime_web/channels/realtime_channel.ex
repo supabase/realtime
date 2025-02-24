@@ -149,6 +149,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :rpc_error, :timeout} ->
         Logging.log_error_message(:error, "TimeoutOnRpcCall", "Node request timeout")
 
+      {:error, :rpc_error, reason} ->
+        Logging.log_error_message(:error, "ErrorOnRpcCall", "RPC call error: " <> inspect(reason))
+
       {:error, :initializing} ->
         Logging.log_error_message(
           :error,
