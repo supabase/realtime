@@ -25,7 +25,8 @@ defmodule Realtime.Rpc do
   @doc """
   Calls external node using :erpc.call/5 and collects telemetry
   """
-  @spec enhanced_call(atom(), atom(), atom(), any(), keyword()) :: {:ok, any()} | {:error, any()}
+  @spec enhanced_call(atom(), atom(), atom(), any(), keyword()) ::
+          {:ok, any()} | {:error, :rpc_error, term()}
   def enhanced_call(node, mod, func, args \\ [], opts \\ []) do
     timeout = Keyword.get(opts, :timeout, Application.get_env(:realtime, :rpc_timeout))
 
@@ -41,18 +42,24 @@ defmodule Realtime.Rpc do
 
           response
 
-        {:error, response} ->
+        {:error, error} ->
           Telemetry.execute(
             [:realtime, :rpc],
             %{latency: latency},
             %{mod: mod, func: func, target_node: node, origin_node: node(), success: false}
           )
 
-          {:error, response}
+          {:error, error}
       end
     end
   catch
-    kind, reason ->
+    _, reason ->
+      reason =
+        case reason do
+          {_, reason} -> reason
+          {_, reason, _} -> reason
+        end
+
       Telemetry.execute(
         [:realtime, :rpc],
         %{latency: 0},
@@ -61,16 +68,12 @@ defmodule Realtime.Rpc do
 
       log_error(
         "ErrorOnRpcCall",
-        %{target: node, mod: mod, func: func, error: {kind, reason}},
+        %{target: node, mod: mod, func: func, error: reason},
         mod: mod,
         func: func,
         target: node
       )
 
-      case reason do
-        {:erpc, :timeout} -> {:error, :rpc_error, :timeout}
-        {:exception, error, _} -> {:error, :rpc_error, error}
-        _ -> {:error, reason}
-      end
+      {:error, :rpc_error, reason}
   end
 end

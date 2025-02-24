@@ -43,7 +43,7 @@ defmodule Realtime.TenantsTest do
   describe "suspend_tenant_by_external_id/1" do
     setup do
       tenant = tenant_fixture()
-      topic = "realtime:operations:invalidate_cache"
+      topic = "realtime:operations:" <> tenant.external_id
       Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
       %{topic: topic, tenant: tenant}
     end
@@ -51,23 +51,36 @@ defmodule Realtime.TenantsTest do
     test "sets suspend flag to true and publishes message", %{tenant: %{external_id: external_id}} do
       tenant = Tenants.suspend_tenant_by_external_id(external_id)
       assert tenant.suspend == true
-      assert_receive {:suspend_tenant, ^external_id}, 1000
+      assert_receive :suspend_tenant, 500
+    end
+
+    test "does not publish message if if not targetted tenant", %{tenant: tenant} do
+      Tenants.suspend_tenant_by_external_id(tenant_fixture().external_id)
+      tenant = Repo.reload!(tenant)
+      assert tenant.suspend == false
+      refute_receive :suspend_tenant, 500
     end
   end
 
   describe "unsuspend_tenant_by_external_id/1" do
     setup do
-      tenant = tenant_fixture()
-      topic = "realtime:operations:invalidate_cache"
+      tenant = tenant_fixture(%{suspend: true})
+      topic = "realtime:operations:" <> tenant.external_id
       Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
       %{topic: topic, tenant: tenant}
     end
 
-    test "sets suspend flag to false and publishes message" do
-      %{external_id: external_id} = tenant_fixture(suspend: true)
-      tenant = Tenants.unsuspend_tenant_by_external_id(external_id)
+    test "sets suspend flag to false and publishes message", %{tenant: tenant} do
+      tenant = Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
       assert tenant.suspend == false
-      assert_receive {:unsuspend_tenant, ^external_id}, 1000
+      assert_receive :unsuspend_tenant, 500
+    end
+
+    test "does not publish message if not targetted tenant", %{tenant: tenant} do
+      Tenants.unsuspend_tenant_by_external_id(tenant_fixture().external_id)
+      tenant = Repo.reload!(tenant)
+      assert tenant.suspend == true
+      refute_receive :unsuspend_tenant, 500
     end
   end
 end

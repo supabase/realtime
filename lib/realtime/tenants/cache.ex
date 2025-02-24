@@ -27,11 +27,7 @@ defmodule Realtime.Tenants.Cache do
   """
   @spec distributed_invalidate_tenant_cache(String.t()) :: :ok
   def distributed_invalidate_tenant_cache(tenant_id) when is_binary(tenant_id) do
-    Phoenix.PubSub.broadcast!(
-      Realtime.PubSub,
-      "realtime:operations:invalidate_cache",
-      {:invalidate_cache, tenant_id}
-    )
+    Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:invalidate_cache", tenant_id)
   end
 
   defp apply_repo_fun(arg1, arg2) do

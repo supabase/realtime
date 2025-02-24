@@ -258,6 +258,7 @@ defmodule Realtime.Tenants do
     |> Tenant.changeset(%{suspend: true})
     |> Repo.update!()
     |> tap(fn _ -> broadcast_operation_event(:suspend_tenant, external_id) end)
+    |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
   end
 
   @doc """
@@ -270,13 +271,9 @@ defmodule Realtime.Tenants do
     |> Tenant.changeset(%{suspend: false})
     |> Repo.update!()
     |> tap(fn _ -> broadcast_operation_event(:unsuspend_tenant, external_id) end)
+    |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
   end
 
-  defp broadcast_operation_event(action, external_id) do
-    Phoenix.PubSub.broadcast!(
-      Realtime.PubSub,
-      "realtime:operations:invalidate_cache",
-      {action, external_id}
-    )
-  end
+  defp broadcast_operation_event(action, external_id),
+    do: Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> external_id, action)
 end
