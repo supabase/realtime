@@ -299,17 +299,17 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :normal, state}
   end
 
-  # Ignore unsuspend messages to avoid handle_info unmatched functions
-  def handle_info(:unsuspend_tenant, state) do
-    {:noreply, state}
-  end
-
   def handle_info(
         {:DOWN, db_conn_reference, _, _, _},
         %{db_conn_reference: db_conn_reference} = state
       ) do
     Logger.info("Database connection has been terminated")
     {:stop, :normal, state}
+  end
+
+  # Ignore messages to avoid handle_info unmatched functions
+  def handle_info(_, state) do
+    {:noreply, state}
   end
 
   @impl true

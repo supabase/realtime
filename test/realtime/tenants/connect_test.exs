@@ -167,8 +167,14 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "handles tenant suspension only on targetted suspended user" do
-      tenant1 = tenant_fixture()
-      tenant2 = tenant_fixture()
+      tenant1 = Containers.checkout_tenant(true)
+      tenant2 = Containers.checkout_tenant(true)
+
+      on_exit(fn ->
+        Containers.checkin_tenant(tenant1)
+        Containers.checkin_tenant(tenant2)
+      end)
+
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant1.external_id)
       Process.sleep(1000)
 
@@ -206,7 +212,7 @@ defmodule Realtime.Tenants.ConnectTest do
           ]
         })
 
-      tenant = Containers.initialize(tenant)
+      tenant = Containers.initialize(tenant, true)
 
       Enum.each(1..10, fn _ ->
         Task.start(fn ->
@@ -397,7 +403,8 @@ defmodule Realtime.Tenants.ConnectTest do
       ]
 
       tenant = tenant_fixture(%{extensions: extensions})
-      tenant = Containers.initialize(tenant)
+      tenant = Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
 
       assert {:error, :tenant_db_too_many_connections} =
                Connect.lookup_or_start_connection(tenant.external_id)

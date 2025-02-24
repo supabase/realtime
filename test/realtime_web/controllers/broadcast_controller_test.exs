@@ -23,11 +23,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     tenant = Containers.checkout_tenant(true)
     on_exit(fn -> Containers.checkin_tenant(tenant) end)
 
-    conn =
-      conn
-      |> put_req_header("accept", "application/json")
-      |> put_req_header("authorization", "Bearer #{@token}")
-      |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+    conn = generate_conn(conn, tenant)
 
     {:ok, conn: conn, tenant: tenant}
   end
@@ -163,7 +159,11 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       end
     end
 
-    test "user has hit the rate limit", %{conn: conn, tenant: tenant} do
+    test "user has hit the rate limit", %{conn: conn} do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+
       requests_key = Tenants.requests_per_second_key(tenant)
       events_key = Tenants.events_per_second_key(tenant)
 
@@ -179,6 +179,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
           %{"topic" => Tenants.tenant_topic(tenant, "sub_topic"), "payload" => %{"data" => "data"}, "event" => "event"}
         ]
 
+        conn = generate_conn(conn, tenant)
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
         assert conn.status == 429
         assert conn.resp_body == Jason.encode!(%{message: "You have exceeded your rate limit"})
@@ -378,13 +379,16 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     @tag role: "anon"
     test "user without permission won't broadcast", %{
       conn: conn,
-      db_conn: db_conn,
-      tenant: tenant
+      db_conn: db_conn
     } do
       with_mocks [
         {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
         {GenCounter, [:passthrough], add: fn _ -> :ok end}
       ] do
+        tenant = tenant_fixture()
+        tenant = Containers.initialize(tenant, true, true)
+        on_exit(fn -> Containers.stop_container(tenant) end)
+
         messages =
           Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
           |> Enum.take(5)
@@ -420,5 +424,12 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     message = message_fixture(tenant)
     create_rls_policies(db_conn, [:authenticated_read_broadcast, :authenticated_write_broadcast], message)
     message
+  end
+
+  defp generate_conn(conn, tenant) do
+    conn
+    |> put_req_header("accept", "application/json")
+    |> put_req_header("authorization", "Bearer #{@token}")
+    |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
   end
 end

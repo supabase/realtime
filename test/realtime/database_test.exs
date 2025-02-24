@@ -10,6 +10,7 @@ defmodule Realtime.DatabaseTest do
 
   setup do
     tenant = Containers.checkout_tenant()
+    :telemetry.attach(__MODULE__, [:realtime, :database, :transaction], &__MODULE__.handle_telemetry/4, pid: self())
 
     on_exit(fn ->
       :telemetry.detach(__MODULE__)
@@ -62,7 +63,10 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "replication_slot_teardown/1" do
-    test "removes replication slots with the realtime prefix", %{tenant: tenant} do
+    test "removes replication slots with the realtime prefix" do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
       Postgrex.query!(
@@ -77,7 +81,11 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "replication_slot_teardown/2" do
-    test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
+    test "removes replication slots with a given name and existing connection" do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -92,7 +100,11 @@ defmodule Realtime.DatabaseTest do
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
 
-    test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
+    test "removes replication slots with a given name and a tenant" do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -243,7 +255,11 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "from_settings/3" do
-    test "returns struct with correct setup", %{tenant: tenant} do
+    test "returns struct with correct setup" do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+
       application_name = "realtime_connect"
       backoff = :stop
       {:ok, ip_version} = Database.detect_ip_version("127.0.0.1")
