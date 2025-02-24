@@ -34,7 +34,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
     on_exit(fn -> Application.put_env(:realtime, :slot_name_suffix, slot) end)
 
-    :ok
+    %{tenant: tenant}
   end
 
   test "fails if tenant connection is invalid" do
@@ -103,9 +103,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
   end
 
-  test "pid is associated to the same pid for a given tenant and guarantees uniqueness" do
-    tenant = tenant_fixture()
-
+  test "pid is associated to the same pid for a given tenant and guarantees uniqueness", %{tenant: tenant} do
     assert {:ok, pid} = ReplicationConnection.start(tenant, self())
     assert {:ok, ^pid} = ReplicationConnection.start(tenant, self())
   end
@@ -119,6 +117,62 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
     assert {:error, "Temporary Replication slot already exists and in use"} =
              ReplicationConnection.start(tenant2, self())
+  end
+
+  defmodule TestHandler do
+    @behaviour PostgresReplication.Handler
+    import PostgresReplication.Protocol
+    alias PostgresReplication.Protocol.KeepAlive
+
+    @impl true
+    def call(message, _metadata) when is_write(message) do
+      :noreply
+    end
+
+    def call(message, _metadata) when is_keep_alive(message) do
+      reply =
+        case parse(message) do
+          %KeepAlive{reply: :now, wal_end: wal_end} ->
+            wal_end = wal_end + 1
+            standby(wal_end, wal_end, wal_end, :now)
+
+          _ ->
+            hold()
+        end
+
+      {:reply, reply}
+    end
+
+    def call(_, _), do: :noreply
+  end
+
+  test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
+    opts = Database.from_tenant(tenant, "realtime_test", :stop) |> Database.opts()
+
+    # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
+    pids =
+      for i <- 0..4 do
+        replication_slot_opts =
+          %PostgresReplication{
+            connection_opts: opts,
+            table: :all,
+            output_plugin: "pgoutput",
+            output_plugin_options: [],
+            handler_module: TestHandler,
+            publication_name: "test_#{i}_publication",
+            replication_slot_name: "test_#{i}_slot"
+          }
+
+        {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
+        pid
+      end
+
+    on_exit(fn ->
+      Enum.each(pids, &Process.exit(&1, :kill))
+      Process.sleep(2000)
+    end)
+
+    assert {:error, :max_wal_senders_reached} = ReplicationConnection.start(tenant, self())
   end
 
   describe "whereis/1" do
