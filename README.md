@@ -241,6 +241,7 @@ This is the list of operational codes that can help you understand your deployme
 | UnableToListenToTenantDatabase     | Unable to LISTEN for notifications against the Tenant Database                                                                      |
 | UnprocessableEntity                | Received a HTTP request with a body that was not able to be processed by the endpoint                                               |
 | InitializingProjectConnection      | Connection against Tenant database is still starting                                                                                |
+| TimeoutOnRpcCall                   | RPC request within the Realtime server as timed out.                                                                                |
 | ErrorOnRpcCall                     | Error when calling another realtime node                                                                                            |
 | ErrorExecutingTransaction          | Error executing a database transaction in tenant database                                                                           |
 | SynInitializationError             | Our framework to syncronize processes has failed to properly startup a connection to the database                                   |

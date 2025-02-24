@@ -3,6 +3,7 @@ defmodule Realtime.Tenants.ConnectTest do
   use Realtime.DataCase, async: false
 
   import Mock
+  import ExUnit.CaptureLog
 
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Listen
@@ -161,6 +162,22 @@ defmodule Realtime.Tenants.ConnectTest do
       Connect.shutdown(tenant.external_id)
     end
 
+    test "handles tenant suspension only on targetted suspended user" do
+      tenant1 = tenant_fixture()
+      tenant2 = tenant_fixture()
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant1.external_id)
+      Process.sleep(1000)
+
+      log =
+        capture_log(fn ->
+          Realtime.Tenants.suspend_tenant_by_external_id(tenant2.external_id)
+          Process.sleep(100)
+        end)
+
+      refute log =~ "Tenant was suspended"
+      assert Process.alive?(db_conn)
+    end
+
     test "properly handles of failing calls by avoid creating too many connections" do
       tenant =
         tenant_fixture(%{
@@ -278,6 +295,12 @@ defmodule Realtime.Tenants.ConnectTest do
 
         assert {:error, :initializing} =
                  Connect.get_status(tenant.external_id)
+      end
+    end
+
+    test "handle rpc errors gracefully" do
+      with_mock Realtime.Nodes, get_node_for_tenant: fn _ -> {:ok, :potato@nohost} end do
+        assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant")
       end
     end
   end
