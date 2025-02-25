@@ -1,13 +1,14 @@
 defmodule Realtime.NodesTest do
-  use Realtime.DataCase
+  # async: false as we will be testing :syn logic which can be impacted by other tests and usage of mocks
+  use Realtime.DataCase, async: false
   alias Realtime.Nodes
   import Mock
 
   describe "get_node_for_tenant/1" do
     setup do
-      tenant = tenant_fixture()
+      tenant = Containers.checkout_tenant()
       region = tenant.extensions |> hd() |> Map.get(:settings) |> Map.get("region")
-
+      on_exit(fn -> Containers.checkin_tenant(tenant) end)
       %{tenant: tenant, region: region}
     end
 

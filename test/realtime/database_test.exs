@@ -1,5 +1,5 @@
 defmodule Realtime.DatabaseTest do
-  # async: false due to the deletion of the replication slot potentially affecting other tests
+  # async: false due to usage of mocks
   use Realtime.DataCase, async: false
 
   import ExUnit.CaptureLog
@@ -9,29 +9,30 @@ defmodule Realtime.DatabaseTest do
   def handle_telemetry(event, metadata, _, pid: pid), do: send(pid, {event, metadata})
 
   setup do
-    tenant = tenant_fixture()
+    tenant = Containers.checkout_tenant()
     :telemetry.attach(__MODULE__, [:realtime, :database, :transaction], &__MODULE__.handle_telemetry/4, pid: self())
-    on_exit(fn -> :telemetry.detach(__MODULE__) end)
-    # Ensure no replication slot is present before the test
-    Cleanup.ensure_no_replication_slot()
+
+    on_exit(fn ->
+      :telemetry.detach(__MODULE__)
+      Containers.checkin_tenant(tenant)
+    end)
 
     %{tenant: tenant}
   end
 
   describe "check_tenant_connection/1" do
     setup context do
+      port = Enum.random(5500..9000)
+
       extensions = [
         %{
           "type" => "postgres_cdc_rls",
           "settings" => %{
-            "db_host" => "localhost",
+            "db_host" => "127.0.0.1",
             "db_name" => "postgres",
             "db_user" => "supabase_admin",
             "db_password" => "postgres",
-            "db_port" => "5433",
-            "poll_interval" => 100,
-            "poll_max_changes" => 100,
-            "poll_max_record_bytes" => 1_048_576,
+            "db_port" => "#{port}",
             "region" => "us-east-1",
             "ssl_enforced" => false,
             "db_pool" => Map.get(context, :db_pool),
@@ -42,7 +43,8 @@ defmodule Realtime.DatabaseTest do
       ]
 
       tenant = tenant_fixture(%{extensions: extensions})
-
+      Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
       %{tenant: tenant}
     end
 
@@ -61,7 +63,10 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "replication_slot_teardown/1" do
-    test "removes replication slots with the realtime prefix", %{tenant: tenant} do
+    test "removes replication slots with the realtime prefix" do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
       Postgrex.query!(
@@ -76,7 +81,11 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "replication_slot_teardown/2" do
-    test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
+    test "removes replication slots with a given name and existing connection" do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -91,7 +100,11 @@ defmodule Realtime.DatabaseTest do
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
 
-    test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
+    test "removes replication slots with a given name and a tenant" do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -242,20 +255,25 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "from_settings/3" do
-    test "returns struct with correct setup", %{tenant: tenant} do
+    test "returns struct with correct setup" do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+
       application_name = "realtime_connect"
       backoff = :stop
-      {:ok, ip_version} = Database.detect_ip_version("localhost")
+      {:ok, ip_version} = Database.detect_ip_version("127.0.0.1")
       socket_options = [ip_version]
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
       settings = Database.from_settings(settings, application_name, backoff)
+      port = settings.port
 
       assert %Realtime.Database{
                socket_options: ^socket_options,
                application_name: ^application_name,
                backoff_type: ^backoff,
-               hostname: "localhost",
-               port: 5433,
+               hostname: "127.0.0.1",
+               port: ^port,
                database: "postgres",
                username: "supabase_admin",
                password: "postgres",

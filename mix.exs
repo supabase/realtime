@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.34.33",
+      version: "2.34.34",
       elixir: "~> 1.17.3",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -101,7 +101,6 @@ defmodule Realtime.MixProject do
         "ecto.create --quiet",
         "run priv/repo/seeds_before_migration.exs",
         "ecto.migrate --migrations-path=priv/repo/migrations",
-        "run priv/repo/seeds_after_migration.exs",
         "test"
       ],
       "assets.deploy": ["esbuild default --minify", "tailwind default --minify", "phx.digest"]

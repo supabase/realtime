@@ -29,9 +29,8 @@ defmodule Realtime.DataCase do
   end
 
   setup tags do
-    :ok = Sandbox.checkout(Realtime.Repo)
-
-    unless tags[:async] do
+    if !tags[:async] do
+      :ok = Sandbox.checkout(Realtime.Repo)
       Sandbox.mode(Realtime.Repo, {:shared, self()})
     end
 

@@ -1,14 +1,16 @@
 defmodule Realtime.MetricsCleanerTest do
+  # async: false due to potentially polluting metrics with other tenant metrics from other tests
   use Realtime.DataCase, async: false
   alias Realtime.MetricsCleaner
 
   setup do
     interval = Application.get_env(:realtime, :metrics_cleaner_schedule_timer_in_ms)
     Application.put_env(:realtime, :metrics_cleaner_schedule_timer_in_ms, 100)
-    tenant = tenant_fixture()
+    tenant = Containers.checkout_tenant(true)
 
     on_exit(fn ->
       Application.put_env(:realtime, :metrics_cleaner_schedule_timer_in_ms, interval)
+      Containers.checkin_tenant(tenant)
     end)
 
     %{tenant: tenant}

@@ -25,12 +25,6 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
-  @pipes [
-    GetTenant,
-    CheckConnection,
-    StartCounters,
-    RegisterProcess
-  ]
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default 50_000
   @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
@@ -52,7 +46,7 @@ defmodule Realtime.Tenants.Connect do
           | {:error, :initializing}
           | {:error, :tenant_database_connection_initializing}
           | {:error, :rpc_error, term()}
-  def lookup_or_start_connection(tenant_id, opts \\ []) do
+  def lookup_or_start_connection(tenant_id, opts \\ []) when is_binary(tenant_id) do
     case get_status(tenant_id) do
       {:ok, conn} ->
         {:ok, conn}
@@ -174,7 +168,14 @@ defmodule Realtime.Tenants.Connect do
   def init(%{tenant_id: tenant_id} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    case Piper.run(@pipes, state) do
+    pipes = [
+      GetTenant,
+      CheckConnection,
+      StartCounters,
+      RegisterProcess
+    ]
+
+    case Piper.run(pipes, state) do
       {:ok, acc} ->
         {:ok, acc, {:continue, :run_migrations}}
 
@@ -298,17 +299,17 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :normal, state}
   end
 
-  # Ignore unsuspend messages to avoid handle_info unmatched functions
-  def handle_info(:unsuspend_tenant, state) do
-    {:noreply, state}
-  end
-
   def handle_info(
         {:DOWN, db_conn_reference, _, _, _},
         %{db_conn_reference: db_conn_reference} = state
       ) do
     Logger.info("Database connection has been terminated")
     {:stop, :normal, state}
+  end
+
+  # Ignore messages to avoid handle_info unmatched functions
+  def handle_info(_, state) do
+    {:noreply, state}
   end
 
   @impl true

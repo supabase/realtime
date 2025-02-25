@@ -1,5 +1,6 @@
 defmodule RealtimeWeb.JwtVerificationTest do
-  use ExUnit.Case, async: false
+  # async: false due to mock usage
+  use Realtime.DataCase, async: false
 
   alias RealtimeWeb.JwtVerification
   alias RealtimeWeb.Joken.CurrentTime.Mock
@@ -13,7 +14,7 @@ defmodule RealtimeWeb.JwtVerificationTest do
   end
 
   setup do
-    {:ok, _pid} = start_supervised(Mock)
+    start_supervised(Mock)
     :ok
   end
 
