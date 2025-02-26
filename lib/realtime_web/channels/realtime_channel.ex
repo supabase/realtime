@@ -146,6 +146,12 @@ defmodule RealtimeWeb.RealtimeChannel do
           "Realtime was unable to connect to the project database"
         )
 
+      {:error, :rpc_error, :timeout} ->
+        Logging.log_error_message(:error, "TimeoutOnRpcCall", "Node request timeout")
+
+      {:error, :rpc_error, reason} ->
+        Logging.log_error_message(:error, "ErrorOnRpcCall", "RPC call error: " <> inspect(reason))
+
       {:error, :initializing} ->
         Logging.log_error_message(
           :error,
@@ -176,12 +182,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, :signature_error} ->
         Logging.log_error_message(:error, "JwtSignatureError", "Failed to validate JWT signature")
-
-      {:error, %Postgrex.Error{} = error} ->
-        Logging.log_error_message(:error, "DatabaseConnectionIssue", error)
-
-      {:error, %DBConnection.ConnectionError{} = error} ->
-        Logging.log_error_message(:error, "DatabaseConnectionIssue", error)
 
       {:error, :shutdown_in_progress} ->
         Logging.log_error_message(

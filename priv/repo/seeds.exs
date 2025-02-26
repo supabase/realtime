@@ -4,7 +4,7 @@ import Ecto.Adapters.SQL, only: [query: 3]
 
 tenant_name = System.get_env("SELF_HOST_TENANT_NAME", "realtime-dev")
 env = if :ets.whereis(Mix.State) != :undefined, do: Mix.env(), else: :prod
-default_db_host = if env in [:dev, :test], do: "localhost", else: "host.docker.internal"
+default_db_host = if env in [:dev, :test], do: "127.0.0.1", else: "host.docker.internal"
 
 Repo.transaction(fn ->
   case Repo.get_by(Tenant, external_id: tenant_name) do

@@ -1,5 +1,5 @@
 defmodule Realtime.Tenants.AuthorizationTest do
-  # Needs to be false due to some conflicts when fetching connection from the pool since this use Postgrex directly
+  # async: false due to usege of mocks
   use RealtimeWeb.ConnCase, async: false
 
   require Phoenix.ChannelTest
@@ -13,7 +13,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
-  alias Realtime.Tenants.Migrations
   alias RealtimeWeb.Joken.CurrentTime
 
   setup [:rls_context]
@@ -366,13 +365,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
   end
 
   def rls_context(context) do
-    start_supervised!(CurrentTime.Mock)
-    tenant = tenant_fixture()
-    :ok = Migrations.run_migrations(tenant)
-
+    start_supervised(CurrentTime.Mock)
+    tenant = Containers.checkout_tenant(true)
+    on_exit(fn -> Containers.checkin_tenant(tenant) end)
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-
-    clean_table(db_conn, "realtime", "messages")
     topic = random_string()
 
     create_rls_policies(db_conn, context.policies, %{topic: topic})

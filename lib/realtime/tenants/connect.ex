@@ -25,12 +25,6 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
 
-  @pipes [
-    GetTenant,
-    CheckConnection,
-    StartCounters,
-    RegisterProcess
-  ]
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default 50_000
   @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
@@ -47,8 +41,12 @@ defmodule Realtime.Tenants.Connect do
   Returns the database connection for a tenant. If the tenant is not connected, it will attempt to connect to the tenant's database.
   """
   @spec lookup_or_start_connection(binary(), keyword()) ::
-          {:ok, pid()} | {:error, term()}
-  def lookup_or_start_connection(tenant_id, opts \\ []) do
+          {:ok, pid()}
+          | {:error, :tenant_database_unavailable}
+          | {:error, :initializing}
+          | {:error, :tenant_database_connection_initializing}
+          | {:error, :rpc_error, term()}
+  def lookup_or_start_connection(tenant_id, opts \\ []) when is_binary(tenant_id) do
     case get_status(tenant_id) do
       {:ok, conn} ->
         {:ok, conn}
@@ -70,10 +68,9 @@ defmodule Realtime.Tenants.Connect do
   """
   @spec get_status(binary()) ::
           {:ok, pid()}
-          | {:error,
-             :tenant_database_unavailable
-             | :initializing
-             | :tenant_database_connection_initializing}
+          | {:error, :tenant_database_unavailable}
+          | {:error, :initializing}
+          | {:error, :tenant_database_connection_initializing}
   def get_status(tenant_id) do
     case :syn.lookup(__MODULE__, tenant_id) do
       {_, %{conn: nil}} ->
@@ -171,7 +168,14 @@ defmodule Realtime.Tenants.Connect do
   def init(%{tenant_id: tenant_id} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    case Piper.run(@pipes, state) do
+    pipes = [
+      GetTenant,
+      CheckConnection,
+      StartCounters,
+      RegisterProcess
+    ]
+
+    case Piper.run(pipes, state) do
       {:ok, acc} ->
         {:ok, acc, {:continue, :run_migrations}}
 
@@ -212,6 +216,10 @@ defmodule Realtime.Tenants.Connect do
       {:noreply, %{state | broadcast_changes_pid: broadcast_changes_pid, listen_pid: listen_pid},
        {:continue, :setup_connected_user_events}}
     else
+      {:error, :max_wal_senders_reached} ->
+        log_error("ReplicationMaxWalSendersReached", "Tenant database has reached the maximum number of WAL senders")
+        {:stop, :shutdown, state}
+
       {:error, error} ->
         log_error("StartListenAndReplicationFailed", error)
         {:stop, :shutdown, state}
@@ -230,7 +238,7 @@ defmodule Realtime.Tenants.Connect do
       tenant_id: tenant_id
     } = state
 
-    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:invalidate_cache")
+    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
     :ets.insert(__MODULE__, {tenant_id})
     {:noreply, state}
@@ -272,7 +280,7 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :normal, state}
   end
 
-  def handle_info({:suspend_tenant, _}, state) do
+  def handle_info(:suspend_tenant, state) do
     %{
       db_conn_pid: db_conn_pid,
       broadcast_changes_pid: broadcast_changes_pid,
@@ -291,22 +299,17 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :normal, state}
   end
 
-  # Ignore unsuspend messages to avoid handle_info unmatched functions
-  def handle_info({:unsuspend_tenant, _}, state) do
-    {:noreply, state}
-  end
-
-  # Ignore invalidate_cache messages to avoid handle_info unmatched functions
-  def handle_info({:invalidate_cache, _}, state) do
-    {:noreply, state}
-  end
-
   def handle_info(
         {:DOWN, db_conn_reference, _, _, _},
         %{db_conn_reference: db_conn_reference} = state
       ) do
     Logger.info("Database connection has been terminated")
     {:stop, :normal, state}
+  end
+
+  # Ignore messages to avoid handle_info unmatched functions
+  def handle_info(_, state) do
+    {:noreply, state}
   end
 
   @impl true
@@ -317,17 +320,13 @@ defmodule Realtime.Tenants.Connect do
   end
 
   ## Private functions
-
   defp call_external_node(tenant_id, opts) do
     rpc_timeout = Keyword.get(opts, :rpc_timeout, @rpc_timeout_default)
 
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
-      Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, opts],
-        timeout: rpc_timeout,
-        tenant: tenant_id
-      )
+      Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, opts], timeout: rpc_timeout, tenant: tenant_id)
     end
   end
 

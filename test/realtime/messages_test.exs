@@ -5,14 +5,12 @@ defmodule Realtime.MessagesTest do
   alias Realtime.Database
   alias Realtime.Messages
   alias Realtime.Repo
-  alias Realtime.Tenants.Migrations
 
   setup do
-    tenant = tenant_fixture()
-    Migrations.run_migrations(tenant)
-
+    tenant = Containers.checkout_tenant(true)
+    on_exit(fn -> Containers.checkin_tenant(tenant) end)
     {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-    clean_table(conn, "realtime", "messages")
+
     date_start = Date.utc_today() |> Date.add(-10)
     date_end = Date.utc_today()
     create_messages_partitions(conn, date_start, date_end)

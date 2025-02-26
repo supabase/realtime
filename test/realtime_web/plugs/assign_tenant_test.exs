@@ -4,8 +4,8 @@ defmodule RealtimeWeb.Plugs.AssignTenantTest do
   alias Realtime.Api
 
   @tenant %{
-    "external_id" => "localhost",
-    "name" => "localhost",
+    "external_id" => "external_id",
+    "name" => "external_id",
     "extensions" => [
       %{
         "type" => "postgres_cdc_rls",
@@ -56,6 +56,8 @@ defmodule RealtimeWeb.Plugs.AssignTenantTest do
   end
 
   test "assigns a tenant", %{conn: conn} do
+    tenant_fixture(%{external_id: "localhost"})
+
     conn =
       conn
       |> Map.put(:host, "localhost.localhost.com")
@@ -65,6 +67,8 @@ defmodule RealtimeWeb.Plugs.AssignTenantTest do
   end
 
   test "assigns a tenant even with lots of subdomains", %{conn: conn} do
+    tenant_fixture(%{external_id: "localhost"})
+
     conn =
       conn
       |> Map.put(:host, "localhost.realtime.localhost.com")

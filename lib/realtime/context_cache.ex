@@ -9,14 +9,9 @@ defmodule Realtime.ContextCache do
     cache = cache_name(context)
     cache_key = {{fun, arity}, args}
 
-    case Cachex.fetch(cache, cache_key, fn {{_fun, _arity}, args} ->
-           {:commit, {:cached, apply(context, fun, args)}}
-         end) do
-      {:commit, {:cached, value}} ->
-        value
-
-      {:ok, {:cached, value}} ->
-        value
+    case Cachex.fetch(cache, cache_key, fn {{_fun, _arity}, args} -> {:commit, {:cached, apply(context, fun, args)}} end) do
+      {:commit, {:cached, value}} -> value
+      {:ok, {:cached, value}} -> value
     end
   end
 

@@ -1,52 +1,58 @@
 defmodule Realtime.Tenants.ConnectTest do
-  # async: false due to the fact that multiple operations against the database will use the same connection
+  # async: false due to the fact that we are checking ets tables for user tracking and usage of mocks
   use Realtime.DataCase, async: false
-
+  import ExUnit.CaptureLog
   import Mock
+  import ExUnit.CaptureLog
 
+  alias Realtime.Database
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Listen
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
 
   setup do
+    tenant = Containers.checkout_tenant()
     :ets.delete_all_objects(Connect)
-    tenant = tenant_fixture()
-    Cleanup.ensure_no_replication_slot()
+    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+
     %{tenant: tenant}
   end
 
   describe "lookup_or_start_connection/1" do
-    test "if tenant exists and connected, returns the db connection and tracks it in ets", %{
-      tenant: tenant
-    } do
+    test "if tenant exists and connected, returns the db connection and tracks it in ets", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(100)
+      Process.sleep(500)
       assert is_pid(db_conn)
-      Connect.shutdown(tenant.external_id)
+      assert Connect.shutdown(tenant.external_id) == :ok
     end
 
     test "tracks multiple users that connect and disconnect" do
       expected =
-        for _ <- 1..10 do
+        for _ <- 1..2 do
           tenant = tenant_fixture()
+          tenant = Containers.initialize(tenant, true, true)
+          on_exit(fn -> Containers.stop_container(tenant) end)
+
           assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-          Process.sleep(100)
+          Process.sleep(500)
+
           assert is_pid(db_conn)
           Connect.shutdown(tenant.external_id)
-          {tenant.external_id}
+
+          tenant.external_id
         end
 
-      result = :ets.select(Connect, [{:"$1", [], [:"$1"]}]) |> Enum.sort()
+      result = :ets.select(Connect, [{{:"$1"}, [], [:"$1"]}]) |> Enum.sort()
       expected = Enum.sort(expected)
       assert result == expected
     end
 
     test "on database disconnect, returns new connection", %{tenant: tenant} do
       assert {:ok, old_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(500)
-      GenServer.stop(old_conn)
-      Process.sleep(500)
+      Process.sleep(1000)
+      Connect.shutdown(tenant.external_id)
+      Process.sleep(1000)
 
       assert {:ok, new_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
@@ -57,20 +63,22 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "if tenant exists but unable to connect, returns error" do
+      port = Enum.random(5500..9000)
+
       extensions = [
         %{
           "type" => "postgres_cdc_rls",
           "settings" => %{
-            "db_host" => "localhost",
-            "db_name" => "false",
-            "db_user" => "false",
-            "db_password" => "false",
-            "db_port" => "5433",
+            "db_host" => "127.0.0.1",
+            "db_name" => "postgres",
+            "db_user" => "postgres",
+            "db_password" => "postgres",
+            "db_port" => "#{port}",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
             "region" => "us-east-1",
-            "ssl_enforced" => false
+            "ssl_enforced" => true
           }
         }
       ]
@@ -85,9 +93,7 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:error, :tenant_not_found} = Connect.lookup_or_start_connection("none")
     end
 
-    test "if no users are connected to a tenant channel, stop the connection", %{
-      tenant: %{external_id: tenant_id}
-    } do
+    test "if no users are connected to a tenant channel, stop the connection", %{tenant: %{external_id: tenant_id}} do
       {:ok, db_conn} =
         Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 100)
 
@@ -102,9 +108,7 @@ defmodule Realtime.Tenants.ConnectTest do
       Connect.shutdown(tenant_id)
     end
 
-    test "if users are connected to a tenant channel, keep the connection", %{
-      tenant: %{external_id: tenant_id}
-    } do
+    test "if users are connected to a tenant channel, keep the connection", %{tenant: %{external_id: tenant_id}} do
       UsersCounter.add(self(), tenant_id)
 
       {:ok, db_conn} =
@@ -120,32 +124,33 @@ defmodule Realtime.Tenants.ConnectTest do
       Connect.shutdown(tenant_id)
     end
 
-    test "connection is killed after user leaving", %{
-      tenant: %{external_id: tenant_id}
-    } do
-      UsersCounter.add(self(), tenant_id)
+    test "connection is killed after user leaving" do
+      tenant = tenant_fixture()
+      %{external_id: external_id} = Containers.initialize(tenant, true, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
 
-      {:ok, db_conn} =
-        Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
+      UsersCounter.add(self(), external_id)
 
-      assert {_pid, %{conn: _conn_pid}} = :syn.lookup(Connect, tenant_id)
+      {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, check_connected_user_interval: 10)
+
+      assert {_pid, %{conn: ^db_conn}} = :syn.lookup(Connect, external_id)
       Process.sleep(1000)
-      :syn.leave(:users, tenant_id, self())
+      :syn.leave(:users, external_id, self())
       Process.sleep(1000)
-      assert :undefined = :syn.lookup(Connect, tenant_id)
+      assert :undefined = :syn.lookup(Connect, external_id)
       refute Process.alive?(db_conn)
-      Connect.shutdown(tenant_id)
+      Connect.shutdown(external_id)
     end
 
     test "error if tenant is suspended" do
       tenant = tenant_fixture(suspend: true)
-
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
     end
 
     test "handles tenant suspension and unsuspension in a reactive way" do
       tenant = tenant_fixture()
-
+      tenant = Containers.initialize(tenant, true, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       Process.sleep(500)
 
@@ -161,18 +166,42 @@ defmodule Realtime.Tenants.ConnectTest do
       Connect.shutdown(tenant.external_id)
     end
 
+    test "handles tenant suspension only on targetted suspended user" do
+      tenant1 = Containers.checkout_tenant(true)
+      tenant2 = Containers.checkout_tenant(true)
+
+      on_exit(fn ->
+        Containers.checkin_tenant(tenant1)
+        Containers.checkin_tenant(tenant2)
+      end)
+
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant1.external_id)
+      Process.sleep(1000)
+
+      log =
+        capture_log(fn ->
+          Realtime.Tenants.suspend_tenant_by_external_id(tenant2.external_id)
+          Process.sleep(100)
+        end)
+
+      refute log =~ "Tenant was suspended"
+      assert Process.alive?(db_conn)
+    end
+
     test "properly handles of failing calls by avoid creating too many connections" do
+      port = Enum.random(5500..6000)
+
       tenant =
         tenant_fixture(%{
           extensions: [
             %{
               "type" => "postgres_cdc_rls",
               "settings" => %{
-                "db_host" => "localhost",
+                "db_host" => "127.0.0.1",
                 "db_name" => "postgres",
                 "db_user" => "supabase_admin",
                 "db_password" => "postgres",
-                "db_port" => "5433",
+                "db_port" => "#{port}",
                 "poll_interval" => 100,
                 "poll_max_changes" => 100,
                 "poll_max_record_bytes" => 1_048_576,
@@ -182,6 +211,8 @@ defmodule Realtime.Tenants.ConnectTest do
             }
           ]
         })
+
+      tenant = Containers.initialize(tenant, true)
 
       Enum.each(1..10, fn _ ->
         Task.start(fn ->
@@ -197,7 +228,7 @@ defmodule Realtime.Tenants.ConnectTest do
     test "on migrations failure, stop the process", %{tenant: tenant} do
       with_mock Realtime.Tenants.Migrations, [], run_migrations: fn _ -> raise("error") end do
         assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
-        Process.sleep(200)
+        Process.sleep(1000)
         refute Process.alive?(pid)
         assert_called(Realtime.Tenants.Migrations.run_migrations(tenant))
       end
@@ -258,9 +289,9 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Process.alive?(old_replication_connection_pid)
       assert Process.alive?(old_listen_connection_pid)
 
-      System.cmd("docker", ["stop", "tenant-db"])
+      System.cmd("docker", ["stop", "realtime-test-#{tenant.external_id}"])
       Process.sleep(500)
-      System.cmd("docker", ["start", "tenant-db"])
+      System.cmd("docker", ["start", "realtime-test-#{tenant.external_id}"])
 
       Process.sleep(3000)
       refute Process.alive?(old_pid)
@@ -269,6 +300,45 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert ReplicationConnection.whereis(tenant.external_id) == nil
       assert Listen.whereis(tenant.external_id) == nil
+    end
+
+    test "handles max_wal_senders by logging the correct operational code" do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+
+      opts = tenant |> Database.from_tenant("realtime_test", :stop) |> Database.opts()
+
+      # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
+      pids =
+        for i <- 0..10 do
+          replication_slot_opts =
+            %PostgresReplication{
+              connection_opts: opts,
+              table: :all,
+              output_plugin: "pgoutput",
+              output_plugin_options: [],
+              handler_module: TestHandler,
+              publication_name: "test_#{i}_publication",
+              replication_slot_name: "test_#{i}_slot"
+            }
+
+          {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
+          pid
+        end
+
+      on_exit(fn ->
+        Enum.each(pids, &Process.exit(&1, :normal))
+        Process.sleep(2000)
+      end)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+          Process.sleep(3000)
+        end)
+
+      assert log =~ "ReplicationMaxWalSendersReached"
     end
 
     test "syn with no connection", %{tenant: tenant} do
@@ -280,19 +350,25 @@ defmodule Realtime.Tenants.ConnectTest do
                  Connect.get_status(tenant.external_id)
       end
     end
+
+    test "handle rpc errors gracefully" do
+      with_mock Realtime.Nodes, get_node_for_tenant: fn _ -> {:ok, :potato@nohost} end do
+        assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant")
+      end
+    end
   end
 
   describe "shutdown/1" do
     test "shutdowns all associated connections", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Process.alive?(db_conn)
-      Process.sleep(300)
+      Process.sleep(1000)
       assert Process.alive?(Connect.whereis(tenant.external_id))
       assert Process.alive?(ReplicationConnection.whereis(tenant.external_id))
       assert Process.alive?(Listen.whereis(tenant.external_id))
 
       Connect.shutdown(tenant.external_id)
-      Process.sleep(200)
+      Process.sleep(1000)
       refute Connect.whereis(tenant.external_id)
       refute ReplicationConnection.whereis(tenant.external_id)
       refute Listen.whereis(tenant.external_id)
@@ -303,15 +379,17 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "tenant not able to connect if database has not enough connections" do
+      port = Enum.random(5500..9000)
+
       extensions = [
         %{
           "type" => "postgres_cdc_rls",
           "settings" => %{
-            "db_host" => "localhost",
+            "db_host" => "127.0.0.1",
             "db_name" => "postgres",
             "db_user" => "supabase_admin",
             "db_password" => "postgres",
-            "db_port" => "5433",
+            "db_port" => "#{port}",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
@@ -325,6 +403,8 @@ defmodule Realtime.Tenants.ConnectTest do
       ]
 
       tenant = tenant_fixture(%{extensions: extensions})
+      tenant = Containers.initialize(tenant, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
 
       assert {:error, :tenant_db_too_many_connections} =
                Connect.lookup_or_start_connection(tenant.external_id)

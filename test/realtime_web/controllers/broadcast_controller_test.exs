@@ -1,5 +1,7 @@
 defmodule RealtimeWeb.BroadcastControllerTest do
+  # async: false due to usage of mocks
   use RealtimeWeb.ConnCase, async: false
+
   import Mock
 
   alias Realtime.Crypto
@@ -12,26 +14,21 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
   @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE1MTYyMzkwMjIsInJvbGUiOiJmb28iLCJleHAiOiJiYXIifQ.Ret2CevUozCsPhpgW2FMeFL7RooLgoOvfQzNpLBj5ak"
   @expired_token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MjEwNzMyOTAsImlhdCI6MTYyNzg4NjQ0MCwicm9sZSI6ImFub24ifQ.AHmuaydSU3XAxwoIFhd3gwGwjnBIKsjFil0JQEOLtRw"
-  setup do
-    Cleanup.ensure_no_replication_slot()
+
+  setup %{conn: conn} do
+    start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
+    start_supervised(Realtime.RateCounter.DynamicSupervisor)
+    start_supervised(Realtime.GenCounter.DynamicSupervisor)
+
+    tenant = Containers.checkout_tenant(true)
+    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+
+    conn = generate_conn(conn, tenant)
+
+    {:ok, conn: conn, tenant: tenant}
   end
 
   describe "broadcast" do
-    setup %{conn: conn} do
-      start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
-      start_supervised(Realtime.RateCounter.DynamicSupervisor)
-      start_supervised(Realtime.GenCounter.DynamicSupervisor)
-      tenant = tenant_fixture()
-
-      conn =
-        conn
-        |> put_req_header("accept", "application/json")
-        |> put_req_header("authorization", "Bearer #{@token}")
-        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
-
-      {:ok, conn: conn, tenant: tenant}
-    end
-
     test "returns 202 when batch of messages is broadcasted", %{conn: conn, tenant: tenant} do
       events_key = Tenants.events_per_second_key(tenant)
 
@@ -68,12 +65,11 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         )
 
         assert_called(
-          Endpoint.broadcast_from(
-            :_,
-            topic_2,
-            "broadcast",
-            %{"payload" => payload_2, "event" => event_2, "type" => "broadcast"}
-          )
+          Endpoint.broadcast_from(:_, topic_2, "broadcast", %{
+            "payload" => payload_2,
+            "event" => event_2,
+            "type" => "broadcast"
+          })
         )
 
         assert_called_exactly(GenCounter.add(events_key), 3)
@@ -129,51 +125,12 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   end
 
   describe "too many requests" do
-    setup %{conn: conn} do
-      start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
-      start_supervised(Realtime.RateCounter.DynamicSupervisor)
-      start_supervised(Realtime.GenCounter.DynamicSupervisor)
-
-      tenant = tenant_fixture(%{max_events_per_second: 1})
-      GenCounter.new(Tenants.events_per_second_key(tenant.external_id))
-
-      conn =
-        conn
-        |> put_req_header("accept", "application/json")
-        |> put_req_header("authorization", "Bearer #{@token}")
-        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
-
-      {:ok, conn: conn, tenant: tenant}
-    end
-
     test "batch will exceed rate limit", %{conn: conn, tenant: tenant} do
-      conn =
-        post(conn, Routes.broadcast_path(conn, :broadcast), %{
-          "messages" =>
-            Stream.repeatedly(fn ->
-              %{
-                "topic" => Tenants.tenant_topic(tenant, "sub_topic"),
-                "payload" => %{"data" => "data"},
-                "event" => "event"
-              }
-            end)
-            |> Enum.take(10)
-        })
-
-      assert conn.status == 429
-
-      assert conn.resp_body ==
-               Jason.encode!(%{
-                 message: "Too many messages to broadcast, please reduce the batch size"
-               })
-    end
-
-    test "user has hit the rate limit", %{conn: conn, tenant: tenant} do
-      events_key = Tenants.events_per_second_key(tenant)
       requests_key = Tenants.requests_per_second_key(tenant)
+      events_key = Tenants.events_per_second_key(tenant)
 
       with_mocks [
-        {RateCounter, [], new: fn _, _ -> :ok end},
+        {RateCounter, [], new: fn _, _ -> {:ok, nil} end},
         {RateCounter, [],
          get: fn
            ^requests_key -> {:ok, %RateCounter{avg: 0}}
@@ -182,47 +139,72 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       ] do
         conn =
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
-            "messages" => [
-              %{
-                "topic" => Tenants.tenant_topic(tenant, "sub_topic"),
-                "payload" => %{"data" => "data"},
-                "event" => "event"
-              }
-            ]
+            "messages" =>
+              Stream.repeatedly(fn ->
+                %{
+                  "topic" => Tenants.tenant_topic(tenant, "sub_topic"),
+                  "payload" => %{"data" => "data"},
+                  "event" => "event"
+                }
+              end)
+              |> Enum.take(1000)
           })
 
         assert conn.status == 429
 
         assert conn.resp_body ==
                  Jason.encode!(%{
-                   message: "You have exceeded your rate limit"
+                   message: "Too many messages to broadcast, please reduce the batch size"
                  })
+      end
+    end
+
+    test "user has hit the rate limit", %{conn: conn} do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+
+      requests_key = Tenants.requests_per_second_key(tenant)
+      events_key = Tenants.events_per_second_key(tenant)
+
+      with_mocks [
+        {RateCounter, [], new: fn _, _ -> {:ok, nil} end},
+        {RateCounter, [],
+         get: fn
+           ^requests_key -> {:ok, %RateCounter{avg: 0}}
+           ^events_key -> {:ok, %RateCounter{avg: 1000}}
+         end}
+      ] do
+        messages = [
+          %{"topic" => Tenants.tenant_topic(tenant, "sub_topic"), "payload" => %{"data" => "data"}, "event" => "event"}
+        ]
+
+        conn = generate_conn(conn, tenant)
+        conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
+        assert conn.status == 429
+        assert conn.resp_body == Jason.encode!(%{message: "You have exceeded your rate limit"})
       end
     end
   end
 
   describe "unauthorized" do
     test "invalid token returns 401", %{conn: conn} do
-      tenant = tenant_fixture()
-
       conn =
         conn
         |> put_req_header("accept", "application/json")
         |> put_req_header("x-api-key", "potato")
-        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+        |> then(&%{&1 | host: "dev_tenant.supabase.com"})
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{})
       assert conn.status == 401
     end
 
     test "expired token returns 401", %{conn: conn} do
-      tenant = tenant_fixture()
-
       conn =
         conn
         |> put_req_header("accept", "application/json")
         |> put_req_header("x-api-key", @expired_token)
-        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
+        |> then(&%{&1 | host: "dev_tenant.supabase.com"})
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{})
       assert conn.status == 401
@@ -246,7 +228,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       start_supervised(Realtime.GenCounter.DynamicSupervisor)
       start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
 
-      tenant = tenant_fixture()
+      tenant = Containers.checkout_tenant(true)
+      on_exit(fn -> Containers.checkin_tenant(tenant) end)
+
       jwt_secret = Crypto.decrypt!(tenant.jwt_secret)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -332,13 +316,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         messages =
           messages ++
-            [
-              %{
-                "topic" => "open_channel",
-                "payload" => %{"content" => random_string()},
-                "event" => random_string()
-              }
-            ]
+            [%{"topic" => "open_channel", "payload" => %{"content" => random_string()}, "event" => random_string()}]
 
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
@@ -348,19 +326,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         end)
 
         # Check open channel
-        assert_called(
-          Endpoint.broadcast_from(
-            :_,
-            Tenants.tenant_topic(tenant, "open_channel"),
-            "broadcast",
-            :_
-          )
-        )
-
-        assert_called_exactly(
-          GenCounter.add(Tenants.events_per_second_key(tenant)),
-          length(channels) + 1
-        )
+        assert_called(Endpoint.broadcast_from(:_, Tenants.tenant_topic(tenant, "open_channel"), "broadcast", :_))
+        assert_called_exactly(GenCounter.add(Tenants.events_per_second_key(tenant)), length(channels) + 1)
 
         assert conn.status == 202
       end
@@ -400,18 +367,10 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         end)
 
         assert_not_called(
-          Endpoint.broadcast_from(
-            :_,
-            Tenants.tenant_topic(tenant, no_auth_channel.topic, false),
-            "broadcast",
-            :_
-          )
+          Endpoint.broadcast_from(:_, Tenants.tenant_topic(tenant, no_auth_channel.topic, false), "broadcast", :_)
         )
 
-        assert_called_exactly(
-          GenCounter.add(Tenants.events_per_second_key(tenant)),
-          length(messages_to_send)
-        )
+        assert_called_exactly(GenCounter.add(Tenants.events_per_second_key(tenant)), length(messages_to_send))
 
         assert conn.status == 202
       end
@@ -420,13 +379,16 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     @tag role: "anon"
     test "user without permission won't broadcast", %{
       conn: conn,
-      db_conn: db_conn,
-      tenant: tenant
+      db_conn: db_conn
     } do
       with_mocks [
         {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
         {GenCounter, [:passthrough], add: fn _ -> :ok end}
       ] do
+        tenant = tenant_fixture()
+        tenant = Containers.initialize(tenant, true, true)
+        on_exit(fn -> Containers.stop_container(tenant) end)
+
         messages =
           Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
           |> Enum.take(5)
@@ -460,13 +422,14 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
   defp generate_message_with_policies(db_conn, tenant) do
     message = message_fixture(tenant)
-
-    create_rls_policies(
-      db_conn,
-      [:authenticated_read_broadcast, :authenticated_write_broadcast],
-      message
-    )
-
+    create_rls_policies(db_conn, [:authenticated_read_broadcast, :authenticated_write_broadcast], message)
     message
+  end
+
+  defp generate_conn(conn, tenant) do
+    conn
+    |> put_req_header("accept", "application/json")
+    |> put_req_header("authorization", "Bearer #{@token}")
+    |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
   end
 end

@@ -13,11 +13,7 @@ defmodule Realtime.Tenants.CacheSupervisor do
 
   @impl true
   def init(_init_arg) do
-    children = [
-      {CachePubSubHandler, topics: ["realtime:operations:invalidate_cache"]},
-      Cache
-    ]
-
+    children = [CachePubSubHandler, Cache]
     Supervisor.init(children, strategy: :one_for_one)
   end
 end

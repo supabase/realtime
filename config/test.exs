@@ -21,7 +21,7 @@ for repo <- [
     username: "postgres",
     password: "postgres",
     database: "realtime_test",
-    hostname: "localhost",
+    hostname: "127.0.0.1",
     pool: Ecto.Adapters.SQL.Sandbox
 end
 
@@ -43,7 +43,9 @@ config :joken,
   current_time_adapter: RealtimeWeb.Joken.CurrentTime.Mock
 
 # Print only errors during test
-config :logger, level: :warning
+config :logger,
+  compile_time_purge_matching: [[module: Postgrex], [module: DBConnection]],
+  level: :warning
 
 # Configures Elixir's Logger
 config :logger, :console,

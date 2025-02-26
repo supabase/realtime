@@ -190,63 +190,65 @@ Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
 
 This is the list of operational codes that can help you understand your deployment and your usage.
 
-| Code                               | Description                                                                                                                         |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| TopicNameRequired                  | You are trying to use Realtime without a topic name set                                                                             |
-| RealtimeDisabledForConfiguration   | The configuration provided to Realtime on connect will not be able to provide you any Postgres Changes                              |
-| TenantNotFound                     | The tenant you are trying to connect to does not exist                                                                              |
-| ErrorConnectingToWebsocket         | Error when trying to connect to the WebSocket server                                                                                |
-| ErrorAuthorizingWebsocket          | Error when trying to authorize the WebSocket connection                                                                             |
-| TableHasSpacesInName               | The table you are trying to listen to has spaces in its name which we are unable to support                                         |
-| UnableToDeleteTenant               | Error when trying to delete a tenant                                                                                                |
-| UnableToSetPolicies                | Error when setting up Authorization Policies                                                                                        |
-| UnableCheckoutConnection           | Error when trying to checkout a connection from the tenant pool                                                                     |
-| UnableToSubscribeToPostgres        | Error when trying to subscribe to Postgres changes                                                                                  |
-| ChannelRateLimitReached            | The number of channels you can create has reached its limit                                                                         |
-| ConnectionRateLimitReached         | The number of connected clients as reached its limit                                                                                |
-| ClientJoinRateLimitReached         | The rate of joins per second from your clients as reached the channel limits                                                        |
-| UnableToConnectToTenantDatabase    | Realtime was not able to connect to the tenant's database                                                                           |
-| RealtimeNodeDisconnected           | Realtime is a distributed application and this means that one the system is unable to communicate with one of the distributed nodes |
-| MigrationsFailedToRun              | Error when running the migrations against the Tenant database that are required by Realtime                                         |
-| StartListenAndReplicationFailed    | Error when starting the replication and listening of errors for database broadcasting                                               |
-| MigrationCheckFailed               | Check to see if we require to run migrations fails                                                                                  |
-| PartitionCreationFailed            | Error when creating partitions for realtime.messages                                                                                |
-| ErrorStartingPostgresCDCStream     | Error when starting the Postgres CDC stream which is used for Postgres Changes                                                      |
-| UnknownDataProcessed               | An unknown data type was processed by the Realtime system                                                                           |
-| ErrorStartingPostgresCDC           | Error when starting the Postgres CDC extension which is used for Postgres Changes                                                   |
-| ReplicationSlotBeingUsed           | The replication slot is being used by another transaction                                                                           |
-| PoolingReplicationPreparationError | Error when preparing the replication slot                                                                                           |
-| PoolingReplicationError            | Error when pooling the replication slot                                                                                             |
-| SubscriptionDeletionFailed         | Error when trying to delete a subscription for postgres changes                                                                     |
-| UnableToDeletePhantomSubscriptions | Error when trying to delete subscriptions that are no longer being used                                                             |
-| UnableToCheckProcessesOnRemoteNode | Error when trying to check the processes on a remote node                                                                           |
-| UnableToCreateCounter              | Error when trying to create a counter to track rate limits for a tenant                                                             |
-| UnableToIncrementCounter           | Error when trying to increment a counter to track rate limits for a tenant                                                          |
-| UnableToDecrementCounter           | Error when trying to decrement a counter to track rate limits for a tenant                                                          |
-| UnableToUpdateCounter              | Error when trying to update a counter to track rate limits for a tenant                                                             |
-| UnableToFindCounter                | Error when trying to find a counter to track rate limits for a tenant                                                               |
-| UnhandledProcessMessage            | Unhandled message received by a Realtime process                                                                                    |
-| UnableToSetPolicies                | We were not able to set policies for this connection                                                                                |
-| UnableToTrackPresence              | Error when handling track presence for this socket                                                                                  |
-| IncreaseConnectionPool             | The number of connections you have set for Realtime are not enough to handle your current use case                                  |
-| RlsPolicyError                     | Error on RLS policy used for authorization                                                                                          |
-| ConnectionInitializing             | Database is initializing connection                                                                                                 |
-| DatabaseConnectionIssue            | Database had connection issues and connection was not able to be established                                                        |
-| UnableToConnectToProject           | Unable to connect to Project database                                                                                               |
-| InvalidJWTExpiration               | JWT exp claim value it's incorrect                                                                                                  |
-| JwtSignatureError                  | JWT signature was not able to be validated                                                                                          |
-| Unauthorized                       | Unauthorized access to Realtime channel                                                                                             |
-| RealtimeRestarting                 | Realtime is currently restarting                                                                                                    |
-| UnableToProcessListenPayload       | Payload sent in NOTIFY operation was JSON parsable                                                                                  |
-| UnableToListenToTenantDatabase     | Unable to LISTEN for notifications against the Tenant Database                                                                      |
-| UnprocessableEntity                | Received a HTTP request with a body that was not able to be processed by the endpoint                                               |
-| InitializingProjectConnection      | Connection against Tenant database is still starting                                                                                |
-| ErrorOnRpcCall                     | Error when calling another realtime node                                                                                            |
-| ErrorExecutingTransaction          | Error executing a database transaction in tenant database                                                                           |
-| SynInitializationError             | Our framework to syncronize processes has failed to properly startup a connection to the database                                   |
-| JanitorFailedToDeleteOldMessages   | Scheduled task for realtime.message cleanup was unable to run                                                                       |
-| UnknownErrorOnController           | An error we are not handling correctly was triggered on a controller                                                                |
-| UnknownErrorOnChannel              | An error we are not handling correctly was triggered on a channel                                                                   |
+| Code                               | Description                                                                                                                                                                                           |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TopicNameRequired                  | You are trying to use Realtime without a topic name set                                                                                                                                               |
+| RealtimeDisabledForConfiguration   | The configuration provided to Realtime on connect will not be able to provide you any Postgres Changes                                                                                                |
+| TenantNotFound                     | The tenant you are trying to connect to does not exist                                                                                                                                                |
+| ErrorConnectingToWebsocket         | Error when trying to connect to the WebSocket server                                                                                                                                                  |
+| ErrorAuthorizingWebsocket          | Error when trying to authorize the WebSocket connection                                                                                                                                               |
+| TableHasSpacesInName               | The table you are trying to listen to has spaces in its name which we are unable to support                                                                                                           |
+| UnableToDeleteTenant               | Error when trying to delete a tenant                                                                                                                                                                  |
+| UnableToSetPolicies                | Error when setting up Authorization Policies                                                                                                                                                          |
+| UnableCheckoutConnection           | Error when trying to checkout a connection from the tenant pool                                                                                                                                       |
+| UnableToSubscribeToPostgres        | Error when trying to subscribe to Postgres changes                                                                                                                                                    |
+| ChannelRateLimitReached            | The number of channels you can create has reached its limit                                                                                                                                           |
+| ConnectionRateLimitReached         | The number of connected clients as reached its limit                                                                                                                                                  |
+| ClientJoinRateLimitReached         | The rate of joins per second from your clients as reached the channel limits                                                                                                                          |
+| UnableToConnectToTenantDatabase    | Realtime was not able to connect to the tenant's database                                                                                                                                             |
+| RealtimeNodeDisconnected           | Realtime is a distributed application and this means that one the system is unable to communicate with one of the distributed nodes                                                                   |
+| MigrationsFailedToRun              | Error when running the migrations against the Tenant database that are required by Realtime                                                                                                           |
+| StartListenAndReplicationFailed    | Error when starting the replication and listening of errors for database broadcasting                                                                                                                 |
+| ReplicationMaxWalSendersReached    | Maximum number of WAL senders reached in tenant database, check how to increase this value in this [link](https://supabase.com/docs/guides/database/custom-postgres-config#cli-configurable-settings) |
+| MigrationCheckFailed               | Check to see if we require to run migrations fails                                                                                                                                                    |
+| PartitionCreationFailed            | Error when creating partitions for realtime.messages                                                                                                                                                  |
+| ErrorStartingPostgresCDCStream     | Error when starting the Postgres CDC stream which is used for Postgres Changes                                                                                                                        |
+| UnknownDataProcessed               | An unknown data type was processed by the Realtime system                                                                                                                                             |
+| ErrorStartingPostgresCDC           | Error when starting the Postgres CDC extension which is used for Postgres Changes                                                                                                                     |
+| ReplicationSlotBeingUsed           | The replication slot is being used by another transaction                                                                                                                                             |
+| PoolingReplicationPreparationError | Error when preparing the replication slot                                                                                                                                                             |
+| PoolingReplicationError            | Error when pooling the replication slot                                                                                                                                                               |
+| SubscriptionDeletionFailed         | Error when trying to delete a subscription for postgres changes                                                                                                                                       |
+| UnableToDeletePhantomSubscriptions | Error when trying to delete subscriptions that are no longer being used                                                                                                                               |
+| UnableToCheckProcessesOnRemoteNode | Error when trying to check the processes on a remote node                                                                                                                                             |
+| UnableToCreateCounter              | Error when trying to create a counter to track rate limits for a tenant                                                                                                                               |
+| UnableToIncrementCounter           | Error when trying to increment a counter to track rate limits for a tenant                                                                                                                            |
+| UnableToDecrementCounter           | Error when trying to decrement a counter to track rate limits for a tenant                                                                                                                            |
+| UnableToUpdateCounter              | Error when trying to update a counter to track rate limits for a tenant                                                                                                                               |
+| UnableToFindCounter                | Error when trying to find a counter to track rate limits for a tenant                                                                                                                                 |
+| UnhandledProcessMessage            | Unhandled message received by a Realtime process                                                                                                                                                      |
+| UnableToSetPolicies                | We were not able to set policies for this connection                                                                                                                                                  |
+| UnableToTrackPresence              | Error when handling track presence for this socket                                                                                                                                                    |
+| IncreaseConnectionPool             | The number of connections you have set for Realtime are not enough to handle your current use case                                                                                                    |
+| RlsPolicyError                     | Error on RLS policy used for authorization                                                                                                                                                            |
+| ConnectionInitializing             | Database is initializing connection                                                                                                                                                                   |
+| DatabaseConnectionIssue            | Database had connection issues and connection was not able to be established                                                                                                                          |
+| UnableToConnectToProject           | Unable to connect to Project database                                                                                                                                                                 |
+| InvalidJWTExpiration               | JWT exp claim value it's incorrect                                                                                                                                                                    |
+| JwtSignatureError                  | JWT signature was not able to be validated                                                                                                                                                            |
+| Unauthorized                       | Unauthorized access to Realtime channel                                                                                                                                                               |
+| RealtimeRestarting                 | Realtime is currently restarting                                                                                                                                                                      |
+| UnableToProcessListenPayload       | Payload sent in NOTIFY operation was JSON parsable                                                                                                                                                    |
+| UnableToListenToTenantDatabase     | Unable to LISTEN for notifications against the Tenant Database                                                                                                                                        |
+| UnprocessableEntity                | Received a HTTP request with a body that was not able to be processed by the endpoint                                                                                                                 |
+| InitializingProjectConnection      | Connection against Tenant database is still starting                                                                                                                                                  |
+| TimeoutOnRpcCall                   | RPC request within the Realtime server as timed out.                                                                                                                                                  |
+| ErrorOnRpcCall                     | Error when calling another realtime node                                                                                                                                                              |
+| ErrorExecutingTransaction          | Error executing a database transaction in tenant database                                                                                                                                             |
+| SynInitializationError             | Our framework to syncronize processes has failed to properly startup a connection to the database                                                                                                     |
+| JanitorFailedToDeleteOldMessages   | Scheduled task for realtime.message cleanup was unable to run                                                                                                                                         |
+| UnknownErrorOnController           | An error we are not handling correctly was triggered on a controller                                                                                                                                  |
+| UnknownErrorOnChannel              | An error we are not handling correctly was triggered on a channel                                                                                                                                     |
 
 ## License
 

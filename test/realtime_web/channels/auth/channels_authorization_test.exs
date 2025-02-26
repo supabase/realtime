@@ -1,9 +1,12 @@
 defmodule RealtimeWeb.ChannelsAuthorizationTest do
-  use ExUnit.Case
+  # async: false due to usage of mocks
+  use ExUnit.Case, async: false
+
   import Mock
   import Generators
 
-  alias RealtimeWeb.{ChannelsAuthorization, JwtVerification}
+  alias RealtimeWeb.ChannelsAuthorization
+  alias RealtimeWeb.JwtVerification
 
   @secret ""
   describe "authorize_conn/3" do

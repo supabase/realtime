@@ -76,6 +76,7 @@ defmodule Realtime.MixProject do
       {:mock, "~> 0.3", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
+      {:postgres_replication, git: "https://github.com/filipecabaco/postgres_replication.git", only: :test},
       {:benchee, "~> 1.1.0", only: [:dev, :test]},
       {:excoveralls, "~> 0.18", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
@@ -100,7 +101,6 @@ defmodule Realtime.MixProject do
         "ecto.create --quiet",
         "run priv/repo/seeds_before_migration.exs",
         "ecto.migrate --migrations-path=priv/repo/migrations",
-        "run priv/repo/seeds_after_migration.exs",
         "test"
       ],
       "assets.deploy": ["esbuild default --minify", "tailwind default --minify", "phx.digest"]
