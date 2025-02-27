@@ -138,7 +138,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     test "expired token returns a error" do
       with_mock ChannelsAuthorization, [],
         authorize_conn: fn _, _, _ ->
-          {:error, :expired_token, "InvalidJWTToken: Token as expired 1000 seconds ago"}
+          {:error, :expired_token, "InvalidJWTToken: Token hasexpired 1000 seconds ago"}
         end do
         sub = random_string()
         conn_opts = conn_opts(@tenant_external_id, %{sub: sub})
@@ -151,7 +151,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
             Process.sleep(300)
           end)
 
-        assert log =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
+        assert log =~ "InvalidJWTToken: Token hasexpired 1000 seconds ago"
         assert log =~ "sub=#{sub}"
       end
     end
@@ -159,7 +159,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     test "expired token returns a error with sub in metadata if available" do
       with_mock ChannelsAuthorization, [],
         authorize_conn: fn _, _, _ ->
-          {:error, :expired_token, "InvalidJWTToken: Token as expired 1000 seconds ago"}
+          {:error, :expired_token, "InvalidJWTToken: Token hasexpired 1000 seconds ago"}
         end do
         log =
           capture_log(fn ->
@@ -169,7 +169,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
             Process.sleep(300)
           end)
 
-        assert log =~ "InvalidJWTToken: Token as expired 1000 seconds ago"
+        assert log =~ "InvalidJWTToken: Token hasexpired 1000 seconds ago"
       end
     end
   end
