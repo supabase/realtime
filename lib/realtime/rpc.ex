@@ -26,7 +26,7 @@ defmodule Realtime.Rpc do
   Calls external node using :erpc.call/5 and collects telemetry
   """
   @spec enhanced_call(atom(), atom(), atom(), any(), keyword()) ::
-          {:ok, any()} | {:error, :rpc_error, term()}
+          {:ok, any()} | {:error, :rpc_error, term()} | {:error, term()}
   def enhanced_call(node, mod, func, args \\ [], opts \\ []) do
     timeout = Keyword.get(opts, :timeout, Application.get_env(:realtime, :rpc_timeout))
 
