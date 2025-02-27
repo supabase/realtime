@@ -63,7 +63,7 @@ config :logflare_logger_backend,
   max_batch_size: 50,
   metadata: :all
 
-config :phoenix, :filter_parameters, ["apikey"]
+config :phoenix, :filter_parameters, {:keep, []}
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

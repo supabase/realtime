@@ -13,12 +13,12 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   setup do
     slot = Application.get_env(:realtime, :slot_name_suffix)
     Application.put_env(:realtime, :slot_name_suffix, "test")
-
-    tenant = Containers.checkout_tenant(true)
+    tenant = tenant_fixture()
+    tenant = Containers.initialize(tenant, true, true)
 
     on_exit(fn ->
       Application.put_env(:realtime, :slot_name_suffix, slot)
-      Containers.checkin_tenant(tenant)
+      Containers.stop_container(tenant)
     end)
 
     %{tenant: tenant}
