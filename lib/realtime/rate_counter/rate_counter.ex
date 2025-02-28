@@ -74,7 +74,7 @@ defmodule Realtime.RateCounter do
       ])
 
     Enum.each(keys, fn {{_, _, key}, {pid, _}} ->
-      GenServer.stop(pid)
+      if Process.alive?(pid), do: GenServer.stop(pid)
       Cachex.del!(@cache, key)
     end)
 

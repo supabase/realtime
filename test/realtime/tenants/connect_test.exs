@@ -12,9 +12,11 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Realtime.UsersCounter
 
   setup do
-    tenant = Containers.checkout_tenant()
     :ets.delete_all_objects(Connect)
-    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+
+    tenant = tenant_fixture()
+    tenant = Containers.initialize(tenant, true, true)
+    on_exit(fn -> Containers.stop_container(tenant) end)
 
     %{tenant: tenant}
   end

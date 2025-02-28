@@ -5,6 +5,9 @@ defmodule Realtime.DatabaseTest do
   import ExUnit.CaptureLog
 
   alias Realtime.Database
+  alias Realtime.Rpc
+  alias Realtime.Tenants.Connect
+
   doctest Realtime.Database
   def handle_telemetry(event, metadata, _, pid: pid), do: send(pid, {event, metadata})
 
@@ -199,6 +202,50 @@ defmodule Realtime.DatabaseTest do
       )
 
       assert_receive {^event, %{latency: _}}
+    end
+  end
+
+  @aux_mod (quote do
+              defmodule Aux do
+                def checker(transaction_conn) do
+                  Postgrex.query!(transaction_conn, "SELECT 1", [])
+                end
+
+                def error(transaction_conn) do
+                  Postgrex.query!(transaction_conn, "SELECT 1/0", [])
+                end
+
+                def exception(_) do
+                  raise RuntimeError, "💣"
+                end
+              end
+            end)
+
+  Code.eval_quoted(@aux_mod)
+
+  describe "transaction/1 in clustered mode" do
+    test "success call returns output" do
+      tenant = Containers.checkout_tenant()
+      {:ok, node} = Clustered.start(@aux_mod)
+      {:ok, db_conn} = Rpc.call(node, Connect, :lookup_or_start_connection, [tenant.external_id])
+      assert {:ok, %Postgrex.Result{rows: [[1]]}} = Database.transaction(db_conn, &Aux.checker/1)
+      on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    end
+
+    test "handles database errors" do
+      tenant = Containers.checkout_tenant()
+      {:ok, node} = Clustered.start(@aux_mod)
+      {:ok, db_conn} = Rpc.call(node, Connect, :lookup_or_start_connection, [tenant.external_id])
+      assert {:error, %Postgrex.Error{}} = Database.transaction(db_conn, &Aux.error/1)
+      on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    end
+
+    test "handles exception" do
+      tenant = Containers.checkout_tenant()
+      {:ok, node} = Clustered.start(@aux_mod)
+      {:ok, db_conn} = Rpc.call(node, Connect, :lookup_or_start_connection, [tenant.external_id])
+      assert {:error, %RuntimeError{}} = Database.transaction(db_conn, &Aux.exception/1)
+      on_exit(fn -> Containers.checkin_tenant(tenant) end)
     end
   end
 
