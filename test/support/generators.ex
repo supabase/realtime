@@ -45,6 +45,7 @@ defmodule Generators do
     tenant
   end
 
+  @spec message_fixture(Realtime.Api.Tenant.t()) :: any()
   def message_fixture(tenant, override \\ %{}) do
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     Realtime.Tenants.Migrations.create_partitions(db_conn)

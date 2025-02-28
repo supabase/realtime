@@ -1,6 +1,9 @@
 defmodule Containers do
-  alias Realtime.Tenants.Connect
+  alias Realtime.Tenants
   alias Realtime.Database
+  alias Realtime.GenCounter
+  alias Realtime.RateCounter
+  alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Migrations
 
   import ExUnit.CaptureLog
@@ -41,6 +44,7 @@ defmodule Containers do
       Migrations.run_migrations(tenant)
       {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
       Migrations.create_partitions(pid)
+      Process.exit(pid, :normal)
     end
 
     tenant
@@ -49,8 +53,30 @@ defmodule Containers do
   def checkout_tenant(run_migrations? \\ false) do
     tenants = :ets.select(:containers, [{{:_, %{using?: :"$1", tenant: :"$2"}}, [{:==, :"$1", false}], [:"$2"]}])
     tenant = Enum.random(tenants)
-
     :ets.insert(:containers, {tenant.external_id, %{tenant: tenant, using?: true}})
+
+    settings = Database.from_tenant(tenant, "realtime_test", :stop)
+
+    settings = %{settings | max_restarts: 0, ssl: false}
+    {:ok, conn} = Database.connect_db(settings)
+
+    Postgrex.transaction(conn, fn db_conn ->
+      pid = Connect.whereis(tenant.external_id)
+      if pid && Process.alive?(pid), do: Connect.shutdown(tenant.external_id)
+
+      tenant
+      |> Tenants.limiter_keys()
+      |> Enum.each(fn key ->
+        RateCounter.stop(tenant.external_id)
+        GenCounter.stop(tenant.external_id)
+        RateCounter.new(key)
+        GenCounter.new(key)
+      end)
+
+      Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
+      Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])
+      :ok
+    end)
 
     if run_migrations? do
       Migrations.run_migrations(tenant)
@@ -58,22 +84,11 @@ defmodule Containers do
       Migrations.create_partitions(pid)
     end
 
+    Process.exit(conn, :normal)
     tenant
   end
 
   def checkin_tenant(tenant) do
-    settings = Database.from_tenant(tenant, "realtime_test", :stop)
-
-    settings = %{settings | max_restarts: 0, ssl: false}
-    {:ok, conn} = Database.connect_db(settings)
-
-    Database.transaction(conn, fn db_conn ->
-      pid = Connect.whereis(tenant.external_id)
-      if pid && Process.alive?(pid), do: Connect.shutdown(tenant.external_id)
-      Postgrex.query(db_conn, "DROP SCHEMA realtime CASCADE", [])
-      Postgrex.query(db_conn, "CREATE SCHEMA realtime", [])
-    end)
-
     :ets.insert(:containers, {tenant.external_id, %{tenant: tenant, using?: false}})
   end
 

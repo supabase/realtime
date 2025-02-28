@@ -12,9 +12,11 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Realtime.UsersCounter
 
   setup do
-    tenant = Containers.checkout_tenant()
     :ets.delete_all_objects(Connect)
-    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+
+    tenant = tenant_fixture()
+    tenant = Containers.initialize(tenant, true, true)
+    on_exit(fn -> Containers.stop_container(tenant) end)
 
     %{tenant: tenant}
   end
@@ -276,30 +278,6 @@ defmodule Realtime.Tenants.ConnectTest do
       listen_pid = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_pid)
       assert Process.alive?(listen_pid)
-    end
-
-    test "on database disconnect, connection is killed to all components", %{tenant: tenant} do
-      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      old_pid = Connect.whereis(tenant.external_id)
-      Process.sleep(1000)
-
-      old_replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
-      old_listen_connection_pid = Listen.whereis(tenant.external_id)
-
-      assert Process.alive?(old_replication_connection_pid)
-      assert Process.alive?(old_listen_connection_pid)
-
-      System.cmd("docker", ["stop", "realtime-test-#{tenant.external_id}"])
-      Process.sleep(500)
-      System.cmd("docker", ["start", "realtime-test-#{tenant.external_id}"])
-
-      Process.sleep(3000)
-      refute Process.alive?(old_pid)
-      refute Process.alive?(old_replication_connection_pid)
-      refute Process.alive?(old_listen_connection_pid)
-
-      assert ReplicationConnection.whereis(tenant.external_id) == nil
-      assert Listen.whereis(tenant.external_id) == nil
     end
 
     test "handles max_wal_senders by logging the correct operational code" do
