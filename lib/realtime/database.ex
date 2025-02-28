@@ -161,7 +161,12 @@ defmodule Realtime.Database do
   def transaction(db_conn, func, opts, metadata) do
     metadata = Keyword.put(metadata, :target, node(db_conn))
     args = [db_conn, func, opts, metadata]
-    Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, args)
+
+    case Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, args) do
+      {:ok, value} -> {:ok, value}
+      {:error, :rpc_error, error} -> {:error, error}
+      {:error, error} -> {:error, error}
+    end
   end
 
   defp transaction_catched(db_conn, func, opts, metadata) do

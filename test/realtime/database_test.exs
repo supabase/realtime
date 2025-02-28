@@ -174,6 +174,21 @@ defmodule Realtime.DatabaseTest do
                )
     end
 
+    test "handles RPC error", %{db_conn: db_conn} do
+      assert {:error, :rpc_error, :noconnection} =
+               Realtime.Rpc.enhanced_call(
+                 :potato@nohost,
+                 Database,
+                 :transaction,
+                 [
+                   db_conn,
+                   fn db_conn -> Postgrex.query!(db_conn, "SELECT 1", []) end,
+                   [backoff: :stop],
+                   [tenant_id: "test"]
+                 ]
+               )
+    end
+
     test "with telemetry event defined, emits telemetry event", %{db_conn: db_conn} do
       event = [:realtime, :database, :transaction]
 
