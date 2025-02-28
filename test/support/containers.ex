@@ -41,9 +41,9 @@ defmodule Containers do
     end)
 
     if run_migrations? do
-      Migrations.run_migrations(tenant)
+      :ok = Migrations.run_migrations(tenant)
       {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
-      Migrations.create_partitions(pid)
+      :ok = Migrations.create_partitions(pid)
       Process.exit(pid, :normal)
     end
 
@@ -56,7 +56,6 @@ defmodule Containers do
     :ets.insert(:containers, {tenant.external_id, %{tenant: tenant, using?: true}})
 
     settings = Database.from_tenant(tenant, "realtime_test", :stop)
-
     settings = %{settings | max_restarts: 0, ssl: false}
     {:ok, conn} = Database.connect_db(settings)
 
@@ -75,6 +74,7 @@ defmodule Containers do
 
       Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
       Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])
+
       :ok
     end)
 

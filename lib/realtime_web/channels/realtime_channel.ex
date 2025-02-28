@@ -48,23 +48,22 @@ defmodule RealtimeWeb.RealtimeChannel do
       socket
       |> assign_access_token(params)
       |> assign_counter()
-      |> assign(:using_broadcast?, !!params["config"]["broadcast"])
+      |> assign_presence_counter()
       |> assign(:private?, !!params["config"]["private"])
       |> assign(:policies, nil)
-
-    start_db_rate_counter(tenant_id)
 
     with :ok <- SignalHandler.shutdown_in_progress?(),
          :ok <- only_private?(tenant_id, socket),
          :ok <- limit_joins(socket.assigns),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket.assigns),
+         :ok <- start_db_rate_counter(tenant_id),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          socket = assign_authorization_context(socket, sub_topic, access_token, claims),
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
-      Realtime.UsersCounter.add(transport_pid, tenant_id)
+
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
       Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
 
@@ -83,8 +82,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       postgres_cdc_subscribe(opts)
 
-      Logger.debug("Start channel: " <> inspect(pg_change_params))
-
       state = %{postgres_changes: add_id_to_postgres_changes(pg_change_params)}
 
       assigns = %{
@@ -100,6 +97,9 @@ defmodule RealtimeWeb.RealtimeChannel do
         db_conn: db_conn
       }
 
+      # Start presence and add user
+      send(self(), :sync_presence)
+      Realtime.UsersCounter.add(transport_pid, tenant_id)
       {:ok, state, assign(socket, assigns)}
     else
       {:error, :expired_token, msg} ->
@@ -198,12 +198,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_info(
         _any,
-        %{
-          assigns: %{
-            rate_counter: %{avg: avg},
-            limits: %{max_events_per_second: max}
-          }
-        } = socket
+        %{assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}} = socket
       )
       when avg > max do
     message = "Too many messages per second"
@@ -405,12 +400,12 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def terminate(reason, _state) do
-    Logger.debug("Channel terminated with reason: " <> inspect(reason))
+    Logger.debug("Channel terminated with reason: #{reason}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
     :ok
   end
 
-  defp postgres_subscribe(min \\ 1, max \\ 5) do
+  defp postgres_subscribe(min \\ 1, max \\ 3) do
     Process.send_after(self(), :postgres_subscribe, backoff(min, max))
   end
 
@@ -486,6 +481,25 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp assign_counter(socket), do: socket
+
+  defp assign_presence_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
+    key = Tenants.presence_events_per_second_key(tenant)
+
+    GenCounter.new(key)
+
+    RateCounter.new(key,
+      idle_shutdown: :infinity,
+      telemetry: %{
+        event_name: [:channel, :presence_events],
+        measurements: %{limit: limits.max_events_per_second},
+        metadata: %{tenant: tenant}
+      }
+    )
+
+    {:ok, rate_counter} = RateCounter.get(key)
+
+    assign(socket, :presence_rate_counter, rate_counter)
+  end
 
   defp count(%{assigns: %{rate_counter: counter}} = socket) do
     GenCounter.add(counter.id)
@@ -592,20 +606,16 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     RateCounter.new(key,
       idle_shutdown: :infinity,
-      telemetry: %{
-        event_name: [:channel, :db_events],
-        measurements: %{},
-        metadata: %{tenant: tenant}
-      }
+      telemetry: %{event_name: [:channel, :db_events], measurements: %{}, metadata: %{tenant: tenant}}
     )
+
+    :ok
   end
 
   defp new_api?(%{"config" => _}), do: true
   defp new_api?(_), do: false
 
   defp pg_change_params(true, params, channel_pid, claims, _) do
-    send(self(), :sync_presence)
-
     case get_in(params, ["config", "postgres_changes"]) do
       [_ | _] = params_list ->
         Enum.map(params_list, fn params ->
@@ -696,23 +706,12 @@ defmodule RealtimeWeb.RealtimeChannel do
          %{assigns: %{private?: true}} = socket
        )
        when not is_nil(topic) and not is_nil(db_conn) do
-    %{using_broadcast?: using_broadcast?} = socket.assigns
-
     authorization_context = socket.assigns.authorization_context
 
-    with {:ok, socket} <-
-           Authorization.get_read_authorizations(socket, db_conn, authorization_context) do
-      cond do
-        match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-          {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"}
-
-        using_broadcast? and
-            match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-          {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"}
-
-        true ->
-          {:ok, socket}
-      end
+    with {:ok, socket} <- Authorization.get_read_authorizations(socket, db_conn, authorization_context) do
+      if match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies),
+        do: {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"},
+        else: {:ok, socket}
     else
       {:error, :increase_connection_pool} ->
         {:error, :increase_connection_pool}

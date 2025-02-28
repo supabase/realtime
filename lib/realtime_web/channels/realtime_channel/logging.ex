@@ -13,8 +13,14 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
         %{assigns: %{log_level: log_level, channel_name: channel_name}} = socket,
         msg
       ) do
-    if Logger.compare_levels(log_level, :error) == :lt do
-      msg = "HANDLE_INFO INCOMING ON " <> channel_name <> " message: " <> inspect(msg)
+    if Logger.compare_levels(log_level, :info) == :eq do
+      msg =
+        case msg do
+          msg when is_binary(msg) -> msg
+          _ -> inspect(msg, pretty: true)
+        end
+
+      msg = "Received message on " <> channel_name <> " with payload: " <> msg
       Logger.log(log_level, msg)
     end
 

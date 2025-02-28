@@ -1,8 +1,7 @@
 alias Ecto.Adapters.SQL.Sandbox
 alias Realtime.Api
 alias Realtime.Database
-max_cases = System.get_env("MAX_CASES", "2") |> String.to_integer()
-ExUnit.start(exclude: [:failing], max_cases: max_cases)
+ExUnit.start(exclude: [:failing], max_cases: 1)
 Containers.stop_containers()
 
 for tenant <- Api.list_tenants() do

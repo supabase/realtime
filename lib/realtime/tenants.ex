@@ -165,8 +165,12 @@ defmodule Realtime.Tenants do
 
   @doc """
   The GenCounter key to use when counting events for RealtimeChannel events.
+  ## Examples
+    iex> Realtime.Tenants.events_per_second_key("tenant_id")
+    {:channel, :events, "tenant_id"}
+    iex> Realtime.Tenants.events_per_second_key(%Realtime.Api.Tenant{external_id: "tenant_id"})
+    {:channel, :events, "tenant_id"}
   """
-
   @spec events_per_second_key(Tenant.t() | String.t()) :: {:channel, :events, String.t()}
   def events_per_second_key(tenant) when is_binary(tenant) do
     {:channel, :events, tenant}
@@ -178,8 +182,11 @@ defmodule Realtime.Tenants do
 
   @doc """
   The GenCounter key to use when counting events for RealtimeChannel events.
+    iex> Realtime.Tenants.db_events_per_second_key("tenant_id")
+    {:channel, :db_events, "tenant_id"}
+    iex> Realtime.Tenants.db_events_per_second_key(%Realtime.Api.Tenant{external_id: "tenant_id"})
+    {:channel, :db_events, "tenant_id"}
   """
-
   @spec db_events_per_second_key(Tenant.t() | String.t()) :: {:channel, :db_events, String.t()}
   def db_events_per_second_key(tenant) when is_binary(tenant) do
     {:channel, :db_events, tenant}
@@ -187,6 +194,23 @@ defmodule Realtime.Tenants do
 
   def db_events_per_second_key(%Tenant{} = tenant) do
     {:channel, :db_events, tenant.external_id}
+  end
+
+  @doc """
+  The GenCounter key to use when counting presence events for RealtimeChannel events.
+  ## Examples
+    iex> Realtime.Tenants.presence_events_per_second_key("tenant_id")
+    {:channel, :presence_events, "tenant_id"}
+    iex> Realtime.Tenants.presence_events_per_second_key(%Realtime.Api.Tenant{external_id: "tenant_id"})
+    {:channel, :presence_events, "tenant_id"}
+  """
+  @spec presence_events_per_second_key(Tenant.t() | String.t()) :: {:channel, :presence_events, String.t()}
+  def presence_events_per_second_key(tenant) when is_binary(tenant) do
+    {:channel, :presence_events, tenant}
+  end
+
+  def presence_events_per_second_key(%Tenant{} = tenant) do
+    {:channel, :presence_events, tenant.external_id}
   end
 
   @spec get_tenant_limits(Realtime.Api.Tenant.t(), maybe_improper_list) :: list
