@@ -44,6 +44,7 @@ defmodule Containers do
       Migrations.run_migrations(tenant)
       {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
       Migrations.create_partitions(pid)
+      Process.exit(pid, :normal)
     end
 
     tenant
@@ -83,6 +84,7 @@ defmodule Containers do
       Migrations.create_partitions(pid)
     end
 
+    Process.exit(conn, :normal)
     tenant
   end
 

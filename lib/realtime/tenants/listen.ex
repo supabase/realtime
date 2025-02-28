@@ -87,10 +87,7 @@ defmodule Realtime.Tenants.Listen do
   """
   @spec whereis(String.t()) :: pid() | nil
   def whereis(tenant_id) do
-    case Registry.lookup(
-           Realtime.Registry.Unique,
-           {Postgrex.Notifications, :tenant_id, tenant_id}
-         ) do
+    case Registry.lookup(Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant_id}) do
       [{pid, _}] -> pid
       [] -> nil
     end
