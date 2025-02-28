@@ -27,6 +27,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       }
     } = socket
 
+    IO.inspect(payload, label: :payload)
+
     case run_authorization_check(socket, db_conn, authorization_context) do
       {:ok,
        %{assigns: %{ack_broadcast: ack_broadcast, policies: %Policies{broadcast: %BroadcastPolicies{write: true}}}} =

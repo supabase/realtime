@@ -66,7 +66,8 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
   end
 
   defp count(tenant) do
-    Tenants.db_events_per_second_key(tenant)
+    tenant
+    |> Tenants.db_events_per_second_key()
     |> GenCounter.add()
   end
 end

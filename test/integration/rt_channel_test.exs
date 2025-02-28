@@ -14,6 +14,7 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Phoenix.Socket.V1
   alias Postgrex
   alias Realtime.Database
+  alias Realtime.GenCounter
   alias Realtime.Integration.RtChannelTest.Endpoint
   alias Realtime.Integration.WebsocketClient
   alias Realtime.RateCounter
@@ -493,7 +494,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "invalid JWT with expired token" do
       assert capture_log(fn ->
                get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
-             end) =~ "InvalidJWTToken: Token hasexpired 1000 seconds ago"
+             end) =~ "InvalidJWTToken: Token has expired 1000 seconds ago"
     end
 
     test "token required the role key" do
@@ -673,13 +674,13 @@ defmodule Realtime.Integration.RtChannelTest do
             event: "system",
             payload: %{
               "extension" => "system",
-              "message" => "Token hasexpired 1000 seconds ago",
+              "message" => "Token has expired 1000 seconds ago",
               "status" => "error"
             }
           }
         end)
 
-      assert log =~ "ChannelShutdown: Token hasexpired 1000 seconds ago"
+      assert log =~ "ChannelShutdown: Token has expired 1000 seconds ago"
     end
 
     test "ChannelShutdown include sub if available in jwt claims",
@@ -773,7 +774,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_close"}
 
-      assert msg =~ "Token hasexpired"
+      assert msg =~ "Token has expired"
     end
 
     test "token expires in between joins", %{topic: topic} do
@@ -798,7 +799,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        event: "phx_reply",
                        payload: %{
                          "status" => "error",
-                         "response" => %{"reason" => "Token hasexpired 0 seconds ago"}
+                         "response" => %{"reason" => "Token has expired 0 seconds ago"}
                        },
                        topic: ^realtime_topic
                      },
@@ -1264,7 +1265,7 @@ defmodule Realtime.Integration.RtChannelTest do
           get_connection("authenticated", %{:exp => System.system_time(:second) - 1000})
         end)
 
-      assert log =~ "InvalidJWTToken: Token hasexpired"
+      assert log =~ "InvalidJWTToken: Token has expired"
     end
   end
 
@@ -1456,6 +1457,133 @@ defmodule Realtime.Integration.RtChannelTest do
 
     refute_receive %Message{event: "phx_reply"}
     refute_receive %Message{event: "presence_state"}
+  end
+
+  def handle_telemetry(event, metadata, _, pid: pid), do: send(pid, {event, metadata})
+
+  describe "billable events" do
+    setup do
+      events = [
+        [:realtime, :rate_counter, :channel, :joins],
+        [:realtime, :rate_counter, :channel, :events],
+        [:realtime, :rate_counter, :channel, :db_events]
+      ]
+
+      RateCounter.stop(@external_id)
+      GenCounter.stop(@external_id)
+      :telemetry.attach_many(__MODULE__, events, &__MODULE__.handle_telemetry/4, pid: self())
+
+      on_exit(fn -> :telemetry.detach(__MODULE__) end)
+      :ok
+    end
+
+    test "join events" do
+      {socket, _} = get_connection()
+      config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
+      topic = "realtime:any"
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      # Join events
+      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{topic: ^topic, event: "presence_state"}
+      assert_receive %Message{topic: ^topic, event: "system"}, 5000
+
+      assert_receive {[:realtime, :rate_counter, :channel, :joins], %{sum: 1}}
+      refute_receive {[:realtime, :rate_counter, :channel, :events], :_}, 5000
+      refute_receive {[:realtime, :rate_counter, :channel, :db_events], :_}, 5000
+    end
+
+    test "broadcast events" do
+      {socket, _} = get_connection()
+      config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
+      topic = "realtime:any"
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      # Join events
+      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{topic: ^topic, event: "presence_state"}
+      assert_receive %Message{topic: ^topic, event: "system"}, 5000
+      Process.sleep(5000)
+
+      # Broadcast events
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic, "broadcast", payload)
+
+      assert_receive %Message{topic: ^topic, event: "broadcast", payload: ^payload}
+
+      assert_receive {[:realtime, :rate_counter, :channel, :events], %{sum: 1}}
+      refute_receive {[:realtime, :rate_counter, :channel, :db_events], %{sum: 1}}
+      refute_receive {[:realtime, :rate_counter, :channel, :joins], :_}
+    end
+
+    test "presence events" do
+      {socket, _} = get_connection()
+      config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
+      topic = "realtime:any"
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      # Join events
+      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{topic: ^topic, event: "presence_state"}
+      assert_receive %Message{topic: ^topic, event: "system"}, 5000
+      assert_receive {[:realtime, :rate_counter, :channel, :joins], %{sum: 1}}
+      Process.sleep(5000)
+
+      # Presence events
+      {socket, _} = get_connection("authenticated")
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{topic: ^topic, event: "presence_state"}
+      assert_receive %Message{topic: ^topic, event: "system"}, 5000
+
+      assert_receive {[:realtime, :rate_counter, :channel, :events], %{sum: 1}}
+      assert_receive {[:realtime, :rate_counter, :channel, :joins], %{sum: 2}}
+      assert_receive {[:realtime, :rate_counter, :channel, :events], %{sum: 1}}
+      refute_receive {[:realtime, :rate_counter, :channel, :db_events], %{sum: 1}}
+    end
+
+    test "postgres changes events" do
+      {socket, _} = get_connection()
+      config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
+      topic = "realtime:any"
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      # Join events
+      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{topic: ^topic, event: "presence_state"}
+      assert_receive %Message{topic: ^topic, event: "system"}, 5000
+      assert_receive {[:realtime, :rate_counter, :channel, :joins], %{sum: 1}}
+      Process.sleep(5000)
+
+      # Postgres Change events
+      tenant = Tenants.get_tenant_by_external_id(@external_id)
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      Postgrex.query!(conn, "insert into test (details) values ('test')", [])
+
+      assert_receive %Message{
+                       topic: ^topic,
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+                           "record" => %{"details" => "test", "id" => 1},
+                           "schema" => "public",
+                           "table" => "test",
+                           "type" => "INSERT"
+                         }
+                       }
+                     },
+                     200
+
+      refute_receive {[:realtime, :rate_counter, :channel, :joins], :_}
+      assert_receive {[:realtime, :rate_counter, :channel, :events], %{sum: 1}}, 200
+      assert_receive {[:realtime, :rate_counter, :channel, :db_events], %{sum: 1}}, 1000
+    end
   end
 
   defp token_valid(role, claims \\ %{}), do: generate_token(Map.put(claims, :role, role))

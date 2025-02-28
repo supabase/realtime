@@ -20,6 +20,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   @spec handle(map(), Phoenix.Socket.t()) :: {:reply, :error | :ok, Phoenix.Socket.t()}
   def handle(%{"event" => event} = payload, socket) do
+    IO.inspect(event)
     event = String.downcase(event, :ascii)
 
     case handle_presence_event(event, payload, socket) do
