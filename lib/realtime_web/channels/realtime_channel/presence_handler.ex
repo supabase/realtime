@@ -18,17 +18,16 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias RealtimeWeb.Presence
   alias RealtimeWeb.RealtimeChannel.Logging
 
-  @spec handle(map(), Phoenix.Socket.t()) ::
-          {:noreply, Phoenix.Socket.t()} | {:reply, :error | :ok, Phoenix.Socket.t()}
+  @spec handle(map(), Phoenix.Socket.t()) :: {:reply, :error | :ok, Phoenix.Socket.t()}
   def handle(%{"event" => event} = payload, socket) do
     event = String.downcase(event, :ascii)
 
     case handle_presence_event(event, payload, socket) do
       {:ok, socket} ->
-        {:noreply, socket}
+        {:reply, :ok, socket}
 
       {:error, socket} ->
-        {:noreply, socket}
+        {:reply, :error, socket}
     end
   end
 

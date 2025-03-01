@@ -132,6 +132,7 @@ describe("presence extension", () => {
     let supabase = await createClient(url, token, { realtime });
 
     let result: any = [];
+    let error = null;
     let topic = "topic:" + crypto.randomUUID();
     let message = crypto.randomUUID();
     let key = crypto.randomUUID();
@@ -145,7 +146,10 @@ describe("presence extension", () => {
       )
       .subscribe(async (status: string) => {
         if (status == "SUBSCRIBED") {
-          await channel.track(expectedPayload);
+          const res = await channel.track(expectedPayload, { timeout: 1000 });
+          if (res == "timed out") {
+            error = res;
+          }
         }
       });
 
@@ -155,6 +159,7 @@ describe("presence extension", () => {
     let presences = result[0].newPresences[0];
     assertEquals(result[0].key, key);
     assertEquals(presences.message, message);
+    assertEquals(error, null);
   });
 
   it("user is able to receive presence updates on private channels", async () => {
@@ -163,6 +168,7 @@ describe("presence extension", () => {
     await supabase.realtime.setAuth();
 
     let result: any = [];
+    let error = null;
     let topic = "topic:" + crypto.randomUUID();
     let message = crypto.randomUUID();
     let key = crypto.randomUUID();
@@ -178,7 +184,10 @@ describe("presence extension", () => {
       )
       .subscribe(async (status: string) => {
         if (status == "SUBSCRIBED") {
-          await channel.track(expectedPayload);
+          const res = await channel.track(expectedPayload, { timeout: 1000 });
+          if (res == "timed out") {
+            error = res;
+          }
         }
       });
 
@@ -188,6 +197,7 @@ describe("presence extension", () => {
     let presences = result[0].newPresences[0];
     assertEquals(result[0].key, key);
     assertEquals(presences.message, message);
+    assertEquals(error, null);
   });
 });
 
