@@ -5,8 +5,9 @@ defmodule Realtime.Application do
 
   use Application
   require Logger
-  alias DBConnection.App
+
   alias Realtime.Repo.Replica
+
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
