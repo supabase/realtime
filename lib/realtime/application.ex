@@ -5,7 +5,9 @@ defmodule Realtime.Application do
 
   use Application
   require Logger
+
   alias Realtime.Repo.Replica
+
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
@@ -48,6 +50,7 @@ defmodule Realtime.Application do
 
     region = Application.get_env(:realtime, :region)
     :syn.join(RegionNodes, region, self(), node: node())
+    migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
 
     children =
       [
@@ -70,7 +73,7 @@ defmodule Realtime.Application do
          child_spec: {DynamicSupervisor, max_restarts: 0},
          strategy: :one_for_one,
          name: Realtime.Tenants.Migrations.DynamicSupervisor,
-         partitions: System.schedulers_online() * 2},
+         partitions: migration_partition_slots},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor, strategy: :one_for_one, name: Realtime.Tenants.Connect.DynamicSupervisor},
         {PartitionSupervisor,
