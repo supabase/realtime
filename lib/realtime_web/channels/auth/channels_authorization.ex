@@ -31,7 +31,7 @@ defmodule RealtimeWeb.ChannelsAuthorization do
 
       {:error, [message: validation_timer, claim: "exp", claim_val: claim_val]}
       when is_integer(validation_timer) ->
-        msg = "Token hasexpired #{validation_timer - claim_val} seconds ago"
+        msg = "Token has expired #{validation_timer - claim_val} seconds ago"
         {:error, :expired_token, msg}
 
       {:error, reason} ->

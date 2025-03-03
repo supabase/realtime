@@ -405,7 +405,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def terminate(reason, _state) do
-    Logger.debug("Channel terminated with reason: " <> inspect(reason))
+    Logger.debug("Channel terminated with reason: #{reason}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
     :ok
   end
