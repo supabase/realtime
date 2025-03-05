@@ -4,6 +4,7 @@ defmodule Realtime.PromEx.Plugins.Tenants do
   use PromEx.Plugin
 
   alias PromEx.MetricTypes.Event
+  alias Realtime.Tenants.Connect
 
   require Logger
 
@@ -28,32 +29,28 @@ defmodule Realtime.PromEx.Plugins.Tenants do
   def polling_metrics(opts) do
     poll_rate = Keyword.get(opts, :poll_rate)
 
-    [metrics(poll_rate)]
-  end
-
-  defp metrics(poll_rate) do
-    Polling.build(
-      :realtime_tenants_events,
-      poll_rate,
-      {__MODULE__, :execute_metrics, []},
-      [
-        last_value(
-          [:realtime, :tenants, :connected],
-          event_name: @event_connected,
-          description: "The total count of connected tenants.",
-          measurement: :connected
-        )
-      ]
-    )
+    [
+      Polling.build(
+        :realtime_tenants_events,
+        poll_rate,
+        {__MODULE__, :execute_metrics, []},
+        [
+          last_value(
+            [:realtime, :tenants, :connected],
+            event_name: @event_connected,
+            description: "The total count of connected tenants.",
+            measurement: :connected
+          )
+        ]
+      )
+    ]
   end
 
   def execute_metrics do
     connected =
-      if Enum.member?(:syn.node_scopes(), Extensions.PostgresCdcRls) do
-        :syn.local_registry_count(Extensions.PostgresCdcRls)
-      else
-        -1
-      end
+      if Enum.member?(:syn.node_scopes(), Connect),
+        do: :syn.local_registry_count(Connect),
+        else: -1
 
     execute_metrics(@event_connected, %{connected: connected})
   end
