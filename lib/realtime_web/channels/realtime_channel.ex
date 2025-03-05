@@ -48,7 +48,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       socket
       |> assign_access_token(params)
       |> assign_counter()
-      |> assign(:using_broadcast?, !!params["config"]["broadcast"])
       |> assign(:private?, !!params["config"]["private"])
       |> assign(:policies, nil)
 
@@ -67,7 +66,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       Realtime.UsersCounter.add(transport_pid, tenant_id)
       RealtimeWeb.Endpoint.subscribe(tenant_topic)
       Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
-
       is_new_api = new_api?(params)
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
 
@@ -393,6 +391,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in(type, payload, socket) do
+    IO.inspect(type, payload)
     socket = count(socket)
 
     # Log info here so that bad messages from clients won't flood Logflare
@@ -405,7 +404,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def terminate(reason, _state) do
-    Logger.debug("Channel terminated with reason: " <> inspect(reason))
+    Logger.debug("Channel terminated with reason: #{reason}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
     :ok
   end
@@ -696,18 +695,12 @@ defmodule RealtimeWeb.RealtimeChannel do
          %{assigns: %{private?: true}} = socket
        )
        when not is_nil(topic) and not is_nil(db_conn) do
-    %{using_broadcast?: using_broadcast?} = socket.assigns
-
     authorization_context = socket.assigns.authorization_context
 
     with {:ok, socket} <-
            Authorization.get_read_authorizations(socket, db_conn, authorization_context) do
       cond do
         match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
-          {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"}
-
-        using_broadcast? and
-            match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies) ->
           {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"}
 
         true ->
