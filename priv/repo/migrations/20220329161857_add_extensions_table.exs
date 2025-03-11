@@ -12,7 +12,7 @@ defmodule Realtime.Repo.Migrations.AddExtensionsTable do
         references(:tenants, on_delete: :delete_all, type: :string, column: :external_id)
       )
 
-      timestamps()
+      timestamps(type: :utc_datetime_usec)
     end
 
     create(index(:extensions, [:tenant_external_id, :type], unique: true))

@@ -8,7 +8,7 @@ defmodule Realtime.Tenants.Migrations.CreateListChangesFunction do
       "create or replace function realtime.list_changes(publication name, slot_name name, max_changes int, max_record_bytes int)
       returns setof realtime.wal_rls
       language sql
-      set log_min_messages to 'fatal'
+
     as $$
       with pub as (
         select

@@ -15,7 +15,7 @@ defmodule Realtime.Api.Extensions do
     field(:type, :string)
     field(:settings, :map)
     belongs_to(:tenant, Realtime.Api.Tenant, foreign_key: :tenant_external_id, type: :string)
-    timestamps()
+    timestamps(type: :utc_datetime_usec) 
   end
 
   def changeset(extension, attrs) do

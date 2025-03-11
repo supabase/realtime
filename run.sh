@@ -3,6 +3,46 @@ set -euo pipefail
 set -x
 ulimit -n
 
+
+echo "Testing database connection..."
+
+# Use environment variables to construct connection string
+POSTGRES_HOST=${DB_HOST}
+POSTGRES_PORT=${DB_PORT}
+POSTGRES_DB=${DB_NAME}
+POSTGRES_USER=${DB_USER}
+POSTGRES_PASSWORD=${DB_PASSWORD}
+
+# Construct connection string
+PG_CONN="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}"
+
+# Test connection and search_path
+echo "Trying to connect to PostgreSQL at ${POSTGRES_HOST}:${POSTGRES_PORT} as ${POSTGRES_USER}..."
+if psql "${PG_CONN}/${POSTGRES_DB}" -c "SELECT 1;" > /dev/null 2>&1; then
+    echo "✅ Database connection successful!"
+    
+    # Test search_path
+    echo "Testing search_path setting..."
+    psql "${PG_CONN}/${POSTGRES_DB}" -c "SET search_path TO _realtime; SELECT current_schema();" 
+    
+    # List available schemas
+    echo "Available schemas:"
+    psql "${PG_CONN}/${POSTGRES_DB}" -c "\dn"
+    
+    # Check if _realtime schema exists
+    if psql "${PG_CONN}/${POSTGRES_DB}" -t -c "SELECT 1 FROM information_schema.schemata WHERE schema_name = '_realtime';" | grep -q 1; then
+        echo "✅ _realtime schema exists"
+    else
+        echo "❌ Warning: _realtime schema does not exist"
+    fi
+else
+    echo "❌ Failed to connect to the database. Please check your credentials and network."
+    echo "Error details:"
+    psql "${PG_CONN}/${POSTGRES_DB}" -c "SELECT 1;"
+    exit 1
+fi
+
+
 if [ ! -z "$RLIMIT_NOFILE" ]; then
     echo "Setting RLIMIT_NOFILE to ${RLIMIT_NOFILE}"
     ulimit -Sn "$RLIMIT_NOFILE"
@@ -54,17 +94,31 @@ upload_crash_dump_to_s3() {
 
     exit "$EXIT_CODE"
 }
-
 if [ "${ENABLE_ERL_CRASH_DUMP:-false}" = true ]; then
     trap upload_crash_dump_to_s3 INT TERM KILL EXIT
 fi
 
-echo "Running migrations"
-sudo -E -u nobody /app/bin/migrate
+
+echo "Running migrations..."
+if ! sudo -E -u nobody /app/bin/migrate; then
+    echo "❌ Migration failed, exiting"
+    # exit 1
+fi
+echo "✅ Migrations completed"
 
 if [ "${SEED_SELF_HOST-}" = true ]; then
-    echo "Seeding selfhosted Realtime"
-    sudo -E -u nobody /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)'
+    echo "Seeding selfhosted Realtime..."
+    echo "Checking database connection..."
+    if ! sudo -E -u nobody /app/bin/realtime eval 'IO.inspect(Realtime.Repo.query("SELECT 1"))'; then
+        echo "❌ Database connection failed"
+        # exit 1
+    fi
+    echo "Running seeding..."
+    if ! sudo -E -u nobody /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)'; then
+        echo "❌ Seeding failed"
+        # exit 1
+    fi
+    echo "✅ Seeding completed"
 fi
 
 echo "Starting Realtime"

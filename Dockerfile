@@ -55,6 +55,8 @@ RUN cd assets \
 # Compile the release
 RUN mix compile
 
+
+
 # Changes to config/runtime.exs don't require recompiling the code
 COPY config/runtime.exs config/
 COPY rel rel
@@ -74,7 +76,7 @@ ENV ECTO_IPV6 true
 ENV ERL_AFLAGS "-proto_dist inet6_tcp"
 
 RUN apt-get update -y && \
-    apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini curl && \
+    apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini curl postgresql-client && \
     apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Set the locale

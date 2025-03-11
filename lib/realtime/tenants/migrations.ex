@@ -159,31 +159,54 @@ defmodule Realtime.Tenants.Migrations do
 
     spec = {__MODULE__, attrs}
 
+    Logger.info("Starting migration process for tenant: #{tenant.external_id}")
     case DynamicSupervisor.start_child(supervisor, spec) do
-      :ignore -> :ok
-      error -> error
+      :ignore ->
+        Logger.info("Migration process for tenant #{tenant.external_id} already running, skipping")
+        :ok
+      {:ok, _pid} ->
+        Logger.info("Migration process started for tenant #{tenant.external_id}")
+        :ok
+      {:error, error} ->
+        Logger.error("Failed to start migration process for tenant #{tenant.external_id}: #{inspect(error)}")
+        {:error, error}
     end
   end
 
   def start_link(%__MODULE__{tenant_external_id: tenant_external_id} = attrs) do
     name = {:via, Registry, {Unique, {__MODULE__, :host, tenant_external_id}}}
+    Logger.info("Initializing migration GenServer for tenant: #{tenant_external_id}")
     GenServer.start_link(__MODULE__, attrs, name: name)
   end
 
   def init(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings}) do
     Logger.metadata(external_id: tenant_external_id, project: tenant_external_id)
+    Logger.info("Starting migration initialization for tenant: #{tenant_external_id}")
 
     case migrate(settings) do
-      {:ok, _} -> :ignore
-      {:error, error} -> {:stop, error}
+      {:ok, result} ->
+        Logger.info("Migration initialization completed successfully for tenant #{tenant_external_id}")
+        {:ok, result}
+      {:error, error} ->
+        Logger.error("Migration initialization failed for tenant #{tenant_external_id}: #{inspect(error)}")
+        {:stop, error}
     end
   end
 
   defp migrate(settings) do
     settings = Database.from_settings(settings, "realtime_migrations", :stop)
 
-    [
-      hostname: settings.hostname,
+    # Apply fallback for hostname if it's "db"
+    adjusted_hostname = if settings.hostname == "db" do
+      Logger.warn("Hostname 'db' detected in migration, falling back to DB_HOST: #{System.get_env("DB_HOST")}")
+      System.get_env("DB_HOST", "your-rds.ap-southeast-2.rds.amazonaws.com")
+    else
+      settings.hostname
+    end
+
+    Logger.info("Configuring database connection for migration: hostname=#{adjusted_hostname}, database=#{settings.database}, port=#{settings.port}")
+    connection_config = [
+      hostname: adjusted_hostname,
       port: settings.port,
       database: settings.database,
       password: settings.password,
@@ -191,20 +214,47 @@ defmodule Realtime.Tenants.Migrations do
       pool_size: settings.pool_size,
       backoff_type: settings.backoff_type,
       socket_options: settings.socket_options,
-      parameters: [application_name: settings.application_name],
+      parameters: [application_name: settings.application_name, search_path: "realtime"],
       ssl: settings.ssl
     ]
-    |> Repo.with_dynamic_repo(fn repo ->
-      Logger.info("Applying migrations to #{settings.hostname}")
 
+    Repo.with_dynamic_repo(connection_config, fn repo ->
+      Logger.info("Applying migrations with dynamic repo for tenant, schema: realtime")
       try do
-        opts = [all: true, prefix: "realtime", dynamic_repo: repo]
-        res = Ecto.Migrator.run(Repo, @migrations, :up, opts)
+        # Ensure the realtime schema exists (no need to stop conn manually)
+        Postgrex.query!(Repo.get_dynamic_repo(), "CREATE SCHEMA IF NOT EXISTS realtime", [])
 
-        {:ok, res}
+        opts = [all: true, prefix: "realtime", dynamic_repo: repo]
+        Logger.info("Migration options: #{inspect(opts)}")
+        total_count = 0
+        failed_count = 0
+
+        migrations = @migrations
+        Logger.info("Found migrations: #{inspect(migrations)}")
+
+        for {version, module} <- migrations do
+          applied = Enum.any?(Ecto.Migrator.migrated_versions(repo), &(&1 == version))
+          if applied do
+            Logger.info("Migration #{version} (#{module}) already applied")
+          else
+            Logger.info("Applying migration: #{version} (#{module})")
+            case Ecto.Migrator.up(repo, version, module) do
+              :ok ->
+                total_count = total_count + 1
+                Logger.info("✅ Successfully applied migration: #{version} (#{module})")
+              {:error, error} ->
+                failed_count = failed_count + 1
+                Logger.error("❌ Error applying migration #{version} (#{module}): #{inspect(error)}")
+            end
+          end
+        end
+
+        Logger.info("Migration process completed - Success: #{total_count}, Failed: #{failed_count}")
+        {:ok, %{total: total_count, failed: failed_count}}
       rescue
         error ->
           log_error("MigrationsFailedToRun", error)
+          Logger.error("Unexpected error during migration: #{inspect(error)}")
           {:error, error}
       end
     end)
@@ -215,7 +265,7 @@ defmodule Realtime.Tenants.Migrations do
   """
   @spec create_partitions(pid()) :: :ok
   def create_partitions(db_conn_pid) do
-    Logger.info("Creating partitions for realtime.messages")
+    Logger.info("Starting partition creation for realtime.messages")
     today = Date.utc_today()
     yesterday = Date.add(today, -1)
     future = Date.add(today, 3)
@@ -227,21 +277,27 @@ defmodule Realtime.Tenants.Migrations do
       start_timestamp = Date.to_string(date)
       end_timestamp = Date.to_string(Date.add(date, 1))
 
-      Database.transaction(db_conn_pid, fn conn ->
+      Logger.info("Creating partition: #{partition_name}, range: #{start_timestamp} to #{end_timestamp}")
+      case Database.transaction(db_conn_pid, fn conn ->
         query = """
         CREATE TABLE IF NOT EXISTS realtime.#{partition_name}
         PARTITION OF realtime.messages
         FOR VALUES FROM ('#{start_timestamp}') TO ('#{end_timestamp}');
         """
 
-        case Postgrex.query(conn, query, []) do
-          {:ok, _} -> Logger.debug("Partition #{partition_name} created")
-          {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> :ok
-          {:error, error} -> log_error("PartitionCreationFailed", error)
-        end
-      end)
+        Postgrex.query(conn, query, [])
+      end) do
+        {:ok, _} ->
+          Logger.info("✅ Partition #{partition_name} created successfully")
+        {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} ->
+          Logger.info("⚠ Partition #{partition_name} already exists, skipping")
+        {:error, error} ->
+          log_error("PartitionCreationFailed", error)
+          Logger.error("❌ Failed to create partition #{partition_name}: #{inspect(error)}")
+      end
     end)
 
+    Logger.info("Partition creation process completed")
     :ok
   end
 end

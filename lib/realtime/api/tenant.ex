@@ -34,7 +34,8 @@ defmodule Realtime.Api.Tenant do
       on_replace: :delete
     )
 
-    timestamps()
+    # Update timestamps to use utc_datetime for timestamptz compatibility
+    timestamps(type: :utc_datetime_usec)
   end
 
   @doc false

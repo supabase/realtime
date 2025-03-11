@@ -11,7 +11,7 @@ defmodule Realtime.Tenants.Migrations.RedefineAuthorizationTables do
     create_if_not_exists table(:messages) do
       add :topic, :text, null: false
       add :extension, :text, null: false
-      timestamps()
+      timestamps(type: :utc_datetime_usec)
     end
 
     create_if_not_exists index(:messages, [:topic])
