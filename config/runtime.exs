@@ -239,9 +239,11 @@ cluster_topologies =
     end
   end)
 
-config :libcluster,
-  debug: false,
-  topologies: cluster_topologies
+if config_env() == :prod do
+  config :libcluster,
+    debug: false,
+    topologies: cluster_topologies
+end
 
 if System.get_env("LOGS_ENGINE") == "logflare" do
   if !System.get_env("LOGFLARE_API_KEY") or !System.get_env("LOGFLARE_SOURCE_ID") do

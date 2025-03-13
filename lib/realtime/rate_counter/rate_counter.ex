@@ -203,10 +203,7 @@ defmodule Realtime.RateCounter do
     {:stop, :normal, state}
   end
 
-  def handle_info(
-        {:DOWN, _, :process, counter_pid, _},
-        %{counter_pid: counter_pid} = state
-      ) do
+  def handle_info({:DOWN, _, :process, counter_pid, _}, %{counter_pid: counter_pid} = state) do
     {:stop, :shutdown, state}
   end
 

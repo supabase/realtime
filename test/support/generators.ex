@@ -3,6 +3,8 @@ defmodule Generators do
   Data genarators for tests.
   """
 
+  alias Realtime.Api.Tenant
+  alias Realtime.Crypto
   alias Realtime.Database
 
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
@@ -36,11 +38,7 @@ defmodule Generators do
     }
 
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
-
-    {:ok, tenant} =
-      create_attrs
-      |> Map.merge(override)
-      |> Realtime.Api.create_tenant()
+    {:ok, tenant} = create_attrs |> Map.merge(override) |> Realtime.Api.create_tenant()
 
     tenant
   end
@@ -250,7 +248,14 @@ defmodule Generators do
     """
   end
 
-  def generate_jwt_token(secret, claims) do
+  def generate_jwt_token(secret, claims \\ %{role: "authenticated", exp: System.system_time(:second) + 100_000})
+
+  def generate_jwt_token(%Tenant{} = tenant, claims) do
+    secret = Crypto.decrypt!(tenant.jwt_secret)
+    generate_jwt_token(secret, claims)
+  end
+
+  def generate_jwt_token(secret, claims) when is_binary(secret) do
     signer = Joken.Signer.create("HS256", secret)
     {:ok, claims} = Joken.generate_claims(%{}, claims)
     {:ok, jwt, _} = Joken.encode_and_sign(claims, signer)

@@ -67,13 +67,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       else: Endpoint.broadcast_from(self(), tenant_topic, @event_type, payload)
   end
 
-  defp increment_rate_counter(
-         %{
-           assigns: %{
-             policies: %Policies{broadcast: %BroadcastPolicies{write: false}}
-           }
-         } = socket
-       ) do
+  defp increment_rate_counter(%{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: false}}}} = socket) do
     socket
   end
 

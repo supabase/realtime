@@ -68,25 +68,6 @@ defmodule Realtime.Latency do
   Pings all the nodes in the cluster one after another and returns with their responses.
   There is a timeout for a single node rpc, and a timeout to yield_many which should really
   never get hit because these pings happen async under the Realtime.TaskSupervisor.
-
-  ## Examples
-
-  Emulate a healthy remote node:
-
-      iex> [{%Task{}, {:ok, %{response: {:ok, {:pong, "not_set"}}}}}] = Realtime.Latency.ping()
-
-  Emulate a slow but healthy remote node:
-
-      iex> [{%Task{}, {:ok, %{response: {:ok, {:pong, "not_set"}}}}}] = Realtime.Latency.ping(5_000, 10_000, 30_000)
-
-  Emulate an unhealthy remote node:
-
-      iex> [{%Task{}, {:ok, %{response: {:badrpc, :timeout}}}}] = Realtime.Latency.ping(5_000, 1_000)
-
-  No response from our Task for a remote node at all:
-
-      iex> [{%Task{}, nil}] = Realtime.Latency.ping(10_000, 5_000, 2_000)
-
   """
 
   @spec ping :: [{Task.t(), tuple() | nil}]

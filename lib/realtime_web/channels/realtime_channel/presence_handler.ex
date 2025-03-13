@@ -23,11 +23,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     event = String.downcase(event, :ascii)
 
     case handle_presence_event(event, payload, socket) do
-      {:ok, socket} ->
-        {:reply, :ok, socket}
-
-      {:error, socket} ->
-        {:reply, :error, socket}
+      {:ok, socket} -> {:reply, :ok, socket}
+      {:error, socket} -> {:reply, :error, socket}
     end
   end
 
@@ -106,7 +103,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   defp track(socket, payload) do
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
-    socket = count(socket)
     payload = Map.get(payload, "payload", %{})
 
     case Presence.track(self(), tenant_topic, presence_key, payload) do
@@ -125,11 +121,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     end
   end
 
-  defp count(%{assigns: %{rate_counter: counter}} = socket) do
-    GenCounter.add(counter.id)
-    {:ok, rate_counter} = RateCounter.get(counter.id)
+  defp count(%{assigns: %{presence_rate_counter: presence_counter}} = socket) do
+    GenCounter.add(presence_counter.id)
+    {:ok, presence_rate_counter} = RateCounter.get(presence_counter.id)
 
-    assign(socket, :rate_counter, rate_counter)
+    assign(socket, :presence_rate_counter, presence_rate_counter)
   end
 
   defp presence_dirty_list(topic) do

@@ -16,13 +16,22 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
   end
 
   describe "maybe_log_handle_info/2" do
-    test "logs message when log_level is less than error" do
+    test "logs message when log_level is less than error and payload is structure" do
       channel_name = random_string()
-      msg = random_string()
-      socket = %{assigns: %{log_level: :debug, channel_name: channel_name}}
+      msg = %{"payload" => %{"a" => "b"}}
+      socket = %{assigns: %{log_level: :info, channel_name: channel_name}}
 
       assert capture_log(fn -> Logging.maybe_log_handle_info(socket, msg) end) =~
-               "HANDLE_INFO INCOMING ON #{channel_name} message: \"#{msg}\""
+               "Received message on #{channel_name} with payload: #{inspect(msg, pretty: true)}"
+    end
+
+    test "logs message when log_level is less than error and payload is string" do
+      channel_name = random_string()
+      msg = random_string()
+      socket = %{assigns: %{log_level: :info, channel_name: channel_name}}
+
+      assert capture_log(fn -> Logging.maybe_log_handle_info(socket, msg) end) =~
+               "Received message on #{channel_name} with payload: #{msg}"
     end
 
     test "does not log message when log_level is error" do

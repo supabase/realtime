@@ -1,9 +1,9 @@
 defmodule Realtime.PromEx.Plugins.TenantsTest do
-  alias Realtime.Tenants.Connect
-  alias Realtime.Rpc
-  use Realtime.DataCase
+  use Realtime.DataCase, async: true
 
   alias Realtime.PromEx.Plugins.Tenants
+  alias Realtime.Rpc
+  alias Realtime.Tenants.Connect
 
   defmodule MetricsTest do
     use PromEx, otp_app: :realtime_test_tenants

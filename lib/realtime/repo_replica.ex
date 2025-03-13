@@ -51,11 +51,11 @@ defmodule Realtime.Repo.Replica do
     # Do not create module if replica isn't set or configuration is not present
     cond do
       is_nil(replica) ->
-        Logger.warning("Replica region not found, defaulting to Realtime.Repo")
+        Logger.info("Replica region not found, defaulting to Realtime.Repo")
         Realtime.Repo
 
       is_nil(replica_conf) ->
-        Logger.warning("Replica config not found for #{region} region")
+        Logger.info("Replica config not found for #{region} region")
         Realtime.Repo
 
       true ->
