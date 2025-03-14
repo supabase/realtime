@@ -2,6 +2,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   # async: false due to the usage of mocks
   use Realtime.DataCase, async: false
 
+  import ExUnit.CaptureLog
   import Generators
   import Mock
 
@@ -145,6 +146,19 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
         end
 
         assert_not_called(Authorization.get_write_authorizations(:_, :_, :_))
+      end
+    end
+
+    test "logs out non recognized events" do
+      with_mock Authorization, [:passthrough], [] do
+        socket = %Phoenix.Socket{joined: true}
+
+        log =
+          capture_log(fn ->
+            assert {:reply, :error, %Phoenix.Socket{}} = PresenceHandler.handle(%{"event" => "unknown"}, socket)
+          end)
+
+        assert log =~ "UnknownPresenceEvent"
       end
     end
   end

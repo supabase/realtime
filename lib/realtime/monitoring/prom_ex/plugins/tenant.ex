@@ -145,6 +145,13 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           measurement: :limit,
           description: "Rate limit of joins per second on a Realtime Channel.",
           tags: [:tenant]
+        ),
+        sum(
+          [:realtime, :channel, :presence_events],
+          event_name: [:realtime, :rate_counter, :channel, :presence_events],
+          measurement: :sum,
+          description: "Sum of presence messages sent on a Realtime Channel.",
+          tags: [:tenant]
         )
       ]
     )

@@ -101,6 +101,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     {Presence.untrack(self(), tenant_topic, presence_key), socket}
   end
 
+  defp handle_presence_event(event, _, socket) do
+    log_error("UnknownPresenceEvent", event)
+    {:error, socket}
+  end
+
   defp track(socket, payload) do
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
     payload = Map.get(payload, "payload", %{})
