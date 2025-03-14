@@ -205,8 +205,17 @@ defmodule Realtime.Database do
     Logger.metadata(application_name: application_name)
     metadata = Logger.metadata()
 
-    [
-      hostname: hostname,
+    # Add fallback for hostname if it’s invalid (e.g., "db")
+    adjusted_hostname = if hostname == "db" do
+      Logger.warn("Hostname 'db' detected, falling back to DB_HOST environment variable: #{System.get_env("DB_HOST")}")
+      System.get_env("DB_HOST", "your-rds.ap-southeast-2.rds.amazonaws.com")
+    else
+      hostname
+    end
+
+    # Prepare connection options with adjusted hostname
+    opts = [
+      hostname: adjusted_hostname,
       port: port,
       database: database,
       username: username,
@@ -222,10 +231,21 @@ defmodule Realtime.Database do
         args
       end
     ]
-    |> then(fn opts ->
-      if max_restarts, do: Keyword.put(opts, :max_restarts, max_restarts), else: opts
-    end)
-    |> Postgrex.start_link()
+
+    opts = if max_restarts, do: Keyword.put(opts, :max_restarts, max_restarts), else: opts
+
+    Logger.configure(level: :debug)
+    Logger.debug("Attempting database connection: hostname=#{adjusted_hostname}, port=#{port}, database=#{database}, username=#{username}, password=#{password}, application_name=#{application_name}")
+
+    case Postgrex.start_link(opts) do
+      {:ok, pid} ->
+        Logger.debug("Successfully connected to database for #{application_name}")
+        {:ok, pid}
+
+      {:error, reason} ->
+        Logger.error("Failed to connect to database: #{inspect(reason)}. Credentials used: hostname=#{adjusted_hostname}, port=#{port}, database=#{database}, username=#{username}, password=#{password}, application_name=#{application_name}")
+        {:error, reason}
+    end
   end
 
   @doc """

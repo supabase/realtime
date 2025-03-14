@@ -12,6 +12,7 @@ defmodule Realtime.Application do
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
   def start(_type, _args) do
+    Logger.info("DEBUG: Application starting with DB_HOST=#{System.get_env("DB_HOST")}, DB_USER=#{System.get_env("DB_USER")}, DB_PASSWORD=#{System.get_env("DB_PASSWORD")}")
     primary_config = :logger.get_primary_config()
 
     # add the region to logs
