@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Verify Versions Updated
-        uses: tj-actions/changed-files@v41
+        uses: step-security/changed-files@v45
         id: verify_changed_files
         with:
           files: |
