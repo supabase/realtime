@@ -623,7 +623,7 @@ defmodule Realtime.Integration.RtChannelTest do
       {:ok, token} = generate_token(%{:exp => System.system_time(:second) - 1000, sub: sub})
 
       log =
-        capture_log(fn ->
+        capture_log([log_level: :warning], fn ->
           WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => token})
 
           assert_receive %Message{
@@ -647,7 +647,7 @@ defmodule Realtime.Integration.RtChannelTest do
       {:ok, token} = generate_token(%{:exp => System.system_time(:second) - 1000, sub: sub})
 
       log =
-        capture_log(fn ->
+        capture_log([level: :warning], fn ->
           WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => token})
 
           assert_receive %Message{event: "system"}, 500
@@ -814,7 +814,7 @@ defmodule Realtime.Integration.RtChannelTest do
         {:ok, access_token} = generate_token(%{:exp => System.system_time(:second) + 1000, role: "authenticated"})
 
         log =
-          capture_log(fn ->
+          capture_log([log_level: :warning], fn ->
             WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => access_token})
 
             assert_receive %Phoenix.Socket.Message{

@@ -30,15 +30,16 @@ defmodule RealtimeWeb.UserSocket do
       %{uri: %{host: host}, x_headers: headers} = opts
 
       {:ok, external_id} = Database.get_external_id(host)
+      log_level = String.to_existing_atom(@default_log_level)
 
-      log_level =
-        params
-        |> Map.get("log_level", @default_log_level)
-        |> then(fn
-          "" -> @default_log_level
-          level -> level
-        end)
-        |> String.to_existing_atom()
+      # TODO: Disabled log level setting for now
+      # params
+      # |> Map.get("log_level", @default_log_level)
+      # |> then(fn
+      #   "" -> @default_log_level
+      #   level -> level
+      # end)
+      # |> String.to_existing_atom()
 
       Logger.metadata(external_id: external_id, project: external_id)
       Logger.put_process_level(self(), log_level)
