@@ -698,6 +698,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp assign_authorization_context(socket, topic, access_token, claims) do
     authorization_context =
       Authorization.build_authorization_params(%{
+        tenant_id: socket.assigns.tenant,
         topic: topic,
         headers: Map.get(socket.assigns, :headers, []),
         jwt: access_token,

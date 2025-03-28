@@ -9,7 +9,7 @@ defmodule Realtime.DatabaseTest do
   alias Realtime.Tenants.Connect
 
   doctest Realtime.Database
-  def handle_telemetry(event, metadata, _, pid: pid), do: send(pid, {event, metadata})
+  def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
 
   setup do
     tenant = Containers.checkout_tenant()
@@ -194,14 +194,20 @@ defmodule Realtime.DatabaseTest do
 
     test "with telemetry event defined, emits telemetry event", %{db_conn: db_conn} do
       event = [:realtime, :database, :transaction]
+      opts = [telemetry: event]
 
-      Database.transaction(
-        db_conn,
-        fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(6)", []) end,
-        telemetry: event
-      )
+      Database.transaction(db_conn, fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(6)", []) end, opts)
+      assert_receive {^event, %{latency: _}, %{tenant_id: nil}}
+    end
 
-      assert_receive {^event, %{latency: _}}
+    test "with telemetry event defined, emits telemetry event with tenant_id", %{db_conn: db_conn} do
+      event = [:realtime, :database, :transaction]
+      tenant_id = random_string()
+      opts = [telemetry: event, tenant_id: tenant_id]
+
+      Database.transaction(db_conn, fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(6)", []) end, opts)
+
+      assert_receive {^event, %{latency: _}, %{tenant_id: ^tenant_id}}
     end
   end
 

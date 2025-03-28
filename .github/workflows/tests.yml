@@ -61,6 +61,6 @@ jobs:
       - name: Start epmd
         run: epmd -daemon
       - name: Run tests
-        run: MIX_ENV=test MAX_CASES=2 mix coveralls.github --trace
+        run: MIX_ENV=test MAX_CASES=1 mix coveralls.github --trace
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
