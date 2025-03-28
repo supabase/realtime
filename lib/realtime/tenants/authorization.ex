@@ -19,9 +19,10 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Repo
   alias Realtime.Tenants.Authorization.Policies
   alias DBConnection.ConnectionError
-  defstruct [:topic, :headers, :jwt, :claims, :role]
+  defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role]
 
   @type t :: %__MODULE__{
+          :tenant_id => binary() | nil,
           :topic => binary() | nil,
           :claims => map(),
           :headers => keyword({binary(), binary()}),
@@ -42,6 +43,7 @@ defmodule Realtime.Tenants.Authorization do
   @spec build_authorization_params(map()) :: t()
   def build_authorization_params(map) do
     %__MODULE__{
+      tenant_id: Map.get(map, :tenant_id),
       topic: Map.get(map, :topic),
       headers: Map.get(map, :headers),
       jwt: Map.get(map, :jwt),
@@ -157,6 +159,8 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   defp get_read_policies_for_connection(conn, authorization_context, policies) do
+    opts = [telemetry: [:realtime, :tenants, :read_authorization_check], tenant_id: authorization_context.tenant_id]
+
     Database.transaction(
       conn,
       fn transaction_conn ->
@@ -190,11 +194,13 @@ defmodule Realtime.Tenants.Authorization do
         Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
         policies
       end,
-      telemetry: [:realtime, :tenants, :read_authorization_check]
+      opts
     )
   end
 
   defp get_write_policies_for_connection(conn, authorization_context, policies) do
+    opts = [telemetry: [:realtime, :tenants, :write_authorization_check], tenant_id: authorization_context.tenant_id]
+
     Database.transaction(
       conn,
       fn transaction_conn ->
@@ -211,7 +217,7 @@ defmodule Realtime.Tenants.Authorization do
 
         policies
       end,
-      telemetry: [:realtime, :tenants, :write_authorization_check]
+      opts
     )
   end
 

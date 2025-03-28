@@ -329,6 +329,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
            :authenticated_read_broadcast_and_presence,
            :authenticated_write_broadcast_and_presence
          ]
+
     test "sends telemetry event", context do
       with_mock Realtime.Telemetry, execute: fn _, _, _ -> :ok end do
         {:ok, conn} =
@@ -349,7 +350,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
           Realtime.Telemetry.execute(
             [:realtime, :tenants, :read_authorization_check],
             %{latency: :_},
-            %{}
+            %{tenant_id: context.authorization_context.tenant_id}
           )
         )
 
@@ -357,7 +358,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
           Realtime.Telemetry.execute(
             [:realtime, :tenants, :write_authorization_check],
             %{latency: :_},
-            %{}
+            %{tenant_id: context.authorization_context.tenant_id}
           )
         )
       end
@@ -380,6 +381,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
     authorization_context =
       Authorization.build_authorization_params(%{
+        tenant_id: tenant.external_id,
         topic: topic,
         jwt: jwt,
         claims: claims,

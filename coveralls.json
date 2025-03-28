@@ -22,6 +22,7 @@
         "lib/realtime/tenants/authorization/policies/broadcast_policies.ex",
         "lib/realtime/tenants/authorization/policies/presence_policies.ex",
         "lib/realtime/tenants/repo/migrations/",
+        "/lib/realtime/tenants/cache_supervisor.ex",
         "test/"
     ]
 }

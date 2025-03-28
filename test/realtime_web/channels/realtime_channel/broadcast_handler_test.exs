@@ -224,6 +224,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
     authorization_context =
       Authorization.build_authorization_params(%{
+        tenant_id: tenant.external_id,
         topic: topic,
         jwt: jwt,
         claims: claims,

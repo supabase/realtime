@@ -29,6 +29,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
   def broadcast(%Plug.Conn{} = conn, %Tenant{} = tenant, messages, super_user) do
     auth_params = %{
+      tenant_id: tenant.external_id,
       headers: conn.req_headers,
       jwt: conn.assigns.jwt,
       claims: conn.assigns.claims,

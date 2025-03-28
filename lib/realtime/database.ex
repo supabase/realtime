@@ -149,7 +149,7 @@ defmodule Realtime.Database do
   @doc """
   Runs database transaction in local node or against a target node withing a Postgrex transaction
   """
-  @spec transaction(pid | DBConnection.t(), fun(), keyword()) :: {:ok, any()} | {:error, any()}
+  @spec transaction(pid | DBConnection.t(), fun(), keyword(), keyword()) :: {:ok, any()} | {:error, any()}
   def transaction(db_conn, func, opts \\ [], metadata \\ [])
 
   def transaction(%DBConnection{} = db_conn, func, opts, metadata),
@@ -173,8 +173,9 @@ defmodule Realtime.Database do
     telemetry = Keyword.get(opts, :telemetry, nil)
 
     if telemetry do
+      tenant_id = Keyword.get(opts, :tenant_id, nil)
       {latency, value} = :timer.tc(Postgrex, :transaction, [db_conn, func, opts], :millisecond)
-      Telemetry.execute(telemetry, %{latency: latency}, %{})
+      Telemetry.execute(telemetry, %{latency: latency}, %{tenant_id: tenant_id})
       value
     else
       Postgrex.transaction(db_conn, func, opts)
