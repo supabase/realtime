@@ -180,6 +180,13 @@ defmodule RealtimeWeb.RealtimeChannel do
           "This project only allows private channels"
         )
 
+      {:error, :tenant_suspended} ->
+        Logging.log_error_message(
+          :error,
+          "RealtimeDisabledForTenant",
+          "Realtime disabled for this tenant"
+        )
+
       {:error, :signature_error} ->
         Logging.log_error_message(:error, "JwtSignatureError", "Failed to validate JWT signature")
 
@@ -307,6 +314,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(:sync_presence, socket), do: PresenceHandler.sync(socket)
+  def handle_info(:unsuspend_tenant, socket), do: {:noreply, socket}
 
   def handle_info(msg, socket) do
     log_error("UnhandledSystemMessage", msg)
