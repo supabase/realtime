@@ -45,7 +45,7 @@ config :joken,
 # Print only errors during test
 config :logger,
   compile_time_purge_matching: [[module: Postgrex], [module: DBConnection]],
-  level: :error
+  level: :warning
 
 # Configures Elixir's Logger
 config :logger, :console,
