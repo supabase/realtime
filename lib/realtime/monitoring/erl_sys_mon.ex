@@ -12,7 +12,7 @@ defmodule Realtime.ErlSysMon do
     :busy_port,
     {:long_gc, 250},
     {:long_schedule, 100},
-    {:long_message_queue, true}
+    {:long_message_queue, {0, 1_000}}
   ]
   def start_link(args \\ @defults), do: GenServer.start_link(__MODULE__, args)
 
