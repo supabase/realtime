@@ -7,7 +7,7 @@ defmodule Realtime.Tenants.Migrations.AddPresencesPoliciesTable do
     create table(:presences) do
       add :channel_id, references(:channels, on_delete: :delete_all), null: false
       add :check, :boolean, default: false, null: false
-      timestamps()
+      timestamps(type: :utc_datetime_usec)
     end
 
     create unique_index(:presences, :channel_id)
