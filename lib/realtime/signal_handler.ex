@@ -18,7 +18,7 @@ defmodule Realtime.SignalHandler do
 
   @impl true
   def handle_event(signal, %{handler_mod: handler_mod} = state) do
-    Logger.warning("#{__MODULE__}: #{inspect(signal)} received")
+    Logger.error("#{__MODULE__}: #{inspect(signal)} received")
 
     if signal == :sigterm do
       Application.put_env(:realtime, :shutdown_in_progress, true)

@@ -11,7 +11,8 @@ defmodule Realtime.ErlSysMon do
     :busy_dist_port,
     :busy_port,
     {:long_gc, 250},
-    {:long_schedule, 100}
+    {:long_schedule, 100},
+    {:long_message_queue, {0, 1_000}}
   ]
   def start_link(args \\ @defults), do: GenServer.start_link(__MODULE__, args)
 
@@ -21,7 +22,7 @@ defmodule Realtime.ErlSysMon do
   end
 
   def handle_info(msg, state) do
-    Logger.warning("#{__MODULE__} message: " <> inspect(msg))
+    Logger.error("#{__MODULE__} message: " <> inspect(msg))
     {:noreply, state}
   end
 end
