@@ -35,14 +35,14 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def join("realtime:" <> sub_topic = topic, params, socket) do
     %{
-      assigns: %{tenant: tenant_id, log_level: _log_level, postgres_cdc_module: module},
+      assigns: %{tenant: tenant_id, log_level: log_level, postgres_cdc_module: module},
       channel_pid: channel_pid,
       serializer: serializer,
       transport_pid: transport_pid
     } = socket
 
     Logger.metadata(external_id: tenant_id, project: tenant_id)
-    # Logger.put_process_level(self(), log_level)
+    Logger.put_process_level(self(), log_level)
 
     socket =
       socket

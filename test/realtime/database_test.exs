@@ -212,7 +212,7 @@ defmodule Realtime.DatabaseTest do
   end
 
   @aux_mod (quote do
-              defmodule Aux do
+              defmodule DatabaseAux do
                 def checker(transaction_conn) do
                   Postgrex.query!(transaction_conn, "SELECT 1", [])
                 end
@@ -234,7 +234,7 @@ defmodule Realtime.DatabaseTest do
       tenant = Containers.checkout_tenant()
       {:ok, node} = Clustered.start(@aux_mod)
       {:ok, db_conn} = Rpc.call(node, Connect, :lookup_or_start_connection, [tenant.external_id])
-      assert {:ok, %Postgrex.Result{rows: [[1]]}} = Database.transaction(db_conn, &Aux.checker/1)
+      assert {:ok, %Postgrex.Result{rows: [[1]]}} = Database.transaction(db_conn, &DatabaseAux.checker/1)
       on_exit(fn -> Containers.checkin_tenant(tenant) end)
     end
 
@@ -242,7 +242,7 @@ defmodule Realtime.DatabaseTest do
       tenant = Containers.checkout_tenant()
       {:ok, node} = Clustered.start(@aux_mod)
       {:ok, db_conn} = Rpc.call(node, Connect, :lookup_or_start_connection, [tenant.external_id])
-      assert {:error, %Postgrex.Error{}} = Database.transaction(db_conn, &Aux.error/1)
+      assert {:error, %Postgrex.Error{}} = Database.transaction(db_conn, &DatabaseAux.error/1)
       on_exit(fn -> Containers.checkin_tenant(tenant) end)
     end
 
@@ -250,7 +250,7 @@ defmodule Realtime.DatabaseTest do
       tenant = Containers.checkout_tenant()
       {:ok, node} = Clustered.start(@aux_mod)
       {:ok, db_conn} = Rpc.call(node, Connect, :lookup_or_start_connection, [tenant.external_id])
-      assert {:error, %RuntimeError{}} = Database.transaction(db_conn, &Aux.exception/1)
+      assert {:error, %RuntimeError{}} = Database.transaction(db_conn, &DatabaseAux.exception/1)
       on_exit(fn -> Containers.checkin_tenant(tenant) end)
     end
   end

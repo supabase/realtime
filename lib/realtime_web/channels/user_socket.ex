@@ -16,7 +16,7 @@ defmodule RealtimeWeb.UserSocket do
   ## Channels
   channel("realtime:*", RealtimeChannel)
 
-  @default_log_level "error"
+  @default_log_level :error
 
   @impl true
   def id(%{assigns: %{tenant: tenant}}), do: subscribers_id(tenant)
@@ -30,19 +30,10 @@ defmodule RealtimeWeb.UserSocket do
       %{uri: %{host: host}, x_headers: headers} = opts
 
       {:ok, external_id} = Database.get_external_id(host)
-      log_level = String.to_existing_atom(@default_log_level)
-
-      # TODO: Disabled log level setting for now
-      # params
-      # |> Map.get("log_level", @default_log_level)
-      # |> then(fn
-      #   "" -> @default_log_level
-      #   level -> level
-      # end)
-      # |> String.to_existing_atom()
 
       Logger.metadata(external_id: external_id, project: external_id)
-      Logger.put_process_level(self(), log_level)
+      Logger.put_process_level(self(), :error)
+
       token = access_token(params, headers)
 
       with %Tenant{
@@ -74,7 +65,7 @@ defmodule RealtimeWeb.UserSocket do
           postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
           postgres_cdc_module: postgres_cdc_module,
           tenant: external_id,
-          log_level: log_level,
+          log_level: log_level(params),
           tenant_token: token,
           headers: opts.x_headers
         }
@@ -117,6 +108,13 @@ defmodule RealtimeWeb.UserSocket do
 
       _ ->
         log_error("InvalidJWTToken", msg)
+    end
+  end
+
+  defp log_level(params) do
+    case Map.get(params, "log_level") do
+      level when level in ["info", "warning", "error"] -> String.to_existing_atom(level)
+      _ -> @default_log_level
     end
   end
 end
