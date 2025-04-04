@@ -117,9 +117,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
         ssl: connection_opts.ssl,
         backoff_type: :stop,
         sync_connect: true,
-        parameters: [
-          application_name: "realtime_replication_connection"
-        ]
+        auto_reconnect: true,
+        parameters: [application_name: "realtime_replication_connection"]
       ]
 
     case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do
