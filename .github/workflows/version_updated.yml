@@ -2,14 +2,14 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
     branches:
-      - 'main'
+      - "main"
 
 name: Default Checks
 
 jobs:
   versions_updated:
     name: Versions Updated
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -19,11 +19,11 @@ jobs:
         id: verify_changed_files
         with:
           files: |
-             mix.exs
+            mix.exs
 
       - name: Fail Unless Versions Updated
         id: fail_unless_changed
         if: steps.verify_changed_files.outputs.any_changed == 'false'
         run: |
-              echo "::error ::Please update the mix.exs version"
-              exit 1
+          echo "::error ::Please update the mix.exs version"
+          exit 1

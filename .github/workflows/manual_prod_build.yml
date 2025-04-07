@@ -10,7 +10,7 @@ on:
         required: true
 jobs:
   docker_x86_release:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
       arch: amd64
