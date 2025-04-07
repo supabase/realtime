@@ -5,7 +5,7 @@ on:
       - "main"
 jobs:
   release:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     outputs:
       published: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
@@ -20,7 +20,7 @@ jobs:
 
   docker_x86_release:
     needs: release
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     if: needs.release.outputs.published == 'true'
     timeout-minutes: 120
     env:
