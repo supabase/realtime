@@ -15,7 +15,7 @@ defmodule Realtime.Api.Message do
     field(:event, :string)
     field(:private, :boolean)
 
-    timestamps()
+    timestamps(type: :utc_datetime_usec)
   end
 
   def changeset(message, attrs) do

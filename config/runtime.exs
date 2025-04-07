@@ -1,9 +1,10 @@
 import Config
+require Logger
 
 config :logflare_logger_backend,
   url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 
-app_name = System.get_env("APP_NAME", "")
+app_name = System.get_env("APP_NAME", "🎸")
 default_db_host = System.get_env("DB_HOST", "127.0.0.1")
 username = System.get_env("DB_USER", "postgres")
 password = System.get_env("DB_PASSWORD", "postgres")
@@ -128,7 +129,26 @@ if config_env() != :test do
       query -> {Postgrex, :query!, [query, []]}
     end
 
+
+
+    # Log database configuration for debugging
+  hostname = System.get_env("DB_HOST", "127.0.0.1")
+  username = System.get_env("DB_USER", "postgres")
+  password = System.get_env("DB_PASSWORD", "postgres")
+  database = System.get_env("DB_NAME", "postgres")
+  port = System.get_env("DB_PORT", "5432")
+
+  Logger.info("🌻 Database connection details: hostname=#{hostname}, username=#{username}, password=#{password}, database=#{database}, port=#{port}")
+
   config :realtime, Realtime.Repo,
+    timezone: :utc,
+    hostname: hostname,
+    username: username,
+    password: password,
+    database: database,
+    port: String.to_integer(port),
+    pool_size: System.get_env("DB_POOL_SIZE", "5") |> String.to_integer(),
+    timezone: :utc,
     hostname: default_db_host,
     username: username,
     password: password,

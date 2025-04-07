@@ -11,7 +11,14 @@ defmodule Realtime.MixProject do
       aliases: aliases(),
       deps: deps(),
       dialyzer: dialyzer(),
-      test_coverage: [tool: ExCoveralls]
+      test_coverage: [tool: ExCoveralls],
+      # releases: [
+      #   realtime: [
+      #     include_executables_for: [:unix],
+      #     applications: [runtime_tools: :permanent],
+      #     exclude: ["priv/repo/migrations"]  # Exclude migrations from the release
+      #   ]
+      # ]
     ]
   end
 
