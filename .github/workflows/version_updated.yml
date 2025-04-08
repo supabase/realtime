@@ -6,6 +6,9 @@ on:
 
 name: Default Checks
 
+permissions:
+  contents: read
+
 jobs:
   versions_updated:
     name: Versions Updated
