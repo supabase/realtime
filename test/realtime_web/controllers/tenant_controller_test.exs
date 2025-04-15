@@ -87,11 +87,17 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant" do
     test "renders tenant when data is valid", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        ext_id = @default_tenant_attrs["external_id"]
-        conn = put(conn, Routes.tenant_path(conn, :update, ext_id), tenant: @default_tenant_attrs)
-        assert %{"id" => _id, "external_id" => ^ext_id} = json_response(conn, 201)["data"]
-        conn = get(conn, Routes.tenant_path(conn, :show, ext_id))
-        assert ^ext_id = json_response(conn, 200)["data"]["external_id"]
+        external_id = random_string()
+        port = Enum.random(5000..9000)
+        attrs = default_tenant_attrs(external_id, port)
+
+        Containers.initialize_no_tenant(external_id, port)
+        on_exit(fn -> Containers.stop_container(external_id) end)
+
+        conn = put(conn, Routes.tenant_path(conn, :update, external_id), tenant: attrs)
+        assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
+        conn = get(conn, Routes.tenant_path(conn, :show, external_id))
+        assert ^external_id = json_response(conn, 200)["data"]["external_id"]
         assert 200 = json_response(conn, 200)["data"]["max_concurrent_users"]
         assert 100 = json_response(conn, 200)["data"]["max_channels_per_client"]
         assert 100 = json_response(conn, 200)["data"]["max_events_per_second"]
@@ -101,15 +107,23 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "encrypt creds", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        ext_id = @default_tenant_attrs["external_id"]
-        conn = put(conn, ~p"/api/tenants/#{ext_id}", tenant: @default_tenant_attrs)
+        external_id = random_string()
+        port = Enum.random(5000..9000)
+        attrs = default_tenant_attrs(external_id, port)
+
+        Containers.initialize_no_tenant(external_id, port)
+        on_exit(fn -> Containers.stop_container(external_id) end)
+
+        conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+
         [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
+
         assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
         assert Crypto.encrypt!("postgres") == settings["db_name"]
         assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
         refute settings["db_password"]
 
-        %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id("external_id")
+        %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id(external_id)
 
         assert Crypto.encrypt!("postgres") == settings["db_password"]
       end
@@ -117,15 +131,36 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "renders errors when data is invalid", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        conn = post(conn, ~p"/api/tenants", tenant: @invalid_attrs)
+        conn = put(conn, ~p"/api/tenants/#{random_string()}", tenant: @invalid_attrs)
         assert json_response(conn, 422)["errors"] != %{}
       end
     end
 
     test "returns 403 when jwt is invalid", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:error, "invalid"} end do
-        conn = post(conn, ~p"/api/tenants", tenant: @default_tenant_attrs)
+        conn = put(conn, ~p"/api/tenants/external_id", tenant: @default_tenant_attrs)
         assert response(conn, 403)
+      end
+    end
+
+    test "run migrations on creation", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        external_id = random_string()
+        port = Enum.random(5500..9000)
+        Containers.initialize_no_tenant(external_id, port)
+        on_exit(fn -> Containers.stop_container(external_id) end)
+
+        assert nil == Tenants.get_tenant_by_external_id(external_id)
+
+        conn =
+          put(conn, Routes.tenant_path(conn, :update, external_id), tenant: default_tenant_attrs(external_id, port))
+
+        assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
+
+        tenant = Tenants.get_tenant_by_external_id(external_id)
+
+        {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+        assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
       end
     end
   end
@@ -326,25 +361,6 @@ defmodule RealtimeWeb.TenantControllerTest do
       end
     end
 
-    test "runs migrations", %{conn: conn} do
-      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
-        tenant = tenant_fixture()
-        tenant = Containers.initialize(tenant, true)
-        on_exit(fn -> Containers.stop_container(tenant) end)
-
-        {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-        assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
-
-        conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
-        data = json_response(conn, 200)["data"]
-        Process.sleep(2000)
-
-        assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
-
-        assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
-      end
-    end
-
     test "returns 404 when jwt is invalid", %{conn: conn, tenant: tenant} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:error, "invalid"} end do
         conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}/health")
@@ -357,5 +373,31 @@ defmodule RealtimeWeb.TenantControllerTest do
     tenant = Containers.checkout_tenant(true)
     on_exit(fn -> Containers.checkin_tenant(tenant) end)
     %{tenant: tenant}
+  end
+
+  defp default_tenant_attrs(external_id, port) do
+    %{
+      "external_id" => external_id,
+      "name" => external_id,
+      "extensions" => [
+        %{
+          "type" => "postgres_cdc_rls",
+          "settings" => %{
+            "db_host" => "127.0.0.1",
+            "db_name" => "postgres",
+            "db_user" => "supabase_admin",
+            "db_password" => "postgres",
+            "db_port" => "#{port}",
+            "poll_interval" => 100,
+            "poll_max_changes" => 100,
+            "poll_max_record_bytes" => 1_048_576,
+            "region" => "us-east-1",
+            "ssl_enforced" => false
+          }
+        }
+      ],
+      "postgres_cdc_default" => "postgres_cdc_rls",
+      "jwt_secret" => "new secret"
+    }
   end
 end

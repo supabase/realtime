@@ -11,6 +11,7 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
+  alias Realtime.Tenants.Migrations
   alias RealtimeWeb.OpenApiSchemas.EmptyResponse
   alias RealtimeWeb.OpenApiSchemas.ErrorResponse
   alias RealtimeWeb.OpenApiSchemas.NotFoundResponse
@@ -47,46 +48,6 @@ defmodule RealtimeWeb.TenantController do
     render(conn, "index.json", tenants: tenants)
   end
 
-  operation(:create,
-    summary: "Create tenant",
-    parameters: [
-      token: [
-        in: :header,
-        name: "Authorization",
-        schema: %OpenApiSpex.Schema{type: :string},
-        required: true,
-        example:
-          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
-      ]
-    ],
-    request_body: TenantParams.params(),
-    responses: %{
-      200 => TenantResponse.response(),
-      403 => EmptyResponse.response()
-    }
-  )
-
-  def create(conn, %{"tenant" => tenant_params}) do
-    extensions =
-      Enum.reduce(tenant_params["extensions"], [], fn
-        %{"type" => type, "settings" => settings}, acc ->
-          [%{"type" => type, "settings" => settings} | acc]
-
-        _e, acc ->
-          acc
-      end)
-
-    with {:ok, %Tenant{} = tenant} <-
-           Api.create_tenant(%{tenant_params | "extensions" => extensions}) do
-      Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
-
-      conn
-      |> put_status(:created)
-      |> put_resp_header("location", Routes.tenant_path(conn, :show, tenant))
-      |> render("show.json", tenant: tenant)
-    end
-  end
-
   operation(:show,
     summary: "Fetch tenant",
     parameters: [
@@ -110,9 +71,9 @@ defmodule RealtimeWeb.TenantController do
   def show(conn, %{"tenant_id" => id}) do
     Logger.metadata(external_id: id, project: id)
 
-    id
-    |> Api.get_tenant_by_external_id()
-    |> case do
+    tenant = Api.get_tenant_by_external_id(id)
+
+    case tenant do
       %Tenant{} = tenant ->
         render(conn, "show.json", tenant: tenant)
 
@@ -145,14 +106,33 @@ defmodule RealtimeWeb.TenantController do
 
   def update(conn, %{"tenant_id" => id, "tenant" => tenant_params}) do
     Logger.metadata(external_id: id, project: id)
+    tenant = Api.get_tenant_by_external_id(id)
 
-    case Api.get_tenant_by_external_id(id) do
+    case tenant do
       nil ->
-        create(conn, %{"tenant" => Map.put(tenant_params, "external_id", id)})
+        extensions =
+          Enum.reduce(tenant_params["extensions"], [], fn
+            %{"type" => type, "settings" => settings}, acc -> [%{"type" => type, "settings" => settings} | acc]
+            _e, acc -> acc
+          end)
+
+        with {:ok, %Tenant{} = tenant} <-
+               Api.create_tenant(%{tenant_params | "extensions" => extensions}),
+             :ok <- Migrations.run_migrations(tenant) do
+          Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
+
+          conn
+          |> put_status(:created)
+          |> put_resp_header("location", Routes.tenant_path(conn, :show, tenant))
+          |> render("show.json", tenant: tenant)
+        end
 
       tenant ->
         with {:ok, %Tenant{} = tenant} <- Api.update_tenant(tenant, tenant_params) do
-          render(conn, "show.json", tenant: tenant)
+          conn
+          |> put_status(:ok)
+          |> put_resp_header("location", Routes.tenant_path(conn, :show, tenant))
+          |> render("show.json", tenant: tenant)
         end
     end
   end

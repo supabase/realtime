@@ -1,6 +1,10 @@
 require Logger
-alias Realtime.{Api.Tenant, Repo}
+
 import Ecto.Adapters.SQL, only: [query: 3]
+
+alias Realtime.Api.Tenant
+alias Realtime.Repo
+alias Realtime.Tenants
 
 tenant_name = System.get_env("SELF_HOST_TENANT_NAME", "realtime-dev")
 env = if :ets.whereis(Mix.State) != :undefined, do: Mix.env(), else: :prod
@@ -36,22 +40,23 @@ Repo.transaction(fn ->
     ]
   })
   |> Repo.insert!()
+
+  tenant = Tenants.get_tenant_by_external_id(tenant_name)
+  Tenants.Migrations.run_migrations(tenant)
 end)
 
 if env in [:dev, :test] do
   publication = "supabase_realtime"
 
-  {:ok, _} =
-    Repo.transaction(fn ->
-      [
-        "drop publication if exists #{publication}",
-        "drop table if exists public.test_tenant;",
-        "create table public.test_tenant ( id SERIAL PRIMARY KEY, details text );",
-        "grant all on table public.test_tenant to anon;",
-        "grant all on table public.test_tenant to postgres;",
-        "grant all on table public.test_tenant to authenticated;",
-        "create publication #{publication} for table public.test_tenant"
-      ]
-      |> Enum.each(&query(Repo, &1, []))
-    end)
+  commands = [
+    "drop publication if exists #{publication}",
+    "drop table if exists public.test_tenant;",
+    "create table public.test_tenant ( id SERIAL PRIMARY KEY, details text );",
+    "grant all on table public.test_tenant to anon;",
+    "grant all on table public.test_tenant to postgres;",
+    "grant all on table public.test_tenant to authenticated;",
+    "create publication #{publication} for table public.test_tenant"
+  ]
+
+  {:ok, _} = Repo.transaction(fn -> Enum.each(commands, &query(Repo, &1, [])) end)
 end
