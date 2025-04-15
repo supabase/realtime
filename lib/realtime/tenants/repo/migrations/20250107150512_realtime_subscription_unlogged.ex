@@ -4,7 +4,8 @@ defmodule Realtime.Tenants.Migrations.RealtimeSubscriptionUnlogged do
 
   def change do
     execute("""
-    ALTER TABLE realtime.subscription SET UNLOGGED;
+    -- Commented to have oriole compatability
+    -- ALTER TABLE realtime.subscription SET UNLOGGED;
     """)
   end
 end
