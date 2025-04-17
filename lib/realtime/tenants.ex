@@ -5,7 +5,6 @@ defmodule Realtime.Tenants do
 
   require Logger
 
-  alias Realtime.Tenants.Migrations
   alias Realtime.Api.Tenant
   alias Realtime.Tenants.Connect
   alias Realtime.Repo
@@ -85,8 +84,6 @@ defmodule Realtime.Tenants do
 
       {:ok, _health_conn} ->
         connected_cluster = UsersCounter.tenant_users(external_id)
-        tenant = Cache.get_tenant_by_external_id(external_id)
-        Migrations.run_migrations(tenant)
 
         {:ok,
          %{
@@ -100,7 +97,6 @@ defmodule Realtime.Tenants do
       connected_cluster when is_integer(connected_cluster) ->
         tenant = Cache.get_tenant_by_external_id(external_id)
         {:ok, db_conn} = Database.connect(tenant, "realtime_health_check")
-        Migrations.run_migrations(tenant)
         Process.alive?(db_conn) && GenServer.stop(db_conn)
 
         {:ok,

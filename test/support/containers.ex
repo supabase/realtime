@@ -1,12 +1,14 @@
 defmodule Containers do
-  alias Realtime.Tenants
+  import ExUnit.CaptureLog
+
+  alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.GenCounter
   alias Realtime.RateCounter
+  alias Realtime.Tenants
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Migrations
 
-  import ExUnit.CaptureLog
   defstruct [:port, :tenant, using?: false]
 
   @type t :: %__MODULE__{port: integer(), tenant: Realtime.Api.Tenant.t(), using?: boolean()}
@@ -48,6 +50,37 @@ defmodule Containers do
     end
 
     tenant
+  end
+
+  def initialize_no_tenant(external_id, port) do
+    name = "realtime-test-#{external_id}"
+
+    capture_log(fn ->
+      if :ets.whereis(:containers) == :undefined, do: :ets.new(:containers, [:named_table, :set, :public])
+
+      {_, 0} =
+        System.cmd("docker", [
+          "run",
+          "-d",
+          "--name",
+          name,
+          "-e",
+          "POSTGRES_HOST=/var/run/postgresql",
+          "-e",
+          "POSTGRES_PASSWORD=postgres",
+          "-p",
+          "#{port}:5432",
+          "supabase/postgres:15.8.1.040",
+          "postgres",
+          "-c",
+          "config_file=/etc/postgresql/postgresql.conf"
+        ])
+
+      check_container_ready(name)
+      Process.sleep(1000)
+    end)
+
+    name
   end
 
   def checkout_tenant(run_migrations? \\ false) do
@@ -92,11 +125,16 @@ defmodule Containers do
     :ets.insert(:containers, {tenant.external_id, %{tenant: tenant, using?: false}})
   end
 
-  def stop_container(tenant) do
+  def stop_container(%Tenant{} = tenant) do
     :ets.delete(:containers, tenant.external_id)
     pid = Connect.whereis(tenant.external_id)
     if pid && Process.alive?(pid), do: Connect.shutdown(tenant.external_id)
     name = "realtime-test-#{tenant.external_id}"
+    System.cmd("docker", ["rm", "-f", name])
+  end
+
+  def stop_container(external_id) do
+    name = "realtime-test-#{external_id}"
     System.cmd("docker", ["rm", "-f", name])
   end
 
