@@ -89,7 +89,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()
         port = Enum.random(5000..9000)
-        attrs = default_tenant_attrs(external_id, port)
+        attrs = default_tenant_attrs(port)
 
         Containers.initialize_no_tenant(external_id, port)
         on_exit(fn -> Containers.stop_container(external_id) end)
@@ -109,7 +109,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()
         port = Enum.random(5000..9000)
-        attrs = default_tenant_attrs(external_id, port)
+        attrs = default_tenant_attrs(port)
 
         Containers.initialize_no_tenant(external_id, port)
         on_exit(fn -> Containers.stop_container(external_id) end)
@@ -153,7 +153,7 @@ defmodule RealtimeWeb.TenantControllerTest do
         assert nil == Tenants.get_tenant_by_external_id(external_id)
 
         conn =
-          put(conn, Routes.tenant_path(conn, :update, external_id), tenant: default_tenant_attrs(external_id, port))
+          put(conn, Routes.tenant_path(conn, :update, external_id), tenant: default_tenant_attrs(port))
 
         assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
 
@@ -375,10 +375,8 @@ defmodule RealtimeWeb.TenantControllerTest do
     %{tenant: tenant}
   end
 
-  defp default_tenant_attrs(external_id, port) do
+  defp default_tenant_attrs(port) do
     %{
-      "external_id" => external_id,
-      "name" => external_id,
       "extensions" => [
         %{
           "type" => "postgres_cdc_rls",
