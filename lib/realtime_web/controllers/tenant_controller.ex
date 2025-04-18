@@ -104,12 +104,14 @@ defmodule RealtimeWeb.TenantController do
     }
   )
 
-  def update(conn, %{"tenant_id" => id, "tenant" => tenant_params}) do
-    Logger.metadata(external_id: id, project: id)
-    tenant = Api.get_tenant_by_external_id(id)
+  def update(conn, %{"tenant_id" => external_id, "tenant" => tenant_params}) do
+    Logger.metadata(external_id: external_id, project: external_id)
+    tenant = Api.get_tenant_by_external_id(external_id)
 
     case tenant do
       nil ->
+        tenant_params = tenant_params |> Map.put("external_id", external_id) |> Map.put("name", external_id)
+
         extensions =
           Enum.reduce(tenant_params["extensions"], [], fn
             %{"type" => type, "settings" => settings}, acc -> [%{"type" => type, "settings" => settings} | acc]
