@@ -29,18 +29,7 @@ defmodule Realtime.Integration.RtChannelTest do
   @uri "ws://#{@external_id}.localhost:#{@port}/socket/websocket"
   @secret "secure_jwt_secret"
 
-  Application.put_env(:phoenix, Endpoint,
-    https: false,
-    http: [port: @port],
-    debug_errors: false,
-    server: true,
-    pubsub_server: __MODULE__,
-    secret_key_base: String.duplicate("a", 64)
-  )
-
-  Application.delete_env(:joken, :current_time_adapter)
-
-  defmodule Endpoint do
+  defmodule TestEndpoint do
     use Phoenix.Endpoint, otp_app: :phoenix
 
     @session_config store: :cookie,
@@ -67,6 +56,17 @@ defmodule Realtime.Integration.RtChannelTest do
       |> send_resp(200, Plug.CSRFProtection.get_csrf_token())
     end
   end
+
+  Application.put_env(:phoenix, TestEndpoint,
+    https: false,
+    http: [port: @port],
+    debug_errors: false,
+    server: true,
+    pubsub_server: __MODULE__,
+    secret_key_base: String.duplicate("a", 64)
+  )
+
+  Application.delete_env(:joken, :current_time_adapter)
 
   defmodule Token do
     use Joken.Config
