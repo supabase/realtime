@@ -88,7 +88,14 @@ defmodule RealtimeWeb.TenantControllerTest do
     test "renders tenant when data is valid with put", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()
-        port = Enum.random(5000..9000)
+
+        port =
+          5500..9000
+          |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+          |> Enum.random()
+
+        :ets.insert(:test_ports, {port})
+
         attrs = default_tenant_attrs(port)
 
         Containers.initialize_no_tenant(external_id, port)
@@ -109,7 +116,12 @@ defmodule RealtimeWeb.TenantControllerTest do
     test "renders tenant when data is valid with post", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()
-        port = Enum.random(5000..9000)
+
+        port =
+          5500..9000
+          |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+          |> Enum.random()
+
         attrs = default_tenant_attrs(port)
         attrs = Map.put(attrs, "external_id", external_id)
 
@@ -131,7 +143,12 @@ defmodule RealtimeWeb.TenantControllerTest do
     test "encrypt creds with put", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()
-        port = Enum.random(5000..9000)
+
+        port =
+          5500..9000
+          |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+          |> Enum.random()
+
         Containers.initialize_no_tenant(external_id, port)
         on_exit(fn -> Containers.stop_container(external_id) end)
 
@@ -154,7 +171,12 @@ defmodule RealtimeWeb.TenantControllerTest do
     test "encrypt creds with post", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()
-        port = Enum.random(5000..9000)
+
+        port =
+          5500..9000
+          |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+          |> Enum.random()
+
         Containers.initialize_no_tenant(external_id, port)
         on_exit(fn -> Containers.stop_container(external_id) end)
 
