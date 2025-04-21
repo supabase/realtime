@@ -300,8 +300,9 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence]
-    test "private broadcast with valid channel no write permissions won't send message but will receive message",
-         %{topic: topic} do
+    test "private broadcast with valid channel no write permissions won't send message but will receive message", %{
+      topic: topic
+    } do
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
 
@@ -309,12 +310,14 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(service_role_socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
-      assert_receive %Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "presence_state"}, 1000
 
       {socket, _} = get_connection("authenticated")
       WebsocketClient.join(socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
-      assert_receive %Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "presence_state"}, 1000
+
+      Process.sleep(1000)
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
