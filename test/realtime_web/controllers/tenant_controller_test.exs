@@ -469,6 +469,25 @@ defmodule RealtimeWeb.TenantControllerTest do
         assert json_response(conn, 404) == "Not Found"
       end
     end
+
+    test "runs migrations", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        tenant = tenant_fixture()
+        tenant = Containers.initialize(tenant, true)
+        on_exit(fn -> Containers.stop_container(tenant) end)
+
+        {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+        assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
+
+        conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+        data = json_response(conn, 200)["data"]
+        Process.sleep(2000)
+
+        assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
+
+        assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
+      end
+    end
   end
 
   defp create_tenant(_) do
