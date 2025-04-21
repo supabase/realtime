@@ -9,7 +9,14 @@ defmodule Generators do
 
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
-    port = Enum.random(5500..9000)
+    if :ets.whereis(:test_ports) == :undefined, do: :ets.new(:test_ports, [:named_table, :set, :public])
+
+    port =
+      5500..9000
+      |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+      |> Enum.random()
+
+    :ets.insert(:test_ports, {port})
 
     create_attrs = %{
       "external_id" => random_string(),

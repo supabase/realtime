@@ -23,9 +23,21 @@ defmodule Clustered do
   end
   ```
   """
+  @spec start(any()) :: {:ok, node}
   def start(aux_mod \\ nil) do
-    :net_kernel.start([:"main@127.0.0.1"])
-    :erlang.set_cookie(:cookie)
+    :ok =
+      case :net_kernel.start([:"main@127.0.0.1"]) do
+        {:ok, _} ->
+          :ok
+
+        {:error, {:already_started, _}} ->
+          :ok
+
+        {:error, reason} ->
+          raise "Failed to start node: #{inspect(reason)}"
+      end
+
+    true = :erlang.set_cookie(:cookie)
 
     {:ok, pid, node} =
       :peer.start_link(%{

@@ -135,6 +135,7 @@ defmodule Realtime.DatabaseTest do
                end)
     end
 
+    @tag db_pool: 1
     test "on checkout error, handles raised exception as an error", %{db_conn: db_conn} do
       for _ <- 1..5 do
         Task.start(fn ->

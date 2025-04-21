@@ -15,7 +15,6 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Postgrex
   alias Realtime.Database
   alias Realtime.GenCounter
-  alias Realtime.Integration.RtChannelTest.Endpoint
   alias Realtime.Integration.WebsocketClient
   alias Realtime.RateCounter
   alias Realtime.Tenants
@@ -29,18 +28,7 @@ defmodule Realtime.Integration.RtChannelTest do
   @uri "ws://#{@external_id}.localhost:#{@port}/socket/websocket"
   @secret "secure_jwt_secret"
 
-  Application.put_env(:phoenix, Endpoint,
-    https: false,
-    http: [port: @port],
-    debug_errors: false,
-    server: true,
-    pubsub_server: __MODULE__,
-    secret_key_base: String.duplicate("a", 64)
-  )
-
-  Application.delete_env(:joken, :current_time_adapter)
-
-  defmodule Endpoint do
+  defmodule TestEndpoint do
     use Phoenix.Endpoint, otp_app: :phoenix
 
     @session_config store: :cookie,
@@ -68,12 +56,24 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
+  Application.put_env(:phoenix, TestEndpoint,
+    https: false,
+    http: [port: @port],
+    debug_errors: false,
+    server: true,
+    pubsub_server: __MODULE__,
+    secret_key_base: String.duplicate("a", 64)
+  )
+
+  Application.delete_env(:joken, :current_time_adapter)
+
   defmodule Token do
     use Joken.Config
   end
 
   setup do
     RateCounter.stop(@external_id)
+    GenCounter.stop(@external_id)
     Cache.invalidate_tenant_cache(@external_id)
     Process.sleep(500)
 
@@ -83,7 +83,7 @@ defmodule Realtime.Integration.RtChannelTest do
   end
 
   setup_all do
-    capture_log(fn -> start_supervised!(Endpoint) end)
+    capture_log(fn -> start_supervised!(TestEndpoint) end)
     start_supervised!({Phoenix.PubSub, name: __MODULE__})
     :ok
   end
@@ -300,8 +300,9 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence]
-    test "private broadcast with valid channel no write permissions won't send message but will receive message",
-         %{topic: topic} do
+    test "private broadcast with valid channel no write permissions won't send message but will receive message", %{
+      topic: topic
+    } do
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
 
@@ -309,12 +310,14 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(service_role_socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
-      assert_receive %Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "presence_state"}, 1000
 
       {socket, _} = get_connection("authenticated")
       WebsocketClient.join(socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
-      assert_receive %Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "presence_state"}, 1000
+
+      Process.sleep(1000)
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
