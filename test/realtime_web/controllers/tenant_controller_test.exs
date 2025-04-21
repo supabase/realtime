@@ -85,7 +85,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   describe "create tenant" do
-    test "renders tenant when data is valid", %{conn: conn} do
+    test "renders tenant when data is valid with put", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()
         port = Enum.random(5000..9000)
@@ -105,7 +105,27 @@ defmodule RealtimeWeb.TenantControllerTest do
       end
     end
 
-    test "encrypt creds", %{conn: conn} do
+    test "renders tenant when data is valid with post", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        external_id = random_string()
+        port = Enum.random(5000..9000)
+        attrs = default_tenant_attrs(port)
+
+        Containers.initialize_no_tenant(external_id, port)
+        on_exit(fn -> Containers.stop_container(external_id) end)
+
+        conn = post(conn, Routes.tenant_path(conn, :update, external_id), tenant: attrs)
+        assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
+        conn = get(conn, Routes.tenant_path(conn, :show, external_id))
+        assert ^external_id = json_response(conn, 200)["data"]["external_id"]
+        assert 200 = json_response(conn, 200)["data"]["max_concurrent_users"]
+        assert 100 = json_response(conn, 200)["data"]["max_channels_per_client"]
+        assert 100 = json_response(conn, 200)["data"]["max_events_per_second"]
+        assert 100 = json_response(conn, 200)["data"]["max_joins_per_second"]
+      end
+    end
+
+    test "encrypt creds with put", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()
         port = Enum.random(5000..9000)
@@ -129,21 +149,80 @@ defmodule RealtimeWeb.TenantControllerTest do
       end
     end
 
-    test "renders errors when data is invalid", %{conn: conn} do
+    test "encrypt creds with post", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        external_id = random_string()
+        port = Enum.random(5000..9000)
+        attrs = default_tenant_attrs(port)
+
+        Containers.initialize_no_tenant(external_id, port)
+        on_exit(fn -> Containers.stop_container(external_id) end)
+
+        conn = post(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+
+        [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
+
+        assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
+        assert Crypto.encrypt!("postgres") == settings["db_name"]
+        assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
+        refute settings["db_password"]
+
+        %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id(external_id)
+
+        assert Crypto.encrypt!("postgres") == settings["db_password"]
+      end
+    end
+
+    test "renders errors when data is invalid with put", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         conn = put(conn, ~p"/api/tenants/#{random_string()}", tenant: @invalid_attrs)
         assert json_response(conn, 422)["errors"] != %{}
       end
     end
 
-    test "returns 403 when jwt is invalid", %{conn: conn} do
+    test "returns 403 when jwt is invalid with put", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:error, "invalid"} end do
         conn = put(conn, ~p"/api/tenants/external_id", tenant: @default_tenant_attrs)
         assert response(conn, 403)
       end
     end
 
-    test "run migrations on creation", %{conn: conn} do
+    test "renders errors when data is invalid with post", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        conn = post(conn, ~p"/api/tenants/#{random_string()}", tenant: @invalid_attrs)
+        assert json_response(conn, 422)["errors"] != %{}
+      end
+    end
+
+    test "returns 403 when jwt is invalid with post", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:error, "invalid"} end do
+        conn = post(conn, ~p"/api/tenants/external_id", tenant: @default_tenant_attrs)
+        assert response(conn, 403)
+      end
+    end
+
+    test "run migrations on creation with post", %{conn: conn} do
+      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
+        external_id = random_string()
+        port = Enum.random(5500..9000)
+        Containers.initialize_no_tenant(external_id, port)
+        on_exit(fn -> Containers.stop_container(external_id) end)
+
+        assert nil == Tenants.get_tenant_by_external_id(external_id)
+
+        conn =
+          post(conn, Routes.tenant_path(conn, :update, external_id), tenant: default_tenant_attrs(port))
+
+        assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
+
+        tenant = Tenants.get_tenant_by_external_id(external_id)
+
+        {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+        assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
+      end
+    end
+
+    test "run migrations on creation with put", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()
         port = Enum.random(5500..9000)
