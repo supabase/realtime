@@ -94,8 +94,7 @@ defmodule RealtimeWeb.TenantController do
         required: true,
         example:
           "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
-      ],
-      tenant_id: [in: :path, description: "Tenant ID", type: :string]
+      ]
     ],
     request_body: TenantParams.params(),
     responses: %{
@@ -104,8 +103,14 @@ defmodule RealtimeWeb.TenantController do
     }
   )
 
-  def create(conn, params) do
-    update(conn, params)
+  @spec create(any(), map()) :: any()
+  def create(conn, %{"tenant" => params}) do
+    external_id = Map.get(params, "external_id")
+
+    case Tenant.changeset(%Tenant{}, params) do
+      %{valid?: true} -> update(conn, %{"tenant_id" => external_id, "tenant" => params})
+      changeset -> changeset
+    end
   end
 
   operation(:update,
