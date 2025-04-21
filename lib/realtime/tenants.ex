@@ -6,13 +6,13 @@ defmodule Realtime.Tenants do
   require Logger
 
   alias Realtime.Api.Tenant
-  alias Realtime.Tenants.Connect
+  alias Realtime.Database
   alias Realtime.Repo
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.Cache
+  alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.Migrations
   alias Realtime.UsersCounter
-  alias Realtime.Database
-  alias Realtime.Tenants.Cache
 
   @doc """
   Gets a list of connected tenant `external_id` strings in the cluster or a node.
@@ -98,6 +98,7 @@ defmodule Realtime.Tenants do
         tenant = Cache.get_tenant_by_external_id(external_id)
         {:ok, db_conn} = Database.connect(tenant, "realtime_health_check")
         Process.alive?(db_conn) && GenServer.stop(db_conn)
+        Migrations.run_migrations(tenant)
 
         {:ok,
          %{
