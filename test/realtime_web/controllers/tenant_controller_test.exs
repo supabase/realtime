@@ -225,6 +225,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       end
     end
 
+    @tag skip: "Currently blocks infrastructure due to bottleneck on database startup"
     test "run migrations on creation with put", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()
@@ -245,6 +246,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       end
     end
 
+    @tag skip: "Currently blocks infrastructure due to bottleneck on database startup"
     test "run migrations on creation with post", %{conn: conn} do
       with_mock JwtVerification, verify: fn _token, _secret, _jwks -> {:ok, %{}} end do
         external_id = random_string()

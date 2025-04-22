@@ -11,7 +11,6 @@ defmodule RealtimeWeb.TenantController do
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
-  alias Realtime.Tenants.Migrations
   alias RealtimeWeb.OpenApiSchemas.EmptyResponse
   alias RealtimeWeb.OpenApiSchemas.ErrorResponse
   alias RealtimeWeb.OpenApiSchemas.NotFoundResponse
@@ -147,9 +146,7 @@ defmodule RealtimeWeb.TenantController do
             _e, acc -> acc
           end)
 
-        with {:ok, %Tenant{} = tenant} <-
-               Api.create_tenant(%{tenant_params | "extensions" => extensions}),
-             :ok <- Migrations.run_migrations(tenant) do
+        with {:ok, %Tenant{} = tenant} <- Api.create_tenant(%{tenant_params | "extensions" => extensions}) do
           Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
 
           conn
