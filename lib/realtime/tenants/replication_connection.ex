@@ -70,6 +70,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
   """
   @spec start(Realtime.Api.Tenant.t(), pid()) :: {:ok, pid()} | {:error, any()}
   def start(tenant, monitored_pid) do
+    Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
+
     Logger.info("Starting replication for Broadcast Changes")
     opts = %__MODULE__{tenant_id: tenant.external_id, monitored_pid: monitored_pid}
     supervisor_spec = supervisor_spec(tenant)
@@ -95,9 +97,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
   """
   @spec whereis(String.t()) :: pid() | nil
   def whereis(tenant_id) do
-    case Registry.lookup(Realtime.Registry.Unique, {__MODULE__, tenant_id}) do
-      [{pid, _}] -> pid
-      [] -> nil
+    case :syn.lookup(__MODULE__, tenant_id) do
+      {pid, _} -> pid
+      :undefined -> nil
     end
   end
 
@@ -107,7 +109,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     connection_opts =
       [
-        name: {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, tenant_id}}},
+        name: {:via, :syn, {__MODULE__, tenant_id}},
         hostname: connection_opts.hostname,
         username: connection_opts.username,
         password: connection_opts.password,
@@ -116,6 +118,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
         socket_options: connection_opts.socket_options,
         ssl: connection_opts.ssl,
         backoff_type: :stop,
+        auto_reconnect: false,
         sync_connect: true,
         parameters: [
           application_name: "realtime_replication_connection"

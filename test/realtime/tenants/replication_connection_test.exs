@@ -19,9 +19,50 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     on_exit(fn ->
       Application.put_env(:realtime, :slot_name_suffix, slot)
       Containers.stop_container(tenant)
+
+      case ReplicationConnection.whereis(tenant) do
+        nil -> :ok
+        pid -> Process.exit(pid, :kill)
+      end
     end)
 
     %{tenant: tenant}
+  end
+
+  test "handles replication slot killed", %{tenant: tenant} do
+    with_mock BatchBroadcast, broadcast: fn _, _, _, _ -> :ok end do
+      {:ok, pid} = ReplicationConnection.start(tenant, self())
+      Process.sleep(200)
+
+      # Kill connection
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        db_conn,
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name='realtime_replication_connection'"
+      )
+
+      # Wait for recovery
+      Process.sleep(500)
+      refute Process.alive?(pid)
+      pid = ReplicationConnection.whereis(tenant.external_id)
+      assert Process.alive?(pid)
+
+      total_messages = 5
+      # Works with one insert per transaction
+      for _ <- 1..total_messages do
+        message_fixture(tenant, %{
+          "topic" => random_string(),
+          "private" => true,
+          "event" => "INSERT",
+          "payload" => %{"value" => random_string()}
+        })
+      end
+
+      Process.sleep(500)
+
+      assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
+    end
   end
 
   test "fails if tenant connection is invalid" do

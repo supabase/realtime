@@ -7,7 +7,6 @@ defmodule Realtime.Tenants.Listen do
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Logs
-  alias Realtime.Registry.Unique
   alias Realtime.Tenants.Cache
 
   @type t :: %__MODULE__{
@@ -19,7 +18,7 @@ defmodule Realtime.Tenants.Listen do
 
   @topic "realtime:system"
   def start_link(%__MODULE__{tenant_id: tenant_id} = state) do
-    name = {:via, Registry, {Unique, {__MODULE__, :tenant_id, tenant_id}}}
+    name = {:via, :syn, {__MODULE__, tenant_id}}
     GenServer.start_link(__MODULE__, state, name: name)
   end
 
@@ -30,8 +29,7 @@ defmodule Realtime.Tenants.Listen do
     tenant = Cache.get_tenant_by_external_id(tenant_id)
     connection_opts = Database.from_tenant(tenant, "realtime_listen", :stop)
 
-    name =
-      {:via, Registry, {Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant_id}}}
+    name = {:via, Registry, {Realtime.Registry.Unique, {Postgrex.Notifications, :tenant_id, tenant_id}}}
 
     settings =
       [
@@ -70,6 +68,7 @@ defmodule Realtime.Tenants.Listen do
 
   @spec start(Realtime.Api.Tenant.t(), pid()) :: {:ok, pid()} | {:error, any()}
   def start(%Tenant{} = tenant, pid) do
+    Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
     supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Listen.DynamicSupervisor, self()}}
     spec = {__MODULE__, %__MODULE__{tenant_id: tenant.external_id, monitored_pid: pid}}
 
