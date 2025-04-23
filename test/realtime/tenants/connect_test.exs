@@ -257,27 +257,53 @@ defmodule Realtime.Tenants.ConnectTest do
       assert listen_before == listen_after
     end
 
-    test "failed broadcast handler and listen recover from failure", %{tenant: tenant} do
-      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(1000)
+    test "on replication connection postgres pid being stopped, also kills the Connect module", %{tenant: tenant} do
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      Process.sleep(500)
 
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
-      listen_pid = ReplicationConnection.whereis(tenant.external_id)
-
       assert Process.alive?(replication_connection_pid)
-      assert Process.alive?(listen_pid)
+      pid = Connect.whereis(tenant.external_id)
 
-      Process.exit(replication_connection_pid, :kill)
-      Process.exit(listen_pid, :kill)
+      Postgrex.query!(
+        db_conn,
+        "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name='realtime_replication_connection'",
+        []
+      )
+
+      Process.sleep(500)
 
       refute Process.alive?(replication_connection_pid)
-      refute Process.alive?(listen_pid)
+      refute Process.alive?(pid)
+    end
 
-      Process.sleep(1000)
+    test "on replication connection exit, also kills the Connect module", %{tenant: tenant} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      Process.sleep(500)
+
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
-      listen_pid = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_pid)
+      pid = Connect.whereis(tenant.external_id)
+      Process.exit(replication_connection_pid, :kill)
+      Process.sleep(500)
+
+      refute Process.alive?(replication_connection_pid)
+      refute Process.alive?(pid)
+    end
+
+    test "on listen exit, also kills the Connect module", %{tenant: tenant} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      Process.sleep(500)
+
+      listen_pid = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(listen_pid)
+
+      pid = Connect.whereis(tenant.external_id)
+      Process.exit(listen_pid, :kill)
+      Process.sleep(500)
+
+      refute Process.alive?(listen_pid)
+      refute Process.alive?(pid)
     end
 
     test "handles max_wal_senders by logging the correct operational code" do
