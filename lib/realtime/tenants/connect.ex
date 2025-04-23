@@ -32,8 +32,10 @@ defmodule Realtime.Tenants.Connect do
   defstruct tenant_id: nil,
             db_conn_reference: nil,
             db_conn_pid: nil,
-            broadcast_changes_pid: nil,
+            replication_connection_pid: nil,
+            replication_connection_reference: nil,
             listen_pid: nil,
+            listen_reference: nil,
             check_connected_user_interval: nil,
             connected_users_bucket: [1]
 
@@ -211,10 +213,20 @@ defmodule Realtime.Tenants.Connect do
   def handle_continue(:start_listen_and_replication, state) do
     %{tenant: tenant} = state
 
-    with {:ok, broadcast_changes_pid} <- ReplicationConnection.start(tenant, self()),
+    with {:ok, replication_connection_pid} <- ReplicationConnection.start(tenant, self()),
          {:ok, listen_pid} <- Listen.start(tenant, self()) do
-      {:noreply, %{state | broadcast_changes_pid: broadcast_changes_pid, listen_pid: listen_pid},
-       {:continue, :setup_connected_user_events}}
+      replication_connection_reference = Process.monitor(replication_connection_pid)
+      listen_reference = Process.monitor(listen_pid)
+
+      state = %{
+        state
+        | replication_connection_pid: replication_connection_pid,
+          replication_connection_reference: replication_connection_reference,
+          listen_pid: listen_pid,
+          listen_reference: listen_reference
+      }
+
+      {:noreply, state, {:continue, :setup_connected_user_events}}
     else
       {:error, :max_wal_senders_reached} ->
         log_error("ReplicationMaxWalSendersReached", "Tenant database has reached the maximum number of WAL senders")
@@ -264,15 +276,15 @@ defmodule Realtime.Tenants.Connect do
   def handle_info(:shutdown, state) do
     %{
       db_conn_pid: db_conn_pid,
-      broadcast_changes_pid: broadcast_changes_pid,
+      replication_connection_pid: replication_connection_pid,
       listen_pid: listen_pid
     } = state
 
     Logger.info("Tenant has no connected users, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 500)
 
-    broadcast_changes_pid && Process.alive?(broadcast_changes_pid) &&
-      GenServer.stop(broadcast_changes_pid, :normal, 500)
+    replication_connection_pid && Process.alive?(replication_connection_pid) &&
+      GenServer.stop(replication_connection_pid, :normal, 500)
 
     listen_pid && Process.alive?(listen_pid) &&
       GenServer.stop(listen_pid, :normal, 500)
@@ -283,15 +295,15 @@ defmodule Realtime.Tenants.Connect do
   def handle_info(:suspend_tenant, state) do
     %{
       db_conn_pid: db_conn_pid,
-      broadcast_changes_pid: broadcast_changes_pid,
+      replication_connection_pid: replication_connection_pid,
       listen_pid: listen_pid
     } = state
 
     Logger.warning("Tenant was suspended, database connection will be terminated")
     :ok = GenServer.stop(db_conn_pid, :normal, 500)
 
-    broadcast_changes_pid && Process.alive?(broadcast_changes_pid) &&
-      GenServer.stop(broadcast_changes_pid, :normal, 500)
+    replication_connection_pid && Process.alive?(replication_connection_pid) &&
+      GenServer.stop(replication_connection_pid, :normal, 500)
 
     listen_pid && Process.alive?(listen_pid) &&
       GenServer.stop(listen_pid, :normal, 500)
@@ -299,11 +311,30 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :normal, state}
   end
 
+  # Handle database connection termination
   def handle_info(
         {:DOWN, db_conn_reference, _, _, _},
         %{db_conn_reference: db_conn_reference} = state
       ) do
-    Logger.info("Database connection has been terminated")
+    Logger.warning("Database connection has been terminated")
+    {:stop, :normal, state}
+  end
+
+  # Handle replication connection termination
+  def handle_info(
+        {:DOWN, replication_connection_reference, _, _, _},
+        %{replication_connection_reference: replication_connection_reference} = state
+      ) do
+    Logger.warning("Replication connection has died")
+    {:stop, :normal, state}
+  end
+
+  #  Handle listen connection termination
+  def handle_info(
+        {:DOWN, listen_reference, _, _, _},
+        %{listen_reference: listen_reference} = state
+      ) do
+    Logger.warning("Listen has been terminated")
     {:stop, :normal, state}
   end
 
