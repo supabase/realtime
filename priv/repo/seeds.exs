@@ -42,7 +42,23 @@ Repo.transaction(fn ->
   |> Repo.insert!()
 
   tenant = Tenants.get_tenant_by_external_id(tenant_name)
+  migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
+
+  pid =
+    case PartitionSupervisor.start_link(
+           name: Realtime.Tenants.Migrations.DynamicSupervisor,
+           child_spec: {DynamicSupervisor, max_restarts: 0},
+           partitions: migration_partition_slots
+         ) do
+      {:ok, pid} ->
+        pid
+
+      {:error, {:already_started, pid}} ->
+        pid
+    end
+
   Tenants.Migrations.run_migrations(tenant)
+  Process.exit(pid, :normal)
 end)
 
 if env in [:dev, :test] do
