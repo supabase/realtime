@@ -43,7 +43,7 @@ defmodule Containers do
     end)
 
     if run_migrations? do
-      :ok = Migrations.run_migrations(tenant)
+      Migrations.run_migrations(tenant)
       {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
       :ok = Migrations.create_partitions(pid)
       Process.exit(pid, :normal)
@@ -107,7 +107,7 @@ defmodule Containers do
 
       Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
       Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])
-
+      Tenants.update_migrations_ran(tenant.external_id, 0)
       :ok
     end)
 

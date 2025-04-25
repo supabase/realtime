@@ -8,6 +8,7 @@ defmodule Realtime.Tenants.Migrations do
 
   import Realtime.Logs
 
+  alias Realtime.Tenants
   alias Realtime.Database
   alias Realtime.Registry.Unique
   alias Realtime.Repo
@@ -149,7 +150,7 @@ defmodule Realtime.Tenants.Migrations do
   @doc """
   Run migrations for the given tenant.
   """
-  @spec run_migrations(Tenant.t()) :: :ok | {:error, any()}
+  @spec run_migrations(Tenant.t()) :: :ok | :noop | {:error, any()}
   def run_migrations(%Tenant{} = tenant) do
     %{extensions: [%{settings: settings} | _]} = tenant
     attrs = %__MODULE__{tenant_external_id: tenant.external_id, settings: settings}
@@ -159,9 +160,13 @@ defmodule Realtime.Tenants.Migrations do
 
     spec = {__MODULE__, attrs}
 
-    case DynamicSupervisor.start_child(supervisor, spec) do
-      :ignore -> :ok
-      error -> error
+    if Tenants.run_migrations?(tenant.external_id) do
+      case DynamicSupervisor.start_child(supervisor, spec) do
+        :ignore -> :ok
+        error -> error
+      end
+    else
+      :noop
     end
   end
 
@@ -174,8 +179,12 @@ defmodule Realtime.Tenants.Migrations do
     Logger.metadata(external_id: tenant_external_id, project: tenant_external_id)
 
     case migrate(settings) do
-      {:ok, _} -> :ignore
-      {:error, error} -> {:stop, error}
+      {:ok, _} ->
+        Tenants.update_migrations_ran(tenant_external_id, Enum.count(@migrations))
+        :ignore
+
+      {:error, error} ->
+        {:stop, error}
     end
   end
 
@@ -244,4 +253,6 @@ defmodule Realtime.Tenants.Migrations do
 
     :ok
   end
+
+  def migrations(), do: @migrations
 end

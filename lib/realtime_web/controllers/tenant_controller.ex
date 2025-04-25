@@ -147,9 +147,8 @@ defmodule RealtimeWeb.TenantController do
             _e, acc -> acc
           end)
 
-        with {:ok, %Tenant{} = tenant} <-
-               Api.create_tenant(%{tenant_params | "extensions" => extensions}),
-             :ok <- Migrations.run_migrations(tenant) do
+        with {:ok, %Tenant{} = tenant} <- Api.create_tenant(%{tenant_params | "extensions" => extensions}),
+             res when res in [:ok, :noop] <- Migrations.run_migrations(tenant) do
           Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
 
           conn

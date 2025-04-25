@@ -26,6 +26,7 @@ defmodule Realtime.Api.Tenant do
     field(:events_per_second_rolling, :float, virtual: true)
     field(:events_per_second_now, :integer, virtual: true)
     field(:private_only, :boolean, default: false)
+    field(:migrations_ran, :integer, default: 0)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -73,7 +74,8 @@ defmodule Realtime.Api.Tenant do
       :max_channels_per_client,
       :max_joins_per_second,
       :suspend,
-      :private_only
+      :private_only,
+      :migrations_ran
     ])
     |> validate_required([
       :external_id,

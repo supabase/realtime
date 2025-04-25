@@ -295,6 +295,27 @@ defmodule Realtime.Tenants do
     |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
   end
 
+  @doc """
+  Checks if migrations for a given tenant need to run.
+  """
+  @spec run_migrations?(binary()) :: boolean()
+  def run_migrations?(external_id) do
+    tenant = Cache.get_tenant_by_external_id(external_id)
+    tenant.migrations_ran < Enum.count(Migrations.migrations())
+  end
+
+  @doc """
+  Updates the migrations_ran field for a tenant.
+  """
+  @spec update_migrations_ran(binary(), integer()) :: {:ok, Tenant.t()} | {:error, term()}
+  def update_migrations_ran(external_id, count) do
+    external_id
+    |> Cache.get_tenant_by_external_id()
+    |> Tenant.changeset(%{migrations_ran: count})
+    |> Repo.update!()
+    |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
+  end
+
   defp broadcast_operation_event(action, external_id),
     do: Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> external_id, action)
 end
