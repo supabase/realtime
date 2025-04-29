@@ -179,7 +179,7 @@ defmodule Realtime.Tenants.Migrations do
     Logger.metadata(external_id: tenant_external_id, project: tenant_external_id)
 
     case migrate(settings) do
-      {:ok, _} ->
+      :ok ->
         Tenants.update_migrations_ran(tenant_external_id, Enum.count(@migrations))
         :ignore
 
@@ -208,9 +208,9 @@ defmodule Realtime.Tenants.Migrations do
 
       try do
         opts = [all: true, prefix: "realtime", dynamic_repo: repo]
-        res = Ecto.Migrator.run(Repo, @migrations, :up, opts)
+        Ecto.Migrator.run(Repo, @migrations, :up, opts)
 
-        {:ok, res}
+        :ok
       rescue
         error ->
           log_error("MigrationsFailedToRun", error)

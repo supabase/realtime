@@ -40,8 +40,7 @@ defmodule Realtime.Integration.RtChannelTest do
         connect_info: [:peer_data, :uri, :x_headers],
         fullsweep_after: 20,
         max_frame_size: 8_000_000
-      ],
-      longpoll: true
+      ]
     )
 
     plug(Plug.Session, @session_config)

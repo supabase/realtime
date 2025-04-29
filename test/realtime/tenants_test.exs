@@ -104,7 +104,7 @@ defmodule Realtime.TenantsTest do
   describe "update_migrations_ran/1" do
     test "updates migrations_ran to the count of all migrations" do
       tenant = tenant_fixture(%{migrations_ran: 0})
-      Tenants.update_migrations_ran(tenant, 1)
+      Tenants.update_migrations_ran(tenant.external_id, 1)
       tenant = Repo.reload!(tenant)
       assert tenant.migrations_ran == 1
     end

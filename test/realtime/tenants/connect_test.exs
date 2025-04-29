@@ -227,8 +227,10 @@ defmodule Realtime.Tenants.ConnectTest do
       refute_receive :too_many_connections
     end
 
-    test "on migrations failure, stop the process", %{tenant: tenant} do
+    test "on migrations failure, stop the process" do
       with_mock Realtime.Tenants.Migrations, [], run_migrations: fn _ -> raise("error") end do
+        tenant = tenant_fixture()
+        tenant = Containers.initialize(tenant, true)
         assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
         Process.sleep(1000)
         refute Process.alive?(pid)
