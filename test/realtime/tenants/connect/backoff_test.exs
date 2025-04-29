@@ -1,0 +1,35 @@
+defmodule Realtime.Tenants.Connect.BackoffTest do
+  use Realtime.DataCase, async: true
+  alias Realtime.Tenants.Connect.Backoff
+
+  setup do
+    tenant_id = random_string()
+    acc = %{tenant_id: tenant_id}
+    {:ok, acc: acc}
+  end
+
+  test "does not apply backoff for a given tenant if never called", %{acc: acc} do
+    assert {:ok, acc} == Backoff.run(acc)
+  end
+
+  test "applies backoff if the user as called more than once during the configured space", %{acc: acc} do
+    # emulate first call
+    Backoff.run(acc)
+
+    assert {:error, :tenant_create_backoff} = Backoff.run(acc)
+  end
+
+  test "resets backoff after the configured space", %{acc: acc} do
+    # emulate first call
+    Backoff.run(acc)
+
+    # emulate block
+    assert {:error, :tenant_create_backoff} = Backoff.run(acc)
+
+    # wait for the timer to expire
+    Process.sleep(Application.get_env(:realtime, :connect_backoff_timer) + 100)
+
+    # check that the backoff has been reset
+    assert {:ok, acc} == Backoff.run(acc)
+  end
+end

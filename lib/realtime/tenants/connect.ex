@@ -15,7 +15,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Api.Tenant
   alias Realtime.Rpc
   alias Realtime.Tenants
-  alias Realtime.Tenants.ReplicationConnection
+  alias Realtime.Tenants.Connect.Backoff
   alias Realtime.Tenants.Connect.CheckConnection
   alias Realtime.Tenants.Connect.GetTenant
   alias Realtime.Tenants.Connect.Piper
@@ -23,6 +23,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants.Connect.StartCounters
   alias Realtime.Tenants.Listen
   alias Realtime.Tenants.Migrations
+  alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
 
   @rpc_timeout_default 30_000
@@ -114,6 +115,10 @@ defmodule Realtime.Tenants.Connect do
       {:error, {:shutdown, :tenant_not_found}} ->
         {:error, :tenant_not_found}
 
+      {:error, {:shutdown, :tenant_create_backoff}} ->
+        log_warning("TooManyConnectAttempts", "Too many connect attempts to tenant database")
+        {:error, :tenant_create_backoff}
+
       {:error, :shutdown} ->
         log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database")
         {:error, :tenant_database_unavailable}
@@ -176,6 +181,7 @@ defmodule Realtime.Tenants.Connect do
 
     pipes = [
       GetTenant,
+      Backoff,
       CheckConnection,
       StartCounters,
       RegisterProcess
@@ -191,9 +197,34 @@ defmodule Realtime.Tenants.Connect do
       {:error, :tenant_db_too_many_connections} ->
         {:stop, {:shutdown, :tenant_db_too_many_connections}}
 
+      {:error, :tenant_create_backoff} ->
+        {:stop, {:shutdown, :tenant_create_backoff}}
+
       {:error, error} ->
         log_error("UnableToConnectToTenantDatabase", error)
         {:stop, :shutdown}
+    end
+  end
+
+  @doc """
+  Returns the pid of the tenant Connection process
+  """
+  @spec whereis(binary()) :: pid | nil
+  def whereis(tenant_id) do
+    case :syn.lookup(__MODULE__, tenant_id) do
+      {pid, _} -> pid
+      :undefined -> nil
+    end
+  end
+
+  @doc """
+  Shutdown the tenant Connection and linked processes
+  """
+  @spec shutdown(binary()) :: :ok | nil
+  def shutdown(tenant_id) do
+    case whereis(tenant_id) do
+      pid when is_pid(pid) -> GenServer.stop(pid)
+      _ -> :ok
     end
   end
 

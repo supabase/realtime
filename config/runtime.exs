@@ -18,6 +18,8 @@ migration_partition_slots =
 connect_partition_slots =
   System.get_env("CONNECT_PARTITION_SLOTS", "#{System.schedulers_online() * 2}") |> String.to_integer()
 
+connect_backoff_timer = System.get_env("CONNECT_BACKOFF_TIMER", "1000") |> String.to_integer()
+
 if !(db_version in [nil, "ipv6", "ipv4"]),
   do: raise("Invalid IP version, please set either ipv6 or ipv4")
 
@@ -39,6 +41,7 @@ socket_options =
 config :realtime,
   migration_partition_slots: migration_partition_slots,
   connect_partition_slots: connect_partition_slots,
+  connect_backoff_timer: connect_backoff_timer,
   tenant_max_bytes_per_second: System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100000") |> String.to_integer(),
   tenant_max_channels_per_client: System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer(),
   tenant_max_concurrent_users: System.get_env("TENANT_MAX_CONCURRENT_USERS", "200") |> String.to_integer(),

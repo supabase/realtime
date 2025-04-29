@@ -373,6 +373,32 @@ defmodule Realtime.Tenants.ConnectTest do
     end
   end
 
+  describe "connect/1" do
+    test "respects backoff pipe", %{tenant: tenant} do
+      assert {:ok, _pid} = Connect.connect(tenant.external_id)
+      :ok = Connect.shutdown(tenant.external_id)
+      Process.sleep(100)
+
+      log =
+        capture_log(fn ->
+          assert {:error, :tenant_create_backoff} = Connect.connect(tenant.external_id)
+        end)
+
+      assert log =~ "Too many connect attempts to tenant database"
+    end
+
+    test "after timer, is able to connect", %{tenant: tenant} do
+      assert {:ok, _pid} = Connect.connect(tenant.external_id)
+      Connect.shutdown(tenant.external_id)
+      Process.sleep(100)
+
+      assert {:error, :tenant_create_backoff} = Connect.connect(tenant.external_id)
+
+      Process.sleep(Application.get_env(:realtime, :connect_backoff_timer) + 100)
+      assert {:ok, _pid} = Connect.connect(tenant.external_id)
+    end
+  end
+
   describe "shutdown/1" do
     test "shutdowns all associated connections", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
