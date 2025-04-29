@@ -125,13 +125,13 @@ defmodule Realtime.Tenants.Connect do
   end
 
   @doc """
-  Returns the pid of the tenant Database connection process
+  Returns the pid of the tenant Connection process and db_conn pid
   """
-  @spec whereis(binary()) :: pid | nil
+  @spec whereis(binary()) :: pid() | nil
   def whereis(tenant_id) do
     case :syn.lookup(__MODULE__, tenant_id) do
-      {_, %{conn: pid}} -> pid
-      :undefined -> nil
+      {pid, _} when is_pid(pid) -> pid
+      _ -> nil
     end
   end
 
@@ -141,8 +141,12 @@ defmodule Realtime.Tenants.Connect do
   @spec shutdown(binary()) :: :ok | nil
   def shutdown(tenant_id) do
     case whereis(tenant_id) do
-      pid when is_pid(pid) -> Process.exit(pid, :shutdown)
-      _ -> :ok
+      pid when is_pid(pid) ->
+        Logger.info("Shutting down tenant connection for #{tenant_id}")
+        GenServer.stop(pid)
+
+      _ ->
+        :ok
     end
   end
 
@@ -281,7 +285,7 @@ defmodule Realtime.Tenants.Connect do
     } = state
 
     Logger.info("Tenant has no connected users, database connection will be terminated")
-    :ok = GenServer.stop(db_conn_pid, :normal, 500)
+    :ok = GenServer.stop(db_conn_pid, :shutdown, 500)
 
     replication_connection_pid && Process.alive?(replication_connection_pid) &&
       GenServer.stop(replication_connection_pid, :normal, 500)
@@ -300,7 +304,7 @@ defmodule Realtime.Tenants.Connect do
     } = state
 
     Logger.warning("Tenant was suspended, database connection will be terminated")
-    :ok = GenServer.stop(db_conn_pid, :normal, 500)
+    :ok = GenServer.stop(db_conn_pid, :shutdown, 500)
 
     replication_connection_pid && Process.alive?(replication_connection_pid) &&
       GenServer.stop(replication_connection_pid, :normal, 500)

@@ -128,7 +128,7 @@ defmodule Containers do
   def stop_container(%Tenant{} = tenant) do
     :ets.delete(:containers, tenant.external_id)
     pid = Connect.whereis(tenant.external_id)
-    if pid && Process.alive?(pid), do: Connect.shutdown(tenant.external_id)
+    if is_pid(pid) && Process.alive?(pid), do: Connect.shutdown(tenant.external_id)
     name = "realtime-test-#{tenant.external_id}"
     System.cmd("docker", ["rm", "-f", name])
   end
