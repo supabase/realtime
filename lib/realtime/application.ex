@@ -52,7 +52,6 @@ defmodule Realtime.Application do
     :syn.join(RegionNodes, region, self(), node: node())
     migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
     connect_partition_slots = Application.get_env(:realtime, :connect_partition_slots)
-    connect_backoff_timer = Application.get_env(:realtime, :connect_backoff_timer)
 
     children =
       [
@@ -88,8 +87,7 @@ defmodule Realtime.Application do
         {PartitionSupervisor,
          child_spec: DynamicSupervisor, strategy: :one_for_one, name: Realtime.Tenants.Listen.DynamicSupervisor},
         RealtimeWeb.Endpoint,
-        RealtimeWeb.Presence,
-        {Realtime.Tenants.Connect.Backoff, [connect_backoff_timer: connect_backoff_timer]}
+        RealtimeWeb.Presence
       ] ++ extensions_supervisors() ++ janitor_tasks()
 
     children =

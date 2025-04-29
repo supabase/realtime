@@ -13,21 +13,28 @@ defmodule Realtime.Tenants.Connect.BackoffTest do
   end
 
   test "applies backoff if the user as called more than once during the configured space", %{acc: acc} do
-    # emulate first call
-    Backoff.run(acc)
+    # emulate calls
+    for _ <- 1..10 do
+      Backoff.run(acc)
+    end
 
+    Process.sleep(1000)
     assert {:error, :tenant_create_backoff} = Backoff.run(acc)
   end
 
   test "resets backoff after the configured space", %{acc: acc} do
-    # emulate first call
-    Backoff.run(acc)
+    # emulate calls
+    for _ <- 1..10 do
+      Backoff.run(acc)
+    end
+
+    Process.sleep(1000)
 
     # emulate block
     assert {:error, :tenant_create_backoff} = Backoff.run(acc)
 
     # wait for the timer to expire
-    Process.sleep(Application.get_env(:realtime, :connect_backoff_timer) + 100)
+    Process.sleep(2000)
 
     # check that the backoff has been reset
     assert {:ok, acc} == Backoff.run(acc)

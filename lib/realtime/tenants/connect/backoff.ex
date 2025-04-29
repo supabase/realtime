@@ -2,57 +2,44 @@ defmodule Realtime.Tenants.Connect.Backoff do
   @moduledoc """
   Applies backoff on process initialization.
   """
-  use GenServer
-
+  alias Realtime.RateCounter
+  alias Realtime.GenCounter
+  alias Realtime.Tenants
   @behaviour Realtime.Tenants.Connect.Piper
 
   @impl Realtime.Tenants.Connect.Piper
   def run(acc) do
     %{tenant_id: tenant_id} = acc
+    connect_backoff_limit = Application.get_env(:realtime, :connect_backoff_limit)
 
-    case check(tenant_id) do
-      {:ok, :block} -> {:error, :tenant_create_backoff}
-      {:ok, :unblock} -> {:ok, acc}
-    end
-  end
-
-  defp check(tenant_id), do: GenServer.call(__MODULE__, {:backoff_status, tenant_id})
-
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  end
-
-  @impl GenServer
-  def init(opts) do
-    timer = Keyword.get(opts, :connect_backoff_timer)
-    Process.send_after(self(), :countdown, timer)
-    {:ok, %{timer: timer, tenants: %{}}}
-  end
-
-  @impl GenServer
-  def handle_call({:backoff_status, tenant_id}, _from, %{tenants: tenants} = state) do
-    if Map.get(tenants, tenant_id) do
-      {:reply, {:ok, :block}, state}
+    with {:ok, counter} <- start_connects_per_second_counter(tenant_id, connect_backoff_limit),
+         {:ok, %{avg: avg}} when avg < connect_backoff_limit <- RateCounter.get(counter) do
+      GenCounter.add(counter)
+      {:ok, acc}
     else
-      {_, updated_tenants} =
-        Map.get_and_update(tenants, tenant_id, fn
-          nil -> {nil, true}
-          _ -> {true, true}
-        end)
-
-      {:reply, {:ok, :unblock}, %{state | tenants: updated_tenants}}
+      _ -> {:error, :tenant_create_backoff}
     end
   end
 
-  @impl GenServer
-  def handle_info(:countdown, %{tenants: tenants, timer: timer} = state) do
-    updated =
-      tenants
-      |> Enum.map(fn {tenant_id, _} -> {tenant_id, false} end)
-      |> Map.new()
+  defp start_connects_per_second_counter(tenant_id, limit) do
+    id = Tenants.connection_attempts_per_second_key(tenant_id)
+    GenCounter.new(id)
 
-    Process.send_after(self(), :countdown, timer)
+    res =
+      RateCounter.new(id,
+        idle_shutdown: :infinity,
+        telemetry: %{
+          event_name: [:channel, :joins],
+          measurements: %{limit: limit},
+          metadata: %{tenant: tenant_id},
+          tick: 500
+        }
+      )
 
-    {:noreply, %{state | tenants: updated}}
+    case res do
+      {:ok, _} -> {:ok, id}
+      {:error, {:already_started, _}} -> {:ok, id}
+      {:error, reason} -> {:error, reason}
+    end
   end
 end
