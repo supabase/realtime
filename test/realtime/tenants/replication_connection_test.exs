@@ -117,7 +117,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
   test "fails on existing replication slot", %{tenant: tenant} do
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-    name = "supabase_realtime_messages_replication_slot_test"
+    name = "supabase_realtime_messages_replication_slot_"
     Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [name])
 
     assert {:error, "Temporary Replication slot already exists and in use"} =
