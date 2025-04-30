@@ -216,17 +216,17 @@ defmodule Realtime.Tenants do
   The GenCounter key to use when counting connection attempts against Realtime.Tenants.Connect
   ## Examples
     iex> Realtime.Tenants.connection_attempts_per_second_key("tenant_id")
-    { :connection_attempts, "tenant_id"}
+    {:tenant, :connection_attempts, "tenant_id"}
     iex> Realtime.Tenants.connection_attempts_per_second_key(%Realtime.Api.Tenant{external_id: "tenant_id"})
-    { :connection_attempts, "tenant_id"}
+    {:tenant, :connection_attempts, "tenant_id"}
   """
-  @spec connection_attempts_per_second_key(Tenant.t() | String.t()) :: {:channel, :connection_attempts, String.t()}
+  @spec connection_attempts_per_second_key(Tenant.t() | String.t()) :: {:tenant, :connection_attempts, String.t()}
   def connection_attempts_per_second_key(tenant) when is_binary(tenant) do
-    {:connection_attempts, tenant}
+    {:tenant, :connection_attempts, tenant}
   end
 
   def connection_attempts_per_second_key(%Tenant{} = tenant) do
-    {:connection_attempts, tenant.external_id}
+    {:tenant, :connection_attempts, tenant.external_id}
   end
 
   @spec get_tenant_limits(Realtime.Api.Tenant.t(), maybe_improper_list) :: list
