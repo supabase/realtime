@@ -107,13 +107,17 @@ defmodule Containers do
 
       Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
       Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])
-      Tenants.update_migrations_ran(tenant.external_id, 0)
+
+      if Tenants.get_tenant_by_external_id(tenant.external_id) do
+        Tenants.update_migrations_ran(tenant.external_id, 0)
+      end
+
       :ok
     end)
 
     if run_migrations? do
-      Migrations.run_migrations(tenant)
       {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
+      Migrations.run_migrations(tenant)
       Migrations.create_partitions(pid)
     end
 

@@ -35,12 +35,9 @@ config :realtime,
   secure_channels: true,
   db_enc_key: "1234567890123456",
   jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
-  api_jwt_secret: System.get_env("API_JWT_SECRET"),
+  api_jwt_secret: System.get_env("API_JWT_SECRET", "secret"),
   metrics_jwt_secret: "test",
   prom_poll_rate: 5_000
-
-config :joken,
-  current_time_adapter: RealtimeWeb.Joken.CurrentTime.Mock
 
 # Print only errors during test
 config :logger,
