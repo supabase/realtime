@@ -105,6 +105,12 @@ defmodule Containers do
         GenCounter.new(key)
       end)
 
+      Postgrex.query!(
+        db_conn,
+        "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name like 'realtime_%' and application_name != 'realtime_test'",
+        []
+      )
+
       Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
       Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])
 
@@ -116,12 +122,13 @@ defmodule Containers do
     end)
 
     if run_migrations? do
-      {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
       Migrations.run_migrations(tenant)
-      Migrations.create_partitions(pid)
+      {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
+      :ok = Migrations.create_partitions(pid)
     end
 
-    Process.exit(conn, :normal)
+    Process.sleep(1000)
+
     tenant
   end
 

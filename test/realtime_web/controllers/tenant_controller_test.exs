@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.TenantControllerTest do
-  use RealtimeWeb.ConnCase, async: true
+  use RealtimeWeb.ConnCase, async: false
 
   alias Realtime.Api.Tenant
   alias Realtime.Crypto

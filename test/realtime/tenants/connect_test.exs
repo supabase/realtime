@@ -169,12 +169,15 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "handles tenant suspension only on targetted suspended user" do
-      tenant1 = Containers.checkout_tenant(true)
-      tenant2 = Containers.checkout_tenant(true)
+      tenant1 = tenant_fixture()
+      tenant1 = Containers.initialize(tenant1, true, true)
+
+      tenant2 = tenant_fixture()
+      tenant2 = Containers.initialize(tenant2, true, true)
 
       on_exit(fn ->
-        Containers.checkin_tenant(tenant1)
-        Containers.checkin_tenant(tenant2)
+        Containers.stop_container(tenant1)
+        Containers.stop_container(tenant2)
       end)
 
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant1.external_id)
