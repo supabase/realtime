@@ -50,7 +50,12 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant with post" do
     test "run migrations on creation", %{conn: conn} do
       external_id = random_string()
-      port = Enum.random(5500..9000)
+
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
+
       Containers.initialize_no_tenant(external_id, port)
       on_exit(fn -> Containers.stop_container(external_id) end)
       assert nil == Tenants.get_tenant_by_external_id(external_id)
@@ -71,7 +76,12 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant with put" do
     test "run migrations on creation", %{conn: conn} do
       external_id = random_string()
-      port = Enum.random(5500..9000)
+
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
+
       Containers.initialize_no_tenant(external_id, port)
       on_exit(fn -> Containers.stop_container(external_id) end)
       assert nil == Tenants.get_tenant_by_external_id(external_id)

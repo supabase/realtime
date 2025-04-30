@@ -65,7 +65,10 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "if tenant exists but unable to connect, returns error" do
-      port = Enum.random(5500..9000)
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
 
       extensions = [
         %{
@@ -194,7 +197,10 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "properly handles of failing calls by avoid creating too many connections" do
-      port = Enum.random(5500..6000)
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
 
       tenant =
         tenant_fixture(%{
@@ -388,7 +394,10 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "tenant not able to connect if database has not enough connections" do
-      port = Enum.random(5500..9000)
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
 
       extensions = [
         %{
