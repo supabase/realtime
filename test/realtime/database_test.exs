@@ -25,7 +25,10 @@ defmodule Realtime.DatabaseTest do
 
   describe "check_tenant_connection/1" do
     setup context do
-      port = Enum.random(5500..9000)
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
 
       extensions = [
         %{

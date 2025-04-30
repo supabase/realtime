@@ -1,32 +1,27 @@
 defmodule Realtime.Tenants.ReplicationConnectionTest do
-  # async: false due to the usage of mocks
   use Realtime.DataCase, async: false
 
-  import ExUnit.CaptureLog
-  import Mock
-
   alias Realtime.Api.Message
-  alias Realtime.Tenants.ReplicationConnection
   alias Realtime.Database
-  alias Realtime.Tenants.BatchBroadcast
+  alias Realtime.Tenants
+  alias Realtime.Tenants.ReplicationConnection
+  alias RealtimeWeb.Endpoint
 
   setup do
     slot = Application.get_env(:realtime, :slot_name_suffix)
     Application.put_env(:realtime, :slot_name_suffix, "test")
-    tenant = tenant_fixture()
-    tenant = Containers.initialize(tenant, true, true)
+
+    tenant = Containers.checkout_tenant(true)
 
     on_exit(fn ->
       Application.put_env(:realtime, :slot_name_suffix, slot)
-      Containers.stop_container(tenant)
+      Containers.checkin_tenant(tenant)
     end)
 
     %{tenant: tenant}
   end
 
   test "fails if tenant connection is invalid" do
-    port = Enum.random(5500..9000)
-
     tenant =
       tenant_fixture(%{
         "extensions" => [
@@ -37,7 +32,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
               "db_name" => "postgres",
               "db_user" => "supabase_admin",
               "db_password" => "postgres",
-              "db_port" => "#{port}",
+              "db_port" => "9001",
               "poll_interval" => 100,
               "poll_max_changes" => 100,
               "poll_max_record_bytes" => 1_048_576,
@@ -48,51 +43,76 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         ]
       })
 
-    capture_log(fn ->
-      assert {:error, _} = ReplicationConnection.start(tenant, self())
-    end) =~ "UnableToStartHandler"
+    assert {:error, _} = ReplicationConnection.start(tenant, self())
   end
 
-  test "starts a handler for the tenant and broadcasts for single insert", %{tenant: tenant} do
-    with_mock BatchBroadcast, broadcast: fn _, _, _, _ -> :ok end do
-      {:ok, _pid} = ReplicationConnection.start(tenant, self())
+  test "starts a handler for the tenant and broadcasts", %{tenant: tenant} do
+    start_link_supervised!(
+      {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+      restart: :transient
+    )
 
-      total_messages = 5
-      # Works with one insert per transaction
+    topic = random_string()
+    tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+    Endpoint.subscribe(tenant_topic)
+
+    total_messages = 5
+    # Works with one insert per transaction
+    for _ <- 1..total_messages do
+      value = random_string()
+
+      message_fixture(tenant, %{
+        "topic" => topic,
+        "private" => true,
+        "event" => "INSERT",
+        "payload" => %{"value" => value}
+      })
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       event: "broadcast",
+                       payload: %{
+                         "event" => "INSERT",
+                         "payload" => %{
+                           "value" => ^value
+                         },
+                         "type" => "broadcast"
+                       },
+                       topic: ^tenant_topic
+                     },
+                     500
+    end
+
+    Process.sleep(500)
+    # Works with batch inserts
+    messages =
       for _ <- 1..total_messages do
-        message_fixture(tenant, %{
-          "topic" => random_string(),
+        Message.changeset(%Message{}, %{
+          "topic" => topic,
           "private" => true,
           "event" => "INSERT",
+          "extension" => "broadcast",
           "payload" => %{"value" => random_string()}
         })
       end
 
-      Process.sleep(500)
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
-      assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
-      # Works with batch inserts
-      messages =
-        for _ <- 1..total_messages do
-          Message.changeset(%Message{}, %{
-            "topic" => random_string(),
-            "private" => true,
-            "event" => "INSERT",
-            "payload" => %{"value" => random_string()}
-          })
-        end
+    {:ok, _} = Realtime.Repo.insert_all_entries(db_conn, messages, Message)
 
-      Database.connect(tenant, "realtime_test", :stop)
-      Realtime.Repo.insert_all_entries(Message, messages, Message)
-      Process.sleep(500)
+    for message <- messages do
+      value = message |> Map.from_struct() |> get_in([:changes, :payload, "value"])
 
-      assert_called_exactly(BatchBroadcast.broadcast(nil, tenant, :_, :_), total_messages)
+      assert_receive %Phoenix.Socket.Broadcast{
+                       event: "broadcast",
+                       payload: %{
+                         "event" => "INSERT",
+                         "payload" => %{"value" => ^value},
+                         "type" => "broadcast"
+                       },
+                       topic: ^tenant_topic
+                     },
+                     500
     end
-  end
-
-  test "pid is associated to the same pid for a given tenant and guarantees uniqueness", %{tenant: tenant} do
-    assert {:ok, pid} = ReplicationConnection.start(tenant, self())
-    assert {:ok, ^pid} = ReplicationConnection.start(tenant, self())
   end
 
   test "fails on existing replication slot", %{tenant: tenant} do
@@ -102,6 +122,8 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
     assert {:error, "Temporary Replication slot already exists and in use"} =
              ReplicationConnection.start(tenant, self())
+
+    Postgrex.query!(db_conn, "SELECT pg_drop_replication_slot($1)", [name])
   end
 
   defmodule TestHandler do
@@ -131,7 +153,10 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     def call(_, _), do: :noreply
   end
 
-  test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
+  test "handle standby connections exceeds max_wal_senders" do
+    tenant = tenant_fixture()
+    tenant = Containers.initialize(tenant, true, true)
+    on_exit(fn -> Containers.stop_container(tenant) end)
     opts = Database.from_tenant(tenant, "realtime_test", :stop) |> Database.opts()
 
     # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
@@ -161,9 +186,14 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   end
 
   describe "whereis/1" do
-    test "returns pid if exists", %{tenant: tenant} do
-      assert {:ok, pid} = ReplicationConnection.start(tenant, self())
+    test "returns pid if exists" do
+      tenant = tenant_fixture()
+      tenant = Containers.initialize(tenant, true, true)
+      on_exit(fn -> Containers.stop_container(tenant) end)
+
+      {:ok, pid} = ReplicationConnection.start(tenant, self())
       assert ReplicationConnection.whereis(tenant.external_id) == pid
+      Process.exit(pid, :shutdown)
     end
 
     test "returns nil if not exists" do

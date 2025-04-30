@@ -13,20 +13,19 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Phoenix.Socket.Message
   alias Phoenix.Socket.V1
   alias Postgrex
+  alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.GenCounter
   alias Realtime.Integration.WebsocketClient
   alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
-  alias Realtime.Tenants.Cache
 
   @moduletag :capture_log
   @port 4002
   @serializer V1.JSONSerializer
-  @external_id "dev_tenant"
-  @uri "ws://#{@external_id}.localhost:#{@port}/socket/websocket"
-  @secret "secure_jwt_secret"
+
+  defp uri(tenant), do: "ws://#{tenant.external_id}.localhost:#{@port}/socket/websocket"
 
   defmodule TestEndpoint do
     use Phoenix.Endpoint, otp_app: :phoenix
@@ -40,8 +39,7 @@ defmodule Realtime.Integration.RtChannelTest do
         connect_info: [:peer_data, :uri, :x_headers],
         fullsweep_after: 20,
         max_frame_size: 8_000_000
-      ],
-      longpoll: true
+      ]
     )
 
     plug(Plug.Session, @session_config)
@@ -65,19 +63,9 @@ defmodule Realtime.Integration.RtChannelTest do
     secret_key_base: String.duplicate("a", 64)
   )
 
-  Application.delete_env(:joken, :current_time_adapter)
-
-  defmodule Token do
-    use Joken.Config
-  end
-
   setup do
-    RateCounter.stop(@external_id)
-    GenCounter.stop(@external_id)
-    Cache.invalidate_tenant_cache(@external_id)
-    Process.sleep(500)
-
-    tenant = Tenants.get_tenant_by_external_id(@external_id)
+    tenant = Containers.checkout_tenant(true)
+    on_exit(fn -> Containers.checkin_tenant(tenant) end)
 
     %{tenant: tenant}
   end
@@ -88,124 +76,150 @@ defmodule Realtime.Integration.RtChannelTest do
     :ok
   end
 
-  test "handle postgres extension" do
-    {socket, _} = get_connection()
-    topic = "realtime:any"
-    config = %{postgres_changes: [%{event: "*", schema: "public"}]}
+  describe "postgres changes" do
+    setup %{tenant: tenant} do
+      {:ok, conn} = Database.connect(tenant, "realtime_test")
 
-    WebsocketClient.join(socket, topic, %{config: config})
-    sub_id = :erlang.phash2(%{"event" => "*", "schema" => "public"})
+      Database.transaction(conn, fn db_conn ->
+        queries = [
+          "create sequence if not exists test_id_seq;",
+          """
+          create table "public"."test" (
+          "id" int4 not null default nextval('test_id_seq'::regclass),
+          "details" text,
+          primary key ("id"));
+          """,
+          "grant all on table public.test to anon;",
+          "grant all on table public.test to postgres;",
+          "grant all on table public.test to authenticated;",
+          "create publication supabase_realtime_test for all tables"
+        ]
 
-    assert_receive %Message{
-                     event: "phx_reply",
-                     payload: %{
-                       "response" => %{
-                         "postgres_changes" => [
-                           %{"event" => "*", "id" => ^sub_id, "schema" => "public"}
-                         ]
+        Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
+      end)
+
+      :ok
+    end
+
+    test "handle postgres extension", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "*", schema: "public"}]}
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "*", "schema" => "public"})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "postgres_changes" => [
+                             %{"event" => "*", "id" => ^sub_id, "schema" => "public"}
+                           ]
+                         },
+                         "status" => "ok"
                        },
-                       "status" => "ok"
+                       ref: "1",
+                       topic: ^topic
                      },
-                     ref: "1",
-                     topic: ^topic
-                   },
-                   200
+                     200
 
-    assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
-    assert_receive %Message{
-                     event: "system",
-                     payload: %{
-                       "channel" => "any",
-                       "extension" => "postgres_changes",
-                       "message" => "Subscribed to PostgreSQL",
-                       "status" => "ok"
-                     },
-                     ref: nil,
-                     topic: ^topic
-                   },
-                   8000
-
-    {:ok, _, conn} = PostgresCdcRls.get_manager_conn(@external_id)
-    Postgrex.query!(conn, "insert into test (details) values ('test')", [])
-
-    assert_receive %Message{
-                     event: "postgres_changes",
-                     payload: %{
-                       "data" => %{
-                         "columns" => [
-                           %{"name" => "id", "type" => "int4"},
-                           %{"name" => "details", "type" => "text"}
-                         ],
-                         "commit_timestamp" => _ts,
-                         "errors" => nil,
-                         "record" => %{"details" => "test", "id" => id},
-                         "schema" => "public",
-                         "table" => "test",
-                         "type" => "INSERT"
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
                        },
-                       "ids" => [^sub_id]
+                       ref: nil,
+                       topic: ^topic
                      },
-                     ref: nil,
-                     topic: "realtime:any"
-                   },
-                   500
+                     8000
 
-    Postgrex.query!(conn, "update test set details = 'test' where id = #{id}", [])
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Postgrex.query!(conn, "insert into test (details) values ('test')", [])
 
-    assert_receive %Message{
-                     event: "postgres_changes",
-                     payload: %{
-                       "data" => %{
-                         "columns" => [
-                           %{"name" => "id", "type" => "int4"},
-                           %{"name" => "details", "type" => "text"}
-                         ],
-                         "commit_timestamp" => _ts,
-                         "errors" => nil,
-                         "old_record" => %{"id" => ^id},
-                         "record" => %{"details" => "test", "id" => ^id},
-                         "schema" => "public",
-                         "table" => "test",
-                         "type" => "UPDATE"
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => [
+                             %{"name" => "id", "type" => "int4"},
+                             %{"name" => "details", "type" => "text"}
+                           ],
+                           "commit_timestamp" => _ts,
+                           "errors" => nil,
+                           "record" => %{"details" => "test", "id" => id},
+                           "schema" => "public",
+                           "table" => "test",
+                           "type" => "INSERT"
+                         },
+                         "ids" => [^sub_id]
                        },
-                       "ids" => [^sub_id]
+                       ref: nil,
+                       topic: "realtime:any"
                      },
-                     ref: nil,
-                     topic: "realtime:any"
-                   },
-                   500
+                     500
 
-    Postgrex.query!(conn, "delete from test where id = #{id}", [])
+      Postgrex.query!(conn, "update test set details = 'test' where id = #{id}", [])
 
-    assert_receive %Message{
-                     event: "postgres_changes",
-                     payload: %{
-                       "data" => %{
-                         "columns" => [
-                           %{"name" => "id", "type" => "int4"},
-                           %{"name" => "details", "type" => "text"}
-                         ],
-                         "commit_timestamp" => _ts,
-                         "errors" => nil,
-                         "old_record" => %{"id" => ^id},
-                         "schema" => "public",
-                         "table" => "test",
-                         "type" => "DELETE"
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => [
+                             %{"name" => "id", "type" => "int4"},
+                             %{"name" => "details", "type" => "text"}
+                           ],
+                           "commit_timestamp" => _ts,
+                           "errors" => nil,
+                           "old_record" => %{"id" => ^id},
+                           "record" => %{"details" => "test", "id" => ^id},
+                           "schema" => "public",
+                           "table" => "test",
+                           "type" => "UPDATE"
+                         },
+                         "ids" => [^sub_id]
                        },
-                       "ids" => [^sub_id]
+                       ref: nil,
+                       topic: "realtime:any"
                      },
-                     ref: nil,
-                     topic: "realtime:any"
-                   },
-                   500
+                     500
+
+      Postgrex.query!(conn, "delete from test where id = #{id}", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => [
+                             %{"name" => "id", "type" => "int4"},
+                             %{"name" => "details", "type" => "text"}
+                           ],
+                           "commit_timestamp" => _ts,
+                           "errors" => nil,
+                           "old_record" => %{"id" => ^id},
+                           "schema" => "public",
+                           "table" => "test",
+                           "type" => "DELETE"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: "realtime:any"
+                     },
+                     500
+    end
   end
 
   describe "handle broadcast extension" do
     setup [:rls_context]
 
-    test "public broadcast" do
-      {socket, _} = get_connection()
+    test "public broadcast", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
 
       config = %{
         broadcast: %{self: true},
@@ -229,9 +243,10 @@ defmodule Realtime.Integration.RtChannelTest do
            :authenticated_write_broadcast_and_presence
          ]
     test "private broadcast with valid channel with permissions sends message", %{
+      tenant: tenant,
       topic: topic
     } do
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
@@ -266,9 +281,9 @@ defmodule Realtime.Integration.RtChannelTest do
          ],
          topic: "topic"
     test "private broadcast with valid channel a colon character sends message and won't intercept in public channels",
-         %{topic: topic} do
-      {anon_socket, _} = get_connection("anon")
-      {socket, _} = get_connection("authenticated")
+         %{topic: topic, tenant: tenant} do
+      {anon_socket, _} = get_connection(tenant, "anon")
+      {socket, _} = get_connection(tenant, "authenticated")
       valid_topic = "realtime:#{topic}"
       malicious_topic = "realtime:private:#{topic}"
 
@@ -301,18 +316,19 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence]
     test "private broadcast with valid channel no write permissions won't send message but will receive message", %{
+      tenant: tenant,
       topic: topic
     } do
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
 
-      {service_role_socket, _} = get_connection("service_role")
+      {service_role_socket, _} = get_connection(tenant, "service_role")
 
       WebsocketClient.join(service_role_socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
       assert_receive %Message{event: "presence_state"}, 1000
 
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       WebsocketClient.join(socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
       assert_receive %Message{event: "presence_state"}, 1000
@@ -348,13 +364,13 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: []
     test "private broadcast with valid channel and no read permissions won't join",
-         %{topic: topic} do
+         %{tenant: tenant, topic: topic} do
       config = %{private: true}
 
       expected = "You do not have permissions to read from this Channel topic: #{topic}"
 
       topic = "realtime:#{topic}"
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
 
       log =
         capture_log(fn ->
@@ -379,8 +395,8 @@ defmodule Realtime.Integration.RtChannelTest do
   describe "handle presence extension" do
     setup [:rls_context]
 
-    test "public presence" do
-      {socket, _} = get_connection()
+    test "public presence", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
       config = %{presence: %{key: ""}, private: false}
       topic = "realtime:any"
 
@@ -410,8 +426,8 @@ defmodule Realtime.Integration.RtChannelTest do
            :authenticated_write_broadcast_and_presence
          ]
     test "private presence with read and write permissions will be able to track and receive presence changes",
-         %{topic: topic} do
-      {socket, _} = get_connection("authenticated")
+         %{tenant: tenant, topic: topic} do
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{presence: %{key: ""}, private: true}
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
@@ -434,9 +450,9 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence]
     test "private presence with read permissions will be able to receive presence changes but won't be able to track",
-         %{topic: topic} do
-      {socket, _} = get_connection("authenticated")
-      {secondary_socket, _} = get_connection("service_role")
+         %{tenant: tenant, topic: topic} do
+      {socket, _} = get_connection(tenant, "authenticated")
+      {secondary_socket, _} = get_connection(tenant, "service_role")
       config = fn key -> %{presence: %{key: key}, private: true} end
       topic = "realtime:#{topic}"
 
@@ -493,20 +509,24 @@ defmodule Realtime.Integration.RtChannelTest do
            :authenticated_read_broadcast_and_presence,
            :authenticated_write_broadcast_and_presence
          ]
-    test "invalid JWT with expired token" do
-      log = capture_log(fn -> get_connection("authenticated", %{:exp => System.system_time(:second) - 1000}) end)
+    test "invalid JWT with expired token", %{tenant: tenant} do
+      log =
+        capture_log(fn -> get_connection(tenant, "authenticated", %{:exp => System.system_time(:second) - 1000}) end)
+
       assert log =~ "InvalidJWTToken: Token has expired"
     end
 
-    test "token required the role key" do
-      {:ok, token} = token_no_role()
-      assert {:error, %{status_code: 403}} = WebsocketClient.connect(self(), @uri, @serializer, [{"x-api-key", token}])
+    test "token required the role key", %{tenant: tenant} do
+      {:ok, token} = token_no_role(tenant)
+
+      assert {:error, %{status_code: 403}} =
+               WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", token}])
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "on new access_token and channel is private policies are reevaluated for read policy",
-         %{topic: topic} do
-      {socket, access_token} = get_connection("authenticated")
+         %{tenant: tenant, topic: topic} do
+      {socket, access_token} = get_connection(tenant, "authenticated")
 
       realtime_topic = "realtime:#{topic}"
 
@@ -518,7 +538,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      {:ok, new_token} = token_valid("anon")
+      {:ok, new_token} = token_valid(tenant, "anon")
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
@@ -538,7 +558,7 @@ defmodule Realtime.Integration.RtChannelTest do
       topic: topic,
       tenant: tenant
     } do
-      {socket, access_token} = get_connection("authenticated")
+      {socket, access_token} = get_connection(tenant, "authenticated")
       realtime_topic = "realtime:#{topic}"
       config = %{broadcast: %{self: true}, private: true}
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
@@ -560,7 +580,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       # Set new token to recheck policies
       {:ok, new_token} =
-        generate_token(%{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
+        generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
@@ -576,9 +596,9 @@ defmodule Realtime.Integration.RtChannelTest do
                      1500
     end
 
-    test "on new access_token and channel is public policies are not reevaluated", %{topic: topic} do
-      {socket, access_token} = get_connection("authenticated")
-      {:ok, new_token} = token_valid("anon")
+    test "on new access_token and channel is public policies are not reevaluated", %{tenant: tenant, topic: topic} do
+      {socket, access_token} = get_connection(tenant, "authenticated")
+      {:ok, new_token} = token_valid(tenant, "anon")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
 
@@ -592,8 +612,8 @@ defmodule Realtime.Integration.RtChannelTest do
       refute_receive %Message{}
     end
 
-    test "on empty string access_token the socket sends an error message", %{topic: topic} do
-      {socket, access_token} = get_connection("authenticated")
+    test "on empty string access_token the socket sends an error message", %{tenant: tenant, topic: topic} do
+      {socket, access_token} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
 
@@ -611,10 +631,10 @@ defmodule Realtime.Integration.RtChannelTest do
       }
     end
 
-    test "on expired access_token the socket sends an error message", %{topic: topic} do
+    test "on expired access_token the socket sends an error message", %{tenant: tenant, topic: topic} do
       sub = random_string()
 
-      {socket, access_token} = get_connection("authenticated", %{sub: sub})
+      {socket, access_token} = get_connection(tenant, "authenticated", %{sub: sub})
 
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
@@ -623,7 +643,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
-      {:ok, token} = generate_token(%{:exp => System.system_time(:second) - 1000, sub: sub})
+      {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) - 1000, sub: sub})
 
       log =
         capture_log([log_level: :warning], fn ->
@@ -639,15 +659,15 @@ defmodule Realtime.Integration.RtChannelTest do
       assert log =~ "ChannelShutdown: Token has expired 1000 seconds ago"
     end
 
-    test "ChannelShutdown include sub if available in jwt claims", %{topic: topic} do
+    test "ChannelShutdown include sub if available in jwt claims", %{tenant: tenant, topic: topic} do
       sub = random_string()
 
-      {socket, access_token} = get_connection("authenticated", %{sub: sub}, %{log_level: :warning})
+      {socket, access_token} = get_connection(tenant, "authenticated", %{sub: sub}, %{log_level: :warning})
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
-      {:ok, token} = generate_token(%{:exp => System.system_time(:second) - 1000, sub: sub})
+      {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) - 1000, sub: sub})
 
       log =
         capture_log([level: :warning], fn ->
@@ -660,8 +680,8 @@ defmodule Realtime.Integration.RtChannelTest do
       assert log =~ "sub=#{sub}"
     end
 
-    test "missing claims close connection", %{topic: topic} do
-      {socket, access_token} = get_connection("authenticated")
+    test "missing claims close connection", %{tenant: tenant, topic: topic} do
+      {socket, access_token} = get_connection(tenant, "authenticated")
 
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
@@ -670,7 +690,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
-      {:ok, token} = generate_token(%{:exp => System.system_time(:second) + 2000})
+      {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) + 2000})
 
       # Update token to be a near expiring token
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => token})
@@ -688,8 +708,8 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_close"}
     end
 
-    test "checks token periodically", %{topic: topic} do
-      {socket, access_token} = get_connection("authenticated")
+    test "checks token periodically", %{tenant: tenant, topic: topic} do
+      {socket, access_token} = get_connection(tenant, "authenticated")
 
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
@@ -699,7 +719,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      {:ok, token} = generate_token(%{:exp => System.system_time(:second) + 2, role: "authenticated"})
+      {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) + 2, role: "authenticated"})
 
       # Update token to be a near expiring token
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => token})
@@ -716,8 +736,8 @@ defmodule Realtime.Integration.RtChannelTest do
       assert msg =~ "Token has expired"
     end
 
-    test "token expires in between joins", %{topic: topic} do
-      {socket, access_token} = get_connection("authenticated")
+    test "token expires in between joins", %{tenant: tenant, topic: topic} do
+      {socket, access_token} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
 
@@ -726,7 +746,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      {:ok, access_token} = generate_token(%{:exp => System.system_time(:second) + 1, role: "authenticated"})
+      {:ok, access_token} = generate_token(tenant, %{:exp => System.system_time(:second) + 1, role: "authenticated"})
 
       # token expires in between joins so it needs to be handled by the channel and not the socket
       Process.sleep(1000)
@@ -743,8 +763,8 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_close"}
     end
 
-    test "token loses claims in between joins", %{topic: topic} do
-      {socket, access_token} = get_connection("authenticated")
+    test "token loses claims in between joins", %{tenant: tenant, topic: topic} do
+      {socket, access_token} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
 
@@ -753,7 +773,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      {:ok, access_token} = generate_token(%{:exp => System.system_time(:second) + 10})
+      {:ok, access_token} = generate_token(tenant, %{:exp => System.system_time(:second) + 10})
 
       # token breaks claims in between joins so it needs to be handled by the channel and not the socket
       Process.sleep(1000)
@@ -773,8 +793,8 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_close"}
     end
 
-    test "token is badly formatted in between joins", %{topic: topic} do
-      {socket, access_token} = get_connection("authenticated")
+    test "token is badly formatted in between joins", %{tenant: tenant, topic: topic} do
+      {socket, access_token} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
 
@@ -798,13 +818,13 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
-    test "handles RPC error on token refreshed", %{topic: topic} do
+    test "handles RPC error on token refreshed", %{tenant: tenant, topic: topic} do
       with_mocks [
         {Authorization, [:passthrough], build_authorization_params: &passthrough([&1])},
         {Authorization, [:passthrough],
          get_read_authorizations: [in_series([:_, :_, :_], [&passthrough([&1, &2, &3]), {:error, "RPC Error"}])]}
       ] do
-        {socket, access_token} = get_connection("authenticated")
+        {socket, access_token} = get_connection(tenant, "authenticated")
         config = %{broadcast: %{self: true}, private: true}
         realtime_topic = "realtime:#{topic}"
 
@@ -814,7 +834,8 @@ defmodule Realtime.Integration.RtChannelTest do
         assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
 
         # Update token to force update
-        {:ok, access_token} = generate_token(%{:exp => System.system_time(:second) + 1000, role: "authenticated"})
+        {:ok, access_token} =
+          generate_token(tenant, %{:exp => System.system_time(:second) + 1000, role: "authenticated"})
 
         log =
           capture_log([log_level: :warning], fn ->
@@ -844,11 +865,12 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "broadcast insert event changes on insert in table with trigger", %{
+      tenant: tenant,
       topic: topic,
       db_conn: db_conn,
       table_name: table_name
     } do
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
 
@@ -884,12 +906,13 @@ defmodule Realtime.Integration.RtChannelTest do
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
          requires_data: true
     test "broadcast update event changes on update in table with trigger", %{
+      tenant: tenant,
       topic: topic,
       db_conn: db_conn,
       table_name: table_name
     } do
       value = random_string()
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
 
@@ -928,11 +951,12 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "broadcast delete event changes on delete in table with trigger", %{
+      tenant: tenant,
       topic: topic,
       db_conn: db_conn,
       table_name: table_name
     } do
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
 
@@ -969,10 +993,11 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "broadcast event when function 'send' is called with private topic", %{
+      tenant: tenant,
       topic: topic,
       db_conn: db_conn
     } do
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: true}
       full_topic = "realtime:#{topic}"
 
@@ -1006,10 +1031,11 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     test "broadcast event when function 'send' is called with public topic", %{
+      tenant: tenant,
       topic: topic,
       db_conn: db_conn
     } do
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       full_topic = "realtime:#{topic}"
 
@@ -1045,9 +1071,12 @@ defmodule Realtime.Integration.RtChannelTest do
     setup [:rls_context]
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
-    test "user with only private channels enabled will not be able to join public channels", %{topic: topic} do
-      change_tenant_configuration(:private_only, true)
-      {socket, _} = get_connection("authenticated")
+    test "user with only private channels enabled will not be able to join public channels", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      change_tenant_configuration(tenant, :private_only, true)
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       topic = "realtime:#{topic}"
 
@@ -1062,34 +1091,35 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
 
-      change_tenant_configuration(:private_only, false)
+      change_tenant_configuration(tenant, :private_only, false)
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "user with only private channels enabled will be able to join private channels", %{
+      tenant: tenant,
       topic: topic
     } do
-      change_tenant_configuration(:private_only, true)
+      change_tenant_configuration(tenant, :private_only, true)
 
-      Realtime.Tenants.Cache.invalidate_tenant_cache(@external_id)
+      Realtime.Tenants.Cache.invalidate_tenant_cache(tenant.external_id)
 
       Process.sleep(100)
 
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: true}
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply"}, 500
-      change_tenant_configuration(:private_only, false)
+      change_tenant_configuration(tenant, :private_only, false)
     end
   end
 
   describe "sensitive information updates" do
     setup [:rls_context]
 
-    test "on jwks the socket closes and sends a system message", %{topic: topic} do
-      {socket, _} = get_connection("authenticated")
+    test "on jwks the socket closes and sends a system message", %{tenant: tenant, topic: topic} do
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
 
@@ -1097,7 +1127,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
-      tenant = Tenants.get_tenant_by_external_id(@external_id)
+      tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["potato"]}})
 
       assert_receive %Message{
@@ -1112,8 +1142,8 @@ defmodule Realtime.Integration.RtChannelTest do
                      500
     end
 
-    test "on jwt_secret the socket closes and sends a system message", %{topic: topic} do
-      {socket, _} = get_connection("authenticated")
+    test "on jwt_secret the socket closes and sends a system message", %{tenant: tenant, topic: topic} do
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
 
@@ -1122,7 +1152,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      tenant = Tenants.get_tenant_by_external_id(@external_id)
+      tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_secret: "potato"})
 
       assert_receive %Message{
@@ -1137,8 +1167,8 @@ defmodule Realtime.Integration.RtChannelTest do
                      500
     end
 
-    test "on other param changes the socket won't close and no message is sent", %{topic: topic} do
-      {socket, _} = get_connection("authenticated")
+    test "on other param changes the socket won't close and no message is sent", %{tenant: tenant, topic: topic} do
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
 
@@ -1147,7 +1177,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      tenant = Tenants.get_tenant_by_external_id(@external_id)
+      tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
       Realtime.Api.update_tenant(tenant, %{max_concurrent_users: 100})
 
       refute_receive %Message{
@@ -1162,8 +1192,10 @@ defmodule Realtime.Integration.RtChannelTest do
                      500
     end
 
-    test "invalid JWT with expired token" do
-      log = capture_log(fn -> get_connection("authenticated", %{:exp => System.system_time(:second) - 1000}) end)
+    test "invalid JWT with expired token", %{tenant: tenant} do
+      log =
+        capture_log(fn -> get_connection(tenant, "authenticated", %{:exp => System.system_time(:second) - 1000}) end)
+
       assert log =~ "InvalidJWTToken: Token has expired"
     end
   end
@@ -1171,11 +1203,11 @@ defmodule Realtime.Integration.RtChannelTest do
   describe "rate limits" do
     setup [:rls_context]
 
-    test "max_concurrent_users limit respected" do
-      %{max_concurrent_users: max_concurrent_users} = Tenants.get_tenant_by_external_id(@external_id)
-      change_tenant_configuration(:max_concurrent_users, 1)
+    test "max_concurrent_users limit respected", %{tenant: tenant} do
+      %{max_concurrent_users: max_concurrent_users} = Tenants.get_tenant_by_external_id(tenant.external_id)
+      change_tenant_configuration(tenant, :max_concurrent_users, 1)
 
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{random_string()}"
       WebsocketClient.join(socket, realtime_topic, %{config: config})
@@ -1192,14 +1224,14 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_close"}
 
-      change_tenant_configuration(:max_concurrent_users, max_concurrent_users)
+      change_tenant_configuration(tenant, :max_concurrent_users, max_concurrent_users)
     end
 
-    test "max_events_per_second limit respected" do
-      %{max_events_per_second: max_concurrent_users} = Tenants.get_tenant_by_external_id(@external_id)
-      change_tenant_configuration(:max_events_per_second, 1)
+    test "max_events_per_second limit respected", %{tenant: tenant} do
+      %{max_events_per_second: max_concurrent_users} = Tenants.get_tenant_by_external_id(tenant.external_id)
+      change_tenant_configuration(tenant, :max_events_per_second, 1)
 
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{random_string()}"
 
@@ -1222,14 +1254,14 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_close"}
 
-      change_tenant_configuration(:max_events_per_second, max_concurrent_users)
+      change_tenant_configuration(tenant, :max_events_per_second, max_concurrent_users)
     end
 
-    test "max_channels_per_client limit respected" do
-      %{max_events_per_second: max_concurrent_users} = Tenants.get_tenant_by_external_id(@external_id)
-      change_tenant_configuration(:max_channels_per_client, 1)
+    test "max_channels_per_client limit respected", %{tenant: tenant} do
+      %{max_events_per_second: max_concurrent_users} = Tenants.get_tenant_by_external_id(tenant.external_id)
+      change_tenant_configuration(tenant, :max_channels_per_client, 1)
 
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic_1 = "realtime:#{random_string()}"
       realtime_topic_2 = "realtime:#{random_string()}"
@@ -1256,14 +1288,14 @@ defmodule Realtime.Integration.RtChannelTest do
       refute_receive %Message{event: "phx_reply", topic: ^realtime_topic_2}, 500
       refute_receive %Message{event: "presence_state", topic: ^realtime_topic_2}, 500
 
-      change_tenant_configuration(:max_channels_per_client, max_concurrent_users)
+      change_tenant_configuration(tenant, :max_channels_per_client, max_concurrent_users)
     end
 
-    test "max_joins_per_second limit respected" do
-      %{max_joins_per_second: max_joins_per_second} = Tenants.get_tenant_by_external_id(@external_id)
-      change_tenant_configuration(:max_joins_per_second, 1)
+    test "max_joins_per_second limit respected", %{tenant: tenant} do
+      %{max_joins_per_second: max_joins_per_second} = Tenants.get_tenant_by_external_id(tenant.external_id)
+      change_tenant_configuration(tenant, :max_joins_per_second, 1)
 
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{random_string()}"
 
@@ -1281,7 +1313,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      2000
 
-      change_tenant_configuration(:max_joins_per_second, max_joins_per_second)
+      change_tenant_configuration(tenant, :max_joins_per_second, max_joins_per_second)
     end
   end
 
@@ -1291,8 +1323,8 @@ defmodule Realtime.Integration.RtChannelTest do
     @tag role: "authenticated",
          policies: [:broken_read_presence, :broken_write_presence]
 
-    test "handle failing rls policy" do
-      {socket, _} = get_connection("authenticated")
+    test "handle failing rls policy", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: true}
       topic = random_string()
       realtime_topic = "realtime:#{topic}"
@@ -1320,8 +1352,8 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
-  test "handle empty topic by closing the socket" do
-    {socket, _} = get_connection("authenticated")
+  test "handle empty topic by closing the socket", %{tenant: tenant} do
+    {socket, _} = get_connection(tenant, "authenticated")
     config = %{broadcast: %{self: true}, private: false}
     realtime_topic = "realtime:"
 
@@ -1353,7 +1385,7 @@ defmodule Realtime.Integration.RtChannelTest do
   end
 
   describe "billable events" do
-    setup do
+    setup %{tenant: tenant} do
       events = [
         [:realtime, :rate_counter, :channel, :joins],
         [:realtime, :rate_counter, :channel, :events],
@@ -1370,8 +1402,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
       {:ok, _} = Agent.start_link(fn -> %{joins: 0, events: 0, db_events: 0, presence_events: 0} end, name: TestCounter)
 
-      RateCounter.stop(@external_id)
-      GenCounter.stop(@external_id)
+      RateCounter.stop(tenant.external_id)
+      GenCounter.stop(tenant.external_id)
       :telemetry.detach(__MODULE__)
       :telemetry.attach_many(__MODULE__, events, &__MODULE__.handle_telemetry/4, [])
 
@@ -1380,11 +1412,11 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag skip: "This tests are skipped because they are flaky due to the fact that it's using the same tenant database"
 
-    test "join events" do
+    test "join events", %{tenant: tenant} do
       # Wait for timer to run GenCounter and RateCounter tickers to clean them
       Process.sleep(5000)
 
-      {socket, _} = get_connection()
+      {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
 
@@ -1411,11 +1443,11 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag skip: "This tests are skipped because they are flaky due to the fact that it's using the same tenant database"
 
-    test "broadcast events" do
+    test "broadcast events", %{tenant: tenant} do
       # Wait for timer to run GenCounter and RateCounter tickers to clean them
       Process.sleep(5000)
 
-      {socket, _} = get_connection()
+      {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
 
@@ -1427,7 +1459,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Add second client so we can test the "multiplication" of billable events
-      {socket, _} = get_connection()
+      {socket, _} = get_connection(tenant)
       WebsocketClient.join(socket, topic, %{config: config})
 
       # Join events
@@ -1459,11 +1491,11 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag skip: "This tests are skipped because they are flaky due to the fact that it's using the same tenant database"
 
-    test "presence events" do
+    test "presence events", %{tenant: tenant} do
       # Wait for timer to run GenCounter and RateCounter tickers to clean them
       Process.sleep(5000)
 
-      {socket, _} = get_connection()
+      {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
 
@@ -1475,7 +1507,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Presence events
-      {socket, _} = get_connection("authenticated")
+      {socket, _} = get_connection(tenant, "authenticated")
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
@@ -1498,11 +1530,11 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag skip: "This tests are skipped because they are flaky due to the fact that it's using the same tenant database"
 
-    test "postgres changes events" do
+    test "postgres changes events", %{tenant: tenant} do
       # Wait for timer to run GenCounter and RateCounter tickers to clean them
       Process.sleep(5000)
 
-      {socket, _} = get_connection()
+      {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
 
@@ -1514,7 +1546,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Add second user to test the "multiplication" of billable events
-      {socket, _} = get_connection()
+      {socket, _} = get_connection(tenant)
       WebsocketClient.join(socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
       assert_receive %Message{topic: ^topic, event: "presence_state"}, 500
@@ -1522,7 +1554,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       # Postgres Change events
       for _ <- 1..5 do
-        tenant = Tenants.get_tenant_by_external_id(@external_id)
+        tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
         {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
         Postgrex.query!(conn, "insert into test (details) values ('test')", [])
 
@@ -1550,11 +1582,11 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag skip: "This tests are skipped because they are flaky due to the fact that it's using the same tenant database"
 
-    test "postgres changes error events" do
+    test "postgres changes error events", %{tenant: tenant} do
       # Wait for timer to run GenCounter and RateCounter tickers to clean them
       Process.sleep(5000)
 
-      {socket, _} = get_connection()
+      {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "none"}]}
       topic = "realtime:any"
 
@@ -1580,28 +1612,29 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
-  defp token_valid(role, claims \\ %{}), do: generate_token(Map.put(claims, :role, role))
-  defp token_no_role, do: generate_token()
+  defp token_valid(tenant, role, claims \\ %{}), do: generate_token(tenant, Map.put(claims, :role, role))
+  defp token_no_role(tenant), do: generate_token(tenant)
 
-  defp generate_token(claims \\ %{}) do
+  defp generate_token(tenant, claims \\ %{}) do
     claims =
       Map.merge(
         %{ref: "127.0.0.1", iat: System.system_time(:second), exp: System.system_time(:second) + 604_800},
         claims
       )
 
-    {:ok, generate_jwt_token(@secret, claims)}
+    {:ok, generate_jwt_token(tenant, claims)}
   end
 
   defp get_connection(
+         tenant,
          role \\ "anon",
          claims \\ %{},
          params \\ %{vsn: "1.0.0", log_level: :warning}
        ) do
     params = Enum.reduce(params, "", fn {k, v}, acc -> "#{acc}&#{k}=#{v}" end)
-    uri = "#{@uri}?#{params}"
+    uri = "#{uri(tenant)}?#{params}"
 
-    with {:ok, token} <- token_valid(role, claims),
+    with {:ok, token} <- token_valid(tenant, role, claims),
          {:ok, socket} <- WebsocketClient.connect(self(), uri, @serializer, [{"x-api-key", token}]) do
       {socket, token}
     end
@@ -1620,10 +1653,10 @@ defmodule Realtime.Integration.RtChannelTest do
   end
 
   def setup_trigger(%{tenant: tenant, topic: topic} = context) do
-    Realtime.Tenants.Connect.shutdown(@external_id)
+    Realtime.Tenants.Connect.shutdown(tenant.external_id)
     Process.sleep(500)
 
-    {:ok, db_conn} = Realtime.Tenants.Connect.connect(@external_id)
+    {:ok, db_conn} = Realtime.Tenants.Connect.connect(tenant.external_id)
 
     random_name = String.downcase("test_#{random_string()}")
     query = "CREATE TABLE #{random_name} (id serial primary key, details text)"
@@ -1670,12 +1703,12 @@ defmodule Realtime.Integration.RtChannelTest do
     |> Map.put(:table_name, random_name)
   end
 
-  defp change_tenant_configuration(limit, value) do
-    @external_id
+  defp change_tenant_configuration(%Tenant{external_id: external_id}, limit, value) do
+    external_id
     |> Realtime.Tenants.get_tenant_by_external_id()
     |> Realtime.Api.Tenant.changeset(%{limit => value})
     |> Realtime.Repo.update!()
 
-    Realtime.Tenants.Cache.invalidate_tenant_cache(@external_id)
+    Realtime.Tenants.Cache.invalidate_tenant_cache(external_id)
   end
 end

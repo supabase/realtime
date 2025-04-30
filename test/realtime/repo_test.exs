@@ -1,5 +1,5 @@
 defmodule Realtime.RepoTest do
-  use Realtime.DataCase, async: true
+  use Realtime.DataCase, async: false
 
   import Ecto.Query
 

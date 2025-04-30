@@ -51,6 +51,7 @@ defmodule Realtime.Application do
     region = Application.get_env(:realtime, :region)
     :syn.join(RegionNodes, region, self(), node: node())
     migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
+    connect_partition_slots = Application.get_env(:realtime, :connect_partition_slots)
 
     children =
       [
@@ -75,7 +76,10 @@ defmodule Realtime.Application do
          name: Realtime.Tenants.Migrations.DynamicSupervisor,
          partitions: migration_partition_slots},
         {PartitionSupervisor,
-         child_spec: DynamicSupervisor, strategy: :one_for_one, name: Realtime.Tenants.Connect.DynamicSupervisor},
+         child_spec: DynamicSupervisor,
+         strategy: :one_for_one,
+         name: Realtime.Tenants.Connect.DynamicSupervisor,
+         partitions: connect_partition_slots},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,

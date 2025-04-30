@@ -1,9 +1,8 @@
 defmodule Realtime.Tenants.ListenTest do
-  use Realtime.DataCase, async: true
+  use Realtime.DataCase, async: false
   import ExUnit.CaptureLog
 
   alias Realtime.Tenants.Listen
-  alias Realtime.Tenants.Migrations
   alias Realtime.Database
 
   describe("start/1") do
@@ -17,7 +16,6 @@ defmodule Realtime.Tenants.ListenTest do
 
       {:ok, _} = Listen.start(tenant, self())
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-      Migrations.run_migrations(tenant)
 
       {:ok, tenant: tenant, db_conn: db_conn}
     end

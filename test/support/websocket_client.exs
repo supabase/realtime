@@ -112,7 +112,9 @@ defmodule Realtime.Integration.WebsocketClient do
         query -> uri.path <> "?" <> query
       end
 
-    with {:ok, conn} <- Mint.HTTP.connect(http_scheme, uri.host, uri.port),
+    [subdomain, host] = String.split(uri.host, ".")
+
+    with {:ok, conn} <- Mint.HTTP.connect(http_scheme, host, uri.port, hostname: subdomain),
          {:ok, conn, ref} <- Mint.WebSocket.upgrade(ws_scheme, conn, path, headers) do
       state = %{state | conn: conn, request_ref: ref, caller: from}
       {:noreply, state}

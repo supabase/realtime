@@ -1,5 +1,6 @@
 defmodule Realtime.TenantsTest do
   # async: false due to cache usage
+  alias Realtime.Tenants.Migrations
   use Realtime.DataCase, async: false
 
   alias Realtime.GenCounter
@@ -82,6 +83,30 @@ defmodule Realtime.TenantsTest do
       tenant = Repo.reload!(tenant)
       assert tenant.suspend == true
       refute_receive :unsuspend_tenant, 500
+    end
+  end
+
+  describe "run_migrations?/1" do
+    test "returns true if migrations_ran is lower than existing migrations" do
+      tenant = tenant_fixture(%{migrations_ran: 0})
+      assert Tenants.run_migrations?(tenant.external_id)
+
+      tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations()) - 1})
+      assert Tenants.run_migrations?(tenant.external_id)
+    end
+
+    test "returns false if migrations_ran is count of all migrations" do
+      tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations())})
+      refute Tenants.run_migrations?(tenant.external_id)
+    end
+  end
+
+  describe "update_migrations_ran/1" do
+    test "updates migrations_ran to the count of all migrations" do
+      tenant = tenant_fixture(%{migrations_ran: 0})
+      Tenants.update_migrations_ran(tenant.external_id, 1)
+      tenant = Repo.reload!(tenant)
+      assert tenant.migrations_ran == 1
     end
   end
 end

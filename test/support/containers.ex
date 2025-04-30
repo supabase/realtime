@@ -13,9 +13,9 @@ defmodule Containers do
 
   @type t :: %__MODULE__{port: integer(), tenant: Realtime.Api.Tenant.t(), using?: boolean()}
   def initialize(tenant, lock? \\ false, run_migrations? \\ false) do
-    capture_log(fn ->
-      if :ets.whereis(:containers) == :undefined, do: :ets.new(:containers, [:named_table, :set, :public])
+    if :ets.whereis(:containers) == :undefined, do: :ets.new(:containers, [:named_table, :set, :public])
 
+    capture_log(fn ->
       name = "realtime-test-#{tenant.external_id}"
       %{port: port} = Database.from_tenant(tenant, "realtime_test", :stop)
 
@@ -43,7 +43,7 @@ defmodule Containers do
     end)
 
     if run_migrations? do
-      :ok = Migrations.run_migrations(tenant)
+      Migrations.run_migrations(tenant)
       {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
       :ok = Migrations.create_partitions(pid)
       Process.exit(pid, :normal)
@@ -53,6 +53,8 @@ defmodule Containers do
   end
 
   def initialize_no_tenant(external_id, port) do
+    if :ets.whereis(:containers) == :undefined, do: :ets.new(:containers, [:named_table, :set, :public])
+
     name = "realtime-test-#{external_id}"
 
     capture_log(fn ->
@@ -105,8 +107,18 @@ defmodule Containers do
         GenCounter.new(key)
       end)
 
+      Postgrex.query!(
+        db_conn,
+        "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name like 'realtime_%' and application_name != 'realtime_test'",
+        []
+      )
+
       Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
       Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])
+
+      if Tenants.get_tenant_by_external_id(tenant.external_id) do
+        Tenants.update_migrations_ran(tenant.external_id, 0)
+      end
 
       :ok
     end)
@@ -114,10 +126,11 @@ defmodule Containers do
     if run_migrations? do
       Migrations.run_migrations(tenant)
       {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
-      Migrations.create_partitions(pid)
+      :ok = Migrations.create_partitions(pid)
     end
 
-    Process.exit(conn, :normal)
+    Process.sleep(1000)
+
     tenant
   end
 
@@ -125,10 +138,11 @@ defmodule Containers do
     :ets.insert(:containers, {tenant.external_id, %{tenant: tenant, using?: false}})
   end
 
+  @spec stop_container(any()) :: {any(), non_neg_integer()}
   def stop_container(%Tenant{} = tenant) do
     :ets.delete(:containers, tenant.external_id)
     pid = Connect.whereis(tenant.external_id)
-    if pid && Process.alive?(pid), do: Connect.shutdown(tenant.external_id)
+    if is_pid(pid) && Process.alive?(pid), do: Connect.shutdown(tenant.external_id)
     name = "realtime-test-#{tenant.external_id}"
     System.cmd("docker", ["rm", "-f", name])
   end

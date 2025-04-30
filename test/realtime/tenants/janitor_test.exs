@@ -130,7 +130,10 @@ defmodule Realtime.Tenants.JanitorTest do
   end
 
   test "logs error if fails to connect to tenant" do
-    port = Enum.random(5500..8000)
+    port =
+      5500..9000
+      |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+      |> Enum.random()
 
     extensions = [
       %{

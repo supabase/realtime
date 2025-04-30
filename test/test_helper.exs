@@ -36,8 +36,9 @@ Database.transaction(conn, fn db_conn ->
   Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
 end)
 
-containers = Application.get_env(:ex_unit, :max_cases, System.schedulers()) * 2
+containers = Application.get_env(:ex_unit, :max_cases, System.schedulers()) * 3
 tenants = for _ <- 0..containers, do: Generators.tenant_fixture()
+if :ets.whereis(:containers) == :undefined, do: :ets.new(:containers, [:named_table, :set, :public])
 
 # Start other containers to be used based on max test cases
 Task.await_many(

@@ -125,13 +125,13 @@ defmodule Realtime.Tenants.Connect do
   end
 
   @doc """
-  Returns the pid of the tenant Connection process
+  Returns the pid of the tenant Connection process and db_conn pid
   """
-  @spec whereis(binary()) :: pid | nil
+  @spec whereis(binary()) :: pid() | nil
   def whereis(tenant_id) do
     case :syn.lookup(__MODULE__, tenant_id) do
-      {pid, _} -> pid
-      :undefined -> nil
+      {pid, _} when is_pid(pid) -> pid
+      _ -> nil
     end
   end
 
@@ -141,8 +141,12 @@ defmodule Realtime.Tenants.Connect do
   @spec shutdown(binary()) :: :ok | nil
   def shutdown(tenant_id) do
     case whereis(tenant_id) do
-      pid when is_pid(pid) -> GenServer.stop(pid)
-      _ -> :ok
+      pid when is_pid(pid) ->
+        send(pid, :shutdown_connect)
+        :ok
+
+      _ ->
+        :ok
     end
   end
 
@@ -196,7 +200,7 @@ defmodule Realtime.Tenants.Connect do
   def handle_continue(:run_migrations, state) do
     %{tenant: tenant, db_conn_pid: db_conn_pid} = state
 
-    with :ok <- Migrations.run_migrations(tenant),
+    with res when res in [:ok, :noop] <- Migrations.run_migrations(tenant),
          :ok <- Migrations.create_partitions(db_conn_pid) do
       {:noreply, state, {:continue, :start_listen_and_replication}}
     else
@@ -273,42 +277,19 @@ defmodule Realtime.Tenants.Connect do
     {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
   end
 
-  def handle_info(:shutdown, state) do
-    %{
-      db_conn_pid: db_conn_pid,
-      replication_connection_pid: replication_connection_pid,
-      listen_pid: listen_pid
-    } = state
-
+  def handle_info(:shutdown_no_connected_users, state) do
     Logger.info("Tenant has no connected users, database connection will be terminated")
-    :ok = GenServer.stop(db_conn_pid, :normal, 500)
-
-    replication_connection_pid && Process.alive?(replication_connection_pid) &&
-      GenServer.stop(replication_connection_pid, :normal, 500)
-
-    listen_pid && Process.alive?(listen_pid) &&
-      GenServer.stop(listen_pid, :normal, 500)
-
-    {:stop, :normal, state}
+    shutdown_connect_process(state)
   end
 
   def handle_info(:suspend_tenant, state) do
-    %{
-      db_conn_pid: db_conn_pid,
-      replication_connection_pid: replication_connection_pid,
-      listen_pid: listen_pid
-    } = state
-
     Logger.warning("Tenant was suspended, database connection will be terminated")
-    :ok = GenServer.stop(db_conn_pid, :normal, 500)
+    shutdown_connect_process(state)
+  end
 
-    replication_connection_pid && Process.alive?(replication_connection_pid) &&
-      GenServer.stop(replication_connection_pid, :normal, 500)
-
-    listen_pid && Process.alive?(listen_pid) &&
-      GenServer.stop(listen_pid, :normal, 500)
-
-    {:stop, :normal, state}
+  def handle_info(:shutdown_connect, state) do
+    Logger.warning("Shutdowning tenant connection")
+    shutdown_connect_process(state)
   end
 
   # Handle database connection termination
@@ -371,7 +352,7 @@ defmodule Realtime.Tenants.Connect do
          @connected_users_bucket_shutdown,
          check_connected_user_interval
        ) do
-    Process.send_after(self(), :shutdown, check_connected_user_interval)
+    Process.send_after(self(), :shutdown_no_connected_users, check_connected_user_interval)
   end
 
   defp send_connected_user_check_message(connected_users_bucket, check_connected_user_interval) do
@@ -381,4 +362,22 @@ defmodule Realtime.Tenants.Connect do
 
   defp tenant_suspended?(%Tenant{suspend: true}), do: {:error, :tenant_suspended}
   defp tenant_suspended?(_), do: :ok
+
+  defp shutdown_connect_process(state) do
+    %{
+      db_conn_pid: db_conn_pid,
+      replication_connection_pid: replication_connection_pid,
+      listen_pid: listen_pid
+    } = state
+
+    :ok = GenServer.stop(db_conn_pid, :shutdown, 500)
+
+    replication_connection_pid && Process.alive?(replication_connection_pid) &&
+      GenServer.stop(replication_connection_pid, :normal, 500)
+
+    listen_pid && Process.alive?(listen_pid) &&
+      GenServer.stop(listen_pid, :normal, 500)
+
+    {:stop, :normal, state}
+  end
 end

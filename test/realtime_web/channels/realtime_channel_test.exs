@@ -161,7 +161,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
 
     test "unsuccessful connection halts join" do
-      port = Enum.random(5500..9000)
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
 
       extensions = [
         %{
@@ -190,7 +193,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
 
     test "lack of connections halts join" do
-      port = Enum.random(5500..9000)
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
 
       extensions = [
         %{

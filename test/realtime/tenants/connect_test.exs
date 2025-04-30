@@ -65,7 +65,10 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "if tenant exists but unable to connect, returns error" do
-      port = Enum.random(5500..9000)
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
 
       extensions = [
         %{
@@ -169,12 +172,15 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "handles tenant suspension only on targetted suspended user" do
-      tenant1 = Containers.checkout_tenant(true)
-      tenant2 = Containers.checkout_tenant(true)
+      tenant1 = tenant_fixture()
+      tenant1 = Containers.initialize(tenant1, true, true)
+
+      tenant2 = tenant_fixture()
+      tenant2 = Containers.initialize(tenant2, true, true)
 
       on_exit(fn ->
-        Containers.checkin_tenant(tenant1)
-        Containers.checkin_tenant(tenant2)
+        Containers.stop_container(tenant1)
+        Containers.stop_container(tenant2)
       end)
 
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant1.external_id)
@@ -191,7 +197,10 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "properly handles of failing calls by avoid creating too many connections" do
-      port = Enum.random(5500..6000)
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
 
       tenant =
         tenant_fixture(%{
@@ -227,8 +236,10 @@ defmodule Realtime.Tenants.ConnectTest do
       refute_receive :too_many_connections
     end
 
-    test "on migrations failure, stop the process", %{tenant: tenant} do
+    test "on migrations failure, stop the process" do
       with_mock Realtime.Tenants.Migrations, [], run_migrations: fn _ -> raise("error") end do
+        tenant = tenant_fixture()
+        tenant = Containers.initialize(tenant, true)
         assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
         Process.sleep(1000)
         refute Process.alive?(pid)
@@ -383,7 +394,10 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "tenant not able to connect if database has not enough connections" do
-      port = Enum.random(5500..9000)
+      port =
+        5500..9000
+        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
+        |> Enum.random()
 
       extensions = [
         %{

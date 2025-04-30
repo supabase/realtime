@@ -195,9 +195,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     RateCounter.new(tenant.external_id)
     GenCounter.new(tenant.external_id)
 
-    on_exit(fn ->
-      Containers.checkin_tenant(tenant)
-    end)
+    on_exit(fn -> Containers.checkin_tenant(tenant) end)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     Process.sleep(500)
