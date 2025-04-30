@@ -10,10 +10,10 @@ defmodule Realtime.Tenants.Connect.Backoff do
   @impl Realtime.Tenants.Connect.Piper
   def run(acc) do
     %{tenant_id: tenant_id} = acc
-    connect_backoff_limit = Application.fetch_env!(:realtime, :connect_backoff_limit)
+    connect_throttle_limit = Application.fetch_env!(:realtime, :connect_throttle_limit)
 
     with {:ok, counter} <- start_connects_per_second_counter(tenant_id),
-         {:ok, %{avg: avg}} when avg < connect_backoff_limit <- RateCounter.get(counter) do
+         {:ok, %{avg: avg}} when avg < connect_throttle_limit <- RateCounter.get(counter) do
       GenCounter.add(counter)
       {:ok, acc}
     else
