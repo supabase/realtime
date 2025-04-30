@@ -14,6 +14,7 @@ defmodule Realtime.Tenants.Connect.Backoff do
 
     with {:ok, counter} <- start_connects_per_second_counter(tenant_id),
          {:ok, %{avg: avg}} when avg < connect_throttle_limit <- RateCounter.get(counter) do
+      IO.inspect(avg)
       GenCounter.add(counter)
       {:ok, acc}
     else
@@ -25,8 +26,7 @@ defmodule Realtime.Tenants.Connect.Backoff do
     id = Tenants.connection_attempts_per_second_key(tenant_id)
     GenCounter.new(id)
 
-    res =
-      RateCounter.new(id, idle_shutdown: :infinity)
+    res = RateCounter.new(id, idle_shutdown: :infinity, tick: 200)
 
     case res do
       {:ok, _} -> {:ok, id}
