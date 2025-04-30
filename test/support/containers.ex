@@ -138,6 +138,7 @@ defmodule Containers do
     :ets.insert(:containers, {tenant.external_id, %{tenant: tenant, using?: false}})
   end
 
+  @spec stop_container(any()) :: {any(), non_neg_integer()}
   def stop_container(%Tenant{} = tenant) do
     :ets.delete(:containers, tenant.external_id)
     pid = Connect.whereis(tenant.external_id)

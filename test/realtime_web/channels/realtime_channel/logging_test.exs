@@ -8,11 +8,13 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
   setup do
     :telemetry.attach(__MODULE__, [:realtime, :channel, :error], &__MODULE__.handle_telemetry/4, pid: self())
-    on_exit(fn -> :telemetry.detach(__MODULE__) end)
-
     level = Logger.level()
-    Logger.configure(level: :debug)
-    on_exit(fn -> Logger.configure(level: level) end)
+    Logger.configure(level: :info)
+
+    on_exit(fn ->
+      :telemetry.detach(__MODULE__)
+      Logger.configure(level: level)
+    end)
   end
 
   describe "maybe_log_handle_info/2" do

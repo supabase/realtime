@@ -1,5 +1,5 @@
 defmodule Realtime.Tenants.ListenTest do
-  use Realtime.DataCase, async: true
+  use Realtime.DataCase, async: false
   import ExUnit.CaptureLog
 
   alias Realtime.Tenants.Listen

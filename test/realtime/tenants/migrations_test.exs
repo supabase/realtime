@@ -1,6 +1,6 @@
 defmodule Realtime.Tenants.MigrationsTest do
   alias Realtime.Tenants.Cache
-  use Realtime.DataCase, async: true
+  use Realtime.DataCase, async: false
 
   alias Realtime.Tenants.Migrations
 

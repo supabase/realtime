@@ -1,5 +1,5 @@
 defmodule Realtime.PromEx.Plugins.TenantsTest do
-  use Realtime.DataCase, async: true
+  use Realtime.DataCase, async: false
 
   alias Realtime.PromEx.Plugins.Tenants
   alias Realtime.Rpc
