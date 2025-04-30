@@ -10,9 +10,9 @@ defmodule Realtime.Tenants.Connect.Backoff do
   @impl Realtime.Tenants.Connect.Piper
   def run(acc) do
     %{tenant_id: tenant_id} = acc
-    connect_backoff_limit = Application.get_env(:realtime, :connect_backoff_limit)
+    connect_backoff_limit = Application.fetch_env!(:realtime, :connect_backoff_limit)
 
-    with {:ok, counter} <- start_connects_per_second_counter(tenant_id, connect_backoff_limit),
+    with {:ok, counter} <- start_connects_per_second_counter(tenant_id),
          {:ok, %{avg: avg}} when avg < connect_backoff_limit <- RateCounter.get(counter) do
       GenCounter.add(counter)
       {:ok, acc}
@@ -21,20 +21,12 @@ defmodule Realtime.Tenants.Connect.Backoff do
     end
   end
 
-  defp start_connects_per_second_counter(tenant_id, limit) do
+  defp start_connects_per_second_counter(tenant_id) do
     id = Tenants.connection_attempts_per_second_key(tenant_id)
     GenCounter.new(id)
 
     res =
-      RateCounter.new(id,
-        idle_shutdown: :infinity,
-        telemetry: %{
-          event_name: [:channel, :joins],
-          measurements: %{limit: limit},
-          metadata: %{tenant: tenant_id},
-          tick: 500
-        }
-      )
+      RateCounter.new(id, idle_shutdown: :infinity)
 
     case res do
       {:ok, _} -> {:ok, id}

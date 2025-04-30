@@ -206,28 +206,6 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
-  @doc """
-  Returns the pid of the tenant Connection process
-  """
-  @spec whereis(binary()) :: pid | nil
-  def whereis(tenant_id) do
-    case :syn.lookup(__MODULE__, tenant_id) do
-      {pid, _} -> pid
-      :undefined -> nil
-    end
-  end
-
-  @doc """
-  Shutdown the tenant Connection and linked processes
-  """
-  @spec shutdown(binary()) :: :ok | nil
-  def shutdown(tenant_id) do
-    case whereis(tenant_id) do
-      pid when is_pid(pid) -> GenServer.stop(pid)
-      _ -> :ok
-    end
-  end
-
   def handle_continue(:run_migrations, state) do
     %{tenant: tenant, db_conn_pid: db_conn_pid} = state
 
