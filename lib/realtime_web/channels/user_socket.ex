@@ -30,7 +30,7 @@ defmodule RealtimeWeb.UserSocket do
       %{uri: %{host: host}, x_headers: headers} = opts
 
       {:ok, external_id} = Database.get_external_id(host)
-
+      external_id = String.upcase(external_id)
       Logger.metadata(external_id: external_id, project: external_id)
       Logger.put_process_level(self(), :error)
 

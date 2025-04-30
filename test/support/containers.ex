@@ -13,9 +13,9 @@ defmodule Containers do
 
   @type t :: %__MODULE__{port: integer(), tenant: Realtime.Api.Tenant.t(), using?: boolean()}
   def initialize(tenant, lock? \\ false, run_migrations? \\ false) do
-    capture_log(fn ->
-      if :ets.whereis(:containers) == :undefined, do: :ets.new(:containers, [:named_table, :set, :public])
+    if :ets.whereis(:containers) == :undefined, do: :ets.new(:containers, [:named_table, :set, :public])
 
+    capture_log(fn ->
       name = "realtime-test-#{tenant.external_id}"
       %{port: port} = Database.from_tenant(tenant, "realtime_test", :stop)
 
@@ -53,6 +53,8 @@ defmodule Containers do
   end
 
   def initialize_no_tenant(external_id, port) do
+    if :ets.whereis(:containers) == :undefined, do: :ets.new(:containers, [:named_table, :set, :public])
+
     name = "realtime-test-#{external_id}"
 
     capture_log(fn ->
