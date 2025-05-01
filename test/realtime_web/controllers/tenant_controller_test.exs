@@ -263,10 +263,10 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert response(conn, 204)
     end
 
-    test "returns 404 when jwt is invalid", %{conn: conn} do
+    test "returns 403 when jwt is invalid", %{conn: conn, tenant: tenant} do
       conn = put_req_header(conn, "authorization", "Bearer potato")
-      conn = delete(conn, ~p"/api/tenants")
-      assert json_response(conn, 404) == "Not Found"
+      conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
+      assert response(conn, 403) == ""
     end
   end
 
@@ -367,10 +367,10 @@ defmodule RealtimeWeb.TenantControllerTest do
              } == data
     end
 
-    test "returns 404 when jwt is invalid", %{conn: conn, tenant: tenant} do
+    test "returns 403 when jwt is invalid", %{conn: conn, tenant: tenant} do
       conn = put_req_header(conn, "authorization", "Bearer potato")
-      conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}/health")
-      assert json_response(conn, 404) == "Not Found"
+      conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+      assert response(conn, 403) == ""
     end
 
     test "runs migrations", %{conn: conn} do
