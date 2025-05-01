@@ -307,7 +307,7 @@ defmodule Realtime.Tenants.Connect do
         %{db_conn_reference: db_conn_reference} = state
       ) do
     Logger.warning("Database connection has been terminated")
-    {:stop, :normal, state}
+    {:stop, :shutdown, state}
   end
 
   # Handle replication connection termination
@@ -316,7 +316,7 @@ defmodule Realtime.Tenants.Connect do
         %{replication_connection_reference: replication_connection_reference} = state
       ) do
     Logger.warning("Replication connection has died")
-    {:stop, :normal, state}
+    {:stop, :shutdown, state}
   end
 
   #  Handle listen connection termination
@@ -325,7 +325,7 @@ defmodule Realtime.Tenants.Connect do
         %{listen_reference: listen_reference} = state
       ) do
     Logger.warning("Listen has been terminated")
-    {:stop, :normal, state}
+    {:stop, :shutdown, state}
   end
 
   # Ignore messages to avoid handle_info unmatched functions

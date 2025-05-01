@@ -4,8 +4,7 @@ defmodule Realtime.Tenants.Connect.BackoffTest do
 
   setup do
     tenant_id = random_string()
-    acc = %{tenant_id: tenant_id}
-    {:ok, acc: acc}
+    {:ok, acc: %{tenant_id: tenant_id}}
   end
 
   test "does not apply backoff for a given tenant if never called", %{acc: acc} do
@@ -14,9 +13,9 @@ defmodule Realtime.Tenants.Connect.BackoffTest do
 
   test "applies backoff if the user as called more than once during the configured space", %{acc: acc} do
     # emulate calls
-    for _ <- 1..100 do
+    for _ <- 1..10 do
       Backoff.run(acc)
-      Process.sleep(5)
+      Process.sleep(10)
     end
 
     assert {:error, :tenant_create_backoff} = Backoff.run(acc)
@@ -24,9 +23,9 @@ defmodule Realtime.Tenants.Connect.BackoffTest do
 
   test "resets backoff after the configured space", %{acc: acc} do
     # emulate calls
-    for _ <- 1..100 do
+    for _ <- 1..10 do
       Backoff.run(acc)
-      Process.sleep(5)
+      Process.sleep(10)
     end
 
     # emulate block

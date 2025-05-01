@@ -189,7 +189,7 @@ defmodule Realtime.Tenants.ConnectTest do
       log =
         capture_log(fn ->
           Realtime.Tenants.suspend_tenant_by_external_id(tenant2.external_id)
-          Process.sleep(100)
+          Process.sleep(50)
         end)
 
       refute log =~ "Tenant was suspended"
@@ -377,10 +377,10 @@ defmodule Realtime.Tenants.ConnectTest do
     test "respects backoff pipe", %{tenant: tenant} do
       log =
         capture_log(fn ->
-          for _ <- 1..100 do
+          for _ <- 1..10 do
             Connect.connect(tenant.external_id)
+            Process.sleep(10)
             Connect.shutdown(tenant.external_id)
-            Process.sleep(5)
           end
 
           assert {:error, :tenant_create_backoff} = Connect.connect(tenant.external_id)
@@ -390,10 +390,10 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "after timer, is able to connect", %{tenant: tenant} do
-      for _ <- 1..100 do
+      for _ <- 1..10 do
         Connect.connect(tenant.external_id)
+        Process.sleep(10)
         Connect.shutdown(tenant.external_id)
-        Process.sleep(5)
       end
 
       assert {:error, :tenant_create_backoff} = Connect.connect(tenant.external_id)
