@@ -377,27 +377,28 @@ defmodule Realtime.Tenants.ConnectTest do
     test "respects backoff pipe", %{tenant: tenant} do
       log =
         capture_log(fn ->
-          for _ <- 1..10 do
+          for _ <- 1..100 do
             Connect.connect(tenant.external_id)
             Process.sleep(10)
             Connect.shutdown(tenant.external_id)
           end
 
-          assert {:error, :tenant_create_backoff} = Connect.connect(tenant.external_id)
+          assert {:error, :tenant_connect_backoff} = Connect.connect(tenant.external_id)
         end)
 
       assert log =~ "Too many connect attempts to tenant database"
     end
 
+    @tag timeout: 130_000
     test "after timer, is able to connect", %{tenant: tenant} do
-      for _ <- 1..10 do
+      for _ <- 1..100 do
         Connect.connect(tenant.external_id)
         Process.sleep(10)
         Connect.shutdown(tenant.external_id)
       end
 
-      assert {:error, :tenant_create_backoff} = Connect.connect(tenant.external_id)
-      Process.sleep(5000)
+      assert {:error, :tenant_connect_backoff} = Connect.connect(tenant.external_id)
+      Process.sleep(70_000)
       assert {:ok, _pid} = Connect.connect(tenant.external_id)
     end
   end

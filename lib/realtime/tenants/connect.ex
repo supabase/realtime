@@ -115,9 +115,9 @@ defmodule Realtime.Tenants.Connect do
       {:error, {:shutdown, :tenant_not_found}} ->
         {:error, :tenant_not_found}
 
-      {:error, {:shutdown, :tenant_create_backoff}} ->
+      {:error, {:shutdown, :tenant_connect_backoff}} ->
         log_warning("TooManyConnectAttempts", "Too many connect attempts to tenant database")
-        {:error, :tenant_create_backoff}
+        {:error, :tenant_connect_backoff}
 
       {:error, :shutdown} ->
         log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database")
@@ -197,8 +197,8 @@ defmodule Realtime.Tenants.Connect do
       {:error, :tenant_db_too_many_connections} ->
         {:stop, {:shutdown, :tenant_db_too_many_connections}}
 
-      {:error, :tenant_create_backoff} ->
-        {:stop, {:shutdown, :tenant_create_backoff}}
+      {:error, :tenant_connect_backoff} ->
+        {:stop, {:shutdown, :tenant_connect_backoff}}
 
       {:error, error} ->
         log_error("UnableToConnectToTenantDatabase", error)
