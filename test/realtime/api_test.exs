@@ -1,6 +1,6 @@
 defmodule Realtime.ApiTest do
   # async: false due to the fact that interacts with Realtime.Repo which means it might capture more entries than expected and due to usage of mocks
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
 
   import Mock
 
@@ -48,10 +48,7 @@ defmodule Realtime.ApiTest do
 
   describe "create_tenant/1" do
     test "valid data creates a tenant" do
-      port =
-        5500..9000
-        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-        |> Enum.random()
+      port = Generators.port()
 
       external_id = random_string()
 

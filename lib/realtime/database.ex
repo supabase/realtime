@@ -27,6 +27,8 @@ defmodule Realtime.Database do
     backoff_type: :rand_exp
   ]
 
+  @typep backoff_type :: :stop | :exp | :rand | :rand_exp
+
   @type t :: %__MODULE__{
           hostname: binary(),
           database: binary(),
@@ -39,14 +41,14 @@ defmodule Realtime.Database do
           max_restarts: non_neg_integer() | nil,
           ssl: boolean(),
           socket_options: list(),
-          backoff_type: :stop | :exp | :rand | :rand_exp
+          backoff_type: backoff_type()
         }
 
   @cdc "postgres_cdc_rls"
   @doc """
   Creates a database connection struct from the given tenant.
   """
-  @spec from_tenant(Tenant.t(), binary(), :stop | :exp | :rand | :rand_exp) :: t()
+  @spec from_tenant(Tenant.t(), application_name :: binary(), backoff_type()) :: t()
   def from_tenant(%Tenant{} = tenant, application_name, backoff \\ :rand_exp) do
     tenant
     |> then(&Realtime.PostgresCdc.filter_settings(@cdc, &1.extensions))
@@ -56,7 +58,7 @@ defmodule Realtime.Database do
   @doc """
   Creates a database connection struct from the given settings.
   """
-  @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: t()
+  @spec from_settings(map(), application_name :: binary(), backoff_type()) :: t()
   def from_settings(settings, application_name, backoff \\ :rand_exp) do
     pool = pool_size_by_application_name(application_name, settings)
 
@@ -129,7 +131,7 @@ defmodule Realtime.Database do
   @doc """
   Connects to the database using the given settings.
   """
-  @spec connect(Tenant.t(), binary(), :stop | :exp | :rand | :rand_exp) ::
+  @spec connect(Tenant.t(), application_name :: binary(), backoff_type()) ::
           {:ok, pid()} | {:error, any()}
   def connect(tenant, application_name, backoff \\ :stop) do
     tenant

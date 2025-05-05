@@ -11,8 +11,7 @@ defmodule Realtime.Tenants.ListenTest do
       start_supervised(Realtime.RateCounter)
       start_supervised(Realtime.GenCounter)
 
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
+      tenant = Containers.checkout_tenant_v2(run_migrations: true)
 
       {:ok, _} = Listen.start(tenant, self())
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -47,7 +46,7 @@ defmodule Realtime.Tenants.ListenTest do
 
   describe "whereis/1" do
     test "returns pid if exists" do
-      tenant = Containers.checkout_tenant()
+      tenant = Containers.checkout_tenant_v2()
       Listen.start(tenant, self())
       assert Listen.whereis(tenant.external_id)
     end

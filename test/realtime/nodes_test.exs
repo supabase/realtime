@@ -6,9 +6,8 @@ defmodule Realtime.NodesTest do
 
   describe "get_node_for_tenant/1" do
     setup do
-      tenant = Containers.checkout_tenant()
+      tenant = Containers.checkout_tenant_v2()
       region = tenant.extensions |> hd() |> Map.get(:settings) |> Map.get("region")
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
       %{tenant: tenant, region: region}
     end
 
