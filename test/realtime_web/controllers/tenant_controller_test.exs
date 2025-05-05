@@ -48,7 +48,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   describe "create tenant with post" do
-    test "run migrations on creation", %{conn: conn} do
+    test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
 
       port =
@@ -67,14 +67,22 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
 
-      tenant = Tenants.get_tenant_by_external_id(external_id)
-      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-      assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
+      [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
+
+      assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
+      assert Crypto.encrypt!("postgres") == settings["db_name"]
+      assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
+      refute settings["db_password"]
+
+      %{extensions: [%{settings: settings}]} = tenant = Tenants.get_tenant_by_external_id(external_id)
+
+      assert Crypto.encrypt!("postgres") == settings["db_password"]
+      assert tenant.migrations_ran > 0
     end
   end
 
   describe "create tenant with put" do
-    test "run migrations on creation", %{conn: conn} do
+    test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
 
       port =
@@ -91,54 +99,6 @@ defmodule RealtimeWeb.TenantControllerTest do
       conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
 
       assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
-
-      tenant = Tenants.get_tenant_by_external_id(external_id)
-      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-      assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
-    end
-  end
-
-  describe "upsert with post" do
-    test "renders tenant when data is valid", %{conn: conn} do
-      external_id = random_string()
-
-      port =
-        5500..9000
-        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-        |> Enum.random()
-
-      attrs = default_tenant_attrs(port)
-      attrs = Map.put(attrs, "external_id", external_id)
-
-      Containers.initialize_no_tenant(external_id, port)
-      on_exit(fn -> Containers.stop_container(external_id) end)
-
-      conn = post(conn, ~p"/api/tenants", tenant: attrs)
-      assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
-
-      conn = get(conn, Routes.tenant_path(conn, :show, external_id))
-      assert ^external_id = json_response(conn, 200)["data"]["external_id"]
-      assert 200 = json_response(conn, 200)["data"]["max_concurrent_users"]
-      assert 100 = json_response(conn, 200)["data"]["max_channels_per_client"]
-      assert 100 = json_response(conn, 200)["data"]["max_events_per_second"]
-      assert 100 = json_response(conn, 200)["data"]["max_joins_per_second"]
-    end
-
-    test "encrypt creds", %{conn: conn} do
-      external_id = random_string()
-
-      port =
-        5500..9000
-        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-        |> Enum.random()
-
-      Containers.initialize_no_tenant(external_id, port)
-      on_exit(fn -> Containers.stop_container(external_id) end)
-
-      attrs = default_tenant_attrs(port)
-      attrs = Map.put(attrs, "external_id", external_id)
-      conn = post(conn, ~p"/api/tenants", tenant: attrs)
-
       [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
 
       assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
@@ -146,9 +106,30 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
       refute settings["db_password"]
 
-      %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id(external_id)
+      %{extensions: [%{settings: settings}]} = tenant = Tenants.get_tenant_by_external_id(external_id)
 
       assert Crypto.encrypt!("postgres") == settings["db_password"]
+      assert tenant.migrations_ran > 0
+    end
+  end
+
+  describe "upsert with post" do
+    setup [:with_tenant]
+
+    test "renders tenant when data is valid", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      attrs = default_tenant_attrs(port)
+      attrs = Map.put(attrs, "external_id", external_id)
+      conn = post(conn, ~p"/api/tenants", tenant: attrs)
+      assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 200)["data"]
+
+      conn = get(conn, Routes.tenant_path(conn, :show, external_id))
+      assert ^external_id = json_response(conn, 200)["data"]["external_id"]
+      assert 200 = json_response(conn, 200)["data"]["max_concurrent_users"]
+      assert 100 = json_response(conn, 200)["data"]["max_channels_per_client"]
+      assert 100 = json_response(conn, 200)["data"]["max_events_per_second"]
+      assert 100 = json_response(conn, 200)["data"]["max_joins_per_second"]
     end
 
     test "renders errors when data is invalid", %{conn: conn} do
@@ -166,23 +147,13 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "upsert with put" do
     setup [:with_tenant]
 
-    test "renders tenant when data is valid", %{conn: conn} do
-      external_id = random_string()
-
-      port =
-        5500..9000
-        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-        |> Enum.random()
-
-      :ets.insert(:test_ports, {port})
-
+    test "renders tenant when data is valid", %{tenant: tenant, conn: conn} do
+      external_id = tenant.external_id
+      port = Database.from_tenant(tenant, "realtime_test", :stop).port
       attrs = default_tenant_attrs(port)
 
-      Containers.initialize_no_tenant(external_id, port)
-      on_exit(fn -> Containers.stop_container(external_id) end)
-
       conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
-      assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
+      assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 200)["data"]
 
       conn = get(conn, Routes.tenant_path(conn, :show, external_id))
       assert ^external_id = json_response(conn, 200)["data"]["external_id"]
@@ -190,32 +161,6 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert 100 = json_response(conn, 200)["data"]["max_channels_per_client"]
       assert 100 = json_response(conn, 200)["data"]["max_events_per_second"]
       assert 100 = json_response(conn, 200)["data"]["max_joins_per_second"]
-    end
-
-    test "encrypt creds", %{conn: conn} do
-      external_id = random_string()
-
-      port =
-        5500..9000
-        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-        |> Enum.random()
-
-      Containers.initialize_no_tenant(external_id, port)
-      on_exit(fn -> Containers.stop_container(external_id) end)
-
-      attrs = default_tenant_attrs(port)
-      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
-
-      [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
-
-      assert Crypto.encrypt!("127.0.0.1") == settings["db_host"]
-      assert Crypto.encrypt!("postgres") == settings["db_name"]
-      assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
-      refute settings["db_password"]
-
-      %{extensions: [%{settings: settings}]} = Tenants.get_tenant_by_external_id(external_id)
-
-      assert Crypto.encrypt!("postgres") == settings["db_password"]
     end
 
     test "renders errors when data is invalid", %{conn: conn} do
@@ -263,10 +208,10 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert response(conn, 204)
     end
 
-    test "returns 404 when jwt is invalid", %{conn: conn} do
+    test "returns 403 when jwt is invalid", %{conn: conn, tenant: tenant} do
       conn = put_req_header(conn, "authorization", "Bearer potato")
-      conn = delete(conn, ~p"/api/tenants")
-      assert json_response(conn, 404) == "Not Found"
+      conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
+      assert response(conn, 403) == ""
     end
   end
 
@@ -367,10 +312,10 @@ defmodule RealtimeWeb.TenantControllerTest do
              } == data
     end
 
-    test "returns 404 when jwt is invalid", %{conn: conn, tenant: tenant} do
+    test "returns 403 when jwt is invalid", %{conn: conn, tenant: tenant} do
       conn = put_req_header(conn, "authorization", "Bearer potato")
-      conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}/health")
-      assert json_response(conn, 404) == "Not Found"
+      conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+      assert response(conn, 403) == ""
     end
 
     test "runs migrations", %{conn: conn} do

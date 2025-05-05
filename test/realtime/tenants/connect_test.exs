@@ -189,7 +189,7 @@ defmodule Realtime.Tenants.ConnectTest do
       log =
         capture_log(fn ->
           Realtime.Tenants.suspend_tenant_by_external_id(tenant2.external_id)
-          Process.sleep(100)
+          Process.sleep(50)
         end)
 
       refute log =~ "Tenant was suspended"
@@ -370,6 +370,35 @@ defmodule Realtime.Tenants.ConnectTest do
       with_mock Realtime.Nodes, get_node_for_tenant: fn _ -> {:ok, :potato@nohost} end do
         assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant")
       end
+    end
+  end
+
+  describe "connect/1" do
+    test "respects backoff pipe", %{tenant: tenant} do
+      log =
+        capture_log(fn ->
+          for _ <- 1..10 do
+            Connect.connect(tenant.external_id)
+            Process.sleep(10)
+            Connect.shutdown(tenant.external_id)
+          end
+
+          assert {:error, :tenant_create_backoff} = Connect.connect(tenant.external_id)
+        end)
+
+      assert log =~ "Too many connect attempts to tenant database"
+    end
+
+    test "after timer, is able to connect", %{tenant: tenant} do
+      for _ <- 1..10 do
+        Connect.connect(tenant.external_id)
+        Process.sleep(10)
+        Connect.shutdown(tenant.external_id)
+      end
+
+      assert {:error, :tenant_create_backoff} = Connect.connect(tenant.external_id)
+      Process.sleep(5000)
+      assert {:ok, _pid} = Connect.connect(tenant.external_id)
     end
   end
 

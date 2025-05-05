@@ -90,46 +90,39 @@ defmodule Containers do
     tenant = Enum.random(tenants)
     :ets.insert(:containers, {tenant.external_id, %{tenant: tenant, using?: true}})
 
-    settings = Database.from_tenant(tenant, "realtime_test", :stop)
-    settings = %{settings | max_restarts: 0, ssl: false}
-    {:ok, conn} = Database.connect_db(settings)
+    capture_log(fn ->
+      settings = Database.from_tenant(tenant, "realtime_test", :stop)
+      settings = %{settings | max_restarts: 0, ssl: false}
+      {:ok, conn} = Database.connect_db(settings)
 
-    Postgrex.transaction(conn, fn db_conn ->
-      pid = Connect.whereis(tenant.external_id)
-      if pid && Process.alive?(pid), do: Connect.shutdown(tenant.external_id)
+      Postgrex.transaction(conn, fn db_conn ->
+        Postgrex.query!(
+          db_conn,
+          "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name like 'realtime_%' and application_name != 'realtime_test'",
+          []
+        )
 
-      tenant
-      |> Tenants.limiter_keys()
-      |> Enum.each(fn key ->
         RateCounter.stop(tenant.external_id)
         GenCounter.stop(tenant.external_id)
-        RateCounter.new(key)
-        GenCounter.new(key)
+
+        Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
+        Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])
+
+        if Tenants.get_tenant_by_external_id(tenant.external_id) do
+          Tenants.update_migrations_ran(tenant.external_id, 0)
+        end
+
+        :ok
       end)
 
-      Postgrex.query!(
-        db_conn,
-        "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name like 'realtime_%' and application_name != 'realtime_test'",
-        []
-      )
-
-      Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
-      Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])
-
-      if Tenants.get_tenant_by_external_id(tenant.external_id) do
-        Tenants.update_migrations_ran(tenant.external_id, 0)
+      if run_migrations? do
+        Migrations.run_migrations(tenant)
+        {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
+        :ok = Migrations.create_partitions(pid)
       end
 
-      :ok
+      Process.sleep(1000)
     end)
-
-    if run_migrations? do
-      Migrations.run_migrations(tenant)
-      {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
-      :ok = Migrations.create_partitions(pid)
-    end
-
-    Process.sleep(1000)
 
     tenant
   end
@@ -138,7 +131,7 @@ defmodule Containers do
     :ets.insert(:containers, {tenant.external_id, %{tenant: tenant, using?: false}})
   end
 
-  @spec stop_container(any()) :: {any(), non_neg_integer()}
+  @spec stop_container(Tenant.t() | binary()) :: {any(), non_neg_integer()}
   def stop_container(%Tenant{} = tenant) do
     :ets.delete(:containers, tenant.external_id)
     pid = Connect.whereis(tenant.external_id)

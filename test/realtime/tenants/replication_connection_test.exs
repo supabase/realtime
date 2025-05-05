@@ -1,4 +1,5 @@
 defmodule Realtime.Tenants.ReplicationConnectionTest do
+  alias Realtime.RateCounter
   use Realtime.DataCase, async: false
 
   alias Realtime.Api.Message
@@ -12,6 +13,12 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     Application.put_env(:realtime, :slot_name_suffix, "test")
 
     tenant = Containers.checkout_tenant(true)
+
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+    name = "supabase_realtime_messages_replication_slot_test"
+    Postgrex.query(db_conn, "SELECT pg_drop_replication_slot($1)", [name])
+    Process.exit(db_conn, :normal)
+    tenant |> Tenants.limiter_keys() |> Enum.each(&RateCounter.new(&1))
 
     on_exit(fn ->
       Application.put_env(:realtime, :slot_name_suffix, slot)
@@ -118,6 +125,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   test "fails on existing replication slot", %{tenant: tenant} do
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     name = "supabase_realtime_messages_replication_slot_test"
+
     Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [name])
 
     assert {:error, "Temporary Replication slot already exists and in use"} =

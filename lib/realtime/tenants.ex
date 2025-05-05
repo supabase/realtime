@@ -121,7 +121,9 @@ defmodule Realtime.Tenants do
       requests_per_second_key(tenant),
       channels_per_client_key(tenant),
       joins_per_second_key(tenant),
-      events_per_second_key(tenant)
+      events_per_second_key(tenant),
+      connection_attempts_per_second_key(tenant),
+      presence_events_per_second_key(tenant)
     ]
   end
 
@@ -208,6 +210,23 @@ defmodule Realtime.Tenants do
 
   def presence_events_per_second_key(%Tenant{} = tenant) do
     {:channel, :presence_events, tenant.external_id}
+  end
+
+  @doc """
+  The GenCounter key to use when counting connection attempts against Realtime.Tenants.Connect
+  ## Examples
+    iex> Realtime.Tenants.connection_attempts_per_second_key("tenant_id")
+    {:tenant, :connection_attempts, "tenant_id"}
+    iex> Realtime.Tenants.connection_attempts_per_second_key(%Realtime.Api.Tenant{external_id: "tenant_id"})
+    {:tenant, :connection_attempts, "tenant_id"}
+  """
+  @spec connection_attempts_per_second_key(Tenant.t() | String.t()) :: {:tenant, :connection_attempts, String.t()}
+  def connection_attempts_per_second_key(tenant) when is_binary(tenant) do
+    {:tenant, :connection_attempts, tenant}
+  end
+
+  def connection_attempts_per_second_key(%Tenant{} = tenant) do
+    {:tenant, :connection_attempts, tenant.external_id}
   end
 
   @spec get_tenant_limits(Realtime.Api.Tenant.t(), maybe_improper_list) :: list

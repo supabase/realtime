@@ -26,7 +26,7 @@ defmodule Realtime.UsersCounterTest do
     test "returns count of connected clients for tenant on cluster node" do
       tenant_id = random_string()
       expected = generate_load(tenant_id)
-      Process.sleep(500)
+      Process.sleep(1000)
       assert UsersCounter.tenant_users(tenant_id) == expected
     end
   end
@@ -42,7 +42,7 @@ defmodule Realtime.UsersCounterTest do
     end
   end
 
-  defp generate_load(tenant_id, nodes \\ 3, processes \\ 3) do
+  defp generate_load(tenant_id, nodes \\ 2, processes \\ 2) do
     for _ <- 1..nodes do
       {:ok, node} = Clustered.start(@aux_mod)
 

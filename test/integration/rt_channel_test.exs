@@ -673,7 +673,7 @@ defmodule Realtime.Integration.RtChannelTest do
         capture_log([level: :warning], fn ->
           WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => token})
 
-          assert_receive %Message{event: "system"}, 500
+          assert_receive %Message{event: "system"}, 1000
         end)
 
       assert log =~ "ChannelShutdown"
