@@ -79,7 +79,8 @@ defmodule Containers do
         ])
 
       check_container_ready(name)
-      Process.sleep(1000)
+      # Required as the database might not be available yet for first operations
+      Process.sleep(4000)
     end)
 
     name
