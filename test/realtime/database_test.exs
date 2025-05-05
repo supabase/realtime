@@ -12,45 +12,33 @@ defmodule Realtime.DatabaseTest do
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
 
   setup do
-    tenant = Containers.checkout_tenant()
+    tenant = Containers.checkout_tenant_v2()
     :telemetry.attach(__MODULE__, [:realtime, :database, :transaction], &__MODULE__.handle_telemetry/4, pid: self())
 
-    on_exit(fn ->
-      :telemetry.detach(__MODULE__)
-      Containers.checkin_tenant(tenant)
-    end)
+    on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
     %{tenant: tenant}
   end
 
   describe "check_tenant_connection/1" do
     setup context do
-      port =
-        5500..9000
-        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-        |> Enum.random()
-
-      extensions = [
-        %{
-          "type" => "postgres_cdc_rls",
-          "settings" => %{
-            "db_host" => "127.0.0.1",
-            "db_name" => "postgres",
-            "db_user" => "supabase_admin",
-            "db_password" => "postgres",
-            "db_port" => "#{port}",
-            "region" => "us-east-1",
-            "ssl_enforced" => false,
-            "db_pool" => Map.get(context, :db_pool),
-            "subcriber_pool_size" => Map.get(context, :subcriber_pool),
-            "subs_pool_size" => Map.get(context, :db_pool)
-          }
+      extension = %{
+        "type" => "postgres_cdc_rls",
+        "settings" => %{
+          "db_host" => "127.0.0.1",
+          "db_name" => "postgres",
+          "db_user" => "supabase_admin",
+          "db_password" => "postgres",
+          "region" => "us-east-1",
+          "ssl_enforced" => false,
+          "db_pool" => Map.get(context, :db_pool),
+          "subcriber_pool_size" => Map.get(context, :subcriber_pool),
+          "subs_pool_size" => Map.get(context, :db_pool)
         }
-      ]
+      }
 
-      tenant = tenant_fixture(%{extensions: extensions})
-      Containers.initialize(tenant, true)
-      on_exit(fn -> Containers.stop_container(tenant) end)
+      {:ok, tenant} = update_extension(context.tenant, extension)
+
       %{tenant: tenant}
     end
 
@@ -69,10 +57,7 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "replication_slot_teardown/1" do
-    test "removes replication slots with the realtime prefix" do
-      tenant = tenant_fixture()
-      tenant = Containers.initialize(tenant, true)
-      on_exit(fn -> Containers.stop_container(tenant) end)
+    test "removes replication slots with the realtime prefix", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
       Postgrex.query!(
@@ -87,11 +72,7 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "replication_slot_teardown/2" do
-    test "removes replication slots with a given name and existing connection" do
-      tenant = tenant_fixture()
-      tenant = Containers.initialize(tenant, true)
-      on_exit(fn -> Containers.stop_container(tenant) end)
-
+    test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -106,11 +87,7 @@ defmodule Realtime.DatabaseTest do
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
 
-    test "removes replication slots with a given name and a tenant" do
-      tenant = tenant_fixture()
-      tenant = Containers.initialize(tenant, true)
-      on_exit(fn -> Containers.stop_container(tenant) end)
-
+    test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -126,8 +103,23 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "transaction/1" do
-    setup %{tenant: tenant} do
+    setup context do
+      extension = %{
+        "type" => "postgres_cdc_rls",
+        "settings" => %{
+          "db_host" => "127.0.0.1",
+          "db_name" => "postgres",
+          "db_user" => "supabase_admin",
+          "db_password" => "postgres",
+          "region" => "us-east-1",
+          "ssl_enforced" => false,
+          "db_pool" => Map.get(context, :db_pool)
+        }
+      }
+
+      {:ok, tenant} = update_extension(context.tenant, extension)
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
       %{db_conn: db_conn}
     end
 
@@ -327,11 +319,7 @@ defmodule Realtime.DatabaseTest do
   end
 
   describe "from_settings/3" do
-    test "returns struct with correct setup" do
-      tenant = tenant_fixture()
-      tenant = Containers.initialize(tenant, true)
-      on_exit(fn -> Containers.stop_container(tenant) end)
-
+    test "returns struct with correct setup", %{tenant: tenant} do
       application_name = "realtime_connect"
       backoff = :stop
       {:ok, ip_version} = Database.detect_ip_version("127.0.0.1")
@@ -370,5 +358,15 @@ defmodule Realtime.DatabaseTest do
       settings = Database.from_settings(settings, application_name, backoff)
       assert settings.ssl == false
     end
+  end
+
+  defp update_extension(tenant, extension) do
+    db_port = Realtime.Crypto.decrypt!(hd(tenant.extensions).settings["db_port"])
+
+    extensions = [
+      put_in(extension, ["settings", "db_port"], db_port)
+    ]
+
+    Realtime.Api.update_tenant(tenant, %{extensions: extensions})
   end
 end

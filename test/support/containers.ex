@@ -1,6 +1,7 @@
 defmodule Containers do
   import ExUnit.CaptureLog
 
+  alias Containers.Container
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.GenCounter
@@ -84,6 +85,72 @@ defmodule Containers do
     end)
 
     name
+  end
+
+  @doc "Return port for a container that can be used"
+  def checkout() do
+    with container when is_pid(container) <- :poolboy.checkout(Containers, true, 5_000),
+         port <- Container.port(container) do
+      # Automatically checkin the container at the end of the test
+      ExUnit.Callbacks.on_exit(fn -> :poolboy.checkin(Containers, container) end)
+
+      {:ok, port}
+    else
+      _ -> {:error, "failed to checkout a container"}
+    end
+  end
+
+  # Might be worth changing this to {:ok, tenant}
+  def checkout_tenant_v2(opts \\ []) do
+    with container when is_pid(container) <- :poolboy.checkout(Containers, true, 5_000),
+         port <- Container.port(container) do
+      tenant = Generators.tenant_fixture(%{port: port, migrations_ran: 0})
+      run_migrations? = Keyword.get(opts, :run_migrations, false)
+
+      # Automatically checkin the container at the end of the test
+      ExUnit.Callbacks.on_exit(fn -> :poolboy.checkin(Containers, container) end)
+
+      settings = Database.from_tenant(tenant, "realtime_test", :stop)
+      settings = %{settings | max_restarts: 0, ssl: false}
+      {:ok, conn} = Database.connect_db(settings)
+
+      Postgrex.transaction(conn, fn db_conn ->
+        Postgrex.query!(
+          db_conn,
+          "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name like 'realtime_%' and application_name != 'realtime_test'",
+          []
+        )
+
+        RateCounter.stop(tenant.external_id)
+        GenCounter.stop(tenant.external_id)
+
+        Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
+        Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])
+
+        :ok
+      end)
+
+      if run_migrations? do
+        case run_migrations(tenant) do
+          {:ok, count} ->
+            # Avoiding to use Tenants.update_migrations_ran/2 because it touches Cachex and it doesn't play well with
+            # Ecto Sandbox
+            {:ok, _} = Realtime.Api.update_tenant(tenant, %{migrations_ran: count})
+
+          _ ->
+            raise "Faled to run migrations"
+        end
+
+        :ok = Migrations.create_partitions(conn)
+      end
+
+      # FIXME revisit this shutdown reason
+      Process.exit(conn, :normal)
+
+      tenant
+    else
+      _ -> {:error, "failed to checkout a container"}
+    end
   end
 
   def checkout_tenant(run_migrations? \\ false) do
@@ -205,5 +272,36 @@ defmodule Containers do
       check_select_possible(tenant, attempts - 1)
   after
     Process.flag(:trap_exit, false)
+  end
+
+  # This exists so we avoid using an external process on Realtime.Tenants.Migrations
+  defp run_migrations(tenant) do
+    %{extensions: [%{settings: settings} | _]} = tenant
+    settings = Database.from_settings(settings, "realtime_migrations", :stop)
+
+    [
+      hostname: settings.hostname,
+      port: settings.port,
+      database: settings.database,
+      password: settings.password,
+      username: settings.username,
+      pool_size: settings.pool_size,
+      backoff_type: settings.backoff_type,
+      socket_options: settings.socket_options,
+      parameters: [application_name: settings.application_name],
+      ssl: settings.ssl
+    ]
+    |> Realtime.Repo.with_dynamic_repo(fn repo ->
+      try do
+        opts = [all: true, prefix: "realtime", dynamic_repo: repo]
+        migrations = Realtime.Tenants.Migrations.migrations()
+        Ecto.Migrator.run(Realtime.Repo, migrations, :up, opts)
+
+        {:ok, length(migrations)}
+      rescue
+        error ->
+          {:error, error}
+      end
+    end)
   end
 end

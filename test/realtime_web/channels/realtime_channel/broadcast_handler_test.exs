@@ -188,8 +188,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     start_supervised(Realtime.RateCounter.DynamicSupervisor)
     start_supervised(CurrentTime.Mock)
 
-    tenant = Containers.checkout_tenant(true)
-    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    tenant = Containers.checkout_tenant_v2(run_migrations: true)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     Process.sleep(500)

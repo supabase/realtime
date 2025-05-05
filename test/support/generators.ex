@@ -7,17 +7,15 @@ defmodule Generators do
   alias Realtime.Crypto
   alias Realtime.Database
 
+  def port() do
+    Agent.get_and_update(:available_db_ports, fn ports ->
+      [port | ports] = ports
+      {port, ports}
+    end)
+  end
+
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do
-    if :ets.whereis(:test_ports) == :undefined, do: :ets.new(:test_ports, [:named_table, :set, :public])
-
-    port =
-      5500..9000
-      |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-      |> Enum.random()
-
-    :ets.insert(:test_ports, {port})
-
     create_attrs = %{
       "external_id" => random_string(),
       "name" => "tenant",
@@ -29,7 +27,7 @@ defmodule Generators do
             "db_name" => "postgres",
             "db_user" => "supabase_admin",
             "db_password" => "postgres",
-            "db_port" => "#{port}",
+            "db_port" => "#{override[:port] || port()}",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,

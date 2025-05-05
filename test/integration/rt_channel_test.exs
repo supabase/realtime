@@ -64,8 +64,7 @@ defmodule Realtime.Integration.RtChannelTest do
   )
 
   setup do
-    tenant = Containers.checkout_tenant(true)
-    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    tenant = Containers.checkout_tenant_v2(run_migrations: true)
 
     %{tenant: tenant}
   end
