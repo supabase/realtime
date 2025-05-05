@@ -5,7 +5,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   import Generators
   import Mock
 
-  alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
@@ -190,11 +189,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     start_supervised(CurrentTime.Mock)
 
     tenant = Containers.checkout_tenant(true)
-    RateCounter.stop(tenant.external_id)
-    GenCounter.stop(tenant.external_id)
-    RateCounter.new(tenant.external_id)
-    GenCounter.new(tenant.external_id)
-
     on_exit(fn -> Containers.checkin_tenant(tenant) end)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
@@ -217,7 +211,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
        ) do
     claims = %{sub: random_string(), role: "authenticated", exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
-
     jwt = Joken.generate_and_sign!(%{}, claims, signer)
 
     authorization_context =
@@ -231,8 +224,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       })
 
     key = Tenants.events_per_second_key(tenant)
-    GenCounter.new(key)
-    RateCounter.new(key)
     {:ok, rate_counter} = RateCounter.get(key)
 
     tenant_topic = "realtime:#{topic}"
