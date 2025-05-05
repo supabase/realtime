@@ -72,9 +72,7 @@ defmodule Generators do
   end
 
   def random_string(length \\ 20) do
-    length
-    |> :crypto.strong_rand_bytes()
-    |> Base.encode32()
+    length |> :crypto.strong_rand_bytes() |> Base.encode32() |> String.downcase()
   end
 
   def clean_table(db_conn, schema, table) do

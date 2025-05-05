@@ -1,15 +1,13 @@
 defmodule Realtime.Tenants.JanitorTest do
-  # async: false due to the fact that we're checking ets tables that can be modified by other tests and we are using mocks
+  # async: false due to the fact that we're checking ets tables that can be modified by other tests
   use Realtime.DataCase, async: false
 
-  import Mock
   import ExUnit.CaptureLog
 
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.Repo
   alias Realtime.Tenants.Janitor
-  alias Realtime.Tenants.Migrations
   alias Realtime.Tenants.Connect
 
   setup do
@@ -68,23 +66,24 @@ defmodule Realtime.Tenants.JanitorTest do
       |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gt))
       |> MapSet.new()
 
-    with_mock Migrations, create_partitions: fn _ -> :ok end do
-      start_supervised!(Janitor)
-      Process.sleep(500)
+    start_supervised!(Janitor)
+    Process.sleep(500)
 
-      current =
-        Enum.map(tenants, fn tenant ->
-          {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-          {:ok, res} = Repo.all(conn, from(m in Message), Message)
-          res
-        end)
-        |> List.flatten()
-        |> MapSet.new()
+    current =
+      Enum.map(tenants, fn tenant ->
+        {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+        {:ok, res} = Repo.all(conn, from(m in Message), Message)
 
-      assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
-      assert_called(Migrations.create_partitions(:_))
-      assert :ets.tab2list(Connect) == []
-    end
+        verify_partitions(conn)
+
+        res
+      end)
+      |> List.flatten()
+      |> MapSet.new()
+
+    assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
+
+    assert :ets.tab2list(Connect) == []
   end
 
   test "cleans messages older than 72 hours and creates partitions from tenants that were active and untracks the user and test tenant has disconnected",
@@ -110,23 +109,23 @@ defmodule Realtime.Tenants.JanitorTest do
       |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gt))
       |> MapSet.new()
 
-    with_mock Migrations, create_partitions: fn _ -> :ok end do
-      start_supervised!(Janitor)
-      Process.sleep(500)
+    start_supervised!(Janitor)
+    Process.sleep(500)
 
-      current =
-        Enum.map(tenants, fn tenant ->
-          {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-          {:ok, res} = Repo.all(conn, from(m in Message), Message)
-          res
-        end)
-        |> List.flatten()
-        |> MapSet.new()
+    current =
+      Enum.map(tenants, fn tenant ->
+        {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+        {:ok, res} = Repo.all(conn, from(m in Message), Message)
 
-      assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
-      assert_called(Migrations.create_partitions(:_))
-      assert :ets.tab2list(Connect) == []
-    end
+        verify_partitions(conn)
+
+        res
+      end)
+      |> List.flatten()
+      |> MapSet.new()
+
+    assert MapSet.difference(current, to_keep) |> MapSet.size() == 0
+    assert :ets.tab2list(Connect) == []
   end
 
   test "logs error if fails to connect to tenant" do
@@ -165,5 +164,23 @@ defmodule Realtime.Tenants.JanitorTest do
            end) =~ "JanitorFailedToDeleteOldMessages"
 
     assert :ets.tab2list(Connect) == []
+  end
+
+  defp verify_partitions(conn) do
+    today = Date.utc_today()
+    yesterday = Date.add(today, -1)
+    future = Date.add(today, 3)
+    dates = Date.range(yesterday, future)
+
+    %{rows: rows} =
+      Postgrex.query!(
+        conn,
+        "SELECT tablename from pg_catalog.pg_tables where schemaname = 'realtime' and tablename like 'messages_%'",
+        []
+      )
+
+    partitions = Enum.map(rows, fn [name] -> name end)
+    expected_names = Enum.map(dates, fn date -> "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}" end)
+    assert expected_names == partitions
   end
 end

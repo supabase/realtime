@@ -18,8 +18,7 @@ migration_partition_slots =
 connect_partition_slots =
   System.get_env("CONNECT_PARTITION_SLOTS", "#{System.schedulers_online() * 2}") |> String.to_integer()
 
-connect_throttle_limit_per_second =
-  System.get_env("CONNECT_THROTTLE_LIMIT_per_second_PER_SECOND", "1") |> String.to_integer()
+connect_throttle_limit_per_second = System.get_env("CONNECT_THROTTLE_LIMIT_PER_SECOND", "1") |> String.to_integer()
 
 if !(db_version in [nil, "ipv6", "ipv4"]),
   do: raise("Invalid IP version, please set either ipv6 or ipv4")
