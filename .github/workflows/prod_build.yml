@@ -3,6 +3,19 @@ on:
   push:
     branches:
       - "main"
+    paths:
+      - "mix.exs"
+      - "/lib/**"
+      - "/config/**"
+      - "Dockerfile"
+      - "/priv/**"
+      - "/assets/**"
+      - "/rel/**"
+      - "run.sh"
+permissions:
+  contents: read
+  packages: write
+  id-token: write
 jobs:
   release:
     runs-on: ubuntu-latest

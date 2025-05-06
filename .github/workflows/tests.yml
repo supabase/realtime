@@ -3,9 +3,21 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - "mix.exs"
+      - "/lib/**"
+      - "/config/**"
+      - "/test/**"
   push:
     branches:
       - main
+    paths:
+      - "mix.exs"
+      - "/lib/**"
+      - "/config/**"
+      - "/test/**"
+permissions:
+  contents: read
 jobs:
   format:
     name: Tests

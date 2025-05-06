@@ -3,6 +3,10 @@ on:
   pull_request:
     branches:
       - release
+
+permissions:
+  contents: read
+
 jobs:
   format:
     name: Formatting Checks
