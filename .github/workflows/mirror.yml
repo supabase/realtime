@@ -7,7 +7,8 @@ on:
         description: "Image tag"
         required: true
         type: string
-
+permissions:
+  contents: read
 jobs:
   mirror:
     runs-on: ubuntu-latest

@@ -3,6 +3,12 @@ on:
     types: [opened, reopened, synchronize]
     branches:
       - "main"
+    paths:
+      - "mix.exs"
+      - "/lib/**"
+      - "/config/**"
+permissions:
+  contents: read
 
 name: Default Checks
 
