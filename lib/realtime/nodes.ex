@@ -29,7 +29,9 @@ defmodule Realtime.Nodes do
   @doc """
   Translates a region from a platform to the closest Supabase tenant region
   """
-  @spec platform_region_translator(String.t()) :: nil | binary()
+  @spec platform_region_translator(String.t() | nil) :: nil | binary()
+  def platform_region_translator(nil), do: nil
+
   def platform_region_translator(tenant_region) when is_binary(tenant_region) do
     platform = Application.get_env(:realtime, :platform)
     region_mapping(platform, tenant_region)

@@ -27,7 +27,12 @@ defmodule Realtime.SynHandler do
     :ok
   end
 
-  def resolve_registry_conflict(mod, name, {pid1, %{region: region}, time1}, {pid2, _, time2}) do
+  def resolve_registry_conflict(mod, name, process1, process2) do
+    {pid1, state1, time1} = process1
+    {pid2, state2, time2} = process2
+
+    region = Map.get(state1, :region) || Map.get(state2, :region)
+
     platform_region = Realtime.Nodes.platform_region_translator(region)
 
     platform_region_nodes =
@@ -36,27 +41,15 @@ defmodule Realtime.SynHandler do
       |> Enum.map(fn {_, [node: node]} -> node end)
 
     {keep, stop} =
-      [pid1, pid2]
-      |> Enum.filter(fn pid ->
-        Enum.member?(platform_region_nodes, node(pid))
-      end)
+      Enum.filter([pid1, pid2], fn pid -> Enum.member?(platform_region_nodes, node(pid)) end)
       |> then(fn
-        [pid] ->
-          {pid, if(pid != pid1, do: pid1, else: pid2)}
-
-        _ ->
-          if time1 < time2 do
-            {pid1, pid2}
-          else
-            {pid2, pid1}
-          end
+        [pid] -> {pid, if(pid != pid1, do: pid1, else: pid2)}
+        _ -> if time1 < time2, do: {pid1, pid2}, else: {pid2, pid1}
       end)
 
-    if node() == node(stop) do
-      spawn(fn -> resolve_conflict(mod, stop, name) end)
-    else
-      Logger.warning("Resolving #{name} conflict, remote pid: #{inspect(stop)}")
-    end
+    if node() == node(stop),
+      do: spawn(fn -> resolve_conflict(mod, stop, name) end),
+      else: Logger.warning("Resolving #{name} conflict, remote pid: #{inspect(stop)}")
 
     keep
   end

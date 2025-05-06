@@ -208,6 +208,7 @@ defmodule Realtime.Tenants.Connect do
 
   def handle_continue(:run_migrations, state) do
     %{tenant: tenant, db_conn_pid: db_conn_pid} = state
+    Logger.warning("Tenant #{tenant.external_id} is initializing: #{inspect(node())}")
 
     with res when res in [:ok, :noop] <- Migrations.run_migrations(tenant),
          :ok <- Migrations.create_partitions(db_conn_pid) do
