@@ -27,36 +27,12 @@ defmodule Realtime.SynHandler do
     :ok
   end
 
-  def resolve_registry_conflict(mod, name, {pid1, %{region: region}, time1}, {pid2, _, time2}) do
-    platform_region = Realtime.Nodes.platform_region_translator(region)
+  def resolve_registry_conflict(mod, name, process1, process2) do
+    [{keep, _, _}, {stop, _, _}] = Enum.sort_by([process1, process2], &elem(&1, 2))
 
-    platform_region_nodes =
-      RegionNodes
-      |> :syn.members(platform_region)
-      |> Enum.map(fn {_, [node: node]} -> node end)
-
-    {keep, stop} =
-      [pid1, pid2]
-      |> Enum.filter(fn pid ->
-        Enum.member?(platform_region_nodes, node(pid))
-      end)
-      |> then(fn
-        [pid] ->
-          {pid, if(pid != pid1, do: pid1, else: pid2)}
-
-        _ ->
-          if time1 < time2 do
-            {pid1, pid2}
-          else
-            {pid2, pid1}
-          end
-      end)
-
-    if node() == node(stop) do
-      spawn(fn -> resolve_conflict(mod, stop, name) end)
-    else
-      Logger.warning("Resolving #{name} conflict, remote pid: #{inspect(stop)}")
-    end
+    if node() == node(stop),
+      do: spawn(fn -> resolve_conflict(mod, stop, name) end),
+      else: Logger.warning("Resolving #{name} conflict, remote pid: #{inspect(stop)}")
 
     keep
   end
@@ -65,7 +41,7 @@ defmodule Realtime.SynHandler do
     resp =
       if Process.alive?(stop) do
         try do
-          DynamicSupervisor.stop(stop, :shutdown, 30_000)
+          Process.exit(stop, :shutdown)
         catch
           error, reason -> {:error, {error, reason}}
         end

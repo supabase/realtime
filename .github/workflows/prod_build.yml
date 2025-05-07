@@ -4,13 +4,13 @@ on:
     branches:
       - "main"
     paths:
+      - "lib/**"
+      - "config/**"
+      - "priv/**"
+      - "assets/**"
+      - "rel/**"
       - "mix.exs"
-      - "/lib/**"
-      - "/config/**"
       - "Dockerfile"
-      - "/priv/**"
-      - "/assets/**"
-      - "/rel/**"
       - "run.sh"
 
 jobs:

@@ -24,7 +24,7 @@ defmodule Clustered do
   ```
   """
   @spec start(any()) :: {:ok, node}
-  def start(aux_mod \\ nil) do
+  def start(aux_mod \\ nil, extra_config \\ []) do
     :ok =
       case :net_kernel.start([:"main@127.0.0.1"]) do
         {:ok, _} ->
@@ -53,9 +53,13 @@ defmodule Clustered do
 
     :ok = :erpc.call(node, :code, :add_paths, [:code.get_path()])
 
+    for {app_name, key, value} <- extra_config do
+      :ok = :erpc.call(node, Application, :put_env, [app_name, key, value])
+    end
+
     for {app_name, _, _} <- Application.loaded_applications(),
-        {key, val} <- Application.get_all_env(app_name) do
-      :ok = :erpc.call(node, Application, :put_env, [app_name, key, val])
+        {key, value} <- Application.get_all_env(app_name) do
+      :ok = :erpc.call(node, Application, :put_env, [app_name, key, value])
     end
 
     # We need to override this value as the current implementation overrides the string with a map leading to errors
