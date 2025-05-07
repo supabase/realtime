@@ -4,9 +4,6 @@ on:
     branches:
       - release
 
-permissions:
-  contents: read
-
 jobs:
   format:
     name: Formatting Checks
