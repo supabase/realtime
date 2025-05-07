@@ -4,10 +4,15 @@ on:
     branches:
       - main
     paths:
+      - "lib/**"
+      - "config/**"
+      - "priv/**"
+      - "assets/**"
+      - "rel/**"
       - "mix.exs"
-      - "/lib/**"
-      - "/config/**"
-      - "/test/**"
+      - "Dockerfile"
+      - "run.sh"
+
   push:
     branches:
       - main
