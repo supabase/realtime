@@ -1,5 +1,6 @@
 defmodule RealtimeWeb.RealtimeChannelTest do
   # Can't run async true because under the hood Cachex is used and it doesn't see Ecto Sandbox
+  # Also using global otel_simple_processor
   use RealtimeWeb.ChannelCase, async: false
 
   import ExUnit.CaptureLog
@@ -15,10 +16,33 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     max_channels_per_client: 100,
     max_bytes_per_second: 100_000
   }
+
+  @parent_id "b7ad6b7169203331"
+  @traceparent "00-0af7651916cd43dd8448eb211c80319c-#{@parent_id}-01"
+  @span_parent_id Integer.parse(@parent_id, 16) |> elem(0)
+
   setup do
     start_supervised!(CurrentTime.Mock)
     tenant = Containers.checkout_tenant(run_migrations: true)
+
+    :otel_simple_processor.set_exporter(:otel_exporter_pid, self())
+
     {:ok, tenant: tenant}
+  end
+
+  describe "connect/3" do
+    test "successful connection", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert socket.assigns.claims["role"] == "authenticated"
+      assert socket.assigns.tenant == tenant.external_id
+      assert socket.assigns.limits == @default_limits
+
+      # parent span is properly propagated
+      attributes = :otel_attributes.new([external_id: tenant.external_id], 128, :infinity)
+      assert_received {:span, span(name: "websocket.connect", attributes: ^attributes, parent_span_id: @span_parent_id)}
+    end
   end
 
   describe "maximum number of connected clients per tenant" do
@@ -54,6 +78,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+      # no error
+      assert_received {:span, span(name: "websocket.connect", status: :undefined)}
     end
 
     test "token has invalid expiration", %{tenant: tenant} do
@@ -62,8 +88,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
                assert {:error, :expired_token} =
                         connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
-
-               Process.sleep(300)
              end) =~ "InvalidJWTToken: Token has expired"
 
       jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1})
@@ -72,6 +96,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                assert {:error, :expired_token} =
                         connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
              end) =~ "InvalidJWTToken: Token has expired"
+
+      assert_received {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
     end
 
     test "missing role claims returns a error", %{tenant: tenant} do
@@ -83,6 +109,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         end)
 
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
+      assert_received {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
     end
 
     test "missing exp claims returns a error", %{tenant: tenant} do
@@ -94,6 +121,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         end)
 
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
+      assert_received {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
     end
 
     test "missing claims returns a error with sub in metadata if available", %{tenant: tenant} do
@@ -104,12 +132,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       log =
         capture_log(fn ->
           assert {:error, :missing_claims} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
-
-          Process.sleep(300)
         end)
 
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
       assert log =~ "sub=#{sub}"
+      assert_received {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
     end
 
     test "expired token returns a error with sub data if available", %{tenant: tenant} do
@@ -121,12 +148,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       log =
         capture_log(fn ->
           assert {:error, :expired_token} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
-
-          Process.sleep(300)
         end)
 
       assert log =~ "InvalidJWTToken: Token has expired"
       assert log =~ "sub=#{sub}"
+      assert_received {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
     end
   end
 
@@ -196,7 +222,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     [
       connect_info: %{
         uri: URI.parse("https://#{tenant.external_id}.localhost:4000/socket/websocket"),
-        x_headers: [{"x-api-key", token}]
+        x_headers: [{"x-api-key", token}],
+        trace_context_headers: [{"traceparent", @traceparent}]
       },
       params: params
     ]

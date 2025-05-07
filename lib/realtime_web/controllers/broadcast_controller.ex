@@ -33,6 +33,8 @@ defmodule RealtimeWeb.BroadcastController do
   )
 
   def broadcast(%{assigns: %{tenant: tenant}} = conn, attrs) do
+    OpenTelemetry.Tracer.set_attributes(external_id: tenant.external_id)
+
     with :ok <- BatchBroadcast.broadcast(conn, tenant, attrs) do
       send_resp(conn, :accepted, "")
     end

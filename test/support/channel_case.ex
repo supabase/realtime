@@ -26,6 +26,8 @@ defmodule RealtimeWeb.ChannelCase do
       import TenantConnection
       # The default endpoint for testing
       @endpoint RealtimeWeb.Endpoint
+
+      use Realtime.Tracing
     end
   end
 

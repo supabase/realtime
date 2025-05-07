@@ -239,6 +239,7 @@ This is the list of operational codes that can help you understand your deployme
 | DatabaseConnectionIssue            | Database had connection issues and connection was not able to be established                                                                                                                          |
 | UnableToConnectToProject           | Unable to connect to Project database                                                                                                                                                                 |
 | InvalidJWTExpiration               | JWT exp claim value it's incorrect                                                                                                                                                                    |
+| InvalidJWTToken                    | JWT is not valid
 | JwtSignatureError                  | JWT signature was not able to be validated                                                                                                                                                            |
 | Unauthorized                       | Unauthorized access to Realtime channel                                                                                                                                                               |
 | RealtimeRestarting                 | Realtime is currently restarting                                                                                                                                                                      |

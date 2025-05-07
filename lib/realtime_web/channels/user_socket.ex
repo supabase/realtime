@@ -2,6 +2,7 @@ defmodule RealtimeWeb.UserSocket do
   use Phoenix.Socket
 
   require Logger
+  require OpenTelemetry.Tracer, as: Tracer
 
   import Realtime.Logs
 
@@ -26,68 +27,78 @@ defmodule RealtimeWeb.UserSocket do
 
   @impl true
   def connect(params, socket, opts) do
-    if Application.fetch_env!(:realtime, :secure_channels) do
-      %{uri: %{host: host}, x_headers: headers} = opts
+    # Phoenix does not propagate the baggage header
+    # https://github.com/phoenixframework/phoenix/blob/22380f266ef5b4d9a899e535f1ecddd05ec2aa47/lib/phoenix/socket/transport.ex#L541-L545
+    :otel_propagator_text_map.extract(opts[:trace_context_headers])
 
-      {:ok, external_id} = Database.get_external_id(host)
-      Logger.metadata(external_id: external_id, project: external_id)
-      Logger.put_process_level(self(), :error)
+    Tracer.with_span "websocket.connect" do
+      if Application.fetch_env!(:realtime, :secure_channels) do
+        %{uri: %{host: host}, x_headers: headers} = opts
 
-      token = access_token(params, headers)
+        {:ok, external_id} = Database.get_external_id(host)
+        Logger.metadata(external_id: external_id, project: external_id)
+        Logger.put_process_level(self(), :error)
+        Tracer.set_attributes(external_id: external_id)
 
-      with %Tenant{
-             extensions: extensions,
-             jwt_secret: jwt_secret,
-             jwt_jwks: jwt_jwks,
-             max_concurrent_users: max_conn_users,
-             max_events_per_second: max_events_per_second,
-             max_bytes_per_second: max_bytes_per_second,
-             max_joins_per_second: max_joins_per_second,
-             max_channels_per_client: max_channels_per_client,
-             postgres_cdc_default: postgres_cdc_default
-           } <- Tenants.Cache.get_tenant_by_external_id(external_id),
-           token when is_binary(token) <- token,
-           jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
-           {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
-           {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
-        assigns = %RealtimeChannel.Assigns{
-          claims: claims,
-          jwt_secret: jwt_secret,
-          jwt_jwks: jwt_jwks,
-          limits: %{
-            max_concurrent_users: max_conn_users,
-            max_events_per_second: max_events_per_second,
-            max_bytes_per_second: max_bytes_per_second,
-            max_joins_per_second: max_joins_per_second,
-            max_channels_per_client: max_channels_per_client
-          },
-          postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
-          postgres_cdc_module: postgres_cdc_module,
-          tenant: external_id,
-          log_level: log_level(params),
-          tenant_token: token,
-          headers: opts.x_headers
-        }
+        token = access_token(params, headers)
 
-        assigns = Map.from_struct(assigns)
+        with %Tenant{
+               extensions: extensions,
+               jwt_secret: jwt_secret,
+               jwt_jwks: jwt_jwks,
+               max_concurrent_users: max_conn_users,
+               max_events_per_second: max_events_per_second,
+               max_bytes_per_second: max_bytes_per_second,
+               max_joins_per_second: max_joins_per_second,
+               max_channels_per_client: max_channels_per_client,
+               postgres_cdc_default: postgres_cdc_default
+             } <- Tenants.Cache.get_tenant_by_external_id(external_id),
+             token when is_binary(token) <- token,
+             jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
+             {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
+             {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
+          assigns = %RealtimeChannel.Assigns{
+            claims: claims,
+            jwt_secret: jwt_secret,
+            jwt_jwks: jwt_jwks,
+            limits: %{
+              max_concurrent_users: max_conn_users,
+              max_events_per_second: max_events_per_second,
+              max_bytes_per_second: max_bytes_per_second,
+              max_joins_per_second: max_joins_per_second,
+              max_channels_per_client: max_channels_per_client
+            },
+            postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
+            postgres_cdc_module: postgres_cdc_module,
+            tenant: external_id,
+            log_level: log_level(params),
+            tenant_token: token,
+            headers: opts.x_headers
+          }
 
-        {:ok, assign(socket, assigns)}
-      else
-        nil ->
-          log_error("TenantNotFound", "Tenant not found: #{external_id}")
-          {:error, :tenant_not_found}
+          assigns = Map.from_struct(assigns)
 
-        {:error, :expired_token, msg} ->
-          log_error_with_token_metadata(msg, token)
-          {:error, :expired_token}
+          {:ok, assign(socket, assigns)}
+        else
+          nil ->
+            log_error("TenantNotFound", "Tenant not found: '#{external_id}'")
+            Tracer.set_status(:error, "TenantNotFound")
+            {:error, :tenant_not_found}
 
-        {:error, :missing_claims} ->
-          log_error_with_token_metadata("Fields `role` and `exp` are required in JWT", token)
-          {:error, :missing_claims}
+          {:error, :expired_token, msg} ->
+            log_error_with_token_metadata(msg, token)
+            Tracer.set_status(:error, "InvalidJWTToken")
+            {:error, :expired_token}
 
-        error ->
-          log_error("ErrorConnectingToWebsocket", error)
-          error
+          {:error, :missing_claims} ->
+            Tracer.set_status(:error, "InvalidJWTToken")
+            log_error_with_token_metadata("Fields `role` and `exp` are required in JWT", token)
+            {:error, :missing_claims}
+
+          error ->
+            log_error("ErrorConnectingToWebsocket", error)
+            error
+        end
       end
     end
   end

@@ -5,6 +5,7 @@ defmodule RealtimeWeb.TenantController do
   require Logger
   import Realtime.Logs
 
+  alias OpenTelemetry.Tracer
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Database
@@ -70,6 +71,7 @@ defmodule RealtimeWeb.TenantController do
 
   def show(conn, %{"tenant_id" => id}) do
     Logger.metadata(external_id: id, project: id)
+    Tracer.set_attributes(external_id: id)
 
     tenant = Api.get_tenant_by_external_id(id)
 
@@ -135,6 +137,7 @@ defmodule RealtimeWeb.TenantController do
 
   def update(conn, %{"tenant_id" => external_id, "tenant" => tenant_params}) do
     Logger.metadata(external_id: external_id, project: external_id)
+    Tracer.set_attributes(external_id: external_id)
     tenant = Api.get_tenant_by_external_id(external_id)
 
     case tenant do
@@ -150,6 +153,7 @@ defmodule RealtimeWeb.TenantController do
         with {:ok, %Tenant{} = tenant} <- Api.create_tenant(%{tenant_params | "extensions" => extensions}),
              res when res in [:ok, :noop] <- Migrations.run_migrations(tenant) do
           Logger.metadata(external_id: tenant.external_id, project: tenant.external_id)
+          Tracer.set_attributes(external_id: tenant.external_id)
 
           conn
           |> put_status(:created)
@@ -189,6 +193,7 @@ defmodule RealtimeWeb.TenantController do
 
   def delete(conn, %{"tenant_id" => tenant_id}) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
+    Tracer.set_attributes(external_id: tenant_id)
 
     stop_all_timeout = Enum.count(PostgresCdc.available_drivers()) * 1_000
 
@@ -232,6 +237,7 @@ defmodule RealtimeWeb.TenantController do
 
   def reload(conn, %{"tenant_id" => tenant_id}) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
+    Tracer.set_attributes(external_id: tenant_id)
 
     case Tenants.get_tenant_by_external_id(tenant_id) do
       nil ->
@@ -269,6 +275,7 @@ defmodule RealtimeWeb.TenantController do
 
   def health(conn, %{"tenant_id" => tenant_id}) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
+    Tracer.set_attributes(external_id: tenant_id)
 
     case Tenants.health_check(tenant_id) do
       {:ok, response} ->

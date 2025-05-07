@@ -1,5 +1,7 @@
 defmodule Realtime.Tenants.ConnectTest do
   # async: false due to the fact that we are checking ets tables for user tracking and usage of mocks
+  # Also using global otel_simple_processor
+
   use Realtime.DataCase, async: false
   import ExUnit.CaptureLog
   import Mock
@@ -11,10 +13,16 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
 
+  @parent_id "b7ad6b7169203331"
+  @traceparent "00-0af7651916cd43dd8448eb211c80319c-#{@parent_id}-01"
+  @span_parent_id Integer.parse(@parent_id, 16) |> elem(0)
+
   setup do
     :ets.delete_all_objects(Connect)
 
     tenant = Containers.checkout_tenant(run_migrations: true)
+
+    :otel_simple_processor.set_exporter(:otel_exporter_pid, self())
 
     %{tenant: tenant}
   end
@@ -22,6 +30,43 @@ defmodule Realtime.Tenants.ConnectTest do
   defp assert_process_down(pid, timeout \\ 100) do
     ref = Process.monitor(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
+  end
+
+  describe "distributed lookup_or_start_connection/1" do
+    test "trace distributed connect" do
+      :otel_propagator_text_map.extract([{"traceparent", @traceparent}])
+      {:ok, node} = Clustered.start()
+
+      parent = self()
+      # Set the other node to forward traces to this node as well
+      :erpc.call(node, :otel_simple_processor, :set_exporter, [:otel_exporter_pid, parent])
+
+      # Forcing the other node to be picked up
+      with_mock Realtime.Nodes, [], get_node_for_tenant: fn _ -> {:ok, node} end do
+        {:ok, pid} = Connect.lookup_or_start_connection("dev_tenant")
+
+        assert node(pid) == node
+        # Local span
+        assert_received {:span, span(name: "rpc", attributes: attributes, parent_span_id: @span_parent_id)}
+
+        assert attributes(
+                 map: %{
+                   external_id: "dev_tenant",
+                   mod: Connect,
+                   func: :connect,
+                   arity: 2
+                 }
+               ) = attributes
+
+        # Remote span
+        assert_received {:span, span(name: "database.connect", attributes: attributes, parent_span_id: @span_parent_id)}
+
+        assert attributes(map: %{external_id: "dev_tenant"}) = attributes
+
+        Connect.shutdown("dev_tenant")
+        assert_process_down(pid, 500)
+      end
+    end
   end
 
   describe "lookup_or_start_connection/1" do
@@ -91,6 +136,15 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert {:error, :tenant_database_unavailable} =
                Connect.lookup_or_start_connection(tenant.external_id)
+
+      attributes = :otel_attributes.new([external_id: tenant.external_id], 128, :infinity)
+
+      assert_received {:span,
+                       span(
+                         name: "database.connect",
+                         attributes: ^attributes,
+                         status: status(code: :error, message: "UnableToConnectToTenantDatabase")
+                       )}
     end
 
     test "if tenant does not exist, returns error" do

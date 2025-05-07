@@ -48,7 +48,7 @@ defmodule Clustered do
 
     :peer.call(pid, :erlang, :set_cookie, [:cookie])
 
-    Node.connect(node)
+    true = Node.connect(node)
 
     :ok = :erpc.call(node, :code, :add_paths, [:code.get_path()])
 
@@ -60,6 +60,14 @@ defmodule Clustered do
         {key, value} <- Application.get_all_env(app_name) do
       :ok = :erpc.call(node, Application, :put_env, [app_name, key, value])
     end
+
+    disable_phoenix_server = fn ->
+      # Disable phoenix server to avoid port collisions as we don't need it
+      endpoint = Application.get_env(:realtime, RealtimeWeb.Endpoint)
+      Application.put_env(:realtime, RealtimeWeb.Endpoint, Keyword.put(endpoint, :server, false))
+    end
+
+    :ok = :erpc.call(node, disable_phoenix_server)
 
     # We need to override this value as the current implementation overrides the string with a map leading to errors
     :ok = :erpc.call(node, Application, :put_env, [:realtime, :jwt_claim_validators, "{}"])

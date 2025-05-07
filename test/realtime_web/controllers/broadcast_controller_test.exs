@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.BroadcastControllerTest do
-  # async: false due to usage of mocks
+  # async: false due to usage of mocks and global otel_simple_processor
   use RealtimeWeb.ConnCase, async: false
 
   import Mock
@@ -23,6 +23,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     tenant = Containers.checkout_tenant(run_migrations: true)
 
     conn = generate_conn(conn, tenant)
+
+    :otel_simple_processor.set_exporter(:otel_exporter_pid, self())
 
     {:ok, conn: conn, tenant: tenant}
   end
@@ -73,6 +75,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         assert_called_exactly(GenCounter.add(events_key), 3)
         assert conn.status == 202
+        attributes = :otel_attributes.new([external_id: tenant.external_id], 128, :infinity)
+
+        assert_received {:span, span(name: "database.connect", attributes: ^attributes)}
       end
     end
 

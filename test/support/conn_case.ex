@@ -31,6 +31,8 @@ defmodule RealtimeWeb.ConnCase do
 
       use RealtimeWeb, :verified_routes
 
+      use Realtime.Tracing
+
       # The default endpoint for testing
       @endpoint RealtimeWeb.Endpoint
     end

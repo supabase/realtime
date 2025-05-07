@@ -12,7 +12,7 @@ defmodule RealtimeWeb.Endpoint do
 
   socket "/socket", RealtimeWeb.UserSocket,
     websocket: [
-      connect_info: [:peer_data, :uri, :x_headers],
+      connect_info: [:peer_data, :uri, :x_headers, :trace_context_headers],
       fullsweep_after: 20,
       max_frame_size: 8_000_000,
       serializer: [
@@ -54,7 +54,7 @@ defmodule RealtimeWeb.Endpoint do
     param_key: "request_logger",
     cookie_key: "request_logger"
 
-  plug Plug.RequestId
+  plug RealtimeWeb.Plugs.BaggageRequestId, baggage_key: "sb-request-id"
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,
