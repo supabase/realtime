@@ -44,41 +44,23 @@ defmodule Realtime.SynHandlerTest do
   end
 
   describe "resolve_registry_conflict/4" do
-    setup do
-      :syn.add_node_to_scopes([Realtime.SynHandlerTest])
-      :ok
-    end
+    test "returns the correct pid to keep" do
+      pid1 = spawn(fn -> Process.sleep(:infinity) end)
+      time1 = System.monotonic_time()
 
-    defmodule TestGen do
-      use GenServer
+      pid2 = spawn(fn -> Process.sleep(:infinity) end)
+      time2 = System.monotonic_time()
 
-      def start_link(opts), do: GenServer.start_link(__MODULE__, %{}, name: name(opts))
-      def init(_), do: {:ok, %{}}
-      defp name(opts), do: {:via, :syn, {Realtime.SynHandlerTest, opts[:id]}}
-    end
-
-    test "handles processes without region in their state and outputs the the oldest clock to keep" do
-      pid = start_supervised!({TestGen, id: Generators.random_string()})
-
-      assert pid ==
+      assert pid1 ==
                SynHandler.resolve_registry_conflict(
                  __MODULE__,
                  Generators.random_string(),
-                 {pid, %{}, System.monotonic_time()},
-                 {self(), %{}, System.monotonic_time()}
+                 {pid1, %{}, time1},
+                 {pid2, %{}, time2}
                )
-    end
 
-    test "handles processes with region in their state and outputs the oldest clock to keep" do
-      pid = start_supervised!({TestGen, id: Generators.random_string()})
-
-      assert pid ==
-               SynHandler.resolve_registry_conflict(
-                 __MODULE__,
-                 Generators.random_string(),
-                 {pid, %{region: "us-east-1"}, System.monotonic_time()},
-                 {self(), %{region: "us-east-1"}, System.monotonic_time()}
-               )
+      Process.sleep(500)
+      refute Process.alive?(pid2)
     end
   end
 end
