@@ -65,6 +65,13 @@ config :logflare_logger_backend,
 
 config :phoenix, :filter_parameters, {:keep, []}
 
+config :opentelemetry,
+  resource_detectors: [:otel_resource_app_env, :otel_resource_env_var],
+  text_map_propagators: [:baggage, :trace_context],
+  # Exporter must be configured through environment variables
+  traces_exporter: :none,
+  span_processor: :batch
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{Mix.env()}.exs"
