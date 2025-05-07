@@ -2,7 +2,6 @@ defmodule Realtime.Tenants.Connect.RegisterProcess do
   @moduledoc """
   Registers the database process in :syn
   """
-  require Logger
   @behaviour Realtime.Tenants.Connect.Piper
 
   @impl true
