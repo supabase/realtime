@@ -12,6 +12,7 @@ on:
       - "/assets/**"
       - "/rel/**"
       - "run.sh"
+
 permissions:
   contents: read
 

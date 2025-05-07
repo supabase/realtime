@@ -11,13 +11,7 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "mix.exs"
-      - "/lib/**"
-      - "/config/**"
-      - "/test/**"
-permissions:
-  contents: read
+
 jobs:
   format:
     name: Tests
