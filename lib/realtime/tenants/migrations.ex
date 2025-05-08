@@ -162,7 +162,7 @@ defmodule Realtime.Tenants.Migrations do
 
     spec = {__MODULE__, attrs}
 
-    if Tenants.run_migrations?(tenant.external_id) do
+    if Tenants.run_migrations?(tenant) do
       case DynamicSupervisor.start_child(supervisor, spec) do
         :ignore -> :ok
         error -> error
