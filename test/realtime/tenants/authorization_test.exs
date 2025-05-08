@@ -1,5 +1,5 @@
 defmodule Realtime.Tenants.AuthorizationTest do
-  # async: false due to usege of mocks
+  # async: false due to usage of mocks
   use RealtimeWeb.ConnCase, async: false
 
   require Phoenix.ChannelTest
@@ -367,8 +367,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   def rls_context(context) do
     start_supervised(CurrentTime.Mock)
-    tenant = Containers.checkout_tenant(true)
-    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    tenant = Containers.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()
 

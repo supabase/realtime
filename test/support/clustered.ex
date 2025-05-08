@@ -17,7 +17,6 @@ defmodule Clustered do
 
   Code.eval_quoted(@aux_mod)
   test "clustered call" do
-    tenant = Containers.checkout_tenant()
     {:ok, node} = Clustered.start(@aux_mod)
     assert ok = :rpc.call(node, Aux, :checker, [:ok])
   end

@@ -1,4 +1,5 @@
 defmodule RealtimeWeb.TenantControllerTest do
+  # Can't run async true because under the hood Cachex is used and it doesn't see Ecto.Sandbox
   use RealtimeWeb.ConnCase, async: false
 
   alias Realtime.Api.Tenant
@@ -25,10 +26,9 @@ defmodule RealtimeWeb.TenantControllerTest do
     {:ok, conn: conn}
   end
 
-  defp with_tenant(context) do
-    tenant = Containers.checkout_tenant(true)
-    on_exit(fn -> Containers.checkin_tenant(tenant) end)
-    Map.put(context, :tenant, tenant)
+  defp with_tenant(_context) do
+    tenant = Containers.checkout_tenant(run_migrations: true)
+    %{tenant: tenant}
   end
 
   describe "show tenant" do
@@ -50,14 +50,8 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant with post" do
     test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
+      {:ok, port} = Containers.checkout()
 
-      port =
-        5500..9000
-        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-        |> Enum.random()
-
-      Containers.initialize_no_tenant(external_id, port)
-      on_exit(fn -> Containers.stop_container(external_id) end)
       assert nil == Tenants.get_tenant_by_external_id(external_id)
 
       attrs = default_tenant_attrs(port)
@@ -84,14 +78,8 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "create tenant with put" do
     test "run migrations on creation and encrypts credentials", %{conn: conn} do
       external_id = random_string()
+      {:ok, port} = Containers.checkout()
 
-      port =
-        5500..9000
-        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-        |> Enum.random()
-
-      Containers.initialize_no_tenant(external_id, port)
-      on_exit(fn -> Containers.stop_container(external_id) end)
       assert nil == Tenants.get_tenant_by_external_id(external_id)
 
       attrs = default_tenant_attrs(port)
@@ -176,12 +164,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   end
 
   describe "delete tenant" do
-    setup do
-      tenant = tenant_fixture()
-      tenant = Containers.initialize(tenant, true, true)
-      on_exit(fn -> Containers.stop_container(tenant) end)
-      %{tenant: tenant}
-    end
+    setup [:with_tenant]
 
     test "deletes chosen tenant", %{conn: conn, tenant: tenant} do
       {:ok, _pid} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
@@ -198,6 +181,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       refute Cache.get_tenant_by_external_id(tenant.external_id)
       refute Tenants.get_tenant_by_external_id(tenant.external_id)
+      Process.sleep(500)
 
       assert {:ok, %{rows: []}} =
                Postgrex.query(db_conn, "SELECT slot_name FROM pg_replication_slots", [])
@@ -319,9 +303,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     end
 
     test "runs migrations", %{conn: conn} do
-      tenant = tenant_fixture()
-      tenant = Containers.initialize(tenant, true)
-      on_exit(fn -> Containers.stop_container(tenant) end)
+      tenant = Containers.checkout_tenant(run_migrations: false)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       assert {:error, _} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])

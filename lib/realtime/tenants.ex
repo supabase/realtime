@@ -317,9 +317,8 @@ defmodule Realtime.Tenants do
   @doc """
   Checks if migrations for a given tenant need to run.
   """
-  @spec run_migrations?(binary()) :: boolean()
-  def run_migrations?(external_id) do
-    tenant = Cache.get_tenant_by_external_id(external_id)
+  @spec run_migrations?(Tenant.t()) :: boolean()
+  def run_migrations?(%Tenant{} = tenant) do
     tenant.migrations_ran < Enum.count(Migrations.migrations())
   end
 

@@ -20,8 +20,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     start_supervised(Realtime.RateCounter.DynamicSupervisor)
     start_supervised(Realtime.GenCounter.DynamicSupervisor)
 
-    tenant = Containers.checkout_tenant(true)
-    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    tenant = Containers.checkout_tenant(run_migrations: true)
 
     conn = generate_conn(conn, tenant)
 
@@ -159,11 +158,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       end
     end
 
-    test "user has hit the rate limit", %{conn: conn} do
-      tenant = tenant_fixture()
-      tenant = Containers.initialize(tenant, true, true)
-      on_exit(fn -> Containers.stop_container(tenant) end)
-
+    test "user has hit the rate limit", %{conn: conn, tenant: tenant} do
       requests_key = Tenants.requests_per_second_key(tenant)
       events_key = Tenants.events_per_second_key(tenant)
 
@@ -223,13 +218,10 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   end
 
   describe "authorization for broadcast" do
-    setup %{conn: conn} = context do
+    setup %{conn: conn, tenant: tenant} = context do
       start_supervised(Realtime.RateCounter.DynamicSupervisor)
       start_supervised(Realtime.GenCounter.DynamicSupervisor)
       start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
-
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
 
       jwt_secret = Crypto.decrypt!(tenant.jwt_secret)
 
@@ -379,16 +371,13 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     @tag role: "anon"
     test "user without permission won't broadcast", %{
       conn: conn,
-      db_conn: db_conn
+      db_conn: db_conn,
+      tenant: tenant
     } do
       with_mocks [
         {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
         {GenCounter, [:passthrough], add: fn _ -> :ok end}
       ] do
-        tenant = tenant_fixture()
-        tenant = Containers.initialize(tenant, true, true)
-        on_exit(fn -> Containers.stop_container(tenant) end)
-
         messages =
           Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
           |> Enum.take(5)

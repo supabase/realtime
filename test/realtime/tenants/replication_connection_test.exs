@@ -12,7 +12,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     slot = Application.get_env(:realtime, :slot_name_suffix)
     Application.put_env(:realtime, :slot_name_suffix, "test")
 
-    tenant = Containers.checkout_tenant(true)
+    tenant = Containers.checkout_tenant(run_migrations: true)
 
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     name = "supabase_realtime_messages_replication_slot_test"
@@ -22,7 +22,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
     on_exit(fn ->
       Application.put_env(:realtime, :slot_name_suffix, slot)
-      Containers.checkin_tenant(tenant)
     end)
 
     %{tenant: tenant}
@@ -161,10 +160,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     def call(_, _), do: :noreply
   end
 
-  test "handle standby connections exceeds max_wal_senders" do
-    tenant = tenant_fixture()
-    tenant = Containers.initialize(tenant, true, true)
-    on_exit(fn -> Containers.stop_container(tenant) end)
+  test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
     opts = Database.from_tenant(tenant, "realtime_test", :stop) |> Database.opts()
 
     # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
@@ -194,11 +190,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   end
 
   describe "whereis/1" do
-    test "returns pid if exists" do
-      tenant = tenant_fixture()
-      tenant = Containers.initialize(tenant, true, true)
-      on_exit(fn -> Containers.stop_container(tenant) end)
-
+    test "returns pid if exists", %{tenant: tenant} do
       {:ok, pid} = ReplicationConnection.start(tenant, self())
       assert ReplicationConnection.whereis(tenant.external_id) == pid
       Process.exit(pid, :shutdown)

@@ -1,5 +1,6 @@
 defmodule Realtime.Tenants.MigrationsTest do
   alias Realtime.Tenants.Cache
+  # Can't use async: true because Cachex does not work well with Ecto Sandbox
   use Realtime.DataCase, async: false
 
   alias Realtime.Tenants.Migrations
@@ -7,7 +8,6 @@ defmodule Realtime.Tenants.MigrationsTest do
   describe "run_migrations/1" do
     test "migrations for a given tenant only run once" do
       tenant = Containers.checkout_tenant()
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
 
       res =
         for _ <- 0..10 do
@@ -21,9 +21,9 @@ defmodule Realtime.Tenants.MigrationsTest do
 
     test "migrations run if tenant has migrations_ran set to 0" do
       tenant = Containers.checkout_tenant()
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
 
       assert Migrations.run_migrations(tenant) == :ok
+      # Sleeping waiting for Cache to be invalided
       Process.sleep(100)
       assert Cache.get_tenant_by_external_id(tenant.external_id).migrations_ran == Enum.count(Migrations.migrations())
     end

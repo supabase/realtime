@@ -1,5 +1,5 @@
 defmodule Realtime.RepoTest do
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
 
   import Ecto.Query
 
@@ -8,8 +8,7 @@ defmodule Realtime.RepoTest do
   alias Realtime.Database
 
   setup do
-    tenant = Containers.checkout_tenant(true)
-    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    tenant = Containers.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     %{tenant: tenant, db_conn: db_conn}
   end

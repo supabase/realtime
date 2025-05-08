@@ -1,7 +1,6 @@
 defmodule Realtime.Extensions.CdcRlsTest do
   # async: false due to usage of dev_realtime and mocks
   use RealtimeWeb.ChannelCase, async: false
-  use RealtimeWeb.ConnCase
 
   import Mock
 

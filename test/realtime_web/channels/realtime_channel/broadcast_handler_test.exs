@@ -25,12 +25,16 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..100, reduce: socket do
         socket ->
           {:reply, :ok, socket} = BroadcastHandler.handle(%{}, socket)
-          topic = "realtime:#{topic}"
-          assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
       end
 
       Process.sleep(1200)
+
+      for _ <- 1..100 do
+        topic = "realtime:#{topic}"
+        assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+      end
+
       {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
       assert avg > 0
     end
@@ -41,12 +45,16 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..100, reduce: socket do
         socket ->
           {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
-          topic = "realtime:#{topic}"
-          refute_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
       end
 
       Process.sleep(1200)
+
+      for _ <- 1..100 do
+        topic = "realtime:#{topic}"
+        refute_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+      end
+
       {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
       assert avg == 0.0
     end
@@ -62,12 +70,16 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..100, reduce: socket do
         socket ->
           {:reply, :ok, socket} = BroadcastHandler.handle(%{}, socket)
-          topic = "realtime:#{topic}"
-          assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
       end
 
-      Process.sleep(1000)
+      Process.sleep(1200)
+
+      for _ <- 1..100 do
+        topic = "realtime:#{topic}"
+        assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+      end
+
       {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
       assert avg > 0.0
     end
@@ -82,12 +94,16 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..100, reduce: socket do
         socket ->
           {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
-          topic = "realtime:#{topic}"
-          refute_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
       end
 
       Process.sleep(1200)
+
+      for _ <- 1..100 do
+        topic = "realtime:#{topic}"
+        refute_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+      end
+
       {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
       assert avg == 0.0
     end
@@ -105,9 +121,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         for _ <- 1..100, reduce: socket do
           socket ->
             {:reply, :ok, socket} = BroadcastHandler.handle(%{}, socket)
-            topic = "realtime:#{topic}"
-            assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
             socket
+        end
+
+        Process.sleep(100)
+
+        for _ <- 1..100 do
+          topic = "realtime:#{topic}"
+          assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
         end
 
         assert_called_exactly(Authorization.get_write_authorizations(:_, :_, :_), 1)
@@ -125,9 +146,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         for _ <- 1..100, reduce: socket do
           socket ->
             {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
-            topic = "realtime:#{topic}"
-            refute_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
             socket
+        end
+
+        Process.sleep(100)
+
+        for _ <- 1..100 do
+          topic = "realtime:#{topic}"
+          refute_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
         end
 
         assert_called_exactly(Authorization.get_write_authorizations(:_, :_, :_), 1)
@@ -144,9 +170,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..100, reduce: socket do
         socket ->
           {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
-          topic = "realtime:#{topic}"
-          assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
+      end
+
+      Process.sleep(100)
+
+      for _ <- 1..100 do
+        topic = "realtime:#{topic}"
+        assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
       end
     end
 
@@ -156,12 +187,16 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..100, reduce: socket do
         socket ->
           {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
-          topic = "realtime:#{topic}"
-          assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
       end
 
-      Process.sleep(1100)
+      Process.sleep(1200)
+
+      for _ <- 1..100 do
+        topic = "realtime:#{topic}"
+        assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+      end
+
       {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
       assert avg > 0.0
     end
@@ -172,12 +207,15 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..100, reduce: socket do
         socket ->
           {:reply, :ok, socket} = BroadcastHandler.handle(%{}, socket)
-          topic = "realtime:#{topic}"
-          assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
           socket
       end
 
-      Process.sleep(1000)
+      for _ <- 1..100 do
+        topic = "realtime:#{topic}"
+        assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+      end
+
+      Process.sleep(1200)
       {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
       assert avg > 0.0
     end
@@ -188,8 +226,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     start_supervised(Realtime.RateCounter.DynamicSupervisor)
     start_supervised(CurrentTime.Mock)
 
-    tenant = Containers.checkout_tenant(true)
-    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    tenant = Containers.checkout_tenant(run_migrations: true)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     Process.sleep(500)

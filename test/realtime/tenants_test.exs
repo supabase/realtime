@@ -89,15 +89,15 @@ defmodule Realtime.TenantsTest do
   describe "run_migrations?/1" do
     test "returns true if migrations_ran is lower than existing migrations" do
       tenant = tenant_fixture(%{migrations_ran: 0})
-      assert Tenants.run_migrations?(tenant.external_id)
+      assert Tenants.run_migrations?(tenant)
 
       tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations()) - 1})
-      assert Tenants.run_migrations?(tenant.external_id)
+      assert Tenants.run_migrations?(tenant)
     end
 
     test "returns false if migrations_ran is count of all migrations" do
       tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations())})
-      refute Tenants.run_migrations?(tenant.external_id)
+      refute Tenants.run_migrations?(tenant)
     end
   end
 

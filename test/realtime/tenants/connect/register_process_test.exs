@@ -1,12 +1,12 @@
 defmodule Realtime.Tenants.Connect.RegisterProcessTest do
-  use ExUnit.Case, async: true
+  # Can't use async: true because Cachex does not work well with Ecto Sandbox
+  use Realtime.DataCase, async: false
   alias Realtime.Tenants.Connect.RegisterProcess
   alias Realtime.Tenants.Connect
 
   describe "run/1" do
     setup do
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
+      tenant = Containers.checkout_tenant(run_migrations: true)
       conn = start_supervised!({Connect, [tenant_id: tenant.external_id]})
       %{tenant_id: tenant.external_id, db_conn_pid: conn}
     end

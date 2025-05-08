@@ -6,11 +6,10 @@ defmodule Realtime.MetricsCleanerTest do
   setup do
     interval = Application.get_env(:realtime, :metrics_cleaner_schedule_timer_in_ms)
     Application.put_env(:realtime, :metrics_cleaner_schedule_timer_in_ms, 100)
-    tenant = Containers.checkout_tenant(true)
+    tenant = Containers.checkout_tenant(run_migrations: true)
 
     on_exit(fn ->
       Application.put_env(:realtime, :metrics_cleaner_schedule_timer_in_ms, interval)
-      Containers.checkin_tenant(tenant)
     end)
 
     %{tenant: tenant}

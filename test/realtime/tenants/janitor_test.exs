@@ -17,14 +17,13 @@ defmodule Realtime.Tenants.JanitorTest do
     Application.put_env(:realtime, :janitor_schedule_timer, 200)
     Application.put_env(:realtime, :janitor_schedule_randomize, false)
     Application.put_env(:realtime, :janitor_chunk_size, 2)
+    tenant1 = Containers.checkout_tenant(run_migrations: true)
+    tenant2 = Containers.checkout_tenant(run_migrations: true)
 
     tenants =
       Enum.map(
-        [tenant_fixture(), tenant_fixture()],
+        [tenant1, tenant2],
         fn tenant ->
-          Containers.initialize(tenant, true, true)
-          on_exit(fn -> Containers.stop_container(tenant) end)
-
           tenant = Repo.preload(tenant, :extensions)
           Connect.lookup_or_start_connection(tenant.external_id)
           Process.sleep(500)
@@ -129,11 +128,6 @@ defmodule Realtime.Tenants.JanitorTest do
   end
 
   test "logs error if fails to connect to tenant" do
-    port =
-      5500..9000
-      |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-      |> Enum.random()
-
     extensions = [
       %{
         "type" => "postgres_cdc_rls",
@@ -142,7 +136,7 @@ defmodule Realtime.Tenants.JanitorTest do
           "db_name" => "postgres",
           "db_user" => "supabase_admin",
           "db_password" => "postgres",
-          "db_port" => "#{port}",
+          "db_port" => "1111",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
           "poll_max_record_bytes" => 1_048_576,

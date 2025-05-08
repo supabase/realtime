@@ -168,16 +168,12 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     start_supervised(Realtime.RateCounter.DynamicSupervisor)
     start_supervised(CurrentTime.Mock)
 
-    tenant = Containers.checkout_tenant(true)
+    tenant = Containers.checkout_tenant(run_migrations: true)
 
     RateCounter.stop(tenant.external_id)
     GenCounter.stop(tenant.external_id)
     RateCounter.new(tenant.external_id)
     GenCounter.new(tenant.external_id)
-
-    on_exit(fn ->
-      Containers.checkin_tenant(tenant)
-    end)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     Process.sleep(500)
