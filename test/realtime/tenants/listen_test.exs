@@ -11,8 +11,7 @@ defmodule Realtime.Tenants.ListenTest do
       start_supervised(Realtime.RateCounter)
       start_supervised(Realtime.GenCounter)
 
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
+      tenant = Containers.checkout_tenant(run_migrations: true)
 
       {:ok, _} = Listen.start(tenant, self())
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)

@@ -29,10 +29,8 @@ defmodule Realtime.DataCase do
   end
 
   setup tags do
-    if !tags[:async] do
-      :ok = Sandbox.checkout(Realtime.Repo)
-      Sandbox.mode(Realtime.Repo, {:shared, self()})
-    end
+    pid = Sandbox.start_owner!(Realtime.Repo, shared: not tags[:async])
+    on_exit(fn -> Sandbox.stop_owner(pid) end)
 
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end

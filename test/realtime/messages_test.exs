@@ -7,8 +7,7 @@ defmodule Realtime.MessagesTest do
   alias Realtime.Repo
 
   setup do
-    tenant = Containers.checkout_tenant(true)
-    on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    tenant = Containers.checkout_tenant(run_migrations: true)
     {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
     date_start = Date.utc_today() |> Date.add(-10)

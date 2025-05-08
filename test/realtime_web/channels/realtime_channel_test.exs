@@ -1,5 +1,6 @@
 defmodule RealtimeWeb.RealtimeChannelTest do
-  use RealtimeWeb.ChannelCase
+  # Can't run async true because under the hood Cachex is used and it doesn't see Ecto Sandbox
+  use RealtimeWeb.ChannelCase, async: false
 
   import ExUnit.CaptureLog
 
@@ -16,14 +17,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   }
   setup do
     start_supervised!(CurrentTime.Mock)
-    :ok
+    tenant = Containers.checkout_tenant(run_migrations: true)
+    {:ok, tenant: tenant}
   end
 
   describe "maximum number of connected clients per tenant" do
-    test "not reached" do
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
-
+    test "not reached", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
@@ -31,9 +30,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "reached" do
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    test "reached", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
@@ -52,20 +49,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "JWT token validations" do
-    test "token has valid expiration" do
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
-
+    test "token has valid expiration", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "token has invalid expiration" do
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
-
+    test "token has invalid expiration", %{tenant: tenant} do
       assert capture_log(fn ->
                jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second)})
 
@@ -83,10 +74,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
              end) =~ "InvalidJWTToken: Token has expired"
     end
 
-    test "missing role claims returns a error" do
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
-
+    test "missing role claims returns a error", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant, %{exp: System.system_time(:second) + 1000})
 
       log =
@@ -97,10 +85,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
     end
 
-    test "missing exp claims returns a error" do
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
-
+    test "missing exp claims returns a error", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated"})
 
       log =
@@ -111,9 +96,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
     end
 
-    test "missing claims returns a error with sub in metadata if available" do
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    test "missing claims returns a error with sub in metadata if available", %{tenant: tenant} do
       sub = random_string()
 
       jwt = Generators.generate_jwt_token(tenant, %{exp: System.system_time(:second) + 10_000, sub: sub})
@@ -129,9 +112,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "sub=#{sub}"
     end
 
-    test "expired token returns a error with sub data if available" do
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
+    test "expired token returns a error with sub data if available", %{tenant: tenant} do
       sub = random_string()
 
       jwt =
@@ -150,41 +131,30 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "checks tenant db connectivity" do
-    test "successful connection proceeds with join" do
-      tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(tenant) end)
-
+    test "successful connection proceeds with join", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
 
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "unsuccessful connection halts join" do
-      port =
-        5500..9000
-        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-        |> Enum.random()
-
-      extensions = [
-        %{
-          "type" => "postgres_cdc_rls",
-          "settings" => %{
-            "db_host" => "127.0.0.1",
-            "db_name" => "false",
-            "db_user" => "false",
-            "db_password" => "false",
-            "db_port" => "#{port}",
-            "poll_interval" => 100,
-            "poll_max_changes" => 100,
-            "poll_max_record_bytes" => 1_048_576,
-            "region" => "us-east-1",
-            "ssl_enforced" => false
-          }
+    test "unsuccessful connection halts join", %{tenant: tenant} do
+      extension = %{
+        "type" => "postgres_cdc_rls",
+        "settings" => %{
+          "db_host" => "127.0.0.1",
+          "db_name" => "false",
+          "db_user" => "false",
+          "db_password" => "false",
+          "poll_interval" => 100,
+          "poll_max_changes" => 100,
+          "poll_max_record_bytes" => 1_048_576,
+          "region" => "us-east-1",
+          "ssl_enforced" => false
         }
-      ]
+      }
 
-      tenant = tenant_fixture(%{extensions: extensions})
+      {:ok, tenant} = update_extension(tenant, extension)
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
@@ -192,13 +162,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "lack of connections halts join" do
-      port =
-        5500..9000
-        |> Enum.reject(&(&1 in Enum.map(:ets.tab2list(:test_ports), fn {port} -> port end)))
-        |> Enum.random()
-
-      extensions = [
+    test "lack of connections halts join", %{tenant: tenant} do
+      extension =
         %{
           "type" => "postgres_cdc_rls",
           "settings" => %{
@@ -206,7 +171,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
             "db_name" => "postgres",
             "db_user" => "supabase_admin",
             "db_password" => "postgres",
-            "db_port" => "#{port}",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
@@ -217,11 +181,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
             "subs_pool_size" => 100
           }
         }
-      ]
 
-      tenant = tenant_fixture(%{extensions: extensions})
-      tenant = Containers.initialize(tenant, true, false)
-      on_exit(fn -> Containers.stop_container(tenant) end)
+      {:ok, tenant} = update_extension(tenant, extension)
 
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
@@ -239,5 +200,15 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       },
       params: params
     ]
+  end
+
+  defp update_extension(tenant, extension) do
+    db_port = Realtime.Crypto.decrypt!(hd(tenant.extensions).settings["db_port"])
+
+    extensions = [
+      put_in(extension, ["settings", "db_port"], db_port)
+    ]
+
+    Realtime.Api.update_tenant(tenant, %{extensions: extensions})
   end
 end

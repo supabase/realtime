@@ -14,8 +14,7 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
   describe "pooling metrics" do
     setup do
-      local_tenant = Containers.checkout_tenant(true)
-      on_exit(fn -> Containers.checkin_tenant(local_tenant) end)
+      local_tenant = Containers.checkout_tenant(run_migrations: true)
       start_supervised!(MetricsTest)
       {:ok, %{tenant: local_tenant}}
     end
