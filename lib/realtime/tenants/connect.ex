@@ -40,6 +40,17 @@ defmodule Realtime.Tenants.Connect do
             check_connected_user_interval: nil,
             connected_users_bucket: [1]
 
+  @doc "Check if Connect has finished setting up connections"
+  def ready?(tenant_id) do
+    case whereis(tenant_id) do
+      pid when is_pid(pid) ->
+        GenServer.call(pid, :ready?)
+
+      _ ->
+        false
+    end
+  end
+
   @doc """
   Returns the database connection for a tenant. If the tenant is not connected, it will attempt to connect to the tenant's database.
   """
@@ -332,6 +343,13 @@ defmodule Realtime.Tenants.Connect do
   # Ignore messages to avoid handle_info unmatched functions
   def handle_info(_, state) do
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_call(:ready?, _from, state) do
+    # We just want to know if the process is ready to reply to the client
+    # Essentially checking if all handle_continue's were completed
+    {:reply, true, state}
   end
 
   @impl true
