@@ -352,7 +352,6 @@ defmodule Realtime.Database do
       "realtime_subscription_manager",
       "realtime_subscription_manager_pub",
       "realtime_subscription_checker",
-      "realtime_connect",
       "realtime_health_check",
       "realtime_janitor",
       "realtime_migrations",

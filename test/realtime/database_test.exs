@@ -32,8 +32,8 @@ defmodule Realtime.DatabaseTest do
           "region" => "us-east-1",
           "ssl_enforced" => false,
           "db_pool" => Map.get(context, :db_pool),
-          "subcriber_pool_size" => Map.get(context, :subcriber_pool),
-          "subs_pool_size" => Map.get(context, :db_pool)
+          "subcriber_pool_size" => Map.get(context, :subcriber_pool_size),
+          "subs_pool_size" => Map.get(context, :subs_pool_size)
         }
       }
 
@@ -53,6 +53,13 @@ defmodule Realtime.DatabaseTest do
     test "restricts connection if tenant database cannot receive more connections based on tenant pool",
          %{tenant: tenant} do
       assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
+    end
+
+    # With the factor of 95% of the pool size, db_pool is taken into consideration, it would fail
+    @tag db_pool: 100
+    test "db_pool is not taken into account on connection limit",
+         %{tenant: tenant} do
+      assert {:ok, _} = Database.check_tenant_connection(tenant)
     end
   end
 
