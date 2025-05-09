@@ -1,5 +1,5 @@
-defmodule PostgresDecoderTest do
-  use ExUnit.Case
+defmodule Realtime.PostgresDecoderTest do
+  use ExUnit.Case, async: true
   alias Realtime.Adapters.Postgres.Decoder
 
   alias Decoder.Messages.{

@@ -1,5 +1,5 @@
 defmodule Realtime.Adapters.Postgres.ProtocolTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   alias Realtime.Adapters.Postgres.Protocol
 
   test "defguard is_write/1" do

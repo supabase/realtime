@@ -1,5 +1,5 @@
 defmodule Realtime.GenCounterTest do
-  use Realtime.DataCase
+  use Realtime.DataCase, async: true
 
   alias Realtime.GenCounter
 

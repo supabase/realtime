@@ -196,8 +196,9 @@ defmodule Realtime.DatabaseTest do
       event = [:realtime, :database, :transaction]
       opts = [telemetry: event]
 
-      Database.transaction(db_conn, fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(6)", []) end, opts)
-      assert_receive {^event, %{latency: _}, %{tenant_id: nil}}
+      Database.transaction(db_conn, fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(0.1)", []) end, opts)
+      assert_receive {^event, %{latency: latency}, %{tenant_id: nil}}
+      assert latency > 100
     end
 
     test "with telemetry event defined, emits telemetry event with tenant_id", %{db_conn: db_conn} do
@@ -205,9 +206,10 @@ defmodule Realtime.DatabaseTest do
       tenant_id = random_string()
       opts = [telemetry: event, tenant_id: tenant_id]
 
-      Database.transaction(db_conn, fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(6)", []) end, opts)
+      Database.transaction(db_conn, fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(0.1)", []) end, opts)
 
-      assert_receive {^event, %{latency: _}, %{tenant_id: ^tenant_id}}
+      assert_receive {^event, %{latency: latency}, %{tenant_id: ^tenant_id}}
+      assert latency > 100
     end
   end
 

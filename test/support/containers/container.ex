@@ -5,7 +5,7 @@ defmodule Containers.Container do
     GenServer.start_link(__MODULE__, args, opts)
   end
 
-  def port(pid), do: GenServer.call(pid, :port)
+  def port(pid), do: GenServer.call(pid, :port, 15_000)
 
   @impl true
   def handle_call(:port, _from, state) do

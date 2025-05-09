@@ -1,6 +1,5 @@
 defmodule Realtime.Tenants.Connect.PiperTest do
-  # async: false due to the change of the error log level
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 

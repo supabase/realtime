@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.AuthTenantTest do
-  use RealtimeWeb.ConnCase
+  use RealtimeWeb.ConnCase, async: true
 
   import Plug.Conn
 

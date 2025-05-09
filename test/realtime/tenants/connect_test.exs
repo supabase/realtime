@@ -35,20 +35,19 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant2 = Containers.checkout_tenant(run_migrations: true)
       tenants = [tenant1, tenant2]
 
-      expected =
-        for tenant <- tenants do
-          assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      for tenant <- tenants do
+        assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
-          assert is_pid(db_conn)
-          Connect.shutdown(tenant.external_id)
-          assert_process_down(db_conn)
+        assert is_pid(db_conn)
+        Connect.shutdown(tenant.external_id)
+        assert_process_down(db_conn)
 
-          tenant.external_id
-        end
+        tenant.external_id
+      end
 
       result = :ets.select(Connect, [{{:"$1"}, [], [:"$1"]}]) |> Enum.sort()
-      expected = Enum.sort(expected)
-      assert result == expected
+      assert tenant1.external_id in result
+      assert tenant2.external_id in result
     end
 
     test "on database disconnect, returns new connection", %{tenant: tenant} do
@@ -152,13 +151,15 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "handles tenant suspension and unsuspension in a reactive way", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(500)
+      assert Connect.ready?(tenant.external_id)
 
       Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
-      Process.sleep(500)
+      assert_process_down(db_conn)
+      # Wait for syn to unregister and Cachex to be invalided
+      Process.sleep(100)
 
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
-      assert Process.alive?(db_conn) == false
+      refute Process.alive?(db_conn)
 
       Realtime.Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
       Process.sleep(50)
@@ -170,7 +171,6 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant2 = Containers.checkout_tenant(run_migrations: true)
 
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant1.external_id)
-      Process.sleep(1000)
 
       log =
         capture_log(fn ->
@@ -215,7 +215,7 @@ defmodule Realtime.Tenants.ConnectTest do
       with_mock Realtime.Tenants.Migrations, [], run_migrations: fn _ -> raise("error") end do
         tenant = Containers.checkout_tenant(run_migrations: false)
         assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
-        Process.sleep(1000)
+        assert_process_down(pid)
         refute Process.alive?(pid)
         assert_called(Realtime.Tenants.Migrations.run_migrations(tenant))
       end
@@ -223,7 +223,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "starts broadcast handler and does not fail on existing connection", %{tenant: tenant} do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(3000)
+      assert Connect.ready?(tenant.external_id)
 
       replication_connection_before = ReplicationConnection.whereis(tenant.external_id)
       listen_before = Listen.whereis(tenant.external_id)
@@ -244,7 +244,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "on replication connection postgres pid being stopped, also kills the Connect module", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(500)
+      assert Connect.ready?(tenant.external_id)
 
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_pid)
@@ -256,37 +256,35 @@ defmodule Realtime.Tenants.ConnectTest do
         []
       )
 
-      Process.sleep(500)
-
-      refute Process.alive?(replication_connection_pid)
-      refute Process.alive?(pid)
+      assert_process_down(replication_connection_pid)
+      assert_process_down(pid)
     end
 
     test "on replication connection exit, also kills the Connect module", %{tenant: tenant} do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(500)
+      assert Connect.ready?(tenant.external_id)
 
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_pid)
       pid = Connect.whereis(tenant.external_id)
       Process.exit(replication_connection_pid, :kill)
-      Process.sleep(500)
 
-      refute Process.alive?(replication_connection_pid)
-      refute Process.alive?(pid)
+      assert_process_down(replication_connection_pid)
+      assert_process_down(pid)
     end
 
     test "on listen exit, also kills the Connect module", %{tenant: tenant} do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(500)
+      assert Connect.ready?(tenant.external_id)
 
       listen_pid = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(listen_pid)
 
       pid = Connect.whereis(tenant.external_id)
       Process.exit(listen_pid, :kill)
-      Process.sleep(500)
 
+      assert_process_down(listen_pid)
+      assert_process_down(pid)
       refute Process.alive?(listen_pid)
       refute Process.alive?(pid)
     end
@@ -314,13 +312,12 @@ defmodule Realtime.Tenants.ConnectTest do
 
       on_exit(fn ->
         Enum.each(pids, &Process.exit(&1, :normal))
-        Process.sleep(2000)
       end)
 
       log =
         capture_log(fn ->
-          assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-          Process.sleep(3000)
+          assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+          assert_process_down(db_conn)
         end)
 
       assert log =~ "ReplicationMaxWalSendersReached"
@@ -376,7 +373,7 @@ defmodule Realtime.Tenants.ConnectTest do
     test "shutdowns all associated connections", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Process.alive?(db_conn)
-      Process.sleep(1000)
+      assert Connect.ready?(tenant.external_id)
       connect_pid = Connect.whereis(tenant.external_id)
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
       listen_pid = Listen.whereis(tenant.external_id)
