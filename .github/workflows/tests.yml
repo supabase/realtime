@@ -18,7 +18,7 @@ on:
       - main
 
 jobs:
-  format:
+  tests:
     name: Tests
     runs-on: ubuntu-latest
 
@@ -69,6 +69,8 @@ jobs:
           mix dialyzer.build
       - name: Run dialyzer
         run: mix dialyzer
+      - name: Run dev seeds
+        run: DB_ENC_KEY="1234567890123456" mix ecto.setup
       - name: Start epmd
         run: epmd -daemon
       - name: Run tests
