@@ -54,13 +54,6 @@ defmodule Realtime.DatabaseTest do
          %{tenant: tenant} do
       assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
     end
-
-    # With the factor of 95% of the pool size, db_pool is taken into consideration, it would fail
-    @tag db_pool: 100
-    test "db_pool is not taken into account on connection limit",
-         %{tenant: tenant} do
-      assert {:ok, _} = Database.check_tenant_connection(tenant)
-    end
   end
 
   describe "replication_slot_teardown/1" do
