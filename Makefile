@@ -15,7 +15,7 @@ dev.orange: ## Start another dev server (orange) on port 4001
 	ELIXIR_ERL_OPTIONS="+hmax 1000000000" SLOT_NAME_SUFFIX=some_sha PORT=4001 MIX_ENV=dev SECURE_CHANNELS=true API_JWT_SECRET=dev METRICS_JWT_SECRET=dev FLY_REGION=fra FLY_ALLOC_ID=123e4567-e89b-12d3-a456-426614174000 DB_ENC_KEY="1234567890123456" CLUSTER_STRATEGIES=$(CLUSTER_STRATEGIES) ERL_AFLAGS="-kernel shell_history enabled" iex --name orange@127.0.0.1 --cookie cookie  -S mix phx.server
 
 seed: ## Seed the database
-	DB_ENC_KEY="1234567890123456" FLY_ALLOC_ID=123e4567-e89b-12d3-a456-426614174000 mix run priv/repo/seeds.exs
+	DB_ENC_KEY="1234567890123456" FLY_ALLOC_ID=123e4567-e89b-12d3-a456-426614174000 mix run priv/repo/dev_seeds.exs
 
 prod: ## Start a server with a MIX_ENV=prod
 	ELIXIR_ERL_OPTIONS="+hmax 1000000000" SLOT_NAME_SUFFIX=some_sha MIX_ENV=prod FLY_APP_NAME=realtime-local API_KEY=dev SECURE_CHANNELS=true API_JWT_SECRET=dev METRICS_JWT_SECRET=dev FLY_REGION=fra FLY_ALLOC_ID=123e4567-e89b-12d3-a456-426614174000 DB_ENC_KEY="1234567890123456" SECRET_KEY_BASE=M+55t7f6L9VWyhH03R5N7cIhrdRlZaMDfTE6Udz0eZS7gCbnoLQ8PImxwhEyao6D DASHBOARD_USER=realtime_local DASHBOARD_PASSWORD=password ERL_AFLAGS="-kernel shell_history enabled" iex -S mix phx.server
