@@ -4,6 +4,7 @@ defmodule Realtime.Rpc do
   """
   import Realtime.Logs
   alias Realtime.Telemetry
+  require OpenTelemetry.Tracer, as: Tracer
 
   @doc """
   Calls external node using :rpc.call/5 and collects telemetry
@@ -31,7 +32,7 @@ defmodule Realtime.Rpc do
     timeout = Keyword.get(opts, :timeout, Application.get_env(:realtime, :rpc_timeout))
 
     with {latency, response} <-
-           :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end) do
+           :timer.tc(fn -> erpc_call(node, mod, func, args, timeout) end) do
       case response do
         {:ok, _} ->
           Telemetry.execute(
@@ -75,5 +76,15 @@ defmodule Realtime.Rpc do
       )
 
       {:error, :rpc_error, reason}
+  end
+
+  defp erpc_call(node, mod, func, args, timeout) when node == node() do
+    :erpc.call(node, mod, func, args, timeout)
+  end
+
+  defp erpc_call(node, mod, func, args, timeout) do
+    Tracer.with_span "remote call" do
+      :erpc.call(node, mod, func, args, timeout)
+    end
   end
 end

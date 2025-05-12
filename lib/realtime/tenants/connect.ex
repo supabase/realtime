@@ -9,6 +9,7 @@ defmodule Realtime.Tenants.Connect do
   use GenServer, restart: :transient
 
   require Logger
+  require OpenTelemetry.Tracer, as: Tracer
 
   import Realtime.Logs
 
@@ -50,19 +51,21 @@ defmodule Realtime.Tenants.Connect do
           | {:error, :tenant_database_connection_initializing}
           | {:error, :rpc_error, term()}
   def lookup_or_start_connection(tenant_id, opts \\ []) when is_binary(tenant_id) do
-    case get_status(tenant_id) do
-      {:ok, conn} ->
-        {:ok, conn}
+    Tracer.with_span "lookup_or_start_connection" do
+      case get_status(tenant_id) do
+        {:ok, conn} ->
+          {:ok, conn}
 
-      {:error, :tenant_database_unavailable} ->
-        call_external_node(tenant_id, opts)
+        {:error, :tenant_database_unavailable} ->
+          call_external_node(tenant_id, opts)
 
-      {:error, :tenant_database_connection_initializing} ->
-        Process.sleep(100)
-        call_external_node(tenant_id, opts)
+        {:error, :tenant_database_connection_initializing} ->
+          Process.sleep(100)
+          call_external_node(tenant_id, opts)
 
-      {:error, :initializing} ->
-        {:error, :tenant_database_unavailable}
+        {:error, :initializing} ->
+          {:error, :tenant_database_unavailable}
+      end
     end
   end
 
@@ -100,7 +103,13 @@ defmodule Realtime.Tenants.Connect do
     supervisor =
       {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, tenant_id}}
 
-    spec = {__MODULE__, [tenant_id: tenant_id] ++ opts}
+    otel = Keyword.get(opts, :otel, [])
+    span_ctx = Keyword.get_lazy(otel, :span_ctx, fn -> Tracer.start_span("connect") end)
+    ctx = Keyword.get_lazy(otel, :ctx, fn -> OpenTelemetry.Ctx.get_current() end)
+
+    opts = [tenant_id: tenant_id, otel: [span_ctx: span_ctx, ctx: ctx]] ++ opts
+
+    spec = {__MODULE__, opts}
 
     case DynamicSupervisor.start_child(supervisor, spec) do
       {:ok, _} ->
@@ -168,41 +177,55 @@ defmodule Realtime.Tenants.Connect do
       check_connected_user_interval: check_connected_user_interval
     }
 
+    otel = Keyword.get(opts, :otel, [])
+
     opts = Keyword.put(opts, :name, {:via, :syn, name})
 
-    GenServer.start_link(__MODULE__, state, opts)
+    GenServer.start_link(__MODULE__, [state, otel], opts)
   end
 
   ## GenServer callbacks
   # Needs to be done on init/1 to guarantee the GenServer only starts if we are able to connect to the database
   @impl GenServer
-  def init(%{tenant_id: tenant_id} = state) do
+  def init([%{tenant_id: tenant_id} = state, otel]) do
+    span_ctx = Keyword.get(otel, :span_ctx)
+    ctx = Keyword.get(otel, :ctx)
+
+    if span_ctx && ctx do
+      OpenTelemetry.Ctx.attach(ctx)
+      Tracer.set_current_span(span_ctx)
+    end
+
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    pipes = [
-      GetTenant,
-      Backoff,
-      CheckConnection,
-      StartCounters,
-      RegisterProcess
-    ]
+    try do
+      pipes = [
+        GetTenant,
+        Backoff,
+        CheckConnection,
+        StartCounters,
+        RegisterProcess
+      ]
 
-    case Piper.run(pipes, state) do
-      {:ok, acc} ->
-        {:ok, acc, {:continue, :run_migrations}}
+      case Piper.run(pipes, state) do
+        {:ok, acc} ->
+          {:ok, acc, {:continue, :run_migrations}}
 
-      {:error, :tenant_not_found} ->
-        {:stop, {:shutdown, :tenant_not_found}}
+        {:error, :tenant_not_found} ->
+          {:stop, {:shutdown, :tenant_not_found}}
 
-      {:error, :tenant_db_too_many_connections} ->
-        {:stop, {:shutdown, :tenant_db_too_many_connections}}
+        {:error, :tenant_db_too_many_connections} ->
+          {:stop, {:shutdown, :tenant_db_too_many_connections}}
 
-      {:error, :tenant_create_backoff} ->
-        {:stop, {:shutdown, :tenant_create_backoff}}
+        {:error, :tenant_create_backoff} ->
+          {:stop, {:shutdown, :tenant_create_backoff}}
 
-      {:error, error} ->
-        log_error("UnableToConnectToTenantDatabase", error)
-        {:stop, :shutdown}
+        {:error, error} ->
+          log_error("UnableToConnectToTenantDatabase", error)
+          {:stop, :shutdown}
+      end
+    after
+      Tracer.end_span(span_ctx)
     end
   end
 
@@ -348,6 +371,16 @@ defmodule Realtime.Tenants.Connect do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
+      # Tracing context is passed for local calls only for now
+      opts =
+        if node == node() do
+          span_ctx = Tracer.start_span("connect")
+          ctx = OpenTelemetry.Ctx.get_current()
+          [otel: [span_ctx: span_ctx, ctx: ctx]] ++ opts
+        else
+          opts
+        end
+
       Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, opts], timeout: rpc_timeout, tenant: tenant_id)
     end
   end

@@ -67,6 +67,9 @@ config :phoenix, :filter_parameters, {:keep, []}
 
 config :opentelemetry,
   resource_detectors: [:otel_resource_app_env, :otel_resource_env_var],
+  resource: %{
+    :"service.name" => "realtime"
+  },
   text_map_propagators: [:baggage, :trace_context],
   # Exporter must be configured through environment variables
   traces_exporter: :none,
