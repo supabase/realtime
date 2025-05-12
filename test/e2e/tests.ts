@@ -2,8 +2,7 @@ import { load } from "https://deno.land/std@0.224.0/dotenv/mod.ts";
 import {
   createClient,
   SupabaseClient,
-  RealtimeChannel,
-} from "npm:@supabase/supabase-js@2.47.3";
+} from "npm:@supabase/supabase-js@2.49.5-next.4";
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { describe, it } from "https://deno.land/std@0.224.0/testing/bdd.ts";
 import { sleep } from "https://deno.land/x/sleep/mod.ts";
@@ -16,54 +15,65 @@ const jwtSecret = env["PROJECT_JWT_SECRET"];
 const realtime = { heartbeatIntervalMs: 500, timeout: 1000 };
 const config = { config: { broadcast: { self: true } } };
 
-const signInUser = async (
+async function signInUser(
   supabase: SupabaseClient,
   email: string,
   password: string
-) => {
-  const { data } = await supabase.auth.signInWithPassword({ email, password });
-  return data!.session!.access_token;
-};
-
-const stopClient = async (
-  supabase: SupabaseClient,
-  channels: RealtimeChannel[]
-) => {
-  await sleep(1);
-  channels.forEach((channel) => {
-    channel.unsubscribe();
-    supabase.removeChannel(channel);
+) {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
   });
-  supabase.realtime.disconnect(1000, "test done");
-  supabase.auth.stopAutoRefresh();
-  await sleep(1);
-};
+  if (error) throw new Error(`Error signing in: ${error.message}`);
+  return data!.session!.access_token;
+}
 
-const executeCreateDatabaseActions = async (
+async function stopClient(supabase: SupabaseClient) {
+  await supabase.realtime.removeAllChannels();
+  await supabase.auth.stopAutoRefresh();
+  await supabase.auth.signOut();
+}
+
+async function executeInsert(
   supabase: SupabaseClient,
   table: string
-): Promise<number> => {
-  const { data }: any = await supabase
+): Promise<number> {
+  const { data, error }: any = await supabase
     .from(table)
     .insert([{ value: crypto.randomUUID() }])
     .select("id");
-  return data[0].id;
-};
 
-const executeModifyDatabaseActions = async (
+  if (error) throw new Error(`Error inserting data: ${error.message}`);
+  return data[0].id;
+}
+
+async function executeUpdate(
   supabase: SupabaseClient,
   table: string,
   id: number
-) => {
-  await supabase
+) {
+  const { data, error } = await supabase
     .from(table)
     .update({ value: crypto.randomUUID() })
     .eq("id", id);
 
-  await supabase.from(table).delete().eq("id", id);
-};
+  if (error) throw new Error(`Error updating data: ${error.message}`);
+  return data;
+}
 
-const generateJwtToken = async (payload: JWTPayload) => {
+async function executeDelete(
+  supabase: SupabaseClient,
+  table: string,
+  id: number
+) {
+  const { data, error } = await supabase.from(table).delete().eq("id", id);
+  if (error) {
+    throw new Error(`Error deleting data: ${error.message}`);
+  }
+  return data;
+}
+
+async function generateJwtToken(payload: JWTPayload) {
   const secret = new TextEncoder().encode(jwtSecret);
   const jwt = await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
@@ -72,12 +82,11 @@ const generateJwtToken = async (payload: JWTPayload) => {
     .sign(secret);
 
   return jwt;
-};
+}
 
 describe("broadcast extension", () => {
   it("user is able to receive self broadcast", async () => {
     let supabase = await createClient(url, token, { realtime });
-
     let result = null;
     let event = crypto.randomUUID();
     let topic = "topic:" + crypto.randomUUID();
@@ -86,18 +95,18 @@ describe("broadcast extension", () => {
     const channel = supabase
       .channel(topic, config)
       .on("broadcast", { event }, ({ payload }) => (result = payload))
-      .subscribe(async (status: string) => {
-        if (status == "SUBSCRIBED") {
-          await channel.send({
-            type: "broadcast",
-            event,
-            payload: expectedPayload,
-          });
-        }
-      });
+      .subscribe();
 
-    await sleep(2);
-    await stopClient(supabase, [channel]);
+    while (channel.state == "joining") await sleep(0.2);
+
+    await channel.send({
+      type: "broadcast",
+      event,
+      payload: expectedPayload,
+    });
+
+    while (result == null) await sleep(0.2);
+    await stopClient(supabase);
     assertEquals(result, expectedPayload);
   });
 
@@ -108,21 +117,22 @@ describe("broadcast extension", () => {
     let event = crypto.randomUUID();
     let topic = "topic:" + crypto.randomUUID();
     let expectedPayload = { message: crypto.randomUUID() };
-
     const activeChannel = supabase
       .channel(topic, config)
       .on("broadcast", { event }, ({ payload }) => (result = payload))
       .subscribe();
-    await sleep(2);
-    const unsubscribedChannel = supabase.channel(topic, config);
-    await unsubscribedChannel.send({
+    while (activeChannel.state == "joining") await sleep(0.2);
+
+    // Send from unsubscribed channel
+    supabase.channel(topic, config).send({
       type: "broadcast",
       event,
       payload: expectedPayload,
     });
 
-    await sleep(1);
-    await stopClient(supabase, [activeChannel, unsubscribedChannel]);
+    while (result == null) await sleep(0.2);
+
+    await stopClient(supabase);
     assertEquals(result, expectedPayload);
   });
 });
@@ -144,17 +154,14 @@ describe("presence extension", () => {
       .on("presence", { event: "join" }, ({ key, newPresences }) =>
         result.push({ key, newPresences })
       )
-      .subscribe(async (status: string) => {
-        if (status == "SUBSCRIBED") {
-          const res = await channel.track(expectedPayload, { timeout: 1000 });
-          if (res == "timed out") {
-            error = res;
-          }
-        }
-      });
+      .subscribe();
 
-    await sleep(2);
-    await stopClient(supabase, [channel]);
+    while (channel.state == "joining") await sleep(0.2);
+
+    const res = await channel.track(expectedPayload, { timeout: 1000 });
+    if (res == "timed out") error = res;
+
+    await stopClient(supabase);
 
     let presences = result[0].newPresences[0];
     assertEquals(result[0].key, key);
@@ -182,136 +189,18 @@ describe("presence extension", () => {
       .on("presence", { event: "join" }, ({ key, newPresences }) =>
         result.push({ key, newPresences })
       )
-      .subscribe(async (status: string) => {
-        if (status == "SUBSCRIBED") {
-          const res = await channel.track(expectedPayload, { timeout: 1000 });
-          if (res == "timed out") {
-            error = res;
-          }
-        }
-      });
+      .subscribe();
 
-    await sleep(2);
-    await stopClient(supabase, [channel]);
+    while (channel.state == "joining") await sleep(0.2);
+
+    const res = await channel.track(expectedPayload, { timeout: 1000 });
+    if (res == "timed out") error = res;
+    await stopClient(supabase);
 
     let presences = result[0].newPresences[0];
     assertEquals(result[0].key, key);
     assertEquals(presences.message, message);
     assertEquals(error, null);
-  });
-});
-
-describe("postgres changes extension", () => {
-  it("user is able to receive INSERT only events from a subscribed table with filter applied", async () => {
-    let supabase = await createClient(url, token, { realtime });
-    await signInUser(supabase, "filipe@supabase.io", "test_test");
-    await supabase.realtime.setAuth();
-    let result: Array<any> = [];
-    let topic = "topic:" + crypto.randomUUID();
-
-    let previousId = await executeCreateDatabaseActions(supabase, "pg_changes");
-    await executeCreateDatabaseActions(supabase, "dummy");
-
-    const activeChannel = supabase
-      .channel(topic, config)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "pg_changes",
-          filter: `id=eq.${previousId + 1}`,
-        },
-        (payload) => result.push(payload)
-      )
-      .subscribe();
-    await sleep(4);
-    await executeCreateDatabaseActions(supabase, "pg_changes");
-    await executeCreateDatabaseActions(supabase, "pg_changes");
-    await sleep(4);
-    await stopClient(supabase, [activeChannel]);
-
-    assertEquals(result.length, 1);
-    assertEquals(result[0].eventType, "INSERT");
-    assertEquals(result[0].new.id, previousId + 1);
-  });
-
-  it("user is able to receive UPDATE only events from a subscribed table with filter applied", async () => {
-    let supabase = await createClient(url, token, { realtime });
-    await signInUser(supabase, "filipe@supabase.io", "test_test");
-    await supabase.realtime.setAuth();
-
-    let result: Array<any> = [];
-    let topic = "topic:" + crypto.randomUUID();
-
-    let mainId = await executeCreateDatabaseActions(supabase, "pg_changes");
-    let fakeId = await executeCreateDatabaseActions(supabase, "pg_changes");
-    let dummyId = await executeCreateDatabaseActions(supabase, "dummy");
-
-    const activeChannel = supabase
-      .channel(topic, config)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "pg_changes",
-          filter: `id=eq.${mainId}`,
-        },
-        (payload) => result.push(payload)
-      )
-      .subscribe();
-    await sleep(4);
-
-    executeModifyDatabaseActions(supabase, "pg_changes", mainId);
-    executeModifyDatabaseActions(supabase, "pg_changes", fakeId);
-    executeModifyDatabaseActions(supabase, "dummy", dummyId);
-
-    await sleep(4);
-    await stopClient(supabase, [activeChannel]);
-
-    assertEquals(result.length, 1);
-    assertEquals(result[0].eventType, "UPDATE");
-    assertEquals(result[0].new.id, mainId);
-  });
-
-  it("user is able to receive DELETE only events from a subscribed table with filter applied", async () => {
-    let supabase = await createClient(url, token, { realtime });
-    await signInUser(supabase, "filipe@supabase.io", "test_test");
-    await supabase.realtime.setAuth();
-
-    let result: Array<any> = [];
-    let topic = "topic:" + crypto.randomUUID();
-
-    let mainId = await executeCreateDatabaseActions(supabase, "pg_changes");
-    let fakeId = await executeCreateDatabaseActions(supabase, "pg_changes");
-    let dummyId = await executeCreateDatabaseActions(supabase, "dummy");
-
-    const activeChannel = supabase
-      .channel(topic, config)
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "pg_changes",
-          filter: `id=eq.${mainId}`,
-        },
-        (payload) => result.push(payload)
-      )
-      .subscribe();
-    await sleep(4);
-
-    executeModifyDatabaseActions(supabase, "pg_changes", mainId);
-    executeModifyDatabaseActions(supabase, "pg_changes", fakeId);
-    executeModifyDatabaseActions(supabase, "dummy", dummyId);
-
-    await sleep(4);
-    await stopClient(supabase, [activeChannel]);
-
-    assertEquals(result.length, 1);
-    assertEquals(result[0].eventType, "DELETE");
-    assertEquals(result[0].old.id, mainId);
   });
 });
 
@@ -325,14 +214,12 @@ describe("authorization check", () => {
     const channel = supabase
       .channel(topic, { config: { private: true } })
       .subscribe((status: string, err: any) => {
-        if (status == "CHANNEL_ERROR") {
-          errMessage = err.message;
-        }
+        if (status == "CHANNEL_ERROR") errMessage = err.message;
       });
 
-    await sleep(1);
+    while (channel.state == "joining") await sleep(0.2);
 
-    await stopClient(supabase, [channel]);
+    await stopClient(supabase);
     assertEquals(
       errMessage,
       `"You do not have permissions to read from this Channel topic: ${topic}"`
@@ -349,14 +236,12 @@ describe("authorization check", () => {
     const channel = supabase
       .channel(topic, { config: { private: true } })
       .subscribe((status: string) => {
-        if (status == "SUBSCRIBED") {
-          connected = true;
-        }
+        if (status == "SUBSCRIBED") connected = true;
       });
 
-    await sleep(1);
-    await supabase.auth.signOut();
-    await stopClient(supabase, [channel]);
+    while (channel.state == "joining") await sleep(0.2);
+
+    await stopClient(supabase);
     assertEquals(connected, true);
   });
 
@@ -371,27 +256,27 @@ describe("authorization check", () => {
 
     const channel = supabase
       .channel(topic, { config: { private: true } })
-      .subscribe((status: string, err: any) => {
-        if (status == "SUBSCRIBED") {
-          connected = true;
-        }
+      .subscribe((status: string) => {
+        if (status == "SUBSCRIBED") connected = true;
       });
 
-    await sleep(1);
-    await stopClient(supabase, [channel]);
+    while (channel.state == "joining") await sleep(0.2);
+
+    await stopClient(supabase);
     assertEquals(connected, true);
   });
 });
 
 describe("broadcast changes", () => {
-  const table = "broadcast_changes";
-  const id = crypto.randomUUID();
-  const originalValue = crypto.randomUUID();
-  const updatedValue = crypto.randomUUID();
-  let insertResult: any, updateResult: any, deleteResult: any;
-
   it("authenticated user receives insert broadcast change from a specific topic based on id", async () => {
+    const table = "broadcast_changes";
+    const id = crypto.randomUUID();
+    const originalValue = crypto.randomUUID();
+    const updatedValue = crypto.randomUUID();
+
+    let insertResult: any, updateResult: any, deleteResult: any;
     let supabase = await createClient(url, token, { realtime });
+
     await signInUser(supabase, "filipe@supabase.io", "test_test");
     await supabase.realtime.setAuth();
 
@@ -400,19 +285,13 @@ describe("broadcast changes", () => {
       .on("broadcast", { event: "INSERT" }, (res) => (insertResult = res))
       .on("broadcast", { event: "DELETE" }, (res) => (deleteResult = res))
       .on("broadcast", { event: "UPDATE" }, (res) => (updateResult = res))
-      .subscribe(async (status) => {
-        if (status == "SUBSCRIBED") {
-          await supabase.from(table).insert({ value: originalValue, id });
+      .subscribe();
 
-          await supabase
-            .from(table)
-            .update({ value: updatedValue })
-            .eq("id", id);
+    while (channel.state == "joining") await sleep(0.2);
 
-          await supabase.from(table).delete().eq("id", id);
-        }
-      });
-    await sleep(5);
+    // Test inserts
+    await supabase.from(table).insert({ value: originalValue, id });
+    while (!insertResult) await sleep(0.2);
     assertEquals(insertResult.payload.record.id, id);
     assertEquals(insertResult.payload.record.value, originalValue);
     assertEquals(insertResult.payload.old_record, null);
@@ -420,6 +299,9 @@ describe("broadcast changes", () => {
     assertEquals(insertResult.payload.schema, "public");
     assertEquals(insertResult.payload.table, "broadcast_changes");
 
+    // Test updates
+    await supabase.from(table).update({ value: updatedValue }).eq("id", id);
+    while (!updateResult) await sleep(0.2);
     assertEquals(updateResult.payload.record.id, id);
     assertEquals(updateResult.payload.record.value, updatedValue);
     assertEquals(updateResult.payload.old_record.id, id);
@@ -428,6 +310,9 @@ describe("broadcast changes", () => {
     assertEquals(updateResult.payload.schema, "public");
     assertEquals(updateResult.payload.table, "broadcast_changes");
 
+    // Test deletes
+    await supabase.from(table).delete().eq("id", id);
+    while (!deleteResult) await sleep(0.2);
     assertEquals(deleteResult.payload.record, null);
     assertEquals(deleteResult.payload.old_record.id, id);
     assertEquals(deleteResult.payload.old_record.value, updatedValue);
@@ -436,6 +321,140 @@ describe("broadcast changes", () => {
     assertEquals(deleteResult.payload.table, "broadcast_changes");
 
     await supabase.auth.signOut();
-    await stopClient(supabase, [channel]);
+    await stopClient(supabase);
+  });
+});
+
+describe("postgres changes extension", () => {
+  it("user is able to receive INSERT only events from a subscribed table with filter applied", async () => {
+    let supabase = await createClient(url, token, { realtime });
+    await sleep(7);
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
+
+    let subscribed = null;
+    let result: any = null;
+    let topic = "topic:" + crypto.randomUUID();
+
+    let previousId = await executeInsert(supabase, "pg_changes");
+    await executeInsert(supabase, "dummy");
+
+    const channel = supabase
+      .channel(topic, config)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "pg_changes",
+          filter: `id=eq.${previousId + 1}`,
+        },
+        (payload) => (result = payload)
+      )
+      .on("system", "*", ({ status }) => (subscribed = status))
+      .subscribe();
+
+    while (channel.state == "joining") await sleep(0.2);
+    while (subscribed != "ok") await sleep(0.2);
+
+    await executeInsert(supabase, "pg_changes");
+    await executeInsert(supabase, "dummy");
+
+    while (result == null) await sleep(0.2);
+
+    await stopClient(supabase);
+    assertEquals(result.eventType, "INSERT");
+    assertEquals(result.new.id, previousId + 1);
+  });
+
+  it("user is able to receive UPDATE only events from a subscribed table with filter applied", async () => {
+    let supabase = await createClient(url, token, { realtime });
+    await sleep(7);
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
+
+    let result: any = null;
+    let subscribed = null;
+    let topic = "topic:" + crypto.randomUUID();
+
+    let mainId = await executeInsert(supabase, "pg_changes");
+    let fakeId = await executeInsert(supabase, "pg_changes");
+    let dummyId = await executeInsert(supabase, "dummy");
+
+    const channel = supabase
+      .channel(topic, config)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "pg_changes",
+          filter: `id=eq.${mainId}`,
+        },
+        (payload) => (result = payload)
+      )
+      .on("system", "*", ({ status }) => (subscribed = status))
+      .subscribe();
+
+    while (channel.state == "joining") await sleep(0.2);
+    while (subscribed != "ok") await sleep(0.2);
+
+    executeUpdate(supabase, "pg_changes", mainId);
+    executeUpdate(supabase, "pg_changes", fakeId);
+    executeUpdate(supabase, "dummy", dummyId);
+
+    while (result == null) await sleep(0.2);
+
+    await stopClient(supabase);
+
+    assertEquals(result.eventType, "UPDATE");
+    assertEquals(result.new.id, mainId);
+  });
+
+  it("user is able to receive DELETE only events from a subscribed table with filter applied", async () => {
+    let supabase = await createClient(url, token, { realtime });
+    await sleep(7);
+    await signInUser(supabase, "filipe@supabase.io", "test_test");
+    await supabase.realtime.setAuth();
+
+    let result: any = null;
+    let subscribed = null;
+    let topic = "topic:" + crypto.randomUUID();
+
+    let mainId = await executeInsert(supabase, "pg_changes");
+    let fakeId = await executeInsert(supabase, "pg_changes");
+    let dummyId = await executeInsert(supabase, "dummy");
+
+    const channel = supabase
+      .channel(topic, config)
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "pg_changes",
+          filter: `id=eq.${mainId}`,
+        },
+        (payload) => (result = payload)
+      )
+      .on("system", "*", ({ status }) => (subscribed = status))
+      .subscribe();
+
+    while (channel.state == "joining") await sleep(0.2);
+    while (subscribed != "ok") {
+      console.log(channel.state);
+      console.log(subscribed);
+      await sleep(0.2);
+    }
+
+    executeDelete(supabase, "pg_changes", mainId);
+    executeDelete(supabase, "pg_changes", fakeId);
+    executeDelete(supabase, "dummy", dummyId);
+
+    while (result == null) await sleep(0.2);
+    await stopClient(supabase);
+
+    assertEquals(result.eventType, "DELETE");
+    assertEquals(result.old.id, mainId);
   });
 });
