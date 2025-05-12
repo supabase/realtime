@@ -107,7 +107,7 @@ defmodule Realtime.Database do
 
       with {:ok, conn} <- connect_db(check_settings) do
         query =
-          "select (current_setting('max_connections')::int - count(*))::int from pg_stat_activity"
+          "select (current_setting('max_connections')::int - count(*))::int from pg_stat_activity where application_name != 'realtime_connect'"
 
         case Postgrex.query(conn, query, []) do
           {:ok, %{rows: [[available_connections]]}}
@@ -352,13 +352,13 @@ defmodule Realtime.Database do
       "realtime_subscription_manager",
       "realtime_subscription_manager_pub",
       "realtime_subscription_checker",
-      "realtime_connect",
       "realtime_health_check",
       "realtime_janitor",
       "realtime_migrations",
       "realtime_broadcast_changes",
       "realtime_rls",
-      "realtime_replication_slot_teardown"
+      "realtime_replication_slot_teardown",
+      "realtime_connect"
     ]
 
     Enum.reduce(application_names, 0, fn application_name, acc ->

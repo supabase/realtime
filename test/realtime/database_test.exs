@@ -32,8 +32,8 @@ defmodule Realtime.DatabaseTest do
           "region" => "us-east-1",
           "ssl_enforced" => false,
           "db_pool" => Map.get(context, :db_pool),
-          "subcriber_pool_size" => Map.get(context, :subcriber_pool),
-          "subs_pool_size" => Map.get(context, :db_pool)
+          "subcriber_pool_size" => Map.get(context, :subcriber_pool_size),
+          "subs_pool_size" => Map.get(context, :subs_pool_size)
         }
       }
 
