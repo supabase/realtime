@@ -37,3 +37,5 @@ config/prod.secret.exs
 demo/.env
 
 .lexical
+
+.DS_Store

@@ -17,6 +17,11 @@ on:
     branches:
       - main
 
+# Cancel old job if a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
     name: Tests
