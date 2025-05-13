@@ -48,11 +48,13 @@ defmodule Realtime.DatabaseTest do
 
     # Connection limit for docker tenant db is 100
     @tag db_pool: 50,
-         subs_pool_size: 50,
-         subcriber_pool_size: 50
+         subs_pool_size: 21,
+         subcriber_pool_size: 33
     test "restricts connection if tenant database cannot receive more connections based on tenant pool",
          %{tenant: tenant} do
-      assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
+      assert capture_log(fn ->
+               assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
+             end) =~ ~r/Only \d+ available connections\. At least 126 connections are required/
     end
   end
 
