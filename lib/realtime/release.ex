@@ -20,6 +20,7 @@ defmodule Realtime.Release do
 
   def seeds(repo) do
     load_app()
+    {:ok, _} = Application.ensure_all_started(:realtime)
 
     {:ok, {:ok, _}, _} =
       Ecto.Migrator.with_repo(repo, fn _repo ->
