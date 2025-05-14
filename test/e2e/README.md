@@ -6,11 +6,6 @@ Our E2E tests intend to test the usage of Realtime with Supabase and ensure we h
 
 ### Project environment
 
-- Create one user in the Authentication dashboard with the following information:
-
-  - Email: test1@test.com
-  - Password: test_test
-
 - Run the following SQL
 
 ```sql
@@ -97,6 +92,7 @@ CREATE TRIGGER broadcast_changes_for_table_public_broadcast_changes_trigger
     FOR EACH ROW
     EXECUTE FUNCTION broadcast_changes_for_table_trigger ();
 
+INSERT INTO "auth"."users" ("instance_id", "id", "aud", "role", "email", "encrypted_password", "email_confirmed_at", "invited_at", "confirmation_token", "confirmation_sent_at", "recovery_token", "recovery_sent_at", "email_change_token_new", "email_change", "email_change_sent_at", "last_sign_in_at", "raw_app_meta_data", "raw_user_meta_data", "is_super_admin", "created_at", "updated_at", "phone", "phone_confirmed_at", "phone_change", "phone_change_token", "phone_change_sent_at", "email_change_token_current", "email_change_confirm_status", "banned_until", "reauthentication_token", "reauthentication_sent_at", "is_sso_user", "deleted_at", "is_anonymous") VALUES ('00000000-0000-0000-0000-000000000000', '93c8bc43-c330-4702-aef2-4ba2c298950a', 'authenticated', 'authenticated', 'filipe@supabase.io', '$2a$10$WQ4tbkMVuS2OUmkX.LRC0uRwH6bU39CbI5bdHuLi82UXhUsjhrLP.', '2025-04-03 03:51:28.207805+00', null, '', '2025-04-03 03:50:59.085609+00', '', null, '', '', null, '2025-04-03 08:01:19.813327+00', '{"provider": "email", "providers": ["email"]}', '{"sub": "92c8bc43-c330-4702-aef2-4ba2c298950a", "email": "filipe@supabase.io", "email_verified": true, "phone_verified": false}', null, '2025-04-03 03:50:59.038087+00', '2025-04-03 22:09:10.979685+00', null, null, '', '', null, '', '0', null, '', null, 'false', null, 'false');
 ```
 
 ### Test enviroment
