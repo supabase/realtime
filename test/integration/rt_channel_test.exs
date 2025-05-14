@@ -568,7 +568,6 @@ defmodule Realtime.Integration.RtChannelTest do
       # Checks first send which will set write policy to true
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, realtime_topic, "broadcast", payload)
-      Process.sleep(1000)
 
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^realtime_topic}, 500
 
@@ -775,7 +774,6 @@ defmodule Realtime.Integration.RtChannelTest do
       {:ok, access_token} = generate_token(tenant, %{:exp => System.system_time(:second) + 10})
 
       # token breaks claims in between joins so it needs to be handled by the channel and not the socket
-      Process.sleep(1000)
       realtime_topic = "realtime:#{topic}"
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
@@ -803,7 +801,6 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "presence_state"}, 500
 
       # token becomes a string in between joins so it needs to be handled by the channel and not the socket
-      Process.sleep(1000)
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: "potato"})
 
       assert_receive %Message{
@@ -926,7 +923,6 @@ defmodule Realtime.Integration.RtChannelTest do
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
       Postgrex.query!(db_conn, "UPDATE #{table_name} SET details = $1 WHERE details = $2", [new_value, value])
 
-      Process.sleep(500)
       old_record = %{"details" => value, "id" => 1}
       record = %{"details" => new_value, "id" => 1}
 
@@ -945,7 +941,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        },
                        topic: ^topic
                      },
-                     200
+                     500
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
@@ -1099,8 +1095,6 @@ defmodule Realtime.Integration.RtChannelTest do
       topic: topic
     } do
       change_tenant_configuration(tenant, :private_only, true)
-
-      Realtime.Tenants.Cache.invalidate_tenant_cache(tenant.external_id)
 
       Process.sleep(100)
 
@@ -1373,14 +1367,12 @@ defmodule Realtime.Integration.RtChannelTest do
 
   def handle_telemetry(event, %{sum: sum}, _, _) do
     [key] = Enum.take(event, -1)
-    agent_pid = Process.whereis(TestCounter)
-    Agent.update(agent_pid, fn state -> Map.update!(state, key, &(&1 + sum)) end)
+    Agent.update(TestCounter, fn state -> Map.update!(state, key, &(&1 + sum)) end)
   end
 
   def get_count(event) do
     [key] = Enum.take(event, -1)
-    agent_pid = Process.whereis(TestCounter)
-    Agent.get(agent_pid, fn state -> Map.get(state, key, 0) end)
+    Agent.get(TestCounter, fn state -> Map.get(state, key, 0) end)
   end
 
   describe "billable events" do
@@ -1392,14 +1384,10 @@ defmodule Realtime.Integration.RtChannelTest do
         [:realtime, :rate_counter, :channel, :presence_events]
       ]
 
-      TestCounter
-      |> Process.whereis()
-      |> then(fn
-        nil -> nil
-        pid -> Process.exit(pid, :normal)
-      end)
-
-      {:ok, _} = Agent.start_link(fn -> %{joins: 0, events: 0, db_events: 0, presence_events: 0} end, name: TestCounter)
+      {:ok, _} =
+        start_supervised(
+          {Agent, [fn -> %{joins: 0, events: 0, db_events: 0, presence_events: 0} end, name: TestCounter]}
+        )
 
       RateCounter.stop(tenant.external_id)
       GenCounter.stop(tenant.external_id)
