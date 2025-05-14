@@ -7,12 +7,7 @@ defmodule Generators do
   alias Realtime.Crypto
   alias Realtime.Database
 
-  def port() do
-    Agent.get_and_update(:available_db_ports, fn ports ->
-      [port | ports] = ports
-      {port, ports}
-    end)
-  end
+  def port(), do: Containers.port()
 
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
   def tenant_fixture(override \\ %{}) do

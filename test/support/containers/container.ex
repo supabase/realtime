@@ -1,8 +1,6 @@
 defmodule Containers.Container do
   use GenServer
 
-  @image "supabase/postgres:15.8.1.040"
-
   def start_link(args \\ [], opts \\ []) do
     GenServer.start_link(__MODULE__, args, opts)
   end
@@ -15,29 +13,15 @@ defmodule Containers.Container do
   end
 
   @impl true
-  def init(args) do
-    port = Keyword.get(args, :port, Generators.port())
-    name = "realtime-test-#{System.unique_integer([:positive])}"
+  def init(_args) do
+    {:ok, %{}, {:continue, :start_container}}
+  end
 
-    {_, 0} =
-      System.cmd("docker", [
-        "run",
-        "-d",
-        "--name",
-        name,
-        "-e",
-        "POSTGRES_HOST=/var/run/postgresql",
-        "-e",
-        "POSTGRES_PASSWORD=postgres",
-        "-p",
-        "#{port}:5432",
-        @image,
-        "postgres",
-        "-c",
-        "config_file=/etc/postgresql/postgresql.conf"
-      ])
+  @impl true
+  def handle_continue(:start_container, _state) do
+    {:ok, name, port} = Containers.start_container()
 
-    {:ok, %{name: name, port: port}, {:continue, :check_container_ready}}
+    {:noreply, %{name: name, port: port}, {:continue, :check_container_ready}}
   end
 
   @impl true
