@@ -25,6 +25,14 @@ defmodule Realtime.DataCase do
       import Realtime.DataCase
       import Generators
       import TenantConnection
+
+      # Use Record module to extract fields of the Span record from the opentelemetry dependency.
+      require Record
+      @span_fields Record.extract(:span, from: "deps/opentelemetry/include/otel_span.hrl")
+      @status_fields Record.extract(:status, from: "deps/opentelemetry_api/include/opentelemetry.hrl")
+      # Define macros for span and span_status
+      Record.defrecordp(:span, @span_fields)
+      Record.defrecordp(:status, @status_fields)
     end
   end
 

@@ -48,3 +48,10 @@ config :logger,
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
   metadata: [:request_id, :project, :external_id, :application_name, :sub]
+
+config :opentelemetry,
+  traces_exporter: :none
+
+config :opentelemetry,
+  span_processor: :simple,
+  processors: [{:otel_simple_processor, %{}}]

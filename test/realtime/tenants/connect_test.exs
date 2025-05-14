@@ -1,5 +1,7 @@
 defmodule Realtime.Tenants.ConnectTest do
   # async: false due to the fact that we are checking ets tables for user tracking and usage of mocks
+  # Also using global otel_simple_processor
+
   use Realtime.DataCase, async: false
   import ExUnit.CaptureLog
   import Mock
@@ -15,6 +17,9 @@ defmodule Realtime.Tenants.ConnectTest do
     :ets.delete_all_objects(Connect)
 
     tenant = Containers.checkout_tenant(run_migrations: true)
+
+    :otel_simple_processor.set_exporter(:otel_exporter_pid, self())
+    on_exit(fn -> :otel_simple_processor.set_exporter(:none) end)
 
     %{tenant: tenant}
   end
@@ -92,6 +97,9 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert {:error, :tenant_database_unavailable} =
                Connect.lookup_or_start_connection(tenant.external_id)
+
+      assert_received {:span,
+                       span(name: "database.connect", status: status(code: :error, message: "unable to connect"))}
     end
 
     test "if tenant does not exist, returns error" do

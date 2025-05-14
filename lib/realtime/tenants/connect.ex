@@ -105,7 +105,12 @@ defmodule Realtime.Tenants.Connect do
     span_ctx = Keyword.get_lazy(otel, :span_ctx, fn -> Tracer.start_span("database.connect") end)
     ctx = Keyword.get_lazy(otel, :ctx, fn -> OpenTelemetry.Ctx.get_current() end)
 
-    opts = [tenant_id: tenant_id, otel: [span_ctx: span_ctx, ctx: ctx]] ++ opts
+    OpenTelemetry.Ctx.attach(ctx)
+    OpenTelemetry.Tracer.set_current_span(span_ctx)
+
+    Tracer.set_attributes(external_id: tenant_id)
+
+    opts = [tenant_id: tenant_id] ++ opts
 
     spec = {__MODULE__, opts}
 
@@ -364,9 +369,10 @@ defmodule Realtime.Tenants.Connect do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
-      # Tracing context is passed for local calls only for now
       opts =
         if node == node() do
+          # Tracing context is passed for local calls only for now
+          # This is necessary because :erpc will spawn a process when timeout is not :infinity
           span_ctx = Tracer.start_span("database.connect")
           ctx = OpenTelemetry.Ctx.get_current()
           [otel: [span_ctx: span_ctx, ctx: ctx]] ++ opts
