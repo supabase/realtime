@@ -123,26 +123,26 @@ defmodule Realtime.Tenants.Connect do
           get_status(tenant_id)
 
         {:error, {:shutdown, :tenant_db_too_many_connections}} ->
-          Tracer.set_status(:error, "too many connections")
+          Tracer.set_status(:error, "DatabaseLackOfConnections")
           {:error, :tenant_db_too_many_connections}
 
         {:error, {:shutdown, :tenant_not_found}} ->
-          Tracer.set_status(:error, "tenant not found")
+          Tracer.set_status(:error, "TenantNotFound")
           {:error, :tenant_not_found}
 
         {:error, {:shutdown, :tenant_create_backoff}} ->
           log_warning("TooManyConnectAttempts", "Too many connect attempts to tenant database")
-          Tracer.set_status(:error, "too many connect attempts")
+          Tracer.set_status(:error, "TooManyConnectAttempts")
           {:error, :tenant_create_backoff}
 
         {:error, :shutdown} ->
           log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database")
-          Tracer.set_status(:error, "unable to connect")
+          Tracer.set_status(:error, "UnableToConnectToTenantDatabase")
           {:error, :tenant_database_unavailable}
 
         {:error, error} ->
           log_error("UnableToConnectToTenantDatabase", error)
-          Tracer.set_status(:error, "unable to connect")
+          Tracer.set_status(:error, "UnableToConnectToTenantDatabase")
           {:error, :tenant_database_unavailable}
       end
     after

@@ -87,6 +87,7 @@ defmodule Realtime.MixProject do
       {:opentelemetry_api, "~> 1.2"},
       {:opentelemetry_phoenix, "~> 2.0"},
       {:opentelemetry_cowboy, "~> 1.0"},
+      {:opentelemetry_semantic_conventions, "~> 1.0"},
       {:mock, "~> 0.3", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},

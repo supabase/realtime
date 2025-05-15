@@ -4,6 +4,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   """
   use RealtimeWeb, :channel
   require Logger
+  require OpenTelemetry.Tracer, as: Tracer
   import Realtime.Logs
 
   alias DBConnection.Backoff
@@ -29,11 +30,14 @@ defmodule RealtimeWeb.RealtimeChannel do
   @confirm_token_ms_interval :timer.minutes(5)
 
   @impl true
-  def join("realtime:", _params, _socket) do
-    Logging.log_error_message(:error, "TopicNameRequired", "You must provide a topic name")
+  def join(topic, params, socket) do
+    Tracer.with_span "channel.join" do
+      Tracer.set_attributes(external_id: socket.assigns.tenant, topic: topic)
+      do_join(topic, params, socket)
+    end
   end
 
-  def join("realtime:" <> sub_topic = topic, params, socket) do
+  defp do_join("realtime:" <> sub_topic = topic, params, socket) do
     %{
       assigns: %{tenant: tenant_id, log_level: log_level, postgres_cdc_module: module},
       channel_pid: channel_pid,
@@ -200,6 +204,10 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, error} ->
         Logging.log_error_message(:error, "UnknownErrorOnChannel", error)
     end
+  end
+
+  defp do_join(_, _, _) do
+    Logging.log_error_message(:error, "TopicNameRequired", "You must provide a topic name")
   end
 
   @impl true
