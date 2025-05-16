@@ -176,7 +176,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     GenCounter.new(tenant.external_id)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-    Process.sleep(500)
+    assert Connect.ready?(tenant.external_id)
 
     topic = random_string()
     Endpoint.subscribe("realtime:#{topic}")

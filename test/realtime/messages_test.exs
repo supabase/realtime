@@ -1,5 +1,5 @@
 defmodule Realtime.MessagesTest do
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
 
   alias Realtime.Api.Message
   alias Realtime.Database
