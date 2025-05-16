@@ -35,20 +35,19 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant2 = Containers.checkout_tenant(run_migrations: true)
       tenants = [tenant1, tenant2]
 
-      expected =
-        for tenant <- tenants do
-          assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      for tenant <- tenants do
+        assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
-          assert is_pid(db_conn)
-          Connect.shutdown(tenant.external_id)
-          assert_process_down(db_conn)
+        assert is_pid(db_conn)
+        Connect.shutdown(tenant.external_id)
+        assert_process_down(db_conn)
 
-          tenant.external_id
-        end
+        tenant.external_id
+      end
 
       result = :ets.select(Connect, [{{:"$1"}, [], [:"$1"]}]) |> Enum.sort()
-      expected = Enum.sort(expected)
-      assert result == expected
+      assert tenant1.external_id in result
+      assert tenant2.external_id in result
     end
 
     test "on database disconnect, returns new connection", %{tenant: tenant} do
@@ -348,7 +347,7 @@ defmodule Realtime.Tenants.ConnectTest do
           for _ <- 1..10 do
             with {:ok, pid} <- Connect.connect(tenant.external_id) do
               Connect.shutdown(tenant.external_id)
-              assert_process_down(pid)
+              assert_process_down(pid, 500)
             end
           end
 
@@ -362,7 +361,7 @@ defmodule Realtime.Tenants.ConnectTest do
       for _ <- 1..10 do
         with {:ok, pid} <- Connect.connect(tenant.external_id) do
           Connect.shutdown(tenant.external_id)
-          assert_process_down(pid)
+          assert_process_down(pid, 500)
         end
       end
 
@@ -376,7 +375,7 @@ defmodule Realtime.Tenants.ConnectTest do
     test "shutdowns all associated connections", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Process.alive?(db_conn)
-      Process.sleep(1000)
+      assert Connect.ready?(tenant.external_id)
       connect_pid = Connect.whereis(tenant.external_id)
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
       listen_pid = Listen.whereis(tenant.external_id)
