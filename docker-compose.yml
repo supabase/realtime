@@ -9,9 +9,7 @@ services:
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_HOST: /var/run/postgresql
-      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
   tenant_db:
     image: supabase/postgres:15.8.1.040
     container_name: tenant-db
@@ -20,9 +18,7 @@ services:
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_HOST: /var/run/postgresql
-      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
   realtime:
     depends_on:
       - db
