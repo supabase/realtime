@@ -5,24 +5,27 @@ alias Realtime.Database
 ExUnit.start(exclude: [:failing], max_cases: 1, capture_log: true)
 
 max_cases = ExUnit.configuration()[:max_cases]
-Containers.stop_containers()
+
+if System.get_env("REUSE_CONTAINERS") != "true" do
+  Containers.stop_containers()
+  Containers.stop_container("dev_tenant")
+end
+
+{:ok, _pid} = Containers.start_link(max_cases)
 
 for tenant <- Api.list_tenants(), do: Api.delete_tenant(tenant)
 
-{:ok, _pid} = Agent.start_link(fn -> Enum.shuffle(5500..9000) end, name: :available_db_ports)
-
 tenant_name = "dev_tenant"
+tenant = Containers.initialize(tenant_name)
 publication = "supabase_realtime_test"
-port = Generators.port()
-opts = %{external_id: tenant_name, name: tenant_name, port: port, jwt_secret: "secure_jwt_secret"}
-tenant = Generators.tenant_fixture(opts)
 
 # Start dev_realtime container to be used in integration tests
-Containers.initialize(tenant)
 {:ok, conn} = Database.connect(tenant, "realtime_seed", :stop)
 
 Database.transaction(conn, fn db_conn ->
   queries = [
+    "DROP TABLE IF EXISTS public.test",
+    "DROP PUBLICATION IF EXISTS #{publication}",
     "create sequence if not exists test_id_seq;",
     """
     create table "public"."test" (
@@ -38,12 +41,6 @@ Database.transaction(conn, fn db_conn ->
 
   Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
 end)
-
-{:ok, _pid} =
-  :poolboy.start_link(
-    [name: {:local, Containers}, size: max_cases + 1, max_overflow: 0, worker_module: Containers.Container],
-    []
-  )
 
 Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
 

@@ -5,6 +5,7 @@ on:
       - main
     paths:
       - "lib/**"
+      - "test/**"
       - "config/**"
       - "priv/**"
       - "assets/**"

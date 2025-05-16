@@ -5,29 +5,71 @@ defmodule Containers do
   alias Realtime.RateCounter
   alias Realtime.Tenants.Migrations
 
-  def initialize(tenant) do
-    name = "realtime-test-#{tenant.external_id}"
-    %{port: port} = Database.from_tenant(tenant, "realtime_test", :stop)
+  use GenServer
 
-    {_, 0} =
-      System.cmd("docker", [
-        "run",
-        "-d",
-        "--name",
-        name,
-        "-e",
-        "POSTGRES_HOST=/var/run/postgresql",
-        "-e",
-        "POSTGRES_PASSWORD=postgres",
-        "-p",
-        "#{port}:5432",
-        "supabase/postgres:15.8.1.040",
-        "postgres",
-        "-c",
-        "config_file=/etc/postgresql/postgresql.conf"
-      ])
+  @image "supabase/postgres:15.8.1.040"
+
+  def start_container(), do: GenServer.call(__MODULE__, :start_container, 10_000)
+  def port(), do: GenServer.call(__MODULE__, :port, 10_000)
+
+  def start_link(max_cases), do: GenServer.start_link(__MODULE__, max_cases, name: __MODULE__)
+
+  def init(max_cases) do
+    existing_containers = existing_containers("realtime-test-*")
+    ports = for {_, port} <- existing_containers, do: port
+    available_ports = Enum.shuffle(5501..9000) -- ports
+
+    {:ok, %{existing_containers: existing_containers, ports: available_ports}, {:continue, {:pool, max_cases}}}
+  end
+
+  def handle_continue({:pool, max_cases}, state) do
+    {:ok, _pid} =
+      :poolboy.start_link(
+        [name: {:local, Containers.Pool}, size: max_cases + 1, max_overflow: 0, worker_module: Containers.Container],
+        []
+      )
+
+    {:noreply, state}
+  end
+
+  def handle_call(:port, _from, state) do
+    [port | ports] = state.ports
+    {:reply, port, %{state | ports: ports}}
+  end
+
+  def handle_call(:start_container, _from, state) do
+    case state.existing_containers do
+      [{name, port} | rest] ->
+        {:reply, {:ok, name, port}, %{state | existing_containers: rest}}
+
+      [] ->
+        [port | ports] = state.ports
+        name = "realtime-test-#{System.unique_integer([:positive])}"
+
+        docker_run!(name, port)
+
+        {:reply, {:ok, name, port}, %{state | ports: ports}}
+    end
+  end
+
+  def initialize(external_id) do
+    name = "realtime-tenant-test-#{external_id}"
+
+    port =
+      case existing_containers(name) do
+        [{^name, port}] ->
+          port
+
+        [] ->
+          port = 5500
+          docker_run!(name, port)
+          port
+      end
 
     check_container_ready(name)
+
+    opts = %{external_id: external_id, name: external_id, port: port, jwt_secret: "secure_jwt_secret"}
+    tenant = Generators.tenant_fixture(opts)
 
     Migrations.run_migrations(tenant)
     {:ok, pid} = Database.connect(tenant, "realtime_test", :stop)
@@ -39,10 +81,10 @@ defmodule Containers do
 
   @doc "Return port for a container that can be used"
   def checkout() do
-    with container when is_pid(container) <- :poolboy.checkout(Containers, true, 5_000),
+    with container when is_pid(container) <- :poolboy.checkout(Containers.Pool, true, 5_000),
          port <- Container.port(container) do
       # Automatically checkin the container at the end of the test
-      ExUnit.Callbacks.on_exit(fn -> :poolboy.checkin(Containers, container) end)
+      ExUnit.Callbacks.on_exit(fn -> :poolboy.checkin(Containers.Pool, container) end)
 
       {:ok, port}
     else
@@ -52,13 +94,13 @@ defmodule Containers do
 
   # Might be worth changing this to {:ok, tenant}
   def checkout_tenant(opts \\ []) do
-    with container when is_pid(container) <- :poolboy.checkout(Containers, true, 5_000),
+    with container when is_pid(container) <- :poolboy.checkout(Containers.Pool, true, 5_000),
          port <- Container.port(container) do
       tenant = Generators.tenant_fixture(%{port: port, migrations_ran: 0})
       run_migrations? = Keyword.get(opts, :run_migrations, false)
 
       # Automatically checkin the container at the end of the test
-      ExUnit.Callbacks.on_exit(fn -> :poolboy.checkin(Containers, container) end)
+      ExUnit.Callbacks.on_exit(fn -> :poolboy.checkin(Containers.Pool, container) end)
 
       settings = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | max_restarts: 0, ssl: false}
@@ -111,6 +153,30 @@ defmodule Containers do
     end
   end
 
+  def stop_container(external_id) do
+    name = "realtime-tenant-test-#{external_id}"
+    System.cmd("docker", ["rm", "-f", name])
+  end
+
+  defp existing_containers(pattern) do
+    {containers, 0} = System.cmd("docker", ["ps", "-a", "--format", "{{json .}}", "--filter", "name=#{pattern}"])
+
+    containers
+    |> String.split("\n", trim: true)
+    |> Enum.map(fn container ->
+      container = Jason.decode!(container)
+      # Ports" => "0.0.0.0:6445->5432/tcp, [::]:6445->5432/tcp"
+      regex = ~r/(?<=:)\d+(?=->)/
+
+      [port] =
+        Regex.scan(regex, container["Ports"])
+        |> List.flatten()
+        |> Enum.uniq()
+
+      {container["Names"], String.to_integer(port)}
+    end)
+  end
+
   defp check_container_ready(name, attempts \\ 50)
   defp check_container_ready(name, 0), do: raise("Container #{name} is not ready")
 
@@ -154,5 +220,25 @@ defmodule Containers do
           {:error, error}
       end
     end)
+  end
+
+  defp docker_run!(name, port) do
+    {_, 0} =
+      System.cmd("docker", [
+        "run",
+        "-d",
+        "--name",
+        name,
+        "-e",
+        "POSTGRES_HOST=/var/run/postgresql",
+        "-e",
+        "POSTGRES_PASSWORD=postgres",
+        "-p",
+        "#{port}:5432",
+        @image,
+        "postgres",
+        "-c",
+        "config_file=/etc/postgresql/postgresql.conf"
+      ])
   end
 end
