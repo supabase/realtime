@@ -2,7 +2,7 @@ start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
 alias Realtime.Database
-ExUnit.start(exclude: [:failing], max_cases: 1, capture_log: true)
+ExUnit.start(exclude: [:failing], max_cases: 2, capture_log: true)
 
 max_cases = ExUnit.configuration()[:max_cases]
 

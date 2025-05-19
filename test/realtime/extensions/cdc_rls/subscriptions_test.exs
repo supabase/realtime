@@ -1,6 +1,5 @@
 defmodule Realtime.Extensionsubscriptions.CdcRlsSubscriptionsTest do
-  # async: false due to the fact that it uses the database
-  use RealtimeWeb.ChannelCase, async: false
+  use RealtimeWeb.ChannelCase, async: true
   doctest Extensions.PostgresCdcRls.Subscriptions
 
   alias Extensions.PostgresCdcRls.Subscriptions

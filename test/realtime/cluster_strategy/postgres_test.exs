@@ -1,13 +1,9 @@
 defmodule Realtime.Cluster.Strategy.PostgresTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Cluster.Strategy.State
   alias Postgrex.Notifications, as: PN
   alias Realtime.Cluster.Strategy.Postgres
-
-  setup do
-    Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :auto)
-  end
 
   test "handle_event/4, :internal, :connect is successful" do
     assert {:noreply, state} = Postgres.handle_continue(:connect, libcluster_state())

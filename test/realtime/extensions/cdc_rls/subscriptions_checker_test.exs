@@ -1,5 +1,5 @@
 defmodule SubscriptionsCheckerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   alias Extensions.PostgresCdcRls.SubscriptionsChecker, as: Checker
 
   test "subscribers_by_node/1" do

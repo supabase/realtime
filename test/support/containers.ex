@@ -25,7 +25,7 @@ defmodule Containers do
   def handle_continue({:pool, max_cases}, state) do
     {:ok, _pid} =
       :poolboy.start_link(
-        [name: {:local, Containers.Pool}, size: max_cases + 1, max_overflow: 0, worker_module: Containers.Container],
+        [name: {:local, Containers.Pool}, size: max_cases + 2, max_overflow: 0, worker_module: Containers.Container],
         []
       )
 
@@ -44,12 +44,18 @@ defmodule Containers do
 
       [] ->
         [port | ports] = state.ports
-        name = "realtime-test-#{System.unique_integer([:positive])}"
+        name = "realtime-test-#{random_string(12)}"
 
         docker_run!(name, port)
 
         {:reply, {:ok, name, port}, %{state | ports: ports}}
     end
+  end
+
+  defp random_string(length) do
+    :crypto.strong_rand_bytes(length)
+    |> Base.url_encode64()
+    |> binary_part(0, length)
   end
 
   def initialize(external_id) do
