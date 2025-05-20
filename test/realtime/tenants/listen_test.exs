@@ -7,10 +7,6 @@ defmodule Realtime.Tenants.ListenTest do
 
   describe("start/1") do
     setup do
-      start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
-      start_supervised(Realtime.RateCounter)
-      start_supervised(Realtime.GenCounter)
-
       tenant = Containers.checkout_tenant(run_migrations: true)
 
       {:ok, _} = Listen.start(tenant, self())

@@ -5,7 +5,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   import ExUnit.CaptureLog
 
   alias Phoenix.Socket
-  alias RealtimeWeb.Joken.CurrentTime
   alias RealtimeWeb.UserSocket
 
   @default_limits %{
@@ -16,7 +15,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     max_bytes_per_second: 100_000
   }
   setup do
-    start_supervised!(CurrentTime.Mock)
     tenant = Containers.checkout_tenant(run_migrations: true)
     {:ok, tenant: tenant}
   end

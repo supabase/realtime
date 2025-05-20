@@ -139,19 +139,22 @@ defmodule Containers do
         :ok
       end)
 
-      if run_migrations? do
-        case run_migrations(tenant) do
-          {:ok, count} ->
-            # Avoiding to use Tenants.update_migrations_ran/2 because it touches Cachex and it doesn't play well with
-            # Ecto Sandbox
-            {:ok, _} = Realtime.Api.update_tenant(tenant, %{migrations_ran: count})
+      tenant =
+        if run_migrations? do
+          case run_migrations(tenant) do
+            {:ok, count} ->
+              # Avoiding to use Tenants.update_migrations_ran/2 because it touches Cachex and it doesn't play well with
+              # Ecto Sandbox
+              :ok = Migrations.create_partitions(conn)
+              {:ok, tenant} = Realtime.Api.update_tenant(tenant, %{migrations_ran: count})
+              tenant
 
-          _ ->
-            raise "Faled to run migrations"
+            _ ->
+              raise "Faled to run migrations"
+          end
+        else
+          tenant
         end
-
-        :ok = Migrations.create_partitions(conn)
-      end
 
       Process.exit(conn, :normal)
 

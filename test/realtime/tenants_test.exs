@@ -10,7 +10,6 @@ defmodule Realtime.TenantsTest do
   describe "tenants" do
     test "get_tenant_limits/1" do
       tenant = tenant_fixture()
-      start_supervised(GenCounter)
       keys = Tenants.limiter_keys(tenant)
 
       for key <- keys do

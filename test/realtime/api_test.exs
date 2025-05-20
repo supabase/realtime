@@ -1,8 +1,7 @@
 defmodule Realtime.ApiTest do
-  # async: false due to the fact that interacts with Realtime.Repo which means it might capture more entries than expected and due to usage of mocks
   use Realtime.DataCase, async: true
 
-  import Mock
+  use Mimic
 
   alias Realtime.Api
   alias Realtime.Api.Extensions
@@ -13,9 +12,6 @@ defmodule Realtime.ApiTest do
   @db_conf Application.compile_env(:realtime, Realtime.Repo)
 
   setup do
-    start_supervised(Realtime.RateCounter)
-    start_supervised(Realtime.GenCounter)
-
     tenant_fixture(%{max_concurrent_users: 10_000_000})
     tenant_fixture(%{max_concurrent_users: 25_000_000})
     tenants = Api.list_tenants()
@@ -179,14 +175,11 @@ defmodule Realtime.ApiTest do
       tenant = Repo.reload!(tenant)
       assert Api.preload_counters(nil) == nil
 
-      with_mocks([
-        {GenCounter, [:passthrough], [get: fn _ -> {:ok, 1} end]},
-        {RateCounter, [:passthrough], [get: fn _ -> {:ok, %RateCounter{avg: 2}} end]}
-      ]) do
-        counters = Api.preload_counters(tenant)
-        assert counters.events_per_second_rolling == 2
-        assert counters.events_per_second_now == 1
-      end
+      expect(GenCounter, :get, fn _ -> {:ok, 1} end)
+      expect(RateCounter, :get, fn _ -> {:ok, %RateCounter{avg: 2}} end)
+      counters = Api.preload_counters(tenant)
+      assert counters.events_per_second_rolling == 2
+      assert counters.events_per_second_now == 1
 
       assert Api.preload_counters(nil, :any) == nil
     end

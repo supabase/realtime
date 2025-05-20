@@ -2,7 +2,7 @@ start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
 alias Realtime.Database
-ExUnit.start(exclude: [:failing], max_cases: 2, capture_log: true)
+ExUnit.start(exclude: [:failing], max_cases: 3, capture_log: true)
 
 max_cases = ExUnit.configuration()[:max_cases]
 
@@ -48,3 +48,13 @@ Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
 
 end_time = :os.system_time(:millisecond)
 IO.puts("[test_helper.exs] Time to start tests: #{end_time - start_time} ms")
+
+Mimic.copy(:syn)
+Mimic.copy(Realtime.GenCounter)
+Mimic.copy(Realtime.Nodes)
+Mimic.copy(Realtime.RateCounter)
+Mimic.copy(Realtime.Tenants.Authorization)
+Mimic.copy(Realtime.Tenants.Migrations)
+Mimic.copy(RealtimeWeb.ChannelsAuthorization)
+Mimic.copy(RealtimeWeb.Endpoint)
+Mimic.copy(RealtimeWeb.JwtVerification)

@@ -1,5 +1,5 @@
 defmodule Realtime.DatabaseTest do
-  # async: false due to usage of mocks
+  # async: false due to usage of Clustered
   use Realtime.DataCase, async: false
 
   import ExUnit.CaptureLog

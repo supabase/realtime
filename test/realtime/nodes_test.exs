@@ -1,21 +1,18 @@
 defmodule Realtime.NodesTest do
-  # async: false as we will be testing :syn logic which can be impacted by other tests and usage of mocks
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
+  use Mimic
   alias Realtime.Nodes
-  import Mock
 
   describe "get_node_for_tenant/1" do
     setup do
       tenant = Containers.checkout_tenant()
-      region = tenant.extensions |> hd() |> Map.get(:settings) |> Map.get("region")
+      region = tenant.extensions |> hd() |> get_in([Access.key!(:settings), "region"])
       %{tenant: tenant, region: region}
     end
 
     test "nil call returns error" do
-      with_mock :syn, members: fn _, _ -> nil end do
-        assert {:error, :tenant_not_found} = Nodes.get_node_for_tenant(nil)
-        assert_not_called(:syn.member(:_))
-      end
+      assert {:error, :tenant_not_found} = Nodes.get_node_for_tenant(nil)
+      reject(&:syn.members/2)
     end
 
     test "on existing tenant id, returns the node for the region using syn", %{
@@ -24,44 +21,33 @@ defmodule Realtime.NodesTest do
     } do
       expected_nodes = [:tenant@closest1, :tenant@closest2]
 
-      with_mock :syn,
-        members: fn RegionNodes, ^region ->
-          [
-            {self(), [node: Enum.at(expected_nodes, 0)]},
-            {self(), [node: Enum.at(expected_nodes, 1)]}
-          ]
-        end do
-        index = :erlang.phash2(tenant.external_id, length(expected_nodes))
-        expected_node = Enum.fetch!(expected_nodes, index)
+      expect(:syn, :members, fn RegionNodes, ^region ->
+        [
+          {self(), [node: Enum.at(expected_nodes, 0)]},
+          {self(), [node: Enum.at(expected_nodes, 1)]}
+        ]
+      end)
 
-        assert {:ok, node} = Nodes.get_node_for_tenant(tenant)
-        assert node == expected_node
-      end
+      index = :erlang.phash2(tenant.external_id, length(expected_nodes))
+      expected_node = Enum.fetch!(expected_nodes, index)
+
+      assert {:ok, node} = Nodes.get_node_for_tenant(tenant)
+      assert node == expected_node
     end
 
     test "on existing tenant id, and a single node for a given region, returns default", %{
       tenant: tenant,
       region: region
     } do
-      with_mock :syn,
-        members: fn RegionNodes, ^region ->
-          [
-            {self(), [node: :tenant@closest1]}
-          ]
-        end do
-        assert {:ok, node} = Nodes.get_node_for_tenant(tenant)
-        assert node == node()
-      end
+      expect(:syn, :members, fn RegionNodes, ^region -> [{self(), [node: :tenant@closest1]}] end)
+      assert {:ok, node} = Nodes.get_node_for_tenant(tenant)
+      assert node == node()
     end
 
-    test "on existing tenant id, returns default node for regions not registered in syn", %{
-      tenant: tenant
-    } do
-      with_mock :syn,
-        members: fn RegionNodes, _ -> [] end do
-        assert {:ok, node} = Nodes.get_node_for_tenant(tenant)
-        assert node == node()
-      end
+    test "on existing tenant id, returns default node for regions not registered in syn", %{tenant: tenant} do
+      expect(:syn, :members, fn RegionNodes, _ -> [] end)
+      assert {:ok, node} = Nodes.get_node_for_tenant(tenant)
+      assert node == node()
     end
   end
 end

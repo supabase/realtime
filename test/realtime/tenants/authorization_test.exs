@@ -1,10 +1,7 @@
 defmodule Realtime.Tenants.AuthorizationTest do
-  # async: false due to usage of mocks
-  use RealtimeWeb.ConnCase, async: false
+  use RealtimeWeb.ConnCase, async: true
 
   require Phoenix.ChannelTest
-
-  import Mock
 
   alias Realtime.Api.Message
   alias Realtime.Database
@@ -13,7 +10,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
-  alias RealtimeWeb.Joken.CurrentTime
 
   setup [:rls_context]
 
@@ -331,42 +327,47 @@ defmodule Realtime.Tenants.AuthorizationTest do
          ]
 
     test "sends telemetry event", context do
-      with_mock Realtime.Telemetry, execute: fn _, _, _ -> :ok end do
-        {:ok, conn} =
-          Authorization.get_read_authorizations(
-            Phoenix.ConnTest.build_conn(),
-            context.db_conn,
-            context.authorization_context
-          )
+      on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
-        {:ok, _} =
-          Authorization.get_write_authorizations(
-            conn,
-            context.db_conn,
-            context.authorization_context
-          )
+      events = [
+        [:realtime, :tenants, :write_authorization_check],
+        [:realtime, :tenants, :read_authorization_check]
+      ]
 
-        assert_called(
-          Realtime.Telemetry.execute(
-            [:realtime, :tenants, :read_authorization_check],
-            %{latency: :_},
-            %{tenant_id: context.authorization_context.tenant_id}
-          )
+      :telemetry.attach_many(
+        __MODULE__,
+        events,
+        fn event, measurements, metadata, _config ->
+          send(self(), {:telemetry_event, event, measurements, metadata})
+        end,
+        %{}
+      )
+
+      {:ok, conn} =
+        Authorization.get_read_authorizations(
+          Phoenix.ConnTest.build_conn(),
+          context.db_conn,
+          context.authorization_context
         )
 
-        assert_called(
-          Realtime.Telemetry.execute(
-            [:realtime, :tenants, :write_authorization_check],
-            %{latency: :_},
-            %{tenant_id: context.authorization_context.tenant_id}
-          )
+      {:ok, _} =
+        Authorization.get_write_authorizations(
+          conn,
+          context.db_conn,
+          context.authorization_context
         )
-      end
+
+      external_id = context.authorization_context.tenant_id
+
+      assert_receive {:telemetry_event, [:realtime, :tenants, :read_authorization_check], %{latency: _},
+                      %{tenant_id: ^external_id}}
+
+      assert_receive {:telemetry_event, [:realtime, :tenants, :write_authorization_check], %{latency: _},
+                      %{tenant_id: ^external_id}}
     end
   end
 
   def rls_context(context) do
-    start_supervised(CurrentTime.Mock)
     tenant = Containers.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()

@@ -3,9 +3,11 @@ Code.require_file("../support/websocket_client.exs", __DIR__)
 defmodule Realtime.Integration.RtChannelTest do
   # async: false due to the fact that multiple operations against the same tenant and usage of mocks
   use RealtimeWeb.ConnCase, async: false
+  use Mimic
   import ExUnit.CaptureLog
   import Generators
-  import Mock
+
+  setup :set_mimic_global
 
   require Logger
 
@@ -860,44 +862,44 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "handles RPC error on token refreshed", %{tenant: tenant, topic: topic} do
-      with_mocks [
-        {Authorization, [:passthrough], build_authorization_params: &passthrough([&1])},
-        {Authorization, [:passthrough],
-         get_read_authorizations: [in_series([:_, :_, :_], [&passthrough([&1, &2, &3]), {:error, "RPC Error"}])]}
-      ] do
-        {socket, access_token} = get_connection(tenant, "authenticated")
-        config = %{broadcast: %{self: true}, private: true}
-        realtime_topic = "realtime:#{topic}"
+      Authorization
+      |> expect(:get_read_authorizations, fn conn, db_conn, context ->
+        call_original(Authorization, :get_read_authorizations, [conn, db_conn, context])
+      end)
+      |> expect(:get_read_authorizations, fn _, _, _ -> {:error, "RPC Error"} end)
 
-        WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+      {socket, access_token} = get_connection(tenant, "authenticated")
+      config = %{broadcast: %{self: true}, private: true}
+      realtime_topic = "realtime:#{topic}"
 
-        assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
-        assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-        # Update token to force update
-        {:ok, access_token} =
-          generate_token(tenant, %{:exp => System.system_time(:second) + 1000, role: "authenticated"})
+      assert_receive %Phoenix.Socket.Message{event: "phx_reply"}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state"}, 500
 
-        log =
-          capture_log([log_level: :warning], fn ->
-            WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => access_token})
+      # Update token to force update
+      {:ok, access_token} =
+        generate_token(tenant, %{:exp => System.system_time(:second) + 1000, role: "authenticated"})
 
-            assert_receive %Phoenix.Socket.Message{
-                             event: "system",
-                             payload: %{
-                               "status" => "error",
-                               "extension" => "system",
-                               "message" => "Realtime was unable to connect to the project database"
-                             },
-                             topic: ^realtime_topic
+      log =
+        capture_log([log_level: :warning], fn ->
+          WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => access_token})
+
+          assert_receive %Phoenix.Socket.Message{
+                           event: "system",
+                           payload: %{
+                             "status" => "error",
+                             "extension" => "system",
+                             "message" => "Realtime was unable to connect to the project database"
                            },
-                           500
+                           topic: ^realtime_topic
+                         },
+                         500
 
-            assert_receive %Phoenix.Socket.Message{event: "phx_close", topic: ^realtime_topic}
-          end)
+          assert_receive %Phoenix.Socket.Message{event: "phx_close", topic: ^realtime_topic}
+        end)
 
-        assert log =~ "Realtime was unable to connect to the project database"
-      end
+      assert log =~ "Realtime was unable to connect to the project database"
     end
 
     test "on sb prefixed access_token the socket ignores the message and respects JWT expiry time", %{
