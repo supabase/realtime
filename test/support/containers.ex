@@ -8,6 +8,17 @@ defmodule Containers do
   use GenServer
 
   @image "supabase/postgres:15.8.1.040"
+  # Pull image if not available
+  def pull do
+    case System.cmd("docker", ["image", "inspect", @image]) do
+      {_, 0} ->
+        :ok
+
+      _ ->
+        IO.puts("Pulling image #{@image}. This might take a while...")
+        {_, 0} = System.cmd("docker", ["pull", @image])
+    end
+  end
 
   def start_container(), do: GenServer.call(__MODULE__, :start_container, 10_000)
   def port(), do: GenServer.call(__MODULE__, :port, 10_000)
