@@ -43,6 +43,8 @@ jobs:
         run: mix deps.get
       - name: Set up Postgres
         run: docker compose -f docker-compose.dbs.yml up -d
+      - name: Pull required docker images
+        run: docker pull supabase/postgres:17.0.1.081-orioledb
       - name: Run main database migrations
         run: mix ecto.migrate --log-migrator-sql
       - name: Run database tenant migrations
