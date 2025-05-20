@@ -1,6 +1,8 @@
 defmodule Realtime.Tenants.ConnectTest do
   # async: false due to the fact that we are checking ets tables for user tracking and usage of mocks
   use Realtime.DataCase, async: false
+  use Mimic
+
   import ExUnit.CaptureLog
   import Mock
   import ExUnit.CaptureLog
@@ -334,9 +336,8 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "handle rpc errors gracefully" do
-      with_mock Realtime.Nodes, get_node_for_tenant: fn _ -> {:ok, :potato@nohost} end do
-        assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant")
-      end
+      expect(Realtime.Nodes, :get_node_for_tenant, fn _ -> {:ok, :potato@nohost} end)
+      assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant")
     end
   end
 

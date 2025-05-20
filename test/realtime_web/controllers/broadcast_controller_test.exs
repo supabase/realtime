@@ -1,6 +1,7 @@
 defmodule RealtimeWeb.BroadcastControllerTest do
   # async: false due to usage of mocks
   use RealtimeWeb.ConnCase, async: false
+  use Mimic
 
   import Mock
 
@@ -32,7 +33,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       events_key = Tenants.events_per_second_key(tenant)
 
       with_mocks [
-        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
         {GenCounter, [:passthrough], add: fn _ -> :ok end}
       ] do
         sub_topic_1 = "sub_topic_1"
@@ -45,6 +45,12 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         event_1 = "event_1"
         event_2 = "event_2"
 
+        payload_topic_1 = %{"payload" => payload_1, "event" => event_1, "type" => "broadcast"}
+        expect(Endpoint, :broadcast_from, 2, fn _, ^topic_1, "broadcast", ^payload_topic_1 -> :ok end)
+
+        payload_topic_2 = %{"payload" => payload_2, "event" => event_2, "type" => "broadcast"}
+        expect(Endpoint, :broadcast_from, fn _, ^topic_2, "broadcast", ^payload_topic_2 -> :ok end)
+
         conn =
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
             "messages" => [
@@ -53,23 +59,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
               %{"topic" => sub_topic_2, "payload" => payload_2, "event" => event_2}
             ]
           })
-
-        assert_called_exactly(
-          Endpoint.broadcast_from(:_, topic_1, "broadcast", %{
-            "payload" => payload_1,
-            "event" => event_1,
-            "type" => "broadcast"
-          }),
-          2
-        )
-
-        assert_called(
-          Endpoint.broadcast_from(:_, topic_2, "broadcast", %{
-            "payload" => payload_2,
-            "event" => event_2,
-            "type" => "broadcast"
-          })
-        )
 
         assert_called_exactly(GenCounter.add(events_key), 3)
         assert conn.status == 202
@@ -80,46 +69,44 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       conn: conn,
       tenant: tenant
     } do
-      with_mock Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end do
-        conn =
-          post(conn, Routes.broadcast_path(conn, :broadcast), %{
-            "messages" => [
-              %{
-                "topic" => "topic"
-              },
-              %{
-                "payload" => %{"data" => "data"}
-              },
-              %{
-                "topic" => "topic",
-                "payload" => %{"data" => "data"},
-                "event" => "event"
-              }
-            ]
-          })
+      reject(Endpoint, :broadcast_from, 4)
 
-        assert Jason.decode!(conn.resp_body) == %{
-                 "errors" => %{
-                   "messages" => [
-                     %{"payload" => ["can't be blank"], "event" => ["can't be blank"]},
-                     %{"topic" => ["can't be blank"], "event" => ["can't be blank"]},
-                     %{}
-                   ]
-                 }
+      conn =
+        post(conn, Routes.broadcast_path(conn, :broadcast), %{
+          "messages" => [
+            %{
+              "topic" => "topic"
+            },
+            %{
+              "payload" => %{"data" => "data"}
+            },
+            %{
+              "topic" => "topic",
+              "payload" => %{"data" => "data"},
+              "event" => "event"
+            }
+          ]
+        })
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "errors" => %{
+                 "messages" => [
+                   %{"payload" => ["can't be blank"], "event" => ["can't be blank"]},
+                   %{"topic" => ["can't be blank"], "event" => ["can't be blank"]},
+                   %{}
+                 ]
                }
+             }
 
-        assert_not_called(Endpoint.broadcast_from(:_, :_, :_, :_))
+      assert conn.status == 422
 
-        assert conn.status == 422
+      # Wait for counters to increment
+      Process.sleep(1000)
+      {:ok, rate_counter} = RateCounter.get(Tenants.requests_per_second_key(tenant))
+      assert rate_counter.avg != 0.0
 
-        # Wait for counters to increment
-        Process.sleep(1000)
-        {:ok, rate_counter} = RateCounter.get(Tenants.requests_per_second_key(tenant))
-        assert rate_counter.avg != 0.0
-
-        {:ok, rate_counter} = RateCounter.get(Tenants.events_per_second_key(tenant))
-        assert rate_counter.avg == 0.0
-      end
+      {:ok, rate_counter} = RateCounter.get(Tenants.events_per_second_key(tenant))
+      assert rate_counter.avg == 0.0
     end
   end
 
@@ -248,13 +235,17 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       db_conn: db_conn,
       tenant: tenant
     } do
-      with_mocks [
-        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
-        {GenCounter, [:passthrough], add: fn _ -> :ok end}
-      ] do
+      with_mocks [{GenCounter, [:passthrough], add: fn _ -> :ok end}] do
         messages_to_send =
           Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
           |> Enum.take(5)
+
+        Enum.each(messages_to_send, fn %{topic: topic} ->
+          topic = Tenants.tenant_topic(tenant, topic, false)
+
+          # Need Mimic.calls here
+          expect(Endpoint, :broadcast_from, fn _, ^topic, "broadcast", _ -> :ok end)
+        end)
 
         messages =
           Enum.map(messages_to_send, fn %{topic: topic} ->
@@ -267,11 +258,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
           end)
 
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-
-        Enum.each(messages_to_send, fn %{topic: topic} ->
-          topic = Tenants.tenant_topic(tenant, topic, false)
-          assert_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
-        end)
 
         assert_called_exactly(
           GenCounter.add(Tenants.events_per_second_key(tenant)),
@@ -374,8 +360,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       db_conn: db_conn,
       tenant: tenant
     } do
+      reject(Endpoint, :broadcast_from, 4)
+
       with_mocks [
-        {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
         {GenCounter, [:passthrough], add: fn _ -> :ok end}
       ] do
         messages =
@@ -396,11 +383,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
           end)
 
         conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-
-        Enum.each(messages, fn %{"topic" => topic} ->
-          topic = Tenants.tenant_topic(tenant, topic)
-          assert_not_called(Endpoint.broadcast_from(:_, topic, "broadcast", :_))
-        end)
 
         assert_not_called(GenCounter.add(Tenants.events_per_second_key(tenant)))
 
