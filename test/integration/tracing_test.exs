@@ -7,6 +7,7 @@ defmodule Realtime.Integration.TracingTest do
   @span_parent_id Integer.parse(@parent_id, 16) |> elem(0)
 
   # This is doing a blackbox approach because tracing is not captured with normal Phoenix controller tests
+  # We need cowboy, endpoint and router to trigger their telemetry events
 
   test "traces basic HTTP request with phoenix and cowboy information" do
     :otel_simple_processor.set_exporter(:otel_exporter_pid, self())
