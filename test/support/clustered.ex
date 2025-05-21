@@ -61,13 +61,11 @@ defmodule Clustered do
       :ok = :erpc.call(node, Application, :put_env, [app_name, key, value])
     end
 
-    disable_phoenix_server = fn ->
-      # Disable phoenix server to avoid port collisions as we don't need it
-      endpoint = Application.get_env(:realtime, RealtimeWeb.Endpoint)
-      Application.put_env(:realtime, RealtimeWeb.Endpoint, Keyword.put(endpoint, :server, false))
-    end
+    endpoint = Application.get_env(:realtime, RealtimeWeb.Endpoint)
 
-    :ok = :erpc.call(node, disable_phoenix_server)
+    # Disable phoenix server to avoid port collisions as we don't need it
+    :ok =
+      :erpc.call(node, Application, :put_env, [:realtime, RealtimeWeb.Endpoint, Keyword.put(endpoint, :server, false)])
 
     # We need to override this value as the current implementation overrides the string with a map leading to errors
     :ok = :erpc.call(node, Application, :put_env, [:realtime, :jwt_claim_validators, "{}"])
