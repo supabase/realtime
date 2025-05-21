@@ -39,6 +39,7 @@ defmodule Realtime.Integration.TracingTest do
     tenant = Containers.checkout_tenant(run_migrations: true)
     jwt = Generators.generate_jwt_token(tenant)
     external_id = tenant.external_id
+    baggage_request_id = UUID.uuid4()
 
     :otel_simple_processor.set_exporter(:otel_exporter_pid, self())
     url = RealtimeWeb.Endpoint.url() <> "/api/broadcast"
@@ -48,7 +49,11 @@ defmodule Realtime.Integration.TracingTest do
     Req.post!(url,
       json: body,
       auth: {:bearer, jwt},
-      headers: [{"host", "#{external_id}.example.com"}, {"traceparent", @traceparent}]
+      headers: [
+        {"host", "#{external_id}.example.com"},
+        {"traceparent", @traceparent},
+        {"baggage", "sb-request-id=#{baggage_request_id}"}
+      ]
     )
 
     assert_receive {:span,
@@ -68,7 +73,8 @@ defmodule Realtime.Integration.TracingTest do
                "phoenix.plug": RealtimeWeb.BroadcastController,
                "url.path": "/api/broadcast",
                "url.scheme": :http,
-               external_id: ^external_id
+               external_id: ^external_id,
+               request_id: ^baggage_request_id
              }
            ) = attributes
 
