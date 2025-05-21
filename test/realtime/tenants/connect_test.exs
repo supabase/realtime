@@ -47,7 +47,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
         assert node(pid) == node
         # Local span
-        assert_received {:span, span(name: "rpc", attributes: attributes, parent_span_id: @span_parent_id)}
+        assert_receive {:span, span(name: "rpc", attributes: attributes, parent_span_id: @span_parent_id)}
 
         assert attributes(
                  map: %{
@@ -59,7 +59,7 @@ defmodule Realtime.Tenants.ConnectTest do
                ) = attributes
 
         # Remote span
-        assert_received {:span, span(name: "database.connect", attributes: attributes, parent_span_id: @span_parent_id)}
+        assert_receive {:span, span(name: "database.connect", attributes: attributes, parent_span_id: @span_parent_id)}
 
         assert attributes(map: %{external_id: "dev_tenant"}) = attributes
 
@@ -139,12 +139,12 @@ defmodule Realtime.Tenants.ConnectTest do
 
       attributes = :otel_attributes.new([external_id: tenant.external_id], 128, :infinity)
 
-      assert_received {:span,
-                       span(
-                         name: "database.connect",
-                         attributes: ^attributes,
-                         status: status(code: :error, message: "UnableToConnectToTenantDatabase")
-                       )}
+      assert_receive {:span,
+                      span(
+                        name: "database.connect",
+                        attributes: ^attributes,
+                        status: status(code: :error, message: "UnableToConnectToTenantDatabase")
+                      )}
     end
 
     test "if tenant does not exist, returns error" do

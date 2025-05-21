@@ -17,7 +17,7 @@ defmodule Realtime.Integration.TracingTest do
     response =
       Req.get!(url, headers: [{"traceparent", @traceparent}, {"baggage", "sb-request-id=#{baggage_request_id}"}])
 
-    assert_received {:span, span(name: "GET /healthcheck", attributes: attributes, parent_span_id: @span_parent_id)}
+    assert_receive {:span, span(name: "GET /healthcheck", attributes: attributes, parent_span_id: @span_parent_id)}
 
     assert attributes(
              map: %{

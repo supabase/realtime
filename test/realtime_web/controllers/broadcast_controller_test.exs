@@ -77,7 +77,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         assert conn.status == 202
         attributes = :otel_attributes.new([external_id: tenant.external_id], 128, :infinity)
 
-        assert_received {:span, span(name: "database.connect", attributes: ^attributes)}
+        assert_receive {:span, span(name: "database.connect", attributes: ^attributes)}
       end
     end
 

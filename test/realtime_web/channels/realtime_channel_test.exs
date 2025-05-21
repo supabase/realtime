@@ -41,7 +41,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       # parent span is properly propagated
       attributes = :otel_attributes.new([external_id: tenant.external_id], 128, :infinity)
-      assert_received {:span, span(name: "websocket.connect", attributes: ^attributes, parent_span_id: @span_parent_id)}
+      assert_receive {:span, span(name: "websocket.connect", attributes: ^attributes, parent_span_id: @span_parent_id)}
     end
   end
 
@@ -79,7 +79,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
       # no error
-      assert_received {:span, span(name: "websocket.connect", status: :undefined)}
+      assert_receive {:span, span(name: "websocket.connect", status: :undefined)}
     end
 
     test "token has invalid expiration", %{tenant: tenant} do
@@ -97,7 +97,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                         connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
              end) =~ "InvalidJWTToken: Token has expired"
 
-      assert_received {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
+      assert_receive {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
     end
 
     test "missing role claims returns a error", %{tenant: tenant} do
@@ -109,7 +109,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         end)
 
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
-      assert_received {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
+      assert_receive {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
     end
 
     test "missing exp claims returns a error", %{tenant: tenant} do
@@ -121,7 +121,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         end)
 
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
-      assert_received {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
+      assert_receive {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
     end
 
     test "missing claims returns a error with sub in metadata if available", %{tenant: tenant} do
@@ -136,7 +136,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
       assert log =~ "sub=#{sub}"
-      assert_received {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
+      assert_receive {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
     end
 
     test "expired token returns a error with sub data if available", %{tenant: tenant} do
@@ -152,7 +152,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert log =~ "InvalidJWTToken: Token has expired"
       assert log =~ "sub=#{sub}"
-      assert_received {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
+      assert_receive {:span, span(name: "websocket.connect", status: status(code: :error, message: "InvalidJWTToken"))}
     end
   end
 
