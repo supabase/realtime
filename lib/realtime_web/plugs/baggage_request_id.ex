@@ -6,6 +6,8 @@ defmodule RealtimeWeb.Plugs.BaggageRequestId do
   Otherwise generates a request ID using `Plug.RequestId`
   """
 
+  def baggage_key, do: Application.get_env(:realtime, :request_id_baggage_key, "request-id")
+
   require Logger
   alias Plug.Conn
   @behaviour Plug
