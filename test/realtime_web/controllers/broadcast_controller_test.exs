@@ -2,6 +2,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   # async: false due to usage of mocks and global otel_simple_processor
   use RealtimeWeb.ConnCase, async: false
 
+  require OpenTelemetry.Tracer, as: Tracer
+
   import Mock
 
   alias Realtime.Crypto
@@ -32,6 +34,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   describe "broadcast" do
     test "returns 202 when batch of messages is broadcasted", %{conn: conn, tenant: tenant} do
       events_key = Tenants.events_per_second_key(tenant)
+      external_id = tenant.external_id
 
       with_mocks [
         {Endpoint, [:passthrough], broadcast_from: fn _, _, _, _ -> :ok end},
@@ -47,14 +50,20 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         event_1 = "event_1"
         event_2 = "event_2"
 
+        # opentelemetry_phoenix expects to be a child of the originating cowboy process hence the Task here :shrug:
         conn =
-          post(conn, Routes.broadcast_path(conn, :broadcast), %{
-            "messages" => [
-              %{"topic" => sub_topic_1, "payload" => payload_1, "event" => event_1},
-              %{"topic" => sub_topic_1, "payload" => payload_1, "event" => event_1},
-              %{"topic" => sub_topic_2, "payload" => payload_2, "event" => event_2}
-            ]
-          })
+          Tracer.with_span "test" do
+            Task.async(fn ->
+              post(conn, Routes.broadcast_path(conn, :broadcast), %{
+                "messages" => [
+                  %{"topic" => sub_topic_1, "payload" => payload_1, "event" => event_1},
+                  %{"topic" => sub_topic_1, "payload" => payload_1, "event" => event_1},
+                  %{"topic" => sub_topic_2, "payload" => payload_2, "event" => event_2}
+                ]
+              })
+            end)
+            |> Task.await()
+          end
 
         assert_called_exactly(
           Endpoint.broadcast_from(:_, topic_1, "broadcast", %{
@@ -75,9 +84,12 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         assert_called_exactly(GenCounter.add(events_key), 3)
         assert conn.status == 202
-        attributes = :otel_attributes.new([external_id: tenant.external_id], 128, :infinity)
 
-        assert_receive {:span, span(name: "database.connect", attributes: ^attributes)}
+        assert_receive {:span, span(name: "POST /api/broadcast", attributes: attributes)}
+        assert attributes(map: %{external_id: ^external_id}) = attributes
+
+        assert_receive {:span, span(name: "database.connect", attributes: attributes)}
+        assert attributes(map: %{external_id: ^external_id}) = attributes
       end
     end
 
