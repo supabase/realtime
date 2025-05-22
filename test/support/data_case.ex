@@ -25,6 +25,8 @@ defmodule Realtime.DataCase do
       import Realtime.DataCase
       import Generators
       import TenantConnection
+
+      use Realtime.Tracing
     end
   end
 

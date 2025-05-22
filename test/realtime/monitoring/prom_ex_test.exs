@@ -13,7 +13,11 @@ defmodule Realtime.PromExTest do
              )
 
       assert String.contains?(metrics, "# TYPE beam_system_schedulers_online_info gauge")
-      assert String.contains?(metrics, "beam_system_schedulers_online_info{host=\"nohost\",region=\"\",id=\"nohost\"}")
+
+      assert String.contains?(
+               metrics,
+               "beam_system_schedulers_online_info{host=\"nohost\",region=\"us-east-1\",id=\"nohost\"}"
+             )
     end
   end
 end

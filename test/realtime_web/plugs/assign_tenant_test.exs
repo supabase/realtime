@@ -1,5 +1,8 @@
 defmodule RealtimeWeb.Plugs.AssignTenantTest do
-  use RealtimeWeb.ConnCase
+  # Use of global otel_simple_processor
+  use RealtimeWeb.ConnCase, async: false
+
+  require OpenTelemetry.Tracer, as: Tracer
 
   alias Realtime.Api
 
@@ -75,5 +78,29 @@ defmodule RealtimeWeb.Plugs.AssignTenantTest do
       |> get(Routes.ping_path(conn, :ping))
 
     assert conn.status == 200
+  end
+
+  test "sets appropriate observability metadata", %{conn: conn} do
+    external_id = "localhost"
+    tenant_fixture(%{external_id: external_id})
+
+    :otel_simple_processor.set_exporter(:otel_exporter_pid, self())
+
+    # opentelemetry_phoenix expects to be a child of the originating cowboy process hence the Task here :shrug:
+    Tracer.with_span "test" do
+      Task.async(fn ->
+        conn
+        |> Map.put(:host, "localhost.localhost.com")
+        |> get(Routes.ping_path(conn, :ping))
+
+        assert Logger.metadata()[:external_id] == external_id
+        assert Logger.metadata()[:project] == external_id
+      end)
+      |> Task.await()
+    end
+
+    assert_receive {:span, span(name: "GET /api/ping", attributes: attributes)}
+
+    assert attributes(map: %{external_id: ^external_id}) = attributes
   end
 end

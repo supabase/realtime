@@ -1,6 +1,9 @@
 defmodule RealtimeWeb.TenantControllerTest do
   # Can't run async true because under the hood Cachex is used and it doesn't see Ecto.Sandbox
+  # Also using global otel_simple_processor
   use RealtimeWeb.ConnCase, async: false
+
+  require OpenTelemetry.Tracer, as: Tracer
 
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
@@ -23,6 +26,8 @@ defmodule RealtimeWeb.TenantControllerTest do
       |> put_req_header("accept", "application/json")
       |> put_req_header("authorization", "Bearer #{jwt}")
 
+    :otel_simple_processor.set_exporter(:otel_exporter_pid, self())
+
     {:ok, conn: conn}
   end
 
@@ -44,6 +49,25 @@ defmodule RealtimeWeb.TenantControllerTest do
       conn = get(conn, ~p"/api/tenants/no")
       response = json_response(conn, 404)
       assert response == %{"error" => "not found"}
+    end
+
+    test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+
+      # opentelemetry_phoenix expects to be a child of the originating cowboy process hence the Task here :shrug:
+      Tracer.with_span "test" do
+        Task.async(fn ->
+          get(conn, ~p"/api/tenants/#{external_id}")
+
+          assert Logger.metadata()[:external_id] == external_id
+          assert Logger.metadata()[:project] == external_id
+        end)
+        |> Task.await()
+      end
+
+      assert_receive {:span, span(name: "GET /api/tenants/:tenant_id", attributes: attributes)}
+
+      assert attributes(map: %{external_id: ^external_id}) = attributes
     end
   end
 
@@ -161,14 +185,36 @@ defmodule RealtimeWeb.TenantControllerTest do
       conn = put(conn, ~p"/api/tenants/external_id", tenant: default_tenant_attrs(5000))
       assert response(conn, 403)
     end
+
+    test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      attrs = default_tenant_attrs(port)
+
+      # opentelemetry_phoenix expects to be a child of the originating cowboy process hence the Task here :shrug:
+      Tracer.with_span "test" do
+        Task.async(fn ->
+          put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+
+          assert Logger.metadata()[:external_id] == external_id
+          assert Logger.metadata()[:project] == external_id
+        end)
+        |> Task.await()
+      end
+
+      assert_receive {:span, span(name: "PUT /api/tenants/:tenant_id", attributes: attributes)}
+
+      assert attributes(map: %{external_id: ^external_id}) = attributes
+    end
   end
 
   describe "delete tenant" do
     setup [:with_tenant]
 
     test "deletes chosen tenant", %{conn: conn, tenant: tenant} do
-      {:ok, _pid} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(500)
+      {:ok, _pid} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+
       assert Cache.get_tenant_by_external_id(tenant.external_id)
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
 
@@ -197,6 +243,25 @@ defmodule RealtimeWeb.TenantControllerTest do
       conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}")
       assert response(conn, 403) == ""
     end
+
+    test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+
+      # opentelemetry_phoenix expects to be a child of the originating cowboy process hence the Task here :shrug:
+      Tracer.with_span "test" do
+        Task.async(fn ->
+          delete(conn, ~p"/api/tenants/#{external_id}")
+
+          assert Logger.metadata()[:external_id] == external_id
+          assert Logger.metadata()[:project] == external_id
+        end)
+        |> Task.await()
+      end
+
+      assert_receive {:span, span(name: "DELETE /api/tenants/:tenant_id", attributes: attributes)}
+
+      assert attributes(map: %{external_id: ^external_id}) = attributes
+    end
   end
 
   describe "reload tenant" do
@@ -212,10 +277,29 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert status == 404
     end
 
-    test "returns 404 when jwt is invalid", %{conn: conn, tenant: tenant} do
+    test "returns 403 when jwt is invalid", %{conn: conn, tenant: tenant} do
       conn = put_req_header(conn, "authorization", "Bearer potato")
-      conn = delete(conn, ~p"/api/tenants/#{tenant.external_id}/reload")
-      assert json_response(conn, 404) == "Not Found"
+      conn = post(conn, ~p"/api/tenants/#{tenant.external_id}/reload")
+      assert response(conn, 403) == ""
+    end
+
+    test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+
+      # opentelemetry_phoenix expects to be a child of the originating cowboy process hence the Task here :shrug:
+      Tracer.with_span "test" do
+        Task.async(fn ->
+          post(conn, ~p"/api/tenants/#{tenant.external_id}/reload")
+
+          assert Logger.metadata()[:external_id] == external_id
+          assert Logger.metadata()[:project] == external_id
+        end)
+        |> Task.await()
+      end
+
+      assert_receive {:span, span(name: "POST /api/tenants/:tenant_id/reload", attributes: attributes)}
+
+      assert attributes(map: %{external_id: ^external_id}) = attributes
     end
   end
 
@@ -315,6 +399,24 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
       assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
+    end
+
+    test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+      # opentelemetry_phoenix expects to be a child of the originating cowboy process hence the Task here :shrug:
+      Tracer.with_span "test" do
+        Task.async(fn ->
+          get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+
+          assert Logger.metadata()[:external_id] == external_id
+          assert Logger.metadata()[:project] == external_id
+        end)
+        |> Task.await()
+      end
+
+      assert_receive {:span, span(name: "GET /api/tenants/:tenant_id/health", attributes: attributes)}
+
+      assert attributes(map: %{external_id: ^external_id}) = attributes
     end
   end
 

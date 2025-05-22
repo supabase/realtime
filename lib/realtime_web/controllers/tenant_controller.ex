@@ -25,6 +25,8 @@ defmodule RealtimeWeb.TenantController do
 
   action_fallback(RealtimeWeb.FallbackController)
 
+  plug :set_observability_attributes when action in [:show, :edit, :update, :delete, :reload, :health]
+
   operation(:index,
     summary: "List tenants",
     parameters: [
@@ -69,8 +71,6 @@ defmodule RealtimeWeb.TenantController do
   )
 
   def show(conn, %{"tenant_id" => id}) do
-    Logger.metadata(external_id: id, project: id)
-
     tenant = Api.get_tenant_by_external_id(id)
 
     case tenant do
@@ -134,7 +134,6 @@ defmodule RealtimeWeb.TenantController do
   )
 
   def update(conn, %{"tenant_id" => external_id, "tenant" => tenant_params}) do
-    Logger.metadata(external_id: external_id, project: external_id)
     tenant = Api.get_tenant_by_external_id(external_id)
 
     case tenant do
@@ -188,8 +187,6 @@ defmodule RealtimeWeb.TenantController do
   )
 
   def delete(conn, %{"tenant_id" => tenant_id}) do
-    Logger.metadata(external_id: tenant_id, project: tenant_id)
-
     stop_all_timeout = Enum.count(PostgresCdc.available_drivers()) * 1_000
 
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id, :primary),
@@ -231,8 +228,6 @@ defmodule RealtimeWeb.TenantController do
   )
 
   def reload(conn, %{"tenant_id" => tenant_id}) do
-    Logger.metadata(external_id: tenant_id, project: tenant_id)
-
     case Tenants.get_tenant_by_external_id(tenant_id) do
       nil ->
         log_error("TenantNotFound", "Tenant not found")
@@ -268,8 +263,6 @@ defmodule RealtimeWeb.TenantController do
   )
 
   def health(conn, %{"tenant_id" => tenant_id}) do
-    Logger.metadata(external_id: tenant_id, project: tenant_id)
-
     case Tenants.health_check(tenant_id) do
       {:ok, response} ->
         json(conn, %{data: response})
@@ -284,5 +277,13 @@ defmodule RealtimeWeb.TenantController do
         |> put_status(404)
         |> render("not_found.json", tenant: nil)
     end
+  end
+
+  defp set_observability_attributes(conn, _opts) do
+    tenant_id = conn.path_params["tenant_id"]
+    OpenTelemetry.Tracer.set_attributes(external_id: tenant_id)
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+
+    conn
   end
 end

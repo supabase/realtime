@@ -2,6 +2,7 @@ defmodule RealtimeWeb.Router do
   use RealtimeWeb, :router
 
   require Logger
+  require OpenTelemetry.Tracer, as: Tracer
 
   import RealtimeWeb.ChannelsAuthorization, only: [authorize: 3]
 
@@ -17,6 +18,7 @@ defmodule RealtimeWeb.Router do
   pipeline :api do
     plug(:accepts, ["json"])
     plug(:check_auth, [:api_jwt_secret, :api_blocklist])
+    plug(:set_span_request_id)
   end
 
   pipeline :open_cors do
@@ -27,10 +29,12 @@ defmodule RealtimeWeb.Router do
     plug(:accepts, ["json"])
     plug(RealtimeWeb.Plugs.AssignTenant)
     plug(RealtimeWeb.Plugs.RateLimiter)
+    plug(:set_span_request_id)
   end
 
   pipeline :secure_tenant_api do
     plug(RealtimeWeb.AuthTenant)
+    plug(:set_span_request_id)
   end
 
   pipeline :dashboard_admin do
@@ -124,6 +128,16 @@ defmodule RealtimeWeb.Router do
         route_name: Realtime.Dashboard.ProcessDump
       ]
     )
+  end
+
+  defp set_span_request_id(conn, _) do
+    # Must have been set by BaggageRequestId
+    # We can't set the span attribute there because the phoenix span only starts after it reaches the Router
+    if request_id = Logger.metadata()[:request_id] do
+      Tracer.set_attribute(:request_id, request_id)
+    end
+
+    conn
   end
 
   defp check_auth(conn, [secret_key, blocklist_key]) do

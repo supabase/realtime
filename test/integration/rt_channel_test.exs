@@ -22,7 +22,7 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Realtime.Tenants.Authorization
 
   @moduletag :capture_log
-  @port 4002
+  @port 4003
   @serializer V1.JSONSerializer
 
   defp uri(tenant), do: "ws://#{tenant.external_id}.localhost:#{@port}/socket/websocket"
@@ -36,7 +36,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
     socket("/socket", RealtimeWeb.UserSocket,
       websocket: [
-        connect_info: [:peer_data, :uri, :x_headers],
+        connect_info: [:peer_data, :uri, :x_headers, :trace_context_headers],
         fullsweep_after: 20,
         max_frame_size: 8_000_000
       ]

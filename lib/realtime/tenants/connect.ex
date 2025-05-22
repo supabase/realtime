@@ -9,6 +9,7 @@ defmodule Realtime.Tenants.Connect do
   use GenServer, restart: :transient
 
   require Logger
+  require OpenTelemetry.Tracer, as: Tracer
 
   import Realtime.Logs
 
@@ -103,6 +104,23 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
+  defp process_otel([]) do
+    span_ctx = Tracer.start_span("database.connect")
+    ctx = OpenTelemetry.Ctx.get_current()
+    OpenTelemetry.Ctx.attach(ctx)
+    Tracer.set_current_span(span_ctx)
+  end
+
+  defp process_otel(%{span_ctx: span_ctx, ctx: ctx}) do
+    OpenTelemetry.Ctx.attach(ctx)
+    Tracer.set_current_span(span_ctx)
+  end
+
+  defp process_otel(propagation) do
+    :otel_propagator_text_map.extract(propagation)
+    process_otel([])
+  end
+
   @doc """
   Connects to a tenant's database and stores the DBConnection in the process :syn metadata
   """
@@ -111,32 +129,46 @@ defmodule Realtime.Tenants.Connect do
     supervisor =
       {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, tenant_id}}
 
-    spec = {__MODULE__, [tenant_id: tenant_id] ++ opts}
+    span_ctx = process_otel(Keyword.get(opts, :otel, []))
+    Tracer.set_attributes(external_id: tenant_id)
 
-    case DynamicSupervisor.start_child(supervisor, spec) do
-      {:ok, _} ->
-        get_status(tenant_id)
+    opts = [tenant_id: tenant_id] ++ opts
 
-      {:error, {:already_started, _}} ->
-        get_status(tenant_id)
+    spec = {__MODULE__, opts}
 
-      {:error, {:shutdown, :tenant_db_too_many_connections}} ->
-        {:error, :tenant_db_too_many_connections}
+    try do
+      case DynamicSupervisor.start_child(supervisor, spec) do
+        {:ok, _} ->
+          get_status(tenant_id)
 
-      {:error, {:shutdown, :tenant_not_found}} ->
-        {:error, :tenant_not_found}
+        {:error, {:already_started, _}} ->
+          get_status(tenant_id)
 
-      {:error, {:shutdown, :tenant_create_backoff}} ->
-        log_warning("TooManyConnectAttempts", "Too many connect attempts to tenant database")
-        {:error, :tenant_create_backoff}
+        {:error, {:shutdown, :tenant_db_too_many_connections}} ->
+          Tracer.set_status(:error, "DatabaseLackOfConnections")
+          {:error, :tenant_db_too_many_connections}
 
-      {:error, :shutdown} ->
-        log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database")
-        {:error, :tenant_database_unavailable}
+        {:error, {:shutdown, :tenant_not_found}} ->
+          Tracer.set_status(:error, "TenantNotFound")
+          {:error, :tenant_not_found}
 
-      {:error, error} ->
-        log_error("UnableToConnectToTenantDatabase", error)
-        {:error, :tenant_database_unavailable}
+        {:error, {:shutdown, :tenant_create_backoff}} ->
+          log_warning("TooManyConnectAttempts", "Too many connect attempts to tenant database")
+          Tracer.set_status(:error, "TooManyConnectAttempts")
+          {:error, :tenant_create_backoff}
+
+        {:error, :shutdown} ->
+          log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database")
+          Tracer.set_status(:error, "UnableToConnectToTenantDatabase")
+          {:error, :tenant_database_unavailable}
+
+        {:error, error} ->
+          log_error("UnableToConnectToTenantDatabase", error)
+          Tracer.set_status(:error, "UnableToConnectToTenantDatabase")
+          {:error, :tenant_database_unavailable}
+      end
+    after
+      OpenTelemetry.Span.end_span(span_ctx)
     end
   end
 
@@ -366,6 +398,21 @@ defmodule Realtime.Tenants.Connect do
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
+      opts =
+        if node == node() do
+          # Tracing context is passed for local calls
+          # This is necessary because :erpc will spawn a process when timeout is not :infinity
+          span_ctx = Tracer.start_span("database.connect")
+          ctx = OpenTelemetry.Ctx.get_current()
+          [otel: %{span_ctx: span_ctx, ctx: ctx}] ++ opts
+        else
+          # For actual remote calls we pass whatever context propagation we have available
+          case :otel_propagator_text_map.inject([]) do
+            [] -> []
+            otel_propagation -> [otel: otel_propagation]
+          end
+        end
+
       Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, opts], timeout: rpc_timeout, tenant: tenant_id)
     end
   end
