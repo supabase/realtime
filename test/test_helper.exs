@@ -6,6 +6,8 @@ ExUnit.start(exclude: [:failing], max_cases: 2, capture_log: true)
 
 max_cases = ExUnit.configuration()[:max_cases]
 
+Containers.pull()
+
 if System.get_env("REUSE_CONTAINERS") != "true" do
   Containers.stop_containers()
   Containers.stop_container("dev_tenant")
