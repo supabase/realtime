@@ -14,7 +14,7 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
     %{tenant: tenant}
   end
 
-  test "cleans messages older than 72 hours and creates partitions", %{ tenant: tenant } do
+  test "cleans messages older than 72 hours and creates partitions", %{tenant: tenant} do
     utc_now = NaiveDateTime.utc_now()
     limit = NaiveDateTime.add(utc_now, -72, :hour)
 
@@ -66,9 +66,12 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
     Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
 
     Process.flag(:trap_exit, true)
-    t = Task.async(fn ->
-      MaintenanceTask.run(tenant.external_id)
-    end)
+
+    t =
+      Task.async(fn ->
+        MaintenanceTask.run(tenant.external_id)
+      end)
+
     pid = t.pid
     ref = t.ref
     assert_receive {:EXIT, ^pid, :killed}
