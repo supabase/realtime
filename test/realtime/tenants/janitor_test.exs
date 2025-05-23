@@ -173,8 +173,11 @@ defmodule Realtime.Tenants.JanitorTest do
         []
       )
 
-    partitions = Enum.map(rows, fn [name] -> name end)
-    expected_names = Enum.map(dates, fn date -> "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}" end)
-    assert expected_names == partitions
+    partitions = MapSet.new(rows, fn [name] -> name end)
+
+    expected_names =
+      MapSet.new(dates, fn date -> "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}" end)
+
+    assert MapSet.equal?(partitions, expected_names)
   end
 end
