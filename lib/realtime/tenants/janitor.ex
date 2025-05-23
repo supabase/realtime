@@ -8,11 +8,7 @@ defmodule Realtime.Tenants.Janitor do
 
   import Realtime.Logs
 
-  alias Realtime.Api.Tenant
-  alias Realtime.Database
-  alias Realtime.Messages
-  alias Realtime.Tenants
-  alias Realtime.Tenants.Migrations
+  alias Realtime.Tenants.Janitor.MaintenanceTask
 
   @type t :: %__MODULE__{
           timer: pos_integer() | nil,
@@ -77,7 +73,7 @@ defmodule Realtime.Tenants.Janitor do
         task =
           Task.Supervisor.async_nolink(
             __MODULE__.TaskSupervisor,
-            fn -> perform_mantaince_tasks(chunks) end,
+            fn -> perform_maintenance_tasks(chunks) end,
             ordered: false
           )
 
@@ -120,20 +116,16 @@ defmodule Realtime.Tenants.Janitor do
 
   defp timer(%{timer: timer}), do: timer
 
-  defp perform_mantaince_tasks(tenants), do: Enum.map(tenants, &perform_mantaince_task/1)
+  defp perform_maintenance_tasks(tenants), do: Enum.map(tenants, &perform_maintenance_task/1)
 
-  defp perform_mantaince_task(tenant_external_id) do
+  defp perform_maintenance_task(tenant_external_id) do
     Logger.metadata(project: tenant_external_id, external_id: tenant_external_id)
     Logger.info("Janitor starting realtime.messages cleanup")
     :ets.delete(@table_name, tenant_external_id)
 
-    with %Tenant{} = tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_external_id),
-         {:ok, conn} <- Database.connect(tenant, "realtime_janitor"),
-         :ok <- Messages.delete_old_messages(conn),
-         :ok <- Migrations.create_partitions(conn) do
+    with :ok <- MaintenanceTask.run(tenant_external_id) do
       Logger.info("Janitor finished")
 
-      GenServer.stop(conn)
       :ok
     end
   end
