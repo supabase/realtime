@@ -18,7 +18,8 @@ defmodule Realtime.RepoTest do
       message_1 = message_fixture(tenant)
       message_2 = message_fixture(tenant)
 
-      assert {:ok, [^message_1, ^message_2] = res} = Repo.all(db_conn, Message, Message)
+      assert {:ok, res} = Repo.all(db_conn, Message, Message)
+      assert Enum.sort([message_1, message_2]) == Enum.sort(res)
       assert Enum.all?(res, &(Ecto.get_meta(&1, :state) == :loaded))
     end
 
