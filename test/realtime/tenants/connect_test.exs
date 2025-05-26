@@ -34,6 +34,14 @@ defmodule Realtime.Tenants.ConnectTest do
 
   describe "distributed lookup_or_start_connection/1" do
     test "trace distributed connect" do
+      # Due to be a shared tenant we need to ensure that the connection is down so we can force it to go to the remote node
+      pid = Connect.whereis("dev_tenant")
+
+      if pid do
+        Connect.shutdown("dev_tenant")
+        assert_process_down(pid)
+      end
+
       :otel_propagator_text_map.extract([{"traceparent", @traceparent}])
       {:ok, node} = Clustered.start()
 
