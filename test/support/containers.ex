@@ -165,7 +165,7 @@ defmodule Containers do
   end
 
   defp existing_containers(pattern) do
-    {containers, 0} = System.cmd("docker", ["ps", "-a", "--format", "{{json .}}", "--filter", "name=#{pattern}"])
+    {containers, 0} = System.cmd("docker", ["ps", "--format", "{{json .}}", "--filter", "name=#{pattern}"])
 
     containers
     |> String.split("\n", trim: true)
@@ -233,6 +233,7 @@ defmodule Containers do
       System.cmd("docker", [
         "run",
         "-d",
+        "--rm",
         "--name",
         name,
         "-e",
