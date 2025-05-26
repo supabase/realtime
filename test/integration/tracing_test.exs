@@ -79,7 +79,7 @@ defmodule Realtime.Integration.TracingTest do
            ) = attributes
 
     # child span of the previous span
-    assert_receive {:span, span(name: "database.connect", attributes: attributes, parent_span_id: ^span_id)}
+    assert_receive {:span, span(name: "local.database.connect", attributes: attributes, parent_span_id: ^span_id)}
 
     assert attributes(map: %{external_id: ^external_id}) = attributes
 

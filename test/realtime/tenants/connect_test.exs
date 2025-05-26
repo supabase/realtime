@@ -27,7 +27,7 @@ defmodule Realtime.Tenants.ConnectTest do
     %{tenant: tenant}
   end
 
-  defp assert_process_down(pid, timeout \\ 100) do
+  defp assert_process_down(pid, timeout \\ 500) do
     ref = Process.monitor(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
   end
@@ -46,22 +46,25 @@ defmodule Realtime.Tenants.ConnectTest do
         {:ok, pid} = Connect.lookup_or_start_connection("dev_tenant")
 
         assert node(pid) == node
-        # Local span
-        assert_receive {:span, span(name: "rpc", attributes: attributes, parent_span_id: @span_parent_id)}
+        # Remote span
+        assert_receive {:span,
+                        span(name: "remote.database.connect", attributes: attributes, parent_span_id: @span_parent_id)}
 
         assert attributes(
                  map: %{
                    external_id: "dev_tenant",
                    mod: Connect,
                    func: :connect,
-                   arity: 2
+                   arity: 2,
+                   node: ^node
                  }
                ) = attributes
 
-        # Remote span
-        assert_receive {:span, span(name: "database.connect", attributes: attributes, parent_span_id: @span_parent_id)}
+        # Local span
+        assert_receive {:span,
+                        span(name: "local.database.connect", attributes: attributes, parent_span_id: @span_parent_id)}
 
-        assert attributes(map: %{external_id: "dev_tenant"}) = attributes
+        assert attributes(map: %{external_id: "dev_tenant", mod: Connect, func: :connect, arity: 2}) = attributes
 
         Connect.shutdown("dev_tenant")
         assert_process_down(pid, 500)
@@ -133,18 +136,20 @@ defmodule Realtime.Tenants.ConnectTest do
       ]
 
       tenant = tenant_fixture(%{extensions: extensions})
+      external_id = tenant.external_id
 
       assert {:error, :tenant_database_unavailable} =
-               Connect.lookup_or_start_connection(tenant.external_id)
-
-      attributes = :otel_attributes.new([external_id: tenant.external_id], 128, :infinity)
+               Connect.lookup_or_start_connection(external_id)
 
       assert_receive {:span,
                       span(
-                        name: "database.connect",
-                        attributes: ^attributes,
+                        name: "local.database.connect",
+                        attributes: attributes,
                         status: status(code: :error, message: "UnableToConnectToTenantDatabase")
                       )}
+
+      assert attributes(map: %{external_id: ^external_id, arity: 2, func: :connect, mod: Realtime.Tenants.Connect}) =
+               attributes
     end
 
     test "if tenant does not exist, returns error" do

@@ -88,7 +88,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         assert_receive {:span, span(name: "POST /api/broadcast", attributes: attributes)}
         assert attributes(map: %{external_id: ^external_id}) = attributes
 
-        assert_receive {:span, span(name: "database.connect", attributes: attributes)}
+        assert_receive {:span, span(name: "local.database.connect", attributes: attributes)}
         assert attributes(map: %{external_id: ^external_id}) = attributes
       end
     end
