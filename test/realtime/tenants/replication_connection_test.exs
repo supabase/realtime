@@ -1,9 +1,10 @@
 defmodule Realtime.Tenants.ReplicationConnectionTest do
-  alias Realtime.RateCounter
+  # Async false due to tweaking application env
   use Realtime.DataCase, async: false
 
   alias Realtime.Api.Message
   alias Realtime.Database
+  alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.ReplicationConnection
   alias RealtimeWeb.Endpoint
@@ -119,6 +120,73 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                      },
                      500
     end
+  end
+
+  test "payload without id", %{tenant: tenant} do
+    start_link_supervised!(
+      {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+      restart: :transient
+    )
+
+    topic = random_string()
+    tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+    assert :ok = Endpoint.subscribe(tenant_topic)
+
+    message =
+      message_fixture(tenant, %{
+        "topic" => topic,
+        "private" => true,
+        "event" => "INSERT",
+        "payload" => %{"value" => "something"}
+      })
+
+    assert_receive %Phoenix.Socket.Broadcast{
+                     event: "broadcast",
+                     payload: %{
+                       "event" => "INSERT",
+                       "payload" => payload,
+                       "type" => "broadcast"
+                     },
+                     topic: ^tenant_topic
+                   },
+                   500
+
+    id = message.id
+
+    assert payload == %{
+             "value" => "something",
+             "id" => id
+           }
+  end
+
+  test "payload including id", %{tenant: tenant} do
+    start_link_supervised!(
+      {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+      restart: :transient
+    )
+
+    topic = random_string()
+    tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+    assert :ok = Endpoint.subscribe(tenant_topic)
+    payload = %{"value" => "something", "id" => "123456"}
+
+    message_fixture(tenant, %{
+      "topic" => topic,
+      "private" => true,
+      "event" => "INSERT",
+      "payload" => payload
+    })
+
+    assert_receive %Phoenix.Socket.Broadcast{
+                     event: "broadcast",
+                     payload: %{
+                       "event" => "INSERT",
+                       "payload" => ^payload,
+                       "type" => "broadcast"
+                     },
+                     topic: ^tenant_topic
+                   },
+                   500
   end
 
   test "fails on existing replication slot", %{tenant: tenant} do

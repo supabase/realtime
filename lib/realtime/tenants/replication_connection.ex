@@ -307,7 +307,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
                 topic: Map.fetch!(to_broadcast, "topic"),
                 event: Map.fetch!(to_broadcast, "event"),
                 private: Map.fetch!(to_broadcast, "private"),
-                payload: Map.put(payload, "id", id)
+                # Avoid overriding user provided id
+                payload: Map.put_new(payload, "id", id)
               }
 
             %Tenant{} = tenant = Cache.get_tenant_by_external_id(tenant_id)
