@@ -30,6 +30,7 @@ defmodule RealtimeWeb.ConnCase do
       alias RealtimeWeb.Router.Helpers, as: Routes
 
       use RealtimeWeb, :verified_routes
+      use Realtime.Tracing
 
       # The default endpoint for testing
       @endpoint RealtimeWeb.Endpoint

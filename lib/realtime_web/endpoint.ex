@@ -1,5 +1,6 @@
 defmodule RealtimeWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :realtime
+  alias RealtimeWeb.Plugs.BaggageRequestId
 
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
@@ -54,7 +55,7 @@ defmodule RealtimeWeb.Endpoint do
     param_key: "request_logger",
     cookie_key: "request_logger"
 
-  plug Plug.RequestId
+  plug BaggageRequestId, baggage_key: BaggageRequestId.baggage_key()
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,

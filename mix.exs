@@ -4,14 +4,23 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.55.9",
+      version: "2.56.0",
       elixir: "~> 1.17.3",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
       dialyzer: dialyzer(),
-      test_coverage: [tool: ExCoveralls]
+      test_coverage: [tool: ExCoveralls],
+      releases: [
+        realtime: [
+          # This will ensure that if opentelemetry terminates, even abnormally, our application will not be terminated.
+          applications: [
+            opentelemetry_exporter: :permanent,
+            opentelemetry: :temporary
+          ]
+        ]
+      ]
     ]
   end
 
@@ -73,6 +82,12 @@ defmodule Realtime.MixProject do
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
       {:observer_cli, "~> 1.7"},
+      {:opentelemetry_exporter, "~> 1.6"},
+      {:opentelemetry, "~> 1.3"},
+      {:opentelemetry_api, "~> 1.2"},
+      {:opentelemetry_phoenix, "~> 2.0"},
+      {:opentelemetry_cowboy, "~> 1.0"},
+      {:opentelemetry_ecto, "~> 1.2"},
       {:mock, "~> 0.3", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
@@ -83,7 +98,8 @@ defmodule Realtime.MixProject do
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
-      {:poolboy, "~> 1.5", only: :test}
+      {:poolboy, "~> 1.5", only: :test},
+      {:req, "~> 0.5", only: :test}
     ]
   end
 
