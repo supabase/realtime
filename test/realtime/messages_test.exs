@@ -42,6 +42,6 @@ defmodule Realtime.MessagesTest do
     assert :ok = Messages.delete_old_messages(conn)
     {:ok, current} = Repo.all(conn, from(m in Message), Message)
 
-    assert current == to_keep
+    assert Enum.sort(current) == Enum.sort(to_keep)
   end
 end

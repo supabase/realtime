@@ -6,10 +6,16 @@ defmodule Containers.Container do
   end
 
   def port(pid), do: GenServer.call(pid, :port, 15_000)
+  def name(pid), do: GenServer.call(pid, :name, 15_000)
 
   @impl true
   def handle_call(:port, _from, state) do
     {:reply, state[:port], state}
+  end
+
+  @impl true
+  def handle_call(:name, _from, state) do
+    {:reply, state[:name], state}
   end
 
   @impl true
