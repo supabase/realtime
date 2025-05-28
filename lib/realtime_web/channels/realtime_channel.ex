@@ -215,7 +215,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_info(%{event: "postgres_cdc_rls_down"}, socket) do
     %{assigns: %{pg_sub_ref: pg_sub_ref}} = socket
-    Process.cancel_timer(pg_sub_ref)
+    if pg_sub_ref, do: Process.cancel_timer(pg_sub_ref)
     pg_sub_ref = postgres_subscribe()
 
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
