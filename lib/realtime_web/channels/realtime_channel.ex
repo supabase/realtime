@@ -324,6 +324,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     shutdown_response(socket, message)
   end
 
+  def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket) do
+    {:noreply, socket}
+  end
+
   def handle_in("access_token", %{"access_token" => refresh_token}, %{assigns: %{access_token: access_token}} = socket)
       when refresh_token == access_token do
     {:noreply, socket}
@@ -552,7 +556,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, socket} <- maybe_assign_policies(topic, db_conn, socket) do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 
-      interval = min(@confirm_token_ms_interval, exp_diff * 1_000)
+      interval = min(@confirm_token_ms_interval, exp_diff * 1000)
       ref = Process.send_after(self(), :confirm_token, interval)
 
       {:ok, claims, ref, access_token, socket}
