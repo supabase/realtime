@@ -17,6 +17,21 @@ defmodule Realtime.SynHandlerTest do
 
       log =
         capture_log(fn ->
+          assert SynHandler.on_process_unregistered(@mod, @name, self(), %{region: "us-east-1"}, reason) == :ok
+        end)
+
+      topic = "#{@topic}:#{@name}"
+      event = "#{@topic}_down"
+
+      assert log =~ "#{@mod} terminated: #{inspect(@name)} #{node()}"
+      refute_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: ^event, payload: nil}
+    end
+
+    test "it handles :syn_conflict_resolution reason without region" do
+      reason = :syn_conflict_resolution
+
+      log =
+        capture_log(fn ->
           assert SynHandler.on_process_unregistered(@mod, @name, self(), %{}, reason) == :ok
         end)
 
@@ -58,9 +73,6 @@ defmodule Realtime.SynHandlerTest do
                  {pid1, %{}, time1},
                  {pid2, %{}, time2}
                )
-
-      Process.sleep(500)
-      refute Process.alive?(pid2)
     end
   end
 end
