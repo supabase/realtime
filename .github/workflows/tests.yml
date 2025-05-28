@@ -54,7 +54,7 @@ jobs:
       - name: Run hex audit
         run: mix hex.audit
       - name: Run mix_audit
-        run: mix deps.audit --ignore-advisory-ids GHSA-vq52-99r9-h5pw,GHSA-9fm9-hp7p-53mf
+        run: mix deps.audit
       - name: Run sobelow
         run: mix sobelow --config .sobelow-conf
       - name: Retrieve PLT Cache

@@ -76,7 +76,6 @@ defmodule Realtime.MixProject do
       {:recon, "~> 2.5"},
       {:mint, "~> 1.4"},
       {:logflare_logger_backend, "~> 0.11"},
-      {:httpoison, "~> 1.8"},
       {:syn, "~> 3.3"},
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},
