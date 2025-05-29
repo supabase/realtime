@@ -51,6 +51,19 @@
       <p class="text-gray-600 text-xs italic">Enable Database Changes on this Channel</p>
     </div>
     <div class="mb-4">
+      <%= label(f, :private, class: "block text-gray-700 text-sm font-bold mb-2") %>
+      <%= checkbox(f, :private, class: "
+                    my-1
+                    block
+                    rounded-md
+                    border-gray-300
+                    shadow-sm
+                    focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50
+                  ") %>
+      <%= error_tag(f, :private) %>
+      <p class="text-gray-600 text-xs italic">Is it using a private channel?</p>
+    </div>
+    <div class="mb-4">
       <%= label(f, :project, class: "block text-gray-700 text-sm font-bold mb-2") %>
       <%= text_input(f, :project, placeholder: "project_ref", class: "
                     my-1
