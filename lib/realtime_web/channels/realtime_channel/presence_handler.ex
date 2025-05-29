@@ -12,6 +12,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias Phoenix.Tracker.Shard
   alias Realtime.GenCounter
   alias Realtime.RateCounter
+  alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
@@ -68,7 +69,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
          payload,
          %{assigns: %{private?: true, policies: %Policies{presence: %PresencePolicies{write: nil}}}} = socket
        ) do
-    %{assigns: %{db_conn: db_conn, authorization_context: authorization_context}} = socket
+    %{assigns: %{authorization_context: authorization_context, tenant: tenant_id}} = socket
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id)
 
     case run_authorization_check(socket, db_conn, authorization_context) do
       {:ok, socket} ->

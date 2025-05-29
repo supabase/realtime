@@ -9,6 +9,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Phoenix.Socket
   alias Realtime.GenCounter
   alias Realtime.RateCounter
+  alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
@@ -23,9 +24,11 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         self_broadcast: self_broadcast,
         tenant_topic: tenant_topic,
         authorization_context: authorization_context,
-        db_conn: db_conn
+        tenant: tenant_id
       }
     } = socket
+
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id)
 
     case run_authorization_check(socket, db_conn, authorization_context) do
       {:ok,

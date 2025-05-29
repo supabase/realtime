@@ -93,8 +93,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         presence_key: presence_key(params),
         self_broadcast: !!params["config"]["broadcast"]["self"],
         tenant_topic: tenant_topic,
-        channel_name: sub_topic,
-        db_conn: db_conn
+        channel_name: sub_topic
       }
 
       # Start presence and add user
@@ -343,13 +342,13 @@ defmodule RealtimeWeb.RealtimeChannel do
       assigns: %{
         access_token: access_token,
         pg_sub_ref: pg_sub_ref,
-        db_conn: db_conn,
         channel_name: channel_name,
         pg_change_params: pg_change_params
       }
     } = socket
 
     socket = assign(socket, :access_token, refresh_token)
+    {:ok, db_conn} = Connect.lookup_or_start_connection(socket.assigns.tenant)
 
     with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
          socket = assign_authorization_context(socket, channel_name, access_token, claims),
@@ -541,13 +540,15 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp confirm_token(%{assigns: assigns} = socket) do
     %{
       jwt_secret: jwt_secret,
-      access_token: access_token
+      access_token: access_token,
+      tenant: tenant_id
     } = assigns
 
     topic = Map.get(assigns, :topic)
-    db_conn = Map.get(assigns, :db_conn)
     socket = Map.put(socket, :policies, nil)
     jwt_jwks = Map.get(assigns, :jwt_jwks)
+
+    db_conn = Connect.lookup_or_start_connection(tenant_id)
 
     with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
@@ -705,11 +706,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :authorization_context, authorization_context)
   end
 
-  defp maybe_assign_policies(
-         topic,
-         db_conn,
-         %{assigns: %{private?: true}} = socket
-       )
+  defp maybe_assign_policies(topic, db_conn, %{assigns: %{private?: true}} = socket)
        when not is_nil(topic) and not is_nil(db_conn) do
     authorization_context = socket.assigns.authorization_context
 
