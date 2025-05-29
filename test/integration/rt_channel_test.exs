@@ -511,7 +511,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "badly formatted jwt token", %{tenant: tenant} do
       log =
         capture_log(fn ->
-          WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", "sb_publishable"}])
+          WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", "bad_token"}])
         end)
 
       assert log =~ "MalformedJWTToken: The token provided is not a valid JWT token"

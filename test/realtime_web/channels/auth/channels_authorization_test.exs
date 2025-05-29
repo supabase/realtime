@@ -30,7 +30,7 @@ defmodule RealtimeWeb.ChannelsAuthorizationTest do
     end
 
     test "when token is not a jwt token" do
-      assert {:error, :token_malformed} = ChannelsAuthorization.authorize("sb_publishable", @secret, nil)
+      assert {:error, :token_malformed} = ChannelsAuthorization.authorize("bad_token", @secret, nil)
     end
 
     test "when token is not a string" do
