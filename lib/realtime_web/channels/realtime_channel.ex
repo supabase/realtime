@@ -324,10 +324,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     shutdown_response(socket, message)
   end
 
-  def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket) do
-    {:noreply, socket}
-  end
-
   def handle_in("access_token", %{"access_token" => refresh_token}, %{assigns: %{access_token: access_token}} = socket)
       when refresh_token == access_token do
     {:noreply, socket}
@@ -339,55 +335,17 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
-    %{
-      assigns: %{
-        access_token: access_token,
-        pg_sub_ref: pg_sub_ref,
-        db_conn: db_conn,
-        channel_name: channel_name,
-        pg_change_params: pg_change_params
-      }
-    } = socket
+    prefix = Application.get_env(:realtime, :access_token_ignore_prefix)
 
-    socket = assign(socket, :access_token, refresh_token)
+    cond do
+      is_nil(prefix) ->
+        handle_access_token(socket, refresh_token)
 
-    with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
-         socket = assign_authorization_context(socket, channel_name, access_token, claims),
-         {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket) do
-      Helpers.cancel_timer(pg_sub_ref)
-      pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
+      String.starts_with?(refresh_token, prefix) ->
+        {:noreply, socket}
 
-      pg_sub_ref =
-        case pg_change_params do
-          [_ | _] -> postgres_subscribe()
-          _ -> nil
-        end
-
-      assigns = %{
-        pg_sub_ref: pg_sub_ref,
-        confirm_token_ref: confirm_token_ref,
-        pg_change_params: pg_change_params
-      }
-
-      {:noreply, assign(socket, assigns)}
-    else
-      {:error, :unauthorized, msg} ->
-        shutdown_response(socket, msg)
-
-      {:error, :expired_token, msg} ->
-        shutdown_response(socket, msg)
-
-      {:error, :missing_claims} ->
-        shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
-
-      {:error, :token_malformed} ->
-        shutdown_response(socket, "The token provided is not a valid JWT")
-
-      {:error, :unable_to_set_policies, _msg} ->
-        shutdown_response(socket, "Realtime was unable to connect to the project database")
-
-      {:error, error} ->
-        shutdown_response(socket, inspect(error))
+      true ->
+        handle_access_token(socket, refresh_token)
     end
   end
 
@@ -762,5 +720,58 @@ defmodule RealtimeWeb.RealtimeChannel do
       nil -> []
       sub -> [sub: sub]
     end)
+  end
+
+  defp handle_access_token(socket, refresh_token) do
+    %{
+      assigns: %{
+        access_token: access_token,
+        pg_sub_ref: pg_sub_ref,
+        db_conn: db_conn,
+        channel_name: channel_name,
+        pg_change_params: pg_change_params
+      }
+    } = socket
+
+    socket = assign(socket, :access_token, refresh_token)
+
+    with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
+         socket = assign_authorization_context(socket, channel_name, access_token, claims),
+         {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket) do
+      Helpers.cancel_timer(pg_sub_ref)
+      pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
+
+      pg_sub_ref =
+        case pg_change_params do
+          [_ | _] -> postgres_subscribe()
+          _ -> nil
+        end
+
+      assigns = %{
+        pg_sub_ref: pg_sub_ref,
+        confirm_token_ref: confirm_token_ref,
+        pg_change_params: pg_change_params
+      }
+
+      {:noreply, assign(socket, assigns)}
+    else
+      {:error, :unauthorized, msg} ->
+        shutdown_response(socket, msg)
+
+      {:error, :expired_token, msg} ->
+        shutdown_response(socket, msg)
+
+      {:error, :missing_claims} ->
+        shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
+
+      {:error, :token_malformed} ->
+        shutdown_response(socket, "The token provided is not a valid JWT")
+
+      {:error, :unable_to_set_policies, _msg} ->
+        shutdown_response(socket, "Realtime was unable to connect to the project database")
+
+      {:error, error} ->
+        shutdown_response(socket, inspect(error))
+    end
   end
 end

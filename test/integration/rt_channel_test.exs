@@ -890,9 +890,10 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply"}, 500
       assert_receive %Message{event: "presence_state"}, 500
+      prefix = Application.get_env(:supabase_realtime, :access_token_ignore_prefix, "sb_")
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
-        "access_token" => "sb_publishable_-fake_key"
+        "access_token" => "#{prefix}#{random_string()}"
       })
 
       # Check if the new token does not trigger a shutdown
