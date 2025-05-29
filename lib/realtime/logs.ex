@@ -4,26 +4,30 @@ defmodule Realtime.Logs do
   """
   require Logger
 
+  defmacro __using__(_opts) do
+    quote do
+      require Logger
+
+      import Realtime.Logs
+    end
+  end
+
   @doc """
   Prepares a value to be logged
   """
   def to_log(value) when is_binary(value), do: value
   def to_log(value), do: inspect(value, pretty: true)
 
-  @doc """
-  Logs error with a given Operational Code
-  """
-  @spec log_error(String.t(), any(), keyword()) :: :ok
-  def log_error(code, error, metadata \\ []) do
-    Logger.error("#{code}: #{to_log(error)}", [error_code: code] ++ metadata)
+  defmacro log_error(code, error, metadata \\ []) do
+    quote bind_quoted: [code: code, error: error, metadata: metadata], location: :keep do
+      Logger.error("#{code}: #{Realtime.Logs.to_log(error)}", [error_code: code] ++ metadata)
+    end
   end
 
-  @doc """
-  Logs warning with a given Operational Code
-  """
-  @spec log_error(String.t(), any(), keyword()) :: :ok
-  def log_warning(code, warning, metadata \\ []) do
-    Logger.warning("#{code}: #{to_log(warning)}", [{:error_code, code} | metadata])
+  defmacro log_warning(code, warning, metadata \\ []) do
+    quote bind_quoted: [code: code, warning: warning, metadata: metadata], location: :keep do
+      Logger.warning("#{code}: #{Realtime.Logs.to_log(warning)}", [{:error_code, code} | metadata])
+    end
   end
 end
 

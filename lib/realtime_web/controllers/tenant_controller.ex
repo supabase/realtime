@@ -2,7 +2,8 @@ defmodule RealtimeWeb.TenantController do
   use RealtimeWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
-  require Logger
+  use Realtime.Logs
+
   import Realtime.Logs
 
   alias Realtime.Api

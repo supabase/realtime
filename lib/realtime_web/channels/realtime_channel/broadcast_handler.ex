@@ -2,9 +2,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   @moduledoc """
   Handles the Broadcast feature from Realtime
   """
-  require Logger
+  use Realtime.Logs
+
   import Phoenix.Socket, only: [assign: 3]
-  import Realtime.Logs
 
   alias Phoenix.Socket
   alias Realtime.GenCounter

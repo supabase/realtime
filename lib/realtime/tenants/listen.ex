@@ -3,10 +3,10 @@ defmodule Realtime.Tenants.Listen do
   Listen for Postgres notifications to identify issues with the functions that are being called in tenants database
   """
   use GenServer, restart: :transient
-  require Logger
+  use Realtime.Logs
+
   alias Realtime.Api.Tenant
   alias Realtime.Database
-  alias Realtime.Logs
   alias Realtime.Registry.Unique
   alias Realtime.Tenants.Cache
 
@@ -96,10 +96,10 @@ defmodule Realtime.Tenants.Listen do
   def handle_info({:notification, _, _, @topic, payload}, state) do
     case Jason.decode(payload) do
       {:ok, %{"function" => "realtime.send"} = parsed} when is_map_key(parsed, "error") ->
-        Logs.log_error("FailedSendFromDatabase", parsed)
+        log_error("FailedSendFromDatabase", parsed)
 
       {:error, _} ->
-        Logs.log_error("FailedToParseDiagnosticMessage", payload)
+        log_error("FailedToParseDiagnosticMessage", payload)
 
       _ ->
         :ok

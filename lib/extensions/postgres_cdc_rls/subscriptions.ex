@@ -2,9 +2,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @moduledoc """
   This module consolidates subscriptions handling
   """
-  require Logger
+  use Realtime.Logs
+
   import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
-  import Realtime.Logs
 
   @type conn() :: Postgrex.conn()
 

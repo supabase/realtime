@@ -4,9 +4,11 @@ defmodule RealtimeWeb.FallbackController do
 
   See `Phoenix.Controller.action_fallback/1` for more details.
   """
+
   use RealtimeWeb, :controller
+  use Realtime.Logs
+
   import RealtimeWeb.ErrorHelpers
-  import Realtime.Logs
 
   def call(conn, {:error, :not_found}) do
     conn

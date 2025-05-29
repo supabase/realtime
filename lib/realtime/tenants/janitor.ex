@@ -4,9 +4,7 @@ defmodule Realtime.Tenants.Janitor do
   """
 
   use GenServer
-  require Logger
-
-  import Realtime.Logs
+  use Realtime.Logs
 
   alias Realtime.Tenants.Janitor.MaintenanceTask
 

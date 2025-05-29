@@ -3,10 +3,7 @@ defmodule Realtime.Tenants.Migrations do
   Run Realtime database migrations for tenant's database.
   """
   use GenServer, restart: :transient
-
-  require Logger
-
-  import Realtime.Logs
+  use Realtime.Logs
 
   alias Realtime.Tenants
   alias Realtime.Database

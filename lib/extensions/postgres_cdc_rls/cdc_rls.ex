@@ -4,8 +4,7 @@ defmodule Extensions.PostgresCdcRls do
   """
 
   @behaviour Realtime.PostgresCdc
-  require Logger
-  import Realtime.Logs
+  use Realtime.Logs
 
   alias RealtimeWeb.Endpoint
   alias Extensions.PostgresCdcRls, as: Rls
