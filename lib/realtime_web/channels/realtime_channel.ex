@@ -557,9 +557,17 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:ok, claims, ref, access_token, socket}
     else
-      {:error, error} -> {:error, error}
-      {:error, error, message} -> {:error, error, message}
-      e -> {:error, e}
+      {:error, :token_malformed} ->
+        {:error, "The token provided is not a valid JWT token"}
+
+      {:error, error} ->
+        {:error, error}
+
+      {:error, error, message} ->
+        {:error, error, message}
+
+      e ->
+        {:error, e}
     end
   end
 

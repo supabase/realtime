@@ -634,8 +634,15 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{
         topic: ^realtime_topic,
         event: "system",
-        payload: %{"extension" => "system", "message" => "Token claims must be a map", "status" => "error"}
+        payload: %{
+          "extension" => "system",
+          "message" => msg,
+          "status" => "error"
+        }
       }
+
+      assert_receive %Message{event: "phx_close"}
+      assert msg =~ "The token provided is not a valid JWT token"
     end
 
     test "on expired access_token the socket sends an error message", %{tenant: tenant, topic: topic} do
@@ -814,7 +821,10 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{
                        event: "phx_reply",
-                       payload: %{"status" => "error", "response" => %{"reason" => "Token claims must be a map"}},
+                       payload: %{
+                         "status" => "error",
+                         "response" => %{"reason" => "The token provided is not a valid JWT token"}
+                       },
                        topic: ^realtime_topic
                      },
                      500
