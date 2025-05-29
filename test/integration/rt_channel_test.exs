@@ -514,7 +514,7 @@ defmodule Realtime.Integration.RtChannelTest do
           WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", "bad_token"}])
         end)
 
-      assert log =~ "MalformedJWTToken: The token provided is not a valid JWT token"
+      assert log =~ "MalformedJWT: The token provided is not a valid JWT"
     end
 
     test "invalid JWT with expired token", %{tenant: tenant} do
@@ -823,7 +823,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        event: "phx_reply",
                        payload: %{
                          "status" => "error",
-                         "response" => %{"reason" => "The token provided is not a valid JWT token"}
+                         "response" => %{"reason" => "The token provided is not a valid JWT}
                        },
                        topic: ^realtime_topic
                      },

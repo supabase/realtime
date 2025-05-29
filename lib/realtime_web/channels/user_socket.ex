@@ -86,7 +86,7 @@ defmodule RealtimeWeb.UserSocket do
           {:error, :missing_claims}
 
         {:error, :token_malformed} ->
-          log_error("MalformedJWTToken", "The token provided is not a valid JWT token")
+          log_error("MalformedJWT", "The token provided is not a valid JWT")
           {:error, :token_malformed}
 
         error ->

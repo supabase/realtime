@@ -377,7 +377,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
 
       {:error, :token_malformed} ->
-        shutdown_response(socket, "The token provided is not a valid JWT token")
+        shutdown_response(socket, "The token provided is not a valid JWT")
 
       {:error, :unable_to_set_policies, _msg} ->
         shutdown_response(socket, "Realtime was unable to connect to the project database")
