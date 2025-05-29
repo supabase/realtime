@@ -2,6 +2,9 @@ defmodule RealtimeWeb.JwtVerification do
   @moduledoc """
   Parse JWT and verify claims
   """
+  # Matching error in Dialyzer when using Joken.peek_claims/1 but {:ok, []} is actually possible and covered by our testing
+  @dialyzer {:nowarn_function, check_claims_format: 1}
+
   defmodule JwtAuthToken do
     @moduledoc false
     use Joken.Config
@@ -49,6 +52,7 @@ defmodule RealtimeWeb.JwtVerification do
   defp check_claims_format(token) do
     case Joken.peek_claims(token) do
       {:ok, claims} when is_map(claims) -> {:ok, claims}
+      {:ok, _} -> {:error, :expected_claims_map}
       {:error, :token_malformed} -> {:error, :token_malformed}
     end
   end
