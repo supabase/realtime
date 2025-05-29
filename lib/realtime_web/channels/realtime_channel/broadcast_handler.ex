@@ -15,22 +15,22 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias RealtimeWeb.Endpoint
 
   @event_type "broadcast"
-  @spec handle(map(), Phoenix.Socket.t()) ::
-          {:reply, :ok, Phoenix.Socket.t()} | {:noreply, Phoenix.Socket.t()}
-  def handle(payload, %{assigns: %{private?: true}} = socket) do
+  @spec handle(map(), Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
+  def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
+
+  @spec handle(map(), pid() | nil, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
+  def handle(payload, db_conn, %{assigns: %{private?: true}} = socket) do
     %{
       assigns: %{
         self_broadcast: self_broadcast,
         tenant_topic: tenant_topic,
-        authorization_context: authorization_context,
-        db_conn: db_conn
+        authorization_context: authorization_context
       }
     } = socket
 
     case run_authorization_check(socket, db_conn, authorization_context) do
-      {:ok,
-       %{assigns: %{ack_broadcast: ack_broadcast, policies: %Policies{broadcast: %BroadcastPolicies{write: true}}}} =
-           socket} ->
+      {:ok, %{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: true}}}} = socket} ->
+        %{ack_broadcast: ack_broadcast} = socket.assigns
         socket = increment_rate_counter(socket)
         send_message(self_broadcast, tenant_topic, payload)
         if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
@@ -44,7 +44,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     end
   end
 
-  def handle(payload, %{assigns: %{private?: false}} = socket) do
+  def handle(payload, _db_conn, %{assigns: %{private?: false}} = socket) do
     %{
       assigns: %{
         tenant_topic: tenant_topic,

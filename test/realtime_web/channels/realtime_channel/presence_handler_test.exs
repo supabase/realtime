@@ -31,7 +31,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       socket =
         socket_fixture(tenant, topic, db_conn, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
 
-      PresenceHandler.handle(%{"event" => "track"}, socket)
+      PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
       topic = "realtime:#{topic}"
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
       assert Map.has_key?(joins, key)
@@ -47,13 +47,13 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       socket =
         socket_fixture(tenant, topic, db_conn, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
 
-      assert {:reply, :ok, socket} = PresenceHandler.handle(%{"event" => "track"}, socket)
+      assert {:reply, :ok, socket} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
       topic = "realtime:#{topic}"
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
       assert Map.has_key?(joins, key)
 
-      assert {:reply, :ok, _socket} =
-               PresenceHandler.handle(%{"event" => "track", "payload" => %{"content" => random_string()}}, socket)
+      payload = %{"event" => "track", "payload" => %{"content" => random_string()}}
+      assert {:reply, :ok, _socket} = PresenceHandler.handle(payload, db_conn, socket)
 
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
       assert Map.has_key?(joins, key)
@@ -89,12 +89,12 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       socket =
         socket_fixture(tenant, topic, db_conn, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
 
-      assert {:reply, :ok, socket} = PresenceHandler.handle(%{"event" => "track"}, socket)
+      assert {:reply, :ok, socket} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
       topic = "realtime:#{topic}"
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
       assert Map.has_key?(joins, key)
 
-      assert {:reply, :ok, _socket} = PresenceHandler.handle(%{"event" => "untrack"}, socket)
+      assert {:reply, :ok, _socket} = PresenceHandler.handle(%{"event" => "untrack"}, db_conn, socket)
       assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: %{}, leaves: leaves}}
       assert Map.has_key?(leaves, key)
     end
@@ -114,6 +114,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
           assert {:reply, :ok, socket} =
                    PresenceHandler.handle(
                      %{"event" => "track", "payload" => %{"metadata" => random_string()}},
+                     db_conn,
                      socket
                    )
 
@@ -150,7 +151,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       log =
         capture_log(fn ->
-          assert {:reply, :error, %Phoenix.Socket{}} = PresenceHandler.handle(%{"event" => "unknown"}, socket)
+          assert {:reply, :error, %Phoenix.Socket{}} = PresenceHandler.handle(%{"event" => "unknown"}, nil, socket)
         end)
 
       assert log =~ "UnknownPresenceEvent"
