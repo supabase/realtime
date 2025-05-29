@@ -85,6 +85,10 @@ defmodule RealtimeWeb.UserSocket do
           log_error_with_token_metadata("Fields `role` and `exp` are required in JWT", token)
           {:error, :missing_claims}
 
+        {:error, :token_malformed} ->
+          log_error("MalformedJWT", "The token provided is not a valid JWT")
+          {:error, :token_malformed}
+
         error ->
           log_error("ErrorConnectingToWebsocket", error)
           error

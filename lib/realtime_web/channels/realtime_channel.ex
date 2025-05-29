@@ -109,10 +109,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "Fields `role` and `exp` are required in JWT"
         Logging.log_error_message(:error, "InvalidJWTToken", msg)
 
-      {:error, :expected_claims_map} ->
-        msg = "Token claims must be a map"
-        Logging.log_error_message(:error, "InvalidJWTToken", msg)
-
       {:error, :unauthorized, msg} ->
         Logging.log_error_message(:error, "Unauthorized", msg)
 
@@ -380,8 +376,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :missing_claims} ->
         shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
 
-      {:error, :expected_claims_map} ->
-        shutdown_response(socket, "Token claims must be a map")
+      {:error, :token_malformed} ->
+        shutdown_response(socket, "The token provided is not a valid JWT")
 
       {:error, :unable_to_set_policies, _msg} ->
         shutdown_response(socket, "Realtime was unable to connect to the project database")
@@ -561,9 +557,17 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:ok, claims, ref, access_token, socket}
     else
-      {:error, error} -> {:error, error}
-      {:error, error, message} -> {:error, error, message}
-      e -> {:error, e}
+      {:error, :token_malformed} ->
+        {:error, "The token provided is not a valid JWT"}
+
+      {:error, error} ->
+        {:error, error}
+
+      {:error, error, message} ->
+        {:error, error, message}
+
+      e ->
+        {:error, e}
     end
   end
 
