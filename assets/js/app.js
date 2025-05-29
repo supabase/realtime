@@ -141,7 +141,7 @@ Hooks.payload = {
         localStorage.setItem("bearer", bearer);
         localStorage.setItem("enable_presence", enable_presence);
         localStorage.setItem("enable_db_changes", enable_db_changes);
-        localStorage.setItem("private", private);
+        localStorage.setItem("private_channel", private_channel);
 
         // Initiate Presence for a connected user
         // Now when a new user connects and sends a `TRACK` message all clients will receive a message like:
@@ -225,7 +225,7 @@ Hooks.payload = {
       bearer: localStorage.getItem("bearer"),
       enable_presence: localStorage.getItem("enable_presence"),
       enable_db_changes: localStorage.getItem("enable_db_changes"),
-      private: localStorage.getItem("private"),
+      private_channel: localStorage.getItem("private_channel"),
     };
 
     this.pushEventTo("#conn_form", "local_storage", params);
@@ -242,7 +242,7 @@ Hooks.payload = {
         connection.bearer,
         connection.enable_presence,
         connection.enable_db_changes,
-        connection.private
+        connection.private_channel
       )
     );
 
