@@ -40,6 +40,8 @@ Hooks.payload = {
       this.realtimeSocket.realtime.setAuth(bearer);
     }
 
+    private_channel = private_channel == "true";
+
     // Join the Channel 'any'
     // Channels can be named anything
     // All clients on the same Channel will get messages sent to that Channel
