@@ -13,8 +13,7 @@ defmodule RealtimeWeb.InspectorLive.Index do
     end
 
     def changeset(form, params \\ %{}) do
-      form
-      |> cast(params, [:event, :payload])
+      cast(form, params, [:event, :payload])
     end
   end
 
@@ -56,17 +55,13 @@ defmodule RealtimeWeb.InspectorLive.Index do
   end
 
   def handle_event("postgres_subscribed", _params, socket) do
-    socket =
-      socket
-      |> assign(postgres_subscribed: true)
+    socket = assign(socket, postgres_subscribed: true)
 
     {:noreply, socket}
   end
 
   def handle_event("presence_subscribed", _params, socket) do
-    socket =
-      socket
-      |> assign(presence_subscribed: true)
+    socket = assign(socket, presence_subscribed: true)
 
     {:noreply, socket}
   end
