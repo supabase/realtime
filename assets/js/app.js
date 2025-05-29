@@ -20,7 +20,8 @@ Hooks.payload = {
     filter,
     bearer,
     enable_presence,
-    enable_db_changes
+    enable_db_changes,
+    private_channel
   ) {
     // Instantiate our client with the Realtime server and params to connect with
     {
@@ -43,7 +44,7 @@ Hooks.payload = {
     // Channels can be named anything
     // All clients on the same Channel will get messages sent to that Channel
     this.channel = this.realtimeSocket.channel(channelName, {
-      config: { broadcast: { self: true } },
+      config: { broadcast: { self: true, private: private_channel } },
     });
 
     // Hack to confirm Postgres is subscribed
@@ -138,6 +139,7 @@ Hooks.payload = {
         localStorage.setItem("bearer", bearer);
         localStorage.setItem("enable_presence", enable_presence);
         localStorage.setItem("enable_db_changes", enable_db_changes);
+        localStorage.setItem("private", private);
 
         // Initiate Presence for a connected user
         // Now when a new user connects and sends a `TRACK` message all clients will receive a message like:
@@ -221,6 +223,7 @@ Hooks.payload = {
       bearer: localStorage.getItem("bearer"),
       enable_presence: localStorage.getItem("enable_presence"),
       enable_db_changes: localStorage.getItem("enable_db_changes"),
+      private: localStorage.getItem("private"),
     };
 
     this.pushEventTo("#conn_form", "local_storage", params);
@@ -236,7 +239,8 @@ Hooks.payload = {
         connection.filter,
         connection.bearer,
         connection.enable_presence,
-        connection.enable_db_changes
+        connection.enable_db_changes,
+        connection.private
       )
     );
 
