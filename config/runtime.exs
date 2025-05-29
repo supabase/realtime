@@ -11,6 +11,7 @@ database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
 db_version = System.get_env("DB_IP_VERSION")
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
+access_token_ignore_prefix = System.get_env("ACCESS_TOKEN_IGNORE_PREFIX", "sb_")
 
 migration_partition_slots =
   System.get_env("MIGRATION_PARTITION_SLOTS", "#{System.schedulers_online() * 2}") |> String.to_integer()
@@ -49,7 +50,8 @@ config :realtime,
   tenant_max_joins_per_second: System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer(),
   metrics_cleaner_schedule_timer_in_ms:
     System.get_env("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", "1800000") |> String.to_integer(),
-  rpc_timeout: System.get_env("RPC_TIMEOUT", "30000") |> String.to_integer()
+  rpc_timeout: System.get_env("RPC_TIMEOUT", "30000") |> String.to_integer(),
+  access_token_ignore_prefix: access_token_ignore_prefix
 
 run_janitor? = System.get_env("RUN_JANITOR", "false") == "true"
 
