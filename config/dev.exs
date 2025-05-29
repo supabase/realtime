@@ -73,7 +73,7 @@ config :realtime, RealtimeWeb.Endpoint,
 # Do not include metadata nor timestamps in development logs
 config :logger, :console,
   format: "$time [$level] $message $metadata\n",
-  metadata: [:error_code, :file, :pid, :project, :external_id, :application_name, :region]
+  metadata: [:error_code, :file, :pid, :project, :external_id, :application_name, :region, :request_id]
 
 # Set a higher stacktrace during development. Avoid configuring such
 # in production as building large stacktraces may be expensive.
@@ -84,3 +84,5 @@ config :phoenix, :plug_init_mode, :runtime
 
 # Disable caching to ensure the rendered spec is refreshed
 config :open_api_spex, :cache_adapter, OpenApiSpex.Plug.NoneCache
+
+config :opentelemetry, traces_exporter: {:otel_exporter_stdout, []}

@@ -12,6 +12,7 @@ defmodule Realtime.Application do
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
   def start(_type, _args) do
+    opentelemetry_setup()
     primary_config = :logger.get_primary_config()
 
     # add the region to logs
@@ -137,5 +138,11 @@ defmodule Realtime.Application do
     else
       []
     end
+  end
+
+  defp opentelemetry_setup do
+    :opentelemetry_cowboy.setup()
+    OpentelemetryPhoenix.setup(adapter: :cowboy2)
+    OpentelemetryEcto.setup([:realtime, :repo], db_statement: :enabled)
   end
 end

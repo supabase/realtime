@@ -22,7 +22,7 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Realtime.Tenants.Authorization
 
   @moduletag :capture_log
-  @port 4002
+  @port 4003
   @serializer V1.JSONSerializer
 
   defp uri(tenant), do: "ws://#{tenant.external_id}.localhost:#{@port}/socket/websocket"

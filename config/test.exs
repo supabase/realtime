@@ -25,19 +25,20 @@ for repo <- [
     pool: Ecto.Adapters.SQL.Sandbox
 end
 
-# We don't run a server during test. If one is required,
-# you can enable the server option below.
+# Running server during tests to run integration tests
 config :realtime, RealtimeWeb.Endpoint,
   http: [port: 4002],
-  server: false
+  server: true
 
 config :realtime,
+  region: "us-east-1",
   secure_channels: true,
   db_enc_key: "1234567890123456",
   jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
   api_jwt_secret: System.get_env("API_JWT_SECRET", "secret"),
   metrics_jwt_secret: "test",
-  prom_poll_rate: 5_000
+  prom_poll_rate: 5_000,
+  request_id_baggage_key: "sb-request-id"
 
 # Print only errors during test
 config :logger,
@@ -48,3 +49,8 @@ config :logger,
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
   metadata: [:request_id, :project, :external_id, :application_name, :sub]
+
+config :opentelemetry,
+  span_processor: :simple,
+  traces_exporter: :none,
+  processors: [{:otel_simple_processor, %{}}]
