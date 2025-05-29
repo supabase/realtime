@@ -23,14 +23,11 @@ defmodule RealtimeWeb.ChannelsAuthorization do
         required = MapSet.new(["role", "exp"])
         claims_keys = claims |> Map.keys() |> MapSet.new()
 
-        if MapSet.subset?(required, claims_keys) do
-          {:ok, claims}
-        else
-          {:error, :missing_claims}
-        end
+        if MapSet.subset?(required, claims_keys),
+          do: {:ok, claims},
+          else: {:error, :missing_claims}
 
-      {:error, [message: validation_timer, claim: "exp", claim_val: claim_val]}
-      when is_integer(validation_timer) ->
+      {:error, [message: validation_timer, claim: "exp", claim_val: claim_val]} when is_integer(validation_timer) ->
         msg = "Token has expired #{validation_timer - claim_val} seconds ago"
         {:error, :expired_token, msg}
 

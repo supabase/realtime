@@ -46,17 +46,18 @@ defmodule RealtimeWeb.JwtVerification do
 
   def verify(_token, _jwt_secret, _jwt_jwks), do: {:error, :not_a_string}
 
+  defp check_claims_format(token) do
+    case Joken.peek_claims(token) do
+      {:ok, claims} when is_map(claims) -> {:ok, claims}
+      {:error, :token_malformed} -> {:error, :token_malformed}
+      _error -> {:error, :expected_claims_map}
+    end
+  end
+
   defp check_header_format(token) do
     case Joken.peek_header(token) do
       {:ok, header} when is_map(header) -> {:ok, header}
       _error -> {:error, :expected_header_map}
-    end
-  end
-
-  defp check_claims_format(token) do
-    case Joken.peek_claims(token) do
-      {:ok, claims} when is_map(claims) -> {:ok, claims}
-      _error -> {:error, :expected_claims_map}
     end
   end
 

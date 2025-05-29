@@ -23,10 +23,17 @@ defmodule RealtimeWeb.JwtVerificationTest do
       assert {:error, :not_a_string} = JwtVerification.verify([], @jwt_secret, nil)
     end
 
+    test "when token is 'sb_' formatted returns more informative error" do
+      invalid_token = "sb_publishable_-fake_key"
+
+      assert {:error, :token_malformed} =
+               JwtVerification.verify(invalid_token, @jwt_secret, nil)
+    end
+
     test "when token has invalid format" do
       invalid_token = Base.encode64("{}")
 
-      assert {:error, :expected_claims_map} =
+      assert {:error, :token_malformed} =
                JwtVerification.verify(invalid_token, @jwt_secret, nil)
     end
 

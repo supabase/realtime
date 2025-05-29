@@ -508,6 +508,15 @@ defmodule Realtime.Integration.RtChannelTest do
            :authenticated_read_broadcast_and_presence,
            :authenticated_write_broadcast_and_presence
          ]
+    test "badly formatted jwt token", %{tenant: tenant} do
+      log =
+        capture_log(fn ->
+          WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", "sb_publishable"}])
+        end)
+
+      assert log =~ "MalformedJWTToken: The token provided is not a valid JWT token"
+    end
+
     test "invalid JWT with expired token", %{tenant: tenant} do
       log =
         capture_log(fn -> get_connection(tenant, "authenticated", %{:exp => System.system_time(:second) - 1000}) end)
