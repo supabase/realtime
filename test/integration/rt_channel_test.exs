@@ -873,6 +873,42 @@ defmodule Realtime.Integration.RtChannelTest do
         assert log =~ "Realtime was unable to connect to the project database"
       end
     end
+
+    test "on sb prefixed access_token the socket ignores the message and respects JWT expiry time", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      sub = random_string()
+
+      {socket, access_token} =
+        get_connection(tenant, "authenticated", %{sub: sub, exp: System.system_time(:second) + 5})
+
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+        "access_token" => "sb_publishable_-fake_key"
+      })
+
+      # Check if the new token does not trigger a shutdown
+      refute_receive %Message{event: "system", topic: ^realtime_topic}, 100
+
+      # Await to check if channel respects token expiry time
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"extension" => "system", "message" => msg, "status" => "error"},
+                       topic: ^realtime_topic
+                     },
+                     5000
+
+      assert_receive %Message{event: "phx_close", topic: ^realtime_topic}
+      msg =~ "Token has expired"
+    end
   end
 
   describe "handle broadcast changes" do
