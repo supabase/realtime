@@ -50,7 +50,6 @@ defmodule RealtimeWeb.JwtVerification do
     case Joken.peek_claims(token) do
       {:ok, claims} when is_map(claims) -> {:ok, claims}
       {:error, :token_malformed} -> {:error, :token_malformed}
-      _error -> {:error, :expected_claims_map}
     end
   end
 
