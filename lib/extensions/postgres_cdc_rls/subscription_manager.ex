@@ -3,8 +3,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   Handles subscriptions from tenant's database.
   """
   use GenServer
-  require Logger
-  import Realtime.Logs
+  use Realtime.Logs
 
   alias Extensions.PostgresCdcRls, as: Rls
 

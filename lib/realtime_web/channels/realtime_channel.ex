@@ -3,8 +3,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   Used for handling channels and subscriptions.
   """
   use RealtimeWeb, :channel
-  require Logger
-  import Realtime.Logs
+  use Realtime.Logs
 
   alias DBConnection.Backoff
 

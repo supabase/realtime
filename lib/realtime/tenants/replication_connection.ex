@@ -17,11 +17,10 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   """
   use Postgrex.ReplicationConnection
-  require Logger
+  use Realtime.Logs
 
   import Realtime.Adapters.Postgres.Protocol
   import Realtime.Adapters.Postgres.Decoder
-  import Realtime.Logs
 
   alias Realtime.Adapters.Postgres.Decoder
   alias Realtime.Adapters.Postgres.Protocol.KeepAlive

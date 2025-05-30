@@ -2,9 +2,7 @@ defmodule Realtime.Database do
   @moduledoc """
   Handles tenant database operations
   """
-  require Logger
-
-  import Realtime.Logs
+  use Realtime.Logs
 
   alias Realtime.Api.Tenant
   alias Realtime.Crypto

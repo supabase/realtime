@@ -2,8 +2,8 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   @moduledoc """
   Log functions for Realtime channels to ensure
   """
-  require Logger
-  import Realtime.Logs
+  use Realtime.Logs
+
   alias Realtime.Telemetry
 
   @doc """

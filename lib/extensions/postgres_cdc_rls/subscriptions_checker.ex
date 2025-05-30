@@ -1,8 +1,8 @@
 defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
   @moduledoc false
   use GenServer
-  require Logger
-  import Realtime.Logs
+  use Realtime.Logs
+
   alias Extensions.PostgresCdcRls, as: Rls
 
   alias Realtime.Database

@@ -7,8 +7,8 @@ defmodule Realtime.GenCounter do
   counters are not serialized through the GenServer keeping GenCounters as performant as possible.
   """
   use GenServer
-  require Logger
-  import Realtime.Logs
+
+  use Realtime.Logs
   alias Realtime.GenCounter
 
   defstruct id: nil, counters: []

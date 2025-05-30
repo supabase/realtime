@@ -8,9 +8,7 @@ defmodule Realtime.Tenants.Connect do
   """
   use GenServer, restart: :transient
 
-  require Logger
-
-  import Realtime.Logs
+  use Realtime.Logs
 
   alias Realtime.Api.Tenant
   alias Realtime.Rpc

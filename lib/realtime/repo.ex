@@ -1,12 +1,11 @@
 defmodule Realtime.Repo do
-  require Logger
+  use Realtime.Logs
 
   use Ecto.Repo,
     otp_app: :realtime,
     adapter: Ecto.Adapters.Postgres
 
   import Ecto.Query
-  import Realtime.Logs
 
   def with_dynamic_repo(config, callback) do
     default_dynamic_repo = get_dynamic_repo()

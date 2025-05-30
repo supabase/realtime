@@ -5,10 +5,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   """
 
   use GenServer
+  use Realtime.Logs
 
-  require Logger
-
-  import Realtime.Logs
   import Realtime.Helpers
 
   alias DBConnection.Backoff

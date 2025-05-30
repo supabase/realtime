@@ -2,11 +2,10 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   @moduledoc """
   Handles the Presence feature from Realtime
   """
-  require Logger
+  use Realtime.Logs
 
   import Phoenix.Socket, only: [assign: 3]
   import Phoenix.Channel, only: [push: 3]
-  import Realtime.Logs
 
   alias Phoenix.Socket
   alias Phoenix.Tracker.Shard

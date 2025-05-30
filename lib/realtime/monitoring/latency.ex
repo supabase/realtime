@@ -4,8 +4,7 @@ defmodule Realtime.Latency do
   """
 
   use GenServer
-  require Logger
-  import Realtime.Logs
+  use Realtime.Logs
 
   alias Realtime.Nodes
   alias Realtime.Rpc
