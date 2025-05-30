@@ -70,15 +70,16 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
          %{assigns: %{private?: true, policies: %Policies{presence: %PresencePolicies{write: nil}}}} = socket
        ) do
     %{assigns: %{authorization_context: authorization_context, tenant: tenant_id}} = socket
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id)
 
-    case run_authorization_check(socket, db_conn, authorization_context) do
-      {:ok, socket} ->
-        handle_presence_event("track", payload, socket)
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
+      case run_authorization_check(socket, db_conn, authorization_context) do
+        {:ok, socket} ->
+          handle_presence_event("track", payload, socket)
 
-      {:error, error} ->
-        log_error("UnableToSetPolicies", error)
-        {:error, socket}
+        {:error, error} ->
+          log_error("UnableToSetPolicies", error)
+          {:error, socket}
+      end
     end
   end
 

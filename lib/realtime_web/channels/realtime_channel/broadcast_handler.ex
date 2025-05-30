@@ -28,22 +28,22 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       }
     } = socket
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id)
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
+      case run_authorization_check(socket, db_conn, authorization_context) do
+        {:ok,
+         %{assigns: %{ack_broadcast: ack_broadcast, policies: %Policies{broadcast: %BroadcastPolicies{write: true}}}} =
+             socket} ->
+          socket = increment_rate_counter(socket)
+          send_message(self_broadcast, tenant_topic, payload)
+          if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
 
-    case run_authorization_check(socket, db_conn, authorization_context) do
-      {:ok,
-       %{assigns: %{ack_broadcast: ack_broadcast, policies: %Policies{broadcast: %BroadcastPolicies{write: true}}}} =
-           socket} ->
-        socket = increment_rate_counter(socket)
-        send_message(self_broadcast, tenant_topic, payload)
-        if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
+        {:ok, socket} ->
+          {:noreply, socket}
 
-      {:ok, socket} ->
-        {:noreply, socket}
-
-      {:error, error} ->
-        log_error("UnableToSetPolicies", error)
-        {:noreply, socket}
+        {:error, error} ->
+          log_error("UnableToSetPolicies", error)
+          {:noreply, socket}
+      end
     end
   end
 

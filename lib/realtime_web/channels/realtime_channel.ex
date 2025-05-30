@@ -348,10 +348,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     } = socket
 
     socket = assign(socket, :access_token, refresh_token)
-    {:ok, db_conn} = Connect.lookup_or_start_connection(socket.assigns.tenant)
 
     with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
          socket = assign_authorization_context(socket, channel_name, access_token, claims),
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(socket.assigns.tenant),
          {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket) do
       Helpers.cancel_timer(pg_sub_ref)
       pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
@@ -548,12 +548,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     socket = Map.put(socket, :policies, nil)
     jwt_jwks = Map.get(assigns, :jwt_jwks)
 
-    db_conn = Connect.lookup_or_start_connection(tenant_id)
-
     with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(topic, db_conn, socket) do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 
