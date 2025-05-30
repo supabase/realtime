@@ -19,7 +19,11 @@ const url = env["PROJECT_URL"];
 const token = env["PROJECT_ANON_TOKEN"];
 const jwtSecret = env["PROJECT_JWT_SECRET"];
 
-const realtime = { heartbeatIntervalMs: 500, timeout: 1000 };
+const realtime = {
+  heartbeatIntervalMs: 500,
+  timeout: 1000,
+  logger: console.log,
+};
 const config = { config: { broadcast: { self: true } } };
 
 let supabase: SupabaseClient | null;
