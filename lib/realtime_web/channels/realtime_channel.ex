@@ -161,6 +161,9 @@ defmodule RealtimeWeb.RealtimeChannel do
           "Connecting to the project database"
         )
 
+      {:error, :token_malformed, msg} ->
+        Logging.log_error_message(:error, "MalformedJWT", msg)
+
       {:error, invalid_exp} when is_integer(invalid_exp) and invalid_exp <= 0 ->
         Logging.log_error_message(
           :error,
@@ -173,6 +176,13 @@ defmodule RealtimeWeb.RealtimeChannel do
           :error,
           "PrivateOnly",
           "This project only allows private channels"
+        )
+
+      {:error, :tenant_not_found} ->
+        Logging.log_error_message(
+          :error,
+          "TenantNotFound",
+          "Tenant with the given ID does not exist"
         )
 
       {:error, :tenant_suspended} ->
@@ -379,8 +389,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :missing_claims} ->
         shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
 
-      {:error, :token_malformed} ->
-        shutdown_response(socket, "The token provided is not a valid JWT")
+      {:error, :token_malformed, msg} ->
+        shutdown_response(socket, msg)
 
       {:error, :unable_to_set_policies, _msg} ->
         shutdown_response(socket, "Realtime was unable to connect to the project database")
@@ -518,30 +528,35 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp assign_access_token(%{assigns: %{tenant_token: _tenant_token}} = socket, %{
-         "user_token" => user_token
-       })
+  defp assign_access_token(%{assigns: %{headers: headers}} = socket, params) do
+    access_token = Map.get(params, "access_token") || Map.get(params, "user_token")
+    {_, header} = Enum.find(headers, {nil, nil}, fn {k, _} -> k == "x-api-key" end)
+
+    case access_token do
+      nil -> assign(socket, :access_token, header)
+      "sb_" <> _ -> assign(socket, :access_token, header)
+      _ -> handle_access_token(socket, params)
+    end
+  end
+
+  defp assign_access_token(socket, params), do: handle_access_token(socket, params)
+
+  defp handle_access_token(%{assigns: %{tenant_token: _tenant_token}} = socket, %{"user_token" => user_token})
        when is_binary(user_token) do
     assign(socket, :access_token, user_token)
   end
 
-  defp assign_access_token(%{assigns: %{tenant_token: _tenant_token}} = socket, %{
-         "access_token" => user_token
-       })
-       when is_binary(user_token) do
-    assign(socket, :access_token, user_token)
+  defp handle_access_token(%{assigns: %{tenant_token: _tenant_token}} = socket, %{"access_token" => access_token})
+       when is_binary(access_token) do
+    assign(socket, :access_token, access_token)
   end
 
-  defp assign_access_token(%{assigns: %{tenant_token: tenant_token}} = socket, _params)
-       when is_binary(tenant_token) do
+  defp handle_access_token(%{assigns: %{tenant_token: tenant_token}} = socket, _params) when is_binary(tenant_token) do
     assign(socket, :access_token, tenant_token)
   end
 
   defp confirm_token(%{assigns: assigns} = socket) do
-    %{
-      jwt_secret: jwt_secret,
-      access_token: access_token
-    } = assigns
+    %{jwt_secret: jwt_secret, access_token: access_token} = assigns
 
     topic = Map.get(assigns, :topic)
     db_conn = Map.get(assigns, :db_conn)
@@ -561,7 +576,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:ok, claims, ref, access_token, socket}
     else
       {:error, :token_malformed} ->
-        {:error, "The token provided is not a valid JWT"}
+        {:error, :token_malformed, "The token provided is not a valid JWT"}
 
       {:error, error} ->
         {:error, error}

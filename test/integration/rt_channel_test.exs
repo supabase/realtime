@@ -531,6 +531,32 @@ defmodule Realtime.Integration.RtChannelTest do
                WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", token}])
     end
 
+    test "handles connection with valid api-header but ignorable access_token payload", %{tenant: tenant, topic: topic} do
+      realtime_topic = "realtime:#{topic}"
+
+      log =
+        capture_log(fn ->
+          {:ok, token} =
+            generate_token(tenant, %{
+              exp: System.system_time(:second) + 1000,
+              role: "authenticated",
+              sub: random_string()
+            })
+
+          {:ok, socket} = WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", token}])
+
+          WebsocketClient.join(socket, realtime_topic, %{
+            config: %{broadcast: %{self: true}, private: false},
+            access_token: "sb_#{random_string()}"
+          })
+
+          assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+          assert_receive %Message{event: "presence_state"}, 500
+        end)
+
+      refute log =~ "MalformedJWT: The token provided is not a valid JWT"
+    end
+
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "on new access_token and channel is private policies are reevaluated for read policy",
          %{tenant: tenant, topic: topic} do
@@ -543,7 +569,7 @@ defmodule Realtime.Integration.RtChannelTest do
         access_token: access_token
       })
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, new_token} = token_valid(tenant, "anon")
@@ -571,7 +597,7 @@ defmodule Realtime.Integration.RtChannelTest do
       config = %{broadcast: %{self: true}, private: true}
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       # Checks first send which will set write policy to true
@@ -611,7 +637,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
@@ -626,7 +652,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => ""})
@@ -655,7 +681,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
       {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) - 1000, sub: sub})
 
@@ -702,7 +728,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
       {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) + 2000})
 
@@ -730,7 +756,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) + 2, role: "authenticated"})
@@ -757,7 +783,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, access_token} = generate_token(tenant, %{:exp => System.system_time(:second) + 1, role: "authenticated"})
@@ -784,7 +810,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, access_token} = generate_token(tenant, %{:exp => System.system_time(:second) + 10})
@@ -813,7 +839,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       # token becomes a string in between joins so it needs to be handled by the channel and not the socket
@@ -888,7 +914,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
@@ -1158,7 +1184,7 @@ defmodule Realtime.Integration.RtChannelTest do
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       change_tenant_configuration(tenant, :private_only, false)
     end
   end
@@ -1173,7 +1199,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
       tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["potato"]}})
@@ -1197,7 +1223,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
@@ -1222,7 +1248,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
       tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
