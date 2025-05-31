@@ -51,3 +51,5 @@ IO.puts("[test_helper.exs] Time to start tests: #{end_time - start_time} ms")
 
 Mimic.copy(Realtime.Nodes)
 Mimic.copy(RealtimeWeb.Endpoint)
+Mimic.copy(Realtime.GenCounter)
+Mimic.copy(Realtime.RateCounter)

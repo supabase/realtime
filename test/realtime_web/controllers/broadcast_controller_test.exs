@@ -30,46 +30,43 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
   describe "broadcast" do
     test "returns 202 when batch of messages is broadcasted", %{conn: conn, tenant: tenant} do
-      events_key = Tenants.events_per_second_key(tenant)
+      broadcast_events_key = Tenants.events_per_second_key(tenant)
+      request_events_key = Tenants.requests_per_second_key(tenant)
 
-      with_mocks [
-        {GenCounter, [:passthrough], add: fn _ -> :ok end}
-      ] do
-        sub_topic_1 = "sub_topic_1"
-        sub_topic_2 = "sub_topic_2"
-        topic_1 = Tenants.tenant_topic(tenant, sub_topic_1)
-        topic_2 = Tenants.tenant_topic(tenant, sub_topic_2)
+      GenCounter
+      |> expect(:add, fn ^request_events_key -> :ok end)
+      |> expect(:add, 2, fn ^broadcast_events_key -> :ok end)
 
-        payload_1 = %{"data" => "data"}
-        payload_2 = %{"data" => "data"}
-        event_1 = "event_1"
-        event_2 = "event_2"
+      sub_topic_1 = "sub_topic_1"
+      sub_topic_2 = "sub_topic_2"
+      topic_1 = Tenants.tenant_topic(tenant, sub_topic_1)
+      topic_2 = Tenants.tenant_topic(tenant, sub_topic_2)
 
-        payload_topic_1 = %{"payload" => payload_1, "event" => event_1, "type" => "broadcast"}
-        expect(Endpoint, :broadcast_from, 2, fn _, ^topic_1, "broadcast", ^payload_topic_1 -> :ok end)
+      payload_1 = %{"data" => "data"}
+      payload_2 = %{"data" => "data"}
+      event_1 = "event_1"
+      event_2 = "event_2"
 
-        payload_topic_2 = %{"payload" => payload_2, "event" => event_2, "type" => "broadcast"}
-        expect(Endpoint, :broadcast_from, fn _, ^topic_2, "broadcast", ^payload_topic_2 -> :ok end)
+      payload_topic_1 = %{"payload" => payload_1, "event" => event_1, "type" => "broadcast"}
+      expect(Endpoint, :broadcast_from, 2, fn _, ^topic_1, "broadcast", ^payload_topic_1 -> :ok end)
 
-        conn =
-          post(conn, Routes.broadcast_path(conn, :broadcast), %{
-            "messages" => [
-              %{"topic" => sub_topic_1, "payload" => payload_1, "event" => event_1},
-              %{"topic" => sub_topic_1, "payload" => payload_1, "event" => event_1},
-              %{"topic" => sub_topic_2, "payload" => payload_2, "event" => event_2}
-            ]
-          })
+      payload_topic_2 = %{"payload" => payload_2, "event" => event_2, "type" => "broadcast"}
+      expect(Endpoint, :broadcast_from, fn _, ^topic_2, "broadcast", ^payload_topic_2 -> :ok end)
 
-        assert_called_exactly(GenCounter.add(events_key), 3)
-        assert conn.status == 202
-      end
+      conn =
+        post(conn, Routes.broadcast_path(conn, :broadcast), %{
+          "messages" => [
+            %{"topic" => sub_topic_1, "payload" => payload_1, "event" => event_1},
+            %{"topic" => sub_topic_1, "payload" => payload_1, "event" => event_1},
+            %{"topic" => sub_topic_2, "payload" => payload_2, "event" => event_2}
+          ]
+        })
+
+      assert conn.status == 202
     end
 
-    test "returns 422 when batch of messages includes badly formed messages", %{
-      conn: conn,
-      tenant: tenant
-    } do
-      reject(Endpoint, :broadcast_from, 4)
+    test "returns 422 when batch of messages includes badly formed messages", %{conn: conn, tenant: tenant} do
+      reject(&Endpoint.broadcast_from/4)
 
       conn =
         post(conn, Routes.broadcast_path(conn, :broadcast), %{
@@ -115,57 +112,53 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       requests_key = Tenants.requests_per_second_key(tenant)
       events_key = Tenants.events_per_second_key(tenant)
 
-      with_mocks [
-        {RateCounter, [], new: fn _, _ -> {:ok, nil} end},
-        {RateCounter, [],
-         get: fn
-           ^requests_key -> {:ok, %RateCounter{avg: 0}}
-           ^events_key -> {:ok, %RateCounter{avg: 10}}
-         end}
-      ] do
-        conn =
-          post(conn, Routes.broadcast_path(conn, :broadcast), %{
-            "messages" =>
-              Stream.repeatedly(fn ->
-                %{
-                  "topic" => Tenants.tenant_topic(tenant, "sub_topic"),
-                  "payload" => %{"data" => "data"},
-                  "event" => "event"
-                }
-              end)
-              |> Enum.take(1000)
-          })
+      RateCounter
+      |> stub(:new, fn _, _ -> {:ok, nil} end)
+      |> stub(:get, fn
+        ^requests_key -> {:ok, %RateCounter{avg: 0}}
+        ^events_key -> {:ok, %RateCounter{avg: 10}}
+      end)
 
-        assert conn.status == 429
+      conn =
+        post(conn, Routes.broadcast_path(conn, :broadcast), %{
+          "messages" =>
+            Stream.repeatedly(fn ->
+              %{
+                "topic" => Tenants.tenant_topic(tenant, "sub_topic"),
+                "payload" => %{"data" => "data"},
+                "event" => "event"
+              }
+            end)
+            |> Enum.take(1000)
+        })
 
-        assert conn.resp_body ==
-                 Jason.encode!(%{
-                   message: "Too many messages to broadcast, please reduce the batch size"
-                 })
-      end
+      assert conn.status == 429
+
+      assert conn.resp_body ==
+               Jason.encode!(%{
+                 message: "Too many messages to broadcast, please reduce the batch size"
+               })
     end
 
     test "user has hit the rate limit", %{conn: conn, tenant: tenant} do
       requests_key = Tenants.requests_per_second_key(tenant)
       events_key = Tenants.events_per_second_key(tenant)
 
-      with_mocks [
-        {RateCounter, [], new: fn _, _ -> {:ok, nil} end},
-        {RateCounter, [],
-         get: fn
-           ^requests_key -> {:ok, %RateCounter{avg: 0}}
-           ^events_key -> {:ok, %RateCounter{avg: 1000}}
-         end}
-      ] do
-        messages = [
-          %{"topic" => Tenants.tenant_topic(tenant, "sub_topic"), "payload" => %{"data" => "data"}, "event" => "event"}
-        ]
+      RateCounter
+      |> stub(:new, fn _, _ -> {:ok, nil} end)
+      |> stub(:get, fn
+        ^requests_key -> {:ok, %RateCounter{avg: 0}}
+        ^events_key -> {:ok, %RateCounter{avg: 1000}}
+      end)
 
-        conn = generate_conn(conn, tenant)
-        conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-        assert conn.status == 429
-        assert conn.resp_body == Jason.encode!(%{message: "You have exceeded your rate limit"})
-      end
+      messages = [
+        %{"topic" => Tenants.tenant_topic(tenant, "sub_topic"), "payload" => %{"data" => "data"}, "event" => "event"}
+      ]
+
+      conn = generate_conn(conn, tenant)
+      conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
+      assert conn.status == 429
+      assert conn.resp_body == Jason.encode!(%{message: "You have exceeded your rate limit"})
     end
   end
 
@@ -235,46 +228,45 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       db_conn: db_conn,
       tenant: tenant
     } do
-      with_mocks [{GenCounter, [:passthrough], add: fn _ -> :ok end}] do
-        expect(Endpoint, :broadcast_from, 5, fn _, _, _, _ -> :ok end)
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      broadcast_events_key = Tenants.events_per_second_key(tenant)
+      expect(Endpoint, :broadcast_from, 5, fn _, _, _, _ -> :ok end)
 
-        messages_to_send =
-          Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
-          |> Enum.take(5)
+      messages_to_send =
+        Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
+        |> Enum.take(5)
 
-        messages =
-          Enum.map(messages_to_send, fn %{topic: topic} ->
-            %{
-              "topic" => topic,
-              "payload" => %{"content" => "payload" <> topic},
-              "event" => "event" <> topic,
-              "private" => true
-            }
-          end)
-
-        conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-
-        broadcast_calls = calls(&Endpoint.broadcast_from/4)
-
-        Enum.each(messages_to_send, fn %{topic: topic} ->
-          payload = %{
+      messages =
+        Enum.map(messages_to_send, fn %{topic: topic} ->
+          %{
+            "topic" => topic,
             "payload" => %{"content" => "payload" <> topic},
             "event" => "event" <> topic,
-            "type" => "broadcast"
+            "private" => true
           }
-
-          broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
-
-          assert [self(), broadcast_topic, "broadcast", payload] in broadcast_calls
         end)
 
-        assert_called_exactly(
-          GenCounter.add(Tenants.events_per_second_key(tenant)),
-          length(messages)
-        )
+      GenCounter
+      |> expect(:add, fn ^request_events_key -> :ok end)
+      |> expect(:add, length(messages), fn ^broadcast_events_key -> :ok end)
 
-        assert conn.status == 202
-      end
+      conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
+
+      broadcast_calls = calls(&Endpoint.broadcast_from/4)
+
+      Enum.each(messages_to_send, fn %{topic: topic} ->
+        payload = %{
+          "payload" => %{"content" => "payload" <> topic},
+          "event" => "event" <> topic,
+          "type" => "broadcast"
+        }
+
+        broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
+
+        assert [self(), broadcast_topic, "broadcast", payload] in broadcast_calls
+      end)
+
+      assert conn.status == 202
     end
 
     @tag role: "authenticated"
@@ -283,63 +275,64 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       db_conn: db_conn,
       tenant: tenant
     } do
-      with_mocks [
-        {GenCounter, [:passthrough], add: fn _ -> :ok end}
-      ] do
-        expect(Endpoint, :broadcast_from, 6, fn _, _, _, _ -> :ok end)
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      broadcast_events_key = Tenants.events_per_second_key(tenant)
+      expect(Endpoint, :broadcast_from, 6, fn _, _, _, _ -> :ok end)
 
-        channels =
-          Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
-          |> Enum.take(5)
+      channels =
+        Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
+        |> Enum.take(5)
 
-        messages =
-          Enum.map(channels, fn %{topic: topic} ->
-            %{
-              "topic" => topic,
-              "payload" => %{"content" => "payload" <> topic},
-              "event" => "event" <> topic,
-              "private" => true
-            }
-          end)
-
-        messages =
-          messages ++
-            [
-              %{
-                "topic" => "open_channel",
-                "payload" => %{"content" => "content_open_channel"},
-                "event" => "event_open_channel"
-              }
-            ]
-
-        conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-
-        broadcast_calls = calls(&Endpoint.broadcast_from/4)
-
-        Enum.each(channels, fn %{topic: topic} ->
-          payload = %{
+      messages =
+        Enum.map(channels, fn %{topic: topic} ->
+          %{
+            "topic" => topic,
             "payload" => %{"content" => "payload" <> topic},
             "event" => "event" <> topic,
-            "type" => "broadcast"
+            "private" => true
           }
-
-          broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
-
-          assert [self(), broadcast_topic, "broadcast", payload] in broadcast_calls
         end)
 
-        # Check open channel
+      messages =
+        messages ++
+          [
+            %{
+              "topic" => "open_channel",
+              "payload" => %{"content" => "content_open_channel"},
+              "event" => "event_open_channel"
+            }
+          ]
+
+      GenCounter
+      |> expect(:add, fn ^request_events_key -> :ok end)
+      |> expect(:add, length(messages), fn ^broadcast_events_key -> :ok end)
+
+      conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
+
+      broadcast_calls = calls(&Endpoint.broadcast_from/4)
+
+      Enum.each(channels, fn %{topic: topic} ->
         payload = %{
-          "payload" => %{"content" => "content_open_channel"},
-          "event" => "event_open_channel",
+          "payload" => %{"content" => "payload" <> topic},
+          "event" => "event" <> topic,
           "type" => "broadcast"
         }
 
-        assert [self(), Tenants.tenant_topic(tenant, "open_channel", true), "broadcast", payload] in broadcast_calls
-        assert_called_exactly(GenCounter.add(Tenants.events_per_second_key(tenant)), length(channels) + 1)
+        broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
 
-        assert conn.status == 202
-      end
+        assert [self(), broadcast_topic, "broadcast", payload] in broadcast_calls
+      end)
+
+      # Check open channel
+      payload = %{
+        "payload" => %{"content" => "content_open_channel"},
+        "event" => "event_open_channel",
+        "type" => "broadcast"
+      }
+
+      assert [self(), Tenants.tenant_topic(tenant, "open_channel", true), "broadcast", payload] in broadcast_calls
+
+      assert conn.status == 202
     end
 
     @tag role: "authenticated"
@@ -348,81 +341,78 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       db_conn: db_conn,
       tenant: tenant
     } do
-      with_mocks [{GenCounter, [:passthrough], add: fn _ -> :ok end}] do
-        expect(Endpoint, :broadcast_from, 5, fn _, _, _, _ -> :ok end)
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      broadcast_events_key = Tenants.events_per_second_key(tenant)
+      expect(Endpoint, :broadcast_from, 5, fn _, _, _, _ -> :ok end)
 
-        messages_to_send =
-          Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
-          |> Enum.take(5)
+      messages_to_send =
+        Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
+        |> Enum.take(5)
 
-        no_auth_channel = message_fixture(tenant)
+      no_auth_channel = message_fixture(tenant)
 
-        messages =
-          Enum.map(messages_to_send ++ [no_auth_channel], fn %{topic: topic} ->
-            %{
-              "topic" => topic,
-              "payload" => %{"content" => "payload" <> topic},
-              "event" => "event" <> topic,
-              "private" => true
-            }
-          end)
-
-        conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
-
-        broadcast_calls = calls(&Endpoint.broadcast_from/4)
-
-        Enum.each(messages_to_send, fn %{topic: topic} ->
-          payload = %{
+      messages =
+        Enum.map(messages_to_send ++ [no_auth_channel], fn %{topic: topic} ->
+          %{
+            "topic" => topic,
             "payload" => %{"content" => "payload" <> topic},
             "event" => "event" <> topic,
-            "type" => "broadcast"
+            "private" => true
           }
-
-          broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
-
-          assert [self(), broadcast_topic, "broadcast", payload] in broadcast_calls
         end)
 
-        assert_called_exactly(GenCounter.add(Tenants.events_per_second_key(tenant)), length(messages_to_send))
+      GenCounter
+      |> expect(:add, fn ^request_events_key -> :ok end)
+      |> expect(:add, length(messages_to_send), fn ^broadcast_events_key -> :ok end)
 
-        assert conn.status == 202
-      end
+      conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
+
+      broadcast_calls = calls(&Endpoint.broadcast_from/4)
+
+      Enum.each(messages_to_send, fn %{topic: topic} ->
+        payload = %{
+          "payload" => %{"content" => "payload" <> topic},
+          "event" => "event" <> topic,
+          "type" => "broadcast"
+        }
+
+        broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
+
+        assert [self(), broadcast_topic, "broadcast", payload] in broadcast_calls
+      end)
+
+      assert conn.status == 202
     end
 
     @tag role: "anon"
-    test "user without permission won't broadcast", %{
-      conn: conn,
-      db_conn: db_conn,
-      tenant: tenant
-    } do
+    test "user without permission won't broadcast", %{conn: conn, db_conn: db_conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
       reject(&Endpoint.broadcast_from/4)
 
-      with_mocks [
-        {GenCounter, [:passthrough], add: fn _ -> :ok end}
-      ] do
-        messages =
-          Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
-          |> Enum.take(5)
+      messages =
+        Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
+        |> Enum.take(5)
 
-        # Duplicate messages to ensure same topics emit twice
-        messages = messages ++ messages
+      # Duplicate messages to ensure same topics emit twice
+      messages = messages ++ messages
 
-        messages =
-          Enum.map(messages, fn %{topic: topic} ->
-            %{
-              "topic" => topic,
-              "payload" => %{"content" => random_string()},
-              "event" => random_string(),
-              "private" => true
-            }
-          end)
+      messages =
+        Enum.map(messages, fn %{topic: topic} ->
+          %{
+            "topic" => topic,
+            "payload" => %{"content" => random_string()},
+            "event" => random_string(),
+            "private" => true
+          }
+        end)
 
-        conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
+      GenCounter
+      |> expect(:add, fn ^request_events_key -> :ok end)
+      |> reject(:add, 1)
 
-        assert_not_called(GenCounter.add(Tenants.events_per_second_key(tenant)))
+      conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-        assert conn.status == 202
-      end
+      assert conn.status == 202
     end
   end
 
