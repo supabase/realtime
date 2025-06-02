@@ -57,10 +57,15 @@ if Code.ensure_loaded?(Phoenix) do
 
     def execute_metrics do
       active_conn =
-        if :ranch.info()[HTTP] do
-          :ranch.info(HTTP)[:active_connections]
-        else
-          -1
+        case :ets.lookup(:ranch_server, {:listener_sup, HTTP}) do
+          [] ->
+            -1
+
+          _ ->
+            HTTP
+            |> :ranch_server.get_connections_sup()
+            |> :supervisor.count_children()
+            |> Keyword.get(:active)
         end
 
       :telemetry.execute(@event_all_connections, %{active: active_conn}, %{})
