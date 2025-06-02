@@ -51,3 +51,9 @@ defimpl Jason.Encoder, for: Postgrex.Error do
     inspect(%{message: message, schema: schema, table: table, code: code}, pretty: true)
   end
 end
+
+defimpl Jason.Encoder, for: Tuple do
+  def encode(tuple, _opts) do
+    inspect(Tuple.to_list(tuple), pretty: true)
+  end
+end
