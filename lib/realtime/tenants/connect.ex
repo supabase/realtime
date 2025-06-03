@@ -354,7 +354,6 @@ defmodule Realtime.Tenants.Connect do
   def terminate(reason, %{tenant_id: tenant_id}) do
     Logger.info("Tenant #{tenant_id} has been terminated: #{inspect(reason)}")
     Realtime.MetricsCleaner.delete_metric(tenant_id)
-    Registry.unregister(__MODULE__.Registry, tenant_id)
     :ok
   end
 
@@ -394,11 +393,8 @@ defmodule Realtime.Tenants.Connect do
     %{
       db_conn_pid: db_conn_pid,
       replication_connection_pid: replication_connection_pid,
-      listen_pid: listen_pid,
-      tenant_id: tenant_id
+      listen_pid: listen_pid
     } = state
-
-    Registry.unregister(__MODULE__.Registry, tenant_id)
 
     :ok = GenServer.stop(db_conn_pid, :shutdown, 500)
 

@@ -137,13 +137,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     {:noreply, prepare_replication(state)}
   end
 
-  @impl true
-  def terminate(reason, state) do
-    Logger.error("Terminating ReplicationPoller: #{inspect(reason)}")
-    Registry.unregister(__MODULE__.Registry, state.tenant)
-    {:stop, reason, state}
-  end
-
   def slot_name_suffix do
     case Application.get_env(:realtime, :slot_name_suffix) do
       nil -> ""
