@@ -45,6 +45,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       tenant: tenant
     }
 
+    Registry.register(__MODULE__.Registry, tenant, %{})
     {:ok, state, {:continue, {:connect, args}}}
   end
 
@@ -134,6 +135,13 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   def handle_info(:retry, %{retry_ref: retry_ref} = state) do
     cancel_timer(retry_ref)
     {:noreply, prepare_replication(state)}
+  end
+
+  @impl true
+  def terminate(reason, state) do
+    Logger.error("Terminating ReplicationPoller: #{inspect(reason)}")
+    Registry.unregister(__MODULE__.Registry, state.tenant)
+    {:stop, reason, state}
   end
 
   def slot_name_suffix do
