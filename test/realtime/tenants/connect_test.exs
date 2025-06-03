@@ -1,8 +1,10 @@
 defmodule Realtime.Tenants.ConnectTest do
-  # async: false due to the fact that we are checking ets tables for user tracking and usage of mocks
+  # Async false due to Mimic running as global because we are spawning Connect processes
   use Realtime.DataCase, async: false
-  import ExUnit.CaptureLog
-  import Mock
+  use Mimic
+
+  setup :set_mimic_global
+
   import ExUnit.CaptureLog
 
   alias Realtime.Database
@@ -12,8 +14,6 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Realtime.UsersCounter
 
   setup do
-    :ets.delete_all_objects(Connect)
-
     tenant = Containers.checkout_tenant(run_migrations: true)
 
     %{tenant: tenant}
@@ -212,13 +212,12 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "on migrations failure, stop the process" do
-      with_mock Realtime.Tenants.Migrations, [], run_migrations: fn _ -> raise("error") end do
-        tenant = Containers.checkout_tenant(run_migrations: false)
-        assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
-        assert_process_down(pid)
-        refute Process.alive?(pid)
-        assert_called(Realtime.Tenants.Migrations.run_migrations(tenant))
-      end
+      tenant = Containers.checkout_tenant(run_migrations: false)
+      expect(Realtime.Tenants.Migrations, :run_migrations, fn ^tenant -> raise "error" end)
+
+      assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert_process_down(pid)
+      refute Process.alive?(pid)
     end
 
     test "starts broadcast handler and does not fail on existing connection", %{tenant: tenant} do
@@ -324,19 +323,16 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "syn with no connection", %{tenant: tenant} do
-      with_mock :syn, [], lookup: fn _, _ -> {nil, %{conn: nil}} end do
-        assert {:error, :tenant_database_unavailable} =
-                 Connect.lookup_or_start_connection(tenant.external_id)
+      external_id = tenant.external_id
+      expect(:syn, :lookup, 2, fn Connect, ^external_id -> {nil, %{conn: nil}} end)
 
-        assert {:error, :initializing} =
-                 Connect.get_status(tenant.external_id)
-      end
+      assert {:error, :tenant_database_unavailable} = Connect.lookup_or_start_connection(external_id)
+      assert {:error, :initializing} = Connect.get_status(external_id)
     end
 
     test "handle rpc errors gracefully" do
-      with_mock Realtime.Nodes, get_node_for_tenant: fn _ -> {:ok, :potato@nohost} end do
-        assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant")
-      end
+      expect(Realtime.Nodes, :get_node_for_tenant, fn _ -> {:ok, :potato@nohost} end)
+      assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant")
     end
   end
 

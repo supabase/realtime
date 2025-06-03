@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.JwtVerificationTest do
-  # async: false due to mock usage
+  # async: false due to mock usage and changing application env
   use Realtime.DataCase, async: false
 
   alias RealtimeWeb.JwtVerification

@@ -1,8 +1,8 @@
 defmodule RealtimeWeb.ChannelsAuthorizationTest do
-  # async: false due to usage of mocks
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
-  import Mock
+  use Mimic
+
   import Generators
 
   alias RealtimeWeb.ChannelsAuthorization
@@ -14,19 +14,17 @@ defmodule RealtimeWeb.ChannelsAuthorizationTest do
       input_token = "\n token %20 1 %20 2 %20 3   "
       expected_token = "token123"
 
-      with_mock JwtVerification,
-        verify: fn token, @secret, _jwks ->
-          assert token == expected_token
-          {:ok, %{}}
-        end do
-        assert {:ok, %{}} = ChannelsAuthorization.authorize(input_token, @secret, nil)
-      end
+      expect(JwtVerification, :verify, 1, fn token, @secret, _jwks ->
+        assert token == expected_token
+        {:ok, %{}}
+      end)
+
+      assert {:ok, %{}} = ChannelsAuthorization.authorize(input_token, @secret, nil)
     end
 
     test "when token is unauthorized" do
-      with_mock JwtVerification, verify: fn _token, _secret, _jwks -> :error end do
-        assert :error = ChannelsAuthorization.authorize("bad_token", @secret, nil)
-      end
+      expect(JwtVerification, :verify, 1, fn _token, @secret, _jwks -> :error end)
+      assert :error = ChannelsAuthorization.authorize("bad_token", @secret, nil)
     end
 
     test "when token is not a jwt token" do

@@ -16,7 +16,6 @@ defmodule RealtimeWeb.AuthTenantTest do
 
   describe "with tenant" do
     setup %{conn: conn} = context do
-      start_supervised!(RealtimeWeb.Joken.CurrentTime.Mock)
       api_key = Map.get(context, :api_key)
       header = Map.get(context, :header)
 

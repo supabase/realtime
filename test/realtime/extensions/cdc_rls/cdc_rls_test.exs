@@ -1,8 +1,7 @@
 defmodule Realtime.Extensions.CdcRlsTest do
-  # async: false due to usage of dev_realtime and mocks
+  # async: false due to usage of dev_tenant
   use RealtimeWeb.ChannelCase, async: false
-
-  import Mock
+  use Mimic
 
   alias Realtime.PostgresCdc
   alias Extensions.PostgresCdcRls
@@ -16,8 +15,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
   @external_id "dev_tenant"
   @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjQ5OTYzNTc1LCJleHAiOjE5NjU1Mzk1NzV9.v7UZK05KaVQKInBBH_AP5h0jXUEwCCC5qtdj3iaxbNQ"
 
-  setup %{} do
-    {:ok, _pid} = start_supervised(RealtimeWeb.Joken.CurrentTime.Mock)
+  setup do
     tenant = Api.get_tenant_by_external_id(@external_id)
 
     assigns = %{
@@ -38,23 +36,18 @@ defmodule Realtime.Extensions.CdcRlsTest do
       log_level: :info
     }
 
-    with_mocks([
-      {ChannelsAuthorization, [],
-       [
-         authorize_conn: fn _, _, _ ->
-           {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
-         end
-       ]}
-    ]) do
-      {:ok, _, socket} =
-        RealtimeWeb.UserSocket
-        |> socket("user_id", assigns)
-        |> subscribe_and_join(RealtimeWeb.RealtimeChannel, "realtime:my_topic", %{
-          "user_token" => @token
-        })
+    expect(ChannelsAuthorization, :authorize_conn, fn _, _, _ ->
+      {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
+    end)
 
-      %{socket: socket, tenant: tenant}
-    end
+    {:ok, _, socket} =
+      RealtimeWeb.UserSocket
+      |> socket("user_id", assigns)
+      |> subscribe_and_join(RealtimeWeb.RealtimeChannel, "realtime:my_topic", %{
+        "user_token" => @token
+      })
+
+    %{socket: socket, tenant: tenant}
   end
 
   describe "Postgres extensions" do

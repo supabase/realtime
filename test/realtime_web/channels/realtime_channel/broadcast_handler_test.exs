@@ -1,9 +1,8 @@
 defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
-  # async: false due to the usage of mocks
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
+  use Mimic
 
   import Generators
-  import Mock
 
   alias Realtime.RateCounter
   alias Realtime.RateCounter
@@ -13,7 +12,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.Endpoint
-  alias RealtimeWeb.Joken.CurrentTime
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
 
   setup [:initiate_tenant]
@@ -117,21 +115,21 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket = socket_fixture(tenant, topic, db_conn)
 
-      with_mock Authorization, [:passthrough], [] do
-        for _ <- 1..100, reduce: socket do
-          socket ->
-            {:reply, :ok, socket} = BroadcastHandler.handle(%{}, socket)
-            socket
-        end
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context ->
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context])
+      end)
 
-        Process.sleep(100)
+      for _ <- 1..100, reduce: socket do
+        socket ->
+          {:reply, :ok, socket} = BroadcastHandler.handle(%{}, socket)
+          socket
+      end
 
-        for _ <- 1..100 do
-          topic = "realtime:#{topic}"
-          assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
-        end
+      Process.sleep(100)
 
-        assert_called_exactly(Authorization.get_write_authorizations(:_, :_, :_), 1)
+      for _ <- 1..100 do
+        topic = "realtime:#{topic}"
+        assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
       end
     end
 
@@ -142,21 +140,21 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     } do
       socket = socket_fixture(tenant, topic, db_conn)
 
-      with_mock Authorization, [:passthrough], [] do
-        for _ <- 1..100, reduce: socket do
-          socket ->
-            {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
-            socket
-        end
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context ->
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context])
+      end)
 
-        Process.sleep(100)
+      for _ <- 1..100, reduce: socket do
+        socket ->
+          {:noreply, socket} = BroadcastHandler.handle(%{}, socket)
+          socket
+      end
 
-        for _ <- 1..100 do
-          topic = "realtime:#{topic}"
-          refute_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
-        end
+      Process.sleep(100)
 
-        assert_called_exactly(Authorization.get_write_authorizations(:_, :_, :_), 1)
+      for _ <- 1..100 do
+        topic = "realtime:#{topic}"
+        refute_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
       end
     end
 
@@ -224,12 +222,13 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   defp initiate_tenant(context) do
     start_supervised(Realtime.GenCounter.DynamicSupervisor)
     start_supervised(Realtime.RateCounter.DynamicSupervisor)
-    start_supervised(CurrentTime.Mock)
 
     tenant = Containers.checkout_tenant(run_migrations: true)
+    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
+    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-    Process.sleep(500)
+    assert Connect.ready?(tenant.external_id)
 
     topic = random_string()
     Endpoint.subscribe("realtime:#{topic}")
