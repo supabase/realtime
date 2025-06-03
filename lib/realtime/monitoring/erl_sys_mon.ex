@@ -7,17 +7,20 @@ defmodule Realtime.ErlSysMon do
 
   require Logger
 
-  @defults [
+  @defaults [
     :busy_dist_port,
     :busy_port,
     {:long_gc, 250},
     {:long_schedule, 100},
     {:long_message_queue, {0, 1_000}}
   ]
-  def start_link(args \\ @defults), do: GenServer.start_link(__MODULE__, args)
+
+  def start_link(args), do: GenServer.start_link(__MODULE__, args)
 
   def init(args) do
-    :erlang.system_monitor(self(), args)
+    config = Keyword.get(args, :config, @defaults)
+    :erlang.system_monitor(self(), config)
+
     {:ok, []}
   end
 
