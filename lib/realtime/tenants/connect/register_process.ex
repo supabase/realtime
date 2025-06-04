@@ -14,6 +14,7 @@ defmodule Realtime.Tenants.Connect.RegisterProcess do
       {:ok, acc}
     else
       {:error, :undefined} -> {:error, :process_not_found}
+      {:error, {:already_registered, _}} -> {:error, :already_registered}
       {:error, reason} -> {:error, reason}
     end
   end

@@ -16,7 +16,24 @@ defmodule Realtime.Tenants.Connect.RegisterProcessTest do
       # Fake the process registration in :syn
       :syn.register(Realtime.Tenants.Connect, tenant_id, self(), %{conn: nil})
       assert {:ok, _} = RegisterProcess.run(%{tenant_id: tenant_id, db_conn_pid: conn})
-      assert {_, %{conn: ^conn}} = :syn.lookup(Realtime.Tenants.Connect, tenant_id)
+      assert {pid, %{conn: ^conn}} = :syn.lookup(Realtime.Tenants.Connect, tenant_id)
+      assert [{^pid, %{}}] = Registry.lookup(Realtime.Tenants.Connect.Registry, tenant_id)
+    end
+
+    test "fails to register the process in syn and Registry and updates metadata", %{
+      tenant_id: tenant_id,
+      db_conn_pid: conn
+    } do
+      # Fake the process registration in :syn
+      :syn.register(Realtime.Tenants.Connect, tenant_id, self(), %{conn: nil})
+
+      # Register normally
+      assert {:ok, _} = RegisterProcess.run(%{tenant_id: tenant_id, db_conn_pid: conn})
+      assert {pid, %{conn: ^conn}} = :syn.lookup(Realtime.Tenants.Connect, tenant_id)
+      assert [{^pid, %{}}] = Registry.lookup(Realtime.Tenants.Connect.Registry, tenant_id)
+
+      # Check failure
+      assert {:error, :already_registered} = RegisterProcess.run(%{tenant_id: tenant_id, db_conn_pid: conn})
     end
 
     test "handles undefined process error" do
