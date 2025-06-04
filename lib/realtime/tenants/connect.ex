@@ -298,17 +298,17 @@ defmodule Realtime.Tenants.Connect do
 
   def handle_info(:shutdown_no_connected_users, state) do
     Logger.info("Tenant has no connected users, database connection will be terminated")
-    shutdown_connect_process(state)
+    {:stop, :shutdown, state}
   end
 
   def handle_info(:suspend_tenant, state) do
     Logger.warning("Tenant was suspended, database connection will be terminated")
-    shutdown_connect_process(state)
+    {:stop, :shutdown, state}
   end
 
   def handle_info(:shutdown_connect, state) do
     Logger.warning("Shutdowning tenant connection")
-    shutdown_connect_process(state)
+    {:stop, :shutdown, state}
   end
 
   # Handle database connection termination
@@ -388,22 +388,4 @@ defmodule Realtime.Tenants.Connect do
 
   defp tenant_suspended?(%Tenant{suspend: true}), do: {:error, :tenant_suspended}
   defp tenant_suspended?(_), do: :ok
-
-  defp shutdown_connect_process(state) do
-    %{
-      db_conn_pid: db_conn_pid,
-      replication_connection_pid: replication_connection_pid,
-      listen_pid: listen_pid
-    } = state
-
-    :ok = GenServer.stop(db_conn_pid, :shutdown, 500)
-
-    replication_connection_pid && Process.alive?(replication_connection_pid) &&
-      GenServer.stop(replication_connection_pid, :normal, 500)
-
-    listen_pid && Process.alive?(listen_pid) &&
-      GenServer.stop(listen_pid, :normal, 500)
-
-    {:stop, :normal, state}
-  end
 end
