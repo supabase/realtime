@@ -276,7 +276,7 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
-      listen_pid = ReplicationConnection.whereis(tenant.external_id)
+      listen_pid = Listen.whereis(tenant.external_id)
       assert Process.alive?(listen_pid)
 
       pid = Connect.whereis(tenant.external_id)

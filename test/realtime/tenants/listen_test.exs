@@ -5,17 +5,67 @@ defmodule Realtime.Tenants.ListenTest do
   alias Realtime.Tenants.Listen
   alias Realtime.Database
 
-  describe("start/1") do
+  describe "start/1" do
     setup do
       tenant = Containers.checkout_tenant(run_migrations: true)
 
-      {:ok, _} = Listen.start(tenant, self())
-      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-
-      {:ok, tenant: tenant, db_conn: db_conn}
+      %{tenant: tenant}
     end
 
-    test "on realtime.send error, notify will capture and log error", %{db_conn: db_conn} do
+    test "connection error" do
+      port = Generators.port()
+
+      extensions = [
+        %{
+          "type" => "postgres_cdc_rls",
+          "settings" => %{
+            "db_host" => "127.0.0.1",
+            "db_name" => "postgres",
+            "db_user" => "postgres",
+            "db_password" => "postgres",
+            "db_port" => "#{port}",
+            "poll_interval" => 100,
+            "poll_max_changes" => 100,
+            "poll_max_record_bytes" => 1_048_576,
+            "region" => "us-east-1",
+            "ssl_enforced" => true
+          }
+        }
+      ]
+
+      tenant = tenant_fixture(%{extensions: extensions})
+
+      {:error, {:error, %DBConnection.ConnectionError{}}} = Listen.start(tenant, self())
+    end
+
+    test "monitored pid stopping also stops Listen process", %{tenant: tenant} do
+      monitored_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      {:ok, listen} = Listen.start(tenant, monitored_pid)
+
+      send(monitored_pid, :stop)
+
+      ref = Process.monitor(listen)
+      assert_receive {:DOWN, ^ref, :process, ^listen, _reason}, 100
+      refute Process.alive?(listen)
+    end
+
+    test "process already exists", %{tenant: tenant} do
+      {:ok, listen} = Listen.start(tenant, self())
+
+      # Same listen process is returned
+      {:ok, ^listen} = Listen.start(tenant, self())
+    end
+
+    test "on realtime.send error, notify will capture and log error", %{tenant: tenant} do
+      {:ok, _listen} = Listen.start(tenant, self())
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
       assert capture_log(fn ->
                Postgrex.query!(
                  db_conn,

@@ -124,7 +124,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     end
   end
 
-  test "monitored pid crashing brings down ReplicationConnection ", %{tenant: tenant} do
+  test "monitored pid stopping brings down ReplicationConnection ", %{tenant: tenant} do
     monitored_pid =
       spawn(fn ->
         receive do
@@ -145,6 +145,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
         ref = Process.monitor(pid)
         assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 100
+        refute Process.alive?(pid)
       end)
 
     assert logs =~ "Disconnecting broadcast changes handler in the step"
