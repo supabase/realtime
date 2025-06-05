@@ -43,6 +43,10 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       {:ok, policies} ->
         {:noreply, assign(socket, :policies, policies)}
 
+      {:error, :rls_policy_error, error} ->
+        log_error("RlsPolicyError", error)
+        {:noreply, socket}
+
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
         {:noreply, socket}
