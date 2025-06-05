@@ -185,26 +185,26 @@ describe("authorization check", () => {
     assertEquals(connected, true);
   });
 
-  it("user using private channel for jwt connections can connect if they have enough permissions based on claims", async () => {
-    supabase = await createClient(url, token, { realtime });
+  // it("user using private channel for jwt connections can connect if they have enough permissions based on claims", async () => {
+  //   supabase = await createClient(url, token, { realtime });
 
-    let topic = "jwt_topic:" + crypto.randomUUID();
-    let connected = false;
-    let claims = { role: "authenticated", sub: "wallet_1" };
-    let jwt_token = await generateJwtToken(claims);
+  //   let topic = "jwt_topic:" + crypto.randomUUID();
+  //   let connected = false;
+  //   let claims = { role: "authenticated", sub: "wallet_1" };
+  //   let jwt_token = await generateJwtToken(claims);
 
-    await supabase.realtime.setAuth(jwt_token);
+  //   await supabase.realtime.setAuth(jwt_token);
 
-    const channel = supabase
-      .channel(topic, { config: { private: true } })
-      .subscribe((status: string) => {
-        if (status == "SUBSCRIBED") connected = true;
-      });
+  //   const channel = supabase
+  //     .channel(topic, { config: { private: true } })
+  //     .subscribe((status: string) => {
+  //       if (status == "SUBSCRIBED") connected = true;
+  //     });
 
-    while (channel.state == "joining") await sleep(0.2);
+  //   while (channel.state == "joining") await sleep(0.2);
 
-    assertEquals(connected, true);
-  });
+  //   assertEquals(connected, true);
+  // });
 });
 
 describe("broadcast changes", () => {

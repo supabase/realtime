@@ -221,17 +221,12 @@ defmodule Realtime.Integration.RtChannelTest do
 
     test "public broadcast", %{tenant: tenant} do
       {socket, _} = get_connection(tenant)
-
-      config = %{
-        broadcast: %{self: true},
-        private: false
-      }
-
+      config = %{broadcast: %{self: true}, private: false}
       topic = "realtime:any"
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
-      assert_receive %Message{}
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
@@ -239,10 +234,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
     end
 
-    @tag policies: [
-           :authenticated_read_broadcast_and_presence,
-           :authenticated_write_broadcast_and_presence
-         ]
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "private broadcast with valid channel with permissions sends message", %{
       tenant: tenant,
       topic: topic
@@ -252,34 +244,16 @@ defmodule Realtime.Integration.RtChannelTest do
       topic = "realtime:#{topic}"
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{
-                       event: "phx_reply",
-                       payload: %{
-                         "response" => %{"postgres_changes" => []},
-                         "status" => "ok"
-                       },
-                       ref: "1",
-                       topic: ^topic
-                     },
-                     500
-
-      assert_receive %Message{}
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
 
-      assert_receive %Message{
-        event: "broadcast",
-        payload: ^payload,
-        ref: nil,
-        topic: ^topic
-      }
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}
     end
 
-    @tag policies: [
-           :authenticated_read_broadcast_and_presence,
-           :authenticated_write_broadcast_and_presence
-         ],
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
          topic: "topic"
     test "private broadcast with valid channel a colon character sends message and won't intercept in public channels",
          %{topic: topic, tenant: tenant} do
@@ -288,30 +262,18 @@ defmodule Realtime.Integration.RtChannelTest do
       valid_topic = "realtime:#{topic}"
       malicious_topic = "realtime:private:#{topic}"
 
-      WebsocketClient.join(socket, valid_topic, %{
-        config: %{broadcast: %{self: true}, private: true}
-      })
+      WebsocketClient.join(socket, valid_topic, %{config: %{broadcast: %{self: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^valid_topic}, 300
+      assert_receive %Message{event: "presence_state"}
 
-      assert_receive %Message{event: "phx_reply", topic: ^valid_topic}, 500
-      assert_receive %Message{}, 500
-
-      WebsocketClient.join(anon_socket, malicious_topic, %{
-        config: %{broadcast: %{self: true}, private: false}
-      })
-
-      assert_receive %Message{event: "phx_reply", topic: ^malicious_topic}, 500
-      assert_receive %Message{}, 500
+      WebsocketClient.join(anon_socket, malicious_topic, %{config: %{broadcast: %{self: true}, private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^malicious_topic}, 300
+      assert_receive %Message{event: "presence_state"}
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, valid_topic, "broadcast", payload)
 
-      assert_receive %Message{
-                       event: "broadcast",
-                       payload: ^payload,
-                       topic: ^valid_topic
-                     },
-                     500
-
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^valid_topic}, 500
       refute_receive %Message{event: "broadcast"}
     end
 
@@ -324,50 +286,28 @@ defmodule Realtime.Integration.RtChannelTest do
       topic = "realtime:#{topic}"
 
       {service_role_socket, _} = get_connection(tenant, "service_role")
-
       WebsocketClient.join(service_role_socket, topic, %{config: config})
-      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
-      assert_receive %Message{event: "presence_state"}, 1000
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
 
       {socket, _} = get_connection(tenant, "authenticated")
       WebsocketClient.join(socket, topic, %{config: config})
-      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
-      assert_receive %Message{event: "presence_state"}, 1000
-
-      Process.sleep(1000)
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
-      WebsocketClient.send_event(socket, topic, "broadcast", payload)
 
-      refute_receive %Message{
-                       event: "broadcast",
-                       payload: ^payload,
-                       topic: ^topic
-                     },
-                     500
+      WebsocketClient.send_event(socket, topic, "broadcast", payload)
+      refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
 
       WebsocketClient.send_event(service_role_socket, topic, "broadcast", payload)
-
-      assert_receive %Message{
-                       event: "broadcast",
-                       payload: ^payload,
-                       topic: ^topic
-                     },
-                     500
-
-      assert_receive %Message{
-                       event: "broadcast",
-                       payload: ^payload,
-                       topic: ^topic
-                     },
-                     500
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
     end
 
     @tag policies: []
-    test "private broadcast with valid channel and no read permissions won't join",
-         %{tenant: tenant, topic: topic} do
+    test "private broadcast with valid channel and no read permissions won't join", %{tenant: tenant, topic: topic} do
       config = %{private: true}
-
       expected = "You do not have permissions to read from this Channel topic: #{topic}"
 
       topic = "realtime:#{topic}"
@@ -380,16 +320,63 @@ defmodule Realtime.Integration.RtChannelTest do
           assert_receive %Message{
                            topic: ^topic,
                            event: "phx_reply",
-                           payload: %{"response" => %{"reason" => reason}, "status" => "error"}
+                           payload: %{"response" => %{"reason" => ^expected}, "status" => "error"}
                          },
-                         1000
+                         300
 
-          assert reason == expected
-          refute_receive %Message{event: "phx_reply", topic: ^topic}, 1000
-          refute_receive %Message{event: "presence_state"}, 1000
+          refute_receive %Message{event: "phx_reply", topic: ^topic}, 300
+          refute_receive %Message{event: "presence_state"}, 300
         end)
 
       assert log =~ "Unauthorized: #{expected}"
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence]
+    test "handles lack of connection to database error on private channels", %{tenant: tenant, topic: topic} do
+      topic = "realtime:#{topic}"
+      {socket, _} = get_connection(tenant, "authenticated")
+      WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: true}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
+
+      {service_role_socket, _} = get_connection(tenant, "service_role")
+      WebsocketClient.join(service_role_socket, topic, %{config: %{broadcast: %{self: false}, private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
+
+      log =
+        capture_log(fn ->
+          :syn.update_registry(Realtime.Tenants.Connect, tenant.external_id, fn _pid, meta -> %{meta | conn: nil} end)
+          payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+          WebsocketClient.send_event(service_role_socket, topic, "broadcast", payload)
+          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+        end)
+
+      assert log =~ "UnableToHandleBroadcast"
+    end
+
+    @tag policies: []
+    test "lack of connection to database error does not impact public channels", %{tenant: tenant, topic: topic} do
+      topic = "realtime:#{topic}"
+      {socket, _} = get_connection(tenant, "authenticated")
+      WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: true}, private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
+
+      {service_role_socket, _} = get_connection(tenant, "service_role")
+      WebsocketClient.join(service_role_socket, topic, %{config: %{broadcast: %{self: false}, private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
+
+      log =
+        capture_log(fn ->
+          :syn.update_registry(Realtime.Tenants.Connect, tenant.external_id, fn _pid, meta -> %{meta | conn: nil} end)
+          payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+          WebsocketClient.send_event(service_role_socket, topic, "broadcast", payload)
+          assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+        end)
+
+      refute log =~ "UnableToHandleBroadcast"
     end
   end
 
@@ -403,7 +390,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
       payload = %{
@@ -422,17 +409,14 @@ defmodule Realtime.Integration.RtChannelTest do
       assert get_in(join_payload, ["t"]) == payload.payload.t
     end
 
-    @tag policies: [
-           :authenticated_read_broadcast_and_presence,
-           :authenticated_write_broadcast_and_presence
-         ]
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "private presence with read and write permissions will be able to track and receive presence changes",
          %{tenant: tenant, topic: topic} do
       {socket, _} = get_connection(tenant, "authenticated")
       config = %{presence: %{key: ""}, private: true}
       topic = "realtime:#{topic}"
-      WebsocketClient.join(socket, topic, %{config: config})
 
+      WebsocketClient.join(socket, topic, %{config: config})
       assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
       payload = %{
@@ -500,6 +484,48 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert get_in(join_payload, ["name"]) == payload.payload.name
       assert get_in(join_payload, ["t"]) == payload.payload.t
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
+    test "handles lack of connection to database error on private channels", %{tenant: tenant, topic: topic} do
+      topic = "realtime:#{topic}"
+      {socket, _} = get_connection(tenant, "authenticated")
+      WebsocketClient.join(socket, topic, %{config: %{private: true}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
+
+      log =
+        capture_log(fn ->
+          :syn.update_registry(Realtime.Tenants.Connect, tenant.external_id, fn _pid, meta -> %{meta | conn: nil} end)
+          payload = %{type: "presence", event: "TRACK", payload: %{name: "realtime_presence_96", t: 1814.7000000029802}}
+          WebsocketClient.send_event(socket, topic, "presence", payload)
+
+          refute_receive %Message{event: "presence_diff"}, 500
+          refute_receive %Message{event: "phx_leave", topic: ^topic}
+        end)
+
+      assert log =~ "UnableToHandlePresence"
+    end
+
+    @tag policies: []
+    test "lack of connection to database error does not impact public channels", %{tenant: tenant, topic: topic} do
+      topic = "realtime:#{topic}"
+      {socket, _} = get_connection(tenant, "authenticated")
+      WebsocketClient.join(socket, topic, %{config: %{private: false}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
+
+      log =
+        capture_log(fn ->
+          :syn.update_registry(Realtime.Tenants.Connect, tenant.external_id, fn _pid, meta -> %{meta | conn: nil} end)
+          payload = %{type: "presence", event: "TRACK", payload: %{name: "realtime_presence_96", t: 1814.7000000029802}}
+          WebsocketClient.send_event(socket, topic, "presence", payload)
+
+          assert_receive %Message{event: "presence_diff"}, 500
+          refute_receive %Message{event: "phx_leave", topic: ^topic}
+        end)
+
+      refute log =~ "UnableToHandlePresence"
     end
   end
 
@@ -1493,7 +1519,7 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       # Join events
-      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "presence_state"}
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
@@ -1524,7 +1550,7 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       # Join events
-      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "presence_state"}
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
@@ -1533,7 +1559,7 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       # Join events
-      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "presence_state"}
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
@@ -1580,7 +1606,7 @@ defmodule Realtime.Integration.RtChannelTest do
       {socket, _} = get_connection(tenant, "authenticated")
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "presence_state"}
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
@@ -1611,14 +1637,14 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       # Join events
-      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "presence_state"}, 500
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Add second user to test the "multiplication" of billable events
       {socket, _} = get_connection(tenant)
       WebsocketClient.join(socket, topic, %{config: config})
-      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "presence_state"}, 500
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
@@ -1663,7 +1689,7 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       # Join events
-      assert_receive %Message{event: "phx_reply", topic: ^topic}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "presence_state"}, 500
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
