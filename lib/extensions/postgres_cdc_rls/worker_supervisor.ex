@@ -3,13 +3,9 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
   use Supervisor
 
   alias Extensions.PostgresCdcRls
-
-  alias PostgresCdcRls.{
-    ReplicationPoller,
-    SubscriptionManager,
-    SubscriptionsChecker
-  }
-
+  alias PostgresCdcRls.ReplicationPoller
+  alias PostgresCdcRls.SubscriptionManager
+  alias PostgresCdcRls.SubscriptionsChecker
   alias Realtime.Api
   alias Realtime.PostgresCdc.Exception
 

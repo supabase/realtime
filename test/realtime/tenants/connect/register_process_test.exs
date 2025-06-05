@@ -1,20 +1,39 @@
 defmodule Realtime.Tenants.Connect.RegisterProcessTest do
   use Realtime.DataCase, async: true
   alias Realtime.Tenants.Connect.RegisterProcess
-  alias Realtime.Tenants.Connect
+  alias Realtime.Database
 
   describe "run/1" do
     setup do
       tenant = Containers.checkout_tenant(run_migrations: true)
       # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
       Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
-
-      conn = start_supervised!({Connect, [tenant_id: tenant.external_id]})
+      {:ok, conn} = Database.connect(tenant, "realtime_test")
       %{tenant_id: tenant.external_id, db_conn_pid: conn}
     end
 
-    test "registers the process in :syn", %{tenant_id: tenant_id, db_conn_pid: conn} do
+    test "registers the process in syn and Registry and updates metadata", %{tenant_id: tenant_id, db_conn_pid: conn} do
+      # Fake the process registration in :syn
+      :syn.register(Realtime.Tenants.Connect, tenant_id, self(), %{conn: nil})
       assert {:ok, _} = RegisterProcess.run(%{tenant_id: tenant_id, db_conn_pid: conn})
+      assert {pid, %{conn: ^conn}} = :syn.lookup(Realtime.Tenants.Connect, tenant_id)
+      assert [{^pid, %{}}] = Registry.lookup(Realtime.Tenants.Connect.Registry, tenant_id)
+    end
+
+    test "fails to register the process in syn and Registry and updates metadata", %{
+      tenant_id: tenant_id,
+      db_conn_pid: conn
+    } do
+      # Fake the process registration in :syn
+      :syn.register(Realtime.Tenants.Connect, tenant_id, self(), %{conn: nil})
+
+      # Register normally
+      assert {:ok, _} = RegisterProcess.run(%{tenant_id: tenant_id, db_conn_pid: conn})
+      assert {pid, %{conn: ^conn}} = :syn.lookup(Realtime.Tenants.Connect, tenant_id)
+      assert [{^pid, %{}}] = Registry.lookup(Realtime.Tenants.Connect.Registry, tenant_id)
+
+      # Check failure
+      assert {:error, :already_registered} = RegisterProcess.run(%{tenant_id: tenant_id, db_conn_pid: conn})
     end
 
     test "handles undefined process error" do

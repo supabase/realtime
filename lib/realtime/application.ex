@@ -7,7 +7,10 @@ defmodule Realtime.Application do
   require Logger
 
   alias Realtime.Repo.Replica
-
+  alias Realtime.Tenants.ReplicationConnection
+  alias Realtime.Tenants.Listen
+  alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.Migrations
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
@@ -69,23 +72,22 @@ defmodule Realtime.Application do
         Realtime.Latency,
         {Registry, keys: :duplicate, name: Realtime.Registry},
         {Registry, keys: :unique, name: Realtime.Registry.Unique},
+        {Registry, keys: :unique, name: Realtime.Tenants.Connect.Registry},
+        {Registry, keys: :unique, name: Extensions.PostgresCdcRls.ReplicationPoller.Registry},
         {Task.Supervisor, name: Realtime.TaskSupervisor},
         {PartitionSupervisor,
          child_spec: {DynamicSupervisor, max_restarts: 0},
          strategy: :one_for_one,
-         name: Realtime.Tenants.Migrations.DynamicSupervisor,
+         name: Migrations.DynamicSupervisor,
          partitions: migration_partition_slots},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,
-         name: Realtime.Tenants.Connect.DynamicSupervisor,
+         name: Connect.DynamicSupervisor,
          partitions: connect_partition_slots},
         {PartitionSupervisor,
-         child_spec: DynamicSupervisor,
-         strategy: :one_for_one,
-         name: Realtime.Tenants.ReplicationConnection.DynamicSupervisor},
-        {PartitionSupervisor,
-         child_spec: DynamicSupervisor, strategy: :one_for_one, name: Realtime.Tenants.Listen.DynamicSupervisor},
+         child_spec: DynamicSupervisor, strategy: :one_for_one, name: ReplicationConnection.DynamicSupervisor},
+        {PartitionSupervisor, child_spec: DynamicSupervisor, strategy: :one_for_one, name: Listen.DynamicSupervisor},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
       ] ++ extensions_supervisors() ++ janitor_tasks()

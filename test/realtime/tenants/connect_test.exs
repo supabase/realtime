@@ -413,6 +413,21 @@ defmodule Realtime.Tenants.ConnectTest do
     end
   end
 
+  describe "registers into local registry" do
+    test "successfully registers a process", %{tenant: %{external_id: external_id}} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(external_id)
+      assert Registry.whereis_name({Realtime.Tenants.Connect.Registry, external_id})
+    end
+
+    test "successfully unregisters a process", %{tenant: %{external_id: external_id}} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(external_id)
+      assert Registry.whereis_name({Realtime.Tenants.Connect.Registry, external_id})
+      Connect.shutdown(external_id)
+      Process.sleep(100)
+      assert :undefined = Registry.whereis_name({Realtime.Tenants.Connect.Registry, external_id})
+    end
+  end
+
   defp check_db_connections_created(test_pid, tenant_id) do
     spawn(fn ->
       receive do

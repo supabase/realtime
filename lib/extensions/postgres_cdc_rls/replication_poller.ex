@@ -45,6 +45,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       tenant: tenant
     }
 
+    {:ok, _} = Registry.register(__MODULE__.Registry, tenant, %{})
     {:ok, state, {:continue, {:connect, args}}}
   end
 
