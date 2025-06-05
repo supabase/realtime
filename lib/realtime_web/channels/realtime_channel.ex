@@ -762,8 +762,11 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp maybe_assign_policies(topic, db_conn, %{assigns: %{private?: true}} = socket)
        when not is_nil(topic) and not is_nil(db_conn) do
     authorization_context = socket.assigns.authorization_context
+    policies = socket.assigns.policies || %Policies{}
 
-    with {:ok, socket} <- Authorization.get_read_authorizations(socket, db_conn, authorization_context) do
+    with {:ok, policies} <- Authorization.get_read_authorizations(policies, db_conn, authorization_context) do
+      socket = assign(socket, :policies, policies)
+
       if match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies),
         do: {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"},
         else: {:ok, socket}
