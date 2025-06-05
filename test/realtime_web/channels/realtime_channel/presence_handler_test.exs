@@ -123,6 +123,35 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       end
     end
 
+    @tag policies: [:authenticated_read_broadcast_and_presence, :broken_write_presence]
+    test "handle failing rls policy", %{tenant: tenant, topic: topic, db_conn: db_conn} do
+      expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context ->
+        call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context])
+      end)
+
+      key = random_string()
+      socket = socket_fixture(tenant, topic, db_conn, key)
+      topic = "realtime:#{topic}"
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..100, reduce: socket do
+            socket ->
+              assert {:reply, :error, socket} =
+                       PresenceHandler.handle(
+                         %{"event" => "track", "payload" => %{"metadata" => random_string()}},
+                         db_conn,
+                         socket
+                       )
+
+              refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
+              socket
+          end
+        end)
+
+      assert log =~ "RlsPolicyError"
+    end
+
     test "does not check write policies once on public channels", %{tenant: tenant, topic: topic, db_conn: db_conn} do
       reject(&Authorization.get_write_authorizations/3)
 
