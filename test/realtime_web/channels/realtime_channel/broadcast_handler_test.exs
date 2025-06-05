@@ -107,7 +107,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
 
     @tag policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
-
     test "validation only runs once on nil and valid policies", %{
       topic: topic,
       tenant: tenant,

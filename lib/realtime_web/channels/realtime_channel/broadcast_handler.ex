@@ -24,19 +24,24 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       assigns: %{
         self_broadcast: self_broadcast,
         tenant_topic: tenant_topic,
-        authorization_context: authorization_context
+        authorization_context: authorization_context,
+        policies: policies
       }
     } = socket
 
-    case run_authorization_check(socket, db_conn, authorization_context) do
-      {:ok, %{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: true}}}} = socket} ->
+    case run_authorization_check(policies || %Policies{}, db_conn, authorization_context) do
+      {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}} = policies} ->
+        socket =
+          socket
+          |> assign(:policies, policies)
+          |> increment_rate_counter()
+
         %{ack_broadcast: ack_broadcast} = socket.assigns
-        socket = increment_rate_counter(socket)
         send_message(self_broadcast, tenant_topic, payload)
         if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
 
-      {:ok, socket} ->
-        {:noreply, socket}
+      {:ok, policies} ->
+        {:noreply, assign(socket, :policies, policies)}
 
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
@@ -78,11 +83,11 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   end
 
   defp run_authorization_check(
-         %Socket{assigns: %{policies: %{broadcast: %BroadcastPolicies{write: nil}}}} = socket,
+         %Policies{broadcast: %BroadcastPolicies{write: nil}} = policies,
          db_conn,
          authorization_context
        ) do
-    Authorization.get_write_authorizations(socket, db_conn, authorization_context)
+    Authorization.get_write_authorizations(policies, db_conn, authorization_context)
   end
 
   defp run_authorization_check(socket, _db_conn, _authorization_context) do
