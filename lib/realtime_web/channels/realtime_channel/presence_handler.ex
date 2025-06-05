@@ -78,6 +78,10 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         socket = assign(socket, :policies, policies)
         handle_presence_event("track", payload, db_conn, socket)
 
+      {:error, :rls_policy_error, error} ->
+        log_error("RlsPolicyError", error)
+        {:error, socket}
+
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
         {:error, socket}
