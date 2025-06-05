@@ -5,11 +5,13 @@ defmodule Realtime.Tenants.Cache do
   require Cachex.Spec
 
   alias Realtime.Tenants
-  @expiration :timer.seconds(30)
+
   def child_spec(_) do
+    tenant_cache_expiration = Application.get_env(:realtime, :tenant_cache_expiration)
+
     %{
       id: __MODULE__,
-      start: {Cachex, :start_link, [__MODULE__, [expiration: Cachex.Spec.expiration(default: @expiration)]]}
+      start: {Cachex, :start_link, [__MODULE__, [expiration: Cachex.Spec.expiration(default: tenant_cache_expiration)]]}
     }
   end
 
