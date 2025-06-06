@@ -41,12 +41,7 @@ defmodule Realtime.Api.Tenant do
   @doc false
   def changeset(tenant, attrs) do
     # TODO: remove after infra update
-    extension_key =
-      if attrs[:extensions] do
-        :extensions
-      else
-        "extensions"
-      end
+    extension_key = if attrs[:extensions], do: :extensions, else: "extensions"
 
     attrs =
       if attrs[extension_key] do
