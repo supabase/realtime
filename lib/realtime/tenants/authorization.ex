@@ -114,7 +114,7 @@ defmodule Realtime.Tenants.Authorization do
     end
   end
 
-  def get_write_authorizations(db_conn, db_conn, authorization_context) when is_pid(db_conn) do
+  def get_write_authorizations(db_conn, authorization_context) do
     case get_write_policies_for_connection(db_conn, authorization_context, %Policies{}) do
       {:ok, %Policies{} = policies} -> {:ok, policies}
       {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}

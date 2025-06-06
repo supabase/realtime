@@ -170,7 +170,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
       {:ok, policies} =
         Authorization.get_write_authorizations(
           context.db_conn,
-          context.db_conn,
           context.authorization_context
         )
 
@@ -188,7 +187,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
     test "anon user has no policies", context do
       {:ok, policies} =
         Authorization.get_write_authorizations(
-          context.db_conn,
           context.db_conn,
           context.authorization_context
         )
@@ -246,7 +244,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
       assert {:error, :increase_connection_pool} =
                Authorization.get_write_authorizations(
                  context.db_conn,
-                 context.db_conn,
                  context.authorization_context
                )
 
@@ -286,7 +283,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       assert {:error, :rls_policy_error, %Postgrex.Error{}} =
                Authorization.get_write_authorizations(
-                 context.db_conn,
                  context.db_conn,
                  context.authorization_context
                )
