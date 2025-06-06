@@ -2,6 +2,8 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   # Async false due to tweaking application env
   use Realtime.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.RateCounter
@@ -122,6 +124,57 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     end
   end
 
+  test "monitored pid stopping brings down ReplicationConnection ", %{tenant: tenant} do
+    monitored_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    logs =
+      capture_log(fn ->
+        pid =
+          start_supervised!(
+            {ReplicationConnection,
+             %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: monitored_pid}},
+            restart: :transient
+          )
+
+        send(monitored_pid, :stop)
+
+        ref = Process.monitor(pid)
+        assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 100
+        refute Process.alive?(pid)
+      end)
+
+    assert logs =~ "Disconnecting broadcast changes handler in the step"
+  end
+
+  test "message without event logs error", %{tenant: tenant} do
+    logs =
+      capture_log(fn ->
+        start_supervised!(
+          {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+          restart: :transient
+        )
+
+        topic = random_string()
+        tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+        assert :ok = Endpoint.subscribe(tenant_topic)
+
+        message_fixture(tenant, %{
+          "topic" => "some_topic",
+          "private" => true,
+          "payload" => %{"value" => "something"}
+        })
+
+        refute_receive %Phoenix.Socket.Broadcast{}, 500
+      end)
+
+    assert logs =~ "UnableToBatchBroadcastChanges"
+  end
+
   test "payload without id", %{tenant: tenant} do
     start_link_supervised!(
       {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
@@ -195,7 +248,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
     Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [name])
 
-    assert {:error, "Temporary Replication slot already exists and in use"} =
+    assert {:error, {:shutdown, "Temporary Replication slot already exists and in use"}} =
              ReplicationConnection.start(tenant, self())
 
     Postgrex.query!(db_conn, "SELECT pg_drop_replication_slot($1)", [name])
