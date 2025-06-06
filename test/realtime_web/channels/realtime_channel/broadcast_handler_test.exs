@@ -3,6 +3,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   use Mimic
 
   import Generators
+  import ExUnit.CaptureLog
 
   alias Realtime.RateCounter
   alias Realtime.RateCounter
@@ -107,7 +108,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
 
     @tag policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
-
     test "validation only runs once on nil and valid policies", %{
       topic: topic,
       tenant: tenant,
@@ -216,6 +216,32 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       Process.sleep(1200)
       {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
       assert avg > 0.0
+    end
+
+    @tag policies: [:broken_write_presence]
+    test "handle failing rls policy", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic)
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..100, reduce: socket do
+            socket ->
+              {:noreply, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+              socket
+          end
+
+          Process.sleep(1200)
+
+          for _ <- 1..100 do
+            topic = "realtime:#{topic}"
+            refute_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+          end
+        end)
+
+      assert log =~ "RlsPolicyError"
+
+      {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+      assert avg == 0.0
     end
   end
 
