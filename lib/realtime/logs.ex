@@ -53,7 +53,10 @@ defimpl Jason.Encoder, for: Postgrex.Error do
 end
 
 defimpl Jason.Encoder, for: Tuple do
+  require Logger
+
   def encode(tuple, _opts) do
-    inspect(Tuple.to_list(tuple), pretty: true)
+    Logger.error("UnableToEncodeJson: Tuple encoding not supported: #{inspect(tuple)}")
+    inspect(%{error: "unable to parse response"}, pretty: true)
   end
 end

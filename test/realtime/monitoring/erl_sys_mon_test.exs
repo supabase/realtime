@@ -10,7 +10,7 @@ defmodule Realtime.Monitoring.ErlSysMonTest do
       assert capture_log(fn ->
                Task.async(fn -> Enum.map(1..100_000, &send(self(), &1)) end)
                |> Task.await()
-             end) =~ "Realtime.ErlSysMon message: "
+             end) =~ "Realtime.ErlSysMon message:"
     end
   end
 end
