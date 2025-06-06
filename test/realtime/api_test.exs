@@ -143,17 +143,19 @@ defmodule Realtime.ApiTest do
 
     test "valid data and jwt_secret change will restart the database connection", %{tenants: [tenant | _]} do
       {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+      Process.monitor(old_pid)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{jwt_secret: "potato"})
-      Process.sleep(100)
+      assert_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
       refute Process.alive?(old_pid)
+      Process.sleep(100)
       assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
-      refute old_pid == new_pid
+      assert %Postgrex.Result{} = Postgrex.query!(new_pid, "SELECT 1", [])
     end
 
     test "valid data and tenant data change will not restart the database connection", %{tenants: [tenant | _]} do
       {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{max_concurrent_users: 100})
-      Process.sleep(100)
+      refute_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
       assert Process.alive?(old_pid)
       assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
       assert old_pid == new_pid
@@ -182,11 +184,13 @@ defmodule Realtime.ApiTest do
       ]
 
       {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+      Process.monitor(old_pid)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{extensions: extensions})
-      Process.sleep(100)
+      assert_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
       refute Process.alive?(old_pid)
+      Process.sleep(100)
       assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
-      refute old_pid == new_pid
+      assert %Postgrex.Result{} = Postgrex.query!(new_pid, "SELECT 1", [])
     end
 
     test "valid data and change to tenant data will refresh cache", %{tenants: [tenant | _]} do

@@ -127,9 +127,17 @@ defmodule Realtime.Api do
     changeset = Tenant.changeset(tenant, attrs)
     updated = Repo.update(changeset)
 
-    maybe_invalidate_cache(changeset)
-    maybe_trigger_disconnect(changeset)
-    maybe_restart_db_connection(changeset)
+    case updated do
+      {:ok, tenant} ->
+        maybe_invalidate_cache(changeset)
+        maybe_trigger_disconnect(changeset)
+        maybe_restart_db_connection(changeset)
+        Logger.debug("Tenant updated: #{inspect(tenant, pretty: true)}")
+
+      {:error, error} ->
+        Logger.error("Failed to update tenant: #{inspect(error, pretty: true)}")
+    end
+
     updated
   end
 
@@ -247,14 +255,7 @@ defmodule Realtime.Api do
 
   defp maybe_restart_db_connection(%Ecto.Changeset{data: %{external_id: external_id}} = changeset)
        when requires_restarting_db_connection(changeset) do
-    case Connect.lookup_or_start_connection(external_id) do
-      {:ok, _db_conn} ->
-        Logger.info("Settings changed for tenant #{external_id}, restarting DB connection")
-        Connect.shutdown(external_id)
-
-      {:error, reason} ->
-        Logger.error("Failed to restart DB connection for tenant #{external_id}: #{inspect(reason)}")
-    end
+    Connect.shutdown(external_id)
   end
 
   defp maybe_restart_db_connection(_changeset), do: nil
