@@ -29,7 +29,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       key = random_string()
 
       socket =
-        socket_fixture(tenant, topic, db_conn, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
+        socket_fixture(tenant, topic, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
 
       PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
       topic = "realtime:#{topic}"
@@ -45,7 +45,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       key = random_string()
 
       socket =
-        socket_fixture(tenant, topic, db_conn, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
+        socket_fixture(tenant, topic, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
 
       assert {:reply, :ok, socket} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
       topic = "realtime:#{topic}"
@@ -60,18 +60,13 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       refute_receive :_
     end
 
-    test "with false policy and is public, user can track their presence and changes", %{
-      tenant: tenant,
-      topic: topic,
-      db_conn: db_conn
-    } do
+    test "with false policy and is public, user can track their presence and changes", %{tenant: tenant, topic: topic} do
       key = random_string()
 
       socket =
         socket_fixture(
           tenant,
           topic,
-          db_conn,
           key,
           %Policies{presence: %PresencePolicies{read: false, write: false}},
           false
@@ -87,7 +82,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       key = random_string()
 
       socket =
-        socket_fixture(tenant, topic, db_conn, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
+        socket_fixture(tenant, topic, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
 
       assert {:reply, :ok, socket} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
       topic = "realtime:#{topic}"
@@ -106,7 +101,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       end)
 
       key = random_string()
-      socket = socket_fixture(tenant, topic, db_conn, key)
+      socket = socket_fixture(tenant, topic, key)
       topic = "realtime:#{topic}"
 
       for _ <- 1..100, reduce: socket do
@@ -130,7 +125,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       end)
 
       key = random_string()
-      socket = socket_fixture(tenant, topic, db_conn, key)
+      socket = socket_fixture(tenant, topic, key)
       topic = "realtime:#{topic}"
 
       log =
@@ -152,13 +147,13 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert log =~ "RlsPolicyError"
     end
 
-    test "does not check write policies once on public channels", %{tenant: tenant, topic: topic, db_conn: db_conn} do
+    test "does not check write policies once on public channels", %{tenant: tenant, topic: topic} do
       reject(&Authorization.get_write_authorizations/3)
 
       key = random_string()
 
       socket =
-        socket_fixture(tenant, topic, db_conn, key, %Policies{broadcast: %BroadcastPolicies{read: false}}, false)
+        socket_fixture(tenant, topic, key, %Policies{broadcast: %BroadcastPolicies{read: false}}, false)
 
       topic = "realtime:#{topic}"
 
@@ -213,7 +208,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   defp socket_fixture(
          tenant,
          topic,
-         db_conn,
          presence_key,
          policies \\ %Policies{
            broadcast: %BroadcastPolicies{read: true},
@@ -254,7 +248,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
         authorization_context: authorization_context,
         rate_counter: rate_counter,
         private?: private?,
-        db_conn: db_conn,
         presence_key: presence_key
       }
     }
