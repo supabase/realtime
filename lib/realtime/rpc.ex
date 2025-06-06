@@ -42,14 +42,14 @@ defmodule Realtime.Rpc do
 
           response
 
-        {:error, error} ->
+        error ->
           Telemetry.execute(
             [:realtime, :rpc],
             %{latency: latency},
             %{mod: mod, func: func, target_node: node, origin_node: node(), success: false}
           )
 
-          {:error, error}
+          error
       end
     end
   catch
