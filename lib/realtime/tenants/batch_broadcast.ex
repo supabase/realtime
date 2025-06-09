@@ -56,8 +56,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
         send_message_and_count(tenant, sub_topic, event, payload, true)
       end)
 
-      tenant_db_conn = Connect.lookup_or_start_connection(tenant.external_id)
-
       # Handle events for private channel
       events
       |> Map.get(true, [])
@@ -68,7 +66,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
             send_message_and_count(tenant, sub_topic, event, payload, false)
           end)
         else
-          case permissions_for_message(auth_params, tenant_db_conn, topic) do
+          case permissions_for_message(tenant, auth_params, topic) do
             %Policies{broadcast: %BroadcastPolicies{write: true}} ->
               Enum.each(events, fn %{topic: sub_topic, payload: payload, event: event} ->
                 send_message_and_count(tenant, sub_topic, event, payload, false)
@@ -115,16 +113,20 @@ defmodule Realtime.Tenants.BatchBroadcast do
     Endpoint.broadcast_from(self(), tenant_topic, "broadcast", payload)
   end
 
-  defp permissions_for_message(_, {:error, _}, _), do: nil
-  defp permissions_for_message(nil, _, _), do: nil
+  defp permissions_for_message(_, nil, _), do: nil
 
-  defp permissions_for_message(auth_params, {:ok, db_conn}, topic) do
-    auth_params = auth_params |> Map.put(:topic, topic) |> Authorization.build_authorization_params()
+  defp permissions_for_message(tenant, auth_params, topic) do
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id) do
+      auth_params =
+        auth_params
+        |> Map.put(:topic, topic)
+        |> Authorization.build_authorization_params()
 
-    case Authorization.get_write_authorizations(db_conn, db_conn, auth_params) do
-      {:ok, policies} -> policies
-      {:error, :not_found} -> nil
-      error -> error
+      case Authorization.get_write_authorizations(db_conn, auth_params) do
+        {:ok, policies} -> policies
+        {:error, :not_found} -> nil
+        error -> error
+      end
     end
   end
 
