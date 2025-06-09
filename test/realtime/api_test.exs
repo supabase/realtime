@@ -9,7 +9,6 @@ defmodule Realtime.ApiTest do
   alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter
-  alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
 
   @db_conf Application.compile_env(:realtime, Realtime.Repo)
@@ -17,12 +16,9 @@ defmodule Realtime.ApiTest do
   setup do
     tenant1 = Containers.checkout_tenant(run_migrations: true)
     tenant2 = Containers.checkout_tenant(run_migrations: true)
-    {:ok, tenant1} = Api.update_tenant(tenant1, %{max_concurrent_users: 10_000_000})
-    {:ok, tenant2} = Api.update_tenant(tenant2, %{max_concurrent_users: 20_000_000})
+    Api.update_tenant(tenant1, %{max_concurrent_users: 10_000_000})
+    Api.update_tenant(tenant2, %{max_concurrent_users: 20_000_000})
 
-    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
-    Cachex.put!(Cache, {{:get_tenant_by_external_id, 1}, [tenant1.external_id]}, {:cached, tenant1})
-    Cachex.put!(Cache, {{:get_tenant_by_external_id, 1}, [tenant2.external_id]}, {:cached, tenant2})
     tenants = Api.list_tenants()
     %{tenants: tenants}
   end
