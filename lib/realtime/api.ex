@@ -241,7 +241,7 @@ defmodule Realtime.Api do
 
   defp maybe_invalidate_cache(%Ecto.Changeset{changes: changes, valid?: true, data: %{external_id: external_id}})
        when changes != %{} do
-    Tenants.Cache.invalidate_tenant_cache(external_id)
+    Tenants.Cache.distributed_invalidate_tenant_cache(external_id)
   end
 
   defp maybe_invalidate_cache(_changeset), do: nil
