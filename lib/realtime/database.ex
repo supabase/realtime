@@ -164,7 +164,7 @@ defmodule Realtime.Database do
     metadata = Keyword.put(metadata, :target, node(db_conn))
     args = [db_conn, func, opts, metadata]
 
-    case Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, args) do
+    case Rpc.enhanced_call(node(db_conn), __MODULE__, :transaction, args, metadata) do
       {:ok, value} -> {:ok, value}
       {:error, :rpc_error, error} -> {:error, error}
       {:error, error} -> {:error, error}
@@ -205,7 +205,6 @@ defmodule Realtime.Database do
       ssl: ssl
     } = settings
 
-    Logger.metadata(application_name: application_name)
     metadata = Logger.metadata()
 
     [

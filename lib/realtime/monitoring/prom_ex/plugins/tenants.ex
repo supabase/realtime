@@ -19,7 +19,7 @@ defmodule Realtime.PromEx.Plugins.Tenants do
         description: "Latency of rpc calls triggered by a tenant action",
         measurement: :latency,
         unit: {:microsecond, :millisecond},
-        tags: [:success],
+        tags: [:success, :tenant],
         reporter_options: [buckets: [10, 250, 5000, 15_000]]
       )
     ])

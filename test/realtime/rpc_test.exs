@@ -72,7 +72,7 @@ defmodule Realtime.RpcTest do
 
   describe "enhanced_call/5" do
     test "successful RPC call returns exactly what the original function returns", %{node: node} do
-      assert {:ok, "success"} = Rpc.enhanced_call(node, TestRpc, :test_success)
+      assert {:ok, "success"} = Rpc.enhanced_call(node, TestRpc, :test_success, [], tenant_id: "123")
       origin_node = node()
 
       assert_receive {[:realtime, :rpc], %{latency: _},
@@ -81,15 +81,16 @@ defmodule Realtime.RpcTest do
                         func: :test_success,
                         origin_node: ^origin_node,
                         target_node: ^node,
-                        success: true
+                        success: true,
+                        tenant: "123"
                       }}
     end
 
     test "raised exceptions are properly caught and logged", %{node: node} do
       assert capture_log(fn ->
                assert {:error, :rpc_error, %RuntimeError{message: "test"}} =
-                        Rpc.enhanced_call(node, TestRpc, :test_raise)
-             end) =~ "ErrorOnRpcCall"
+                        Rpc.enhanced_call(node, TestRpc, :test_raise, [], tenant_id: "123")
+             end) =~ "project=123 external_id=123 [error] ErrorOnRpcCall"
 
       origin_node = node()
 
@@ -99,7 +100,8 @@ defmodule Realtime.RpcTest do
                         func: :test_raise,
                         origin_node: ^origin_node,
                         target_node: ^node,
-                        success: false
+                        success: false,
+                        tenant: "123"
                       }}
     end
 

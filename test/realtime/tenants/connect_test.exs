@@ -335,7 +335,9 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "handle rpc errors gracefully" do
       expect(Realtime.Nodes, :get_node_for_tenant, fn _ -> {:ok, :potato@nohost} end)
-      assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant")
+
+      assert capture_log(fn -> assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant") end) =~
+               "project=tenant external_id=tenant [error] ErrorOnRpcCall"
     end
   end
 
