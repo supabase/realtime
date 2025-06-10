@@ -3,6 +3,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   require Phoenix.ChannelTest
 
+  import ExUnit.CaptureLog
+
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.Repo
@@ -213,39 +215,45 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       Process.sleep(100)
 
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_read_authorizations(
-                 Phoenix.ConnTest.build_conn(),
-                 context.db_conn,
-                 context.authorization_context
-               )
+      log =
+        capture_log(fn ->
+          assert {:error, :increase_connection_pool} =
+                   Authorization.get_read_authorizations(
+                     Phoenix.ConnTest.build_conn(),
+                     context.db_conn,
+                     context.authorization_context
+                   )
 
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_write_authorizations(
-                 Phoenix.ConnTest.build_conn(),
-                 context.db_conn,
-                 context.authorization_context
-               )
+          assert {:error, :increase_connection_pool} =
+                   Authorization.get_write_authorizations(
+                     Phoenix.ConnTest.build_conn(),
+                     context.db_conn,
+                     context.authorization_context
+                   )
 
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_read_authorizations(
-                 Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
-                 context.db_conn,
-                 context.authorization_context
-               )
+          assert {:error, :increase_connection_pool} =
+                   Authorization.get_read_authorizations(
+                     Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+                     context.db_conn,
+                     context.authorization_context
+                   )
 
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_write_authorizations(
-                 Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
-                 context.db_conn,
-                 context.authorization_context
-               )
+          assert {:error, :increase_connection_pool} =
+                   Authorization.get_write_authorizations(
+                     Phoenix.ChannelTest.socket(RealtimeWeb.UserSocket),
+                     context.db_conn,
+                     context.authorization_context
+                   )
 
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_write_authorizations(
-                 context.db_conn,
-                 context.authorization_context
-               )
+          assert {:error, :increase_connection_pool} =
+                   Authorization.get_write_authorizations(
+                     context.db_conn,
+                     context.authorization_context
+                   )
+        end)
+
+      external_id = context.tenant.external_id
+      assert log =~ "project=#{external_id} external_id=#{external_id} [error] ErrorExecutingTransaction"
 
       Task.await(task, :timer.minutes(1))
     end
