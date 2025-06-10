@@ -1,19 +1,17 @@
 defmodule Realtime.Tenants.Authorization do
   @moduledoc """
-  Runs validations based on RLS policies to set policies for a given connection and
+  Runs validations based on RLS policies to return policies and
   creates a Realtime.Tenants.Policies struct with the accumulated results of the policies
   for a given user and a given channel context
 
-  Each extension will have its own set of ways to check Policies against the Authorization context but we will create some setup data to be used by the policies.
+  Each extension will have its own set of ways to check Policies against the Authorization context
+  but we will create some setup data to be used by the policies.
 
   Check more information at Realtime.Tenants.Authorization.Policies
   """
   require Logger
   import Ecto.Query
 
-  alias Phoenix.Socket
-  alias Plug.Conn
-  alias Realtime.Api.Message
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.Repo
@@ -53,27 +51,13 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   @doc """
-  Runs validations based on RLS policies to set policies for read policies a given connection (either Phoenix.Socket or Plug.Conn).
+  Runs validations based on RLS policies to return policies for read policies
   """
-  @spec get_read_authorizations(Socket.t() | Conn.t(), pid(), __MODULE__.t()) ::
-          {:ok, Socket.t() | Conn.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
-
-  def get_read_authorizations(%Socket{} = socket, db_conn, authorization_context) do
-    policies = Map.get(socket.assigns, :policies) || %Policies{}
-
+  @spec get_read_authorizations(Policies.t(), pid(), t()) ::
+          {:ok, Policies.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
+  def get_read_authorizations(policies, db_conn, authorization_context) do
     case get_read_policies_for_connection(db_conn, authorization_context, policies) do
-      {:ok, %Policies{} = policies} -> {:ok, Socket.assign(socket, :policies, policies)}
-      {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
-      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
-      {:error, error} -> {:error, error}
-    end
-  end
-
-  def get_read_authorizations(%Conn{} = conn, db_conn, authorization_context) do
-    policies = Map.get(conn.assigns, :policies) || %Policies{}
-
-    case get_read_policies_for_connection(db_conn, authorization_context, policies) do
-      {:ok, %Policies{} = policies} -> {:ok, Conn.assign(conn, :policies, policies)}
+      {:ok, %Policies{} = policies} -> {:ok, policies}
       {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
       {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
@@ -81,33 +65,13 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   @doc """
-  Runs validations based on RLS policies to set policies for read policies a given connection (either Phoenix.Socket or Conn).
+  Runs validations based on RLS policies to return policies for write policies
   """
-  @spec get_write_authorizations(Socket.t() | Conn.t() | pid(), pid(), __MODULE__.t()) ::
-          {:ok, Socket.t() | Conn.t() | Policies.t()}
-          | {:error, any()}
-          | {:error, :rls_policy_error, any()}
-
-  def get_write_authorizations(
-        %Socket{} = socket,
-        db_conn,
-        authorization_context
-      ) do
-    policies = Map.get(socket.assigns, :policies) || %Policies{}
-
+  @spec get_write_authorizations(Policies.t(), pid(), __MODULE__.t()) ::
+          {:ok, Policies.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
+  def get_write_authorizations(policies, db_conn, authorization_context) when is_pid(db_conn) do
     case get_write_policies_for_connection(db_conn, authorization_context, policies) do
-      {:ok, %Policies{} = policies} -> {:ok, Socket.assign(socket, :policies, policies)}
-      {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
-      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
-      {:error, error} -> {:error, error}
-    end
-  end
-
-  def get_write_authorizations(%Conn{} = conn, db_conn, authorization_context) do
-    policies = Map.get(conn.assigns, :policies) || %Policies{}
-
-    case get_write_policies_for_connection(db_conn, authorization_context, policies) do
-      {:ok, %Policies{} = policies} -> {:ok, Conn.assign(conn, :policies, policies)}
+      {:ok, %Policies{} = policies} -> {:ok, policies}
       {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
       {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
@@ -115,12 +79,7 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   def get_write_authorizations(db_conn, authorization_context) do
-    case get_write_policies_for_connection(db_conn, authorization_context, %Policies{}) do
-      {:ok, %Policies{} = policies} -> {:ok, policies}
-      {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
-      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
-      {:error, error} -> {:error, error}
-    end
+    get_write_authorizations(%Policies{}, db_conn, authorization_context)
   end
 
   @doc """

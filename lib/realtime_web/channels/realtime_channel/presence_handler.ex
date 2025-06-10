@@ -69,13 +69,18 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
          "track",
          payload,
          db_conn,
-         %{assigns: %{private?: true, policies: %Policies{presence: %PresencePolicies{write: nil}}}} = socket
+         %{assigns: %{private?: true, policies: %Policies{presence: %PresencePolicies{write: nil}} = policies}} = socket
        ) do
     %{assigns: %{authorization_context: authorization_context}} = socket
 
-    case run_authorization_check(socket, db_conn, authorization_context) do
-      {:ok, socket} ->
+    case Authorization.get_write_authorizations(policies, db_conn, authorization_context) do
+      {:ok, policies} ->
+        socket = assign(socket, :policies, policies)
         handle_presence_event("track", payload, db_conn, socket)
+
+      {:error, :rls_policy_error, error} ->
+        log_error("RlsPolicyError", error)
+        {:error, socket}
 
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
@@ -145,17 +150,5 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     |> Shard.name_for_topic(topic, size)
     |> Shard.dirty_list(topic)
     |> Phoenix.Presence.group()
-  end
-
-  defp run_authorization_check(
-         %Socket{assigns: %{private?: true, policies: %{presence: %PresencePolicies{write: nil}}}} = socket,
-         db_conn,
-         authorization_context
-       ) do
-    Authorization.get_write_authorizations(socket, db_conn, authorization_context)
-  end
-
-  defp run_authorization_check(socket, _db_conn, _authorization_context) do
-    {:ok, socket}
   end
 end
