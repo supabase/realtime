@@ -159,7 +159,9 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   defp get_read_policies_for_connection(conn, authorization_context, policies) do
-    opts = [telemetry: [:realtime, :tenants, :read_authorization_check], tenant_id: authorization_context.tenant_id]
+    tenant_id = authorization_context.tenant_id
+    opts = [telemetry: [:realtime, :tenants, :read_authorization_check], tenant_id: tenant_id]
+    metadata = [project: tenant_id, external_id: tenant_id]
 
     Database.transaction(
       conn,
@@ -194,12 +196,15 @@ defmodule Realtime.Tenants.Authorization do
         Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
         policies
       end,
-      opts
+      opts,
+      metadata
     )
   end
 
   defp get_write_policies_for_connection(conn, authorization_context, policies) do
-    opts = [telemetry: [:realtime, :tenants, :write_authorization_check], tenant_id: authorization_context.tenant_id]
+    tenant_id = authorization_context.tenant_id
+    opts = [telemetry: [:realtime, :tenants, :write_authorization_check], tenant_id: tenant_id]
+    metadata = [project: tenant_id, external_id: tenant_id]
 
     Database.transaction(
       conn,
@@ -217,7 +222,8 @@ defmodule Realtime.Tenants.Authorization do
 
         policies
       end,
-      opts
+      opts,
+      metadata
     )
   end
 

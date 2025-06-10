@@ -153,13 +153,15 @@ defmodule Realtime.DatabaseTest do
                      Database.transaction(
                        db_conn,
                        fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(11)", []) end,
-                       timeout: 15000
+                       [timeout: 15000],
+                       external_id: "123",
+                       project: "123"
                      )
                    end)
                    |> Task.await(20000)
         end)
 
-      assert log =~ "ErrorExecutingTransaction"
+      assert log =~ "project=123 external_id=123 [error] ErrorExecutingTransaction"
     end
 
     test "run call using RPC", %{db_conn: db_conn} do
@@ -234,20 +236,35 @@ defmodule Realtime.DatabaseTest do
   describe "transaction/1 in clustered mode" do
     test "success call returns output" do
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :lookup_or_start_connection, ["dev_tenant"])
+      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant"])
+      assert node(db_conn) == node
       assert {:ok, %Postgrex.Result{rows: [[1]]}} = Database.transaction(db_conn, &DatabaseAux.checker/1)
     end
 
     test "handles database errors" do
+      metadata = [external_id: "123", project: "123"]
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :lookup_or_start_connection, ["dev_tenant"])
-      assert {:error, %Postgrex.Error{}} = Database.transaction(db_conn, &DatabaseAux.error/1)
+      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant"])
+      assert node(db_conn) == node
+
+      assert capture_log(fn ->
+               assert {:error, %Postgrex.Error{}} = Database.transaction(db_conn, &DatabaseAux.error/1, [], metadata)
+               # We have to wait for logs to be relayed to this node
+               Process.sleep(100)
+             end) =~ "project=123 external_id=123 [error] ErrorExecutingTransaction:"
     end
 
     test "handles exception" do
+      metadata = [external_id: "123", project: "123"]
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :lookup_or_start_connection, ["dev_tenant"])
-      assert {:error, %RuntimeError{}} = Database.transaction(db_conn, &DatabaseAux.exception/1)
+      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant"])
+      assert node(db_conn) == node
+
+      assert capture_log(fn ->
+               assert {:error, %RuntimeError{}} = Database.transaction(db_conn, &DatabaseAux.exception/1, [], metadata)
+               # We have to wait for logs to be relayed to this node
+               Process.sleep(100)
+             end) =~ "project=123 external_id=123 [error] ErrorExecutingTransaction:"
     end
   end
 
