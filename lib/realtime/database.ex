@@ -220,7 +220,10 @@ defmodule Realtime.Database do
       backoff_type: backoff_type,
       ssl: ssl,
       configure: fn args ->
-        Logger.metadata(metadata)
+        metadata
+        |> Keyword.put(:application_name, application_name)
+        |> Logger.metadata()
+
         args
       end
     ]
