@@ -132,6 +132,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, :unable_to_set_policies, error} ->
         Logging.log_error_message(:error, "UnableToSetPolicies", error)
+        {:error, %{reason: "Realtime was unable to connect to the project database"}}
 
       {:error, :tenant_database_unavailable} ->
         Logging.log_error_message(
@@ -203,6 +204,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, error} ->
         Logging.log_error_message(:error, "UnknownErrorOnChannel", error)
+        {:error, %{reason: "Unknown Error on Channel"}}
     end
   end
 
