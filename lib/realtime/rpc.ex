@@ -32,8 +32,7 @@ defmodule Realtime.Rpc do
     tenant_id = Keyword.get(opts, :tenant_id)
 
     try do
-      with {latency, response} <-
-             :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end) do
+      with {latency, response} <- :timer.tc(fn -> :erpc.call(node, mod, func, args, timeout) end) do
         case response do
           {:ok, _} ->
             Telemetry.execute(
@@ -44,14 +43,14 @@ defmodule Realtime.Rpc do
 
             response
 
-          {:error, error} ->
+          error ->
             Telemetry.execute(
               [:realtime, :rpc],
               %{latency: latency},
               %{mod: mod, func: func, target_node: node, origin_node: node(), success: false, tenant: tenant_id}
             )
 
-            {:error, error}
+            error
         end
       end
     catch

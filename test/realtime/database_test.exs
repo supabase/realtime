@@ -234,6 +234,13 @@ defmodule Realtime.DatabaseTest do
   Code.eval_quoted(@aux_mod)
 
   describe "transaction/1 in clustered mode" do
+    setup do
+      Connect.shutdown("dev_tenant")
+      # Waiting for :syn to "unregister" if the Connect process was up
+      Process.sleep(100)
+      :ok
+    end
+
     test "success call returns output" do
       {:ok, node} = Clustered.start(@aux_mod)
       {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant"])
