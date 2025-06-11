@@ -71,9 +71,20 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   end
 
   defp send_message(self_broadcast, tenant_topic, payload) do
-    if self_broadcast,
-      do: Endpoint.broadcast(tenant_topic, @event_type, payload),
-      else: Endpoint.broadcast_from(self(), tenant_topic, @event_type, payload)
+    nodes = Node.list()
+    dbg(tenant_topic)
+
+    if self_broadcast do
+      Endpoint.local_broadcast(tenant_topic, @event_type, payload)
+      :gen_rpc.multicall(nodes, Endpoint, :local_broadcast, [tenant_topic, @event_type, payload])
+    else
+      Endpoint.local_broadcast_from(self(), tenant_topic, @event_type, payload)
+      :gen_rpc.multicall(nodes, Endpoint, :local_broadcast_from, [self(), tenant_topic, @event_type, payload])
+    end
+
+    # if self_broadcast,
+    #   do: Endpoint.broadcast(tenant_topic, @event_type, payload),
+    #   else: Endpoint.broadcast_from(self(), tenant_topic, @event_type, payload)
   end
 
   defp increment_rate_counter(%{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: false}}}} = socket) do

@@ -67,6 +67,13 @@ defmodule Clustered do
     :ok =
       :erpc.call(node, Application, :put_env, [:realtime, RealtimeWeb.Endpoint, Keyword.put(endpoint, :server, false)])
 
+    # Configure gen_rpc swapping port definitons
+    gen_rpc_tpc_server_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
+    gen_rpc_tpc_client_port = Application.fetch_env!(:gen_rpc, :tcp_client_port)
+
+    :ok = :erpc.call(node, Application, :put_env, [:gen_rpc, :tcp_server_port, gen_rpc_tpc_client_port])
+    :ok = :erpc.call(node, Application, :put_env, [:gen_rpc, :tcp_client_port, gen_rpc_tpc_server_port])
+
     # We need to override this value as the current implementation overrides the string with a map leading to errors
     :ok = :erpc.call(node, Application, :put_env, [:realtime, :jwt_claim_validators, "{}"])
 

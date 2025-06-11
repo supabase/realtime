@@ -126,6 +126,10 @@ if config_env() == :prod do
 end
 
 if config_env() != :test do
+  config :gen_rpc,
+    tcp_server_port: System.get_env("GEN_RPC_TCP_SERVER_PORT", "5369") |> String.to_integer(),
+    tcp_client_port: System.get_env("GEN_RPC_TCP_CLIENT_PORT", "5369") |> String.to_integer()
+
   config :logger, level: System.get_env("LOG_LEVEL", "info") |> String.to_existing_atom()
 
   platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws, else: :fly

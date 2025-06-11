@@ -52,3 +52,7 @@ config :opentelemetry,
   span_processor: :simple,
   traces_exporter: :none,
   processors: [{:otel_simple_processor, %{}}]
+
+config :gen_rpc,
+  tcp_server_port: 5969,
+  tcp_client_port: 5970
