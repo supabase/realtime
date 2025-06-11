@@ -239,8 +239,10 @@ defmodule Realtime.Api do
     |> Map.put(:events_per_second_now, current)
   end
 
-  defp maybe_invalidate_cache(%Ecto.Changeset{changes: changes, valid?: true, data: %{external_id: external_id}})
-       when changes != %{} do
+  defp maybe_invalidate_cache(
+         %Ecto.Changeset{changes: changes, valid?: true, data: %{external_id: external_id}} = changeset
+       )
+       when changes != %{} and requires_restarting_db_connection(changeset) do
     Tenants.Cache.distributed_invalidate_tenant_cache(external_id)
   end
 
