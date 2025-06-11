@@ -42,11 +42,15 @@ Hooks.payload = {
 
     private_channel = private_channel == "true";
 
+    console.log("Connecting to Realtime Channel")
     // Join the Channel 'any'
     // Channels can be named anything
     // All clients on the same Channel will get messages sent to that Channel
     this.channel = this.realtimeSocket.channel(channelName, {
-      config: { broadcast: { self: true, private: private_channel } },
+      config: {
+        broadcast: { self: true },
+        private: private_channel
+      },
     });
 
     // Hack to confirm Postgres is subscribed

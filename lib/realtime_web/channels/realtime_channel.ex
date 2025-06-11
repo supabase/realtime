@@ -51,6 +51,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign(:private?, !!params["config"]["private"])
       |> assign(:policies, nil)
 
+    dbg(params)
+    dbg(socket.assigns.private?)
+
     with :ok <- SignalHandler.shutdown_in_progress?(),
          :ok <- only_private?(tenant_id, socket),
          :ok <- limit_joins(socket.assigns),
@@ -563,9 +566,14 @@ defmodule RealtimeWeb.RealtimeChannel do
     {_, header} = Enum.find(headers, {nil, nil}, fn {k, _} -> k == "x-api-key" end)
 
     case access_token do
-      nil -> assign(socket, :access_token, header)
-      "sb_" <> _ -> assign(socket, :access_token, header)
-      _ -> handle_access_token(socket, params)
+      # nil ->
+      #   assign(socket, :access_token, header)
+
+      "sb_" <> _ ->
+        assign(socket, :access_token, header)
+
+      _ ->
+        handle_access_token(socket, params)
     end
   end
 

@@ -88,7 +88,7 @@ defmodule RealtimeWeb.InspectorLive.ConnComponent do
         %{"_target" => ["connection", "project"], "connection" => %{"project" => project} = conn},
         socket
       ) do
-    host = "https://#{project}.supabase.co"
+    host = "http://#{project}.localhost:#{System.get_env("PORT")}"
 
     conn = conn |> Map.put("host", host) |> Map.put("project", project)
 

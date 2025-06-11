@@ -15,7 +15,7 @@ config :realtime,
   presence: presence
 
 config :realtime, RealtimeWeb.Endpoint,
-  http: [port: System.get_env("PORT", "4000")],
+  http: [host: "localhost", port: System.get_env("PORT", "4000")],
   debug_errors: true,
   code_reloader: true,
   check_origin: false,
@@ -85,4 +85,5 @@ config :phoenix, :plug_init_mode, :runtime
 # Disable caching to ensure the rendered spec is refreshed
 config :open_api_spex, :cache_adapter, OpenApiSpex.Plug.NoneCache
 
-config :opentelemetry, traces_exporter: {:otel_exporter_stdout, []}
+# To output open telemetry traces to the console, you can uncomment the following line:
+# config :opentelemetry, traces_exporter: {:otel_exporter_stdout, []}
