@@ -43,8 +43,13 @@ defmodule Realtime.UsersCounterTest do
   end
 
   defp generate_load(tenant_id, nodes \\ 2, processes \\ 2) do
-    for _ <- 1..nodes do
-      {:ok, node} = Clustered.start(@aux_mod)
+    for i <- 1..nodes do
+      # Avoid port collision
+      extra_config = [
+        {:gen_rpc, :tcp_server_port, 15970 + i}
+      ]
+
+      {:ok, node} = Clustered.start(@aux_mod, extra_config: extra_config, phoenix_port: 4012 + i)
 
       for _ <- 1..processes do
         pid = Rpc.call(node, Aux, :ping, [])

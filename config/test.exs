@@ -41,7 +41,9 @@ config :realtime,
   request_id_baggage_key: "sb-request-id"
 
 # Print nothing during tests unless captured or a test failure happens
-config :logger, backends: []
+config :logger,
+  backends: [],
+  level: :warning
 
 # Configures Elixir's Logger
 config :logger, :console,
@@ -52,3 +54,7 @@ config :opentelemetry,
   span_processor: :simple,
   traces_exporter: :none,
   processors: [{:otel_simple_processor, %{}}]
+
+config :gen_rpc,
+  tcp_server_port: 5969,
+  tcp_client_port: 5970

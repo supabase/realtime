@@ -27,6 +27,7 @@ defmodule Realtime.Api.Tenant do
     field(:events_per_second_now, :integer, virtual: true)
     field(:private_only, :boolean, default: false)
     field(:migrations_ran, :integer, default: 0)
+    field(:broadcast_adapter, Ecto.Enum, values: [:phoenix, :gen_rpc], default: :phoenix)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -70,7 +71,8 @@ defmodule Realtime.Api.Tenant do
       :max_joins_per_second,
       :suspend,
       :private_only,
-      :migrations_ran
+      :migrations_ran,
+      :broadcast_adapter
     ])
     |> validate_required([
       :external_id,

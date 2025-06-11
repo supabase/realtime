@@ -17,7 +17,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
   setup [:initiate_tenant]
 
-  describe "call/2" do
+  describe "handle/3" do
     test "with write true policy, user is able to send message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket = socket_fixture(tenant, topic, %Policies{broadcast: %BroadcastPolicies{write: true}})
 

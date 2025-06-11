@@ -10,13 +10,14 @@ defmodule Realtime.Rpc do
   """
   @spec call(atom(), atom(), atom(), any(), keyword()) :: any()
   def call(node, mod, func, args, opts \\ []) do
+    tenant_id = Keyword.get(opts, :tenant_id)
     timeout = Keyword.get(opts, :timeout, Application.get_env(:realtime, :rpc_timeout))
     {latency, response} = :timer.tc(fn -> :rpc.call(node, mod, func, args, timeout) end)
 
     Telemetry.execute(
       [:realtime, :rpc],
       %{latency: latency},
-      %{mod: mod, func: func, target_node: node, origin_node: node()}
+      %{mod: mod, func: func, target_node: node, origin_node: node(), mechanism: :rpc, tenant: tenant_id, success: nil}
     )
 
     response
@@ -38,7 +39,15 @@ defmodule Realtime.Rpc do
             Telemetry.execute(
               [:realtime, :rpc],
               %{latency: latency},
-              %{mod: mod, func: func, target_node: node, origin_node: node(), success: true, tenant: tenant_id}
+              %{
+                mod: mod,
+                func: func,
+                target_node: node,
+                origin_node: node(),
+                success: true,
+                tenant: tenant_id,
+                mechanism: :erpc
+              }
             )
 
             response
@@ -47,7 +56,15 @@ defmodule Realtime.Rpc do
             Telemetry.execute(
               [:realtime, :rpc],
               %{latency: latency},
-              %{mod: mod, func: func, target_node: node, origin_node: node(), success: false, tenant: tenant_id}
+              %{
+                mod: mod,
+                func: func,
+                target_node: node,
+                origin_node: node(),
+                success: false,
+                tenant: tenant_id,
+                mechanism: :erpc
+              }
             )
 
             error
@@ -64,7 +81,15 @@ defmodule Realtime.Rpc do
         Telemetry.execute(
           [:realtime, :rpc],
           %{latency: 0},
-          %{mod: mod, func: func, target_node: node, origin_node: node(), success: false, tenant: tenant_id}
+          %{
+            mod: mod,
+            func: func,
+            target_node: node,
+            origin_node: node(),
+            success: false,
+            tenant: tenant_id,
+            mechanism: :erpc
+          }
         )
 
         log_error(
