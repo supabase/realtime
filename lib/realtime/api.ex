@@ -13,6 +13,18 @@ defmodule Realtime.Api do
   alias Realtime.RateCounter
   alias Realtime.GenCounter
   alias Realtime.Tenants
+  alias Realtime.Tenants.Connect
+
+  defguard requires_disconnect(changeset)
+           when changeset.valid? == true and
+                  (is_map_key(changeset.changes, :jwt_secret) or
+                     is_map_key(changeset.changes, :jwt_jwks))
+
+  defguard requires_restarting_db_connection(changeset)
+           when changeset.valid? == true and
+                  (is_map_key(changeset.changes, :extensions) or
+                     is_map_key(changeset.changes, :jwt_secret) or
+                     is_map_key(changeset.changes, :jwt_jwks))
 
   @doc """
   Returns the list of tenants.
@@ -112,22 +124,22 @@ defmodule Realtime.Api do
 
   """
   def update_tenant(%Tenant{} = tenant, attrs) do
-    tenant
-    |> Tenant.changeset(attrs)
-    |> tap(&maybe_trigger_disconnect/1)
-    |> Repo.update()
-  end
+    changeset = Tenant.changeset(tenant, attrs)
+    updated = Repo.update(changeset)
 
-  defp maybe_trigger_disconnect(%Ecto.Changeset{
-         changes: changes,
-         valid?: true,
-         data: %{external_id: external_id}
-       })
-       when is_map_key(changes, :jwt_jwks) or is_map_key(changes, :jwt_secret) do
-    Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> external_id, :disconnect)
-  end
+    case updated do
+      {:ok, tenant} ->
+        maybe_invalidate_cache(changeset)
+        maybe_trigger_disconnect(changeset)
+        maybe_restart_db_connection(changeset)
+        Logger.debug("Tenant updated: #{inspect(tenant, pretty: true)}")
 
-  defp maybe_trigger_disconnect(_), do: nil
+      {:error, error} ->
+        Logger.error("Failed to update tenant: #{inspect(error, pretty: true)}")
+    end
+
+    updated
+  end
 
   @doc """
   Deletes a tenant.
@@ -198,7 +210,8 @@ defmodule Realtime.Api do
       {value, settings} = Map.pop(extension.settings, from)
       new_settings = Map.put(settings, to, value)
 
-      Ecto.Changeset.cast(extension, %{settings: new_settings}, [:settings])
+      extension
+      |> Ecto.Changeset.cast(%{settings: new_settings}, [:settings])
       |> Repo.update!()
     end
   end
@@ -225,4 +238,27 @@ defmodule Realtime.Api do
     |> Map.put(:events_per_second_rolling, avg)
     |> Map.put(:events_per_second_now, current)
   end
+
+  defp maybe_invalidate_cache(
+         %Ecto.Changeset{changes: changes, valid?: true, data: %{external_id: external_id}} = changeset
+       )
+       when changes != %{} and requires_restarting_db_connection(changeset) do
+    Tenants.Cache.distributed_invalidate_tenant_cache(external_id)
+  end
+
+  defp maybe_invalidate_cache(_changeset), do: nil
+
+  defp maybe_trigger_disconnect(%Ecto.Changeset{data: %{external_id: external_id}} = changeset)
+       when requires_disconnect(changeset) do
+    Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> external_id, :disconnect)
+  end
+
+  defp maybe_trigger_disconnect(_changeset), do: nil
+
+  defp maybe_restart_db_connection(%Ecto.Changeset{data: %{external_id: external_id}} = changeset)
+       when requires_restarting_db_connection(changeset) do
+    Connect.shutdown(external_id)
+  end
+
+  defp maybe_restart_db_connection(_changeset), do: nil
 end

@@ -1,5 +1,5 @@
 defmodule Realtime.ApiTest do
-  use Realtime.DataCase, async: true
+  use Realtime.DataCase, async: false
 
   use Mimic
 
@@ -9,13 +9,17 @@ defmodule Realtime.ApiTest do
   alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter
+  alias Realtime.Tenants.Connect
+
   @db_conf Application.compile_env(:realtime, Realtime.Repo)
 
   setup do
-    tenant_fixture(%{max_concurrent_users: 10_000_000})
-    tenant_fixture(%{max_concurrent_users: 25_000_000})
-    tenants = Api.list_tenants()
+    tenant1 = Containers.checkout_tenant(run_migrations: true)
+    tenant2 = Containers.checkout_tenant(run_migrations: true)
+    Api.update_tenant(tenant1, %{max_concurrent_users: 10_000_000})
+    Api.update_tenant(tenant2, %{max_concurrent_users: 20_000_000})
 
+    tenants = Api.list_tenants()
     %{tenants: tenants}
   end
 
@@ -97,9 +101,7 @@ defmodule Realtime.ApiTest do
   end
 
   describe "update_tenant/2" do
-    test "valid data updates the tenant" do
-      tenant = tenant_fixture()
-
+    test "valid data updates the tenant", %{tenants: [tenant | _]} do
       update_attrs = %{
         external_id: tenant.external_id,
         jwt_secret: "some updated jwt_secret",
@@ -117,29 +119,84 @@ defmodule Realtime.ApiTest do
       assert {:error, %Ecto.Changeset{}} = Api.update_tenant(tenant, %{external_id: nil, jwt_secret: nil, name: nil})
     end
 
-    test "valid data and jwks change will send disconnect event" do
-      tenant = tenant_fixture()
+    test "valid data and jwks change will send disconnect event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
-
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["test"]}})
       assert_receive :disconnect, 500
     end
 
-    test "valid data and jwt_secret change will send disconnect event" do
-      tenant = tenant_fixture()
+    test "valid data and jwt_secret change will send disconnect event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
-
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{jwt_secret: "potato"})
-
       assert_receive :disconnect, 500
     end
 
-    test "valid data but not updating jwt_secret or jwt_jwks won't send event" do
-      tenant = tenant_fixture()
+    test "valid data but not updating jwt_secret or jwt_jwks won't send event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
-
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{max_events_per_second: 100})
       refute_receive :disconnect, 500
+    end
+
+    test "valid data and jwt_secret change will restart the database connection", %{tenants: [tenant | _]} do
+      {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+      Process.monitor(old_pid)
+      assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{jwt_secret: "potato"})
+      assert_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
+      refute Process.alive?(old_pid)
+      Process.sleep(100)
+      assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert %Postgrex.Result{} = Postgrex.query!(new_pid, "SELECT 1", [])
+    end
+
+    test "valid data and tenant data change will not restart the database connection", %{tenants: [tenant | _]} do
+      {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{max_concurrent_users: 100})
+      refute_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
+      assert Process.alive?(old_pid)
+      assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert old_pid == new_pid
+    end
+
+    test "valid data and extensions data change will restart the database connection", %{tenants: [tenant | _]} do
+      config = Realtime.Database.from_tenant(tenant, "realtime_test", :stop)
+
+      extensions = [
+        %{
+          "type" => "postgres_cdc_rls",
+          "settings" => %{
+            "db_host" => "127.0.0.1",
+            "db_name" => "postgres",
+            "db_user" => "supabase_admin",
+            "db_password" => "postgres",
+            "db_port" => "#{config.port}",
+            "poll_interval" => 100,
+            "poll_max_changes" => 100,
+            "poll_max_record_bytes" => 1_048_576,
+            "region" => "us-east-1",
+            "publication" => "supabase_realtime_test",
+            "ssl_enforced" => false
+          }
+        }
+      ]
+
+      {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+      Process.monitor(old_pid)
+      assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{extensions: extensions})
+      assert_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
+      refute Process.alive?(old_pid)
+      Process.sleep(100)
+      assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert %Postgrex.Result{} = Postgrex.query!(new_pid, "SELECT 1", [])
+    end
+
+    test "valid data and change to tenant data will refresh cache", %{tenants: [tenant | _]} do
+      assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{name: "new_name"})
+      assert %Tenant{name: "new_name"} = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
+    end
+
+    test "valid data and no changes to tenant will not refresh cache", %{tenants: [tenant | _]} do
+      reject(&Realtime.Tenants.Cache.get_tenant_by_external_id/1)
+      assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{name: tenant.name})
     end
   end
 
@@ -190,6 +247,74 @@ defmodule Realtime.ApiTest do
       tenant = tenant_fixture()
       Api.rename_settings_field("poll_interval_ms", "poll_interval")
       assert %{extensions: [%{settings: %{"poll_interval" => _}}]} = tenant
+    end
+  end
+
+  describe "requires_disconnect/1" do
+    defmodule TestRequiresDisconnect do
+      import Api
+
+      def check(changeset) when requires_disconnect(changeset), do: true
+      def check(_changeset), do: false
+    end
+
+    test "returns true if jwt_secret is changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{jwt_secret: "new_secret"}}
+      assert TestRequiresDisconnect.check(changeset)
+    end
+
+    test "returns true if jwt_jwks is changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{jwt_jwks: %{keys: ["test"]}}}
+      assert TestRequiresDisconnect.check(changeset)
+    end
+
+    test "returns false if jwt_secret and jwt_jwks are not changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{max_concurrent_users: 10}}
+      refute TestRequiresDisconnect.check(changeset)
+    end
+
+    test "returns false if valid? is false" do
+      changeset = %Ecto.Changeset{valid?: false, changes: %{jwt_secret: "new_secret"}}
+      refute TestRequiresDisconnect.check(changeset)
+    end
+  end
+
+  describe "requires_restarting_db_connection/1" do
+    defmodule TestRequiresRestartingDbConnection do
+      import Api
+
+      def check(changeset) when requires_restarting_db_connection(changeset), do: true
+      def check(_changeset), do: false
+    end
+
+    test "returns true if extensions is changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{extensions: []}}
+      assert TestRequiresRestartingDbConnection.check(changeset)
+    end
+
+    test "returns true if jwt_secret and max_events_per_second are changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{jwt_secret: "new_secret"}}
+      assert TestRequiresRestartingDbConnection.check(changeset)
+    end
+
+    test "returns true if jwt_jwks and max_concurrent_users are changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{jwt_jwks: %{keys: ["test"]}}}
+      assert TestRequiresRestartingDbConnection.check(changeset)
+    end
+
+    test "returns true if multiple relevant fields are changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{jwt_secret: "new_secret", jwt_jwks: %{keys: ["test"]}}}
+      assert TestRequiresRestartingDbConnection.check(changeset)
+    end
+
+    test "returns false if no relevant fields are changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{postgres_cdc_default: "potato"}}
+      refute TestRequiresRestartingDbConnection.check(changeset)
+    end
+
+    test "returns false if valid? is false" do
+      changeset = %Ecto.Changeset{valid?: false, changes: %{jwt_secret: "new_secret"}}
+      refute TestRequiresRestartingDbConnection.check(changeset)
     end
   end
 end
