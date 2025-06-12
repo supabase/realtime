@@ -273,6 +273,24 @@ defmodule Realtime.DatabaseTest do
                Process.sleep(100)
              end) =~ "project=123 external_id=123 [error] ErrorExecutingTransaction:"
     end
+
+    test "noproc error" do
+      metadata = [external_id: "123", project: "123", tenant_id: "123"]
+      {:ok, node} = Clustered.start(@aux_mod)
+      # Grab a remote pid that will not exist. :erpc uses a new process to perform the call.
+      # Once it has returned the process is not alive anymore
+
+      pid = Rpc.call(node, :erlang, :self, [])
+      assert node(pid) == node
+
+      assert capture_log(fn ->
+               assert {:error, {:noproc, {DBConnection.Holder, :checkout, [^pid, []]}}} =
+                        Database.transaction(pid, &DatabaseAux.checker/1, [], metadata)
+
+               # We have to wait for logs to be relayed to this node
+               Process.sleep(100)
+             end) =~ "project=123 external_id=123 [error] ErrorOnRpcCall:"
+    end
   end
 
   describe "pool_size_by_application_name/2" do

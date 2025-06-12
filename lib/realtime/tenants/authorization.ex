@@ -74,7 +74,8 @@ defmodule Realtime.Tenants.Authorization do
            node(db_conn),
            __MODULE__,
            :get_read_authorizations,
-           [policies, db_conn, authorization_context]
+           [policies, db_conn, authorization_context],
+           tenant_id: authorization_context.tenant_id
          ) do
       {:error, :rpc_error, reason} -> {:error, reason}
       response -> response
@@ -103,7 +104,8 @@ defmodule Realtime.Tenants.Authorization do
            node(db_conn),
            __MODULE__,
            :get_write_authorizations,
-           [policies, db_conn, authorization_context]
+           [policies, db_conn, authorization_context],
+           tenant_id: authorization_context.tenant_id
          ) do
       {:error, :rpc_error, reason} -> {:error, reason}
       response -> response
@@ -152,7 +154,7 @@ defmodule Realtime.Tenants.Authorization do
   defp get_read_policies_for_connection(conn, authorization_context, policies) do
     tenant_id = authorization_context.tenant_id
     opts = [telemetry: [:realtime, :tenants, :read_authorization_check], tenant_id: tenant_id]
-    metadata = [project: tenant_id, external_id: tenant_id]
+    metadata = [project: tenant_id, external_id: tenant_id, tenant_id: tenant_id]
 
     Database.transaction(
       conn,
