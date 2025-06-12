@@ -12,11 +12,13 @@ defmodule Realtime.Tenants.Authorization do
   require Logger
   import Ecto.Query
 
+  alias DBConnection.ConnectionError
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.Repo
+  alias Realtime.Rpc
   alias Realtime.Tenants.Authorization.Policies
-  alias DBConnection.ConnectionError
+
   defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role]
 
   @type t :: %__MODULE__{
@@ -52,10 +54,12 @@ defmodule Realtime.Tenants.Authorization do
 
   @doc """
   Runs validations based on RLS policies to return policies for read policies
+
+  Automatically uses RPC if the database connection is not in the same node
   """
   @spec get_read_authorizations(Policies.t(), pid(), t()) ::
           {:ok, Policies.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
-  def get_read_authorizations(policies, db_conn, authorization_context) do
+  def get_read_authorizations(policies, db_conn, authorization_context) when node() == node(db_conn) do
     case get_read_policies_for_connection(db_conn, authorization_context, policies) do
       {:ok, %Policies{} = policies} -> {:ok, policies}
       {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
@@ -64,17 +68,47 @@ defmodule Realtime.Tenants.Authorization do
     end
   end
 
+  # Remote call
+  def get_read_authorizations(policies, db_conn, authorization_context) do
+    case Rpc.enhanced_call(
+           node(db_conn),
+           __MODULE__,
+           :get_read_authorizations,
+           [policies, db_conn, authorization_context],
+           tenant_id: authorization_context.tenant_id
+         ) do
+      {:error, :rpc_error, reason} -> {:error, reason}
+      response -> response
+    end
+  end
+
   @doc """
   Runs validations based on RLS policies to return policies for write policies
+
+  Automatically uses RPC if the database connection is not in the same node
   """
   @spec get_write_authorizations(Policies.t(), pid(), __MODULE__.t()) ::
           {:ok, Policies.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
-  def get_write_authorizations(policies, db_conn, authorization_context) when is_pid(db_conn) do
+  def get_write_authorizations(policies, db_conn, authorization_context) when node() == node(db_conn) do
     case get_write_policies_for_connection(db_conn, authorization_context, policies) do
       {:ok, %Policies{} = policies} -> {:ok, policies}
       {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
       {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
       {:error, error} -> {:error, error}
+    end
+  end
+
+  # Remote call
+  def get_write_authorizations(policies, db_conn, authorization_context) do
+    case Rpc.enhanced_call(
+           node(db_conn),
+           __MODULE__,
+           :get_write_authorizations,
+           [policies, db_conn, authorization_context],
+           tenant_id: authorization_context.tenant_id
+         ) do
+      {:error, :rpc_error, reason} -> {:error, reason}
+      response -> response
     end
   end
 
@@ -120,7 +154,7 @@ defmodule Realtime.Tenants.Authorization do
   defp get_read_policies_for_connection(conn, authorization_context, policies) do
     tenant_id = authorization_context.tenant_id
     opts = [telemetry: [:realtime, :tenants, :read_authorization_check], tenant_id: tenant_id]
-    metadata = [project: tenant_id, external_id: tenant_id]
+    metadata = [project: tenant_id, external_id: tenant_id, tenant_id: tenant_id]
 
     Database.transaction(
       conn,

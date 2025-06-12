@@ -40,10 +40,8 @@ config :realtime,
   prom_poll_rate: 5_000,
   request_id_baggage_key: "sb-request-id"
 
-# Print only errors during test
-config :logger,
-  compile_time_purge_matching: [[module: Postgrex], [module: DBConnection]],
-  level: :warning
+# Print nothing during tests unless captured or a test failure happens
+config :logger, backends: []
 
 # Configures Elixir's Logger
 config :logger, :console,
