@@ -67,12 +67,4 @@ defmodule RealtimeWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
   plug RealtimeWeb.Router
-
-  @doc """
-  Broadcast through :gen_rpc
-  """
-  @spec gen_rpc_broadcast(Phoenix.Endpoint.topic(), Phoenix.Endpoint.event(), Phoenix.Endpoint.msg()) :: :ok
-  def gen_rpc_broadcast(topic, event, msg) do
-    Realtime.GenRpc.multicast(RealtimeWeb.Endpoint, :local_broadcast, [topic, event, msg])
-  end
 end

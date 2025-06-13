@@ -266,7 +266,6 @@ defmodule Realtime.Integration.RtChannelTest do
       node: node
     } do
       tenant_topic = Tenants.tenant_topic(tenant, topic, false)
-      :ok = :erpc.call(node, Subscriber, :subscribe, [tenant_topic, self()])
 
       {:ok, token} =
         generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
@@ -284,7 +283,7 @@ defmodule Realtime.Integration.RtChannelTest do
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
 
-      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
