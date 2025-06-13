@@ -56,6 +56,9 @@ defmodule Clustered do
       :ok = :erpc.call(node, Application, :put_env, [app_name, key, value])
     end
 
+    # We need to load the app first as it has default app env that we want to override
+    :ok = :erpc.call(node, Application, :ensure_loaded, [:gen_rpc])
+
     for {app_name, _, _} <- Application.loaded_applications(),
         {key, value} <- Application.get_all_env(app_name) do
       :ok = :erpc.call(node, Application, :put_env, [app_name, key, value])
@@ -63,9 +66,12 @@ defmodule Clustered do
 
     endpoint = Application.get_env(:realtime, RealtimeWeb.Endpoint)
 
-    # Disable phoenix server to avoid port collisions as we don't need it
     :ok =
-      :erpc.call(node, Application, :put_env, [:realtime, RealtimeWeb.Endpoint, Keyword.put(endpoint, :server, false)])
+      :erpc.call(node, Application, :put_env, [
+        :realtime,
+        RealtimeWeb.Endpoint,
+        Keyword.put(endpoint, :http, port: 4012)
+      ])
 
     # Configure gen_rpc swapping port definitons
     gen_rpc_tpc_server_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)

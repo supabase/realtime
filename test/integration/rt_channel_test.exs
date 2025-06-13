@@ -30,7 +30,7 @@ defmodule Realtime.Integration.RtChannelTest do
   @port 4003
   @serializer V1.JSONSerializer
 
-  defp uri(tenant), do: "ws://#{tenant.external_id}.localhost:#{@port}/socket/websocket"
+  defp uri(tenant, port \\ @port), do: "ws://#{tenant.external_id}.localhost:#{port}/socket/websocket"
 
   defmodule TestEndpoint do
     use Phoenix.Endpoint, otp_app: :phoenix
@@ -267,28 +267,24 @@ defmodule Realtime.Integration.RtChannelTest do
     } do
       tenant_topic = Tenants.tenant_topic(tenant, topic, false)
       :ok = :erpc.call(node, Subscriber, :subscribe, [tenant_topic, self()])
-      {socket, _} = get_connection(tenant, "authenticated")
-      config = %{broadcast: %{self: true}, private: true}
+
+      {:ok, token} =
+        generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
+
+      {:ok, remote_socket} = WebsocketClient.connect(self(), uri(tenant, 4012), @serializer, [{"x-api-key", token}])
+      {:ok, socket} = WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", token}])
+
+      config = %{broadcast: %{self: false}, private: true}
       topic = "realtime:#{topic}"
+
+      WebsocketClient.join(remote_socket, topic, %{config: config})
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
-
+      # Send through one socket and receive through the other (self: false)
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
 
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}
-
-      :gen_rpc.call(node, Node, :self, []) |> dbg()
-
-      assert_receive {:relay, ^node,
-                      %Phoenix.Socket.Broadcast{
-                        event: "broadcast",
-                        payload: %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"},
-                        topic: "dev_tenant-private:my27xoclbsnkfsq5yreudln5g4pydvcu"
-                      }},
-                     500
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
@@ -1799,32 +1795,13 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
-  @aux_mod (quote do
-              defmodule Subscriber do
-                def subscribe(topic, process_subscriber) do
-                  spawn(fn ->
-                    dbg("Subscribing to #{topic}")
-                    RealtimeWeb.Endpoint.subscribe(topic)
-
-                    receive do
-                      msg -> send(process_subscriber, {:relay, node(), msg})
-                    end
-                  end)
-
-                  :ok
-                end
-              end
-            end)
-
-  Code.eval_quoted(@aux_mod)
-
   defp mode(%{mode: :distributed, tenant: tenant}) do
     Connect.shutdown(tenant.external_id)
     # Sleeping so that syn can forget about this Connect process
     Process.sleep(100)
     on_exit(fn -> Connect.shutdown(tenant.external_id) end)
 
-    {:ok, node} = Clustered.start(@aux_mod)
+    {:ok, node} = Clustered.start()
     {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant"])
 
     assert node(db_conn) == node
