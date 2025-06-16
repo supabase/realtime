@@ -30,7 +30,7 @@ defmodule Realtime.Integration.RtChannelTest do
   @port 4003
   @serializer V1.JSONSerializer
 
-  defp uri(tenant), do: "ws://#{tenant.external_id}.localhost:#{@port}/socket/websocket"
+  defp uri(tenant, port \\ @port), do: "ws://#{tenant.external_id}.localhost:#{port}/socket/websocket"
 
   defmodule TestEndpoint do
     use Phoenix.Endpoint, otp_app: :phoenix
@@ -479,22 +479,53 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
          mode: :distributed
-    test "private broadcast with valid channel with permissions sends message using a remote node", %{
+    test "private broadcast with valid channel with permissions sends message using a remote node (phoenix adapter)", %{
       tenant: tenant,
       topic: topic
     } do
-      {socket, _} = get_connection(tenant, "authenticated")
-      config = %{broadcast: %{self: true}, private: true}
+      {:ok, token} =
+        generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
+
+      {:ok, remote_socket} = WebsocketClient.connect(self(), uri(tenant, 4012), @serializer, [{"x-api-key", token}])
+      {:ok, socket} = WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", token}])
+
+      config = %{broadcast: %{self: false}, private: true}
       topic = "realtime:#{topic}"
+
+      WebsocketClient.join(remote_socket, topic, %{config: config})
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
-
+      # Send through one socket and receive through the other (self: false)
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
 
-      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
+         mode: :distributed
+    test "private broadcast with valid channel with permissions sends message using a remote node (gen_rpc adapter)", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      {:ok, tenant} = Realtime.Api.update_tenant(tenant, %{broadcast_adapter: :gen_rpc})
+
+      {:ok, token} =
+        generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
+
+      {:ok, remote_socket} = WebsocketClient.connect(self(), uri(tenant, 4012), @serializer, [{"x-api-key", token}])
+      {:ok, socket} = WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", token}])
+
+      config = %{broadcast: %{self: false}, private: true}
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(remote_socket, topic, %{config: config})
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      # Send through one socket and receive through the other (self: false)
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic, "broadcast", payload)
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
@@ -2015,7 +2046,7 @@ defmodule Realtime.Integration.RtChannelTest do
     {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant"])
 
     assert node(db_conn) == node
-    %{db_conn: db_conn}
+    %{db_conn: db_conn, node: node}
   end
 
   defp mode(%{tenant: tenant}) do

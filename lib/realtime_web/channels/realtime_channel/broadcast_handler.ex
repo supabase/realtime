@@ -6,13 +6,15 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   import Phoenix.Socket, only: [assign: 3]
 
+  alias RealtimeWeb.TenantBroadcaster
   alias Phoenix.Socket
+  alias Realtime.Api.Tenant
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias RealtimeWeb.Endpoint
+  alias Realtime.Tenants.Cache
 
   @event_type "broadcast"
   @spec handle(map(), Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
@@ -36,8 +38,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
           |> assign(:policies, policies)
           |> increment_rate_counter()
 
-        %{ack_broadcast: ack_broadcast} = socket.assigns
-        send_message(self_broadcast, tenant_topic, payload)
+        %{ack_broadcast: ack_broadcast, tenant: tenant_id} = socket.assigns
+        send_message(tenant_id, self_broadcast, tenant_topic, payload)
         if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
 
       {:ok, policies} ->
@@ -58,22 +60,27 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       assigns: %{
         tenant_topic: tenant_topic,
         self_broadcast: self_broadcast,
-        ack_broadcast: ack_broadcast
+        ack_broadcast: ack_broadcast,
+        tenant: tenant_id
       }
     } = socket
 
     socket = increment_rate_counter(socket)
-    send_message(self_broadcast, tenant_topic, payload)
+    send_message(tenant_id, self_broadcast, tenant_topic, payload)
 
     if ack_broadcast,
       do: {:reply, :ok, socket},
       else: {:noreply, socket}
   end
 
-  defp send_message(self_broadcast, tenant_topic, payload) do
-    if self_broadcast,
-      do: Endpoint.broadcast(tenant_topic, @event_type, payload),
-      else: Endpoint.broadcast_from(self(), tenant_topic, @event_type, payload)
+  defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do
+    with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id) do
+      if self_broadcast do
+        TenantBroadcaster.broadcast(tenant, tenant_topic, @event_type, payload)
+      else
+        TenantBroadcaster.broadcast_from(tenant, self(), tenant_topic, @event_type, payload)
+      end
+    end
   end
 
   defp increment_rate_counter(%{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: false}}}} = socket) do
