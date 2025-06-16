@@ -66,7 +66,7 @@ defmodule Realtime.Application do
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
         {Cachex, name: Realtime.RateCounter},
-        Realtime.Tenants.CacheSupervisor,
+        Realtime.Tenants.Cache,
         Realtime.GenCounter.DynamicSupervisor,
         Realtime.RateCounter.DynamicSupervisor,
         Realtime.Latency,

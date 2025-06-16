@@ -1,4 +1,6 @@
 defmodule Realtime.Tenants.CacheTest do
+  alias Realtime.Rpc
+  # async: false due to the usage of dev_realtime tenant
   use Realtime.DataCase, async: false
 
   alias Realtime.Api
@@ -37,20 +39,42 @@ defmodule Realtime.Tenants.CacheTest do
   end
 
   describe "distributed_invalidate_tenant_cache/1" do
-    test "invalidates the cache given a tenant_id", %{tenant: tenant} do
-      external_id = tenant.external_id
-      assert %Api.Tenant{suspend: false} = Cache.get_tenant_by_external_id(external_id)
+    setup do
+      {:ok, node} = Clustered.start()
+      %{node: node}
+    end
 
-      # Delete tenant
-      Realtime.Repo.delete(tenant)
+    test "invalidates the cache given a tenant_id", %{node: node} do
+      external_id = "dev_tenant"
+      %Api.Tenant{name: expected_name} = tenant = Tenants.get_tenant_by_external_id(external_id)
 
-      # Cache showing non existing tenant
-      assert %Api.Tenant{suspend: false} = Cache.get_tenant_by_external_id(external_id)
+      dummy_name = random_string()
+
+      # Ensure cache has the values
+      Cachex.put!(
+        Realtime.Tenants.Cache,
+        {{:get_tenant_by_external_id, 1}, [external_id]},
+        {:cached, %{tenant | name: dummy_name}}
+      )
+
+      Rpc.enhanced_call(node, Cachex, :put!, [
+        Realtime.Tenants.Cache,
+        {{:get_tenant_by_external_id, 1}, [external_id]},
+        {:cached, %{tenant | name: dummy_name}}
+      ])
+
+      # Cache showing old value
+      assert %Api.Tenant{name: ^dummy_name} = Cache.get_tenant_by_external_id(external_id)
+      assert %Api.Tenant{name: ^dummy_name} = Rpc.enhanced_call(node, Cache, :get_tenant_by_external_id, [external_id])
 
       # Invalidate cache
-      Cache.distributed_invalidate_tenant_cache(external_id)
-      Process.sleep(500)
-      refute Cache.get_tenant_by_external_id(external_id)
+      assert true = Cache.distributed_invalidate_tenant_cache(external_id)
+
+      # Cache showing new value
+      assert %Api.Tenant{name: ^expected_name} = Cache.get_tenant_by_external_id(external_id)
+
+      assert %Api.Tenant{name: ^expected_name} =
+               Rpc.enhanced_call(node, Cache, :get_tenant_by_external_id, [external_id])
     end
   end
 end
