@@ -91,10 +91,11 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert Crypto.encrypt!("postgres") == settings["db_name"]
       assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
       refute settings["db_password"]
-
+      Process.sleep(100)
       %{extensions: [%{settings: settings}]} = tenant = Tenants.get_tenant_by_external_id(external_id)
 
       assert Crypto.encrypt!("postgres") == settings["db_password"]
+
       assert tenant.migrations_ran > 0
     end
   end
@@ -117,7 +118,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert Crypto.encrypt!("postgres") == settings["db_name"]
       assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
       refute settings["db_password"]
-
+      Process.sleep(100)
       %{extensions: [%{settings: settings}]} = tenant = Tenants.get_tenant_by_external_id(external_id)
 
       assert Crypto.encrypt!("postgres") == settings["db_password"]

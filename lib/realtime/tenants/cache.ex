@@ -29,7 +29,7 @@ defmodule Realtime.Tenants.Cache do
   @spec distributed_invalidate_tenant_cache(String.t()) :: boolean()
   def distributed_invalidate_tenant_cache(tenant_id) when is_binary(tenant_id) do
     nodes = [Node.self() | Node.list()]
-    results = :erpc.multicall(nodes, __MODULE__, :invalidate_tenant_cache, [tenant_id])
+    results = :erpc.multicall(nodes, __MODULE__, :invalidate_tenant_cache, [tenant_id], 1000)
 
     results
     |> Enum.map(fn

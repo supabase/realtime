@@ -75,6 +75,7 @@ defmodule Realtime.Application do
         {Registry, keys: :unique, name: Realtime.Tenants.Connect.Registry},
         {Registry, keys: :unique, name: Extensions.PostgresCdcRls.ReplicationPoller.Registry},
         {Task.Supervisor, name: Realtime.TaskSupervisor},
+        {Task.Supervisor, name: Realtime.Tenants.Migrations.TaskSupervisor},
         {PartitionSupervisor,
          child_spec: {DynamicSupervisor, max_restarts: 0},
          strategy: :one_for_one,
