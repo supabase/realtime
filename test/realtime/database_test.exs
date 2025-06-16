@@ -199,7 +199,7 @@ defmodule Realtime.DatabaseTest do
       opts = [telemetry: event]
 
       Database.transaction(db_conn, fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(0.1)", []) end, opts)
-      assert_receive {^event, %{latency: latency}, %{tenant_id: nil}}
+      assert_receive {^event, %{latency: latency}, %{tenant: nil}}
       assert latency > 100
     end
 
@@ -210,7 +210,7 @@ defmodule Realtime.DatabaseTest do
 
       Database.transaction(db_conn, fn conn -> Postgrex.query!(conn, "SELECT pg_sleep(0.1)", []) end, opts)
 
-      assert_receive {^event, %{latency: latency}, %{tenant_id: ^tenant_id}}
+      assert_receive {^event, %{latency: latency}, %{tenant: ^tenant_id}}
       assert latency > 100
     end
   end

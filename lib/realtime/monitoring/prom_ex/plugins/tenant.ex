@@ -155,19 +155,23 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Sum of presence messages sent on a Realtime Channel.",
           tags: [:tenant]
         ),
-        last_value(
+        distribution(
           [:realtime, :tenants, :read_authorization_check],
           event_name: [:realtime, :tenants, :read_authorization_check],
-          measurement: :count,
-          description: "Last value of read authorization checks.",
-          tags: [:tenant]
+          measurement: :latency,
+          unit: :millisecond,
+          description: "Latency of read authorization checks.",
+          tags: [:tenant],
+          reporter_options: [buckets: [10, 250, 5000, 15_000]]
         ),
-        last_value(
+        distribution(
           [:realtime, :tenants, :write_authorization_check],
           event_name: [:realtime, :tenants, :write_authorization_check],
-          measurement: :count,
-          description: "Last value of write authorization checks.",
-          tags: [:tenant]
+          measurement: :latency,
+          unit: :millisecond,
+          description: "Latency of write authorization checks.",
+          tags: [:tenant],
+          reporter_options: [buckets: [10, 250, 5000, 15_000]]
         )
       ]
     )

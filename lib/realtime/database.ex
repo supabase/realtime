@@ -177,7 +177,7 @@ defmodule Realtime.Database do
     if telemetry do
       tenant_id = Keyword.get(opts, :tenant_id, nil)
       {latency, value} = :timer.tc(Postgrex, :transaction, [db_conn, func, opts], :millisecond)
-      Telemetry.execute(telemetry, %{latency: latency}, %{tenant_id: tenant_id})
+      Telemetry.execute(telemetry, %{latency: latency}, %{tenant: tenant_id})
       value
     else
       Postgrex.transaction(db_conn, func, opts)

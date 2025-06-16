@@ -1,9 +1,21 @@
 defmodule Realtime.PromEx.Plugins.TenantTest do
-  use Realtime.DataCase
+  alias Realtime.Tenants.Authorization.Policies
+  use Realtime.DataCase, async: false
 
   alias Realtime.PromEx.Plugins.Tenant
   alias Realtime.Rpc
   alias Realtime.UsersCounter
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization
+
+  defmodule MetricsTest do
+    use PromEx, otp_app: :realtime_test_phoenix
+
+    @impl true
+    def plugins do
+      [{Tenant, poll_rate: 100}]
+    end
+  end
 
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
 
@@ -45,5 +57,88 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       refute_receive :_
     end
+  end
+
+  describe "event_metrics/0" do
+    setup do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+      {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test", :stop)
+
+      authorization_context =
+        Authorization.build_authorization_params(%{
+          tenant_id: tenant.external_id,
+          topic: "test_topic",
+          jwt: "jwt",
+          claims: [],
+          headers: [{"header-1", "value-1"}],
+          role: "anon"
+        })
+
+      start_supervised!(MetricsTest)
+
+      %{authorization_context: authorization_context, db_conn: db_conn, tenant: tenant}
+    end
+
+    test "read_authorization_check", context do
+      pattern =
+        ~r/realtime_tenants_read_authorization_check_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+
+      {:ok, _} =
+        Authorization.get_read_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context
+        )
+
+      Process.sleep(200)
+
+      assert metric_value(pattern) == metric_value + 1
+
+      bucket_pattern =
+        ~r/realtime_tenants_read_authorization_check_bucket{tenant="#{context.tenant.external_id}",le="250"}\s(?<number>\d+)/
+
+      assert metric_value(bucket_pattern) > 0
+    end
+
+    test "write_authorization_check", context do
+      pattern =
+        ~r/realtime_tenants_write_authorization_check_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+
+      {:ok, _} =
+        Authorization.get_write_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context
+        )
+
+      # Wait enough time for the poll rate to be triggered at least once
+      Process.sleep(200)
+
+      assert metric_value(pattern) == metric_value + 1
+
+      bucket_pattern =
+        ~r/realtime_tenants_write_authorization_check_bucket{tenant="#{context.tenant.external_id}",le="250"}\s(?<number>\d+)/
+
+      assert metric_value(bucket_pattern) > 0
+    end
+  end
+
+  defp metric_value(pattern) do
+    PromEx.get_metrics(MetricsTest)
+    |> String.split("\n", trim: true)
+    |> Enum.find_value(
+      "0",
+      fn item ->
+        case Regex.run(pattern, item, capture: ["number"]) do
+          [number] -> number
+          _ -> false
+        end
+      end
+    )
+    |> String.to_integer()
   end
 end
