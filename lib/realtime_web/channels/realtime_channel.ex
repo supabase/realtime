@@ -678,7 +678,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp pg_change_params(true, params, channel_pid, claims, _) do
     case get_in(params, ["config", "postgres_changes"]) do
       [_ | _] = params_list ->
-        Enum.map(params_list, fn params ->
+        params_list
+        |> Enum.reject(&is_nil/1)
+        |> Enum.map(fn params ->
           %{
             id: UUID.uuid1(),
             channel_pid: channel_pid,
