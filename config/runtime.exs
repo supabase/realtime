@@ -128,9 +128,21 @@ if config_env() == :prod do
 end
 
 if config_env() != :test do
-  config :gen_rpc,
-    tcp_server_port: System.get_env("GEN_RPC_TCP_SERVER_PORT", "5369") |> String.to_integer(),
-    tcp_client_port: System.get_env("GEN_RPC_TCP_CLIENT_PORT", "5369") |> String.to_integer()
+  gen_rpc_socket_ip = System.get_env("GEN_RPC_SOCKET_IP", "0.0.0.0") |> to_charlist()
+
+  case :inet.parse_address(gen_rpc_socket_ip) do
+    {:ok, address} ->
+      config :gen_rpc,
+        tcp_server_port: System.get_env("GEN_RPC_TCP_SERVER_PORT", "5369") |> String.to_integer(),
+        tcp_client_port: System.get_env("GEN_RPC_TCP_CLIENT_PORT", "5369") |> String.to_integer(),
+        socket_ip: address
+
+    _ ->
+      raise """
+      Environment variable GEN_RPC_SOCKET_IP is not a valid IP Address
+      Most likely it should be "0.0.0.0" (ipv4) or "::" (ipv6) to bind to all interfaces
+      """
+  end
 
   config :logger, level: System.get_env("LOG_LEVEL", "info") |> String.to_existing_atom()
 
