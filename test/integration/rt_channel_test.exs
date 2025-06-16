@@ -93,7 +93,7 @@ defmodule Realtime.Integration.RtChannelTest do
         queries = [
           "create sequence if not exists test_id_seq;",
           """
-          create table "public"."test" (
+          create table if not exists "public"."test" (
           "id" int4 not null default nextval('test_id_seq'::regclass),
           "details" text,
           primary key ("id"));
@@ -110,7 +110,202 @@ defmodule Realtime.Integration.RtChannelTest do
       :ok
     end
 
-    test "handle postgres extension", %{tenant: tenant} do
+    test "handle insert", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "INSERT", schema: "public"}]}
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public"})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "postgres_changes" => [
+                             %{"event" => "INSERT", "id" => ^sub_id, "schema" => "public"}
+                           ]
+                         },
+                         "status" => "ok"
+                       },
+                       topic: ^topic
+                     },
+                     200
+
+      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => [
+                             %{"name" => "id", "type" => "int4"},
+                             %{"name" => "details", "type" => "text"}
+                           ],
+                           "commit_timestamp" => _ts,
+                           "errors" => nil,
+                           "record" => %{"details" => "test", "id" => ^id},
+                           "schema" => "public",
+                           "table" => "test",
+                           "type" => "INSERT"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: "realtime:any"
+                     },
+                     500
+    end
+
+    test "handle update", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "UPDATE", schema: "public"}]}
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "UPDATE", "schema" => "public"})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "postgres_changes" => [
+                             %{"event" => "UPDATE", "id" => ^sub_id, "schema" => "public"}
+                           ]
+                         },
+                         "status" => "ok"
+                       },
+                       ref: "1",
+                       topic: ^topic
+                     },
+                     200
+
+      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      Postgrex.query!(conn, "update test set details = 'test' where id = #{id}", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => [
+                             %{"name" => "id", "type" => "int4"},
+                             %{"name" => "details", "type" => "text"}
+                           ],
+                           "commit_timestamp" => _ts,
+                           "errors" => nil,
+                           "old_record" => %{"id" => ^id},
+                           "record" => %{"details" => "test", "id" => ^id},
+                           "schema" => "public",
+                           "table" => "test",
+                           "type" => "UPDATE"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: "realtime:any"
+                     },
+                     500
+    end
+
+    test "handle delete", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "DELETE", schema: "public"}]}
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "DELETE", "schema" => "public"})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "postgres_changes" => [
+                             %{"event" => "DELETE", "id" => ^sub_id, "schema" => "public"}
+                           ]
+                         },
+                         "status" => "ok"
+                       },
+                       ref: "1",
+                       topic: ^topic
+                     },
+                     200
+
+      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+      Postgrex.query!(conn, "delete from test where id = #{id}", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => [
+                             %{"name" => "id", "type" => "int4"},
+                             %{"name" => "details", "type" => "text"}
+                           ],
+                           "commit_timestamp" => _ts,
+                           "errors" => nil,
+                           "old_record" => %{"id" => ^id},
+                           "schema" => "public",
+                           "table" => "test",
+                           "type" => "DELETE"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: "realtime:any"
+                     },
+                     500
+    end
+
+    test "handle wildcard", %{tenant: tenant} do
       {socket, _} = get_connection(tenant)
       topic = "realtime:any"
       config = %{postgres_changes: [%{event: "*", schema: "public"}]}
@@ -149,7 +344,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      8000
 
       {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
-      Postgrex.query!(conn, "insert into test (details) values ('test')", [])
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
 
       assert_receive %Message{
                        event: "postgres_changes",
@@ -161,7 +356,7 @@ defmodule Realtime.Integration.RtChannelTest do
                            ],
                            "commit_timestamp" => _ts,
                            "errors" => nil,
-                           "record" => %{"details" => "test", "id" => id},
+                           "record" => %{"id" => ^id},
                            "schema" => "public",
                            "table" => "test",
                            "type" => "INSERT"
@@ -221,6 +416,30 @@ defmodule Realtime.Integration.RtChannelTest do
                        topic: "realtime:any"
                      },
                      500
+    end
+
+    test "handle nil postgres changes params as empty param changes", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
+      topic = "realtime:any"
+      config = %{postgres_changes: [nil]}
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
+      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+
+      refute_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
     end
   end
 
