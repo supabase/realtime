@@ -181,7 +181,11 @@ defmodule Realtime.Tenants.Migrations do
 
     case migrate(settings) do
       :ok ->
-        Tenants.update_migrations_ran(tenant_external_id, Enum.count(@migrations))
+        Task.Supervisor.async_nolink(__MODULE__.TaskSupervisor, Tenants, :update_migrations_ran, [
+          tenant_external_id,
+          Enum.count(@migrations)
+        ])
+
         :ignore
 
       {:error, error} ->
