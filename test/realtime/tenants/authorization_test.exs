@@ -214,10 +214,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
       external_id = context.authorization_context.tenant_id
 
       assert_receive {:telemetry_event, [:realtime, :tenants, :read_authorization_check], %{latency: _},
-                      %{tenant_id: ^external_id}}
+                      %{tenant: ^external_id}}
 
       assert_receive {:telemetry_event, [:realtime, :tenants, :write_authorization_check], %{latency: _},
-                      %{tenant_id: ^external_id}}
+                      %{tenant: ^external_id}}
     end
   end
 
