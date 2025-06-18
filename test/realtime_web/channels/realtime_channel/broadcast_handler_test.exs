@@ -217,7 +217,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         for _ <- 1..100 do
           topic = "realtime:#{topic}"
-          assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+          assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
         end
 
         Process.sleep(1200)

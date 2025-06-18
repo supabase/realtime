@@ -10,14 +10,24 @@ defmodule Realtime.GenRpc do
 
   @type result :: any | {:error, :rpc_error, reason :: any}
 
-  # Here we run the async_call on all nodes using gen_rpc except the local node
-  # This is because gen_rpc does not have a bypass for local node on multicall
-  # For the local node we use rpc instead
-  defp async_call({node, _}, mod, func, args) when node == node(), do: :rpc.async_call(node, mod, func, args)
-  defp async_call(node, mod, func, args), do: :gen_rpc.async_call(node, mod, func, args)
+  @doc """
+  Fire and forget apply(mod, func, args) on all nodes
 
-  defp nb_yield(node, ref, timeout) when node == node(), do: :rpc.nb_yield(ref, timeout)
-  defp nb_yield(_node, ref, timeout), do: :gen_rpc.nb_yield(ref, timeout)
+  Options:
+
+  - `:key` - Optional key to consistently select the same gen_rpc clients to guarantee message order between nodes
+  """
+  @spec multicast(module, atom, list(any), keyword()) :: :ok
+  def multicast(mod, func, args, opts \\ []) when is_atom(mod) and is_atom(func) and is_list(args) and is_list(opts) do
+    key = Keyword.get(opts, :key, nil)
+
+    nodes = rpc_nodes(Node.list(), key)
+
+    # Use erpc for the local node because :gen_rpc tries to connect with the local node
+    :ok = :erpc.cast(Node.self(), mod, func, args)
+    :gen_rpc.eval_everywhere(nodes, mod, func, args)
+    :ok
+  end
 
   # Not using :gen_rpc.multicall here because we can't see the actual results on errors
 
@@ -112,4 +122,13 @@ defmodule Realtime.GenRpc do
   defp rpc_node(node, key), do: {node, :erlang.phash2(key, max_clients()) + 1}
 
   defp default_rpc_timeout, do: Application.get_env(:realtime, :rpc_timeout, 5_000)
+
+  # Here we run the async_call on all nodes using gen_rpc except the local node
+  # This is because gen_rpc does not have a bypass for local node on multicall
+  # For the local node we use rpc instead
+  defp async_call({node, _}, mod, func, args) when node == node(), do: :rpc.async_call(node, mod, func, args)
+  defp async_call(node, mod, func, args), do: :gen_rpc.async_call(node, mod, func, args)
+
+  defp nb_yield(node, ref, timeout) when node == node(), do: :rpc.nb_yield(ref, timeout)
+  defp nb_yield(_node, ref, timeout), do: :gen_rpc.nb_yield(ref, timeout)
 end
