@@ -78,56 +78,49 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   describe "database error" do
     @tag role: "authenticated",
          policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
-         timeout: :timer.minutes(2)
+         timeout: :timer.minutes(1)
     test "handles small pool size", context do
       task =
         Task.async(fn ->
           :erpc.call(node(context.db_conn), Postgrex, :query!, [
             context.db_conn,
-            "SELECT pg_sleep(59)",
+            "SELECT pg_sleep(19)",
             [],
-            [timeout: :timer.minutes(1)]
+            [timeout: :timer.seconds(20)]
           ])
         end)
 
       Process.sleep(100)
 
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_read_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+      log =
+        capture_log(fn ->
+          t1 =
+            Task.async(fn ->
+              assert {:error, :increase_connection_pool} =
+                       Authorization.get_read_authorizations(
+                         %Policies{},
+                         context.db_conn,
+                         context.authorization_context
+                       )
+            end)
 
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_write_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+          t2 =
+            Task.async(fn ->
+              assert {:error, :increase_connection_pool} =
+                       Authorization.get_write_authorizations(
+                         %Policies{},
+                         context.db_conn,
+                         context.authorization_context
+                       )
+            end)
 
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_read_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+          Task.await_many([t1, t2], 20_000)
+        end)
 
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_write_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+      external_id = context.tenant.external_id
+      assert log =~ "project=#{external_id} external_id=#{external_id} [error] ErrorExecutingTransaction"
 
-      assert {:error, :increase_connection_pool} =
-               Authorization.get_write_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
-
-      Task.await(task, :timer.minutes(1))
+      Task.await(task, :timer.seconds(30))
     end
 
     @tag role: "authenticated",
