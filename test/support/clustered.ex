@@ -23,7 +23,10 @@ defmodule Clustered do
   ```
   """
   @spec start(any()) :: {:ok, node}
-  def start(aux_mod \\ nil, extra_config \\ []) do
+  def start(aux_mod \\ nil, opts \\ []) do
+    extra_config = Keyword.get(opts, :extra_config, [])
+    phoenix_port = Keyword.get(opts, :phoenix_port, 4012)
+
     :ok =
       case :net_kernel.start([:"main@127.0.0.1"]) do
         {:ok, _} ->
@@ -52,9 +55,8 @@ defmodule Clustered do
 
     :ok = :erpc.call(node, :code, :add_paths, [:code.get_path()])
 
-    for {app_name, key, value} <- extra_config do
-      :ok = :erpc.call(node, Application, :put_env, [app_name, key, value])
-    end
+    # We need to load the app first as it has default app env that we want to override
+    :ok = :erpc.call(node, Application, :ensure_loaded, [:gen_rpc])
 
     for {app_name, _, _} <- Application.loaded_applications(),
         {key, value} <- Application.get_all_env(app_name) do
@@ -63,12 +65,27 @@ defmodule Clustered do
 
     endpoint = Application.get_env(:realtime, RealtimeWeb.Endpoint)
 
-    # Disable phoenix server to avoid port collisions as we don't need it
     :ok =
-      :erpc.call(node, Application, :put_env, [:realtime, RealtimeWeb.Endpoint, Keyword.put(endpoint, :server, false)])
+      :erpc.call(node, Application, :put_env, [
+        :realtime,
+        RealtimeWeb.Endpoint,
+        Keyword.put(endpoint, :http, port: phoenix_port)
+      ])
+
+    # Configure gen_rpc swapping port definitons
+    gen_rpc_tcp_server_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
+    gen_rpc_tcp_client_port = Application.fetch_env!(:gen_rpc, :tcp_client_port)
+
+    :ok = :erpc.call(node, Application, :put_env, [:gen_rpc, :tcp_server_port, gen_rpc_tcp_client_port])
+    :ok = :erpc.call(node, Application, :put_env, [:gen_rpc, :tcp_client_port, gen_rpc_tcp_server_port])
 
     # We need to override this value as the current implementation overrides the string with a map leading to errors
     :ok = :erpc.call(node, Application, :put_env, [:realtime, :jwt_claim_validators, "{}"])
+
+    # Override with extra config
+    for {app_name, key, value} <- extra_config do
+      :ok = :erpc.call(node, Application, :put_env, [app_name, key, value])
+    end
 
     {:ok, _} = :erpc.call(node, Application, :ensure_all_started, [:mix])
     :ok = :erpc.call(node, Mix, :env, [Mix.env()])

@@ -75,6 +75,11 @@ config :opentelemetry,
   traces_exporter: :none,
   span_processor: :batch
 
+config :gen_rpc,
+  # Inactivity period in milliseconds after which a pending process holding an async_call return value will exit.
+  # This is used for process sanitation purposes so please make sure to set it in a sufficiently high number
+  async_call_inactivity_timeout: 300_000
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{Mix.env()}.exs"

@@ -13,6 +13,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
+  alias Realtime.Tenants.Connect
 
   setup [:rls_context]
 
@@ -205,6 +206,9 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
   defp rls_context(context) do
     tenant = Realtime.Tenants.get_tenant_by_external_id("dev_tenant")
+    Connect.shutdown("dev_tenant")
+    # Waiting for :syn to unregister
+    Process.sleep(100)
 
     {:ok, local_db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()
@@ -230,7 +234,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     create_rls_policies(local_db_conn, context.policies, %{topic: topic})
 
     {:ok, node} = Clustered.start()
-    {:ok, db_conn} = :erpc.call(node, Realtime.Tenants.Connect, :connect, ["dev_tenant"])
+    {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant"])
 
     assert node(db_conn) == node
 

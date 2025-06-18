@@ -1,0 +1,117 @@
+defmodule Realtime.GenRpcTest do
+  # Async false due to Clustered usage
+  use ExUnit.Case, async: false
+
+  import ExUnit.CaptureLog
+
+  alias Realtime.GenRpc
+
+  setup context do
+    {:ok, node} = Clustered.start(nil, extra_config: context[:extra_config] || [])
+
+    :telemetry.attach(__MODULE__, [:realtime, :rpc], &__MODULE__.handle_telemetry/4, pid: self())
+    on_exit(fn -> :telemetry.detach(__MODULE__) end)
+    %{node: node}
+  end
+
+  describe "multicall/4" do
+    test "returns the result of the function call per node", %{node: node} do
+      current_node = node()
+
+      assert GenRpc.multicall(Map, :fetch, [%{a: 1}, :a], tenant_id: "123") == [
+               {:"main@127.0.0.1", {:ok, 1}},
+               {node, {:ok, 1}}
+             ]
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^node,
+                        success: true,
+                        tenant: "123",
+                        mechanism: :gen_rpc
+                      }}
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^current_node,
+                        success: true,
+                        tenant: "123",
+                        mechanism: :gen_rpc
+                      }}
+    end
+
+    test "timeout error", %{node: node} do
+      current_node = node()
+
+      log =
+        capture_log(fn ->
+          assert GenRpc.multicall(Process, :sleep, [500], timeout: 100, tenant_id: 123) == [
+                   {:"main@127.0.0.1", {:error, :rpc_error, :timeout}},
+                   {node, {:error, :rpc_error, :timeout}}
+                 ]
+        end)
+
+      assert log =~
+               "project=123 external_id=123 [error] ErrorOnRpcCall: %{error: :timeout, mod: Process, func: :sleep, target: :\"main@127.0.0.1\"}"
+
+      assert log =~
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :timeout,\s+mod: Process,\s+func: :sleep,\s+target:\s+:"#{node}"/
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^node,
+                        success: false,
+                        tenant: 123,
+                        mechanism: :gen_rpc
+                      }}
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^current_node,
+                        success: false,
+                        tenant: 123,
+                        mechanism: :gen_rpc
+                      }}
+    end
+
+    @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
+    test "partial results with bad tcp error", %{node: node} do
+      current_node = node()
+
+      log =
+        capture_log(fn ->
+          assert GenRpc.multicall(Map, :fetch, [%{a: 1}, :a], tenant_id: 123) == [
+                   {:"main@127.0.0.1", {:ok, 1}},
+                   {node, {:error, :rpc_error, :econnrefused}}
+                 ]
+        end)
+
+      assert log =~
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :econnrefused,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^node,
+                        success: false,
+                        tenant: 123,
+                        mechanism: :gen_rpc
+                      }}
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^current_node,
+                        success: true,
+                        tenant: 123,
+                        mechanism: :gen_rpc
+                      }}
+    end
+  end
+
+  def handle_telemetry(event, measurements, metadata, pid: pid), do: send(pid, {event, measurements, metadata})
+end
