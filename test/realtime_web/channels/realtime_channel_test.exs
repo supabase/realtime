@@ -218,6 +218,19 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  test "registers transport pid and channel pid per tenant", %{tenant: tenant} do
+    jwt = Generators.generate_jwt_token(tenant)
+    {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+    assert {:ok, _, %Socket{transport_pid: transport_pid_1} = socket} =
+             subscribe_and_join(socket, "realtime:#{random_string()}", %{})
+
+    assert {:ok, _, %Socket{transport_pid: ^transport_pid_1}} =
+             subscribe_and_join(socket, "realtime:#{random_string()}", %{})
+
+    assert [{_, ^transport_pid_1}] = Registry.lookup(RealtimeWeb.SocketDisconnect.Registry, tenant.external_id)
+  end
+
   defp conn_opts(tenant, token, params \\ %{}) do
     [
       connect_info: %{

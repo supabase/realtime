@@ -42,9 +42,7 @@ defmodule Realtime.Integration.WebsocketClient do
   @doc """
   Closes the socket
   """
-  def close(socket) do
-    GenServer.cast(socket, :close)
-  end
+  def close(socket), do: GenServer.cast(socket, :close)
 
   @doc """
   Sends an event to the WebSocket server per the message protocol.
@@ -56,37 +54,28 @@ defmodule Realtime.Integration.WebsocketClient do
   @doc """
   Sends a low-level text message to the client.
   """
-  def send(socket, msg) do
-    GenServer.call(socket, {:send, msg})
-  end
+  def send(socket, msg), do: GenServer.call(socket, {:send, msg})
 
   @doc """
   Sends a heartbeat event
   """
-  def send_heartbeat(socket) do
-    send_event(socket, "phoenix", "heartbeat", %{})
-  end
+  def send_heartbeat(socket), do: send_event(socket, "phoenix", "heartbeat", %{})
 
   @doc """
   Sends join event to the WebSocket server per the Message protocol
   """
-  def join(socket, topic, msg) do
-    send_event(socket, topic, "phx_join", msg)
-  end
+  def join(socket, topic, msg), do: send_event(socket, topic, "phx_join", msg)
 
   @doc """
   Sends leave event to the WebSocket server per the Message protocol
   """
-  def leave(socket, topic, msg) do
-    send_event(socket, topic, "phx_leave", msg)
-  end
+  def leave(socket, topic, msg), do: send_event(socket, topic, "phx_leave", msg)
 
   ## GenServer implementation
 
   @doc false
   def init({sender, serializer}) do
     state = %__MODULE__{sender: sender, serializer: serializer}
-
     {:ok, state}
   end
 
@@ -119,11 +108,8 @@ defmodule Realtime.Integration.WebsocketClient do
       state = %{state | conn: conn, request_ref: ref, caller: from}
       {:noreply, state}
     else
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-
-      {:error, conn, reason} ->
-        {:reply, {:error, reason}, put_in(state.conn, conn)}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+      {:error, conn, reason} -> {:reply, {:error, reason}, put_in(state.conn, conn)}
     end
   end
 
@@ -137,9 +123,7 @@ defmodule Realtime.Integration.WebsocketClient do
   end
 
   @doc false
-  def handle_cast(:close, state) do
-    do_close(state)
-  end
+  def handle_cast(:close, state), do: do_close(state)
 
   defp do_close(state) do
     # Streaming a close frame may fail if the server has already closed
@@ -153,11 +137,11 @@ defmodule Realtime.Integration.WebsocketClient do
   def handle_info(message, state) do
     case Mint.WebSocket.stream(state.conn, message) do
       {:ok, conn, responses} ->
-        state = put_in(state.conn, conn) |> handle_responses(responses)
+        state = state.conn |> put_in(conn) |> handle_responses(responses)
         if state.closing?, do: do_close(state), else: {:noreply, state}
 
       {:error, conn, reason, _responses} ->
-        state = put_in(state.conn, conn) |> reply({:error, reason})
+        state = state.conn |> put_in(conn) |> reply({:error, reason})
         {:noreply, state}
 
       :unknown ->
@@ -168,12 +152,14 @@ defmodule Realtime.Integration.WebsocketClient do
   defp handle_responses(state, responses)
 
   defp handle_responses(%{request_ref: ref} = state, [{:status, ref, status} | rest]) do
-    put_in(state.status, status)
+    state.status
+    |> put_in(status)
     |> handle_responses(rest)
   end
 
   defp handle_responses(%{request_ref: ref} = state, [{:headers, ref, resp_headers} | rest]) do
-    put_in(state.resp_headers, resp_headers)
+    state.resp_headers
+    |> put_in(resp_headers)
     |> handle_responses(rest)
   end
 
@@ -185,30 +171,29 @@ defmodule Realtime.Integration.WebsocketClient do
         |> handle_responses(rest)
 
       {:error, conn, reason} ->
-        put_in(state.conn, conn)
+        state.conn
+        |> put_in(conn)
         |> reply({:error, reason})
     end
   end
 
-  defp handle_responses(%{request_ref: ref, websocket: websocket} = state, [
-         {:data, ref, data} | rest
-       ])
+  defp handle_responses(%{request_ref: ref, websocket: websocket} = state, [{:data, ref, data} | rest])
        when websocket != nil do
     case Mint.WebSocket.decode(websocket, data) do
       {:ok, websocket, frames} ->
-        put_in(state.websocket, websocket)
+        state.websocket
+        |> put_in(websocket)
         |> handle_frames(frames)
         |> handle_responses(rest)
 
       {:error, websocket, reason} ->
-        put_in(state.websocket, websocket)
+        state.websocket
+        |> put_in(websocket)
         |> reply({:error, reason})
     end
   end
 
-  defp handle_responses(state, [_response | rest]) do
-    handle_responses(state, rest)
-  end
+  defp handle_responses(state, [_response | rest]), do: handle_responses(state, rest)
 
   defp handle_responses(state, []), do: state
 

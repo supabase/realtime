@@ -108,4 +108,26 @@ defmodule Realtime.TenantsTest do
       assert tenant.migrations_ran == 1
     end
   end
+
+  describe "broadcast_operation_event/2" do
+    setup do
+      tenant = tenant_fixture()
+      topic = "realtime:operations:" <> tenant.external_id
+      Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
+      %{tenant: tenant}
+    end
+
+    test "broadcasts events to the targetted tenant", %{tenant: tenant} do
+      events = [
+        :suspend_tenant,
+        :unsuspend_tenant,
+        :disconnect
+      ]
+
+      for event <- events do
+        Tenants.broadcast_operation_event(event, tenant.external_id)
+        assert_receive ^event
+      end
+    end
+  end
 end

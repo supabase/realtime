@@ -5,6 +5,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
   use Realtime.Logs
 
+  alias RealtimeWeb.SocketDisconnect
   alias DBConnection.Backoff
 
   alias Realtime.Crypto
@@ -98,6 +99,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       # Start presence and add user
       send(self(), :sync_presence)
       Realtime.UsersCounter.add(transport_pid, tenant_id)
+      SocketDisconnect.add(tenant_id, socket)
+
       {:ok, state, assign(socket, assigns)}
     else
       {:error, :expired_token, msg} ->

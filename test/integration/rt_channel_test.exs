@@ -25,6 +25,7 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
+  alias RealtimeWeb.SocketDisconnect
 
   @moduletag :capture_log
   @port 4003
@@ -1517,7 +1518,7 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
-  describe "sensitive information updates" do
+  describe "socket disconnect" do
     setup [:rls_context]
 
     test "on jwks the socket closes and sends a system message", %{tenant: tenant, topic: topic} do
@@ -1599,6 +1600,26 @@ defmodule Realtime.Integration.RtChannelTest do
         capture_log(fn -> get_connection(tenant, "authenticated", %{:exp => System.system_time(:second) - 1000}) end)
 
       assert log =~ "InvalidJWTToken: Token has expired"
+    end
+
+    test "check registry of SocketDisconnect and on distribution called, kill socket", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant, "authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+
+      for _ <- 1..10 do
+        topic = "realtime:#{random_string()}"
+        WebsocketClient.join(socket, topic, %{config: config})
+
+        assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+        assert_receive %Message{event: "presence_state", topic: ^topic}, 500
+      end
+
+      assert :ok = WebsocketClient.send_heartbeat(socket)
+
+      SocketDisconnect.distributed_disconnect(tenant)
+
+      Process.sleep(500)
+      assert {:error, %Mint.TransportError{reason: :closed}} = WebsocketClient.send_heartbeat(socket)
     end
   end
 

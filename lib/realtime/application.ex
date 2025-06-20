@@ -74,6 +74,8 @@ defmodule Realtime.Application do
         {Registry, keys: :unique, name: Realtime.Registry.Unique},
         {Registry, keys: :unique, name: Realtime.Tenants.Connect.Registry},
         {Registry, keys: :unique, name: Extensions.PostgresCdcRls.ReplicationPoller.Registry},
+        {Registry,
+         keys: :duplicate, partitions: System.schedulers_online() * 2, name: RealtimeWeb.SocketDisconnect.Registry},
         {Task.Supervisor, name: Realtime.TaskSupervisor},
         {Task.Supervisor, name: Realtime.Tenants.Migrations.TaskSupervisor},
         {PartitionSupervisor,
