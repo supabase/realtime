@@ -1,6 +1,13 @@
 defmodule Realtime.Tenants.BatchBroadcast do
   @moduledoc """
-  Virtual schema with a representation of a batched broadcast.
+  Batch broadcast logic for tenant messages in Supabase Realtime.
+
+  This module:
+  - Handles batch sending of broadcast messages to channels
+  - Applies rate limiting and authorization checks
+  - Integrates with tenant configuration and counters
+
+  See also: Realtime.Tenants, Realtime.Tenants.Authorization
   """
   use Ecto.Schema
   import Ecto.Changeset

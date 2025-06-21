@@ -3,7 +3,15 @@
 
 defmodule Realtime.Adapters.Postgres.Decoder do
   @moduledoc """
-  Functions for decoding different types of logical replication messages.
+  Postgres logical replication message decoder for Supabase Realtime.
+
+  This module:
+  - Decodes binary messages from Postgres logical replication into Elixir structs
+  - Handles WAL (Write-Ahead Log) message parsing for inserts, updates, deletes, etc.
+  - Provides helpers for decoding tuple data, columns, and LSNs
+  - Contains TODOs for edge cases and real data verification
+
+  See also: Realtime.Adapters.Postgres.Protocol
   """
   defmodule Messages do
     @moduledoc """

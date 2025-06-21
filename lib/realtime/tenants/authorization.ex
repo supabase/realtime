@@ -1,13 +1,14 @@
 defmodule Realtime.Tenants.Authorization do
   @moduledoc """
-  Runs validations based on RLS policies to return policies and
-  creates a Realtime.Tenants.Policies struct with the accumulated results of the policies
-  for a given user and a given channel context
+  Authorization and policy enforcement for tenants in Supabase Realtime.
 
-  Each extension will have its own set of ways to check Policies against the Authorization context
-  but we will create some setup data to be used by the policies.
+  This module:
+  - Builds authorization contexts from JWT claims, headers, and topics
+  - Checks read/write permissions using Row Level Security (RLS) policies
+  - Supports both local and remote (RPC) policy checks
+  - Sets connection configuration for database access control
 
-  Check more information at Realtime.Tenants.Authorization.Policies
+  See also: Realtime.Tenants.Authorization.Policies
   """
   require Logger
   import Ecto.Query
