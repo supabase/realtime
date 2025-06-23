@@ -191,6 +191,7 @@ defmodule Realtime.ApiTest do
 
     test "valid data and change to tenant data will refresh cache", %{tenants: [tenant | _]} do
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{name: "new_name"})
+      Process.sleep(100)
       assert %Tenant{name: "new_name"} = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
     end
 
@@ -268,9 +269,9 @@ defmodule Realtime.ApiTest do
       assert TestRequiresDisconnect.check(changeset)
     end
 
-    test "returns false if jwt_secret and jwt_jwks are not changed" do
-      changeset = %Ecto.Changeset{valid?: true, changes: %{max_concurrent_users: 10}}
-      refute TestRequiresDisconnect.check(changeset)
+    test "returns true if private_only is changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{private_only: true}}
+      assert TestRequiresDisconnect.check(changeset)
     end
 
     test "returns false if valid? is false" do
