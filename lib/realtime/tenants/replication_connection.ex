@@ -64,6 +64,27 @@ defmodule Realtime.Tenants.ReplicationConnection do
             buffer: [],
             monitored_pid: nil
 
+  defmodule Wrapper do
+    @moduledoc """
+    This GenServer exists at the moment so that we can have an init timeout for ReplicationConnection
+    """
+    use GenServer
+
+    @init_timeout 30_000
+
+    def start_link(args) do
+      GenServer.start_link(__MODULE__, args, timeout: @init_timeout)
+    end
+
+    @impl true
+    def init(args) do
+      case Realtime.Tenants.ReplicationConnection.start_link(args) do
+        {:ok, pid} -> {:ok, pid}
+        {:error, reason} -> {:stop, reason}
+      end
+    end
+  end
+
   @doc """
   Starts the replication connection for a tenant and monitors a given pid to stop the ReplicationConnection.
   """
@@ -75,7 +96,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     child_spec = %{
       id: __MODULE__,
-      start: {__MODULE__, :start_link, [opts]},
+      start: {Wrapper, :start_link, [opts]},
       restart: :transient,
       type: :worker
     }
