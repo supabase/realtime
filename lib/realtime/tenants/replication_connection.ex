@@ -70,10 +70,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
     """
     use GenServer
 
-    @init_timeout 30_000
-
-    def start_link(args) do
-      GenServer.start_link(__MODULE__, args, timeout: @init_timeout)
+    def start_link(args, init_timeout) do
+      GenServer.start_link(__MODULE__, args, timeout: init_timeout)
     end
 
     @impl true
@@ -85,18 +83,20 @@ defmodule Realtime.Tenants.ReplicationConnection do
     end
   end
 
+  @default_init_timeout 30_000
+
   @doc """
   Starts the replication connection for a tenant and monitors a given pid to stop the ReplicationConnection.
   """
   @spec start(Realtime.Api.Tenant.t(), pid()) :: {:ok, pid()} | {:error, any()}
-  def start(tenant, monitored_pid) do
+  def start(tenant, monitored_pid, init_timeout \\ @default_init_timeout) do
     Logger.info("Starting replication for Broadcast Changes")
     opts = %__MODULE__{tenant_id: tenant.external_id, monitored_pid: monitored_pid}
     supervisor_spec = supervisor_spec(tenant)
 
     child_spec = %{
       id: __MODULE__,
-      start: {Wrapper, :start_link, [opts]},
+      start: {Wrapper, :start_link, [opts, init_timeout]},
       restart: :transient,
       type: :worker
     }
