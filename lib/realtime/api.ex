@@ -6,19 +6,21 @@ defmodule Realtime.Api do
 
   import Ecto.Query
 
+  alias Realtime.Api.Extensions
+  alias Realtime.Api.Tenant
+  alias Realtime.GenCounter
+  alias Realtime.RateCounter
   alias Realtime.Repo
   alias Realtime.Repo.Replica
-  alias Realtime.Api.Tenant
-  alias Realtime.Api.Extensions
-  alias Realtime.RateCounter
-  alias Realtime.GenCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect
+  alias RealtimeWeb.SocketDisconnect
 
   defguard requires_disconnect(changeset)
            when changeset.valid? == true and
                   (is_map_key(changeset.changes, :jwt_secret) or
-                     is_map_key(changeset.changes, :jwt_jwks))
+                     is_map_key(changeset.changes, :jwt_jwks) or
+                     is_map_key(changeset.changes, :private_only))
 
   defguard requires_restarting_db_connection(changeset)
            when changeset.valid? == true and
@@ -250,7 +252,7 @@ defmodule Realtime.Api do
 
   defp maybe_trigger_disconnect(%Ecto.Changeset{data: %{external_id: external_id}} = changeset)
        when requires_disconnect(changeset) do
-    Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> external_id, :disconnect)
+    SocketDisconnect.distributed_disconnect(external_id)
   end
 
   defp maybe_trigger_disconnect(_changeset), do: nil

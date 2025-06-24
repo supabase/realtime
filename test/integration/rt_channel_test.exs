@@ -1533,16 +1533,8 @@ defmodule Realtime.Integration.RtChannelTest do
       tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["potato"]}})
 
-      assert_receive %Message{
-                       topic: ^realtime_topic,
-                       event: "system",
-                       payload: %{
-                         "extension" => "system",
-                         "message" => "Server requested disconnect",
-                         "status" => "ok"
-                       }
-                     },
-                     500
+      Process.sleep(500)
+      assert {:error, %Mint.TransportError{reason: :closed}} = WebsocketClient.send_heartbeat(socket)
     end
 
     test "on jwt_secret the socket closes and sends a system message", %{tenant: tenant, topic: topic} do
@@ -1558,16 +1550,25 @@ defmodule Realtime.Integration.RtChannelTest do
       tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_secret: "potato"})
 
-      assert_receive %Message{
-                       topic: ^realtime_topic,
-                       event: "system",
-                       payload: %{
-                         "extension" => "system",
-                         "message" => "Server requested disconnect",
-                         "status" => "ok"
-                       }
-                     },
-                     500
+      Process.sleep(500)
+      assert {:error, %Mint.TransportError{reason: :closed}} = WebsocketClient.send_heartbeat(socket)
+    end
+
+    test "on private_only the socket closes and sends a system message", %{tenant: tenant, topic: topic} do
+      {socket, _} = get_connection(tenant, "authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+
+      tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
+      Realtime.Api.update_tenant(tenant, %{private_only: true})
+
+      Process.sleep(500)
+      assert {:error, %Mint.TransportError{reason: :closed}} = WebsocketClient.send_heartbeat(socket)
     end
 
     test "on other param changes the socket won't close and no message is sent", %{tenant: tenant, topic: topic} do
@@ -1593,6 +1594,9 @@ defmodule Realtime.Integration.RtChannelTest do
                        }
                      },
                      500
+
+      Process.sleep(500)
+      assert :ok = WebsocketClient.send_heartbeat(socket)
     end
 
     test "invalid JWT with expired token", %{tenant: tenant} do
