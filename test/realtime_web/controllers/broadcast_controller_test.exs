@@ -248,7 +248,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
-      expect(Endpoint, :broadcast_from, 5, fn _, _, _, _ -> :ok end)
+      expect(Endpoint, :broadcast, 5, fn _, _, _ -> :ok end)
 
       messages_to_send =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
@@ -270,7 +270,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-      broadcast_calls = calls(&Endpoint.broadcast_from/4)
+      broadcast_calls = calls(&Endpoint.broadcast/3)
 
       Enum.each(messages_to_send, fn %{topic: topic} ->
         payload = %{
@@ -281,7 +281,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
 
-        assert [self(), broadcast_topic, "broadcast", payload] in broadcast_calls
+        assert [broadcast_topic, "broadcast", payload] in broadcast_calls
       end)
 
       assert conn.status == 202
@@ -295,7 +295,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
-      expect(Endpoint, :broadcast_from, 6, fn _, _, _, _ -> :ok end)
+      expect(Endpoint, :broadcast, 6, fn _, _, _ -> :ok end)
 
       channels =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
@@ -327,7 +327,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-      broadcast_calls = calls(&Endpoint.broadcast_from/4)
+      broadcast_calls = calls(&Endpoint.broadcast/3)
 
       Enum.each(channels, fn %{topic: topic} ->
         payload = %{
@@ -338,7 +338,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
 
-        assert [self(), broadcast_topic, "broadcast", payload] in broadcast_calls
+        assert [broadcast_topic, "broadcast", payload] in broadcast_calls
       end)
 
       # Check open channel
@@ -348,7 +348,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         "type" => "broadcast"
       }
 
-      assert [self(), Tenants.tenant_topic(tenant, "open_channel", true), "broadcast", payload] in broadcast_calls
+      assert [Tenants.tenant_topic(tenant, "open_channel", true), "broadcast", payload] in broadcast_calls
 
       assert conn.status == 202
     end
@@ -361,7 +361,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
-      expect(Endpoint, :broadcast_from, 5, fn _, _, _, _ -> :ok end)
+      expect(Endpoint, :broadcast, 5, fn _, _, _ -> :ok end)
 
       messages_to_send =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
@@ -385,7 +385,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-      broadcast_calls = calls(&Endpoint.broadcast_from/4)
+      broadcast_calls = calls(&Endpoint.broadcast/3)
 
       Enum.each(messages_to_send, fn %{topic: topic} ->
         payload = %{
@@ -396,7 +396,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
 
-        assert [self(), broadcast_topic, "broadcast", payload] in broadcast_calls
+        assert [broadcast_topic, "broadcast", payload] in broadcast_calls
       end)
 
       assert conn.status == 202
@@ -405,7 +405,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     @tag role: "anon"
     test "user without permission won't broadcast", %{conn: conn, db_conn: db_conn, tenant: tenant} do
       request_events_key = Tenants.requests_per_second_key(tenant)
-      reject(&Endpoint.broadcast_from/4)
+      reject(&Endpoint.broadcast/3)
 
       messages =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
