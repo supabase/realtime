@@ -14,7 +14,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Connect
 
-  alias RealtimeWeb.Endpoint
+  alias RealtimeWeb.TenantBroadcaster
 
   embedded_schema do
     embeds_many :messages, Message do
@@ -110,7 +110,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
     payload = %{"payload" => payload, "event" => event, "type" => "broadcast"}
 
     GenCounter.add(events_per_second_key)
-    Endpoint.broadcast_from(self(), tenant_topic, "broadcast", payload)
+    TenantBroadcaster.broadcast(tenant, tenant_topic, "broadcast", payload)
   end
 
   defp permissions_for_message(_, nil, _), do: nil
