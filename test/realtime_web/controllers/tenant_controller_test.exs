@@ -8,6 +8,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.Database
+  alias Realtime.PostgresCdc
   alias Realtime.PromEx.Plugins.Tenants
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
@@ -269,8 +270,22 @@ defmodule RealtimeWeb.TenantControllerTest do
     setup [:with_tenant]
 
     test "reload when tenant does exist", %{conn: conn, tenant: tenant} do
+      [%{settings: settings}] = tenant.extensions
+      settings = Map.put(settings, "id", tenant.external_id)
+      PostgresCdc.connect(Extensions.PostgresCdcRls, settings)
+      Process.sleep(1000)
+      {:ok, manager_pid, _} = Extensions.PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      {:ok, connect_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      assert Process.alive?(manager_pid)
+      assert Process.alive?(connect_pid)
+
       %{status: status} = post(conn, ~p"/api/tenants/#{tenant.external_id}/reload")
       assert status == 204
+      Process.sleep(1000)
+      refute Process.alive?(manager_pid)
+      refute Process.alive?(connect_pid)
     end
 
     test "reload when tenant does not exist", %{conn: conn} do

@@ -191,7 +191,7 @@ defmodule Realtime.ApiTest do
 
     test "valid data and change to tenant data will refresh cache", %{tenants: [tenant | _]} do
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{name: "new_name"})
-      Process.sleep(100)
+      Process.sleep(500)
       assert %Tenant{name: "new_name"} = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
     end
 
