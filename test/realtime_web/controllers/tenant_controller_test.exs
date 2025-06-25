@@ -268,9 +268,32 @@ defmodule RealtimeWeb.TenantControllerTest do
   describe "reload tenant" do
     setup [:with_tenant]
 
-    test "reload when tenant does exist", %{conn: conn, tenant: tenant} do
-      %{status: status} = post(conn, ~p"/api/tenants/#{tenant.external_id}/reload")
+    test "reload when tenant does exist", %{conn: conn, tenant: %{external_id: external_id} = tenant} do
+      Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> external_id)
+
+      [%{settings: settings}] = tenant.extensions
+      settings = Map.put(settings, "id", external_id)
+      {:ok, _} = Extensions.PostgresCdcRls.start(settings)
+      wait_on_postgres_cdc_rls(external_id)
+
+      {:ok, manager_pid, _} = Extensions.PostgresCdcRls.get_manager_conn(external_id)
+      {:ok, connect_pid} = Connect.lookup_or_start_connection(external_id)
+      Process.monitor(manager_pid)
+      Process.monitor(connect_pid)
+
+      assert Process.alive?(manager_pid)
+      assert Process.alive?(connect_pid)
+
+      %{status: status} = post(conn, ~p"/api/tenants/#{external_id}/reload")
+
       assert status == 204
+
+      assert_receive :disconnect
+      assert_receive {:DOWN, _, :process, ^manager_pid, _}
+      assert_receive {:DOWN, _, :process, ^connect_pid, _}
+
+      refute Process.alive?(manager_pid)
+      refute Process.alive?(connect_pid)
     end
 
     test "reload when tenant does not exist", %{conn: conn} do
@@ -443,5 +466,22 @@ defmodule RealtimeWeb.TenantControllerTest do
       "postgres_cdc_default" => "postgres_cdc_rls",
       "jwt_secret" => "new secret"
     }
+  end
+
+  defp wait_on_postgres_cdc_rls(external_id, attempt \\ 10)
+
+  defp wait_on_postgres_cdc_rls(external_id, 0) do
+    raise "Postgres CDC RLS manager connection not established for #{external_id} after multiple attempts"
+  end
+
+  defp wait_on_postgres_cdc_rls(external_id, attempt) do
+    case Extensions.PostgresCdcRls.get_manager_conn(external_id) do
+      {:ok, _, _} ->
+        :ok
+
+      {:error, _} ->
+        Process.sleep(100)
+        wait_on_postgres_cdc_rls(external_id, attempt - 1)
+    end
   end
 end
