@@ -127,11 +127,18 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Sum of messages sent on a Realtime Channel.",
           tags: [:tenant]
         ),
-        last_value(
-          [:realtime, :channel, :events, :limit_per_second],
-          event_name: [:realtime, :rate_counter, :channel, :events],
-          measurement: :limit,
-          description: "Rate limit of messages per second sent on a Realtime Channel.",
+        sum(
+          [:realtime, :channel, :presence_events],
+          event_name: [:realtime, :rate_counter, :channel, :presence_events],
+          measurement: :sum,
+          description: "Sum of presence messages sent on a Realtime Channel.",
+          tags: [:tenant]
+        ),
+        sum(
+          [:realtime, :channel, :db_events],
+          event_name: [:realtime, :rate_counter, :channel, :db_events],
+          measurement: :sum,
+          description: "Sum of db messages sent on a Realtime Channel.",
           tags: [:tenant]
         ),
         sum(
@@ -142,17 +149,17 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           tags: [:tenant]
         ),
         last_value(
+          [:realtime, :channel, :events, :limit_per_second],
+          event_name: [:realtime, :rate_counter, :channel, :events],
+          measurement: :limit,
+          description: "Rate limit of messages per second sent on a Realtime Channel.",
+          tags: [:tenant]
+        ),
+        last_value(
           [:realtime, :channel, :joins, :limit_per_second],
           event_name: [:realtime, :rate_counter, :channel, :joins],
           measurement: :limit,
           description: "Rate limit of joins per second on a Realtime Channel.",
-          tags: [:tenant]
-        ),
-        sum(
-          [:realtime, :channel, :presence_events],
-          event_name: [:realtime, :rate_counter, :channel, :presence_events],
-          measurement: :sum,
-          description: "Sum of presence messages sent on a Realtime Channel.",
           tags: [:tenant]
         ),
         distribution(

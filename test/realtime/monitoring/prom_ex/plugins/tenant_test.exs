@@ -12,9 +12,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
     use PromEx, otp_app: :realtime_test_phoenix
 
     @impl true
-    def plugins do
-      [{Tenant, poll_rate: 100}]
-    end
+    def plugins, do: [{Tenant, poll_rate: 50}]
   end
 
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
@@ -23,6 +21,60 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
               defmodule FakeUserCounter do
                 def fake_add(external_id) do
                   :ok = UsersCounter.add(spawn(fn -> Process.sleep(2000) end), external_id)
+                end
+
+                def fake_db_event(external_id) do
+                  external_id |> Realtime.Tenants.db_events_per_second_key() |> Realtime.GenCounter.new()
+
+                  external_id
+                  |> Realtime.Tenants.db_events_per_second_key()
+                  |> Realtime.RateCounter.new(
+                    telemetry: %{
+                      event_name: [:channel, :db_events],
+                      measurements: %{},
+                      metadata: %{tenant: external_id}
+                    }
+                  )
+
+                  external_id
+                  |> Realtime.Tenants.db_events_per_second_key()
+                  |> Realtime.GenCounter.add()
+                end
+
+                def fake_event(external_id) do
+                  external_id |> Realtime.Tenants.events_per_second_key() |> Realtime.GenCounter.new()
+
+                  external_id
+                  |> Realtime.Tenants.events_per_second_key()
+                  |> Realtime.RateCounter.new(
+                    telemetry: %{
+                      event_name: [:channel, :events],
+                      measurements: %{},
+                      metadata: %{tenant: external_id}
+                    }
+                  )
+
+                  external_id
+                  |> Realtime.Tenants.events_per_second_key()
+                  |> Realtime.GenCounter.add()
+                end
+
+                def fake_presence_event(external_id) do
+                  external_id |> Realtime.Tenants.presence_events_per_second_key() |> Realtime.GenCounter.new()
+
+                  external_id
+                  |> Realtime.Tenants.presence_events_per_second_key()
+                  |> Realtime.RateCounter.new(
+                    telemetry: %{
+                      event_name: [:channel, :presence_events],
+                      measurements: %{},
+                      metadata: %{tenant: external_id}
+                    }
+                  )
+
+                  external_id
+                  |> Realtime.Tenants.presence_events_per_second_key()
+                  |> Realtime.GenCounter.add()
                 end
               end
             end)
@@ -79,7 +131,38 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       %{authorization_context: authorization_context, db_conn: db_conn, tenant: tenant}
     end
 
-    test "read_authorization_check", context do
+    test "event exists after counter added", %{tenant: %{external_id: external_id}} do
+      pattern =
+        ~r/realtime_channel_events{tenant="#{external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+      FakeUserCounter.fake_event(external_id)
+
+      Process.sleep(100)
+      assert metric_value(pattern) == metric_value + 1
+    end
+
+    test "db_event exists after counter added", %{tenant: %{external_id: external_id}} do
+      pattern =
+        ~r/realtime_channel_db_events{tenant="#{external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+      FakeUserCounter.fake_db_event(external_id)
+      Process.sleep(100)
+      assert metric_value(pattern) == metric_value + 1
+    end
+
+    test "presence_event exists after counter added", %{tenant: %{external_id: external_id}} do
+      pattern =
+        ~r/realtime_channel_presence_events{tenant="#{external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+      FakeUserCounter.fake_presence_event(external_id)
+      Process.sleep(100)
+      assert metric_value(pattern) == metric_value + 1
+    end
+
+    test "metric read_authorization_check exists after check", context do
       pattern =
         ~r/realtime_tenants_read_authorization_check_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
 
@@ -102,7 +185,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(bucket_pattern) > 0
     end
 
-    test "write_authorization_check", context do
+    test "metric write_authorization_check exists after check", context do
       pattern =
         ~r/realtime_tenants_write_authorization_check_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
 
