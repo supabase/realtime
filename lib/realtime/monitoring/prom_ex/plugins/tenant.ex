@@ -135,7 +135,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           tags: [:tenant]
         ),
         sum(
-          [:realtime, :channel, :presence_events],
+          [:realtime, :channel, :db_events],
           event_name: [:realtime, :rate_counter, :channel, :db_events],
           measurement: :sum,
           description: "Sum of db messages sent on a Realtime Channel.",

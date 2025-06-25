@@ -114,7 +114,6 @@ defmodule Realtime.Tenants do
   @doc """
   All the keys that we use to create counters and RateLimiters for tenants.
   """
-
   @spec limiter_keys(Tenant.t()) :: [{atom(), atom(), String.t()}]
   def limiter_keys(%Tenant{} = tenant) do
     [
@@ -122,6 +121,7 @@ defmodule Realtime.Tenants do
       channels_per_client_key(tenant),
       joins_per_second_key(tenant),
       events_per_second_key(tenant),
+      db_events_per_second_key(tenant),
       connection_attempts_per_second_key(tenant),
       presence_events_per_second_key(tenant)
     ]
