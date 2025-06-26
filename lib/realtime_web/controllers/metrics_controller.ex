@@ -2,22 +2,21 @@ defmodule RealtimeWeb.MetricsController do
   use RealtimeWeb, :controller
   require Logger
   alias Realtime.PromEx
-  alias Realtime.Rpc
+  alias Realtime.GenRpc
 
   def index(conn, _) do
     cluster_metrics =
       Node.list()
       |> Task.async_stream(
         fn node ->
-          {node, Rpc.call(node, PromEx, :get_metrics, [], timeout: 10_000)}
+          {node, GenRpc.call(node, PromEx, :get_metrics, [], timeout: 10_000)}
         end,
         timeout: :infinity
       )
       |> Enum.reduce(PromEx.get_metrics(), fn {_, {node, response}}, acc ->
         case response do
-          {:badrpc, reason} ->
+          {:error, :rpc_error, reason} ->
             Logger.error("Cannot fetch metrics from the node #{inspect(node)} because #{inspect(reason)}")
-
             acc
 
           metrics ->

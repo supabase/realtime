@@ -1,5 +1,11 @@
 defmodule RealtimeWeb.MetricsControllerTest do
-  use RealtimeWeb.ConnCase
+  # Usage of Clustered
+  use RealtimeWeb.ConnCase, async: false
+
+  setup_all do
+    {:ok, _} = Clustered.start(nil, extra_config: [{:realtime, :region, "ap-southeast-2"}])
+    :ok
+  end
 
   describe "GET /metrics" do
     setup %{conn: conn} do
@@ -20,6 +26,9 @@ defmodule RealtimeWeb.MetricsControllerTest do
       # Check prometheus like metrics
       assert response =~
                "# HELP beam_system_schedulers_online_info The number of scheduler threads that are online."
+
+      assert response =~ "region=\"ap-southeast-2"
+      assert response =~ "region=\"us-east-1"
     end
 
     test "returns 403 when authorization header is missing", %{conn: conn} do
