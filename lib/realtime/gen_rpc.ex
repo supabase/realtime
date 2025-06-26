@@ -29,6 +29,48 @@ defmodule Realtime.GenRpc do
     :ok
   end
 
+  @doc """
+  Calls node to apply(mod, func, args)
+
+  Options:
+
+  - `:key` - Optional key to consistently select the same gen_rpc clients to guarantee message order between nodes
+  - `:tenant_id` - Tenant ID for telemetry and logging, defaults to nil
+  - `:timeout` - timeout in milliseconds for the RPC call, defaults to 5000ms
+  """
+  @spec call(node, module, atom, list(any), keyword()) :: result
+  def call(node, mod, func, args, opts)
+      when is_atom(node) and is_atom(mod) and is_atom(func) and is_list(args) and is_list(opts) do
+    timeout = Keyword.get(opts, :timeout, default_rpc_timeout())
+    tenant_id = Keyword.get(opts, :tenant_id)
+    key = Keyword.get(opts, :key, nil)
+
+    node_key = rpc_node(node, key)
+    {latency, response} = :timer.tc(fn -> :gen_rpc.call(node_key, mod, func, args, timeout) end)
+
+    case response do
+      {:badrpc, reason} ->
+        log_error(
+          "ErrorOnRpcCall",
+          %{target: node, mod: mod, func: func, error: reason},
+          project: tenant_id,
+          external_id: tenant_id
+        )
+
+        telemetry_failure(node, latency, tenant_id)
+
+        {:error, :rpc_error, reason}
+
+      {:error, _} ->
+        telemetry_failure(node, latency, tenant_id)
+        response
+
+      _ ->
+        telemetry_success(node, latency, tenant_id)
+        response
+    end
+  end
+
   # Not using :gen_rpc.multicall here because we can't see the actual results on errors
 
   @doc """
