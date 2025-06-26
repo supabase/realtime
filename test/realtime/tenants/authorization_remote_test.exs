@@ -115,6 +115,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
             end)
 
           Task.await_many([t1, t2], 20_000)
+          # Wait for logs to arrive from remote node
+          Process.sleep(200)
         end)
 
       external_id = context.tenant.external_id
