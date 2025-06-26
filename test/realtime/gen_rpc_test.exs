@@ -14,6 +14,133 @@ defmodule Realtime.GenRpcTest do
     %{node: node}
   end
 
+  describe "call/5" do
+    test "returns the result calling local node" do
+      current_node = node()
+
+      assert GenRpc.call(current_node, Map, :fetch, [%{a: 1}, :a], tenant_id: "123") == {:ok, 1}
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^current_node,
+                        success: true,
+                        tenant: "123",
+                        mechanism: :gen_rpc
+                      }}
+    end
+
+    test "returns the result with an error tuple calling local node" do
+      current_node = node()
+
+      assert GenRpc.call(current_node, File, :open, ["/not-existing.file"], tenant_id: "123") == {:error, :enoent}
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^current_node,
+                        success: false,
+                        tenant: "123",
+                        mechanism: :gen_rpc
+                      }}
+    end
+
+    test "returns the result calling remote node", %{node: node} do
+      current_node = node()
+      assert GenRpc.call(node, Map, :fetch, [%{a: 1}, :a], tenant_id: "123") == {:ok, 1}
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^node,
+                        success: true,
+                        tenant: "123",
+                        mechanism: :gen_rpc
+                      }}
+    end
+
+    test "returns the result with an error tuple calling remote node", %{node: node} do
+      current_node = node()
+
+      assert GenRpc.call(node, File, :open, ["/not-existing.file"], tenant_id: "123") == {:error, :enoent}
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^node,
+                        success: false,
+                        tenant: "123",
+                        mechanism: :gen_rpc
+                      }}
+    end
+
+    test "local node timeout error" do
+      current_node = node()
+
+      log =
+        capture_log(fn ->
+          assert GenRpc.call(current_node, Process, :sleep, [500], timeout: 100, tenant_id: 123) ==
+                   {:error, :rpc_error, :timeout}
+        end)
+
+      assert log =~
+               "project=123 external_id=123 [error] ErrorOnRpcCall: %{error: :timeout, mod: Process, func: :sleep, target: :\"main@127.0.0.1\"}"
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^current_node,
+                        success: false,
+                        tenant: 123,
+                        mechanism: :gen_rpc
+                      }}
+    end
+
+    test "remote node timeout error", %{node: node} do
+      current_node = node()
+
+      log =
+        capture_log(fn ->
+          assert GenRpc.call(node, Process, :sleep, [500], timeout: 100, tenant_id: 123) ==
+                   {:error, :rpc_error, :timeout}
+        end)
+
+      assert log =~
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :timeout,\s+mod: Process,\s+func: :sleep,\s+target:\s+:"#{node}"/
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^node,
+                        success: false,
+                        tenant: 123,
+                        mechanism: :gen_rpc
+                      }}
+    end
+
+    @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
+    test "bad tcp error", %{node: node} do
+      current_node = node()
+
+      log =
+        capture_log(fn ->
+          assert GenRpc.call(node, Map, :fetch, [%{a: 1}, :a], tenant_id: 123) == {:error, :rpc_error, :econnrefused}
+        end)
+
+      assert log =~
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :econnrefused,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^node,
+                        success: false,
+                        tenant: 123,
+                        mechanism: :gen_rpc
+                      }}
+    end
+  end
+
   describe "multicast/4" do
     test "evals everywhere" do
       parent = self()

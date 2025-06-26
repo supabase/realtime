@@ -135,6 +135,8 @@ if config_env() != :test do
       config :gen_rpc,
         tcp_server_port: System.get_env("GEN_RPC_TCP_SERVER_PORT", "5369") |> String.to_integer(),
         tcp_client_port: System.get_env("GEN_RPC_TCP_CLIENT_PORT", "5369") |> String.to_integer(),
+        connect_timeout: System.get_env("GEN_RPC_CONNECT_TIMEOUT_IN_MS", "10000") |> String.to_integer(),
+        send_timeout: System.get_env("GEN_RPC_SEND_TIMEOUT_IN_MS", "10000") |> String.to_integer(),
         ipv6_only: System.get_env("GEN_RPC_IPV6_ONLY", "false") == "true",
         socket_ip: address
 
