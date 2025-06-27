@@ -68,6 +68,13 @@ defmodule RealtimeWeb.RealtimeChannel do
       Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
 
       is_new_api = new_api?(params)
+      # TODO: Default will be moved to false in the future
+      presence_enabled? =
+        case get_in(params, ["config", "presence", "enabled"]) do
+          enabled when is_boolean(enabled) -> enabled
+          _ -> true
+        end
+
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
 
       opts = %{
@@ -93,11 +100,13 @@ defmodule RealtimeWeb.RealtimeChannel do
         presence_key: presence_key(params),
         self_broadcast: !!params["config"]["broadcast"]["self"],
         tenant_topic: tenant_topic,
-        channel_name: sub_topic
+        channel_name: sub_topic,
+        presence_enabled?: presence_enabled?
       }
 
-      # Start presence and add user
-      send(self(), :sync_presence)
+      # Start presence and add user if presence is enabled
+      if presence_enabled?, do: send(self(), :sync_presence)
+
       Realtime.UsersCounter.add(transport_pid, tenant_id)
       SocketDisconnect.add(tenant_id, socket)
 
@@ -318,7 +327,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:stop, :shutdown, socket}
   end
 
-  def handle_info(:sync_presence, socket), do: PresenceHandler.sync(socket)
+  def handle_info(:sync_presence, %{assigns: %{presence_enabled?: true}} = socket), do: PresenceHandler.sync(socket)
+  def handle_info(:sync_presence, socket), do: {:noreply, socket}
+
   def handle_info(:unsuspend_tenant, socket), do: {:noreply, socket}
 
   def handle_info(msg, socket) do
