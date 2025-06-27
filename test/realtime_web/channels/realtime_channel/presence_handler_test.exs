@@ -180,6 +180,33 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       assert log =~ "UnknownPresenceEvent"
     end
+
+    test "socket with presence enabled false will ignore presence events in public channel", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies, false, false)
+
+      assert {:reply, :ok, _socket} = PresenceHandler.handle(%{"event" => "track"}, socket)
+      topic = "realtime:#{topic}"
+      refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
+    end
+
+    test "socket with presence enabled false will ignore presence events in private channel", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn
+    } do
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies, false, false)
+
+      assert {:reply, :ok, _socket} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+      topic = "realtime:#{topic}"
+      refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
+    end
   end
 
   defp initiate_tenant(context) do
@@ -213,7 +240,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
            broadcast: %BroadcastPolicies{read: true},
            presence: %PresencePolicies{read: true, write: nil}
          },
-         private? \\ true
+         private? \\ true,
+         enabled? \\ true
        ) do
     claims = %{sub: random_string(), role: "authenticated", exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
@@ -248,7 +276,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
         authorization_context: authorization_context,
         rate_counter: rate_counter,
         private?: private?,
-        presence_key: presence_key
+        presence_key: presence_key,
+        presence_enabled?: enabled?
       }
     }
   end
