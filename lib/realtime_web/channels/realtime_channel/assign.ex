@@ -19,7 +19,8 @@ defmodule RealtimeWeb.RealtimeChannel.Assigns do
     :access_token,
     :postgres_cdc_module,
     :channel_name,
-    :headers
+    :headers,
+    :region
   ]
 
   @type t :: %__MODULE__{
@@ -42,6 +43,7 @@ defmodule RealtimeWeb.RealtimeChannel.Assigns do
           jwt_jwks: map(),
           tenant_token: String.t(),
           access_token: String.t(),
-          channel_name: String.t()
+          channel_name: String.t(),
+          region: String.t()
         }
 end

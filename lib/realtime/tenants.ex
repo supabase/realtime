@@ -340,4 +340,12 @@ defmodule Realtime.Tenants do
   @spec broadcast_operation_event(:suspend_tenant | :unsuspend_tenant | :disconnect, String.t()) :: :ok
   def broadcast_operation_event(action, external_id),
     do: Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> external_id, action)
+
+  @doc """
+  Returns the region of the tenant based on its extensions.
+  If the region is not set, it returns nil.
+  """
+  @spec region(Tenant.t()) :: String.t() | nil
+  def region(%Tenant{extensions: [%{settings: settings}]}), do: Map.get(settings, "region")
+  def region(_), do: nil
 end

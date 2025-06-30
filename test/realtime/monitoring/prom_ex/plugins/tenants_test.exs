@@ -114,7 +114,8 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
       # Enough time for the poll rate to be triggered at least once
       Process.sleep(200)
       previous_value = metric_value(pattern)
-      {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
+      region = Realtime.Tenants.region(tenant)
+      {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id, region)
       Process.sleep(200)
       assert metric_value(pattern) == previous_value + 1
     end

@@ -27,7 +27,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
-      expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :unexpected_error} end)
+      expect(Connect, :lookup_or_start_connection, fn _, _ -> {:error, :unexpected_error} end)
 
       assert capture_log(fn ->
                assert {:error, %{reason: "Unknown Error on Channel"}} = subscribe_and_join(socket, "realtime:test", %{})

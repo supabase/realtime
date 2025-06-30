@@ -2125,8 +2125,10 @@ defmodule Realtime.Integration.RtChannelTest do
       Process.sleep(100)
     end)
 
+    on_exit(fn -> Connect.shutdown(tenant.external_id) end)
+    region = Realtime.Tenants.region(tenant)
     {:ok, node} = Clustered.start()
-    {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant"])
+    {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant", region])
     assert Connect.ready?(tenant.external_id)
 
     assert node(db_conn) == node
@@ -2137,16 +2139,8 @@ defmodule Realtime.Integration.RtChannelTest do
     Realtime.Tenants.Connect.shutdown(tenant.external_id)
     # Sleeping so that syn can forget about this Connect process
     Process.sleep(100)
-
-    on_exit(fn ->
-      Connect.shutdown(tenant.external_id)
-      # Sleeping so that syn can forget about this Connect process
-      Process.sleep(100)
-    end)
-
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-    assert Connect.ready?(tenant.external_id)
-
+    region = Realtime.Tenants.region(tenant)
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
     %{db_conn: db_conn}
   end
 

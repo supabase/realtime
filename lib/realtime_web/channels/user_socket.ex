@@ -42,11 +42,13 @@ defmodule RealtimeWeb.UserSocket do
              max_joins_per_second: max_joins_per_second,
              max_channels_per_client: max_channels_per_client,
              postgres_cdc_default: postgres_cdc_default
-           } <- Tenants.Cache.get_tenant_by_external_id(external_id),
+           } = tenant <- Tenants.Cache.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- token,
            jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
            {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
+        region = Tenants.region(tenant)
+
         assigns = %RealtimeChannel.Assigns{
           claims: claims,
           jwt_secret: jwt_secret,
@@ -63,7 +65,8 @@ defmodule RealtimeWeb.UserSocket do
           tenant: external_id,
           log_level: log_level(params),
           tenant_token: token,
-          headers: opts.x_headers
+          headers: opts.x_headers,
+          region: region
         }
 
         assigns = Map.from_struct(assigns)

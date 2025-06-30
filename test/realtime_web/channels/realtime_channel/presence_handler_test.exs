@@ -222,7 +222,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     RateCounter.new(tenant.external_id)
     GenCounter.new(tenant.external_id)
 
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    region = Tenants.region(tenant)
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
     assert Connect.ready?(tenant.external_id)
 
     topic = random_string()

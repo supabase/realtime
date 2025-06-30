@@ -1,7 +1,10 @@
 defmodule Realtime.MetricsCleanerTest do
   # async: false due to potentially polluting metrics with other tenant metrics from other tests
   use Realtime.DataCase, async: false
+
   alias Realtime.MetricsCleaner
+  alias Realtime.Tenants
+  alias Realtime.Tenants.Connect
 
   setup do
     interval = Application.get_env(:realtime, :metrics_cleaner_schedule_timer_in_ms)
@@ -17,10 +20,11 @@ defmodule Realtime.MetricsCleanerTest do
 
   describe "metrics cleanup" do
     test "cleans up metrics for users that have been disconnected", %{
-      tenant: %{external_id: external_id}
+      tenant: %{external_id: external_id} = tenant
     } do
       start_supervised!(MetricsCleaner)
-      {:ok, _} = Realtime.Tenants.Connect.lookup_or_start_connection(external_id)
+      region = Tenants.region(tenant)
+      {:ok, _} = Connect.lookup_or_start_connection(external_id, region)
       # Wait for promex to collect the metrics
       Process.sleep(6000)
 
@@ -34,7 +38,7 @@ defmodule Realtime.MetricsCleanerTest do
              |> :ets.select([{{{:_, %{tenant: :"$1"}}, :_}, [], [:"$1"]}])
              |> Enum.any?(&(&1 == external_id))
 
-      Realtime.Tenants.Connect.shutdown(external_id)
+      Connect.shutdown(external_id)
       Process.sleep(200)
 
       refute Realtime.PromEx.Metrics

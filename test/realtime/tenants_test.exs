@@ -130,4 +130,51 @@ defmodule Realtime.TenantsTest do
       end
     end
   end
+
+  describe "region/1" do
+    test "returns the region of the tenant" do
+      attrs = %{
+        "external_id" => random_string(),
+        "name" => "tenant",
+        "extensions" => [
+          %{
+            "type" => "postgres_cdc_rls",
+            "settings" => %{
+              "db_host" => "127.0.0.1",
+              "db_name" => "postgres",
+              "db_user" => "supabase_admin",
+              "db_password" => "postgres",
+              "db_port" => "#{port()}",
+              "poll_interval" => 100,
+              "poll_max_changes" => 100,
+              "poll_max_record_bytes" => 1_048_576,
+              "region" => "us-east-1",
+              "publication" => "supabase_realtime_test",
+              "ssl_enforced" => false
+            }
+          }
+        ],
+        "postgres_cdc_default" => "postgres_cdc_rls",
+        "jwt_secret" => "new secret",
+        "jwt_jwks" => nil
+      }
+
+      {:ok, tenant} = Realtime.Api.create_tenant(attrs)
+      assert Tenants.region(tenant) == "us-east-1"
+    end
+
+    test "returns nil if no extension is set" do
+      attrs = %{
+        "external_id" => random_string(),
+        "name" => "tenant",
+        "extensions" => [],
+        "postgres_cdc_default" => "postgres_cdc_rls",
+        "jwt_secret" => "new secret",
+        "jwt_jwks" => nil
+      }
+
+      {:ok, tenant} = Realtime.Api.create_tenant(attrs)
+      assert Tenants.region(tenant) == nil
+    end
+  end
 end

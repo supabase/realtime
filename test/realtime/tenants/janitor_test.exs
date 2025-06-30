@@ -25,7 +25,8 @@ defmodule Realtime.Tenants.JanitorTest do
         [tenant1, tenant2],
         fn tenant ->
           tenant = Repo.preload(tenant, :extensions)
-          Connect.lookup_or_start_connection(tenant.external_id)
+          region = Realtime.Tenants.region(tenant)
+          Connect.lookup_or_start_connection(tenant.external_id, region)
           Process.sleep(500)
           tenant
         end
