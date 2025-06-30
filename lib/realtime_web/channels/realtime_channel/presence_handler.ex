@@ -18,9 +18,12 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias RealtimeWeb.RealtimeChannel.Logging
 
   @spec handle(map(), Socket.t()) :: {:reply, :error | :ok, Socket.t()}
+  def handle(_, %{assigns: %{presence_enabled?: false}} = socket), do: {:reply, :ok, socket}
   def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
 
   @spec handle(map(), pid() | nil, Socket.t()) :: {:reply, :error | :ok, Socket.t()}
+  def handle(_, _, %{assigns: %{presence_enabled?: false}} = socket), do: {:reply, :ok, socket}
+
   def handle(%{"event" => event} = payload, db_conn, socket) do
     event = String.downcase(event, :ascii)
 
@@ -36,6 +39,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   Sends presence state to connected clients
   """
   @spec sync(Socket.t()) :: {:noreply, Socket.t()}
+  def sync(%{assigns: %{presence_enabled?: false}} = socket), do: {:noreply, socket}
+
   def sync(%{assigns: %{private?: false}} = socket) do
     %{assigns: %{tenant_topic: topic}} = socket
     socket = count(socket)
