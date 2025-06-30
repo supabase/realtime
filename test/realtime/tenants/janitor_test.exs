@@ -25,8 +25,7 @@ defmodule Realtime.Tenants.JanitorTest do
         [tenant1, tenant2],
         fn tenant ->
           tenant = Repo.preload(tenant, :extensions)
-          region = Realtime.Tenants.region(tenant)
-          Connect.lookup_or_start_connection(tenant.external_id, region)
+          Connect.lookup_or_start_connection(tenant.external_id)
           Process.sleep(500)
           tenant
         end
@@ -90,7 +89,7 @@ defmodule Realtime.Tenants.JanitorTest do
        %{
          tenants: tenants
        } do
-    Realtime.Tenants.Connect.shutdown(hd(tenants).external_id)
+    Connect.shutdown(hd(tenants).external_id)
     Process.sleep(100)
 
     utc_now = NaiveDateTime.utc_now()

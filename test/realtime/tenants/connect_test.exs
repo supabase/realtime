@@ -27,8 +27,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
   describe "lookup_or_start_connection/1" do
     test "if tenant exists and connected, returns the db connection and tracks it in ets", %{tenant: tenant} do
-      region = Tenants.region(tenant)
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert is_pid(db_conn)
       assert Connect.shutdown(tenant.external_id) == :ok
     end
@@ -38,8 +37,7 @@ defmodule Realtime.Tenants.ConnectTest do
       tenants = [tenant1, tenant2]
 
       for tenant <- tenants do
-        region = Tenants.region(tenant)
-        assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+        assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
         assert is_pid(db_conn)
         Connect.shutdown(tenant.external_id)
@@ -54,15 +52,14 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "on database disconnect, returns new connection", %{tenant: tenant} do
-      region = Tenants.region(tenant)
-      assert {:ok, old_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, old_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       Connect.shutdown(tenant.external_id)
       assert_process_down(old_conn)
       # Sleeping here so that syn has enough time to unregister
       # This could be avoided if we called :syn.unregister/2 on shutdown
       Process.sleep(100)
 
-      assert {:ok, new_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, new_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
       on_exit(fn -> Process.exit(new_conn, :shutdown) end)
 
@@ -93,26 +90,25 @@ defmodule Realtime.Tenants.ConnectTest do
 
       tenant = tenant_fixture(%{extensions: extensions})
       external_id = tenant.external_id
-      region = Tenants.region(tenant)
 
       assert capture_log(fn ->
                assert {:error, :tenant_database_unavailable} =
-                        Connect.lookup_or_start_connection(tenant.external_id, region)
+                        Connect.lookup_or_start_connection(tenant.external_id)
              end) =~ "project=#{external_id} external_id=#{external_id} [error] UnableToConnectToTenantDatabase"
     end
 
     test "if tenant does not exist, returns error" do
-      assert {:error, :tenant_not_found} = Connect.lookup_or_start_connection("none", nil)
+      assert {:error, :tenant_not_found} = Connect.lookup_or_start_connection("none")
     end
 
     test "if no users are connected to a tenant channel, stop the connection", %{
       tenant: %{external_id: tenant_id} = tenant
     } do
-      region = Tenants.region(tenant)
-      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id, region, check_connected_user_interval: 100)
+      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 100)
 
       # Not enough time has passed, connection still alive
       Process.sleep(400)
+      region = Tenants.region(tenant)
       assert {_, %{conn: _, region: ^region}} = :syn.lookup(Connect, tenant_id)
 
       assert_process_down(db_conn, 1000)
@@ -127,11 +123,12 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant: %{external_id: tenant_id} = tenant
     } do
       UsersCounter.add(self(), tenant_id)
-      region = Tenants.region(tenant)
-      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id, region, check_connected_user_interval: 10)
+
+      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
       # Emulate connected user
       UsersCounter.add(self(), tenant_id)
+      region = Tenants.region(tenant)
       assert {pid, %{conn: conn_pid, region: ^region}} = :syn.lookup(Connect, tenant_id)
       Process.sleep(300)
       assert {^pid, %{conn: ^conn_pid, region: ^region}} = :syn.lookup(Connect, tenant_id)
@@ -142,11 +139,11 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "connection is killed after user leaving", %{tenant: tenant} do
       external_id = tenant.external_id
-      region = Tenants.region(tenant)
+
       UsersCounter.add(self(), external_id)
 
-      {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, region, check_connected_user_interval: 10)
-
+      {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, check_connected_user_interval: 10)
+      region = Tenants.region(tenant)
       assert {_pid, %{conn: ^db_conn, region: ^region}} = :syn.lookup(Connect, external_id)
       Process.sleep(1000)
       :syn.leave(:users, external_id, self())
@@ -158,13 +155,12 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "error if tenant is suspended" do
       tenant = tenant_fixture(suspend: true)
-      region = Tenants.region(tenant)
-      assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id, region)
+
+      assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
     end
 
     test "handles tenant suspension and unsuspension in a reactive way", %{tenant: tenant} do
-      region = Tenants.region(tenant)
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
       Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
@@ -172,19 +168,19 @@ defmodule Realtime.Tenants.ConnectTest do
       # Wait for syn to unregister and Cachex to be invalided
       Process.sleep(100)
 
-      assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
       refute Process.alive?(db_conn)
 
       Realtime.Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
       Process.sleep(50)
-      assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
       Connect.shutdown(tenant.external_id)
     end
 
     test "handles tenant suspension only on targetted suspended user", %{tenant: tenant1} do
       tenant2 = Containers.checkout_tenant(run_migrations: true)
 
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant1.external_id, Tenants.region(tenant1))
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant1.external_id)
 
       log =
         capture_log(fn ->
@@ -216,7 +212,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       Enum.each(1..10, fn _ ->
         Task.start(fn ->
-          Connect.lookup_or_start_connection(tenant.external_id, Tenants.region(tenant))
+          Connect.lookup_or_start_connection(tenant.external_id)
         end)
       end)
 
@@ -228,15 +224,14 @@ defmodule Realtime.Tenants.ConnectTest do
     test "on migrations failure, stop the process" do
       tenant = Containers.checkout_tenant(run_migrations: false)
       expect(Realtime.Tenants.Migrations, :run_migrations, fn ^tenant -> raise "error" end)
-      region = Tenants.region(tenant)
-      assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id, region)
+
+      assert {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
       assert_process_down(pid)
       refute Process.alive?(pid)
     end
 
     test "starts broadcast handler and does not fail on existing connection", %{tenant: tenant} do
-      region = Tenants.region(tenant)
-      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
       replication_connection_before = ReplicationConnection.whereis(tenant.external_id)
@@ -245,7 +240,7 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Process.alive?(replication_connection_before)
       assert Process.alive?(listen_before)
 
-      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
       replication_connection_after = ReplicationConnection.whereis(tenant.external_id)
       listen_after = Listen.whereis(tenant.external_id)
@@ -257,8 +252,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "on replication connection postgres pid being stopped, also kills the Connect module", %{tenant: tenant} do
-      region = Tenants.region(tenant)
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
@@ -276,8 +270,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "on replication connection exit, also kills the Connect module", %{tenant: tenant} do
-      region = Tenants.region(tenant)
-      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
@@ -290,8 +283,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "on listen exit, also kills the Connect module", %{tenant: tenant} do
-      region = Tenants.region(tenant)
-      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
       listen_pid = Listen.whereis(tenant.external_id)
@@ -333,8 +325,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       log =
         capture_log(fn ->
-          region = Tenants.region(tenant)
-          assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+          assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
           assert_process_down(db_conn)
         end)
 
@@ -344,15 +335,15 @@ defmodule Realtime.Tenants.ConnectTest do
     test "syn with no connection", %{tenant: tenant} do
       external_id = tenant.external_id
       expect(:syn, :lookup, 2, fn Connect, ^external_id -> {nil, %{conn: nil}} end)
-      region = Tenants.region(tenant)
-      assert {:error, :tenant_database_unavailable} = Connect.lookup_or_start_connection(external_id, region)
+
+      assert {:error, :tenant_database_unavailable} = Connect.lookup_or_start_connection(external_id)
       assert {:error, :initializing} = Connect.get_status(external_id)
     end
 
     test "handle rpc errors gracefully" do
-      expect(Realtime.Nodes, :get_node_for_tenant, fn _ -> {:ok, :potato@nohost} end)
+      expect(Realtime.Nodes, :get_node_for_tenant, fn _ -> {:ok, :potato@nohost, "us-east-1"} end)
 
-      assert capture_log(fn -> assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant", nil) end) =~
+      assert capture_log(fn -> assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant") end) =~
                "project=tenant external_id=tenant [error] ErrorOnRpcCall"
     end
   end
@@ -387,7 +378,6 @@ defmodule Realtime.Tenants.ConnectTest do
         Connect.shutdown(external_id)
       end
 
-      region = Tenants.region(tenant)
       assert {:error, :tenant_create_backoff} = Connect.connect(external_id, region)
 
       Process.sleep(5000)
@@ -397,8 +387,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
   describe "shutdown/1" do
     test "shutdowns all associated connections", %{tenant: tenant} do
-      region = Tenants.region(tenant)
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Process.alive?(db_conn)
       assert Connect.ready?(tenant.external_id)
       connect_pid = Connect.whereis(tenant.external_id)
@@ -438,21 +427,19 @@ defmodule Realtime.Tenants.ConnectTest do
       }
 
       {:ok, tenant} = update_extension(tenant, extension)
-      region = Tenants.region(tenant)
-      assert {:error, :tenant_db_too_many_connections} = Connect.lookup_or_start_connection(tenant.external_id, region)
+
+      assert {:error, :tenant_db_too_many_connections} = Connect.lookup_or_start_connection(tenant.external_id)
     end
   end
 
   describe "registers into local registry" do
-    test "successfully registers a process", %{tenant: %{external_id: external_id} = tenant} do
-      region = Tenants.region(tenant)
-      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(external_id, region)
+    test "successfully registers a process", %{tenant: %{external_id: external_id}} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(external_id)
       assert Registry.whereis_name({Realtime.Tenants.Connect.Registry, external_id})
     end
 
-    test "successfully unregisters a process", %{tenant: %{external_id: external_id} = tenant} do
-      region = Tenants.region(tenant)
-      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(external_id, region)
+    test "successfully unregisters a process", %{tenant: %{external_id: external_id}} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(external_id)
       assert Registry.whereis_name({Realtime.Tenants.Connect.Registry, external_id})
       Connect.shutdown(external_id)
       Process.sleep(100)

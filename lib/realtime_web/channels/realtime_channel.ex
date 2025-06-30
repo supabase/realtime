@@ -35,7 +35,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def join("realtime:" <> sub_topic = topic, params, socket) do
     %{
-      assigns: %{tenant: tenant_id, log_level: log_level, postgres_cdc_module: module, region: region},
+      assigns: %{tenant: tenant_id, log_level: log_level, postgres_cdc_module: module},
       channel_pid: channel_pid,
       serializer: serializer,
       transport_pid: transport_pid
@@ -59,7 +59,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_max_users(socket.assigns),
          :ok <- start_db_rate_counter(tenant_id),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
-         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id, region),
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          socket = assign_authorization_context(socket, sub_topic, access_token, claims),
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
@@ -339,9 +339,9 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
-    %{tenant: tenant_id, region: region} = socket.assigns
+    %{tenant: tenant_id} = socket.assigns
 
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id, region) do
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
       BroadcastHandler.handle(payload, db_conn, socket)
     else
       {:error, error} ->
@@ -355,9 +355,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in("presence", payload, %{assigns: %{private?: true}} = socket) do
-    %{tenant: tenant_id, region: region} = socket.assigns
+    %{tenant: tenant_id} = socket.assigns
 
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id, region) do
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id) do
       PresenceHandler.handle(payload, db_conn, socket)
     else
       {:error, error} ->
@@ -398,7 +398,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         pg_sub_ref: pg_sub_ref,
         channel_name: channel_name,
         pg_change_params: pg_change_params,
-        region: region,
         tenant: tenant
       }
     } = socket
@@ -407,7 +406,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
          socket = assign_authorization_context(socket, channel_name, access_token, claims),
-         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant, region),
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant),
          {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket) do
       Helpers.cancel_timer(pg_sub_ref)
       pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
@@ -602,8 +601,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     %{
       jwt_secret: jwt_secret,
       access_token: access_token,
-      tenant: tenant_id,
-      region: region
+      tenant: tenant_id
     } = assigns
 
     topic = Map.get(assigns, :topic)
@@ -614,7 +612,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
          exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id, region),
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(topic, db_conn, socket) do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 

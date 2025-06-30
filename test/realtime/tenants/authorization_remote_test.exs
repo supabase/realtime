@@ -230,7 +230,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     create_rls_policies(local_db_conn, context.policies, %{topic: topic})
 
     {:ok, node} = Clustered.start()
-
     region = Tenants.region(tenant)
     {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant", region])
 

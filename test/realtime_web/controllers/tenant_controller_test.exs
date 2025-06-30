@@ -213,8 +213,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     setup [:with_tenant]
 
     test "deletes chosen tenant", %{conn: conn, tenant: tenant} do
-      region = Tenants.region(tenant)
-      {:ok, _pid} = Connect.lookup_or_start_connection(tenant.external_id, region)
+      {:ok, _pid} = Connect.lookup_or_start_connection(tenant.external_id)
 
       assert Connect.ready?(tenant.external_id)
 
@@ -279,8 +278,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       wait_on_postgres_cdc_rls(external_id)
 
       {:ok, manager_pid, _} = Extensions.PostgresCdcRls.get_manager_conn(external_id)
-      region = Tenants.region(tenant)
-      {:ok, connect_pid} = Connect.lookup_or_start_connection(external_id, region)
+      {:ok, connect_pid} = Connect.lookup_or_start_connection(external_id)
       Process.monitor(manager_pid)
       Process.monitor(connect_pid)
 
@@ -380,12 +378,8 @@ defmodule RealtimeWeb.TenantControllerTest do
              } == data
     end
 
-    test "healthy tenant with 1 client connection", %{
-      conn: conn,
-      tenant: %Tenant{external_id: ext_id} = tenant
-    } do
-      region = Tenants.region(tenant)
-      {:ok, db_conn} = Connect.lookup_or_start_connection(ext_id, region)
+    test "healthy tenant with 1 client connection", %{conn: conn, tenant: %Tenant{external_id: ext_id}} do
+      {:ok, db_conn} = Connect.lookup_or_start_connection(ext_id)
       # Fake adding a connected client here
       UsersCounter.add(self(), ext_id)
 

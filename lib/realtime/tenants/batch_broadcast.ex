@@ -43,7 +43,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
     with %Ecto.Changeset{valid?: true} = changeset <- changeset(%__MODULE__{}, messages),
          %Ecto.Changeset{changes: %{messages: messages}} = changeset,
          events_per_second_key = Tenants.events_per_second_key(tenant),
-         region = Tenants.region(tenant),
          :ok <- check_rate_limit(events_per_second_key, tenant, length(messages)) do
       events =
         messages
@@ -67,7 +66,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
             send_message_and_count(tenant, sub_topic, event, payload, false)
           end)
         else
-          case permissions_for_message(tenant, auth_params, topic, region) do
+          case permissions_for_message(tenant, auth_params, topic) do
             %Policies{broadcast: %BroadcastPolicies{write: true}} ->
               Enum.each(events, fn %{topic: sub_topic, payload: payload, event: event} ->
                 send_message_and_count(tenant, sub_topic, event, payload, false)
@@ -114,10 +113,10 @@ defmodule Realtime.Tenants.BatchBroadcast do
     TenantBroadcaster.broadcast(tenant, tenant_topic, "broadcast", payload)
   end
 
-  defp permissions_for_message(_, nil, _, _), do: nil
+  defp permissions_for_message(_, nil, _), do: nil
 
-  defp permissions_for_message(tenant, auth_params, topic, region) do
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id, region) do
+  defp permissions_for_message(tenant, auth_params, topic) do
+    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id) do
       auth_params =
         auth_params
         |> Map.put(:topic, topic)

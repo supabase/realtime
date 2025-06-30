@@ -3,7 +3,6 @@ defmodule Realtime.MetricsCleanerTest do
   use Realtime.DataCase, async: false
 
   alias Realtime.MetricsCleaner
-  alias Realtime.Tenants
   alias Realtime.Tenants.Connect
 
   setup do
@@ -19,12 +18,9 @@ defmodule Realtime.MetricsCleanerTest do
   end
 
   describe "metrics cleanup" do
-    test "cleans up metrics for users that have been disconnected", %{
-      tenant: %{external_id: external_id} = tenant
-    } do
+    test "cleans up metrics for users that have been disconnected", %{tenant: %{external_id: external_id}} do
       start_supervised!(MetricsCleaner)
-      region = Tenants.region(tenant)
-      {:ok, _} = Connect.lookup_or_start_connection(external_id, region)
+      {:ok, _} = Connect.lookup_or_start_connection(external_id)
       # Wait for promex to collect the metrics
       Process.sleep(6000)
 

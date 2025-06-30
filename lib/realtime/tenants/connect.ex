@@ -52,23 +52,23 @@ defmodule Realtime.Tenants.Connect do
   @doc """
   Returns the database connection for a tenant. If the tenant is not connected, it will attempt to connect to the tenant's database.
   """
-  @spec lookup_or_start_connection(binary(), binary(), keyword()) ::
+  @spec lookup_or_start_connection(binary(), keyword()) ::
           {:ok, pid()}
           | {:error, :tenant_database_unavailable}
           | {:error, :initializing}
           | {:error, :tenant_database_connection_initializing}
           | {:error, :rpc_error, term()}
-  def lookup_or_start_connection(tenant_id, region, opts \\ []) when is_binary(tenant_id) do
+  def lookup_or_start_connection(tenant_id, opts \\ []) when is_binary(tenant_id) do
     case get_status(tenant_id) do
       {:ok, conn} ->
         {:ok, conn}
 
       {:error, :tenant_database_unavailable} ->
-        call_external_node(tenant_id, region, opts)
+        call_external_node(tenant_id, opts)
 
       {:error, :tenant_database_connection_initializing} ->
         Process.sleep(100)
-        call_external_node(tenant_id, region, opts)
+        call_external_node(tenant_id, opts)
 
       {:error, :initializing} ->
         {:error, :tenant_database_unavailable}
@@ -360,12 +360,12 @@ defmodule Realtime.Tenants.Connect do
   end
 
   ## Private functions
-  defp call_external_node(tenant_id, region, opts) do
+  defp call_external_node(tenant_id, opts) do
     rpc_timeout = Keyword.get(opts, :rpc_timeout, @rpc_timeout_default)
 
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
-         {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
+         {:ok, node, region} <- Realtime.Nodes.get_node_for_tenant(tenant) do
       Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, region, opts],
         timeout: rpc_timeout,
         tenant_id: tenant_id
