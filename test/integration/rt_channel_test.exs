@@ -661,7 +661,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
     test "public presence", %{tenant: tenant} do
       {socket, _} = get_connection(tenant)
-      config = %{presence: %{key: ""}, private: false}
+      config = %{presence: %{key: "", enabled: true}, private: false}
       topic = "realtime:any"
 
       WebsocketClient.join(socket, topic, %{config: config})
@@ -689,7 +689,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "private presence with read and write permissions will be able to track and receive presence changes",
          %{tenant: tenant, topic: topic} do
       {socket, _} = get_connection(tenant, "authenticated")
-      config = %{presence: %{key: ""}, private: true}
+      config = %{presence: %{key: "", enabled: true}, private: true}
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: config})
@@ -714,7 +714,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "private presence with read and write permissions will be able to track and receive presence changes using a remote node",
          %{tenant: tenant, topic: topic} do
       {socket, _} = get_connection(tenant, "authenticated")
-      config = %{presence: %{key: ""}, private: true}
+      config = %{presence: %{key: "", enabled: true}, private: true}
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: config})
@@ -739,7 +739,7 @@ defmodule Realtime.Integration.RtChannelTest do
          %{tenant: tenant, topic: topic} do
       {socket, _} = get_connection(tenant, "authenticated")
       {secondary_socket, _} = get_connection(tenant, "service_role")
-      config = fn key -> %{presence: %{key: key}, private: true} end
+      config = fn key -> %{presence: %{key: key, enabled: true}, private: true} end
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(socket, topic, %{config: config.("authenticated")})
@@ -791,7 +791,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "handles lack of connection to database error on private channels", %{tenant: tenant, topic: topic} do
       topic = "realtime:#{topic}"
       {socket, _} = get_connection(tenant, "authenticated")
-      WebsocketClient.join(socket, topic, %{config: %{private: true}})
+      WebsocketClient.join(socket, topic, %{config: %{private: true, presence: %{enabled: true}}})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{event: "presence_state"}
 
@@ -812,7 +812,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "lack of connection to database error does not impact public channels", %{tenant: tenant, topic: topic} do
       topic = "realtime:#{topic}"
       {socket, _} = get_connection(tenant, "authenticated")
-      WebsocketClient.join(socket, topic, %{config: %{private: false}})
+      WebsocketClient.join(socket, topic, %{config: %{private: false, presence: %{enabled: true}}})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{event: "presence_state"}
 
@@ -827,6 +827,58 @@ defmodule Realtime.Integration.RtChannelTest do
         end)
 
       refute log =~ "UnableToHandlePresence"
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
+
+    test "presence enabled if param enabled is set in configuration for private channels", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      {socket, _} = get_connection(tenant, "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, presence: %{enabled: true}}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
+
+    test "presence disabled if param 'enabled' is set to false in configuration for private channels", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      {socket, _} = get_connection(tenant, "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: true, presence: %{enabled: false}}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      refute_receive %Message{event: "presence_state"}, 500
+    end
+
+    test "presence enabled if param enabled is set in configuration for public channels", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      {socket, _} = get_connection(tenant, "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: false, presence: %{enabled: true}}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+    end
+
+    test "presence disabled if param 'enabled' is set to false in configuration for public channels", %{
+      tenant: tenant,
+      topic: topic
+    } do
+      {socket, _} = get_connection(tenant, "authenticated")
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: %{private: false, presence: %{enabled: false}}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      refute_receive %Message{event: "presence_state"}, 500
     end
   end
 
