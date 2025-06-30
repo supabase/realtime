@@ -113,8 +113,8 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         assert conn.status == 422
 
-        # Wait for counters to increment
-        Process.sleep(1000)
+        # Wait for counters to increment. RateCounter tick is 1 second
+        Process.sleep(2000)
         {:ok, rate_counter} = RateCounter.get(Tenants.requests_per_second_key(tenant))
         assert rate_counter.avg != 0.0
 
