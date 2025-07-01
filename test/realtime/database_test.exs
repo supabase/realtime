@@ -243,7 +243,7 @@ defmodule Realtime.DatabaseTest do
 
     test "success call returns output" do
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant"])
+      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
       assert node(db_conn) == node
       assert {:ok, %Postgrex.Result{rows: [[1]]}} = Database.transaction(db_conn, &DatabaseAux.checker/1)
     end
@@ -251,7 +251,7 @@ defmodule Realtime.DatabaseTest do
     test "handles database errors" do
       metadata = [external_id: "123", project: "123"]
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant"])
+      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
       assert node(db_conn) == node
 
       assert capture_log(fn ->
@@ -264,7 +264,7 @@ defmodule Realtime.DatabaseTest do
     test "handles exception" do
       metadata = [external_id: "123", project: "123"]
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant"])
+      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
       assert node(db_conn) == node
 
       assert capture_log(fn ->

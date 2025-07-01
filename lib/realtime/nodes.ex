@@ -4,26 +4,20 @@ defmodule Realtime.Nodes do
   """
   require Logger
   alias Realtime.Api.Tenant
+  alias Realtime.Tenants
 
   @doc """
   Gets the node to launch the Postgres connection on for a tenant.
   """
-  @spec get_node_for_tenant(Tenant.t()) :: {:ok, node()} | {:error, term()}
+  @spec get_node_for_tenant(Tenant.t()) :: {:ok, node(), binary()} | {:error, term()}
   def get_node_for_tenant(nil), do: {:error, :tenant_not_found}
 
-  def get_node_for_tenant(%Tenant{extensions: extensions, external_id: tenant_id}) do
-    with region <- get_region(extensions),
+  def get_node_for_tenant(%Tenant{external_id: tenant_id} = tenant) do
+    with region <- Tenants.region(tenant),
          tenant_region <- platform_region_translator(region),
          node <- launch_node(tenant_id, tenant_region, node()) do
-      {:ok, node}
+      {:ok, node, tenant_region}
     end
-  end
-
-  defp get_region(extensions) do
-    extensions
-    |> Enum.map(fn %{settings: %{"region" => region}} -> region end)
-    |> Enum.uniq()
-    |> hd()
   end
 
   @doc """

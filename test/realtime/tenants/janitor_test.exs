@@ -89,7 +89,7 @@ defmodule Realtime.Tenants.JanitorTest do
        %{
          tenants: tenants
        } do
-    Realtime.Tenants.Connect.shutdown(hd(tenants).external_id)
+    Connect.shutdown(hd(tenants).external_id)
     Process.sleep(100)
 
     utc_now = NaiveDateTime.utc_now()

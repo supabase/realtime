@@ -3,12 +3,12 @@ defmodule Realtime.Extensions.CdcRlsTest do
   use RealtimeWeb.ChannelCase, async: false
   use Mimic
 
-  alias Realtime.PostgresCdc
   alias Extensions.PostgresCdcRls
   alias PostgresCdcRls.SubscriptionManager
+  alias Postgrex
   alias Realtime.Api
+  alias Realtime.PostgresCdc
   alias RealtimeWeb.ChannelsAuthorization
-  alias Postgrex, as: P
 
   @cdc "postgres_cdc_rls"
   @cdc_module Extensions.PostgresCdcRls
@@ -92,12 +92,12 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       %SubscriptionManager.State{oids: oids} = :sys.get_state(subscriber_manager_pid)
 
-      P.query!(conn, "drop publication supabase_realtime_test", [])
+      Postgrex.query!(conn, "drop publication supabase_realtime_test", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids2} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids, oids2)
 
-      P.query!(conn, "create publication supabase_realtime_test for all tables", [])
+      Postgrex.query!(conn, "create publication supabase_realtime_test for all tables", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids3} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids2, oids3)
@@ -106,8 +106,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
     test "Stop tenant supervisor", %{tenant: tenant} do
       sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
-          :syn.lookup(Extensions.PostgresCdcRls, @external_id)
-          |> case do
+          case :syn.lookup(Extensions.PostgresCdcRls, @external_id) do
             :undefined ->
               Process.sleep(500)
               {:cont, acc}

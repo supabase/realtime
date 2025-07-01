@@ -8,6 +8,7 @@ defmodule Realtime.Tenants.ConnectTest do
   import ExUnit.CaptureLog
 
   alias Realtime.Database
+  alias Realtime.Tenants
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Listen
   alias Realtime.Tenants.ReplicationConnection
@@ -100,13 +101,15 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:error, :tenant_not_found} = Connect.lookup_or_start_connection("none")
     end
 
-    test "if no users are connected to a tenant channel, stop the connection", %{tenant: %{external_id: tenant_id}} do
-      {:ok, db_conn} =
-        Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 100)
+    test "if no users are connected to a tenant channel, stop the connection", %{
+      tenant: %{external_id: tenant_id} = tenant
+    } do
+      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 100)
 
       # Not enough time has passed, connection still alive
       Process.sleep(400)
-      assert {_, %{conn: _}} = :syn.lookup(Connect, tenant_id)
+      region = Tenants.region(tenant)
+      assert {_, %{conn: _, region: ^region}} = :syn.lookup(Connect, tenant_id)
 
       assert_process_down(db_conn, 1000)
       # Enough time has passed, syn has cleaned up
@@ -116,17 +119,19 @@ defmodule Realtime.Tenants.ConnectTest do
       Connect.shutdown(tenant_id)
     end
 
-    test "if users are connected to a tenant channel, keep the connection", %{tenant: %{external_id: tenant_id}} do
+    test "if users are connected to a tenant channel, keep the connection", %{
+      tenant: %{external_id: tenant_id} = tenant
+    } do
       UsersCounter.add(self(), tenant_id)
 
-      {:ok, db_conn} =
-        Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
+      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant_id, check_connected_user_interval: 10)
 
       # Emulate connected user
       UsersCounter.add(self(), tenant_id)
-      assert {pid, %{conn: conn_pid}} = :syn.lookup(Connect, tenant_id)
+      region = Tenants.region(tenant)
+      assert {pid, %{conn: conn_pid, region: ^region}} = :syn.lookup(Connect, tenant_id)
       Process.sleep(300)
-      assert {^pid, %{conn: ^conn_pid}} = :syn.lookup(Connect, tenant_id)
+      assert {^pid, %{conn: ^conn_pid, region: ^region}} = :syn.lookup(Connect, tenant_id)
       assert Process.alive?(db_conn)
 
       Connect.shutdown(tenant_id)
@@ -134,11 +139,12 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "connection is killed after user leaving", %{tenant: tenant} do
       external_id = tenant.external_id
+
       UsersCounter.add(self(), external_id)
 
       {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, check_connected_user_interval: 10)
-
-      assert {_pid, %{conn: ^db_conn}} = :syn.lookup(Connect, external_id)
+      region = Tenants.region(tenant)
+      assert {_pid, %{conn: ^db_conn, region: ^region}} = :syn.lookup(Connect, external_id)
       Process.sleep(1000)
       :syn.leave(:users, external_id, self())
       Process.sleep(1000)
@@ -149,6 +155,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "error if tenant is suspended" do
       tenant = tenant_fixture(suspend: true)
+
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
     end
 
@@ -334,7 +341,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "handle rpc errors gracefully" do
-      expect(Realtime.Nodes, :get_node_for_tenant, fn _ -> {:ok, :potato@nohost} end)
+      expect(Realtime.Nodes, :get_node_for_tenant, fn _ -> {:ok, :potato@nohost, "us-east-1"} end)
 
       assert capture_log(fn -> assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant") end) =~
                "project=tenant external_id=tenant [error] ErrorOnRpcCall"
@@ -344,16 +351,17 @@ defmodule Realtime.Tenants.ConnectTest do
   describe "connect/1" do
     test "respects backoff pipe", %{tenant: tenant} do
       external_id = tenant.external_id
+      region = Tenants.region(tenant)
 
       log =
         capture_log(fn ->
           for _ <- 1..10 do
-            Connect.connect(external_id)
+            Connect.connect(external_id, region)
             Process.sleep(10)
             Connect.shutdown(external_id)
           end
 
-          assert {:error, :tenant_create_backoff} = Connect.connect(external_id)
+          assert {:error, :tenant_create_backoff} = Connect.connect(external_id, region)
         end)
 
       assert log =~ "Too many connect attempts to tenant database"
@@ -362,17 +370,18 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "after timer, is able to connect", %{tenant: tenant} do
       external_id = tenant.external_id
+      region = Tenants.region(tenant)
 
       for _ <- 1..10 do
-        Connect.connect(external_id)
+        Connect.connect(external_id, region)
         Process.sleep(10)
         Connect.shutdown(external_id)
       end
 
-      assert {:error, :tenant_create_backoff} = Connect.connect(external_id)
+      assert {:error, :tenant_create_backoff} = Connect.connect(external_id, region)
 
       Process.sleep(5000)
-      assert {:ok, _pid} = Connect.connect(external_id)
+      assert {:ok, _pid} = Connect.connect(external_id, region)
     end
   end
 
@@ -419,8 +428,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       {:ok, tenant} = update_extension(tenant, extension)
 
-      assert {:error, :tenant_db_too_many_connections} =
-               Connect.lookup_or_start_connection(tenant.external_id)
+      assert {:error, :tenant_db_too_many_connections} = Connect.lookup_or_start_connection(tenant.external_id)
     end
   end
 

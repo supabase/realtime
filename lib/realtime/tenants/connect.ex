@@ -104,12 +104,12 @@ defmodule Realtime.Tenants.Connect do
   @doc """
   Connects to a tenant's database and stores the DBConnection in the process :syn metadata
   """
-  @spec connect(binary(), keyword()) :: {:ok, DBConnection.t()} | {:error, term()}
-  def connect(tenant_id, opts \\ []) do
+  @spec connect(binary(), binary(), keyword()) :: {:ok, DBConnection.t()} | {:error, term()}
+  def connect(tenant_id, region, opts \\ []) do
     supervisor =
       {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, tenant_id}}
 
-    spec = {__MODULE__, [tenant_id: tenant_id] ++ opts}
+    spec = {__MODULE__, [tenant_id: tenant_id, region: region] ++ opts}
     metadata = [external_id: tenant_id, project: tenant_id]
 
     case DynamicSupervisor.start_child(supervisor, spec) do
@@ -167,11 +167,12 @@ defmodule Realtime.Tenants.Connect do
 
   def start_link(opts) do
     tenant_id = Keyword.get(opts, :tenant_id)
+    region = Keyword.get(opts, :region)
 
     check_connected_user_interval =
       Keyword.get(opts, :check_connected_user_interval, @check_connected_user_interval_default)
 
-    name = {__MODULE__, tenant_id, %{conn: nil}}
+    name = {__MODULE__, tenant_id, %{conn: nil, region: region}}
 
     state = %__MODULE__{
       tenant_id: tenant_id,
@@ -364,8 +365,11 @@ defmodule Realtime.Tenants.Connect do
 
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
-         {:ok, node} <- Realtime.Nodes.get_node_for_tenant(tenant) do
-      Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, opts], timeout: rpc_timeout, tenant_id: tenant_id)
+         {:ok, node, region} <- Realtime.Nodes.get_node_for_tenant(tenant) do
+      Rpc.enhanced_call(node, __MODULE__, :connect, [tenant_id, region, opts],
+        timeout: rpc_timeout,
+        tenant_id: tenant_id
+      )
     end
   end
 

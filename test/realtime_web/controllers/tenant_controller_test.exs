@@ -214,6 +214,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "deletes chosen tenant", %{conn: conn, tenant: tenant} do
       {:ok, _pid} = Connect.lookup_or_start_connection(tenant.external_id)
+
       assert Connect.ready?(tenant.external_id)
 
       assert Cache.get_tenant_by_external_id(tenant.external_id)
@@ -377,10 +378,7 @@ defmodule RealtimeWeb.TenantControllerTest do
              } == data
     end
 
-    test "healthy tenant with 1 client connection", %{
-      conn: conn,
-      tenant: %Tenant{external_id: ext_id}
-    } do
+    test "healthy tenant with 1 client connection", %{conn: conn, tenant: %Tenant{external_id: ext_id}} do
       {:ok, db_conn} = Connect.lookup_or_start_connection(ext_id)
       # Fake adding a connected client here
       UsersCounter.add(self(), ext_id)

@@ -2,6 +2,7 @@ defmodule Realtime.NodesTest do
   use Realtime.DataCase, async: true
   use Mimic
   alias Realtime.Nodes
+  alias Realtime.Tenants
 
   describe "get_node_for_tenant/1" do
     setup do
@@ -29,10 +30,13 @@ defmodule Realtime.NodesTest do
       end)
 
       index = :erlang.phash2(tenant.external_id, length(expected_nodes))
-      expected_node = Enum.fetch!(expected_nodes, index)
 
-      assert {:ok, node} = Nodes.get_node_for_tenant(tenant)
+      expected_node = Enum.fetch!(expected_nodes, index)
+      expected_region = Tenants.region(tenant)
+
+      assert {:ok, node, region} = Nodes.get_node_for_tenant(tenant)
       assert node == expected_node
+      assert region == expected_region
     end
 
     test "on existing tenant id, and a single node for a given region, returns default", %{
@@ -40,14 +44,22 @@ defmodule Realtime.NodesTest do
       region: region
     } do
       expect(:syn, :members, fn RegionNodes, ^region -> [{self(), [node: :tenant@closest1]}] end)
-      assert {:ok, node} = Nodes.get_node_for_tenant(tenant)
+      assert {:ok, node, region} = Nodes.get_node_for_tenant(tenant)
+
+      expected_region = Tenants.region(tenant)
+
       assert node == node()
+      assert region == expected_region
     end
 
     test "on existing tenant id, returns default node for regions not registered in syn", %{tenant: tenant} do
       expect(:syn, :members, fn RegionNodes, _ -> [] end)
-      assert {:ok, node} = Nodes.get_node_for_tenant(tenant)
+      assert {:ok, node, region} = Nodes.get_node_for_tenant(tenant)
+
+      expected_region = Tenants.region(tenant)
+
       assert node == node()
+      assert region == expected_region
     end
   end
 end

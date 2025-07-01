@@ -9,6 +9,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   require Phoenix.ChannelTest
 
   alias Realtime.Database
+  alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
@@ -229,7 +230,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     create_rls_policies(local_db_conn, context.policies, %{topic: topic})
 
     {:ok, node} = Clustered.start()
-    {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant"])
+    region = Tenants.region(tenant)
+    {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant", region])
 
     assert node(db_conn) == node
 
