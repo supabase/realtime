@@ -30,7 +30,7 @@ defmodule Realtime.DistributedMetricsTest do
                    send_pend: _
                  ]
                }
-             } = DistributedMetrics.info() |> dbg()
+             } = DistributedMetrics.info()
     end
   end
 end
