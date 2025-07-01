@@ -104,7 +104,7 @@ defmodule Realtime.Tenants.Connect do
   @doc """
   Connects to a tenant's database and stores the DBConnection in the process :syn metadata
   """
-  @spec connect(binary(), keyword()) :: {:ok, DBConnection.t()} | {:error, term()}
+  @spec connect(binary(), binary(), keyword()) :: {:ok, DBConnection.t()} | {:error, term()}
   def connect(tenant_id, region, opts \\ []) do
     supervisor =
       {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, tenant_id}}

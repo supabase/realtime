@@ -137,7 +137,6 @@ defmodule Realtime.ApiTest do
     end
 
     test "valid data and jwt_secret change will restart the database connection", %{tenant: tenant} do
-      region = Realtime.Tenants.region(tenant)
       {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
 
       Process.monitor(old_pid)
@@ -150,7 +149,6 @@ defmodule Realtime.ApiTest do
     end
 
     test "valid data and tenant data change will not restart the database connection", %{tenant: tenant} do
-      region = Realtime.Tenants.region(tenant)
       {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
 
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{max_concurrent_users: 100})
@@ -182,7 +180,6 @@ defmodule Realtime.ApiTest do
         }
       ]
 
-      region = Realtime.Tenants.region(tenant)
       {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
       Process.monitor(old_pid)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{extensions: extensions})

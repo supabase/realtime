@@ -8,7 +8,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
   alias Postgrex
   alias Realtime.Api
   alias Realtime.PostgresCdc
-  alias Realtime.Tenants
   alias RealtimeWeb.ChannelsAuthorization
 
   @cdc "postgres_cdc_rls"
@@ -34,8 +33,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
         max_bytes_per_second: 100_000
       },
       is_new_api: false,
-      log_level: :info,
-      region: Tenants.region(tenant)
+      log_level: :info
     }
 
     expect(ChannelsAuthorization, :authorize_conn, fn _, _, _ ->
