@@ -30,7 +30,7 @@ defmodule Realtime.Tenants.Connect.Backoff do
 
       {:error, _} ->
         GenCounter.new(id)
-        RateCounter.new(id, idle_shutdown: :infinity, tick: 100, idle_shutdown_ms: :timer.minutes(5))
+        RateCounter.new(id, idle_shutdown: :timer.minutes(5), tick: 100)
     end
 
     {:ok, id}

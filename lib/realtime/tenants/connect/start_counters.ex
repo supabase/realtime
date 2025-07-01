@@ -27,7 +27,6 @@ defmodule Realtime.Tenants.Connect.StartCounters do
 
     res =
       RateCounter.new(id,
-        idle_shutdown: :infinity,
         telemetry: %{
           event_name: [:channel, :joins],
           measurements: %{limit: max_joins_per_second},
@@ -51,7 +50,6 @@ defmodule Realtime.Tenants.Connect.StartCounters do
 
     res =
       RateCounter.new(key,
-        idle_shutdown: :infinity,
         telemetry: %{
           event_name: [:channel, :events],
           measurements: %{limit: max_events_per_second},
@@ -72,7 +70,6 @@ defmodule Realtime.Tenants.Connect.StartCounters do
 
     res =
       RateCounter.new(key,
-        idle_shutdown: :infinity,
         telemetry: %{
           event_name: [:channel, :db_events],
           measurements: %{},
