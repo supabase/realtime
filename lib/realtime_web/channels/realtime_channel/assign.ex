@@ -24,7 +24,7 @@ defmodule RealtimeWeb.RealtimeChannel.Assigns do
 
   @type t :: %__MODULE__{
           tenant: String.t(),
-          log_level: atom(),
+          log_level: Logger.level(),
           rate_counter: Realtime.RateCounter.t(),
           limits: %{
             max_events_per_second: integer(),

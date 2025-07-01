@@ -71,4 +71,74 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       refute_receive {[:realtime, :channel, :error], %{code: "DatabaseConnectionIssue"}, %{code: "UnableToSetPolicies"}}
     end
   end
+
+  describe "maybe_log/3" do
+    test "logs messages at the specified level" do
+      socket = %{assigns: %{log_level: :info}}
+
+      assert capture_log(fn ->
+               Logging.maybe_log(socket, :info, "TestCode", "test message")
+             end) =~ "TestCode: test message"
+
+      assert capture_log(fn ->
+               Logging.maybe_log(socket, :error, "TestError", "test error")
+             end) =~ "TestError: test error"
+    end
+
+    test "does not log messages when log level is higher than the configured level" do
+      socket = %{assigns: %{log_level: :error}}
+
+      assert capture_log(fn ->
+               Logging.maybe_log(socket, :info, "TestCode", "test message")
+             end) == ""
+    end
+  end
+
+  describe "maybe_log_error/3" do
+    test "logs error messages at the error level" do
+      socket = %{assigns: %{log_level: :info}}
+
+      assert capture_log(fn ->
+               Logging.maybe_log_error(socket, "TestError", "test error")
+             end) =~ "TestError: test error"
+    end
+
+    test "does not log when log level is higher than error" do
+      socket = %{assigns: %{log_level: :emergency}}
+
+      assert capture_log(fn ->
+               Logging.maybe_log_error(socket, "TestError", "test error")
+             end) == ""
+    end
+  end
+
+  describe "maybe_log_warning/3" do
+    test "logs warning messages at the warning level" do
+      socket = %{assigns: %{log_level: :warning}}
+
+      assert capture_log(fn ->
+               Logging.maybe_log_warning(socket, "TestWarning", "test warning")
+             end) =~ "TestWarning: test warning"
+    end
+
+    test "does not log when log level is higher than warning" do
+      socket = %{assigns: %{log_level: :error}}
+
+      assert capture_log(fn -> Logging.maybe_log_warning(socket, "TestWarning", "test warning") end) == ""
+    end
+  end
+
+  describe "maybe_log_info/3" do
+    test "logs info messages at the info level" do
+      socket = %{assigns: %{log_level: :info}}
+
+      assert capture_log(fn -> Logging.maybe_log_info(socket, "test info") end) =~ "test info"
+    end
+
+    test "does not log when log level is higher than info" do
+      socket = %{assigns: %{log_level: :warning}}
+
+      assert capture_log(fn -> Logging.maybe_log_info(socket, "test info") end) == ""
+    end
+  end
 end

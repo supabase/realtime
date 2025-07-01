@@ -278,22 +278,28 @@ defmodule RealtimeWeb.RealtimeChannel do
         case PostgresCdc.after_connect(module, response, postgres_extension, pg_change_params) do
           {:ok, _response} ->
             message = "Subscribed to PostgreSQL"
-            Logger.info(message)
+            Logging.maybe_log_info(socket, message)
             push_system_message("postgres_changes", socket, "ok", message, channel_name)
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
           error ->
-            log_warning("UnableToSubscribeToPostgres", error)
+            Logging.maybe_log_warning(socket, "RealtimeDisabledForConfiguration", error)
+
             push_system_message("postgres_changes", socket, "error", error, channel_name)
             {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
         end
 
       nil ->
-        Logger.warning("Re-connecting to PostgreSQL with params: " <> inspect(pg_change_params))
+        Logging.maybe_log_warning(
+          socket,
+          "ReconnectSubscribeToPostgres",
+          "Re-connecting to PostgreSQL with params: " <> inspect(pg_change_params)
+        )
+
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe())}
 
       error ->
-        log_warning("UnableToSubscribeToPostgres", error)
+        Logging.maybe_log_error(socket, "UnableToSubscribeToPostgres", error)
         push_system_message("postgres_changes", socket, "error", error, channel_name)
         {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
     end
