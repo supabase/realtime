@@ -13,7 +13,6 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Api.Tenant
   alias Realtime.Rpc
   alias Realtime.Tenants
-  alias Realtime.Tenants.Connect.Backoff
   alias Realtime.Tenants.Connect.CheckConnection
   alias Realtime.Tenants.Connect.GetTenant
   alias Realtime.Tenants.Connect.Piper
@@ -125,10 +124,6 @@ defmodule Realtime.Tenants.Connect do
       {:error, {:shutdown, :tenant_not_found}} ->
         {:error, :tenant_not_found}
 
-      {:error, {:shutdown, :tenant_create_backoff}} ->
-        log_warning("TooManyConnectAttempts", "Too many connect attempts to tenant database", metadata)
-        {:error, :tenant_create_backoff}
-
       {:error, :shutdown} ->
         log_error("UnableToConnectToTenantDatabase", "Unable to connect to tenant database", metadata)
         {:error, :tenant_database_unavailable}
@@ -192,7 +187,6 @@ defmodule Realtime.Tenants.Connect do
 
     pipes = [
       GetTenant,
-      Backoff,
       CheckConnection,
       StartCounters,
       RegisterProcess
@@ -207,9 +201,6 @@ defmodule Realtime.Tenants.Connect do
 
       {:error, :tenant_db_too_many_connections} ->
         {:stop, {:shutdown, :tenant_db_too_many_connections}}
-
-      {:error, :tenant_create_backoff} ->
-        {:stop, {:shutdown, :tenant_create_backoff}}
 
       {:error, error} ->
         log_error("UnableToConnectToTenantDatabase", error)

@@ -305,7 +305,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   rescue
     error ->
-      Logging.maybe_log_warning(socket, "UnableToSubscribeToPostgres", error)
+      log_warning("UnableToSubscribeToPostgres", error)
       push_system_message("postgres_changes", socket, "error", error, channel_name)
       {:noreply, assign(socket, :pg_sub_ref, postgres_subscribe(5, 10))}
   end
