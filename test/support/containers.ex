@@ -1,7 +1,6 @@
 defmodule Containers do
   alias Containers.Container
   alias Realtime.Database
-  alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants.Migrations
 
@@ -131,7 +130,6 @@ defmodule Containers do
         )
 
         RateCounter.stop(tenant.external_id)
-        GenCounter.stop(tenant.external_id)
 
         Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
         Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])

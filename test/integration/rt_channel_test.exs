@@ -73,7 +73,6 @@ defmodule Realtime.Integration.RtChannelTest do
     tenant = Api.get_tenant_by_external_id("dev_tenant")
 
     RateCounter.stop(tenant.external_id)
-    GenCounter.stop(tenant.external_id)
 
     %{tenant: tenant}
   end
@@ -92,6 +91,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
       Database.transaction(conn, fn db_conn ->
         queries = [
+          "drop table if exists public.test",
+          "drop publication if exists supabase_realtime_test",
           "create sequence if not exists test_id_seq;",
           """
           create table if not exists "public"."test" (
@@ -2117,10 +2118,16 @@ defmodule Realtime.Integration.RtChannelTest do
     Connect.shutdown(tenant.external_id)
     # Sleeping so that syn can forget about this Connect process
     Process.sleep(100)
-    on_exit(fn -> Connect.shutdown(tenant.external_id) end)
+
+    on_exit(fn ->
+      Connect.shutdown(tenant.external_id)
+      # Sleeping so that syn can forget about this Connect process
+      Process.sleep(100)
+    end)
 
     {:ok, node} = Clustered.start()
     {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant"])
+    assert Connect.ready?(tenant.external_id)
 
     assert node(db_conn) == node
     %{db_conn: db_conn, node: node}
@@ -2128,10 +2135,18 @@ defmodule Realtime.Integration.RtChannelTest do
 
   defp mode(%{tenant: tenant}) do
     Realtime.Tenants.Connect.shutdown(tenant.external_id)
-    on_exit(fn -> Connect.shutdown(tenant.external_id) end)
     # Sleeping so that syn can forget about this Connect process
     Process.sleep(100)
+
+    on_exit(fn ->
+      Connect.shutdown(tenant.external_id)
+      # Sleeping so that syn can forget about this Connect process
+      Process.sleep(100)
+    end)
+
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    assert Connect.ready?(tenant.external_id)
+
     %{db_conn: db_conn}
   end
 
@@ -2146,7 +2161,8 @@ defmodule Realtime.Integration.RtChannelTest do
     %{topic: message.topic}
   end
 
-  defp setup_trigger(%{tenant: tenant, topic: topic, db_conn: db_conn} = context) do
+  defp setup_trigger(%{tenant: tenant, topic: topic}) do
+    {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     random_name = String.downcase("test_#{random_string()}")
     query = "CREATE TABLE #{random_name} (id serial primary key, details text)"
     Postgrex.query!(db_conn, query, [])
@@ -2184,9 +2200,7 @@ defmodule Realtime.Integration.RtChannelTest do
       Postgrex.query!(db_conn, query, [])
     end)
 
-    context
-    |> Map.put(:db_conn, db_conn)
-    |> Map.put(:table_name, random_name)
+    %{table_name: random_name}
   end
 
   defp change_tenant_configuration(%Tenant{external_id: external_id}, limit, value) do
