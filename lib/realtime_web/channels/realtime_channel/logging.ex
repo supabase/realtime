@@ -7,6 +7,35 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   alias Realtime.Telemetry
 
   @doc """
+  Checks if the log level set in the socket is less than or equal to the given level of the message to be logged.
+  """
+  @spec maybe_log(
+          socket :: Phoenix.Socket.t(),
+          level :: Logger.level(),
+          code :: binary(),
+          msg :: binary(),
+          metadata :: keyword()
+        ) :: :ok
+  def maybe_log(%{assigns: %{log_level: log_level}}, level, code, msg, metadata \\ []) do
+    metadata = if metadata == [], do: Logger.metadata()
+
+    if Logger.compare_levels(log_level, level) != :gt do
+      Logger.log(level, "#{code}: #{msg}", metadata)
+    end
+  end
+
+  def maybe_log_error(socket, code, msg, metadata \\ []), do: maybe_log(socket, :error, code, msg, metadata)
+  def maybe_log_warning(socket, code, msg, metadata \\ []), do: maybe_log(socket, :warning, code, msg, metadata)
+
+  def maybe_log_info(%{assigns: %{log_level: log_level}}, msg, metadata \\ []) do
+    metadata = if metadata == [], do: Logger.metadata()
+
+    if Logger.compare_levels(log_level, :info) != :gt do
+      Logger.info(inspect(msg), metadata)
+    end
+  end
+
+  @doc """
   Logs messages according to user options given on config
   """
   def maybe_log_handle_info(
