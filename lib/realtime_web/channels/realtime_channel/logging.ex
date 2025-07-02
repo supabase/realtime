@@ -36,6 +36,49 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   end
 
   @doc """
+  Logs an error with token metadata
+  """
+  @spec log_error_with_token_metadata(
+          code :: binary(),
+          msg :: binary(),
+          token :: Joken.bearer_token(),
+          metadata :: keyword()
+        ) :: {:error, %{reason: binary()}}
+  def log_error_with_token_metadata(code, msg, token, metadata \\ []) do
+    if metadata == [], do: Logger.metadata()
+    metadata = update_metadata_with_token_claims(metadata, token)
+    log_error_message(:error, code, msg, metadata)
+  end
+
+  @doc """
+  Logs an error with token metadata
+  """
+  @spec log_warning_with_token_metadata(
+          code :: binary(),
+          msg :: binary(),
+          token :: Joken.bearer_token(),
+          metadata :: keyword()
+        ) :: {:error, %{reason: binary()}}
+  def log_warning_with_token_metadata(code, msg, token, metadata \\ []) do
+    if metadata == [], do: Logger.metadata()
+    metadata = update_metadata_with_token_claims(metadata, token)
+    log_error_message(:warning, code, msg, metadata)
+  end
+
+  defp update_metadata_with_token_claims(metadata, token) do
+    case Joken.peek_claims(token) do
+      {:ok, claims} ->
+        sub = Map.get(claims, "sub")
+        exp = Map.get(claims, "exp")
+        iss = Map.get(claims, "iss")
+        metadata ++ [sub: sub, exp: exp, iss: iss]
+
+      _ ->
+        metadata
+    end
+  end
+
+  @doc """
   Logs messages according to user options given on config
   """
   def maybe_log_handle_info(

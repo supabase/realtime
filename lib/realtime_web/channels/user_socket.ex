@@ -7,11 +7,12 @@ defmodule RealtimeWeb.UserSocket do
   alias Realtime.Database
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
-
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
+  alias RealtimeWeb.RealtimeChannel.Logging
+
   ## Channels
-  channel("realtime:*", RealtimeChannel)
+  channel "realtime:*", RealtimeChannel
 
   @default_log_level :error
 
@@ -75,11 +76,11 @@ defmodule RealtimeWeb.UserSocket do
           {:error, :tenant_not_found}
 
         {:error, :expired_token, msg} ->
-          log_error_with_token_metadata(msg, token)
+          Logging.log_error_with_token_metadata("InvalidJWTToken", msg, token)
           {:error, :expired_token}
 
         {:error, :missing_claims} ->
-          log_error_with_token_metadata("Fields `role` and `exp` are required in JWT", token)
+          Logging.log_error_with_token_metadata("InvalidJWTToken", "Fields `role` and `exp` are required in JWT", token)
           {:error, :missing_claims}
 
         {:error, :token_malformed} ->
@@ -97,17 +98,6 @@ defmodule RealtimeWeb.UserSocket do
     case :proplists.lookup("x-api-key", headers) do
       :none -> Map.get(params, "apikey")
       {"x-api-key", token} -> token
-    end
-  end
-
-  defp log_error_with_token_metadata(msg, token) do
-    case Joken.peek_claims(token) do
-      {:ok, claims} ->
-        sub = Map.get(claims, "sub")
-        log_error("InvalidJWTToken", msg, sub: sub)
-
-      _ ->
-        log_error("InvalidJWTToken", msg)
     end
   end
 

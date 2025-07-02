@@ -1082,12 +1082,12 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     test "ChannelShutdown include sub if available in jwt claims", %{tenant: tenant, topic: topic} do
-      sub = random_string()
+      exp = System.system_time(:second) + 10_000
 
-      {socket, access_token} = get_connection(tenant, "authenticated", %{sub: sub}, %{log_level: :warning})
+      {socket, access_token} = get_connection(tenant, "authenticated", %{exp: exp}, %{log_level: :warning})
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{topic}"
-
+      sub = random_string()
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
       {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) - 1000, sub: sub})
 

@@ -48,7 +48,7 @@ config :logger,
 # Configures Elixir's Logger
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id, :project, :external_id, :application_name, :sub]
+  metadata: [:request_id, :project, :external_id, :application_name, :sub, :exp, :iss]
 
 config :opentelemetry,
   span_processor: :simple,
