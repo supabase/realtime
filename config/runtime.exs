@@ -26,6 +26,9 @@ connect_throttle_limit_per_second = System.get_env("CONNECT_THROTTLE_LIMIT_PER_S
 metrics_cleaner_schedule_timer_in_ms =
   System.get_env("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", "1800000") |> String.to_integer()
 
+metrics_rpc_timeout_in_ms =
+  System.get_env("METRICS_RPC_TIMEOUT_IN_MS", "15000") |> String.to_integer()
+
 tenant_max_bytes_per_second = System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100000") |> String.to_integer()
 tenant_max_channels_per_client = System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer()
 tenant_max_concurrent_users = System.get_env("TENANT_MAX_CONCURRENT_USERS", "200") |> String.to_integer()
@@ -72,6 +75,7 @@ config :realtime,
   tenant_max_events_per_second: tenant_max_events_per_second,
   tenant_max_joins_per_second: tenant_max_joins_per_second,
   metrics_cleaner_schedule_timer_in_ms: metrics_cleaner_schedule_timer_in_ms,
+  metrics_rpc_timeout: metrics_rpc_timeout_in_ms,
   tenant_cache_expiration: tenant_cache_expiration,
   rpc_timeout: rpc_timeout,
   max_gen_rpc_clients: max_gen_rpc_clients

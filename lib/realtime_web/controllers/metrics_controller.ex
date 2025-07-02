@@ -5,11 +5,13 @@ defmodule RealtimeWeb.MetricsController do
   alias Realtime.GenRpc
 
   def index(conn, _) do
+    timeout = Application.fetch_env!(:realtime, :metrics_rpc_timeout)
+
     cluster_metrics =
       Node.list()
       |> Task.async_stream(
         fn node ->
-          {node, GenRpc.call(node, PromEx, :get_metrics, [], timeout: 10_000)}
+          {node, GenRpc.call(node, PromEx, :get_metrics, [], timeout: timeout)}
         end,
         timeout: :infinity
       )
