@@ -1,11 +1,45 @@
 defmodule Realtime.SynHandlerTest do
-  use ExUnit.Case, async: true
+  use Realtime.DataCase, async: false
   import ExUnit.CaptureLog
   alias Realtime.SynHandler
+  alias Realtime.Tenants.Connect
 
   @mod SynHandler
   @name "test"
   @topic "syn_handler"
+
+  describe "integration test with a Connect conflict" do
+    setup do
+      {:ok, pid, node} = Clustered.start_disconnected()
+      %{peer_pid: pid, node: node}
+    end
+
+    test "it resolves a Connect conflict", %{node: node, peer_pid: peer_pid} do
+      external_id = "dev_tenant"
+      # start connect locally first
+      {:ok, db_conn} = Connect.connect(external_id)
+      assert Connect.ready?(external_id)
+      current_metadata = :syn.lookup(Connect, external_id)
+      connect = Connect.whereis(external_id)
+      assert node(connect) == node()
+
+      # Now let's force the remote node to start the same Connect process
+
+      log =
+        capture_log(fn ->
+          {:ok, remote_db_conn} = :peer.call(peer_pid, Connect, :connect, [external_id])
+          assert :peer.call(peer_pid, Connect, :ready?, [external_id]) == true
+          # assert remote_db_conn != db_conn
+          Node.connect(node)
+          # Give some time for the conflict resolution to happen
+          Process.sleep(2000)
+        end)
+
+      assert ^current_metadata = :syn.lookup(Connect, external_id)
+
+      # assert log =~ "Connect terminated"
+    end
+  end
 
   describe "on_process_unregistered/5" do
     setup do
