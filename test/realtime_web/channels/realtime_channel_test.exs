@@ -122,7 +122,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
     end
 
-    test "missing claims returns a error with sub in metadata if available", %{tenant: tenant} do
+    test "missing claims returns a error with token exp, iss and sub in metadata if available", %{tenant: tenant} do
       sub = random_string()
       iss = random_string()
       exp = System.system_time(:second) + 10_000
