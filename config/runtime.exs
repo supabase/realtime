@@ -112,6 +112,7 @@ if config_env() == :prod do
     server: true,
     url: [host: "#{app_name}.fly.dev", port: 80],
     http: [
+      compress: true,
       port: String.to_integer(System.get_env("PORT") || "4000"),
       protocol_options: [
         max_header_value_length: String.to_integer(System.get_env("MAX_HEADER_LENGTH") || "4096")

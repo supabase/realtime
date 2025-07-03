@@ -15,7 +15,7 @@ config :realtime,
   presence: presence
 
 config :realtime, RealtimeWeb.Endpoint,
-  http: [port: System.get_env("PORT", "4000")],
+  http: [port: System.get_env("PORT", "4000"), compress: true],
   debug_errors: true,
   code_reloader: true,
   check_origin: false,
