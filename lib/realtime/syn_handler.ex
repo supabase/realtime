@@ -68,10 +68,13 @@ defmodule Realtime.SynHandler do
             {pid2, pid1}
           end
       end)
+      |> dbg()
 
     if node() == node(stop) do
+      dbg("Resolving conflict")
       spawn(fn -> resolve_conflict(mod, stop, name) end)
     else
+      dbg("Doing nothing")
       Logger.warning("Resolving #{name} conflict, remote pid: #{inspect(stop)}")
     end
 
