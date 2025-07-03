@@ -1,6 +1,9 @@
 defmodule RealtimeWeb.MetricsControllerTest do
   # Usage of Clustered
+  # Also changing Application env
   use RealtimeWeb.ConnCase, async: false
+
+  import ExUnit.CaptureLog
 
   setup_all do
     {:ok, _} = Clustered.start(nil, extra_config: [{:realtime, :region, "ap-southeast-2"}])
@@ -17,7 +20,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
       {:ok, conn: authenticated_conn}
     end
 
-    test "returns 200 and metrics when tenant exists", %{conn: conn} do
+    test "returns 200", %{conn: conn} do
       assert response =
                conn
                |> get(~p"/metrics")
@@ -29,6 +32,29 @@ defmodule RealtimeWeb.MetricsControllerTest do
 
       assert response =~ "region=\"ap-southeast-2"
       assert response =~ "region=\"us-east-1"
+    end
+
+    test "returns 200 and log on timeout", %{conn: conn} do
+      current_value = Application.get_env(:realtime, :metrics_rpc_timeout)
+      on_exit(fn -> Application.put_env(:realtime, :metrics_rpc_timeout, current_value) end)
+      Application.put_env(:realtime, :metrics_rpc_timeout, 0)
+
+      log =
+        capture_log(fn ->
+          assert response =
+                   conn
+                   |> get(~p"/metrics")
+                   |> text_response(200)
+
+          # Check prometheus like metrics
+          assert response =~
+                   "# HELP beam_system_schedulers_online_info The number of scheduler threads that are online."
+
+          refute response =~ "region=\"ap-southeast-2"
+          assert response =~ "region=\"us-east-1"
+        end)
+
+      assert log =~ "Cannot fetch metrics from the node"
     end
 
     test "returns 403 when authorization header is missing", %{conn: conn} do
