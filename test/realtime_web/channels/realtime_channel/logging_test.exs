@@ -150,7 +150,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
     test "logs error messages with token metadata", %{tenant: tenant} do
       sub = random_string()
-      iss = random_string()
+      iss = "https://#{random_string()}.com"
       exp = System.system_time(:second) + 1000
 
       token = generate_jwt_token(tenant, %{sub: sub, exp: exp, iss: iss})
@@ -170,7 +170,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
     test "logs warning messages with token metadata", %{tenant: tenant} do
       sub = random_string()
-      iss = random_string()
+      iss = "https://#{random_string()}.com"
       exp = System.system_time(:second) + 1000
 
       token = generate_jwt_token(tenant, %{sub: sub, exp: exp, iss: iss})

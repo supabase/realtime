@@ -124,7 +124,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
     test "missing claims returns a error with token exp, iss and sub in metadata if available", %{tenant: tenant} do
       sub = random_string()
-      iss = random_string()
+      iss = "https://#{random_string()}.com"
       exp = System.system_time(:second) + 10_000
 
       jwt = Generators.generate_jwt_token(tenant, %{exp: exp, sub: sub, iss: iss})
