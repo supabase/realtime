@@ -132,6 +132,13 @@ defmodule Realtime.PromEx do
     metrics
   end
 
+  @doc "Compressed metrics using :zlib.compress/1"
+  @spec get_compressed_metrics() :: binary()
+  def get_compressed_metrics do
+    get_metrics()
+    |> :zlib.compress()
+  end
+
   def set_metrics_tags do
     [_, node_host] = node() |> Atom.to_string() |> String.split("@")
 
