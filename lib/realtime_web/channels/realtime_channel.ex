@@ -113,11 +113,11 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:ok, state, assign(socket, assigns)}
     else
       {:error, :expired_token, msg} ->
-        Logging.log_error_message(:error, "InvalidJWTToken", msg)
+        Logging.log_error_with_token_metadata("InvalidJWTToken", msg, socket.assigns.access_token)
 
       {:error, :missing_claims} ->
         msg = "Fields `role` and `exp` are required in JWT"
-        Logging.log_error_message(:error, "InvalidJWTToken", msg)
+        Logging.log_error_with_token_metadata("InvalidJWTToken", msg, socket.assigns.access_token)
 
       {:error, :unauthorized, msg} ->
         Logging.log_error_message(:error, "Unauthorized", msg)
@@ -177,10 +177,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         Logging.log_error_message(:error, "MalformedJWT", msg)
 
       {:error, invalid_exp} when is_integer(invalid_exp) and invalid_exp <= 0 ->
-        Logging.log_error_message(
-          :error,
-          "InvalidJWTExpiration",
-          "Token expiration time is invalid"
+        Logging.log_error_with_token_metadata(
+          "InvalidJWTToken",
+          "Token expiration time is invalid",
+          socket.assigns.access_token
         )
 
       {:error, :private_only} ->

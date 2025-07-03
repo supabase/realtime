@@ -122,10 +122,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
     end
 
-    test "missing claims returns a error with sub in metadata if available", %{tenant: tenant} do
+    test "missing claims returns a error with token exp, iss and sub in metadata if available", %{tenant: tenant} do
       sub = random_string()
+      iss = "https://#{random_string()}.com"
+      exp = System.system_time(:second) + 10_000
 
-      jwt = Generators.generate_jwt_token(tenant, %{exp: System.system_time(:second) + 10_000, sub: sub})
+      jwt = Generators.generate_jwt_token(tenant, %{exp: exp, sub: sub, iss: iss})
 
       log =
         capture_log(fn ->
@@ -136,6 +138,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
       assert log =~ "sub=#{sub}"
+      assert log =~ "iss=#{iss}"
+      assert log =~ "exp=#{exp}"
     end
 
     test "expired token returns a error with sub data if available", %{tenant: tenant} do

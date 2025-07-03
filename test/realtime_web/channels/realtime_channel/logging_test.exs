@@ -141,4 +141,44 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert capture_log(fn -> Logging.maybe_log_info(socket, "test info") end) == ""
     end
   end
+
+  describe "log_error_with_token_metadata/4" do
+    setup do
+      tenant = tenant_fixture()
+      %{tenant: tenant}
+    end
+
+    test "logs error messages with token metadata", %{tenant: tenant} do
+      sub = random_string()
+      iss = "https://#{random_string()}.com"
+      exp = System.system_time(:second) + 1000
+
+      token = generate_jwt_token(tenant, %{sub: sub, exp: exp, iss: iss})
+      log = capture_log(fn -> Logging.log_error_with_token_metadata("TestCode", "test message", token) end)
+      assert log =~ "TestCode: test message"
+      assert log =~ "sub=#{sub}"
+      assert log =~ "exp=#{exp}"
+      assert log =~ "iss=#{iss}"
+    end
+  end
+
+  describe "log_warning_with_token_metadata/4" do
+    setup do
+      tenant = tenant_fixture()
+      %{tenant: tenant}
+    end
+
+    test "logs warning messages with token metadata", %{tenant: tenant} do
+      sub = random_string()
+      iss = "https://#{random_string()}.com"
+      exp = System.system_time(:second) + 1000
+
+      token = generate_jwt_token(tenant, %{sub: sub, exp: exp, iss: iss})
+      log = capture_log(fn -> Logging.log_warning_with_token_metadata("TestCode", "test message", token) end)
+      assert log =~ "TestCode: test message"
+      assert log =~ "sub=#{sub}"
+      assert log =~ "exp=#{exp}"
+      assert log =~ "iss=#{iss}"
+    end
+  end
 end
