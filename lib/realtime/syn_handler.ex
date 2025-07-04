@@ -27,11 +27,15 @@ defmodule Realtime.SynHandler do
     :ok
   end
 
-  def resolve_registry_conflict(mod, name, {pid1, %{region: region}, time1}, {pid2, _, time2}) do
+  def aresolve_registry_conflict(mod, name, {pid1, %{region: region}, time1}, {pid2, _, time2}) do
+    dbg([node(), {node(pid1), pid1, time1}, {node(pid2), pid2, time2}])
     platform_region = Realtime.Nodes.platform_region_translator(region)
+    dbg([node(), platform_region])
 
     platform_region_nodes =
       RegionNodes |> :syn.members(platform_region) |> Enum.map(fn {_, [node: node]} -> node end)
+
+    dbg([node(), platform_region_nodes])
 
     {keep, stop} =
       [pid1, pid2]
@@ -49,13 +53,12 @@ defmodule Realtime.SynHandler do
             {pid2, pid1}
           end
       end)
-      |> dbg()
 
     if node() == node(stop) do
-      dbg("Resolving conflict")
+      dbg([node(), "Resolving conflict"])
       spawn(fn -> resolve_conflict(mod, stop, name) end)
     else
-      dbg("Doing nothing")
+      dbg([node(), "Doing nothing"])
       Logger.warning("Resolving #{name} conflict, remote pid: #{inspect(stop)}")
     end
 
@@ -70,9 +73,12 @@ defmodule Realtime.SynHandler do
     resp =
       if Process.alive?(stop) do
         try do
+          dbg("Calling stop on #{inspect(stop)}")
           DynamicSupervisor.stop(stop, :shutdown, 30_000)
         catch
-          error, reason -> {:error, {error, reason}}
+          error, reason ->
+            dbg("error happened")
+            {:error, {error, reason}}
         end
       else
         :not_alive

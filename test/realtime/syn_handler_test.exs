@@ -8,34 +8,63 @@ defmodule Realtime.SynHandlerTest do
   @name "test"
   @topic "syn_handler"
 
+  @aux_mod (quote do
+              defmodule FakeConnect do
+                use GenServer
+
+                def init(tenant_id) do
+                  :syn.update_registry(Connect, tenant_id, fn _pid, meta -> %{meta | conn: "fake_conn"} end)
+                  {:ok, nil}
+                end
+              end
+            end)
+
+  Code.eval_quoted(@aux_mod)
+
+  defp assert_process_down(pid, timeout \\ 100) do
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
+  end
+
   describe "integration test with a Connect conflict" do
     setup do
-      {:ok, pid, node} = Clustered.start_disconnected()
+      {:ok, pid, node} = Clustered.start_disconnected(@aux_mod, extra_config: [{:realtime, :region, "ap-southeast-2"}])
       %{peer_pid: pid, node: node}
     end
 
     test "it resolves a Connect conflict", %{node: node, peer_pid: peer_pid} do
       external_id = "dev_tenant"
+      dbg(external_id)
       # start connect locally first
-      {:ok, db_conn} = Connect.connect(external_id)
+      {:ok, db_conn} = Connect.lookup_or_start_connection(external_id)
       assert Connect.ready?(external_id)
       current_metadata = :syn.lookup(Connect, external_id)
       connect = Connect.whereis(external_id)
       assert node(connect) == node()
 
-      # Now let's force the remote node to start the same Connect process
+      # Now let's force the remote node to start the fake Connect process
 
-      log =
-        capture_log(fn ->
-          {:ok, remote_db_conn} = :peer.call(peer_pid, Connect, :connect, [external_id])
-          assert :peer.call(peer_pid, Connect, :ready?, [external_id]) == true
-          # assert remote_db_conn != db_conn
-          Node.connect(node)
-          # Give some time for the conflict resolution to happen
-          Process.sleep(2000)
-        end)
+      # log =
+      #   capture_log(fn ->
+      name = {Connect, external_id, %{conn: nil, region: "ap-southeast-2"}}
+      opts = [name: {:via, :syn, name}]
+      {:ok, remote_pid} = :peer.call(peer_pid, GenServer, :start_link, [FakeConnect, external_id, opts])
+      Node.connect(node)
+      # Give some time for the conflict resolution to happen
+      # assert_process_down(remote_pid, 500)
+      # Let's wait for any logs from remote to arrive
+      Process.sleep(500)
+      # end)
 
-      assert ^current_metadata = :syn.lookup(Connect, external_id)
+      :syn.lookup(Connect, external_id) |> dbg()
+      :peer.call(peer_pid, :syn, :lookup, [Connect, external_id]) |> dbg()
+
+      :peer.call(peer_pid, Process, :alive?, [remote_pid]) |> dbg()
+      Process.alive?(db_conn) |> dbg()
+
+      :"syn_registry_by_name_Elixir.Realtime.Tenants.Connect"
+      |> :ets.tab2list()
+      |> dbg()
 
       # assert log =~ "Connect terminated"
     end
