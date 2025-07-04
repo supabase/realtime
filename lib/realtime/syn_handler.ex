@@ -45,62 +45,67 @@ defmodule Realtime.SynHandler do
     :ok
   end
 
+  # resolve_registry_conflict(Scope :: atom(),
+  #                           Name :: term(),
+  #                           {Pid1 :: pid(), Meta1 :: term(), Time1 :: non_neg_integer()},
+  #                           {Pid2 :: pid(), Meta2 :: term(), Time2 :: non_neg_integer()}) ->
+  #                              PidToKeep :: pid().
+  # %% by default, keep pid registered more recently
+  #          %% this is a simple mechanism that can be imprecise, as system clocks are not perfectly aligned in a cluster
+  #          %% if something more elaborate is desired (such as vector clocks) use Meta to store data and a custom event handler
+  #          PidToKeep = case Time1 > Time2 of
+  #              true -> Pid1;
+  #              _ -> Pid2
+  #          end,
+  #          {PidToKeep, true}
   @impl true
-  def resolve_registry_conflict(mod, name, {pid1, %{region: region}, time1}, {pid2, _, time2}) do
-    platform_region = Realtime.Nodes.platform_region_translator(region)
+  def resolve_registry_conflict(mod, name, {pid1, _meta1, time1}, {pid2, _meta2, time2}) do
+    {pid_to_keep, pid_to_stop} = decide(pid1, time2, pid2, time2)
 
-    platform_region_nodes =
-      RegionNodes |> :syn.members(platform_region) |> Enum.map(fn {_, [node: node]} -> node end)
+    if node(pid_to_stop) == node() do
+      Logger.warning(
+        "SynHandler: Resolving conflict on scope #{inspect(mod)} for name #{inspect(name)} {#{inspect(pid1)}, #{time1}} vs {#{inspect(pid2)}, #{time2}}, stop local process: #{inspect(pid_to_stop)}"
+      )
 
-    {keep, stop} =
-      [pid1, pid2]
-      |> Enum.filter(fn pid ->
-        Enum.member?(platform_region_nodes, node(pid))
+      spawn(fn ->
+        Process.monitor(pid_to_stop)
+        Process.exit(pid_to_stop, {:shutdown, :syn_conflict_resolution})
+
+        receive do
+          {:DOWN, _ref, :process, ^pid_to_stop, reason} ->
+            Logger.warning("SynHandler: Successfully stopped #{inspect(pid_to_stop)}. Reason: #{inspect(reason)}")
+        after
+          30_000 ->
+            Logger.warning("SynHandler: Timed out while waiting for process #{inspect(pid_to_stop)} to stop")
+        end
       end)
-      |> then(fn
-        [pid] ->
-          {pid, if(pid != pid1, do: pid1, else: pid2)}
-
-        _ ->
-          if time1 < time2 do
-            {pid1, pid2}
-          else
-            {pid2, pid1}
-          end
-      end)
-      |> dbg()
-
-    if node() == node(stop) do
-      dbg("Resolving conflict")
-      spawn(fn -> resolve_conflict(mod, stop, name) end)
     else
-      dbg("Doing nothing")
-      Logger.warning("Resolving #{name} conflict, remote pid: #{inspect(stop)}")
+      Logger.warning(
+        "SynHandler: Resolving conflict on scope #{inspect(mod)} for name #{inspect(name)} {#{inspect(pid1)}, #{time1}} vs {#{inspect(pid2)}, #{time2}}, remote process will be stopped: #{inspect(pid_to_stop)}"
+      )
     end
 
-    keep
+    pid_to_keep
   end
 
-  def resolve_registry_conflict(mod, name, {pid1, _, time1}, {pid2, _, time2}) do
-    resolve_registry_conflict(mod, name, {pid1, %{region: nil}, time1}, {pid2, %{region: nil}, time2})
+  # If the time on both pids are exactly the same
+  # we compare the node names and pick one consistently
+  # Node names are necessarily unique
+  defp decide(pid1, time1, pid2, time2) when time1 == time2 do
+    if node(pid1) < node(pid2) do
+      {pid1, pid2}
+    else
+      {pid2, pid1}
+    end
   end
 
-  defp resolve_conflict(mod, stop, name) do
-    resp =
-      if Process.alive?(stop) do
-        try do
-          DynamicSupervisor.stop(stop, :shutdown, 30_000)
-        catch
-          error, reason -> {:error, {error, reason}}
-        end
-      else
-        :not_alive
-      end
-
-    topic = topic(mod)
-    Endpoint.broadcast(topic <> ":" <> name, topic <> "_down", nil)
-
-    Logger.warning("Resolving #{name} conflict, stop local pid: #{inspect(stop)}, response: #{inspect(resp)}")
+  defp decide(pid1, time1, pid2, time2) do
+    # We pick the one that started first.
+    if time1 < time2 do
+      {pid1, pid2}
+    else
+      {pid2, pid1}
+    end
   end
 
   defp topic(mod) do
