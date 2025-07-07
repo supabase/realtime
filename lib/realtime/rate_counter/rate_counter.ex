@@ -17,7 +17,7 @@ defmodule Realtime.RateCounter do
   alias Realtime.RateCounter
   alias Realtime.Telemetry
 
-  @idle_shutdown :timer.hours(1)
+  @idle_shutdown :timer.seconds(5)
   @tick :timer.seconds(1)
   @max_bucket_len 60
   @cache __MODULE__
