@@ -483,6 +483,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     GenCounter.new(id)
 
     RateCounter.new(id,
+      idle_shutdown: :infinity,
       telemetry: %{
         event_name: [:channel, :joins],
         measurements: %{limit: limits.max_joins_per_second},
@@ -530,6 +531,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     GenCounter.new(key)
 
     RateCounter.new(key,
+      idle_shutdown: :infinity,
       telemetry: %{
         event_name: [:channel, :events],
         measurements: %{limit: limits.max_events_per_second},
@@ -550,6 +552,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     GenCounter.new(key)
 
     RateCounter.new(key,
+      idle_shutdown: :infinity,
       telemetry: %{
         event_name: [:channel, :presence_events],
         measurements: %{limit: limits.max_events_per_second},
@@ -683,6 +686,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     GenCounter.new(key)
 
     RateCounter.new(key,
+      idle_shutdown: :infinity,
       telemetry: %{event_name: [:channel, :db_events], measurements: %{}, metadata: %{tenant: tenant}}
     )
 

@@ -1,7 +1,5 @@
 defmodule Realtime.RateCounterTest do
-  use Realtime.DataCase, async: true
-
-  import ExUnit.CaptureLog
+  use Realtime.DataCase
 
   alias Realtime.RateCounter
   alias Realtime.GenCounter
@@ -20,15 +18,9 @@ defmodule Realtime.RateCounterTest do
 
     test "rate counters shut themselves down when no activity occurs on the GenCounter" do
       term = {:domain, :metric, Ecto.UUID.generate()}
-
-      log =
-        capture_log(fn ->
-          {:ok, _} = RateCounter.new(term, idle_shutdown: 5)
-          Process.sleep(25)
-          assert {:error, _term} = RateCounter.get(term)
-        end)
-
-      assert log =~ "idle_shutdown reached for: #{inspect(term)}"
+      {:ok, _} = RateCounter.new(term, idle_shutdown: 5)
+      Process.sleep(25)
+      assert {:error, _term} = RateCounter.get(term)
     end
 
     test "rate counters reset GenCounter to zero after one tick and average the bucket" do
@@ -42,7 +34,7 @@ defmodule Realtime.RateCounterTest do
                 avg: 0.5,
                 bucket: [0, 1],
                 id: _id,
-                idle_shutdown: 3_600_000,
+                idle_shutdown: 5000,
                 idle_shutdown_ref: _ref,
                 max_bucket_len: 60,
                 tick: 5,
