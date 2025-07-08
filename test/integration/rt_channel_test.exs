@@ -112,6 +112,41 @@ defmodule Realtime.Integration.RtChannelTest do
       :ok
     end
 
+    test "error subscribing", %{tenant: tenant} do
+      {:ok, conn} = Database.connect(tenant, "realtime_test")
+
+      # Let's drop the publication to cause an error
+      Database.transaction(conn, fn db_conn ->
+        Postgrex.query!(db_conn, "drop publication if exists supabase_realtime_test")
+      end)
+
+      {socket, _} = get_connection(tenant)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "INSERT", schema: "public"}]}
+
+      log =
+        capture_log(fn ->
+          WebsocketClient.join(socket, topic, %{config: config})
+
+          assert_receive %Message{
+                           event: "system",
+                           payload: %{
+                             "channel" => "any",
+                             "extension" => "postgres_changes",
+                             "message" =>
+                               "{:error, \"Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [event: INSERT, schema: public]\"}",
+                             "status" => "error"
+                           },
+                           ref: nil,
+                           topic: ^topic
+                         },
+                         8000
+        end)
+
+      assert log =~ "RealtimeDisabledForConfiguration"
+      assert log =~ "Unable to subscribe to changes with given parameters"
+    end
+
     test "handle insert", %{tenant: tenant} do
       {socket, _} = get_connection(tenant)
       topic = "realtime:any"

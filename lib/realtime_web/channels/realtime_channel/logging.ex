@@ -19,6 +19,8 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   def maybe_log(%{assigns: %{log_level: log_level}}, level, code, msg, metadata \\ []) do
     metadata = if metadata == [], do: Logger.metadata()
 
+    msg = stringify!(msg)
+
     if Logger.compare_levels(log_level, level) != :gt do
       Logger.log(level, "#{code}: #{msg}", metadata)
     end
@@ -86,17 +88,20 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
         msg
       ) do
     if Logger.compare_levels(log_level, :info) == :eq do
-      msg =
-        case msg do
-          msg when is_binary(msg) -> msg
-          _ -> inspect(msg, pretty: true)
-        end
+      msg = stringify!(msg)
 
       msg = "Received message on " <> channel_name <> " with payload: " <> msg
       Logger.log(log_level, msg)
     end
 
     socket
+  end
+
+  defp stringify!(msg) do
+    case msg do
+      msg when is_binary(msg) -> msg
+      _ -> inspect(msg, pretty: true)
+    end
   end
 
   @doc """
