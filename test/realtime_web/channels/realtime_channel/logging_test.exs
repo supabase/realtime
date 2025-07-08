@@ -85,6 +85,18 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
              end) =~ "TestError: test error"
     end
 
+    test "logs messages when not binary message" do
+      socket = %{assigns: %{log_level: :info}}
+
+      assert capture_log(fn ->
+               Logging.maybe_log(socket, :info, "TestCode", {:error, "Error message"})
+             end) =~ "TestCode: {:error, \"Error message\"}"
+
+      assert capture_log(fn ->
+               Logging.maybe_log(socket, :error, "TestError", "test error")
+             end) =~ "TestError: test error"
+    end
+
     test "does not log messages when log level is higher than the configured level" do
       socket = %{assigns: %{log_level: :error}}
 
