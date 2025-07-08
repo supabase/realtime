@@ -88,7 +88,7 @@ defmodule Extensions.PostgresCdcRls do
   Start db poller. Expects an `external_id` as a `tenant`.
   """
 
-  @spec start(map()) :: :ok | {:error, :already_started | :reserved}
+  @spec start(map()) :: {:ok, pid} | {:error, :already_started | :reserved}
   def start(%{"id" => tenant} = args) when is_binary(tenant) do
     args = Map.merge(args, %{"subs_pool_size" => Map.get(args, "subcriber_pool_size", 4)})
 

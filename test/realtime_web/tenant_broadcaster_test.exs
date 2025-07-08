@@ -49,8 +49,17 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
       assert_receive %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}
 
-      # Remote node receive the broadcast
+      # Remote node received the broadcast
       assert_receive {:relay, ^node, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
+    end
+
+    test "pubsub_broadcast", %{tenant: tenant, node: node} do
+      TenantBroadcaster.pubsub_broadcast(tenant, @topic, "a message", Phoenix.PubSub)
+
+      assert_receive "a message"
+
+      # Remote node received the broadcast
+      assert_receive {:relay, ^node, "a message"}
     end
 
     test "broadcast_from", %{tenant: tenant, node: node} do
@@ -72,7 +81,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
       assert_receive {:other_process, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
 
-      # Remote node receive the broadcast
+      # Remote node received the broadcast
       assert_receive {:relay, ^node, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
 
       # This process does not receive the message
@@ -89,8 +98,17 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
       assert_receive %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}
 
-      # Remote node receive the broadcast
+      # Remote node received the broadcast
       assert_receive {:relay, ^node, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
+    end
+
+    test "pubsub_broadcast", %{tenant: tenant, node: node} do
+      TenantBroadcaster.pubsub_broadcast(tenant, @topic, "a message", Phoenix.PubSub)
+
+      assert_receive "a message"
+
+      # Remote node received the broadcast
+      assert_receive {:relay, ^node, "a message"}
     end
 
     test "broadcast_from", %{tenant: tenant, node: node} do
@@ -112,7 +130,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
       assert_receive {:other_process, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
 
-      # Remote node receive the broadcast
+      # Remote node received the broadcast
       assert_receive {:relay, ^node, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
 
       # This process does not receive the message
