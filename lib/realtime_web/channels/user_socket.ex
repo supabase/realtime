@@ -28,10 +28,11 @@ defmodule RealtimeWeb.UserSocket do
       %{uri: %{host: host}, x_headers: headers} = opts
 
       {:ok, external_id} = Database.get_external_id(host)
+      token = access_token(params, headers)
+      socket = socket |> assign(:access_token, token) |> assign(:tenant, external_id)
+
       Logger.metadata(external_id: external_id, project: external_id)
       Logger.put_process_level(self(), :error)
-
-      token = access_token(params, headers)
 
       with %Tenant{
              extensions: extensions,
@@ -68,19 +69,20 @@ defmodule RealtimeWeb.UserSocket do
         }
 
         assigns = Map.from_struct(assigns)
-
-        {:ok, assign(socket, assigns)}
+        socket = assign(socket, assigns)
+        {:ok, socket}
       else
         nil ->
           log_error("TenantNotFound", "Tenant not found: #{external_id}")
           {:error, :tenant_not_found}
 
         {:error, :expired_token, msg} ->
-          Logging.log_error_with_token_metadata("InvalidJWTToken", msg, token)
+          Logging.log_error_with_token_metadata("InvalidJWTToken", msg, socket)
           {:error, :expired_token}
 
         {:error, :missing_claims} ->
-          Logging.log_error_with_token_metadata("InvalidJWTToken", "Fields `role` and `exp` are required in JWT", token)
+          msg = "Fields `role` and `exp` are required in JWT"
+          Logging.log_error_with_token_metadata("InvalidJWTToken", msg, socket)
           {:error, :missing_claims}
 
         {:error, :token_malformed} ->

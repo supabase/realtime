@@ -46,28 +46,33 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
   describe "log_error_message/3" do
     test "handles warning level errors" do
+      socket = %{assigns: %{log_level: :warning, tenant: random_string()}}
+
       assert capture_log([level: :warning], fn ->
-               result = Logging.log_error_message(:warning, "TestError", "test error")
+               result = Logging.log_error_message(:warning, "TestError", "test error", socket)
                assert {:error, %{reason: "test error"}} = result
              end) =~ "TestError: test error"
     end
 
     test "handles error level errors" do
+      socket = %{assigns: %{log_level: :error, tenant: random_string()}}
+
       assert capture_log(fn ->
-               result = Logging.log_error_message(:error, "TestCodeError", "test error")
+               result = Logging.log_error_message(:error, "TestCodeError", "test error", socket)
                assert {:error, %{reason: "test error"}} = result
              end) =~ "test error"
     end
 
     test "only emits telemetry for system errors" do
+      socket = %{assigns: %{log_level: :error, tenant: random_string()}}
       errors = Logging.system_errors()
 
       for error <- errors do
-        Logging.log_error_message(:error, error, "test error")
+        Logging.log_error_message(:error, error, "test error", socket)
         assert_receive {[:realtime, :channel, :error], %{code: ^error}, %{code: ^error}}
       end
 
-      Logging.log_error_message(:error, "DatabaseConnectionIssue", "test error")
+      Logging.log_error_message(:error, "DatabaseConnectionIssue", "test error", socket)
       refute_receive {[:realtime, :channel, :error], %{code: "DatabaseConnectionIssue"}, %{code: "UnableToSetPolicies"}}
     end
   end
@@ -164,13 +169,17 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       sub = random_string()
       iss = "https://#{random_string()}.com"
       exp = System.system_time(:second) + 1000
-
       token = generate_jwt_token(tenant, %{sub: sub, exp: exp, iss: iss})
-      log = capture_log(fn -> Logging.log_error_with_token_metadata("TestCode", "test message", token) end)
+
+      socket = %{assigns: %{access_token: token, tenant: tenant.external_id}}
+
+      log = capture_log(fn -> Logging.log_error_with_token_metadata("TestCode", "test message", socket) end)
       assert log =~ "TestCode: test message"
       assert log =~ "sub=#{sub}"
       assert log =~ "exp=#{exp}"
       assert log =~ "iss=#{iss}"
+      assert log =~ "project=#{tenant.external_id}"
+      assert log =~ "external_id=#{tenant.external_id}"
     end
   end
 
@@ -184,13 +193,17 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       sub = random_string()
       iss = "https://#{random_string()}.com"
       exp = System.system_time(:second) + 1000
-
       token = generate_jwt_token(tenant, %{sub: sub, exp: exp, iss: iss})
-      log = capture_log(fn -> Logging.log_warning_with_token_metadata("TestCode", "test message", token) end)
+
+      socket = %{assigns: %{access_token: token, tenant: tenant.external_id}}
+
+      log = capture_log(fn -> Logging.log_warning_with_token_metadata("TestCode", "test message", socket) end)
       assert log =~ "TestCode: test message"
       assert log =~ "sub=#{sub}"
       assert log =~ "exp=#{exp}"
       assert log =~ "iss=#{iss}"
+      assert log =~ "project=#{tenant.external_id}"
+      assert log =~ "external_id=#{tenant.external_id}"
     end
   end
 end

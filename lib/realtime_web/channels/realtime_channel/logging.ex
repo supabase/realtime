@@ -43,13 +43,12 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   @spec log_error_with_token_metadata(
           code :: binary(),
           msg :: binary(),
-          token :: Joken.bearer_token(),
-          metadata :: keyword()
+          socket :: Phoenix.Socket.t()
         ) :: {:error, %{reason: binary()}}
-  def log_error_with_token_metadata(code, msg, token, metadata \\ []) do
-    if metadata == [], do: Logger.metadata()
-    metadata = update_metadata_with_token_claims(metadata, token)
-    log_error_message(:error, code, msg, metadata)
+  def log_error_with_token_metadata(code, msg, %{assigns: %{access_token: access_token, tenant: tenant_id}} = socket) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+    update_metadata_with_token_claims(access_token)
+    log_error_message(:error, code, msg, socket)
   end
 
   @doc """
@@ -58,25 +57,25 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   @spec log_warning_with_token_metadata(
           code :: binary(),
           msg :: binary(),
-          token :: Joken.bearer_token(),
-          metadata :: keyword()
+          socket :: Phoenix.Socket.t()
         ) :: {:error, %{reason: binary()}}
-  def log_warning_with_token_metadata(code, msg, token, metadata \\ []) do
-    if metadata == [], do: Logger.metadata()
-    metadata = update_metadata_with_token_claims(metadata, token)
-    log_error_message(:warning, code, msg, metadata)
+  def log_warning_with_token_metadata(code, msg, %{assigns: %{access_token: access_token, tenant: tenant_id}} = socket) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+    update_metadata_with_token_claims(access_token)
+    log_error_message(:error, code, msg, socket)
   end
 
-  defp update_metadata_with_token_claims(metadata, token) do
+  defp update_metadata_with_token_claims(token) do
     case Joken.peek_claims(token) do
       {:ok, claims} ->
         sub = Map.get(claims, "sub")
         exp = Map.get(claims, "exp")
         iss = Map.get(claims, "iss")
-        metadata ++ [sub: sub, exp: exp, iss: iss]
+
+        Logger.metadata(sub: sub, exp: exp, iss: iss)
 
       _ ->
-        metadata
+        nil
     end
   end
 
@@ -122,19 +121,22 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
           level :: :error | :warning,
           code :: binary(),
           error :: term(),
-          keyword()
+          socket :: Phoenix.Socket.t()
         ) :: {:error, %{reason: binary()}}
-  def log_error_message(level, code, error, metadata \\ [])
+  def log_error_message(level, code, error, socket)
 
-  def log_error_message(:error, code, error, metadata) do
+  def log_error_message(:error, code, error, %{assigns: %{tenant: tenant_id}}) do
     if code in system_errors(), do: Telemetry.execute([:realtime, :channel, :error], %{code: code}, %{code: code})
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    log_error(code, error, metadata)
+    log_error(code, error, Logger.metadata())
     {:error, %{reason: error}}
   end
 
-  def log_error_message(:warning, code, error, metadata) do
-    log_warning(code, error, metadata)
+  def log_error_message(:warning, code, error, %{assigns: %{tenant: tenant_id}}) do
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+
+    log_warning(code, error, Logger.metadata())
     {:error, %{reason: error}}
   end
 end
