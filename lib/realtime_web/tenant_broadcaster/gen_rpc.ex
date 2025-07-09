@@ -14,4 +14,13 @@ defmodule RealtimeWeb.TenantBroadcaster.GenRpc do
     Realtime.GenRpc.multicast(RealtimeWeb.Endpoint, :local_broadcast_from, [from, topic, event, msg], key: topic)
     :ok
   end
+
+  @impl true
+  def pubsub_broadcast(topic, message, dispatcher) do
+    Realtime.GenRpc.multicast(Phoenix.PubSub, :local_broadcast, [Realtime.PubSub, topic, message, dispatcher],
+      key: topic
+    )
+
+    :ok
+  end
 end

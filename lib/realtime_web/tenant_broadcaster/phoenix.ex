@@ -10,4 +10,9 @@ defmodule RealtimeWeb.TenantBroadcaster.Phoenix do
 
   @impl true
   def broadcast_from(from, topic, event, msg), do: Endpoint.broadcast_from(from, topic, event, msg)
+
+  @impl true
+  def pubsub_broadcast(topic, message, dispatcher) do
+    Phoenix.PubSub.broadcast(Realtime.PubSub, topic, message, dispatcher)
+  end
 end

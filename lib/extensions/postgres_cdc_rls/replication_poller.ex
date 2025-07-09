@@ -18,14 +18,15 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   alias Realtime.Adapters.Changes.NewRecord
   alias Realtime.Adapters.Changes.UpdatedRecord
   alias Realtime.Database
-  alias Realtime.PubSub
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
   @impl true
   def init(args) do
-    tenant = args["id"]
-    Logger.metadata(external_id: tenant, project: tenant)
+    tenant_id = args["id"]
+    Logger.metadata(external_id: tenant_id, project: tenant_id)
+
+    tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id)
 
     state = %{
       backoff: Backoff.new(backoff_min: 100, backoff_max: 5_000, backoff_type: :rand_exp),
@@ -45,7 +46,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       tenant: tenant
     }
 
-    {:ok, _} = Registry.register(__MODULE__.Registry, tenant, %{})
+    {:ok, _} = Registry.register(__MODULE__.Registry, tenant_id, %{})
     {:ok, state, {:continue, {:connect, args}}}
   end
 
@@ -83,7 +84,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
     args = [conn, slot_name, publication, max_changes, max_record_bytes]
     {time, list_changes} = :timer.tc(Replications, :list_changes, args)
-    record_list_changes_telemetry(time, tenant)
+    record_list_changes_telemetry(time, tenant.external_id)
 
     case handle_list_changes_result(list_changes, tenant) do
       {:ok, row_count} ->
@@ -163,11 +164,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     end
   end
 
-  defp record_list_changes_telemetry(time, tenant) do
+  defp record_list_changes_telemetry(time, tenant_id) do
     Realtime.Telemetry.execute(
       [:realtime, :replication, :poller, :query, :stop],
       %{duration: time},
-      %{tenant: tenant}
+      %{tenant: tenant_id}
     )
   end
 
@@ -182,8 +183,14 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
        ) do
     for row <- rows,
         change <- columns |> Enum.zip(row) |> generate_record() |> List.wrap() do
-      topic = "realtime:postgres:" <> tenant
-      Phoenix.PubSub.broadcast_from(PubSub, self(), topic, change, MessageDispatcher)
+      topic = "realtime:postgres:" <> tenant.external_id
+
+      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(
+        tenant,
+        topic,
+        change,
+        MessageDispatcher
+      )
     end
 
     {:ok, rows_count}
