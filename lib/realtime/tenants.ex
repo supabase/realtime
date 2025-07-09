@@ -196,7 +196,17 @@ defmodule Realtime.Tenants do
         event_name: [:channel, :events],
         measurements: %{limit: max_events_per_second},
         metadata: %{tenant: tenant_id}
-      }
+      },
+      limit: [
+        value: max_events_per_second,
+        log: true,
+        log_fn: fn ->
+          Logger.error("MessagePerSecondRateLimitReached: Too many messages per second",
+            external_id: tenant_id,
+            project: tenant_id
+          )
+        end
+      ]
     ]
 
     %RateCounter.Args{id: events_per_second_key(tenant_id), opts: opts}
