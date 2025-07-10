@@ -1,4 +1,6 @@
 defmodule Containers do
+  alias Extensions.PostgresCdcRls
+  alias Realtime.Tenants.Connect
   alias Containers.Container
   alias Realtime.Database
   alias Realtime.RateCounter
@@ -115,26 +117,22 @@ defmodule Containers do
       tenant = Generators.tenant_fixture(%{port: port, migrations_ran: 0})
       run_migrations? = Keyword.get(opts, :run_migrations, false)
 
-      # Automatically checkin the container at the end of the test
-      ExUnit.Callbacks.on_exit(fn -> :poolboy.checkin(Containers.Pool, container) end)
-
       settings = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | max_restarts: 0, ssl: false}
       {:ok, conn} = Database.connect_db(settings)
+      Postgrex.query!(conn, "DROP SCHEMA realtime CASCADE", [])
+      Postgrex.query!(conn, "CREATE SCHEMA realtime", [])
+      Process.exit(conn, :normal)
 
-      Postgrex.transaction(conn, fn db_conn ->
-        Postgrex.query!(
-          db_conn,
-          "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name like 'realtime_%' and application_name != 'realtime_test'",
-          []
-        )
+      RateCounter.stop(tenant.external_id)
 
-        RateCounter.stop(tenant.external_id)
-
-        Postgrex.query!(db_conn, "DROP SCHEMA realtime CASCADE", [])
-        Postgrex.query!(db_conn, "CREATE SCHEMA realtime", [])
-
-        :ok
+      # Automatically checkin the container at the end of the test
+      ExUnit.Callbacks.on_exit(fn ->
+        # Clean up database connections if they are set-up
+        connect = Connect.whereis(tenant.external_id)
+        if connect, do: Process.exit(connect, :brutal_kill)
+        PostgresCdcRls.handle_stop(tenant.external_id, 5_000)
+        :poolboy.checkin(Containers.Pool, container)
       end)
 
       tenant =
@@ -153,8 +151,6 @@ defmodule Containers do
         else
           tenant
         end
-
-      Process.exit(conn, :normal)
 
       tenant
     else
