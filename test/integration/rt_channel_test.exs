@@ -1,5 +1,3 @@
-Code.require_file("../support/websocket_client.exs", __DIR__)
-
 defmodule Realtime.Integration.RtChannelTest do
   # async: false due to the fact that multiple operations against the same tenant and usage of mocks
   # Also using dev_tenant due to distributed test
@@ -1208,16 +1206,24 @@ defmodule Realtime.Integration.RtChannelTest do
       # token expires in between joins so it needs to be handled by the channel and not the socket
       Process.sleep(1000)
       realtime_topic = "realtime:#{topic}"
-      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-      assert_receive %Message{
-                       event: "phx_reply",
-                       payload: %{"status" => "error", "response" => %{"reason" => "Token has expired 0 seconds ago"}},
-                       topic: ^realtime_topic
-                     },
-                     500
+      log =
+        capture_log(fn ->
+          WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+
+          assert_receive %Message{
+                           event: "phx_reply",
+                           payload: %{"status" => "error", "response" => %{"reason" => msg}},
+                           topic: ^realtime_topic
+                         },
+                         500
+
+          assert msg =~ "Token has expired"
+        end)
 
       assert_receive %Message{event: "phx_close"}
+      assert log =~ "#{tenant.external_id}"
+      assert log =~ "#{tenant.external_id}"
     end
 
     test "token loses claims in between joins", %{tenant: tenant, topic: topic} do
@@ -1752,10 +1758,13 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
-      for _ <- 1..1000 do
-        WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
-        1..5 |> Enum.random() |> Process.sleep()
-      end
+      log =
+        capture_log(fn ->
+          for _ <- 1..1000 do
+            WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
+            1..5 |> Enum.random() |> Process.sleep()
+          end
+        end)
 
       assert_receive %Message{
                        event: "system",
@@ -1770,6 +1779,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_close"}
 
       change_tenant_configuration(tenant, :max_events_per_second, max_concurrent_users)
+      assert log =~ "MessagePerSecondRateLimitReached"
     end
 
     test "max_channels_per_client limit respected", %{tenant: tenant} do
