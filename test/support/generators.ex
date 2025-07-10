@@ -246,11 +246,13 @@ defmodule Generators do
     """
   end
 
+  @spec generate_jwt_token(Tenant.t() | binary()) :: Joken.sign_result()
   def generate_jwt_token(secret_or_tenant) do
     claims = %{role: "authenticated", exp: System.system_time(:second) + 100_000}
     generate_jwt_token(secret_or_tenant, claims)
   end
 
+  @spec generate_jwt_token(Tenant.t() | binary(), map()) :: Joken.sign_result()
   def generate_jwt_token(%Tenant{} = tenant, claims) do
     secret = Crypto.decrypt!(tenant.jwt_secret)
     generate_jwt_token(secret, claims)
@@ -262,6 +264,4 @@ defmodule Generators do
     {:ok, jwt, _} = Joken.encode_and_sign(claims, signer)
     jwt
   end
-
-  def generate_jwt_token(nil, _), do: raise("Missing JWT secret")
 end

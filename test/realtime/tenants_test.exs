@@ -19,24 +19,16 @@ defmodule Realtime.TenantsTest do
 
       limits = Tenants.get_tenant_limits(tenant, keys)
 
-      [all] =
-        Enum.filter(limits, fn e -> e.limiter == Tenants.requests_per_second_key(tenant) end)
-
+      [all] = Enum.filter(limits, fn e -> e.limiter == Tenants.requests_per_second_key(tenant) end)
       assert all.counter == 9
 
-      [user_channels] =
-        Enum.filter(limits, fn e -> e.limiter == Tenants.channels_per_client_key(tenant) end)
-
+      [user_channels] = Enum.filter(limits, fn e -> e.limiter == Tenants.channels_per_client_key(tenant) end)
       assert user_channels.counter == 9
 
-      [channel_joins] =
-        Enum.filter(limits, fn e -> e.limiter == Tenants.joins_per_second_key(tenant) end)
-
+      [channel_joins] = Enum.filter(limits, fn e -> e.limiter == Tenants.joins_per_second_key(tenant) end)
       assert channel_joins.counter == 9
 
-      [tenant_events] =
-        Enum.filter(limits, fn e -> e.limiter == Tenants.events_per_second_key(tenant) end)
-
+      [tenant_events] = Enum.filter(limits, fn e -> e.limiter == Tenants.events_per_second_key(tenant) end)
       assert tenant_events.counter == 9
     end
   end
@@ -44,13 +36,12 @@ defmodule Realtime.TenantsTest do
   describe "suspend_tenant_by_external_id/1" do
     setup do
       tenant = tenant_fixture()
-      topic = "realtime:operations:" <> tenant.external_id
-      Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
-      %{topic: topic, tenant: tenant}
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
+      %{tenant: tenant}
     end
 
     test "sets suspend flag to true and publishes message", %{tenant: %{external_id: external_id}} do
-      tenant = Tenants.suspend_tenant_by_external_id(external_id)
+      {:ok, tenant} = Tenants.suspend_tenant_by_external_id(external_id)
       assert tenant.suspend == true
       assert_receive :suspend_tenant, 500
     end
@@ -66,13 +57,12 @@ defmodule Realtime.TenantsTest do
   describe "unsuspend_tenant_by_external_id/1" do
     setup do
       tenant = tenant_fixture(%{suspend: true})
-      topic = "realtime:operations:" <> tenant.external_id
-      Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
-      %{topic: topic, tenant: tenant}
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
+      %{tenant: tenant}
     end
 
     test "sets suspend flag to false and publishes message", %{tenant: tenant} do
-      tenant = Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
+      {:ok, tenant} = Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
       assert tenant.suspend == false
       assert_receive :unsuspend_tenant, 500
     end
@@ -112,8 +102,7 @@ defmodule Realtime.TenantsTest do
   describe "broadcast_operation_event/2" do
     setup do
       tenant = tenant_fixture()
-      topic = "realtime:operations:" <> tenant.external_id
-      Phoenix.PubSub.subscribe(Realtime.PubSub, topic)
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       %{tenant: tenant}
     end
 

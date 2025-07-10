@@ -335,13 +335,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_info(:sync_presence, %{assigns: %{presence_enabled?: true}} = socket), do: PresenceHandler.sync(socket)
   def handle_info(:sync_presence, socket), do: {:noreply, socket}
-
-  def handle_info(:unsuspend_tenant, socket), do: {:noreply, socket}
-
-  def handle_info(msg, socket) do
-    log_error("UnhandledSystemMessage", msg)
-    {:noreply, socket}
-  end
+  def handle_info(_message, socket), do: {:noreply, socket}
 
   @impl true
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
