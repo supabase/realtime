@@ -33,7 +33,7 @@ defmodule Realtime.ApiTest do
       assert hd(Api.list_tenants(search: hd(tenants).external_id)) == hd(tenants)
 
       assert Api.list_tenants(order_by: "max_concurrent_users", order: "desc", limit: 2) ==
-               tenants |> Enum.sort_by(& &1.max_concurrent_users, :desc) |> Enum.take(2)
+               Enum.sort_by(tenants, & &1.max_concurrent_users, :desc) |> Enum.take(2)
     end
   end
 
@@ -131,6 +131,12 @@ defmodule Realtime.ApiTest do
       assert_receive :disconnect, 500
     end
 
+    test "valid data and suspend change will send disconnect event", %{tenant: tenant} do
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
+      assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{suspend: true})
+      assert_receive :disconnect, 500
+    end
+
     test "valid data but not updating jwt_secret or jwt_jwks won't send event", %{tenant: tenant} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{max_events_per_second: 100})
@@ -147,6 +153,17 @@ defmodule Realtime.ApiTest do
       Process.sleep(100)
       assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
       assert %Postgrex.Result{} = Postgrex.query!(new_pid, "SELECT 1", [])
+    end
+
+    test "valid data and suspend change will restart the database connection", %{tenant: tenant} do
+      {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      Process.monitor(old_pid)
+      assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{suspend: true})
+      assert_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
+      refute Process.alive?(old_pid)
+      Process.sleep(100)
+      assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
     end
 
     test "valid data and tenant data change will not restart the database connection", %{tenant: tenant} do
@@ -219,12 +236,6 @@ defmodule Realtime.ApiTest do
     end
   end
 
-  describe "change_tenant/1" do
-    test "returns a tenant changeset", %{tenants: [tenant | _]} do
-      assert %Ecto.Changeset{} = Api.change_tenant(tenant)
-    end
-  end
-
   test "list_extensions/1 ", %{tenants: tenants} do
     assert length(Api.list_extensions()) == length(tenants)
   end
@@ -275,6 +286,11 @@ defmodule Realtime.ApiTest do
       assert TestRequiresDisconnect.check(changeset)
     end
 
+    test "returns true if suspend is changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{suspend: true}}
+      assert TestRequiresDisconnect.check(changeset)
+    end
+
     test "returns false if valid? is false" do
       changeset = %Ecto.Changeset{valid?: false, changes: %{jwt_secret: "new_secret"}}
       refute TestRequiresDisconnect.check(changeset)
@@ -294,13 +310,18 @@ defmodule Realtime.ApiTest do
       assert TestRequiresRestartingDbConnection.check(changeset)
     end
 
-    test "returns true if jwt_secret and max_events_per_second are changed" do
+    test "returns true if jwt_secret are changed" do
       changeset = %Ecto.Changeset{valid?: true, changes: %{jwt_secret: "new_secret"}}
       assert TestRequiresRestartingDbConnection.check(changeset)
     end
 
-    test "returns true if jwt_jwks and max_concurrent_users are changed" do
+    test "returns true if jwt_jwks are changed" do
       changeset = %Ecto.Changeset{valid?: true, changes: %{jwt_jwks: %{keys: ["test"]}}}
+      assert TestRequiresRestartingDbConnection.check(changeset)
+    end
+
+    test "returns true if suspend is changed" do
+      changeset = %Ecto.Changeset{valid?: true, changes: %{suspend: true}}
       assert TestRequiresRestartingDbConnection.check(changeset)
     end
 
