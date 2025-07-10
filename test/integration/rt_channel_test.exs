@@ -1,5 +1,3 @@
-Code.require_file("../support/websocket_client.exs", __DIR__)
-
 defmodule Realtime.Integration.RtChannelTest do
   # async: false due to the fact that multiple operations against the same tenant and usage of mocks
   # Also using dev_tenant due to distributed test

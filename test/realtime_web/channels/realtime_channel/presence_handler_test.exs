@@ -137,7 +137,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
                      socket
                    )
 
-          refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
+          refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}, 1000
         end)
 
       assert log =~ "RlsPolicyError"
