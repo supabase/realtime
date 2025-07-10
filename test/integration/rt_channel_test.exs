@@ -1757,6 +1757,13 @@ defmodule Realtime.Integration.RtChannelTest do
         1..5 |> Enum.random() |> Process.sleep()
       end
 
+      Process.sleep(2000)
+      {:messages, messages} = Process.info(self(), :messages)
+
+      Enum.each(messages, fn message ->
+        if message.event != "broadcast", do: dbg(message)
+      end)
+
       assert_receive %Message{
                        event: "system",
                        payload: %{

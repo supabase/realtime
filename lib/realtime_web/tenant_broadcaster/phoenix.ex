@@ -15,4 +15,9 @@ defmodule RealtimeWeb.TenantBroadcaster.Phoenix do
   def pubsub_broadcast(topic, message, dispatcher) do
     Phoenix.PubSub.broadcast(Realtime.PubSub, topic, message, dispatcher)
   end
+
+  @impl true
+  def pubsub_broadcast_from(from, topic, message, dispatcher) do
+    Phoenix.PubSub.broadcast_from(Realtime.PubSub, from, topic, message, dispatcher)
+  end
 end

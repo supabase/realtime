@@ -64,8 +64,10 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
-      RealtimeWeb.Endpoint.subscribe(tenant_topic)
-      Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
+      # fastlane subscription
+
+      fastlane = {:realtime_channel_fastlane, transport_pid, serializer, topic}
+      RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: fastlane)
 
       is_new_api = new_api?(params)
       # TODO: Default will be moved to false in the future
@@ -253,6 +255,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(%{event: type, payload: payload} = msg, socket) do
+    dbg(msg)
     socket = socket |> count() |> Logging.maybe_log_handle_info(msg)
     push(socket, type, payload)
     {:noreply, socket}
@@ -832,5 +835,37 @@ defmodule RealtimeWeb.RealtimeChannel do
       nil -> []
       sub -> [sub: sub]
     end)
+  end
+
+  @doc """
+  Inspired by Phoenix.Channel.Server.dispatch/3
+  """
+  def dispatch(subscribers, from, %Phoenix.Socket.Broadcast{} = msg) do
+    Enum.reduce(subscribers, %{}, fn
+      {pid, _}, cache when pid == from ->
+        cache
+
+      {_pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic}}, cache ->
+        case cache do
+          %{^serializer => encoded_msg} ->
+            send(fastlane_pid, encoded_msg)
+            cache
+
+          %{} ->
+            # Use the original topic that was joined without the external_id
+            msg = %{msg | topic: join_topic}
+            encoded_msg = serializer.fastlane!(msg)
+            # dbg(["fastlane", encoded_msg])
+            send(fastlane_pid, encoded_msg)
+            Map.put(cache, serializer, encoded_msg)
+        end
+
+      {pid, _}, cache ->
+        dbg(["not fastlane", msg])
+        send(pid, msg)
+        cache
+    end)
+
+    :ok
   end
 end
