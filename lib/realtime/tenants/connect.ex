@@ -4,12 +4,14 @@ defmodule Realtime.Tenants.Connect do
 
   ## Options
   * `:check_connected_user_interval` - The interval in milliseconds to check if there are any connected users to a tenant channel. If there are no connected users, the connection will be stopped.
+  * `:check_connect_region_interval` - The interval in milliseconds to check if this process is in the correct region. If the region is not correct it stops the connection.
   * `:erpc_timeout` - The timeout in milliseconds for the `:erpc` calls to the tenant's database.
   """
   use GenServer, restart: :transient
 
   use Realtime.Logs
 
+  alias Realtime.Tenants.Rebalancer
   alias Realtime.Api.Tenant
   alias Realtime.Rpc
   alias Realtime.Tenants
@@ -25,6 +27,7 @@ defmodule Realtime.Tenants.Connect do
 
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default 50_000
+  @check_connect_region_interval_default :timer.minutes(5)
   @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
 
   defstruct tenant_id: nil,
@@ -35,7 +38,8 @@ defmodule Realtime.Tenants.Connect do
             listen_pid: nil,
             listen_reference: nil,
             check_connected_user_interval: nil,
-            connected_users_bucket: [1]
+            connected_users_bucket: [1],
+            check_connect_region_interval: nil
 
   @doc "Check if Connect has finished setting up connections"
   def ready?(tenant_id) do
@@ -167,11 +171,15 @@ defmodule Realtime.Tenants.Connect do
     check_connected_user_interval =
       Keyword.get(opts, :check_connected_user_interval, @check_connected_user_interval_default)
 
+    check_connect_region_interval =
+      Keyword.get(opts, :check_connect_region_interval, @check_connect_region_interval_default)
+
     name = {__MODULE__, tenant_id, %{conn: nil, region: region}}
 
     state = %__MODULE__{
       tenant_id: tenant_id,
-      check_connected_user_interval: check_connected_user_interval
+      check_connected_user_interval: check_connected_user_interval,
+      check_connect_region_interval: check_connect_region_interval
     }
 
     opts = Keyword.put(opts, :name, {:via, :syn, name})
@@ -208,6 +216,7 @@ defmodule Realtime.Tenants.Connect do
     end
   end
 
+  @impl true
   def handle_continue(:run_migrations, state) do
     %{tenant: tenant, db_conn_pid: db_conn_pid} = state
     Logger.warning("Tenant #{tenant.external_id} is initializing: #{inspect(node())}")
@@ -258,7 +267,6 @@ defmodule Realtime.Tenants.Connect do
       {:stop, :shutdown, state}
   end
 
-  @impl true
   def handle_continue(:setup_connected_user_events, state) do
     %{
       check_connected_user_interval: check_connected_user_interval,
@@ -269,6 +277,11 @@ defmodule Realtime.Tenants.Connect do
     :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
     send_connected_user_check_message(connected_users_bucket, check_connected_user_interval)
     :ets.insert(__MODULE__, {tenant_id})
+    {:noreply, state, {:continue, :start_connect_region_check}}
+  end
+
+  def handle_continue(:start_connect_region_check, state) do
+    send_connect_region_check_message(state.check_connect_region_interval)
     {:noreply, state}
   end
 
@@ -287,6 +300,21 @@ defmodule Realtime.Tenants.Connect do
       |> send_connected_user_check_message(check_connected_user_interval)
 
     {:noreply, %{state | connected_users_bucket: connected_users_bucket}}
+  end
+
+  def handle_info({:check_connect_region, previous_nodes_set}, state) do
+    current_nodes_set = MapSet.new(Node.list())
+
+    case Rebalancer.check(previous_nodes_set, current_nodes_set, state.tenant_id) do
+      :ok ->
+        # Let's check again in the future
+        send_connect_region_check_message(state.check_connect_region_interval)
+        {:noreply, state}
+
+      {:error, :wrong_region} ->
+        Logger.warning("Rebalancing Tenant database connection for a closer region")
+        {:stop, {:shutdown, :rebalancing}, state}
+    end
   end
 
   def handle_info(:shutdown_no_connected_users, state) do
@@ -380,6 +408,10 @@ defmodule Realtime.Tenants.Connect do
   defp send_connected_user_check_message(connected_users_bucket, check_connected_user_interval) do
     Process.send_after(self(), :check_connected_users, check_connected_user_interval)
     connected_users_bucket
+  end
+
+  defp send_connect_region_check_message(check_connect_region_interval) do
+    Process.send_after(self(), {:check_connect_region, MapSet.new(Node.list())}, check_connect_region_interval)
   end
 
   defp tenant_suspended?(%Tenant{suspend: true}), do: {:error, :tenant_suspended}

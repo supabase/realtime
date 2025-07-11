@@ -11,6 +11,7 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Listen
+  alias Realtime.Tenants.Rebalancer
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
 
@@ -20,9 +21,46 @@ defmodule Realtime.Tenants.ConnectTest do
     %{tenant: tenant}
   end
 
-  defp assert_process_down(pid, timeout \\ 100) do
+  defp assert_process_down(pid, timeout \\ 100, reason \\ nil) do
     ref = Process.monitor(pid)
-    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
+
+    if reason do
+      assert_receive {:DOWN, ^ref, :process, ^pid, ^reason}, timeout
+    else
+      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
+    end
+  end
+
+  defp refute_process_down(pid, timeout \\ 500) do
+    ref = Process.monitor(pid)
+    refute_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
+  end
+
+  describe "region rebalancing" do
+    test "rebalancing needed process stops", %{tenant: tenant} do
+      external_id = tenant.external_id
+
+      log =
+        capture_log(fn ->
+          assert {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, check_connect_region_interval: 100)
+
+          expect(Rebalancer, :check, 1, fn _, _, ^external_id -> {:error, :wrong_region} end)
+          reject(&Rebalancer.check/3)
+
+          assert_process_down(db_conn, 500, {:shutdown, :rebalancing})
+        end)
+
+      assert log =~ "Rebalancing Tenant database connection"
+    end
+
+    test "rebalancing not needed process stays up", %{tenant: tenant} do
+      external_id = tenant.external_id
+      assert {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, check_connect_region_interval: 100)
+
+      stub(Rebalancer, :check, fn _, _, ^external_id -> :ok end)
+
+      refute_process_down(db_conn)
+    end
   end
 
   describe "lookup_or_start_connection/1" do
