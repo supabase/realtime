@@ -92,7 +92,9 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert Crypto.encrypt!("supabase_admin") == settings["db_user"]
       refute settings["db_password"]
       Process.sleep(100)
-      %{extensions: [%{settings: settings}]} = tenant = Tenants.get_tenant_by_external_id(external_id)
+
+      %{broadcast_adapter: :gen_rpc, extensions: [%{settings: settings}]} =
+        tenant = Tenants.get_tenant_by_external_id(external_id)
 
       assert Crypto.encrypt!("postgres") == settings["db_password"]
 
