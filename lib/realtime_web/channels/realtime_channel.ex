@@ -65,8 +65,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
       # fastlane subscription
-
-      fastlane = {:realtime_channel_fastlane, transport_pid, serializer, topic}
+      fastlane = fastlane_metadata(socket, topic, log_level)
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: fastlane)
 
       is_new_api = new_api?(params)
@@ -222,7 +221,29 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
+  defp fastlane_metadata(socket, topic, :info) do
+    # Pass :log to ensure messages are logged
+    {:realtime_channel_fastlane, socket.transport_pid, socket.serializer, topic, socket.assigns.rate_counter,
+     {:log, socket.assigns.tenant}}
+  end
+
+  defp fastlane_metadata(socket, topic, _log_level) do
+    {:realtime_channel_fastlane, socket.transport_pid, socket.serializer, topic, socket.assigns.rate_counter}
+  end
+
   @impl true
+  def handle_info(:update_rate_counter, %{assigns: %{limits: %{max_events_per_second: max}}} = socket) do
+    socket = count(socket)
+
+    if socket.assigns.rate_counter.avg > max do
+      message = "Too many messages per second"
+
+      shutdown_response(socket, message)
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_info(
         _any,
         %{assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}} = socket
@@ -255,7 +276,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(%{event: type, payload: payload} = msg, socket) do
-    dbg(msg)
     socket = socket |> count() |> Logging.maybe_log_handle_info(msg)
     push(socket, type, payload)
     {:noreply, socket}
@@ -845,20 +865,17 @@ defmodule RealtimeWeb.RealtimeChannel do
       {pid, _}, cache when pid == from ->
         cache
 
-      {_pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic}}, cache ->
-        case cache do
-          %{^serializer => encoded_msg} ->
-            send(fastlane_pid, encoded_msg)
-            cache
+      {pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic, rate_counter}}, cache ->
+        send(pid, :update_rate_counter)
+        do_dispatch(msg, fastlane_pid, serializer, join_topic, rate_counter, cache)
 
-          %{} ->
-            # Use the original topic that was joined without the external_id
-            msg = %{msg | topic: join_topic}
-            encoded_msg = serializer.fastlane!(msg)
-            # dbg(["fastlane", encoded_msg])
-            send(fastlane_pid, encoded_msg)
-            Map.put(cache, serializer, encoded_msg)
-        end
+      {pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic, rate_counter, {:log, tenant_id}}},
+      cache ->
+        send(pid, :update_rate_counter)
+        msg = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
+        Logger.info(msg, external_id: tenant_id, project: tenant_id)
+
+        do_dispatch(msg, fastlane_pid, serializer, join_topic, rate_counter, cache)
 
       {pid, _}, cache ->
         dbg(["not fastlane", msg])
@@ -867,5 +884,24 @@ defmodule RealtimeWeb.RealtimeChannel do
     end)
 
     :ok
+  end
+
+  defp do_dispatch(msg, fastlane_pid, serializer, join_topic, rate_counter, cache) do
+    GenCounter.add(rate_counter.id)
+
+    case cache do
+      %{^serializer => encoded_msg} ->
+        # dbg(["fastlane cached", encoded_msg])
+        send(fastlane_pid, encoded_msg)
+        cache
+
+      %{} ->
+        # Use the original topic that was joined without the external_id
+        msg = %{msg | topic: join_topic}
+        encoded_msg = serializer.fastlane!(msg)
+        # dbg(["fastlane not cached", encoded_msg])
+        send(fastlane_pid, encoded_msg)
+        Map.put(cache, serializer, encoded_msg)
+    end
   end
 end

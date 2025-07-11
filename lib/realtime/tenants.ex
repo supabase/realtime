@@ -289,23 +289,6 @@ defmodule Realtime.Tenants do
     do: "#{external_id}:#{sub_topic}"
 
   @doc """
-  Builds the original PubSub topic that was generated with `Tenants.tenant_topic`
-
-  iex> Realtime.Tenants.original_topic("tenant_id", "tenant_id:sub_topic")
-  "realtime:sub_topic"
-  iex> Realtime.Tenants.original_topic("tenant_id", "tenant_id-private:sub_topic")
-  "realtime:sub_topic"
-  """
-  @spec original_topic(String.t(), String.t()) :: String.t()
-  def original_topic(external_id, tenant_topic) do
-    case String.split(tenant_topic, ":", parts: 2) do
-      [^external_id, sub_topic] -> "realtime:#{sub_topic}"
-      [^external_id <> "-private", sub_topic] -> "realtime:#{sub_topic}"
-      _ -> raise ArgumentError, "Invalid tenant topic format"
-    end
-  end
-
-  @doc """
   Sets tenant as suspended. New connections won't be accepted
   """
   @spec suspend_tenant_by_external_id(String.t()) :: {:ok, Tenant.t()} | {:error, term()}

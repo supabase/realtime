@@ -1,5 +1,3 @@
-Code.require_file("../support/websocket_client.exs", __DIR__)
-
 defmodule Realtime.Integration.RtChannelTest do
   # async: false due to the fact that multiple operations against the same tenant and usage of mocks
   # Also using dev_tenant due to distributed test
@@ -1756,13 +1754,6 @@ defmodule Realtime.Integration.RtChannelTest do
         WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
         1..5 |> Enum.random() |> Process.sleep()
       end
-
-      Process.sleep(2000)
-      {:messages, messages} = Process.info(self(), :messages)
-
-      Enum.each(messages, fn message ->
-        if message.event != "broadcast", do: dbg(message)
-      end)
 
       assert_receive %Message{
                        event: "system",

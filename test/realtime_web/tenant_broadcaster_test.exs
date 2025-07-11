@@ -2,7 +2,6 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
   # Usage of Clustered
   use Realtime.DataCase, async: false
 
-  alias Phoenix.Socket.Broadcast
   alias RealtimeWeb.Endpoint
   alias RealtimeWeb.TenantBroadcaster
 
