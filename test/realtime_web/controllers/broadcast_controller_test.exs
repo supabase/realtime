@@ -26,6 +26,26 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     {:ok, conn: conn, tenant: tenant}
   end
 
+  defp subscribe(tenant_topic, topic, rate_counter_key) do
+    # Simulate fastlane
+    RateCounter.new(rate_counter_key)
+    {:ok, rate_counter} = RateCounter.get(rate_counter_key)
+    fastlane = {:realtime_channel_fastlane, self(), Phoenix.Socket.V1.JSONSerializer, topic, rate_counter}
+
+    Endpoint.subscribe(tenant_topic, metadata: fastlane)
+  end
+
+  defp assert_receive_message(topic, payload) do
+    assert_receive {:socket_push, :text, data}
+
+    message =
+      data
+      |> IO.iodata_to_binary()
+      |> Jason.decode!()
+
+    assert message == %{"event" => "broadcast", "payload" => payload, "ref" => nil, "topic" => topic}
+  end
+
   for adapter <- [:phoenix, :gen_rpc] do
     describe "broadcast #{adapter}" do
       @describetag adapter: adapter
@@ -56,11 +76,10 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         event_2 = "event_2"
 
         payload_topic_1 = %{"payload" => payload_1, "event" => event_1, "type" => "broadcast"}
-
         payload_topic_2 = %{"payload" => payload_2, "event" => event_2, "type" => "broadcast"}
 
-        Endpoint.subscribe(topic_1)
-        Endpoint.subscribe(topic_2)
+        subscribe(topic_1, sub_topic_1, broadcast_events_key)
+        subscribe(topic_2, sub_topic_2, broadcast_events_key)
 
         conn =
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
@@ -73,10 +92,11 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         assert conn.status == 202
 
-        assert_receive %Phoenix.Socket.Broadcast{topic: ^topic_1, event: "broadcast", payload: ^payload_topic_1}
-        assert_receive %Phoenix.Socket.Broadcast{topic: ^topic_1, event: "broadcast", payload: ^payload_topic_1}
-        assert_receive %Phoenix.Socket.Broadcast{topic: ^topic_2, event: "broadcast", payload: ^payload_topic_2}
-        refute_receive %Phoenix.Socket.Broadcast{}
+        assert_receive_message(sub_topic_1, payload_topic_1)
+        assert_receive_message(sub_topic_1, payload_topic_1)
+        assert_receive_message(sub_topic_2, payload_topic_2)
+
+        refute_receive {:socket_push, _, _}
       end
 
       test "returns 422 when batch of messages includes badly formed messages", %{conn: conn, tenant: tenant} do
