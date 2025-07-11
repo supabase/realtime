@@ -21,7 +21,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     test "logs message when log_level is less than error and payload is structure" do
       channel_name = random_string()
       msg = %{"payload" => %{"a" => "b"}}
-      socket = %{assigns: %{log_level: :info, channel_name: channel_name}}
+      socket = %{assigns: %{log_level: :info, channel_name: channel_name, tenant: random_string()}}
 
       assert capture_log(fn -> Logging.maybe_log_handle_info(socket, msg) end) =~
                "Received message on #{channel_name} with payload: #{inspect(msg, pretty: true)}"
@@ -30,17 +30,29 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     test "logs message when log_level is less than error and payload is string" do
       channel_name = random_string()
       msg = random_string()
-      socket = %{assigns: %{log_level: :info, channel_name: channel_name}}
+      socket = %{assigns: %{log_level: :info, channel_name: channel_name, tenant: random_string()}}
 
       assert capture_log(fn -> Logging.maybe_log_handle_info(socket, msg) end) =~
                "Received message on #{channel_name} with payload: #{msg}"
     end
 
     test "does not log message when log_level is error" do
-      socket = %{assigns: %{log_level: :error, channel_name: "test_channel"}}
+      socket = %{assigns: %{log_level: :error, channel_name: "test_channel", tenant: random_string()}}
       test_msg = "test message"
 
       assert capture_log(fn -> Logging.maybe_log_handle_info(socket, test_msg) end) == ""
+    end
+
+    test "includes tenant in metadata and does not override other metadata" do
+      tenant_id = random_string()
+      application_name = random_string()
+      Logger.metadata(application_name: application_name)
+
+      socket = %{assigns: %{log_level: :info, tenant: tenant_id, channel_name: random_string()}}
+
+      log = capture_log(fn -> Logging.maybe_log_handle_info(socket, random_string()) end)
+      assert log =~ tenant_id
+      assert log =~ application_name
     end
   end
 
@@ -74,7 +86,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
   describe "maybe_log/3" do
     test "logs messages at the specified level" do
-      socket = %{assigns: %{log_level: :info}}
+      socket = %{assigns: %{log_level: :info, tenant: random_string()}}
 
       assert capture_log(fn ->
                Logging.maybe_log(socket, :info, "TestCode", "test message")
@@ -86,7 +98,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     end
 
     test "logs messages when not binary message" do
-      socket = %{assigns: %{log_level: :info}}
+      socket = %{assigns: %{log_level: :info, tenant: random_string()}}
 
       assert capture_log(fn ->
                Logging.maybe_log(socket, :info, "TestCode", {:error, "Error message"})
@@ -98,17 +110,28 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     end
 
     test "does not log messages when log level is higher than the configured level" do
-      socket = %{assigns: %{log_level: :error}}
+      socket = %{assigns: %{log_level: :error, tenant: random_string()}}
 
       assert capture_log(fn ->
                Logging.maybe_log(socket, :info, "TestCode", "test message")
              end) == ""
     end
+
+    test "sets metadata for the tenant" do
+      application_name = random_string()
+      tenant_id = random_string()
+      Logger.metadata(application_name: application_name)
+      socket = %{assigns: %{log_level: :info, tenant: tenant_id, channel_name: random_string()}}
+
+      log = capture_log(fn -> Logging.maybe_log(socket, :info, "TestCode", "test message") end)
+      assert log =~ tenant_id
+      assert log =~ application_name
+    end
   end
 
   describe "maybe_log_error/3" do
     test "logs error messages at the error level" do
-      socket = %{assigns: %{log_level: :info}}
+      socket = %{assigns: %{log_level: :info, tenant: random_string(), channel_name: random_string()}}
 
       assert capture_log(fn ->
                Logging.maybe_log_error(socket, "TestError", "test error")
@@ -116,7 +139,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     end
 
     test "does not log when log level is higher than error" do
-      socket = %{assigns: %{log_level: :emergency}}
+      socket = %{assigns: %{log_level: :emergency, tenant: random_string(), channel_name: random_string()}}
 
       assert capture_log(fn ->
                Logging.maybe_log_error(socket, "TestError", "test error")
@@ -126,7 +149,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
   describe "maybe_log_warning/3" do
     test "logs warning messages at the warning level" do
-      socket = %{assigns: %{log_level: :warning}}
+      socket = %{assigns: %{log_level: :warning, tenant: random_string(), channel_name: random_string()}}
 
       assert capture_log(fn ->
                Logging.maybe_log_warning(socket, "TestWarning", "test warning")
@@ -134,7 +157,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     end
 
     test "does not log when log level is higher than warning" do
-      socket = %{assigns: %{log_level: :error}}
+      socket = %{assigns: %{log_level: :error, tenant: random_string(), channel_name: random_string()}}
 
       assert capture_log(fn -> Logging.maybe_log_warning(socket, "TestWarning", "test warning") end) == ""
     end
@@ -142,13 +165,13 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
   describe "maybe_log_info/3" do
     test "logs info messages at the info level" do
-      socket = %{assigns: %{log_level: :info}}
+      socket = %{assigns: %{log_level: :info, tenant: random_string(), channel_name: random_string()}}
 
       assert capture_log(fn -> Logging.maybe_log_info(socket, "test info") end) =~ "test info"
     end
 
     test "does not log when log level is higher than info" do
-      socket = %{assigns: %{log_level: :warning}}
+      socket = %{assigns: %{log_level: :warning, tenant: random_string(), channel_name: random_string()}}
 
       assert capture_log(fn -> Logging.maybe_log_info(socket, "test info") end) == ""
     end
