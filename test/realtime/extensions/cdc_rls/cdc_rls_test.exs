@@ -95,7 +95,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       %SubscriptionManager.State{oids: oids} = :sys.get_state(subscriber_manager_pid)
 
-      Postgrex.query!(conn, "drop publication supabase_realtime_test", [])
+      Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids2} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids, oids2)

@@ -27,7 +27,7 @@ defmodule Realtime.Api.Tenant do
     field(:events_per_second_now, :integer, virtual: true)
     field(:private_only, :boolean, default: false)
     field(:migrations_ran, :integer, default: 0)
-    field(:broadcast_adapter, Ecto.Enum, values: [:phoenix, :gen_rpc], default: :phoenix)
+    field(:broadcast_adapter, Ecto.Enum, values: [:phoenix, :gen_rpc], default: :gen_rpc)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
