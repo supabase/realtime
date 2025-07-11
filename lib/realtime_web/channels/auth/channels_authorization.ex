@@ -1,6 +1,13 @@
 defmodule RealtimeWeb.ChannelsAuthorization do
   @moduledoc """
-  Check connection is authorized to access channel
+  Channel-level authorization logic for Supabase Realtime.
+
+  This module provides functions to:
+  - Authorize WebSocket connections and channel joins using JWTs
+  - Validate required claims and token expiration
+  - Clean and decode tokens for use in channel logic
+
+  See also: RealtimeWeb.JwtVerification
   """
   require Logger
 
