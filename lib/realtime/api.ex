@@ -20,13 +20,15 @@ defmodule Realtime.Api do
            when changeset.valid? == true and
                   (is_map_key(changeset.changes, :jwt_secret) or
                      is_map_key(changeset.changes, :jwt_jwks) or
-                     is_map_key(changeset.changes, :private_only))
+                     is_map_key(changeset.changes, :private_only) or
+                     is_map_key(changeset.changes, :suspend))
 
   defguard requires_restarting_db_connection(changeset)
            when changeset.valid? == true and
                   (is_map_key(changeset.changes, :extensions) or
                      is_map_key(changeset.changes, :jwt_secret) or
-                     is_map_key(changeset.changes, :jwt_jwks))
+                     is_map_key(changeset.changes, :jwt_jwks) or
+                     is_map_key(changeset.changes, :suspend))
 
   @doc """
   Returns the list of tenants.
@@ -155,9 +157,7 @@ defmodule Realtime.Api do
       {:error, %Ecto.Changeset{}}
 
   """
-  def delete_tenant(%Tenant{} = tenant) do
-    Repo.delete(tenant)
-  end
+  def delete_tenant(%Tenant{} = tenant), do: Repo.delete(tenant)
 
   @spec delete_tenant_by_external_id(String.t()) :: boolean()
   def delete_tenant_by_external_id(id) do
@@ -170,19 +170,6 @@ defmodule Realtime.Api do
       _ ->
         false
     end
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for tracking tenant changes.
-
-  ## Examples
-
-      iex> change_tenant(tenant)
-      %Ecto.Changeset{data: %Tenant{}}
-
-  """
-  def change_tenant(%Tenant{} = tenant, attrs \\ %{}) do
-    Tenant.changeset(tenant, attrs)
   end
 
   @spec get_tenant_by_external_id(String.t(), atom()) :: Tenant.t() | nil
@@ -218,9 +205,7 @@ defmodule Realtime.Api do
     end
   end
 
-  def preload_counters(nil) do
-    nil
-  end
+  def preload_counters(nil), do: nil
 
   def preload_counters(%Tenant{} = tenant) do
     id = Tenants.requests_per_second_key(tenant)
@@ -228,9 +213,7 @@ defmodule Realtime.Api do
     preload_counters(tenant, id)
   end
 
-  def preload_counters(nil, _key) do
-    nil
-  end
+  def preload_counters(nil, _key), do: nil
 
   def preload_counters(%Tenant{} = tenant, counters_key) do
     {:ok, current} = GenCounter.get(counters_key)

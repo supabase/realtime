@@ -204,7 +204,7 @@ defmodule Realtime.Tenants.ConnectTest do
       Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
       assert_process_down(db_conn)
       # Wait for syn to unregister and Cachex to be invalided
-      Process.sleep(100)
+      Process.sleep(500)
 
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
       refute Process.alive?(db_conn)
