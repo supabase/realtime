@@ -81,6 +81,7 @@ defmodule Realtime.ApiTest do
       assert tenant.external_id == external_id
       assert tenant.jwt_secret == "YIriPuuJO1uerq5hSZ1W5Q=="
       assert tenant.name == external_id
+      assert tenant.broadcast_adapter == :gen_rpc
     end
 
     test "invalid data returns error changeset" do
