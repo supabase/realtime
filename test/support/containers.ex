@@ -120,7 +120,7 @@ defmodule Containers do
       settings = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | max_restarts: 0, ssl: false}
       {:ok, conn} = Database.connect_db(settings)
-      Postgrex.query!(conn, "DROP SCHEMA realtime CASCADE", [])
+      Postgrex.query!(conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
       Postgrex.query!(conn, "CREATE SCHEMA realtime", [])
       Process.exit(conn, :normal)
 
