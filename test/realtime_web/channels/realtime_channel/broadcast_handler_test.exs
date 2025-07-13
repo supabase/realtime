@@ -254,9 +254,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   end
 
   defp initiate_tenant(context) do
-    start_supervised(Realtime.GenCounter.DynamicSupervisor)
-    start_supervised(Realtime.RateCounter.DynamicSupervisor)
-
     tenant = Containers.checkout_tenant(run_migrations: true)
     {:ok, tenant} = Realtime.Api.update_tenant(tenant, %{broadcast_adapter: context.adapter})
 

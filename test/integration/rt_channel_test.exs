@@ -2175,6 +2175,7 @@ defmodule Realtime.Integration.RtChannelTest do
     # Sleeping so that syn can forget about this Connect process
     Process.sleep(100)
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    assert Connect.ready?(tenant.external_id)
     %{db_conn: db_conn}
   end
 

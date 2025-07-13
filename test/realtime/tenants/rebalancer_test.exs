@@ -35,7 +35,6 @@ defmodule Realtime.Tenants.RebalancerTest do
 
     test "same node set different region set returns :ok", %{tenant: tenant} do
       external_id = tenant.external_id
-      current_region = Application.fetch_env!(:realtime, :region)
 
       expect(Nodes, :get_node_for_tenant, fn ^tenant -> {:ok, :some_node, "ap-southeast-1"} end)
       reject(&Nodes.get_node_for_tenant/1)
