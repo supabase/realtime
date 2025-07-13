@@ -210,17 +210,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   end
 
   defp initiate_tenant(context) do
-    start_supervised(Realtime.GenCounter.DynamicSupervisor)
-    start_supervised(Realtime.RateCounter.DynamicSupervisor)
-
     tenant = Containers.checkout_tenant(run_migrations: true)
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
     Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
 
     RateCounter.stop(tenant.external_id)
-    GenCounter.stop(tenant.external_id)
-    RateCounter.new(tenant.external_id)
-    GenCounter.new(tenant.external_id)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     assert Connect.ready?(tenant.external_id)
