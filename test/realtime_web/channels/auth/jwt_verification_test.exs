@@ -11,6 +11,8 @@ defmodule RealtimeWeb.JwtVerificationTest do
   setup_all do
     Application.put_env(:realtime, :jwt_secret, @jwt_secret)
     Application.put_env(:realtime, :jwt_claim_validators, %{})
+    on_exit(fn -> Application.put_env(:realtime, :jwt_claim_validators, %{}) end)
+    :ok
   end
 
   setup do

@@ -120,8 +120,12 @@ defmodule Containers do
       settings = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | max_restarts: 0, ssl: false}
       {:ok, conn} = Database.connect_db(settings)
-      Postgrex.query!(conn, "DROP SCHEMA realtime CASCADE", [])
-      Postgrex.query!(conn, "CREATE SCHEMA realtime", [])
+
+      Postgrex.transaction(conn, fn db_conn ->
+        Postgrex.query!(db_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
+        Postgrex.query!(db_conn, "CREATE SCHEMA IF NOT EXISTS realtime", [])
+      end)
+
       Process.exit(conn, :normal)
 
       RateCounter.stop(tenant.external_id)
