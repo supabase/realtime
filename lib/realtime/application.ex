@@ -8,7 +8,6 @@ defmodule Realtime.Application do
 
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.ReplicationConnection
-  alias Realtime.Tenants.Listen
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Migrations
   defmodule JwtSecretError, do: defexception([:message])
@@ -87,11 +86,6 @@ defmodule Realtime.Application do
          child_spec: DynamicSupervisor,
          strategy: :one_for_one,
          name: ReplicationConnection.DynamicSupervisor,
-         partitions: connect_partition_slots},
-        {PartitionSupervisor,
-         child_spec: DynamicSupervisor,
-         strategy: :one_for_one,
-         name: Listen.DynamicSupervisor,
          partitions: connect_partition_slots},
         {PartitionSupervisor,
          child_spec: DynamicSupervisor,

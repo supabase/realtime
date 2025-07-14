@@ -73,7 +73,8 @@ defmodule Realtime.Tenants.Migrations do
     RemoveUnusedPublications,
     RealtimeSendSetsTopicConfig,
     SubscriptionIndexBridgingDisabled,
-    RunSubscriptionIndexBridgingDisabled
+    RunSubscriptionIndexBridgingDisabled,
+    BroadcastSendErrorLogging
   }
 
   @migrations [
@@ -138,7 +139,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_250_123_174_212, RemoveUnusedPublications},
     {20_250_128_220_012, RealtimeSendSetsTopicConfig},
     {20_250_506_224_012, SubscriptionIndexBridgingDisabled},
-    {20_250_523_164_012, RunSubscriptionIndexBridgingDisabled}
+    {20_250_523_164_012, RunSubscriptionIndexBridgingDisabled},
+    {20_250_714_121_412, BroadcastSendErrorLogging}
   ]
 
   defstruct [:tenant_external_id, :settings]
