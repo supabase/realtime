@@ -42,7 +42,8 @@ defmodule RealtimeWeb.UserSocket do
              max_bytes_per_second: max_bytes_per_second,
              max_joins_per_second: max_joins_per_second,
              max_channels_per_client: max_channels_per_client,
-             postgres_cdc_default: postgres_cdc_default
+             postgres_cdc_default: postgres_cdc_default,
+             suspend: false
            } <- Tenants.Cache.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- token,
            jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
@@ -74,6 +75,15 @@ defmodule RealtimeWeb.UserSocket do
         nil ->
           log_error("TenantNotFound", "Tenant not found: #{external_id}")
           {:error, :tenant_not_found}
+
+        %Tenant{suspend: true} ->
+          Logging.log_error_message(
+            :error,
+            "RealtimeDisabledForTenant",
+            "Realtime disabled for this tenant"
+          )
+
+          {:error, :tenant_suspended}
 
         {:error, :expired_token, msg} ->
           Logging.log_error_with_token_metadata("InvalidJWTToken", msg, token)
