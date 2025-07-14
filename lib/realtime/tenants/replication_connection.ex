@@ -27,6 +27,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   alias Realtime.Adapters.Postgres.Protocol.Write
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.Telemetry
   alias Realtime.Tenants.BatchBroadcast
   alias Realtime.Tenants.Cache
 
@@ -49,7 +50,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
           proto_version: integer(),
           relations: map(),
           buffer: list(),
-          monitored_pid: pid()
+          monitored_pid: pid(),
+          commit_timestamp: DateTime.t()
         }
   defstruct tenant_id: nil,
             table: nil,
@@ -62,7 +64,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
             proto_version: 1,
             relations: %{},
             buffer: [],
-            monitored_pid: nil
+            monitored_pid: nil,
+            commit_timestamp: nil
 
   defmodule Wrapper do
     @moduledoc """
@@ -280,6 +283,11 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   @impl true
+  def handle_info(%Decoder.Messages.Begin{commit_timestamp: commit_timestamp}, state) do
+    # Truncate to second to match inserted_at granularity and match naive datetime
+    {:noreply, %{state | commit_timestamp: commit_timestamp |> DateTime.truncate(:second) |> DateTime.to_naive()}}
+  end
+
   def handle_info(%Decoder.Messages.Relation{} = msg, state) do
     %Decoder.Messages.Relation{id: id, namespace: namespace, name: name, columns: columns} = msg
     %{relations: relations} = state
@@ -298,51 +306,34 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   def handle_info(%Decoder.Messages.Insert{} = msg, state) do
     %Decoder.Messages.Insert{relation_id: relation_id, tuple_data: tuple_data} = msg
-    %{relations: relations, tenant_id: tenant_id} = state
+    %{relations: relations, tenant_id: tenant_id, commit_timestamp: commit_timestamp} = state
 
-    case Map.get(relations, relation_id) do
-      %{columns: columns} ->
-        to_broadcast =
-          tuple_data
-          |> Tuple.to_list()
-          |> Enum.zip(columns)
-          |> Map.new(fn
-            {nil, %{name: name}} -> {name, nil}
-            {value, %{name: name, type: "jsonb"}} -> {name, Jason.decode!(value)}
-            {value, %{name: name, type: "bool"}} -> {name, value == "t"}
-            {value, %{name: name}} -> {name, value}
-          end)
+    with %{columns: columns} <- Map.get(relations, relation_id),
+         to_broadcast = tuple_to_map(tuple_data, columns),
+         {:ok, payload} <- get_or_error(to_broadcast, "payload", :payload_missing),
+         {:ok, inserted_at} <- get_or_error(to_broadcast, "inserted_at", :inserted_at_missing),
+         {:ok, event} <- get_or_error(to_broadcast, "event", :event_missing),
+         {:ok, id} <- get_or_error(to_broadcast, "id", :id_missing),
+         {:ok, topic} <- get_or_error(to_broadcast, "topic", :topic_missing),
+         {:ok, private} <- get_or_error(to_broadcast, "private", :private_missing),
+         %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id),
+         broadcast_message = %{topic: topic, event: event, private: private, payload: Map.put_new(payload, "id", id)},
+         :ok <- BatchBroadcast.broadcast(nil, tenant, %{messages: [broadcast_message]}, true) do
+      inserted_at = NaiveDateTime.from_iso8601!(inserted_at)
 
-        payload = Map.get(to_broadcast, "payload")
+      Telemetry.execute(
+        [:realtime, :broadcast, :broadcast_from_database],
+        %{inserted_at: inserted_at, commit_timestamp: commit_timestamp, utc_now: NaiveDateTime.utc_now(:second)},
+        %{tenant_id: tenant_id}
+      )
 
-        case payload do
-          nil ->
-            {:noreply, state}
-
-          payload ->
-            id = Map.fetch!(to_broadcast, "id")
-
-            to_broadcast =
-              %{
-                topic: Map.fetch!(to_broadcast, "topic"),
-                event: Map.fetch!(to_broadcast, "event"),
-                private: Map.fetch!(to_broadcast, "private"),
-                # Avoid overriding user provided id
-                payload: Map.put_new(payload, "id", id)
-              }
-
-            %Tenant{} = tenant = Cache.get_tenant_by_external_id(tenant_id)
-
-            case BatchBroadcast.broadcast(nil, tenant, %{messages: [to_broadcast]}, true) do
-              :ok -> :ok
-              error -> log_error("UnableToBatchBroadcastChanges", error)
-            end
-
-            {:noreply, state}
-        end
+      {:noreply, state}
+    else
+      {:error, error} ->
+        log_error("UnableToBroadcastChanges", error)
+        {:noreply, state}
 
       _ ->
-        log_error("UnknownBroadcastChangesRelation", "Relation ID not found: #{relation_id}")
         {:noreply, state}
     end
   rescue
@@ -378,4 +369,23 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   defp slot_suffix, do: Application.get_env(:realtime, :slot_name_suffix)
+
+  defp tuple_to_map(tuple_data, columns) do
+    tuple_data
+    |> Tuple.to_list()
+    |> Enum.zip(columns)
+    |> Map.new(fn
+      {nil, %{name: name}} -> {name, nil}
+      {value, %{name: name, type: "jsonb"}} -> {name, Jason.decode!(value)}
+      {value, %{name: name, type: "bool"}} -> {name, value == "t"}
+      {value, %{name: name}} -> {name, value}
+    end)
+  end
+
+  defp get_or_error(map, key, error_type) do
+    case Map.get(map, key) do
+      nil -> {:error, error_type}
+      value -> {:ok, value}
+    end
+  end
 end

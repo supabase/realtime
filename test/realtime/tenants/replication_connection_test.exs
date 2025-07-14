@@ -183,7 +183,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
             refute_receive %Phoenix.Socket.Broadcast{}, 500
           end)
 
-        assert logs =~ "UnableToBatchBroadcastChanges"
+        assert logs =~ "UnableToBroadcastChanges"
       end
 
       test "payload without id", %{tenant: tenant} do
@@ -316,6 +316,54 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
     test "returns nil if not exists" do
       assert ReplicationConnection.whereis(random_string()) == nil
+    end
+  end
+
+  def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {event, measures, metadata})
+
+  describe "telemetry events" do
+    setup do
+      :telemetry.detach(__MODULE__)
+
+      :telemetry.attach(
+        __MODULE__,
+        [:realtime, :broadcast, :broadcast_from_database],
+        &__MODULE__.handle_telemetry/4,
+        pid: self()
+      )
+    end
+
+    test "receives telemetry event", %{tenant: %{external_id: external_id} = tenant} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(external_id, topic, false)
+      Endpoint.subscribe(tenant_topic)
+
+      message_fixture(tenant, %{
+        "topic" => topic,
+        "private" => true,
+        "event" => "INSERT",
+        "payload" => %{"value" => random_string()}
+      })
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       event: "broadcast",
+                       payload: %{"event" => "INSERT", "payload" => _, "type" => "broadcast"},
+                       topic: ^tenant_topic
+                     },
+                     500
+
+      assert_receive {[:realtime, :broadcast, :broadcast_from_database],
+                      %{inserted_at: inserted_at, commit_timestamp: commit_timestamp, utc_now: utc_now},
+                      %{tenant_id: ^external_id}}
+
+      assert inserted_at
+      assert commit_timestamp
+      assert utc_now
     end
   end
 
