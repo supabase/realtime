@@ -26,7 +26,6 @@ defmodule Realtime.Tenants.Connect do
 
   @rpc_timeout_default 30_000
   @check_connected_user_interval_default 50_000
-  @check_connect_region_interval_default :timer.minutes(5)
   @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
 
   defstruct tenant_id: nil,
@@ -168,8 +167,7 @@ defmodule Realtime.Tenants.Connect do
     check_connected_user_interval =
       Keyword.get(opts, :check_connected_user_interval, @check_connected_user_interval_default)
 
-    check_connect_region_interval =
-      Keyword.get(opts, :check_connect_region_interval, @check_connect_region_interval_default)
+    check_connect_region_interval = Keyword.get(opts, :check_connect_region_interval, rebalance_check_interval_in_ms())
 
     name = {__MODULE__, tenant_id, %{conn: nil, region: region}}
 
@@ -392,4 +390,6 @@ defmodule Realtime.Tenants.Connect do
 
   defp tenant_suspended?(%Tenant{suspend: true}), do: {:error, :tenant_suspended}
   defp tenant_suspended?(_), do: :ok
+
+  defp rebalance_check_interval_in_ms(), do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
 end
