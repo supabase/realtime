@@ -5,6 +5,7 @@ defmodule Realtime.Tenants do
 
   require Logger
 
+  alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Repo
@@ -295,10 +296,8 @@ defmodule Realtime.Tenants do
   def suspend_tenant_by_external_id(external_id) do
     external_id
     |> Cache.get_tenant_by_external_id()
-    |> Tenant.changeset(%{suspend: true})
-    |> Repo.update!()
+    |> Api.update_tenant(%{suspend: true})
     |> tap(fn _ -> broadcast_operation_event(:suspend_tenant, external_id) end)
-    |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
   end
 
   @doc """
@@ -308,10 +307,8 @@ defmodule Realtime.Tenants do
   def unsuspend_tenant_by_external_id(external_id) do
     external_id
     |> Cache.get_tenant_by_external_id()
-    |> Tenant.changeset(%{suspend: false})
-    |> Repo.update!()
+    |> Api.update_tenant(%{suspend: false})
     |> tap(fn _ -> broadcast_operation_event(:unsuspend_tenant, external_id) end)
-    |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
   end
 
   @doc """

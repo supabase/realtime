@@ -322,11 +322,6 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :shutdown, state}
   end
 
-  def handle_info(:suspend_tenant, state) do
-    Logger.warning("Tenant was suspended, database connection will be terminated")
-    {:stop, :shutdown, state}
-  end
-
   def handle_info(:shutdown_connect, state) do
     Logger.warning("Shutdowning tenant connection")
     {:stop, :shutdown, state}
