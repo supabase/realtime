@@ -81,8 +81,8 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                   Realtime.Telemetry.execute(
                     [:realtime, :tenants, :broadcast_from_database],
                     %{
-                      latency_committed_at: 1,
-                      latency_inserted_at: 2
+                      latency_committed_at: 100,
+                      latency_inserted_at: 1
                     },
                     %{tenant_id: external_id}
                   )
@@ -220,9 +220,9 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(bucket_pattern) > 0
     end
 
-    test "metric broadcast_from_database exists after check", context do
+    test "metric realtime_tenants_broadcast_from_database_latency_committed_at exists after check", context do
       pattern =
-        ~r/realtime_tenants_broadcast_from_database{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
+        ~r/realtime_tenants_broadcast_from_database_latency_committed_at{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
 
       metric_value = metric_value(pattern)
 
@@ -231,7 +231,23 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
 
       bucket_pattern =
-        ~r/realtime_tenants_broadcast_from_database_bucket{tenant="#{context.tenant.external_id}",le="250"}\s(?<number>\d+)/
+        ~r/realtime_tenants_broadcast_from_database_latency_committed_at{tenant="#{context.tenant.external_id}",le="250"}\s(?<number>\d+)/
+
+      assert metric_value(bucket_pattern) > 0
+    end
+
+    test "metric realtime_tenants_broadcast_from_database_latency_inserted_at exists after check", context do
+      pattern =
+        ~r/realtime_tenants_broadcast_from_database_latency_inserted_at{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+
+      FakeUserCounter.fake_broadcast_from_database(context.tenant.external_id)
+      Process.sleep(200)
+      assert metric_value(pattern) == metric_value + 1
+
+      bucket_pattern =
+        ~r/realtime_tenants_broadcast_from_database_latency_inserted_at{tenant="#{context.tenant.external_id}",le="250"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
@@ -239,7 +255,6 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
   defp metric_value(pattern) do
     PromEx.get_metrics(MetricsTest)
-    |> IO.inspect(label: "metrics")
     |> String.split("\n", trim: true)
     |> Enum.find_value(
       "0",
