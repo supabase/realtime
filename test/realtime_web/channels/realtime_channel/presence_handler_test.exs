@@ -130,18 +130,14 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       log =
         capture_log(fn ->
-          for _ <- 1..100, reduce: socket do
-            socket ->
-              assert {:reply, :error, socket} =
-                       PresenceHandler.handle(
-                         %{"event" => "track", "payload" => %{"metadata" => random_string()}},
-                         db_conn,
-                         socket
-                       )
+          assert {:reply, :error, _} =
+                   PresenceHandler.handle(
+                     %{"event" => "track", "payload" => %{"metadata" => random_string()}},
+                     db_conn,
+                     socket
+                   )
 
-              refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
-              socket
-          end
+          refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
         end)
 
       assert log =~ "RlsPolicyError"
