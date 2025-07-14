@@ -10,7 +10,6 @@ defmodule Realtime.Tenants.ConnectTest do
   alias Realtime.Database
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect
-  alias Realtime.Tenants.Listen
   alias Realtime.Tenants.Rebalancer
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
@@ -273,20 +272,13 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Connect.ready?(tenant.external_id)
 
       replication_connection_before = ReplicationConnection.whereis(tenant.external_id)
-      listen_before = Listen.whereis(tenant.external_id)
-
       assert Process.alive?(replication_connection_before)
-      assert Process.alive?(listen_before)
 
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
       replication_connection_after = ReplicationConnection.whereis(tenant.external_id)
-      listen_after = Listen.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_after)
-      assert Process.alive?(listen_after)
-
       assert replication_connection_before == replication_connection_after
-      assert listen_before == listen_after
     end
 
     test "on replication connection postgres pid being stopped, also kills the Connect module", %{tenant: tenant} do
@@ -318,22 +310,6 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert_process_down(replication_connection_pid)
       assert_process_down(pid)
-    end
-
-    test "on listen exit, also kills the Connect module", %{tenant: tenant} do
-      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      assert Connect.ready?(tenant.external_id)
-
-      listen_pid = Listen.whereis(tenant.external_id)
-      assert Process.alive?(listen_pid)
-
-      pid = Connect.whereis(tenant.external_id)
-      Process.exit(listen_pid, :kill)
-
-      assert_process_down(listen_pid)
-      assert_process_down(pid)
-      refute Process.alive?(listen_pid)
-      refute Process.alive?(pid)
     end
 
     test "handles max_wal_senders by logging the correct operational code", %{tenant: tenant} do
@@ -393,15 +369,12 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Connect.ready?(tenant.external_id)
       connect_pid = Connect.whereis(tenant.external_id)
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
-      listen_pid = Listen.whereis(tenant.external_id)
       assert Process.alive?(connect_pid)
       assert Process.alive?(replication_connection_pid)
-      assert Process.alive?(listen_pid)
 
       Connect.shutdown(tenant.external_id)
       assert_process_down(connect_pid)
       assert_process_down(replication_connection_pid)
-      assert_process_down(listen_pid)
     end
 
     test "if tenant does not exist, does nothing" do

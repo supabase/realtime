@@ -20,7 +20,6 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants.Connect.Piper
   alias Realtime.Tenants.Connect.RegisterProcess
   alias Realtime.Tenants.Connect.StartCounters
-  alias Realtime.Tenants.Listen
   alias Realtime.Tenants.Migrations
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
@@ -35,8 +34,6 @@ defmodule Realtime.Tenants.Connect do
             db_conn_pid: nil,
             replication_connection_pid: nil,
             replication_connection_reference: nil,
-            listen_pid: nil,
-            listen_reference: nil,
             check_connected_user_interval: nil,
             connected_users_bucket: [1],
             check_connect_region_interval: nil
@@ -223,7 +220,7 @@ defmodule Realtime.Tenants.Connect do
 
     with res when res in [:ok, :noop] <- Migrations.run_migrations(tenant),
          :ok <- Migrations.create_partitions(db_conn_pid) do
-      {:noreply, state, {:continue, :start_listen_and_replication}}
+      {:noreply, state, {:continue, :start_replication}}
     else
       error ->
         log_error("MigrationsFailedToRun", error)
@@ -235,20 +232,16 @@ defmodule Realtime.Tenants.Connect do
       {:stop, :shutdown, state}
   end
 
-  def handle_continue(:start_listen_and_replication, state) do
+  def handle_continue(:start_replication, state) do
     %{tenant: tenant} = state
 
-    with {:ok, replication_connection_pid} <- ReplicationConnection.start(tenant, self()),
-         {:ok, listen_pid} <- Listen.start(tenant, self()) do
+    with {:ok, replication_connection_pid} <- ReplicationConnection.start(tenant, self()) do
       replication_connection_reference = Process.monitor(replication_connection_pid)
-      listen_reference = Process.monitor(listen_pid)
 
       state = %{
         state
         | replication_connection_pid: replication_connection_pid,
-          replication_connection_reference: replication_connection_reference,
-          listen_pid: listen_pid,
-          listen_reference: listen_reference
+          replication_connection_reference: replication_connection_reference
       }
 
       {:noreply, state, {:continue, :setup_connected_user_events}}
@@ -258,12 +251,12 @@ defmodule Realtime.Tenants.Connect do
         {:stop, :shutdown, state}
 
       {:error, error} ->
-        log_error("StartListenAndReplicationFailed", error)
+        log_error("StartReplicationFailed", error)
         {:stop, :shutdown, state}
     end
   rescue
     error ->
-      log_error("StartListenAndReplicationFailed", error)
+      log_error("StartReplicationFailed", error)
       {:stop, :shutdown, state}
   end
 
@@ -345,19 +338,7 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :shutdown, state}
   end
 
-  #  Handle listen connection termination
-  def handle_info(
-        {:DOWN, listen_reference, _, _, _},
-        %{listen_reference: listen_reference} = state
-      ) do
-    Logger.warning("Listen has been terminated")
-    {:stop, :shutdown, state}
-  end
-
-  # Ignore messages to avoid handle_info unmatched functions
-  def handle_info(_, state) do
-    {:noreply, state}
-  end
+  def handle_info(_, state), do: {:noreply, state}
 
   @impl true
   def handle_call(:ready?, _from, state) do
