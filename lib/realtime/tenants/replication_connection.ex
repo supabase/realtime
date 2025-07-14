@@ -140,9 +140,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
         ssl: connection_opts.ssl,
         backoff_type: :stop,
         sync_connect: true,
-        parameters: [
-          application_name: "realtime_replication_connection"
-        ]
+        parameters: [application_name: "realtime_replication_connection"]
       ]
 
     case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do
@@ -157,12 +155,13 @@ defmodule Realtime.Tenants.ReplicationConnection do
   def init(%__MODULE__{tenant_id: tenant_id, monitored_pid: monitored_pid} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Process.monitor(monitored_pid)
-    state = %{state | table: "messages", schema: "realtime"}
 
     state = %{
       state
       | publication_name: publication_name(state),
-        replication_slot_name: replication_slot_name(state)
+        replication_slot_name: replication_slot_name(state),
+        table: "messages",
+        schema: "realtime"
     }
 
     Logger.info("Initializing connection with the status: #{inspect(state, pretty: true)}")
@@ -175,8 +174,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     replication_slot_name = replication_slot_name(state)
     Logger.info("Checking if replication slot #{replication_slot_name} exists")
 
-    query =
-      "SELECT * FROM pg_replication_slots WHERE slot_name = '#{replication_slot_name}'"
+    query = "SELECT * FROM pg_replication_slots WHERE slot_name = '#{replication_slot_name}'"
 
     {:query, query, %{state | step: :check_replication_slot}}
   end
@@ -186,10 +184,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     {:disconnect, {:shutdown, "Temporary Replication slot already exists and in use"}}
   end
 
-  def handle_result(
-        [%Postgrex.Result{num_rows: 0}],
-        %__MODULE__{step: :check_replication_slot} = state
-      ) do
+  def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :check_replication_slot} = state) do
     %__MODULE__{
       output_plugin: output_plugin,
       replication_slot_name: replication_slot_name,
@@ -198,8 +193,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     Logger.info("Create replication slot #{replication_slot_name} using plugin #{output_plugin}")
 
-    query =
-      "CREATE_REPLICATION_SLOT #{replication_slot_name} TEMPORARY LOGICAL #{output_plugin} NOEXPORT_SNAPSHOT"
+    query = "CREATE_REPLICATION_SLOT #{replication_slot_name} TEMPORARY LOGICAL #{output_plugin} NOEXPORT_SNAPSHOT"
 
     {:query, query, %{state | step: :check_publication}}
   end
@@ -213,10 +207,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     {:query, query, %{state | step: :create_publication}}
   end
 
-  def handle_result(
-        [%Postgrex.Result{num_rows: 0}],
-        %__MODULE__{step: :create_publication} = state
-      ) do
+  def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :create_publication} = state) do
     %__MODULE__{table: table, schema: schema, publication_name: publication_name} = state
 
     Logger.info("Create publication #{publication_name} for table #{schema}.#{table}")
@@ -225,18 +216,12 @@ defmodule Realtime.Tenants.ReplicationConnection do
     {:query, query, %{state | step: :start_replication_slot}}
   end
 
-  def handle_result(
-        [%Postgrex.Result{num_rows: 1}],
-        %__MODULE__{step: :create_publication} = state
-      ) do
+  def handle_result([%Postgrex.Result{num_rows: 1}], %__MODULE__{step: :create_publication} = state) do
     {:query, "SELECT 1", %{state | step: :start_replication_slot}}
   end
 
   @impl true
-  def handle_result(
-        [%Postgrex.Result{}],
-        %__MODULE__{step: :start_replication_slot} = state
-      ) do
+  def handle_result([%Postgrex.Result{}], %__MODULE__{step: :start_replication_slot} = state) do
     %__MODULE__{
       proto_version: proto_version,
       replication_slot_name: replication_slot_name,
@@ -284,10 +269,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @impl true
   def handle_info(%Decoder.Messages.Begin{commit_timestamp: commit_timestamp}, state) do
-    latency_committed_at =
-      NaiveDateTime.utc_now()
-      |> NaiveDateTime.diff(commit_timestamp, :millisecond)
-
+    latency_committed_at = NaiveDateTime.utc_now() |> NaiveDateTime.diff(commit_timestamp, :millisecond)
     {:noreply, %{state | latency_committed_at: latency_committed_at}}
   end
 
