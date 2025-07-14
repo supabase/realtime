@@ -51,7 +51,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
           relations: map(),
           buffer: list(),
           monitored_pid: pid(),
-          commit_timestamp: DateTime.t()
+          latency_committed_at: integer()
         }
   defstruct tenant_id: nil,
             table: nil,
@@ -65,7 +65,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
             relations: %{},
             buffer: [],
             monitored_pid: nil,
-            commit_timestamp: nil
+            latency_committed_at: nil
 
   defmodule Wrapper do
     @moduledoc """
@@ -285,7 +285,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
   @impl true
   def handle_info(%Decoder.Messages.Begin{commit_timestamp: commit_timestamp}, state) do
     # Truncate to second to match inserted_at granularity and match naive datetime
-    {:noreply, %{state | commit_timestamp: commit_timestamp |> DateTime.truncate(:second) |> DateTime.to_naive()}}
+    latency_committed_at = NaiveDateTime.utc_now(:second) |> NaiveDateTime.diff(commit_timestamp, :second)
+
+    {:noreply, %{state | latency_committed_at: latency_committed_at}}
   end
 
   def handle_info(%Decoder.Messages.Relation{} = msg, state) do
@@ -306,7 +308,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   def handle_info(%Decoder.Messages.Insert{} = msg, state) do
     %Decoder.Messages.Insert{relation_id: relation_id, tuple_data: tuple_data} = msg
-    %{relations: relations, tenant_id: tenant_id, commit_timestamp: commit_timestamp} = state
+    %{relations: relations, tenant_id: tenant_id, latency_committed_at: latency_committed_at} = state
 
     with %{columns: columns} <- Map.get(relations, relation_id),
          to_broadcast = tuple_to_map(tuple_data, columns),
@@ -320,10 +322,11 @@ defmodule Realtime.Tenants.ReplicationConnection do
          broadcast_message = %{topic: topic, event: event, private: private, payload: Map.put_new(payload, "id", id)},
          :ok <- BatchBroadcast.broadcast(nil, tenant, %{messages: [broadcast_message]}, true) do
       inserted_at = NaiveDateTime.from_iso8601!(inserted_at)
+      latency_inserted_at = NaiveDateTime.utc_now(:second) |> NaiveDateTime.diff(inserted_at, :second)
 
       Telemetry.execute(
         [:realtime, :broadcast, :broadcast_from_database],
-        %{inserted_at: inserted_at, commit_timestamp: commit_timestamp, utc_now: NaiveDateTime.utc_now(:second)},
+        %{latency_committed_at: latency_committed_at, latency_inserted_at: latency_inserted_at},
         %{tenant_id: tenant_id}
       )
 

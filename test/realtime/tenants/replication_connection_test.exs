@@ -358,12 +358,11 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                      500
 
       assert_receive {[:realtime, :broadcast, :broadcast_from_database],
-                      %{inserted_at: inserted_at, commit_timestamp: commit_timestamp, utc_now: utc_now},
+                      %{latency_committed_at: latency_committed_at, latency_inserted_at: latency_inserted_at},
                       %{tenant_id: ^external_id}}
 
-      assert inserted_at
-      assert commit_timestamp
-      assert utc_now
+      assert latency_committed_at
+      assert latency_inserted_at
     end
   end
 
