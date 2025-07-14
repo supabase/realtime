@@ -1609,7 +1609,7 @@ defmodule Realtime.Integration.RtChannelTest do
   describe "socket disconnect" do
     setup [:rls_context]
 
-    test "tenant already suspended", %{topic: topic} do
+    test "tenant already suspended", %{topic: _topic} do
       tenant = Containers.checkout_tenant(run_migrations: true)
       {:ok, _} = Realtime.Api.update_tenant(tenant, %{suspend: true})
       {:error, %Mint.WebSocket.UpgradeFailureError{}} = get_connection(tenant, "anon")

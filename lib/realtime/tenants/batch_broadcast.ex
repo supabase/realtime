@@ -27,7 +27,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
   @spec broadcast(
           auth_params :: map() | nil,
-          tenant :: %Tenant{},
+          tenant :: Tenant.t(),
           messages :: %{messages: list(%{topic: String.t(), payload: map(), event: String.t(), private: boolean()})},
           super_user :: boolean()
         ) :: :ok | {:error, atom()}

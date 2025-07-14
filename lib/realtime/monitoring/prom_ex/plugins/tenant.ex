@@ -184,19 +184,19 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           [:realtime, :tenants, :broadcast_from_database, :latency_committed_at],
           event_name: [:realtime, :tenants, :broadcast_from_database],
           measurement: :latency_committed_at,
-          unit: :microsecond,
-          description: "Latency of database transaction start until reaches realtime",
+          unit: :millisecond,
+          description: "Latency of database transaction start until reaches server to be broadcasted",
           tags: [:tenant],
-          reporter_options: [buckets: [10, 250, 5000, 15_000]]
+          reporter_options: [buckets: [10, 250, 5000]]
         ),
         distribution(
           [:realtime, :tenants, :broadcast_from_database, :latency_inserted_at],
           event_name: [:realtime, :tenants, :broadcast_from_database],
           measurement: :latency_inserted_at,
           unit: :second,
-          description: "Latency of database inserted_at until reaches realtime",
+          description: "Latency of database inserted_at until reaches server to be broadcasted",
           tags: [:tenant],
-          reporter_options: [buckets: [1, 2, 5, 10, 15]]
+          reporter_options: [buckets: [1, 2, 5]]
         )
       ]
     )

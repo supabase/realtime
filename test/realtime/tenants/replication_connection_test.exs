@@ -327,7 +327,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
       :telemetry.attach(
         __MODULE__,
-        [:realtime, :broadcast, :broadcast_from_database],
+        [:realtime, :tenants, :broadcast_from_database],
         &__MODULE__.handle_telemetry/4,
         pid: self()
       )
@@ -357,9 +357,9 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                      },
                      500
 
-      assert_receive {[:realtime, :broadcast, :broadcast_from_database],
+      assert_receive {[:realtime, :tenants, :broadcast_from_database],
                       %{latency_committed_at: latency_committed_at, latency_inserted_at: latency_inserted_at},
-                      %{tenant_id: ^external_id}}
+                      %{tenant: ^external_id}}
 
       assert latency_committed_at
       assert latency_inserted_at

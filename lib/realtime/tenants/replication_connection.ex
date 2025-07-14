@@ -284,7 +284,10 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @impl true
   def handle_info(%Decoder.Messages.Begin{commit_timestamp: commit_timestamp}, state) do
-    latency_committed_at = NaiveDateTime.utc_now() |> NaiveDateTime.diff(commit_timestamp)
+    latency_committed_at =
+      NaiveDateTime.utc_now()
+      |> NaiveDateTime.diff(commit_timestamp, :millisecond)
+
     {:noreply, %{state | latency_committed_at: latency_committed_at}}
   end
 
@@ -323,9 +326,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
       latency_inserted_at = NaiveDateTime.utc_now() |> NaiveDateTime.diff(inserted_at)
 
       Telemetry.execute(
-        [:realtime, :broadcast, :broadcast_from_database],
+        [:realtime, :tenants, :broadcast_from_database],
         %{latency_committed_at: latency_committed_at, latency_inserted_at: latency_inserted_at},
-        %{tenant_id: tenant_id}
+        %{tenant: tenant_id}
       )
 
       {:noreply, state}
