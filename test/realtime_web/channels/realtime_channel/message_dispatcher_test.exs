@@ -50,8 +50,8 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       from_pid = :erlang.list_to_pid(~c'<0.2.1>')
 
       subscribers = [
-        {subscriber_pid, {:realtime_channel_fastlane, self(), TestSerializer, "realtime:topic"}},
-        {subscriber_pid, {:realtime_channel_fastlane, self(), TestSerializer, "realtime:topic", {:log, "tenant123"}}}
+        {subscriber_pid, {:realtime_channel_fastlane, self(), TestSerializer, "realtime:topic", {:log, "tenant123"}}},
+        {subscriber_pid, {:realtime_channel_fastlane, self(), TestSerializer, "realtime:topic"}}
       ]
 
       msg = %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}

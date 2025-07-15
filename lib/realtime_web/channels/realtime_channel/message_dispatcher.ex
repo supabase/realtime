@@ -35,8 +35,8 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
         {pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic, {:log, tenant_id}}}, cache ->
           send(pid, :update_rate_counter)
-          msg = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
-          Logger.info(msg, external_id: tenant_id, project: tenant_id)
+          log = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
+          Logger.info(log, external_id: tenant_id, project: tenant_id)
 
           do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
 
