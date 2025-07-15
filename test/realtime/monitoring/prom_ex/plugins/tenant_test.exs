@@ -76,6 +76,17 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                   |> Realtime.Tenants.presence_events_per_second_key()
                   |> Realtime.GenCounter.add()
                 end
+
+                def fake_broadcast_from_database(external_id) do
+                  Realtime.Telemetry.execute(
+                    [:realtime, :tenants, :broadcast_from_database],
+                    %{
+                      latency_committed_at: 10,
+                      latency_inserted_at: 1
+                    },
+                    %{tenant: external_id}
+                  )
+                end
               end
             end)
 
@@ -138,7 +149,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       metric_value = metric_value(pattern)
       FakeUserCounter.fake_event(external_id)
 
-      Process.sleep(100)
+      Process.sleep(200)
       assert metric_value(pattern) == metric_value + 1
     end
 
@@ -148,7 +159,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       metric_value = metric_value(pattern)
       FakeUserCounter.fake_db_event(external_id)
-      Process.sleep(100)
+      Process.sleep(200)
       assert metric_value(pattern) == metric_value + 1
     end
 
@@ -158,7 +169,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       metric_value = metric_value(pattern)
       FakeUserCounter.fake_presence_event(external_id)
-      Process.sleep(100)
+      Process.sleep(200)
       assert metric_value(pattern) == metric_value + 1
     end
 
@@ -205,6 +216,37 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       bucket_pattern =
         ~r/realtime_tenants_write_authorization_check_bucket{tenant="#{context.tenant.external_id}",le="250"}\s(?<number>\d+)/
+
+      assert metric_value(bucket_pattern) > 0
+    end
+
+    test "metric realtime_tenants_broadcast_from_database_latency_committed_at exists after check", context do
+      pattern =
+        ~r/realtime_tenants_broadcast_from_database_latency_committed_at_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+      FakeUserCounter.fake_broadcast_from_database(context.tenant.external_id)
+      Process.sleep(200)
+      assert metric_value(pattern) == metric_value + 1
+
+      bucket_pattern =
+        ~r/realtime_tenants_broadcast_from_database_latency_committed_at_bucket{tenant="#{context.tenant.external_id}",le="10"}\s(?<number>\d+)/
+
+      assert metric_value(bucket_pattern) > 0
+    end
+
+    test "metric realtime_tenants_broadcast_from_database_latency_inserted_at exists after check", context do
+      pattern =
+        ~r/realtime_tenants_broadcast_from_database_latency_inserted_at_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+
+      FakeUserCounter.fake_broadcast_from_database(context.tenant.external_id)
+      Process.sleep(200)
+      assert metric_value(pattern) == metric_value + 1
+
+      bucket_pattern =
+        ~r/realtime_tenants_broadcast_from_database_latency_inserted_at_bucket{tenant="#{context.tenant.external_id}",le="5"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end

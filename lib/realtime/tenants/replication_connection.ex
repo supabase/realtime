@@ -27,13 +27,12 @@ defmodule Realtime.Tenants.ReplicationConnection do
   alias Realtime.Adapters.Postgres.Protocol.Write
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.Telemetry
   alias Realtime.Tenants.BatchBroadcast
   alias Realtime.Tenants.Cache
 
   @type t :: %__MODULE__{
           tenant_id: String.t(),
-          table: String.t(),
-          schema: String.t(),
           opts: Keyword.t(),
           step:
             :disconnected
@@ -49,11 +48,10 @@ defmodule Realtime.Tenants.ReplicationConnection do
           proto_version: integer(),
           relations: map(),
           buffer: list(),
-          monitored_pid: pid()
+          monitored_pid: pid(),
+          latency_committed_at: integer()
         }
   defstruct tenant_id: nil,
-            table: nil,
-            schema: "public",
             opts: [],
             step: :disconnected,
             publication_name: nil,
@@ -62,7 +60,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
             proto_version: 1,
             relations: %{},
             buffer: [],
-            monitored_pid: nil
+            monitored_pid: nil,
+            latency_committed_at: nil
 
   defmodule Wrapper do
     @moduledoc """
@@ -84,7 +83,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   @default_init_timeout 30_000
-
+  @table "messages"
+  @schema "realtime"
   @doc """
   Starts the replication connection for a tenant and monitors a given pid to stop the ReplicationConnection.
   """
@@ -137,9 +137,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
         ssl: connection_opts.ssl,
         backoff_type: :stop,
         sync_connect: true,
-        parameters: [
-          application_name: "realtime_replication_connection"
-        ]
+        parameters: [application_name: "realtime_replication_connection"]
       ]
 
     case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do
@@ -154,12 +152,11 @@ defmodule Realtime.Tenants.ReplicationConnection do
   def init(%__MODULE__{tenant_id: tenant_id, monitored_pid: monitored_pid} = state) do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Process.monitor(monitored_pid)
-    state = %{state | table: "messages", schema: "realtime"}
 
     state = %{
       state
-      | publication_name: publication_name(state),
-        replication_slot_name: replication_slot_name(state)
+      | publication_name: publication_name(@schema, @table),
+        replication_slot_name: replication_slot_name(@schema, @table)
     }
 
     Logger.info("Initializing connection with the status: #{inspect(state, pretty: true)}")
@@ -169,11 +166,10 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @impl true
   def handle_connect(state) do
-    replication_slot_name = replication_slot_name(state)
+    replication_slot_name = replication_slot_name(@schema, @table)
     Logger.info("Checking if replication slot #{replication_slot_name} exists")
 
-    query =
-      "SELECT * FROM pg_replication_slots WHERE slot_name = '#{replication_slot_name}'"
+    query = "SELECT * FROM pg_replication_slots WHERE slot_name = '#{replication_slot_name}'"
 
     {:query, query, %{state | step: :check_replication_slot}}
   end
@@ -183,10 +179,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     {:disconnect, {:shutdown, "Temporary Replication slot already exists and in use"}}
   end
 
-  def handle_result(
-        [%Postgrex.Result{num_rows: 0}],
-        %__MODULE__{step: :check_replication_slot} = state
-      ) do
+  def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :check_replication_slot} = state) do
     %__MODULE__{
       output_plugin: output_plugin,
       replication_slot_name: replication_slot_name,
@@ -195,45 +188,35 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     Logger.info("Create replication slot #{replication_slot_name} using plugin #{output_plugin}")
 
-    query =
-      "CREATE_REPLICATION_SLOT #{replication_slot_name} TEMPORARY LOGICAL #{output_plugin} NOEXPORT_SNAPSHOT"
+    query = "CREATE_REPLICATION_SLOT #{replication_slot_name} TEMPORARY LOGICAL #{output_plugin} NOEXPORT_SNAPSHOT"
 
     {:query, query, %{state | step: :check_publication}}
   end
 
   def handle_result([%Postgrex.Result{}], %__MODULE__{step: :check_publication} = state) do
-    %__MODULE__{table: table, schema: schema, publication_name: publication_name} = state
+    %__MODULE__{publication_name: publication_name} = state
 
-    Logger.info("Check publication #{publication_name} for table #{schema}.#{table} exists")
+    Logger.info("Check publication #{publication_name} for table #{@schema}.#{@table} exists")
     query = "SELECT * FROM pg_publication WHERE pubname = '#{publication_name}'"
 
     {:query, query, %{state | step: :create_publication}}
   end
 
-  def handle_result(
-        [%Postgrex.Result{num_rows: 0}],
-        %__MODULE__{step: :create_publication} = state
-      ) do
-    %__MODULE__{table: table, schema: schema, publication_name: publication_name} = state
+  def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :create_publication} = state) do
+    %__MODULE__{publication_name: publication_name} = state
 
-    Logger.info("Create publication #{publication_name} for table #{schema}.#{table}")
-    query = "CREATE PUBLICATION #{publication_name} FOR TABLE #{schema}.#{table}"
+    Logger.info("Create publication #{publication_name} for table #{@schema}.#{@table}")
+    query = "CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
 
     {:query, query, %{state | step: :start_replication_slot}}
   end
 
-  def handle_result(
-        [%Postgrex.Result{num_rows: 1}],
-        %__MODULE__{step: :create_publication} = state
-      ) do
+  def handle_result([%Postgrex.Result{num_rows: 1}], %__MODULE__{step: :create_publication} = state) do
     {:query, "SELECT 1", %{state | step: :start_replication_slot}}
   end
 
   @impl true
-  def handle_result(
-        [%Postgrex.Result{}],
-        %__MODULE__{step: :start_replication_slot} = state
-      ) do
+  def handle_result([%Postgrex.Result{}], %__MODULE__{step: :start_replication_slot} = state) do
     %__MODULE__{
       proto_version: proto_version,
       replication_slot_name: replication_slot_name,
@@ -280,6 +263,11 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   @impl true
+  def handle_info(%Decoder.Messages.Begin{commit_timestamp: commit_timestamp}, state) do
+    latency_committed_at = NaiveDateTime.utc_now() |> NaiveDateTime.diff(commit_timestamp, :millisecond)
+    {:noreply, %{state | latency_committed_at: latency_committed_at}}
+  end
+
   def handle_info(%Decoder.Messages.Relation{} = msg, state) do
     %Decoder.Messages.Relation{id: id, namespace: namespace, name: name, columns: columns} = msg
     %{relations: relations} = state
@@ -298,51 +286,35 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   def handle_info(%Decoder.Messages.Insert{} = msg, state) do
     %Decoder.Messages.Insert{relation_id: relation_id, tuple_data: tuple_data} = msg
-    %{relations: relations, tenant_id: tenant_id} = state
+    %{relations: relations, tenant_id: tenant_id, latency_committed_at: latency_committed_at} = state
 
-    case Map.get(relations, relation_id) do
-      %{columns: columns} ->
-        to_broadcast =
-          tuple_data
-          |> Tuple.to_list()
-          |> Enum.zip(columns)
-          |> Map.new(fn
-            {nil, %{name: name}} -> {name, nil}
-            {value, %{name: name, type: "jsonb"}} -> {name, Jason.decode!(value)}
-            {value, %{name: name, type: "bool"}} -> {name, value == "t"}
-            {value, %{name: name}} -> {name, value}
-          end)
+    with %{columns: columns} <- Map.get(relations, relation_id),
+         to_broadcast = tuple_to_map(tuple_data, columns),
+         {:ok, payload} <- get_or_error(to_broadcast, "payload", :payload_missing),
+         {:ok, inserted_at} <- get_or_error(to_broadcast, "inserted_at", :inserted_at_missing),
+         {:ok, event} <- get_or_error(to_broadcast, "event", :event_missing),
+         {:ok, id} <- get_or_error(to_broadcast, "id", :id_missing),
+         {:ok, topic} <- get_or_error(to_broadcast, "topic", :topic_missing),
+         {:ok, private} <- get_or_error(to_broadcast, "private", :private_missing),
+         %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id),
+         broadcast_message = %{topic: topic, event: event, private: private, payload: Map.put_new(payload, "id", id)},
+         :ok <- BatchBroadcast.broadcast(nil, tenant, %{messages: [broadcast_message]}, true) do
+      inserted_at = NaiveDateTime.from_iso8601!(inserted_at)
+      latency_inserted_at = NaiveDateTime.utc_now() |> NaiveDateTime.diff(inserted_at)
 
-        payload = Map.get(to_broadcast, "payload")
+      Telemetry.execute(
+        [:realtime, :tenants, :broadcast_from_database],
+        %{latency_committed_at: latency_committed_at, latency_inserted_at: latency_inserted_at},
+        %{tenant: tenant_id}
+      )
 
-        case payload do
-          nil ->
-            {:noreply, state}
-
-          payload ->
-            id = Map.fetch!(to_broadcast, "id")
-
-            to_broadcast =
-              %{
-                topic: Map.fetch!(to_broadcast, "topic"),
-                event: Map.fetch!(to_broadcast, "event"),
-                private: Map.fetch!(to_broadcast, "private"),
-                # Avoid overriding user provided id
-                payload: Map.put_new(payload, "id", id)
-              }
-
-            %Tenant{} = tenant = Cache.get_tenant_by_external_id(tenant_id)
-
-            case BatchBroadcast.broadcast(nil, tenant, %{messages: [to_broadcast]}, true) do
-              :ok -> :ok
-              error -> log_error("UnableToBatchBroadcastChanges", error)
-            end
-
-            {:noreply, state}
-        end
+      {:noreply, state}
+    else
+      {:error, error} ->
+        log_error("UnableToBroadcastChanges", error)
+        {:noreply, state}
 
       _ ->
-        log_error("UnknownBroadcastChangesRelation", "Relation ID not found: #{relation_id}")
         {:noreply, state}
     end
   rescue
@@ -369,13 +341,32 @@ defmodule Realtime.Tenants.ReplicationConnection do
     {:via, PartitionSupervisor, {__MODULE__.DynamicSupervisor, tenant_id}}
   end
 
-  def publication_name(%__MODULE__{table: table, schema: schema}) do
+  def publication_name(schema, table) do
     "supabase_#{schema}_#{table}_publication"
   end
 
-  def replication_slot_name(%__MODULE__{table: table, schema: schema}) do
+  def replication_slot_name(schema, table) do
     "supabase_#{schema}_#{table}_replication_slot_#{slot_suffix()}"
   end
 
   defp slot_suffix, do: Application.get_env(:realtime, :slot_name_suffix)
+
+  defp tuple_to_map(tuple_data, columns) do
+    tuple_data
+    |> Tuple.to_list()
+    |> Enum.zip(columns)
+    |> Map.new(fn
+      {nil, %{name: name}} -> {name, nil}
+      {value, %{name: name, type: "jsonb"}} -> {name, Jason.decode!(value)}
+      {value, %{name: name, type: "bool"}} -> {name, value == "t"}
+      {value, %{name: name}} -> {name, value}
+    end)
+  end
+
+  defp get_or_error(map, key, error_type) do
+    case Map.get(map, key) do
+      nil -> {:error, error_type}
+      value -> {:ok, value}
+    end
+  end
 end
