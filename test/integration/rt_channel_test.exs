@@ -1610,10 +1610,15 @@ defmodule Realtime.Integration.RtChannelTest do
 
     test "tenant already suspended", %{topic: _topic} do
       tenant = Containers.checkout_tenant(run_migrations: true)
-      {:ok, _} = Realtime.Api.update_tenant(tenant, %{suspend: true})
-      {:error, %Mint.WebSocket.UpgradeFailureError{}} = get_connection(tenant, "anon")
 
-      refute_receive _any
+      log =
+        capture_log(fn ->
+          {:ok, _} = Realtime.Api.update_tenant(tenant, %{suspend: true})
+          {:error, %Mint.WebSocket.UpgradeFailureError{}} = get_connection(tenant, "anon")
+          refute_receive _any
+        end)
+
+      assert log =~ "RealtimeDisabledForTenant"
     end
 
     test "on jwks the socket closes and sends a system message", %{tenant: tenant, topic: topic} do
