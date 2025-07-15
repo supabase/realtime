@@ -2158,6 +2158,62 @@ defmodule Realtime.Integration.RtChannelTest do
     assert [{_pid, 0}] = Tracker.list_pids()
   end
 
+  test "failed connections are present in tracker with counter counter lower than 0 so they are actioned on by tracker",
+       %{tenant: tenant} do
+    assert [] = Tracker.list_pids()
+
+    {socket, _} = get_connection(tenant)
+    config = %{broadcast: %{self: true}, private: true, presence: %{enabled: false}}
+
+    for _ <- 1..10 do
+      topic = "realtime:#{random_string()}"
+      :ok = WebsocketClient.join(socket, topic, %{config: config})
+      assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "error"}}, 500
+    end
+
+    assert [{_pid, count}] = Tracker.list_pids()
+    assert count == 0
+  end
+
+  test "failed connections but one succeeds properly tracks",
+       %{tenant: tenant} do
+    assert [] = Tracker.list_pids()
+
+    {socket, _} = get_connection(tenant)
+    topic = "realtime:#{random_string()}"
+
+    :ok =
+      WebsocketClient.join(socket, topic, %{
+        config: %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
+      })
+
+    assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
+    assert [{_pid, count}] = Tracker.list_pids()
+    assert count == 1
+
+    for _ <- 1..10 do
+      topic = "realtime:#{random_string()}"
+
+      :ok =
+        WebsocketClient.join(socket, topic, %{
+          config: %{broadcast: %{self: true}, private: true, presence: %{enabled: false}}
+        })
+
+      assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "error"}}, 500
+    end
+
+    topic = "realtime:#{random_string()}"
+
+    :ok =
+      WebsocketClient.join(socket, topic, %{
+        config: %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
+      })
+
+    assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
+    assert [{_pid, count}] = Tracker.list_pids()
+    assert count == 2
+  end
+
   defp mode(%{mode: :distributed, tenant: tenant}) do
     Connect.shutdown(tenant.external_id)
     # Sleeping so that syn can forget about this Connect process

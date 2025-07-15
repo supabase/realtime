@@ -43,6 +43,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       transport_pid: transport_pid
     } = socket
 
+    Tracker.track(socket.transport_pid)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
 
@@ -114,7 +115,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       Realtime.UsersCounter.add(transport_pid, tenant_id)
       SocketDisconnect.add(tenant_id, socket)
-      Tracker.track(socket.transport_pid)
 
       {:ok, state, assign(socket, assigns)}
     else
