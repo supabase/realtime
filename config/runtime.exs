@@ -21,13 +21,15 @@ migration_partition_slots =
 connect_partition_slots =
   System.get_env("CONNECT_PARTITION_SLOTS", "#{System.schedulers_online() * 2}") |> String.to_integer()
 
-connect_throttle_limit_per_second = System.get_env("CONNECT_THROTTLE_LIMIT_PER_SECOND", "1") |> String.to_integer()
 # defaults to 30 minutes
 metrics_cleaner_schedule_timer_in_ms =
   System.get_env("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", "1800000") |> String.to_integer()
 
 metrics_rpc_timeout_in_ms =
   System.get_env("METRICS_RPC_TIMEOUT_IN_MS", "15000") |> String.to_integer()
+
+rebalance_check_interval_in_ms =
+  System.get_env("REBALANCE_CHECK_INTERVAL_IN_MS", to_string(:timer.minutes(10))) |> String.to_integer()
 
 tenant_max_bytes_per_second = System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100000") |> String.to_integer()
 tenant_max_channels_per_client = System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer()
@@ -68,7 +70,7 @@ socket_options =
 config :realtime,
   migration_partition_slots: migration_partition_slots,
   connect_partition_slots: connect_partition_slots,
-  connect_throttle_limit_per_second: connect_throttle_limit_per_second,
+  rebalance_check_interval_in_ms: rebalance_check_interval_in_ms,
   tenant_max_bytes_per_second: tenant_max_bytes_per_second,
   tenant_max_channels_per_client: tenant_max_channels_per_client,
   tenant_max_concurrent_users: tenant_max_concurrent_users,
