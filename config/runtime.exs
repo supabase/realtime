@@ -52,7 +52,7 @@ janitor_children_timeout = System.get_env("JANITOR_CHILDREN_TIMEOUT", "5000") |>
 # 4 hours by default
 janitor_schedule_timer = System.get_env("JANITOR_SCHEDULE_TIMER_IN_MS", "14400000") |> String.to_integer()
 # defaults to 30 seconds
-no_channel_timeout_in_ms = System.get_env("NO_CHANNEL_TIMEOUT_IN_MS", "30000") |> String.to_integer()
+no_channel_timeout_in_ms = System.get_env("NO_CHANNEL_TIMEOUT_IN_MS", "600000") |> String.to_integer()
 
 if !(db_version in [nil, "ipv6", "ipv4"]),
   do: raise("Invalid IP version, please set either ipv6 or ipv4")
