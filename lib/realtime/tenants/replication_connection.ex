@@ -33,8 +33,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @type t :: %__MODULE__{
           tenant_id: String.t(),
-          table: String.t(),
-          schema: String.t(),
           opts: Keyword.t(),
           step:
             :disconnected
@@ -54,8 +52,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
           latency_committed_at: integer()
         }
   defstruct tenant_id: nil,
-            table: nil,
-            schema: "public",
             opts: [],
             step: :disconnected,
             publication_name: nil,
@@ -87,7 +83,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   @default_init_timeout 30_000
-
+  @table "messages"
+  @schema "realtime"
   @doc """
   Starts the replication connection for a tenant and monitors a given pid to stop the ReplicationConnection.
   """
@@ -158,10 +155,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     state = %{
       state
-      | publication_name: publication_name(state),
-        replication_slot_name: replication_slot_name(state),
-        table: "messages",
-        schema: "realtime"
+      | publication_name: publication_name(@schema, @table),
+        replication_slot_name: replication_slot_name(@schema, @table)
     }
 
     Logger.info("Initializing connection with the status: #{inspect(state, pretty: true)}")
@@ -171,7 +166,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @impl true
   def handle_connect(state) do
-    replication_slot_name = replication_slot_name(state)
+    replication_slot_name = replication_slot_name(@schema, @table)
     Logger.info("Checking if replication slot #{replication_slot_name} exists")
 
     query = "SELECT * FROM pg_replication_slots WHERE slot_name = '#{replication_slot_name}'"
@@ -199,19 +194,19 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   def handle_result([%Postgrex.Result{}], %__MODULE__{step: :check_publication} = state) do
-    %__MODULE__{table: table, schema: schema, publication_name: publication_name} = state
+    %__MODULE__{publication_name: publication_name} = state
 
-    Logger.info("Check publication #{publication_name} for table #{schema}.#{table} exists")
+    Logger.info("Check publication #{publication_name} for table #{@schema}.#{@table} exists")
     query = "SELECT * FROM pg_publication WHERE pubname = '#{publication_name}'"
 
     {:query, query, %{state | step: :create_publication}}
   end
 
   def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :create_publication} = state) do
-    %__MODULE__{table: table, schema: schema, publication_name: publication_name} = state
+    %__MODULE__{publication_name: publication_name} = state
 
-    Logger.info("Create publication #{publication_name} for table #{schema}.#{table}")
-    query = "CREATE PUBLICATION #{publication_name} FOR TABLE #{schema}.#{table}"
+    Logger.info("Create publication #{publication_name} for table #{@schema}.#{@table}")
+    query = "CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
 
     {:query, query, %{state | step: :start_replication_slot}}
   end
@@ -346,11 +341,11 @@ defmodule Realtime.Tenants.ReplicationConnection do
     {:via, PartitionSupervisor, {__MODULE__.DynamicSupervisor, tenant_id}}
   end
 
-  def publication_name(%__MODULE__{table: table, schema: schema}) do
+  def publication_name(schema, table) do
     "supabase_#{schema}_#{table}_publication"
   end
 
-  def replication_slot_name(%__MODULE__{table: table, schema: schema}) do
+  def replication_slot_name(schema, table) do
     "supabase_#{schema}_#{table}_replication_slot_#{slot_suffix()}"
   end
 
