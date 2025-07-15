@@ -83,9 +83,15 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
       }
 
       if self_broadcast do
-        TenantBroadcaster.pubsub_broadcast(tenant, tenant_topic, broadcast, RealtimeChannel)
+        TenantBroadcaster.pubsub_broadcast(tenant, tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
       else
-        TenantBroadcaster.pubsub_broadcast_from(tenant, self(), tenant_topic, broadcast, RealtimeChannel)
+        TenantBroadcaster.pubsub_broadcast_from(
+          tenant,
+          self(),
+          tenant_topic,
+          broadcast,
+          RealtimeChannel.MessageDispatcher
+        )
       end
     end
   end

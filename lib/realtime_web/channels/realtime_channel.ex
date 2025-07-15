@@ -24,6 +24,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.Logging
+  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
 
   @confirm_token_ms_interval :timer.minutes(5)
@@ -65,8 +66,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
       # fastlane subscription
-      fastlane = fastlane_metadata(socket, topic, log_level)
-      RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: fastlane)
+      metadata = MessageDispatcher.fastlane_metadata(transport_pid, serializer, topic, log_level, tenant_id)
+      RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
 
       is_new_api = new_api?(params)
       # TODO: Default will be moved to false in the future
@@ -221,14 +222,14 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp fastlane_metadata(socket, topic, :info) do
-    # Pass :log to ensure messages are logged
-    {:realtime_channel_fastlane, socket.transport_pid, socket.serializer, topic, {:log, socket.assigns.tenant}}
-  end
-
-  defp fastlane_metadata(socket, topic, _log_level) do
-    {:realtime_channel_fastlane, socket.transport_pid, socket.serializer, topic}
-  end
+  # defp fastlane_metadata(socket, topic, :info) do
+  #   # Pass :log to ensure messages are logged
+  #   {:realtime_channel_fastlane, socket.transport_pid, socket.serializer, topic, {:log, socket.assigns.tenant}}
+  # end
+  #
+  # defp fastlane_metadata(socket, topic, _log_level) do
+  #   {:realtime_channel_fastlane, socket.transport_pid, socket.serializer, topic}
+  # end
 
   @impl true
   def handle_info(:update_rate_counter, %{assigns: %{limits: %{max_events_per_second: max}}} = socket) do
@@ -848,54 +849,5 @@ defmodule RealtimeWeb.RealtimeChannel do
       nil -> []
       sub -> [sub: sub]
     end)
-  end
-
-  @doc """
-  Inspired by Phoenix.Channel.Server.dispatch/3
-
-  """
-  def dispatch(subscribers, from, %Phoenix.Socket.Broadcast{} = msg) do
-    # fastlane_pid is the actual socket transport pid
-    # This reduce caches the serialization and bypasses the channel process going straight to the
-    # transport process
-
-    # Credo doesn't like that we don't use the result aggregation
-    _ =
-      Enum.reduce(subscribers, %{}, fn
-        {pid, _}, cache when pid == from ->
-          cache
-
-        {pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic}}, cache ->
-          send(pid, :update_rate_counter)
-          do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
-
-        {pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic, {:log, tenant_id}}}, cache ->
-          send(pid, :update_rate_counter)
-          msg = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
-          Logger.info(msg, external_id: tenant_id, project: tenant_id)
-
-          do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
-
-        {pid, _}, cache ->
-          send(pid, msg)
-          cache
-      end)
-
-    :ok
-  end
-
-  defp do_dispatch(msg, fastlane_pid, serializer, join_topic, cache) do
-    case cache do
-      %{^serializer => encoded_msg} ->
-        send(fastlane_pid, encoded_msg)
-        cache
-
-      %{} ->
-        # Use the original topic that was joined without the external_id
-        msg = %{msg | topic: join_topic}
-        encoded_msg = serializer.fastlane!(msg)
-        send(fastlane_pid, encoded_msg)
-        Map.put(cache, serializer, encoded_msg)
-    end
   end
 end

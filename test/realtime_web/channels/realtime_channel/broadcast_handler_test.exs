@@ -299,9 +299,17 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
     topic = random_string()
     # Simulate fastlane
-    fastlane = {:realtime_channel_fastlane, self(), Phoenix.Socket.V1.JSONSerializer, "realtime:#{topic}"}
+    fastlane =
+      RealtimeWeb.RealtimeChannel.MessageDispatcher.fastlane_metadata(
+        self(),
+        Phoenix.Socket.V1.JSONSerializer,
+        "realtime:#{topic}",
+        :warning,
+        "tenant_id"
+      )
 
     Endpoint.subscribe("realtime:#{topic}", metadata: fastlane)
+
     if policies = context[:policies], do: create_rls_policies(db_conn, policies, %{topic: topic})
 
     %{tenant: tenant, topic: topic, db_conn: db_conn}

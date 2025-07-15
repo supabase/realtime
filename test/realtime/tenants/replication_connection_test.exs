@@ -404,7 +404,14 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   end
 
   defp subscribe(tenant_topic, topic) do
-    fastlane = {:realtime_channel_fastlane, self(), Phoenix.Socket.V1.JSONSerializer, topic}
+    fastlane =
+      RealtimeWeb.RealtimeChannel.MessageDispatcher.fastlane_metadata(
+        self(),
+        Phoenix.Socket.V1.JSONSerializer,
+        topic,
+        :warning,
+        "tenant_id"
+      )
 
     Endpoint.subscribe(tenant_topic, metadata: fastlane)
   end

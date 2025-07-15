@@ -29,7 +29,14 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   end
 
   defp subscribe(tenant_topic, topic) do
-    fastlane = {:realtime_channel_fastlane, self(), Phoenix.Socket.V1.JSONSerializer, topic}
+    fastlane =
+      RealtimeChannel.MessageDispatcher.fastlane_metadata(
+        self(),
+        Phoenix.Socket.V1.JSONSerializer,
+        topic,
+        :error,
+        "tenant_id"
+      )
 
     Endpoint.subscribe(tenant_topic, metadata: fastlane)
   end
@@ -320,7 +327,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         }
 
         assert Enum.any?(broadcast_calls, fn
-                 [_, ^broadcast_topic, ^message, RealtimeChannel] -> true
+                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
                  _ -> false
                end)
       end)
@@ -384,7 +391,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         }
 
         assert Enum.count(broadcast_calls, fn
-                 [_, ^broadcast_topic, ^message, RealtimeChannel] -> true
+                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
                  _ -> false
                end) == 1
       end)
@@ -403,7 +410,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       open_channel_topic = Tenants.tenant_topic(tenant, "open_channel", true)
 
       assert Enum.count(broadcast_calls, fn
-               [_, ^open_channel_topic, ^message, RealtimeChannel] -> true
+               [_, ^open_channel_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
                _ -> false
              end) == 1
 
@@ -458,7 +465,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         }
 
         assert Enum.count(broadcast_calls, fn
-                 [_, ^broadcast_topic, ^message, RealtimeChannel] -> true
+                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
                  _ -> false
                end) == 1
       end)
