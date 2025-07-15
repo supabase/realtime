@@ -10,6 +10,7 @@ defmodule Realtime.Application do
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Migrations
+
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
@@ -55,6 +56,9 @@ defmodule Realtime.Application do
     migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
     connect_partition_slots = Application.get_env(:realtime, :connect_partition_slots)
 
+    disconnect_socket_on_no_channels_interval_in_ms =
+      Application.get_env(:realtime, :disconnect_socket_on_no_channels_interval_in_ms)
+
     children =
       [
         Realtime.ErlSysMon,
@@ -92,6 +96,7 @@ defmodule Realtime.Application do
          strategy: :one_for_one,
          name: Connect.DynamicSupervisor,
          partitions: connect_partition_slots},
+        {RealtimeWeb.RealtimeChannel.Tracker, check_interval_in_ms: disconnect_socket_on_no_channels_interval_in_ms},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
       ] ++ extensions_supervisors() ++ janitor_tasks()

@@ -6,7 +6,7 @@ defmodule Generators do
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.Database
-
+  alias Realtime.Integration.WebsocketClient
   def port(), do: Containers.port()
 
   @spec tenant_fixture(map()) :: Realtime.Api.Tenant.t()
@@ -263,5 +263,41 @@ defmodule Generators do
     {:ok, claims} = Joken.generate_claims(%{}, claims)
     {:ok, jwt, _} = Joken.encode_and_sign(claims, signer)
     jwt
+  end
+
+  @port 4003
+  @serializer Phoenix.Socket.V1.JSONSerializer
+
+  def get_connection(
+        tenant,
+        role \\ "anon",
+        claims \\ %{},
+        params \\ %{vsn: "1.0.0", log_level: :warning}
+      ) do
+    params = Enum.reduce(params, "", fn {k, v}, acc -> "#{acc}&#{k}=#{v}" end)
+    uri = "#{uri(tenant)}?#{params}"
+
+    with {:ok, token} <- token_valid(tenant, role, claims),
+         {:ok, socket} <- WebsocketClient.connect(self(), uri, @serializer, [{"x-api-key", token}]) do
+      {socket, token}
+    end
+  end
+
+  def uri(tenant, port \\ @port), do: "ws://#{tenant.external_id}.localhost:#{port}/socket/websocket"
+
+  @spec token_valid(Tenant.t(), binary(), map()) :: {:ok, binary()}
+  def token_valid(tenant, role, claims \\ %{}), do: generate_token(tenant, Map.put(claims, :role, role))
+  @spec token_no_role(Tenant.t()) :: {:ok, binary()}
+  def token_no_role(tenant), do: generate_token(tenant)
+
+  @spec generate_token(Tenant.t() | binary(), map()) :: {:ok, binary()}
+  def generate_token(tenant, claims \\ %{}) do
+    claims =
+      Map.merge(
+        %{ref: "127.0.0.1", iat: System.system_time(:second), exp: System.system_time(:second) + 604_800},
+        claims
+      )
+
+    {:ok, generate_jwt_token(tenant, claims)}
   end
 end

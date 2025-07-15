@@ -12,9 +12,12 @@ defmodule Realtime.Integration.RtChannelTest do
   require Logger
 
   alias Extensions.PostgresCdcRls
+
   alias Phoenix.Socket.Message
   alias Phoenix.Socket.V1
+
   alias Postgrex
+
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.GenCounter
@@ -23,40 +26,13 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
+
+  alias RealtimeWeb.RealtimeChannel.Tracker
   alias RealtimeWeb.SocketDisconnect
 
   @moduletag :capture_log
   @port 4003
   @serializer V1.JSONSerializer
-
-  defp uri(tenant, port \\ @port), do: "ws://#{tenant.external_id}.localhost:#{port}/socket/websocket"
-
-  defmodule TestEndpoint do
-    use Phoenix.Endpoint, otp_app: :phoenix
-
-    @session_config store: :cookie,
-                    key: "_hello_key",
-                    signing_salt: "change_me"
-
-    socket("/socket", RealtimeWeb.UserSocket,
-      websocket: [
-        connect_info: [:peer_data, :uri, :x_headers],
-        fullsweep_after: 20,
-        max_frame_size: 8_000_000
-      ]
-    )
-
-    plug(Plug.Session, @session_config)
-    plug(:fetch_session)
-    plug(Plug.CSRFProtection)
-    plug(:put_session)
-
-    defp put_session(conn, _) do
-      conn
-      |> put_session(:from_session, "123")
-      |> send_resp(200, Plug.CSRFProtection.get_csrf_token())
-    end
-  end
 
   Application.put_env(:phoenix, TestEndpoint,
     https: false,
@@ -71,6 +47,7 @@ defmodule Realtime.Integration.RtChannelTest do
     tenant = Api.get_tenant_by_external_id("dev_tenant")
 
     RateCounter.stop(tenant.external_id)
+    :ets.delete_all_objects(Tracker.table_name())
 
     %{tenant: tenant}
   end
@@ -2151,32 +2128,29 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
-  defp token_valid(tenant, role, claims \\ %{}), do: generate_token(tenant, Map.put(claims, :role, role))
-  defp token_no_role(tenant), do: generate_token(tenant)
+  test "tracks and untracks properly channels", %{tenant: tenant} do
+    assert [] = Tracker.list_pids()
 
-  defp generate_token(tenant, claims \\ %{}) do
-    claims =
-      Map.merge(
-        %{ref: "127.0.0.1", iat: System.system_time(:second), exp: System.system_time(:second) + 604_800},
-        claims
-      )
+    {socket, _} = get_connection(tenant)
+    config = %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
 
-    {:ok, generate_jwt_token(tenant, claims)}
-  end
+    topics =
+      for _ <- 1..10 do
+        topic = "realtime:#{random_string()}"
+        :ok = WebsocketClient.join(socket, topic, %{config: config})
+        assert_receive %Message{topic: ^topic, event: "phx_reply"}, 500
+        topic
+      end
 
-  defp get_connection(
-         tenant,
-         role \\ "anon",
-         claims \\ %{},
-         params \\ %{vsn: "1.0.0", log_level: :warning}
-       ) do
-    params = Enum.reduce(params, "", fn {k, v}, acc -> "#{acc}&#{k}=#{v}" end)
-    uri = "#{uri(tenant)}?#{params}"
+    assert [{_pid, count}] = Tracker.list_pids()
+    assert count == length(topics)
 
-    with {:ok, token} <- token_valid(tenant, role, claims),
-         {:ok, socket} <- WebsocketClient.connect(self(), uri, @serializer, [{"x-api-key", token}]) do
-      {socket, token}
+    for topic <- topics do
+      :ok = WebsocketClient.leave(socket, topic, %{})
+      assert_receive %Message{topic: ^topic, event: "phx_close"}, 500
     end
+
+    assert [{_pid, 0}] = Tracker.list_pids()
   end
 
   defp mode(%{mode: :distributed, tenant: tenant}) do
