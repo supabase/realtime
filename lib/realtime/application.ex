@@ -53,11 +53,10 @@ defmodule Realtime.Application do
 
     region = Application.get_env(:realtime, :region)
     :syn.join(RegionNodes, region, self(), node: node())
+
     migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
     connect_partition_slots = Application.get_env(:realtime, :connect_partition_slots)
-
-    disconnect_socket_on_no_channels_interval_in_ms =
-      Application.get_env(:realtime, :disconnect_socket_on_no_channels_interval_in_ms)
+    no_channel_timeout_in_ms = Application.get_env(:realtime, :no_channel_timeout_in_ms)
 
     children =
       [
@@ -96,7 +95,7 @@ defmodule Realtime.Application do
          strategy: :one_for_one,
          name: Connect.DynamicSupervisor,
          partitions: connect_partition_slots},
-        {RealtimeWeb.RealtimeChannel.Tracker, check_interval_in_ms: disconnect_socket_on_no_channels_interval_in_ms},
+        {RealtimeWeb.RealtimeChannel.Tracker, check_interval_in_ms: no_channel_timeout_in_ms},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
       ] ++ extensions_supervisors() ++ janitor_tasks()

@@ -59,7 +59,7 @@ defmodule RealtimeWeb.RealtimeChannel.TrackerTest do
     assert Tracker.table_name() |> :ets.tab2list() |> length() == 0
 
     pids =
-      for _ <- 1..10_000 do
+      for _ <- 1..10_500 do
         pid = spawn(fn -> :timer.sleep(:infinity) end)
 
         Tracker.track(pid)

@@ -7,6 +7,7 @@ defmodule RealtimeWeb.RealtimeChannel.Tracker do
   If the user has no channels open, we kill the transport pid.
   """
   use GenServer
+  require Logger
 
   @table :channel_tracker
   @zero_count_match [{{:"$1", :"$2"}, [{:"=<", :"$2", 0}], [:"$1"]}]
@@ -77,6 +78,7 @@ defmodule RealtimeWeb.RealtimeChannel.Tracker do
         :ok
 
       {pids, cont} ->
+        Logger.info("Killing #{length(pids)} transport pids with no channels open")
         Enum.each(pids, fn pid -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
         chunked_killing(cont)
     end

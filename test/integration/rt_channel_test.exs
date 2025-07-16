@@ -2155,7 +2155,10 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "phx_close"}, 500
     end
 
-    assert [{_pid, 0}] = Tracker.list_pids()
+    # wait to trigger tracker
+    Process.sleep(5000)
+    assert [] = Tracker.list_pids()
+    assert {:error, %Mint.TransportError{reason: :closed}} = WebsocketClient.send_heartbeat(socket)
   end
 
   test "failed connections are present in tracker with counter counter lower than 0 so they are actioned on by tracker",
