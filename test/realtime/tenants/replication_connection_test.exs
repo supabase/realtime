@@ -351,7 +351,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
       topic = random_string()
       tenant_topic = Tenants.tenant_topic(external_id, topic, false)
-      Endpoint.subscribe(tenant_topic)
+      subscribe(tenant_topic, topic)
 
       message_fixture(tenant, %{
         "topic" => topic,
@@ -360,12 +360,10 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         "payload" => %{"value" => random_string()}
       })
 
-      assert_receive %Phoenix.Socket.Broadcast{
-                       event: "broadcast",
-                       payload: %{"event" => "INSERT", "payload" => _, "type" => "broadcast"},
-                       topic: ^tenant_topic
-                     },
-                     500
+      assert_receive {:socket_push, :text, data}
+      message = data |> IO.iodata_to_binary() |> Jason.decode!()
+
+      assert %{"event" => "broadcast", "payload" => _, "ref" => nil, "topic" => ^topic} = message
 
       assert_receive {[:realtime, :tenants, :broadcast_from_database],
                       %{latency_committed_at: latency_committed_at, latency_inserted_at: latency_inserted_at},
