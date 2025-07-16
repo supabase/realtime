@@ -6,7 +6,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
   import ExUnit.CaptureLog
 
   alias Realtime.RateCounter
-  alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -26,7 +25,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         for _ <- 1..100, reduce: socket do
           socket ->
-            {:reply, :ok, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+            {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
             socket
         end
 
@@ -34,10 +33,17 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         for _ <- 1..100 do
           topic = "realtime:#{topic}"
-          assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+          assert_receive {:socket_push, :text, data}
+
+          message =
+            data
+            |> IO.iodata_to_binary()
+            |> Jason.decode!()
+
+          assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
-        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: [100 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert avg > 0
       end
 
@@ -56,12 +62,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         Process.sleep(1200)
 
-        for _ <- 1..100 do
-          topic = "realtime:#{topic}"
-          refute_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
-        end
+        refute_received _any
 
-        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: [0 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert avg == 0.0
       end
 
@@ -75,7 +78,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         for _ <- 1..100, reduce: socket do
           socket ->
-            {:reply, :ok, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+            {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
             socket
         end
 
@@ -83,10 +86,17 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         for _ <- 1..100 do
           topic = "realtime:#{topic}"
-          assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+          assert_received {:socket_push, :text, data}
+
+          message =
+            data
+            |> IO.iodata_to_binary()
+            |> Jason.decode!()
+
+          assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
-        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: [100 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert avg > 0.0
       end
 
@@ -105,12 +115,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         Process.sleep(1200)
 
-        for _ <- 1..100 do
-          topic = "realtime:#{topic}"
-          refute_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
-        end
+        refute_received _any
 
-        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: [0 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert avg == 0.0
       end
 
@@ -126,17 +133,25 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           call_original(Authorization, :get_write_authorizations, [conn, db_conn, auth_context])
         end)
 
+        reject(&Authorization.get_write_authorizations/3)
+
         for _ <- 1..100, reduce: socket do
           socket ->
-            {:reply, :ok, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+            {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
             socket
         end
 
-        Process.sleep(100)
-
         for _ <- 1..100 do
           topic = "realtime:#{topic}"
-          assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+
+          assert_receive {:socket_push, :text, data}
+
+          message =
+            data
+            |> IO.iodata_to_binary()
+            |> Jason.decode!()
+
+          assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
       end
 
@@ -159,10 +174,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         Process.sleep(100)
 
-        for _ <- 1..100 do
-          topic = "realtime:#{topic}"
-          refute_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
-        end
+        refute_received _
       end
 
       test "no ack still sends message", %{
@@ -174,7 +186,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         for _ <- 1..100, reduce: socket do
           socket ->
-            {:noreply, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+            {:noreply, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
             socket
         end
 
@@ -182,7 +194,15 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         for _ <- 1..100 do
           topic = "realtime:#{topic}"
-          assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+
+          assert_received {:socket_push, :text, data}
+
+          message =
+            data
+            |> IO.iodata_to_binary()
+            |> Jason.decode!()
+
+          assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
       end
 
@@ -191,7 +211,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         for _ <- 1..100, reduce: socket do
           socket ->
-            {:noreply, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+            {:noreply, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
             socket
         end
 
@@ -199,10 +219,17 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         for _ <- 1..100 do
           topic = "realtime:#{topic}"
-          assert_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+          assert_received {:socket_push, :text, data}
+
+          message =
+            data
+            |> IO.iodata_to_binary()
+            |> Jason.decode!()
+
+          assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
-        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: [100 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert avg > 0.0
       end
 
@@ -211,17 +238,25 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         for _ <- 1..100, reduce: socket do
           socket ->
-            {:reply, :ok, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+            {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
             socket
         end
 
         for _ <- 1..100 do
           topic = "realtime:#{topic}"
-          assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
+
+          assert_receive {:socket_push, :text, data}
+
+          message =
+            data
+            |> IO.iodata_to_binary()
+            |> Jason.decode!()
+
+          assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
         Process.sleep(1200)
-        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: [100 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert avg > 0.0
       end
 
@@ -239,15 +274,12 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
             Process.sleep(1200)
 
-            for _ <- 1..100 do
-              topic = "realtime:#{topic}"
-              refute_received %Phoenix.Socket.Broadcast{topic: ^topic, event: "broadcast", payload: %{}}
-            end
+            refute_received _
           end)
 
         assert log =~ "RlsPolicyError"
 
-        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: [0 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert avg == 0.0
       end
     end
@@ -262,8 +294,22 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     assert Connect.ready?(tenant.external_id)
 
+    key = Tenants.events_per_second_key(tenant)
+    RateCounter.new(key)
+
     topic = random_string()
-    Endpoint.subscribe("realtime:#{topic}")
+    # Simulate fastlane
+    fastlane =
+      RealtimeWeb.RealtimeChannel.MessageDispatcher.fastlane_metadata(
+        self(),
+        Phoenix.Socket.V1.JSONSerializer,
+        "realtime:#{topic}",
+        :warning,
+        "tenant_id"
+      )
+
+    Endpoint.subscribe("realtime:#{topic}", metadata: fastlane)
+
     if policies = context[:policies], do: create_rls_policies(db_conn, policies, %{topic: topic})
 
     %{tenant: tenant, topic: topic, db_conn: db_conn}

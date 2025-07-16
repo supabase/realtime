@@ -14,6 +14,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Connect
 
+  alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.TenantBroadcaster
 
   embedded_schema do
@@ -110,13 +111,16 @@ defmodule Realtime.Tenants.BatchBroadcast do
     end
   end
 
+  @event_type "broadcast"
   defp send_message_and_count(tenant, topic, event, payload, public?) do
     events_per_second_key = Tenants.events_per_second_key(tenant)
     tenant_topic = Tenants.tenant_topic(tenant, topic, public?)
     payload = %{"payload" => payload, "event" => event, "type" => "broadcast"}
 
+    broadcast = %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
+
     GenCounter.add(events_per_second_key)
-    TenantBroadcaster.broadcast(tenant, tenant_topic, "broadcast", payload)
+    TenantBroadcaster.pubsub_broadcast(tenant, tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
   end
 
   defp permissions_for_message(_, nil, _), do: nil

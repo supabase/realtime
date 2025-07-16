@@ -1,5 +1,3 @@
-Code.require_file("../support/websocket_client.exs", __DIR__)
-
 defmodule Realtime.Integration.RtChannelTest do
   # async: false due to the fact that multiple operations against the same tenant and usage of mocks
   # Also using dev_tenant due to distributed test
@@ -496,6 +494,30 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
 
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+    end
+
+    test "broadcast to another tenant does not get mixed up", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
+      config = %{broadcast: %{self: false}, private: false}
+      topic = "realtime:any"
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      other_tenant = Containers.checkout_tenant(run_migrations: true)
+
+      {other_socket, _} = get_connection(other_tenant)
+      WebsocketClient.join(other_socket, topic, %{config: config})
+
+      # Both sockets joined
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state"}
+      assert_receive %Message{event: "presence_state"}
+
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, topic, "broadcast", payload)
+
+      # No message received
+      refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]

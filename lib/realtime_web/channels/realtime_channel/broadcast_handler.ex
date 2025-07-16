@@ -6,6 +6,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   import Phoenix.Socket, only: [assign: 3]
 
+  alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.TenantBroadcaster
   alias Phoenix.Socket
   alias Realtime.Api.Tenant
@@ -75,10 +76,22 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do
     with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id) do
+      broadcast = %Phoenix.Socket.Broadcast{
+        topic: tenant_topic,
+        event: @event_type,
+        payload: payload
+      }
+
       if self_broadcast do
-        TenantBroadcaster.broadcast(tenant, tenant_topic, @event_type, payload)
+        TenantBroadcaster.pubsub_broadcast(tenant, tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
       else
-        TenantBroadcaster.broadcast_from(tenant, self(), tenant_topic, @event_type, payload)
+        TenantBroadcaster.pubsub_broadcast_from(
+          tenant,
+          self(),
+          tenant_topic,
+          broadcast,
+          RealtimeChannel.MessageDispatcher
+        )
       end
     end
   end

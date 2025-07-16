@@ -8,6 +8,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   alias Realtime.Tenants
   alias Realtime.Database
 
+  alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.Endpoint
   alias RealtimeWeb.TenantBroadcaster
 
@@ -25,6 +26,29 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     conn = generate_conn(conn, tenant)
 
     {:ok, conn: conn, tenant: tenant}
+  end
+
+  defp subscribe(tenant_topic, topic) do
+    fastlane =
+      RealtimeChannel.MessageDispatcher.fastlane_metadata(
+        self(),
+        Phoenix.Socket.V1.JSONSerializer,
+        topic,
+        :error,
+        "tenant_id"
+      )
+
+    Endpoint.subscribe(tenant_topic, metadata: fastlane)
+  end
+
+  defp assert_receive_messages(count) do
+    Enum.map(1..count, fn _ ->
+      assert_receive {:socket_push, :text, data}
+
+      data
+      |> IO.iodata_to_binary()
+      |> Jason.decode!()
+    end)
   end
 
   for adapter <- [:phoenix, :gen_rpc] do
@@ -57,11 +81,10 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         event_2 = "event_2"
 
         payload_topic_1 = %{"payload" => payload_1, "event" => event_1, "type" => "broadcast"}
-
         payload_topic_2 = %{"payload" => payload_2, "event" => event_2, "type" => "broadcast"}
 
-        Endpoint.subscribe(topic_1)
-        Endpoint.subscribe(topic_2)
+        subscribe(topic_1, sub_topic_1)
+        subscribe(topic_2, sub_topic_2)
 
         conn =
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
@@ -74,16 +97,33 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         assert conn.status == 202
 
-        assert_receive %Phoenix.Socket.Broadcast{topic: ^topic_1, event: "broadcast", payload: ^payload_topic_1}
-        assert_receive %Phoenix.Socket.Broadcast{topic: ^topic_1, event: "broadcast", payload: ^payload_topic_1}
-        assert_receive %Phoenix.Socket.Broadcast{topic: ^topic_2, event: "broadcast", payload: ^payload_topic_2}
-        refute_receive %Phoenix.Socket.Broadcast{}
+        messages = assert_receive_messages(3)
+
+        assert Enum.count(messages, fn message ->
+                 message == %{
+                   "event" => "broadcast",
+                   "payload" => payload_topic_1,
+                   "ref" => nil,
+                   "topic" => sub_topic_1
+                 }
+               end) == 2
+
+        assert Enum.count(messages, fn message ->
+                 message == %{
+                   "event" => "broadcast",
+                   "payload" => payload_topic_2,
+                   "ref" => nil,
+                   "topic" => sub_topic_2
+                 }
+               end) == 1
+
+        refute_receive {:socket_push, _, _}
       end
 
       test "returns 422 when batch of messages includes badly formed messages", %{conn: conn, tenant: tenant} do
-        topic = Tenants.tenant_topic(tenant, "topic")
+        tenant_topic = Tenants.tenant_topic(tenant, "topic")
 
-        Endpoint.subscribe(topic)
+        subscribe(tenant_topic, "topic")
 
         conn =
           post(conn, Routes.broadcast_path(conn, :broadcast), %{
@@ -122,7 +162,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         {:ok, rate_counter} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert rate_counter.avg == 0.0
 
-        refute_receive %Phoenix.Socket.Broadcast{}
+        refute_receive {:socket_push, _, _}
       end
     end
   end
@@ -249,7 +289,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
-      expect(TenantBroadcaster, :broadcast, 5, fn _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 5, fn _, _, _, _ -> :ok end)
 
       messages_to_send =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
@@ -271,19 +311,23 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-      broadcast_calls = calls(&TenantBroadcaster.broadcast/4)
+      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/4)
 
       Enum.each(messages_to_send, fn %{topic: topic} ->
-        payload = %{
-          "payload" => %{"content" => "payload" <> topic},
-          "event" => "event" <> topic,
-          "type" => "broadcast"
-        }
-
         broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
 
+        message = %Phoenix.Socket.Broadcast{
+          topic: topic,
+          event: "broadcast",
+          payload: %{
+            "payload" => %{"content" => "payload" <> topic},
+            "event" => "event" <> topic,
+            "type" => "broadcast"
+          }
+        }
+
         assert Enum.any?(broadcast_calls, fn
-                 [_, ^broadcast_topic, "broadcast", ^payload] -> true
+                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
                  _ -> false
                end)
       end)
@@ -299,7 +343,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
-      expect(TenantBroadcaster, :broadcast, 6, fn _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 6, fn _, _, _, _ -> :ok end)
 
       channels =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
@@ -331,36 +375,44 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-      broadcast_calls = calls(&TenantBroadcaster.broadcast/4)
+      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/4)
 
       Enum.each(channels, fn %{topic: topic} ->
-        payload = %{
-          "payload" => %{"content" => "payload" <> topic},
-          "event" => "event" <> topic,
-          "type" => "broadcast"
-        }
-
         broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
 
-        assert Enum.any?(broadcast_calls, fn
-                 [_, ^broadcast_topic, "broadcast", ^payload] -> true
+        message = %Phoenix.Socket.Broadcast{
+          topic: topic,
+          event: "broadcast",
+          payload: %{
+            "payload" => %{"content" => "payload" <> topic},
+            "event" => "event" <> topic,
+            "type" => "broadcast"
+          }
+        }
+
+        assert Enum.count(broadcast_calls, fn
+                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
                  _ -> false
-               end)
+               end) == 1
       end)
 
       # Check open channel
-      payload = %{
-        "payload" => %{"content" => "content_open_channel"},
-        "event" => "event_open_channel",
-        "type" => "broadcast"
+      message = %Phoenix.Socket.Broadcast{
+        topic: "open_channel",
+        event: "broadcast",
+        payload: %{
+          "payload" => %{"content" => "content_open_channel"},
+          "event" => "event_open_channel",
+          "type" => "broadcast"
+        }
       }
 
       open_channel_topic = Tenants.tenant_topic(tenant, "open_channel", true)
 
-      assert Enum.any?(broadcast_calls, fn
-               [_, ^open_channel_topic, "broadcast", ^payload] -> true
+      assert Enum.count(broadcast_calls, fn
+               [_, ^open_channel_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
                _ -> false
-             end)
+             end) == 1
 
       assert conn.status == 202
     end
@@ -373,7 +425,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
-      expect(TenantBroadcaster, :broadcast, 5, fn _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 5, fn _, _, _, _ -> :ok end)
 
       messages_to_send =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
@@ -397,22 +449,28 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-      broadcast_calls = calls(&TenantBroadcaster.broadcast/4)
+      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/4)
 
       Enum.each(messages_to_send, fn %{topic: topic} ->
-        payload = %{
-          "payload" => %{"content" => "payload" <> topic},
-          "event" => "event" <> topic,
-          "type" => "broadcast"
-        }
-
         broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
 
-        assert Enum.any?(broadcast_calls, fn
-                 [_, ^broadcast_topic, "broadcast", ^payload] -> true
+        message = %Phoenix.Socket.Broadcast{
+          topic: topic,
+          event: "broadcast",
+          payload: %{
+            "payload" => %{"content" => "payload" <> topic},
+            "event" => "event" <> topic,
+            "type" => "broadcast"
+          }
+        }
+
+        assert Enum.count(broadcast_calls, fn
+                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
                  _ -> false
-               end)
+               end) == 1
       end)
+
+      assert length(broadcast_calls) == length(messages_to_send)
 
       assert conn.status == 202
     end

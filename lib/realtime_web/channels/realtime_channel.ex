@@ -24,6 +24,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.Logging
+  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
 
   @confirm_token_ms_interval :timer.minutes(5)
@@ -64,7 +65,10 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
-      RealtimeWeb.Endpoint.subscribe(tenant_topic)
+      # fastlane subscription
+      metadata = MessageDispatcher.fastlane_metadata(transport_pid, serializer, topic, log_level, tenant_id)
+      RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
+
       Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
 
       is_new_api = new_api?(params)
@@ -221,6 +225,18 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
+  def handle_info(:update_rate_counter, %{assigns: %{limits: %{max_events_per_second: max}}} = socket) do
+    socket = count(socket)
+
+    if socket.assigns.rate_counter.avg > max do
+      message = "Too many messages per second"
+
+      shutdown_response(socket, message)
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_info(
         _any,
         %{assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}} = socket
