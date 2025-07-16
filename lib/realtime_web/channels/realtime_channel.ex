@@ -69,6 +69,8 @@ defmodule RealtimeWeb.RealtimeChannel do
       metadata = MessageDispatcher.fastlane_metadata(transport_pid, serializer, topic, log_level, tenant_id)
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
 
+      Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
+
       is_new_api = new_api?(params)
       # TODO: Default will be moved to false in the future
       presence_enabled? =
