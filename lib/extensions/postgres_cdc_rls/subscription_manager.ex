@@ -5,6 +5,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   use GenServer
   use Realtime.Logs
 
+  alias Realtime.Tenants.Rebalancer
   alias Extensions.PostgresCdcRls, as: Rls
 
   alias Realtime.Database
@@ -29,7 +30,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       :no_users_ref,
       no_users_ts: nil,
       oids: %{},
-      check_oid_ref: nil
+      check_oid_ref: nil,
+      check_region_interval: nil
     ]
 
     @type t :: %__MODULE__{
@@ -44,7 +46,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
               queue: :queue.queue()
             },
             no_users_ref: reference(),
-            no_users_ts: non_neg_integer() | nil
+            no_users_ts: non_neg_integer() | nil,
+            check_region_interval: non_neg_integer
           }
   end
 
@@ -79,6 +82,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     oids = Subscriptions.fetch_publication_tables(conn, publication)
 
+    check_region_interval = Map.get(args, :check_region_interval, rebalance_check_interval_in_ms())
+    send_region_check_message(check_region_interval)
+
     state = %State{
       id: id,
       conn: conn,
@@ -89,7 +95,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         ref: check_delete_queue(),
         queue: :queue.new()
       },
-      no_users_ref: check_no_users()
+      no_users_ref: check_no_users(),
+      check_region_interval: check_region_interval
     }
 
     send(self(), :check_oids)
@@ -200,6 +207,22 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     {:noreply, %{state | no_users_ts: ts_new, no_users_ref: check_no_users()}}
   end
 
+  def handle_info({:check_region, previous_nodes_set}, state) do
+    current_nodes_set = MapSet.new(Node.list())
+
+    case Rebalancer.check(previous_nodes_set, current_nodes_set, state.id) do
+      :ok ->
+        # Let's check again in the future
+        send_region_check_message(state.check_region_interval)
+        {:noreply, state}
+
+      {:error, :wrong_region} ->
+        Logger.warning("Rebalancing Postgres Changes replication for a closer region")
+        Rls.handle_stop(state.id, 15_000)
+        {:noreply, state}
+    end
+  end
+
   def handle_info(msg, state) do
     log_error("UnhandledProcessMessage", msg)
 
@@ -216,4 +239,10 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
   defp check_delete_queue(timeout \\ @timeout),
     do: Process.send_after(self(), :check_delete_queue, timeout)
+
+  defp send_region_check_message(check_region_interval) do
+    Process.send_after(self(), {:check_region, MapSet.new(Node.list())}, check_region_interval)
+  end
+
+  defp rebalance_check_interval_in_ms(), do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
 end
