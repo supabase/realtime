@@ -222,15 +222,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  # defp fastlane_metadata(socket, topic, :info) do
-  #   # Pass :log to ensure messages are logged
-  #   {:realtime_channel_fastlane, socket.transport_pid, socket.serializer, topic, {:log, socket.assigns.tenant}}
-  # end
-  #
-  # defp fastlane_metadata(socket, topic, _log_level) do
-  #   {:realtime_channel_fastlane, socket.transport_pid, socket.serializer, topic}
-  # end
-
   @impl true
   def handle_info(:update_rate_counter, %{assigns: %{limits: %{max_events_per_second: max}}} = socket) do
     socket = count(socket)
