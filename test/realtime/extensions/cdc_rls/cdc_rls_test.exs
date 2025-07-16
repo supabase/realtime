@@ -1,15 +1,21 @@
 defmodule Realtime.Extensions.CdcRlsTest do
   # async: false due to usage of dev_tenant
+  # Also global mimic mock
   use RealtimeWeb.ChannelCase, async: false
   use Mimic
 
-  alias Realtime.Api.Tenant
-  alias Realtime.Database
+  import ExUnit.CaptureLog
+
+  setup :set_mimic_global
+
   alias Extensions.PostgresCdcRls
   alias PostgresCdcRls.SubscriptionManager
   alias Postgrex
   alias Realtime.Api
+  alias Realtime.Api.Tenant
+  alias Realtime.Database
   alias Realtime.PostgresCdc
+  alias Realtime.Tenants.Rebalancer
   alias RealtimeWeb.ChannelsAuthorization
 
   @cdc "postgres_cdc_rls"
@@ -125,6 +131,45 @@ defmodule Realtime.Extensions.CdcRlsTest do
     end
   end
 
+  describe "Region rebalancing" do
+    setup do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+      %Tenant{extensions: extensions, external_id: external_id} = tenant
+      postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
+
+      args =
+        postgres_extension
+        |> Map.put("id", external_id)
+        |> Map.put(:check_region_interval, 100)
+
+      %{tenant_id: tenant.id, args: args}
+    end
+
+    test "rebalancing needed process stops", %{tenant_id: tenant_id, args: args} do
+      log =
+        capture_log(fn ->
+          expect(Rebalancer, :check, 1, fn _, _, tenant_id -> {:error, :wrong_region} end)
+          reject(&Rebalancer.check/3)
+
+          {:ok, pid} = PostgresCdcRls.start(args)
+          ref = Process.monitor(pid)
+
+          assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 3000
+        end)
+
+      assert log =~ "Rebalancing Postgres Changes replication for a closer region"
+    end
+
+    test "rebalancing not needed process stays up", %{tenant_id: tenant_id, args: args} do
+      stub(Rebalancer, :check, fn _, _, ^tenant_id -> :ok end)
+
+      {:ok, pid} = PostgresCdcRls.start(args)
+      ref = Process.monitor(pid)
+
+      refute_receive {:DOWN, ^ref, :process, ^pid, _reason}, 1000
+    end
+  end
+
   for adapter <- [:phoenix, :gen_rpc] do
     describe "integration #{adapter}" do
       @describetag adapter: adapter
@@ -191,10 +236,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
         subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, external_id, true}
         metadata = [metadata: subscription_metadata]
         :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
-
-        # Mimicking how Phoenix.Channel subscribes when a channel joins using fastlane
-        fastlane = {:fastlane, self(), serializer, []}
-        :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, topic, metadata: fastlane)
 
         # First time it will return nil
         PostgresCdcRls.handle_connect(args)
@@ -286,10 +327,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
         subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, external_id, true}
         metadata = [metadata: subscription_metadata]
         :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
-
-        # Mimicking how Phoenix.Channel subscribes when a channel joins using fastlane
-        fastlane = {:fastlane, self(), serializer, []}
-        :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, topic, metadata: fastlane)
 
         # Now subscribe to the Postgres Changes
         {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params)
