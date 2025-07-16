@@ -7,10 +7,10 @@ defmodule RealtimeWeb.UserSocket do
   alias Realtime.Database
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
+
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RealtimeChannel.Logging
-
   ## Channels
   channel "realtime:*", RealtimeChannel
 
@@ -34,21 +34,25 @@ defmodule RealtimeWeb.UserSocket do
       token = access_token(params, headers)
 
       with %Tenant{
-             extensions: extensions,
              jwt_secret: jwt_secret,
              jwt_jwks: jwt_jwks,
-             max_concurrent_users: max_conn_users,
-             max_events_per_second: max_events_per_second,
-             max_bytes_per_second: max_bytes_per_second,
-             max_joins_per_second: max_joins_per_second,
-             max_channels_per_client: max_channels_per_client,
              postgres_cdc_default: postgres_cdc_default,
              suspend: false
-           } <- Tenants.Cache.get_tenant_by_external_id(external_id),
+           } = tenant <- Tenants.Cache.get_tenant_by_external_id(external_id),
            token when is_binary(token) <- token,
            jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
            {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
            {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
+        %Tenant{
+          extensions: extensions,
+          max_concurrent_users: max_conn_users,
+          max_events_per_second: max_events_per_second,
+          max_bytes_per_second: max_bytes_per_second,
+          max_joins_per_second: max_joins_per_second,
+          max_channels_per_client: max_channels_per_client,
+          postgres_cdc_default: postgres_cdc_default
+        } = tenant
+
         assigns = %RealtimeChannel.Assigns{
           claims: claims,
           jwt_secret: jwt_secret,
@@ -77,12 +81,7 @@ defmodule RealtimeWeb.UserSocket do
           {:error, :tenant_not_found}
 
         %Tenant{suspend: true} ->
-          Logging.log_error_message(
-            :error,
-            "RealtimeDisabledForTenant",
-            "Realtime disabled for this tenant"
-          )
-
+          Logging.log_error_message(:error, "RealtimeDisabledForTenant", "Realtime disabled for this tenant")
           {:error, :tenant_suspended}
 
         {:error, :expired_token, msg} ->

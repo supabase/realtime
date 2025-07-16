@@ -26,6 +26,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.Logging
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
+  alias RealtimeWeb.RealtimeChannel.Tracker
 
   @confirm_token_ms_interval :timer.minutes(5)
 
@@ -42,6 +43,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       transport_pid: transport_pid
     } = socket
 
+    Tracker.track(socket.transport_pid)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
 
@@ -351,7 +353,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_info(:sync_presence, %{assigns: %{presence_enabled?: true}} = socket), do: PresenceHandler.sync(socket)
   def handle_info(:sync_presence, socket), do: {:noreply, socket}
-  def handle_info(_message, socket), do: {:noreply, socket}
+  def handle_info(_, socket), do: {:noreply, socket}
 
   @impl true
   def handle_in("broadcast", payload, %{assigns: %{private?: true}} = socket) do
@@ -473,9 +475,10 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def terminate(reason, _state) do
+  def terminate(reason, %{transport_pid: transport_pid}) do
     Logger.debug("Channel terminated with reason: #{reason}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
+    Tracker.untrack(transport_pid)
     :ok
   end
 

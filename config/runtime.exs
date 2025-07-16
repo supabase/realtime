@@ -31,6 +31,9 @@ metrics_rpc_timeout_in_ms =
 rebalance_check_interval_in_ms =
   System.get_env("REBALANCE_CHECK_INTERVAL_IN_MS", to_string(:timer.minutes(10))) |> String.to_integer()
 
+disconnect_socket_on_no_channels_interval_in_ms =
+  System.get_env("DISCONNECT_SOCKET_ON_NO_CHANNELS_INTERVAL_IN_MS", "30000") |> String.to_integer()
+
 tenant_max_bytes_per_second = System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100000") |> String.to_integer()
 tenant_max_channels_per_client = System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer()
 tenant_max_concurrent_users = System.get_env("TENANT_MAX_CONCURRENT_USERS", "200") |> String.to_integer()
@@ -48,6 +51,11 @@ janitor_run_after_in_ms = System.get_env("JANITOR_RUN_AFTER_IN_MS", "600000") |>
 janitor_children_timeout = System.get_env("JANITOR_CHILDREN_TIMEOUT", "5000") |> String.to_integer()
 # 4 hours by default
 janitor_schedule_timer = System.get_env("JANITOR_SCHEDULE_TIMER_IN_MS", "14400000") |> String.to_integer()
+# defaults to 10 minutes
+no_channel_timeout_in_ms =
+  if config_env() == :test,
+    do: 3000,
+    else: System.get_env("NO_CHANNEL_TIMEOUT_IN_MS", "600000") |> String.to_integer()
 
 if !(db_version in [nil, "ipv6", "ipv4"]),
   do: raise("Invalid IP version, please set either ipv6 or ipv4")
@@ -79,8 +87,10 @@ config :realtime,
   metrics_cleaner_schedule_timer_in_ms: metrics_cleaner_schedule_timer_in_ms,
   metrics_rpc_timeout: metrics_rpc_timeout_in_ms,
   tenant_cache_expiration: tenant_cache_expiration,
+  disconnect_socket_on_no_channels_interval_in_ms: disconnect_socket_on_no_channels_interval_in_ms,
   rpc_timeout: rpc_timeout,
-  max_gen_rpc_clients: max_gen_rpc_clients
+  max_gen_rpc_clients: max_gen_rpc_clients,
+  no_channel_timeout_in_ms: no_channel_timeout_in_ms
 
 if config_env() == :test || !run_janitor? do
   config :realtime, run_janitor: false
