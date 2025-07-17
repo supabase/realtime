@@ -4,6 +4,17 @@ defmodule Realtime.SynHandler do
   """
   require Logger
   alias RealtimeWeb.Endpoint
+  alias Realtime.Tenants.Connect
+
+  @behaviour :syn_event_handler
+
+  @impl true
+  def on_registry_process_updated(Connect, tenant_id, _pid, %{conn: conn}, :normal) when is_pid(conn) do
+    # Update that a database connection is ready
+    Endpoint.local_broadcast(Connect.syn_topic(tenant_id), "ready", %{conn: conn})
+  end
+
+  def on_registry_process_updated(_scope, _name, _pid, _meta, _reason), do: :ok
 
   @doc """
   When processes registered with :syn are unregistered, either manually or by stopping, this
@@ -14,6 +25,7 @@ defmodule Realtime.SynHandler do
   We want to log conflict resolutions to know when more than one process on the cluster
   was started, and subsequently stopped because :syn handled the conflict.
   """
+  @impl true
   def on_process_unregistered(mod, name, _pid, _meta, reason) do
     case reason do
       :syn_conflict_resolution ->
@@ -27,6 +39,7 @@ defmodule Realtime.SynHandler do
     :ok
   end
 
+  @impl true
   def resolve_registry_conflict(mod, name, {pid1, %{region: region}, time1}, {pid2, _, time2}) do
     platform_region = Realtime.Nodes.platform_region_translator(region)
 

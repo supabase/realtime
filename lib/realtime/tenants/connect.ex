@@ -66,7 +66,6 @@ defmodule Realtime.Tenants.Connect do
         call_external_node(tenant_id, opts)
 
       {:error, :tenant_database_connection_initializing} ->
-        Process.sleep(100)
         call_external_node(tenant_id, opts)
 
       {:error, :initializing} ->
@@ -84,8 +83,8 @@ defmodule Realtime.Tenants.Connect do
           | {:error, :tenant_database_connection_initializing}
   def get_status(tenant_id) do
     case :syn.lookup(__MODULE__, tenant_id) do
-      {_, %{conn: nil}} ->
-        {:error, :initializing}
+      {_pid, %{conn: nil}} ->
+        wait_for_connection(tenant_id)
 
       {_, %{conn: conn}} ->
         {:ok, conn}
@@ -98,6 +97,28 @@ defmodule Realtime.Tenants.Connect do
         log_error("SynInitializationError", error)
         {:error, :tenant_database_unavailable}
     end
+  end
+
+  def syn_topic(tenant_id), do: "connect:#{tenant_id}"
+
+  defp wait_for_connection(tenant_id) do
+    RealtimeWeb.Endpoint.subscribe(syn_topic(tenant_id))
+
+    # We do a lookup after subscribing because we could've missed a message while subscribing
+    case :syn.lookup(__MODULE__, tenant_id) do
+      {_pid, %{conn: conn}} when is_pid(conn) ->
+        {:ok, conn}
+
+      _ ->
+        # Wait for up to 5 seconds for the ready event
+        receive do
+          %{event: "ready", payload: %{conn: conn}} -> {:ok, conn}
+        after
+          5_000 -> {:error, :initializing}
+        end
+    end
+  after
+    RealtimeWeb.Endpoint.unsubscribe(syn_topic(tenant_id))
   end
 
   @doc """
