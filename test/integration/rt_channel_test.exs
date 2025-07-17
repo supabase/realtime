@@ -660,7 +660,8 @@ defmodule Realtime.Integration.RtChannelTest do
           :syn.update_registry(Connect, tenant.external_id, fn _pid, meta -> %{meta | conn: nil} end)
           payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
           WebsocketClient.send_event(service_role_socket, topic, "broadcast", payload)
-          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 500
+          # Waiting more than 5 seconds as this is the amount of time we will wait for the Connection to be ready
+          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 6000
         end)
 
       assert log =~ "UnableToHandleBroadcast"
@@ -837,7 +838,8 @@ defmodule Realtime.Integration.RtChannelTest do
           WebsocketClient.send_event(socket, topic, "presence", payload)
 
           refute_receive %Message{event: "presence_diff"}, 500
-          refute_receive %Message{event: "phx_leave", topic: ^topic}
+          # Waiting more than 5 seconds as this is the amount of time we will wait for the Connection to be ready
+          refute_receive %Message{event: "phx_leave", topic: ^topic}, 6000
         end)
 
       assert log =~ "UnableToHandlePresence"
@@ -2251,11 +2253,10 @@ defmodule Realtime.Integration.RtChannelTest do
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     clean_table(db_conn, "realtime", "messages")
     topic = Map.get(context, :topic, random_string())
-    message = message_fixture(tenant, %{topic: topic})
 
-    if policies = context[:policies], do: create_rls_policies(db_conn, policies, message)
+    if policies = context[:policies], do: create_rls_policies(db_conn, policies, %{topic: topic})
 
-    %{topic: message.topic}
+    %{topic: topic}
   end
 
   defp setup_trigger(%{tenant: tenant, topic: topic}) do

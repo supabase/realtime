@@ -35,6 +35,62 @@ defmodule Realtime.Tenants.ConnectTest do
     refute_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
   end
 
+  describe "handle cold start" do
+    test "multiple proccesses succeed together", %{tenant: tenant} do
+      parent = self()
+
+      # Let's slow down Connect starting
+      expect(Database, :check_tenant_connection, fn t ->
+        :timer.sleep(1000)
+        call_original(Database, :check_tenant_connection, [t])
+      end)
+
+      connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
+
+      # Start an early connect
+      spawn(connect)
+      :timer.sleep(100)
+
+      # Start others
+      spawn(connect)
+      spawn(connect)
+
+      # This one should block and wait for the first Connect
+      {:ok, pid} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      assert_receive {:ok, ^pid}
+      assert_receive {:ok, ^pid}
+      assert_receive {:ok, ^pid}
+    end
+
+    test "more than 5 seconds passed error out", %{tenant: tenant} do
+      parent = self()
+
+      # Let's slow down Connect starting
+      expect(Database, :check_tenant_connection, fn t ->
+        :timer.sleep(5500)
+        call_original(Database, :check_tenant_connection, [t])
+      end)
+
+      connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
+
+      # Start an early connect
+      spawn(connect)
+      :timer.sleep(100)
+
+      # Start others
+      spawn(connect)
+      spawn(connect)
+
+      {:error, :tenant_database_unavailable} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      # Only one will succeed the others timed out waiting
+      assert_receive {:error, :tenant_database_unavailable}
+      assert_receive {:error, :tenant_database_unavailable}
+      assert_receive {:ok, _pid}, 7000
+    end
+  end
+
   describe "region rebalancing" do
     test "rebalancing needed process stops", %{tenant: tenant} do
       external_id = tenant.external_id
@@ -344,14 +400,6 @@ defmodule Realtime.Tenants.ConnectTest do
         end)
 
       assert log =~ "ReplicationMaxWalSendersReached"
-    end
-
-    test "syn with no connection", %{tenant: tenant} do
-      external_id = tenant.external_id
-      expect(:syn, :lookup, 2, fn Connect, ^external_id -> {nil, %{conn: nil}} end)
-
-      assert {:error, :tenant_database_unavailable} = Connect.lookup_or_start_connection(external_id)
-      assert {:error, :initializing} = Connect.get_status(external_id)
     end
 
     test "handle rpc errors gracefully" do
