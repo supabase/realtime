@@ -9,14 +9,13 @@ defmodule Realtime.Tenants.Authorization do
 
   Check more information at Realtime.Tenants.Authorization.Policies
   """
-  require Logger
   import Ecto.Query
 
   alias DBConnection.ConnectionError
   alias Realtime.Api.Message
   alias Realtime.Database
   alias Realtime.Repo
-  alias Realtime.Rpc
+  alias Realtime.GenRpc
   alias Realtime.Tenants.Authorization.Policies
 
   defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role]
@@ -70,12 +69,13 @@ defmodule Realtime.Tenants.Authorization do
 
   # Remote call
   def get_read_authorizations(policies, db_conn, authorization_context) do
-    case Rpc.enhanced_call(
+    case GenRpc.call(
            node(db_conn),
            __MODULE__,
            :get_read_authorizations,
            [policies, db_conn, authorization_context],
-           tenant_id: authorization_context.tenant_id
+           tenant_id: authorization_context.tenant_id,
+           key: authorization_context.tenant_id
          ) do
       {:error, :rpc_error, reason} -> {:error, reason}
       response -> response
@@ -100,12 +100,13 @@ defmodule Realtime.Tenants.Authorization do
 
   # Remote call
   def get_write_authorizations(policies, db_conn, authorization_context) do
-    case Rpc.enhanced_call(
+    case GenRpc.call(
            node(db_conn),
            __MODULE__,
            :get_write_authorizations,
            [policies, db_conn, authorization_context],
-           tenant_id: authorization_context.tenant_id
+           tenant_id: authorization_context.tenant_id,
+           key: authorization_context.tenant_id
          ) do
       {:error, :rpc_error, reason} -> {:error, reason}
       response -> response
