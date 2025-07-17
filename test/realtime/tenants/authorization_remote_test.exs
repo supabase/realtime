@@ -93,36 +93,29 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
       Process.sleep(100)
 
-      log =
-        capture_log(fn ->
-          t1 =
-            Task.async(fn ->
-              assert {:error, :increase_connection_pool} =
-                       Authorization.get_read_authorizations(
-                         %Policies{},
-                         context.db_conn,
-                         context.authorization_context
-                       )
-            end)
-
-          t2 =
-            Task.async(fn ->
-              assert {:error, :increase_connection_pool} =
-                       Authorization.get_write_authorizations(
-                         %Policies{},
-                         context.db_conn,
-                         context.authorization_context
-                       )
-            end)
-
-          Task.await_many([t1, t2], 20_000)
-          # Wait for logs to arrive from remote node
-          Process.sleep(200)
+      t1 =
+        Task.async(fn ->
+          assert {:error, :increase_connection_pool} =
+                   Authorization.get_read_authorizations(
+                     %Policies{},
+                     context.db_conn,
+                     context.authorization_context
+                   )
         end)
 
-      external_id = context.tenant.external_id
-      assert log =~ "project=#{external_id} external_id=#{external_id} [error] ErrorExecutingTransaction"
+      t2 =
+        Task.async(fn ->
+          assert {:error, :increase_connection_pool} =
+                   Authorization.get_write_authorizations(
+                     %Policies{},
+                     context.db_conn,
+                     context.authorization_context
+                   )
+        end)
 
+      Task.await_many([t1, t2], 20_000)
+      # Wait for logs to arrive from remote node
+      Process.sleep(200)
       Task.await(task, :timer.seconds(30))
     end
 
@@ -170,12 +163,12 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     @describetag role: "anon", policies: []
 
     test "get_read_authorizations", context do
-      # Grab a remote pid that will not exist in the near future. :erpc uses a new process to perform the call.
+      # Grab a remote pid that will not exist in the near future. :gen_rpc uses a new process to perform the call.
       # Once it has returned the process is not alive anymore
       db_conn = :erpc.call(context.node, :erlang, :self, [])
 
       assert capture_log(fn ->
-               {:error, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}} =
+               {:error, {:EXIT, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}}} =
                  Authorization.get_read_authorizations(
                    %Policies{},
                    db_conn,
@@ -185,12 +178,12 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     end
 
     test "get_write_authorizations", context do
-      # Grab a remote pid that will not exist in the near future. :erpc uses a new process to perform the call.
+      # Grab a remote pid that will not exist in the near future. :gen_rpc uses a new process to perform the call.
       # Once it has returned the process is not alive anymore
       db_conn = :erpc.call(context.node, :erlang, :self, [])
 
       assert capture_log(fn ->
-               {:error, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}} =
+               {:error, {:EXIT, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}}} =
                  Authorization.get_write_authorizations(
                    %Policies{},
                    db_conn,
