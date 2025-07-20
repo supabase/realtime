@@ -266,15 +266,10 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         log =
           capture_log(fn ->
-            for _ <- 1..100, reduce: socket do
-              socket ->
-                {:noreply, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
-                socket
-            end
+            {:noreply, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
 
-            Process.sleep(1200)
-
-            refute_received _
+            # Enough for the RateCounter to calculate the last bucket
+            refute_received _, 1200
           end)
 
         assert log =~ "RlsPolicyError"

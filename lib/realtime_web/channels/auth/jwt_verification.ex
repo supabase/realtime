@@ -107,13 +107,17 @@ defmodule RealtimeWeb.JwtVerification do
          "keys" => keys
        })
        when is_binary(kid) and alg in @hs_algorithms do
-    jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "oct" and jwk["kid"] == kid end)
+    jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "oct" and jwk["kid"] == kid and is_binary(jwk["k"]) end)
 
-    case jwk do
+    if jwk do
+      case Base.url_decode64(jwk["k"], padding: false) do
+        {:ok, secret} -> {:ok, Joken.Signer.create(alg, secret)}
+        _ -> {:error, :error_generating_signer}
+      end
+    else
       # If there's no JWK, and HS* is being used, instead of erroring, try
       # the jwt_secret instead.
-      nil -> {:ok, Joken.Signer.create(alg, jwt_secret)}
-      _ -> {:ok, Joken.Signer.create(alg, jwk)}
+      {:ok, Joken.Signer.create(alg, jwt_secret)}
     end
   end
 
