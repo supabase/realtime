@@ -140,6 +140,9 @@ defmodule Realtime.Integration.WebsocketClient do
         state = state.conn |> put_in(conn) |> handle_responses(responses)
         if state.closing?, do: do_close(state), else: {:noreply, state}
 
+      {:error, _conn, %Mint.TransportError{reason: :closed}, _} ->
+        {:stop, :normal, state}
+
       {:error, conn, reason, _responses} ->
         state = state.conn |> put_in(conn) |> reply({:error, reason})
         {:noreply, state}

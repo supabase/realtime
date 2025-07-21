@@ -1633,8 +1633,7 @@ defmodule Realtime.Integration.RtChannelTest do
       tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["potato"]}})
 
-      Process.sleep(500)
-      assert {:error, %Mint.TransportError{reason: :closed}} = WebsocketClient.send_heartbeat(socket)
+      assert_process_down(socket)
     end
 
     test "on jwt_secret the socket closes and sends a system message", %{tenant: tenant, topic: topic} do
@@ -1650,8 +1649,7 @@ defmodule Realtime.Integration.RtChannelTest do
       tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
       Realtime.Api.update_tenant(tenant, %{jwt_secret: "potato"})
 
-      Process.sleep(500)
-      assert {:error, %Mint.TransportError{reason: :closed}} = WebsocketClient.send_heartbeat(socket)
+      assert_process_down(socket)
     end
 
     test "on private_only the socket closes and sends a system message", %{tenant: tenant, topic: topic} do
@@ -1667,8 +1665,7 @@ defmodule Realtime.Integration.RtChannelTest do
       tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
       Realtime.Api.update_tenant(tenant, %{private_only: true})
 
-      Process.sleep(500)
-      assert {:error, %Mint.TransportError{reason: :closed}} = WebsocketClient.send_heartbeat(socket)
+      assert_process_down(socket)
     end
 
     test "on other param changes the socket won't close and no message is sent", %{tenant: tenant, topic: topic} do
@@ -1722,8 +1719,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
       SocketDisconnect.distributed_disconnect(tenant)
 
-      Process.sleep(500)
-      assert {:error, %Mint.TransportError{reason: :closed}} = WebsocketClient.send_heartbeat(socket)
+      assert_process_down(socket)
     end
   end
 
@@ -1756,6 +1752,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
     test "max_events_per_second limit respected", %{tenant: tenant} do
       %{max_events_per_second: max_concurrent_users} = Tenants.get_tenant_by_external_id(tenant.external_id)
+      on_exit(fn -> change_tenant_configuration(tenant, :max_events_per_second, max_concurrent_users) end)
       change_tenant_configuration(tenant, :max_events_per_second, 1)
 
       {socket, _} = get_connection(tenant, "authenticated")
@@ -1765,7 +1762,12 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
       for _ <- 1..1000 do
-        WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
+        try do
+          WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
+        catch
+          _, _ -> :ok
+        end
+
         1..5 |> Enum.random() |> Process.sleep()
       end
 
@@ -1780,8 +1782,7 @@ defmodule Realtime.Integration.RtChannelTest do
                      2000
 
       assert_receive %Message{event: "phx_close"}
-
-      change_tenant_configuration(tenant, :max_events_per_second, max_concurrent_users)
+      assert_process_down(socket)
     end
 
     test "max_channels_per_client limit respected", %{tenant: tenant} do
@@ -2156,9 +2157,8 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     # wait to trigger tracker
-    Process.sleep(5000)
+    assert_process_down(socket, 5000)
     assert [] = Tracker.list_pids()
-    assert {:error, %Mint.TransportError{reason: :closed}} = WebsocketClient.send_heartbeat(socket)
   end
 
   test "failed connections are present in tracker with counter counter lower than 0 so they are actioned on by tracker",
@@ -2307,5 +2307,10 @@ defmodule Realtime.Integration.RtChannelTest do
     |> Realtime.Repo.update!()
 
     Realtime.Tenants.Cache.invalidate_tenant_cache(external_id)
+  end
+
+  defp assert_process_down(pid, timeout \\ 100) do
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
   end
 end
