@@ -284,29 +284,41 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
       test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
         opts = Database.from_tenant(tenant, "realtime_test", :stop) |> Database.opts()
+        parent = self()
 
         # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
         pids =
-          for i <- 0..4 do
+          for i <- 0..5 do
             replication_slot_opts =
               %PostgresReplication{
                 connection_opts: opts,
                 table: :all,
                 output_plugin: "pgoutput",
-                output_plugin_options: [],
-                handler_module: TestHandler,
+                output_plugin_options: [proto_version: "1", publication_names: "test_#{i}_publication"],
+                handler_module: Replication.TestHandler,
                 publication_name: "test_#{i}_publication",
                 replication_slot_name: "test_#{i}_slot"
               }
 
-            {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
-            pid
+            spawn(fn ->
+              {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
+              send(parent, :ready)
+
+              receive do
+                :stop -> Process.exit(pid, :kill)
+              end
+            end)
           end
 
         on_exit(fn ->
-          Enum.each(pids, &Process.exit(&1, :kill))
+          Enum.each(pids, &send(&1, :stop))
           Process.sleep(2000)
         end)
+
+        assert_receive :ready, 5000
+        assert_receive :ready, 5000
+        assert_receive :ready, 5000
+        assert_receive :ready, 5000
 
         assert {:error, :max_wal_senders_reached} = ReplicationConnection.start(tenant, self())
       end
@@ -370,33 +382,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert latency_committed_at
       assert latency_inserted_at
     end
-  end
-
-  defmodule TestHandler do
-    @behaviour PostgresReplication.Handler
-    import PostgresReplication.Protocol
-    alias PostgresReplication.Protocol.KeepAlive
-
-    @impl true
-    def call(message, _metadata) when is_write(message) do
-      :noreply
-    end
-
-    def call(message, _metadata) when is_keep_alive(message) do
-      reply =
-        case parse(message) do
-          %KeepAlive{reply: :now, wal_end: wal_end} ->
-            wal_end = wal_end + 1
-            standby(wal_end, wal_end, wal_end, :now)
-
-          _ ->
-            hold()
-        end
-
-      {:reply, reply}
-    end
-
-    def call(_, _), do: :noreply
   end
 
   defp subscribe(tenant_topic, topic) do
