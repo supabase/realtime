@@ -121,9 +121,9 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :unexpected_error} end)
 
       assert capture_log(fn ->
-               assert {:error, %{reason: "Realtime was unable to connect to the project database"}} =
-                        subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
-             end) =~ "UnableToSetPolicies"
+               assert {:error, %{reason: "Unknown Error on Channel"}} =
+                        subscribe_and_join(socket, "realtime:test", %{})
+             end) =~ "UnknownErrorOnChannel: :unexpected_error"
     end
 
     test "unexpected error while setting policies", %{tenant: tenant} do
@@ -228,14 +228,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert_process_down(socket.channel_pid)
     end
 
-    @tag policies: [:authenticated_all_topic_read]
     test "new valid access_token but Connect timed out", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      assert %Socket{channel_pid: channel_pid} =
-               socket =
-               subscribe_and_join!(socket, "realtime:test", %{"config" => %{"private" => true}})
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
 
       new_token =
         Generators.generate_jwt_token(tenant, %{
@@ -260,14 +257,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "Node request timeout"
     end
 
-    @tag policies: [:authenticated_all_topic_read]
     test "new valid access_token but Connect had an error", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      assert %Socket{channel_pid: channel_pid} =
-               socket =
-               subscribe_and_join!(socket, "realtime:test", %{"config" => %{"private" => true}})
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
 
       new_token =
         Generators.generate_jwt_token(tenant, %{
