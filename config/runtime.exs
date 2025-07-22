@@ -12,6 +12,17 @@ port = System.get_env("DB_PORT", "5432")
 db_version = System.get_env("DB_IP_VERSION")
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
 
+ssl_opts =
+  if System.get_env("DB_SSL", "false") == "true" do
+    if cert = System.get_env("DB_SSL_CA_CERT") do
+      [cacertfile: cert]
+    else
+      [verify: :verify_none]
+    end
+  else
+    false
+  end
+
 tenant_cache_expiration =
   System.get_env("TENANT_CACHE_EXPIRATION_IN_MS", "30000") |> String.to_integer()
 
@@ -204,7 +215,8 @@ if config_env() != :test do
       application_name: "supabase_mt_realtime"
     ],
     after_connect: after_connect_query_args,
-    socket_options: socket_options
+    socket_options: socket_options,
+    ssl: ssl_opts
 
   replica_repos = %{
     Realtime.Repo.Replica.FRA => System.get_env("DB_HOST_REPLICA_FRA", default_db_host),
@@ -232,7 +244,9 @@ if config_env() != :test do
       queue_interval: queue_interval,
       parameters: [
         application_name: "supabase_mt_realtime_ro"
-      ]
+      ],
+      socket_options: socket_options,
+      ssl: ssl_opts
   end
 end
 
@@ -279,6 +293,7 @@ cluster_topologies =
                 application_name: "cluster_node_#{node()}"
               ],
               socket_options: socket_options,
+              ssl: ssl_opts,
               heartbeat_interval: 5_000,
               node_timeout: 15_000,
               channel_name: System.get_env("POSTGRES_CLUSTER_CHANNEL_NAME", "realtime_cluster_#{version}")
