@@ -102,11 +102,20 @@ defmodule Realtime.Tenants.ReplicationConnection do
     }
 
     case DynamicSupervisor.start_child(supervisor_spec, child_spec) do
-      {:ok, pid} -> {:ok, pid}
-      {:error, {:already_started, pid}} -> {:ok, pid}
-      {:error, {:bad_return_from_init, {:stop, error, _}}} -> {:error, error}
-      {:error, %Postgrex.Error{postgres: %{pg_code: "53300"}}} -> {:error, :max_wal_senders_reached}
-      error -> error
+      {:ok, pid} ->
+        {:ok, pid}
+
+      {:error, {:already_started, pid}} ->
+        {:ok, pid}
+
+      {:error, {:bad_return_from_init, {:stop, error, _}}} ->
+        {:error, error}
+
+      {:error, %Postgrex.Error{postgres: %{pg_code: pg_code}}} when pg_code in ~w(53300 53400) ->
+        {:error, :max_wal_senders_reached}
+
+      error ->
+        error
     end
   end
 
@@ -215,7 +224,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
     {:query, "SELECT 1", %{state | step: :start_replication_slot}}
   end
 
-  @impl true
   def handle_result([%Postgrex.Result{}], %__MODULE__{step: :start_replication_slot} = state) do
     %__MODULE__{
       proto_version: proto_version,
@@ -231,6 +239,11 @@ defmodule Realtime.Tenants.ReplicationConnection do
       "START_REPLICATION SLOT #{replication_slot_name} LOGICAL 0/0 (proto_version '#{proto_version}', publication_names '#{publication_name}')"
 
     {:stream, query, [], %{state | step: :streaming}}
+  end
+
+  # %Postgrex.Error{message: nil, postgres: %{code: :configuration_limit_exceeded, line: "291", message: "all replication slots are in use", file: "slot.c", unknown: "ERROR", severity: "ERROR", hint: "Free one or increase max_replication_slots.", routine: "ReplicationSlotCreate", pg_code: "53400"}, connection_id: 217538, query: nil}
+  def handle_result(%Postgrex.Error{postgres: %{pg_code: pg_code}}, _state) when pg_code in ~w(53300 53400) do
+    {:disconnect, :max_wal_senders_reached}
   end
 
   def handle_result(%Postgrex.Error{postgres: %{message: message}}, _state) do
