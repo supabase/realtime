@@ -278,6 +278,7 @@ cluster_topologies =
               parameters: [
                 application_name: "cluster_node_#{node()}"
               ],
+              socket_options: socket_options,
               heartbeat_interval: 5_000,
               node_timeout: 15_000,
               channel_name: System.get_env("POSTGRES_CLUSTER_CHANNEL_NAME", "realtime_cluster_#{version}")
