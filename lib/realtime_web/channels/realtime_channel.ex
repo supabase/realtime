@@ -63,7 +63,8 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- start_db_rate_counter(tenant_id),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
          socket = assign_authorization_context(socket, sub_topic, access_token, claims),
-         {:ok, socket} <- maybe_assign_policies(sub_topic, socket) do
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
+         {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
       # fastlane subscription
@@ -411,6 +412,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
     %{
       assigns: %{
+        tenant: tenant_id,
         pg_sub_ref: pg_sub_ref,
         channel_name: channel_name,
         pg_change_params: pg_change_params
@@ -422,7 +424,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
          socket = assign_authorization_context(socket, channel_name, refresh_token, claims),
-         {:ok, socket} <- maybe_assign_policies(channel_name, socket) do
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
+         {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket) do
       Helpers.cancel_timer(pg_sub_ref)
       pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
 
@@ -788,12 +791,12 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @connect_errors ~w(initializing tenant_database_unavailable tenant_database_connection_initializing tenant_db_too_many_connections)a
 
-  defp maybe_assign_policies(topic, %{assigns: %{private?: true, tenant: tenant_id}} = socket) when not is_nil(topic) do
+  defp maybe_assign_policies(topic, db_conn, %{assigns: %{private?: true}} = socket)
+       when not is_nil(topic) do
     authorization_context = socket.assigns.authorization_context
     policies = socket.assigns.policies || %Policies{}
 
-    with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, policies} <- Authorization.get_read_authorizations(policies, db_conn, authorization_context) do
+    with {:ok, policies} <- Authorization.get_read_authorizations(policies, db_conn, authorization_context) do
       socket = assign(socket, :policies, policies)
 
       if match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies),
@@ -813,13 +816,10 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, error} ->
         {:error, :unable_to_set_policies, error}
-
-      {:error, :rpc_error, reason} ->
-        {:error, :rpc_error, reason}
     end
   end
 
-  defp maybe_assign_policies(_, socket), do: {:ok, assign(socket, policies: nil)}
+  defp maybe_assign_policies(_, _, socket), do: {:ok, assign(socket, policies: nil)}
 
   defp only_private?(tenant_id, %{assigns: %{private?: private?}}) do
     tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
