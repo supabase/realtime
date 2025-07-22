@@ -49,6 +49,7 @@ defmodule Realtime.Cluster.Strategy.PostgresTest do
       parameters: [
         application_name: "#{node()}"
       ],
+      socket_options: [:inet],
       heartbeat_interval: 5_000,
       node_timeout: 15_000,
       channel_name: "test_channel_name"
