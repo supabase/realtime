@@ -30,6 +30,7 @@ defmodule Realtime.Cluster.Strategy.Postgres do
       port: Keyword.fetch!(state.config, :port),
       parameters: Keyword.fetch!(state.config, :parameters),
       socket_options: Keyword.fetch!(state.config, :socket_options),
+      ssl: Keyword.fetch!(state.config, :ssl),
       channel_name: Keyword.fetch!(state.config, :channel_name)
     ]
 
