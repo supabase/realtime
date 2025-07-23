@@ -29,7 +29,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
             socket
         end
 
-        Process.sleep(1200)
+        Process.sleep(120)
 
         for _ <- 1..100 do
           topic = "realtime:#{topic}"
@@ -43,7 +43,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
-        {:ok, %{avg: avg, bucket: [100 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        assert 100 in buckets
         assert avg > 0
       end
 
@@ -60,11 +61,11 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
             socket
         end
 
-        Process.sleep(1200)
+        Process.sleep(120)
 
         refute_received _any
 
-        {:ok, %{avg: avg, bucket: [0 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert avg == 0.0
       end
 
@@ -82,7 +83,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
             socket
         end
 
-        Process.sleep(1200)
+        Process.sleep(120)
 
         for _ <- 1..100 do
           topic = "realtime:#{topic}"
@@ -96,7 +97,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
-        {:ok, %{avg: avg, bucket: [100 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        assert 100 in buckets
         assert avg > 0.0
       end
 
@@ -113,11 +115,11 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
             socket
         end
 
-        Process.sleep(1200)
+        Process.sleep(120)
 
         refute_received _any
 
-        {:ok, %{avg: avg, bucket: [0 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert avg == 0.0
       end
 
@@ -215,7 +217,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
             socket
         end
 
-        Process.sleep(1200)
+        Process.sleep(120)
 
         for _ <- 1..100 do
           topic = "realtime:#{topic}"
@@ -229,7 +231,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
-        {:ok, %{avg: avg, bucket: [100 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        assert 100 in buckets
         assert avg > 0.0
       end
 
@@ -255,8 +258,9 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
-        Process.sleep(1200)
-        {:ok, %{avg: avg, bucket: [100 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        Process.sleep(120)
+        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        assert 100 in buckets
         assert avg > 0.0
       end
 
@@ -274,7 +278,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         assert log =~ "RlsPolicyError"
 
-        {:ok, %{avg: avg, bucket: [0 | _]}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
         assert avg == 0.0
       end
     end
@@ -282,15 +286,17 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
   defp initiate_tenant(context) do
     tenant = Containers.checkout_tenant(run_migrations: true)
+
     {:ok, tenant} = Realtime.Api.update_tenant(tenant, %{broadcast_adapter: context.adapter})
 
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
     Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
-    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-    assert Connect.ready?(tenant.external_id)
 
     key = Tenants.events_per_second_key(tenant)
-    RateCounter.new(key)
+    RateCounter.new(key, tick: 100)
+
+    {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+    assert Connect.ready?(tenant.external_id)
 
     topic = random_string()
     # Simulate fastlane
