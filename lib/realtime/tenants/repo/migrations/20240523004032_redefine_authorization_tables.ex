@@ -4,9 +4,9 @@ defmodule Realtime.Tenants.Migrations.RedefineAuthorizationTables do
   use Ecto.Migration
 
   def change do
-    drop table(:broadcasts, mode: :cascade)
-    drop table(:presences, mode: :cascade)
-    drop table(:channels, mode: :cascade)
+    drop table(:broadcasts), mode: :cascade
+    drop table(:presences), mode: :cascade
+    drop table(:channels), mode: :cascade
 
     create_if_not_exists table(:messages) do
       add :topic, :text, null: false
