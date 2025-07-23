@@ -9,12 +9,15 @@ defmodule Realtime.GenRpcTest do
   setup context do
     {:ok, node} = Clustered.start(nil, extra_config: context[:extra_config] || [])
 
-    :telemetry.attach(__MODULE__, [:realtime, :rpc], &__MODULE__.handle_telemetry/4, pid: self())
-    on_exit(fn -> :telemetry.detach(__MODULE__) end)
     %{node: node}
   end
 
   describe "call/5" do
+    setup do
+      :telemetry.attach(__MODULE__, [:realtime, :rpc], &__MODULE__.handle_telemetry/4, pid: self())
+      on_exit(fn -> :telemetry.detach(__MODULE__) end)
+    end
+
     test "returns the result calling local node" do
       current_node = node()
 
@@ -172,6 +175,11 @@ defmodule Realtime.GenRpcTest do
   end
 
   describe "multicall/4" do
+    setup do
+      :telemetry.attach(__MODULE__, [:realtime, :rpc], &__MODULE__.handle_telemetry/4, pid: self())
+      on_exit(fn -> :telemetry.detach(__MODULE__) end)
+    end
+
     test "returns the result of the function call per node", %{node: node} do
       current_node = node()
 
