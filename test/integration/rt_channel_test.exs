@@ -451,7 +451,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        ref: nil,
                        topic: ^topic
                      },
-                     8000
+                     1000
     end
   end
 
@@ -1374,7 +1374,6 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      Process.sleep(500)
       value = random_string()
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
 
@@ -1395,7 +1394,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        },
                        topic: ^topic
                      },
-                     200
+                     1000
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
@@ -1416,7 +1415,6 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      Process.sleep(500)
       new_value = random_string()
 
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
@@ -1440,7 +1438,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        },
                        topic: ^topic
                      },
-                     500
+                     1000
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
@@ -1459,7 +1457,6 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      Process.sleep(500)
       value = random_string()
 
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
@@ -1482,7 +1479,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        },
                        topic: ^topic
                      },
-                     200
+                     1000
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
@@ -1500,7 +1497,6 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      Process.sleep(500)
       value = random_string()
       event = random_string()
 
@@ -1521,7 +1517,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        join_ref: nil,
                        ref: nil
                      },
-                     500
+                     1000
     end
 
     test "broadcast event when function 'send' is called with public topic", %{
@@ -1537,7 +1533,6 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
-      Process.sleep(500)
 
       value = random_string()
       event = random_string()
@@ -1557,7 +1552,7 @@ defmodule Realtime.Integration.RtChannelTest do
                        },
                        topic: ^full_topic
                      },
-                     200
+                     1000
     end
   end
 
@@ -1570,6 +1565,7 @@ defmodule Realtime.Integration.RtChannelTest do
       topic: topic
     } do
       change_tenant_configuration(tenant, :private_only, true)
+      on_exit(fn -> change_tenant_configuration(tenant, :private_only, false) end)
       {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       topic = "realtime:#{topic}"
@@ -1584,8 +1580,6 @@ defmodule Realtime.Integration.RtChannelTest do
                        }
                      },
                      500
-
-      change_tenant_configuration(tenant, :private_only, false)
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
@@ -1594,6 +1588,7 @@ defmodule Realtime.Integration.RtChannelTest do
       topic: topic
     } do
       change_tenant_configuration(tenant, :private_only, true)
+      on_exit(fn -> change_tenant_configuration(tenant, :private_only, false) end)
 
       Process.sleep(100)
 
@@ -1603,7 +1598,6 @@ defmodule Realtime.Integration.RtChannelTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      change_tenant_configuration(tenant, :private_only, false)
     end
   end
 

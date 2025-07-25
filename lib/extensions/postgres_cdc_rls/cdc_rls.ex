@@ -130,4 +130,6 @@ defmodule Extensions.PostgresCdcRls do
       end
     end)
   end
+
+  def syn_topic(tenant_id), do: "cdc_rls:#{tenant_id}"
 end

@@ -16,54 +16,82 @@ defmodule Realtime.Extensions.CdcRlsTest do
   alias Realtime.Database
   alias Realtime.PostgresCdc
   alias Realtime.Tenants.Rebalancer
-  alias RealtimeWeb.ChannelsAuthorization
 
-  @cdc "postgres_cdc_rls"
   @cdc_module Extensions.PostgresCdcRls
-  @external_id "dev_tenant"
-  @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjQ5OTYzNTc1LCJleHAiOjE5NjU1Mzk1NzV9.v7UZK05KaVQKInBBH_AP5h0jXUEwCCC5qtdj3iaxbNQ"
 
   describe "Postgres extensions" do
     setup do
-      tenant = Api.get_tenant_by_external_id(@external_id)
-      PostgresCdcRls.handle_stop(tenant.external_id, 10_000)
+      tenant = Containers.checkout_tenant(run_migrations: true)
 
-      assigns = %{
-        tenant_token: @token,
-        jwt_secret: tenant.jwt_secret,
-        tenant: tenant.external_id,
-        postgres_extension: PostgresCdc.filter_settings(@cdc, tenant.extensions),
-        postgres_cdc_module: @cdc_module,
-        claims: %{},
-        limits: %{
-          max_concurrent_users: 1,
-          max_events_per_second: 100,
-          max_joins_per_second: 100,
-          max_channels_per_client: 100,
-          max_bytes_per_second: 100_000
-        },
-        is_new_api: false,
-        log_level: :info
-      }
+      {:ok, conn} = Database.connect(tenant, "realtime_test")
 
-      expect(ChannelsAuthorization, :authorize_conn, fn _, _, _ ->
-        {:ok, %{"exp" => Joken.current_time() + 1_000, "role" => "postgres"}}
+      Database.transaction(conn, fn db_conn ->
+        queries = [
+          "drop table if exists public.test",
+          "drop publication if exists supabase_realtime_test",
+          "create sequence if not exists test_id_seq;",
+          """
+          create table if not exists "public"."test" (
+          "id" int4 not null default nextval('test_id_seq'::regclass),
+          "details" text,
+          primary key ("id"));
+          """,
+          "grant all on table public.test to anon;",
+          "grant all on table public.test to postgres;",
+          "grant all on table public.test to authenticated;",
+          "create publication supabase_realtime_test for all tables"
+        ]
+
+        Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
       end)
 
-      {:ok, _, socket} =
-        RealtimeWeb.UserSocket
-        |> socket("user_id", assigns)
-        |> subscribe_and_join(RealtimeWeb.RealtimeChannel, "realtime:my_topic", %{
-          "user_token" => @token
-        })
+      %Tenant{extensions: extensions, external_id: external_id} = tenant
+      postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
+      args = Map.put(postgres_extension, "id", external_id)
 
-      %{socket: socket, tenant: tenant}
+      pg_change_params = [
+        %{
+          id: UUID.uuid1(),
+          params: %{"event" => "*", "schema" => "public"},
+          channel_pid: self(),
+          claims: %{
+            "exp" => System.system_time(:second) + 100_000,
+            "iat" => 0,
+            "ref" => "127.0.0.1",
+            "role" => "anon"
+          }
+        }
+      ]
+
+      ids =
+        Enum.map(pg_change_params, fn %{id: id, params: params} ->
+          {UUID.string_to_binary!(id), :erlang.phash2(params)}
+        end)
+
+      topic = "realtime:test"
+      serializer = Phoenix.Socket.V1.JSONSerializer
+
+      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, external_id, true}
+      metadata = [metadata: subscription_metadata]
+      :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
+
+      # First time it will return nil
+      PostgresCdcRls.handle_connect(args)
+      # Wait for it to start
+      Process.sleep(3000)
+      {:ok, response} = PostgresCdcRls.handle_connect(args)
+
+      # Now subscribe to the Postgres Changes
+      {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params)
+
+      on_exit(fn -> PostgresCdcRls.handle_stop(external_id, 10_000) end)
+      %{tenant: tenant}
     end
 
-    test "Check supervisor crash and respawn" do
+    test "Check supervisor crash and respawn", %{tenant: tenant} do
       sup =
         Enum.reduce_while(1..30, nil, fn _, acc ->
-          :syn.lookup(Extensions.PostgresCdcRls, @external_id)
+          :syn.lookup(Extensions.PostgresCdcRls, tenant.external_id)
           |> case do
             :undefined ->
               Process.sleep(500)
@@ -75,17 +103,25 @@ defmodule Realtime.Extensions.CdcRlsTest do
         end)
 
       assert Process.alive?(sup)
+      Process.monitor(sup)
+
+      RealtimeWeb.Endpoint.subscribe(PostgresCdcRls.syn_topic(tenant.external_id))
+
       Process.exit(sup, :kill)
-      Process.sleep(10_000)
-      {sup2, _} = :syn.lookup(Extensions.PostgresCdcRls, @external_id)
-      assert Process.alive?(sup2)
+      assert_receive {:DOWN, _, :process, ^sup, _reason}, 5000
+
+      assert_receive %{event: "ready"}, 5000
+
+      {sup2, _} = :syn.lookup(Extensions.PostgresCdcRls, tenant.external_id)
+
       assert(sup != sup2)
+      assert Process.alive?(sup2)
     end
 
-    test "Subscription manager updates oids" do
+    test "Subscription manager updates oids", %{tenant: tenant} do
       {subscriber_manager_pid, conn} =
         Enum.reduce_while(1..25, nil, fn _, acc ->
-          case PostgresCdcRls.get_manager_conn(@external_id) do
+          case PostgresCdcRls.get_manager_conn(tenant.external_id) do
             nil ->
               Process.sleep(200)
               {:cont, acc}
@@ -115,7 +151,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
     test "Stop tenant supervisor", %{tenant: tenant} do
       sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
-          case :syn.lookup(Extensions.PostgresCdcRls, @external_id) do
+          case :syn.lookup(Extensions.PostgresCdcRls, tenant.external_id) do
             :undefined ->
               Process.sleep(500)
               {:cont, acc}
@@ -142,14 +178,13 @@ defmodule Realtime.Extensions.CdcRlsTest do
         |> Map.put("id", external_id)
         |> Map.put(:check_region_interval, 100)
 
-      %{tenant_id: tenant.id, args: args}
+      %{tenant_id: tenant.external_id, args: args}
     end
 
     test "rebalancing needed process stops", %{tenant_id: tenant_id, args: args} do
       log =
         capture_log(fn ->
-          expect(Rebalancer, :check, 1, fn _, _, tenant_id -> {:error, :wrong_region} end)
-          reject(&Rebalancer.check/3)
+          expect(Rebalancer, :check, fn _, _, ^tenant_id -> {:error, :wrong_region} end)
 
           {:ok, pid} = PostgresCdcRls.start(args)
           ref = Process.monitor(pid)

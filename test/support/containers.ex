@@ -133,9 +133,19 @@ defmodule Containers do
       # Automatically checkin the container at the end of the test
       ExUnit.Callbacks.on_exit(fn ->
         # Clean up database connections if they are set-up
-        connect = Connect.whereis(tenant.external_id)
-        if connect, do: Process.exit(connect, :brutal_kill)
-        PostgresCdcRls.handle_stop(tenant.external_id, 5_000)
+
+        if connect_pid = Connect.whereis(tenant.external_id) do
+          supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, tenant.external_id}}
+
+          DynamicSupervisor.terminate_child(supervisor, connect_pid)
+        end
+
+        try do
+          PostgresCdcRls.handle_stop(tenant.external_id, 5_000)
+        catch
+          _, _ -> :ok
+        end
+
         :poolboy.checkin(Containers.Pool, container)
       end)
 

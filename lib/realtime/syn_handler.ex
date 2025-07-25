@@ -3,6 +3,7 @@ defmodule Realtime.SynHandler do
   Custom defined Syn's callbacks
   """
   require Logger
+  alias Extensions.PostgresCdcRls
   alias RealtimeWeb.Endpoint
   alias Realtime.Tenants.Connect
 
@@ -12,6 +13,11 @@ defmodule Realtime.SynHandler do
   def on_registry_process_updated(Connect, tenant_id, _pid, %{conn: conn}, :normal) when is_pid(conn) do
     # Update that a database connection is ready
     Endpoint.local_broadcast(Connect.syn_topic(tenant_id), "ready", %{conn: conn})
+  end
+
+  def on_registry_process_updated(PostgresCdcRls, tenant_id, _pid, meta, _reason) do
+    # Update that the CdCRls connection is ready
+    Endpoint.local_broadcast(PostgresCdcRls.syn_topic(tenant_id), "ready", meta)
   end
 
   def on_registry_process_updated(_scope, _name, _pid, _meta, _reason), do: :ok
