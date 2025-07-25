@@ -3,89 +3,53 @@ defmodule Realtime.GenCounterTest do
 
   alias Realtime.GenCounter
 
-  describe "new/1" do
-    test "starts a new counter from an Erlang term" do
-      term = {:domain, :metric, Ecto.UUID.generate()}
-      assert {:ok, _} = GenCounter.new(term)
-    end
-
-    test "counters are unique for an Erlang term" do
-      term = {:domain, :metric, Ecto.UUID.generate()}
-      {:ok, _} = GenCounter.new(term)
-      assert {:error, {:already_started, _pid}} = GenCounter.new(term)
-    end
-  end
-
   describe "add/1" do
-    test "incriments a counter" do
+    test "increments a counter" do
       term = {:domain, :metric, Ecto.UUID.generate()}
-      {:ok, _} = GenCounter.new(term)
-      :ok = GenCounter.add(term)
-      assert {:ok, 1} = GenCounter.get(term)
+      assert GenCounter.add(term) == 1
+      assert GenCounter.add(term) == 2
+
+      assert GenCounter.get(term) == 2
     end
   end
 
   describe "add/2" do
-    test "incriments a counter by `count`" do
+    test "increments a counter by `count`" do
       term = {:domain, :metric, Ecto.UUID.generate()}
-      {:ok, _} = GenCounter.new(term)
-      :ok = GenCounter.add(term, 10)
-      assert {:ok, 10} = GenCounter.get(term)
+      assert GenCounter.add(term, 10) == 10
+      assert GenCounter.get(term) == 10
     end
   end
 
-  describe "sub/1" do
-    test "decriments a counter" do
+  describe "reset/2" do
+    test "delete a counter the previous value" do
       term = {:domain, :metric, Ecto.UUID.generate()}
-      {:ok, _} = GenCounter.new(term)
-      :ok = GenCounter.add(term)
-      :ok = GenCounter.sub(term)
-      assert {:ok, 0} = GenCounter.get(term)
+      GenCounter.add(term, 10)
+      assert 10 == GenCounter.reset(term)
+      assert GenCounter.get(term) == 0
+      assert :ets.lookup(:gen_counter, term) == []
     end
   end
 
-  describe "sub/2" do
-    test "decriments a counter by `count`" do
-      term = {:domain, :metric, Ecto.UUID.generate()}
-      {:ok, _} = GenCounter.new(term)
-      :ok = GenCounter.add(term, 10)
-      :ok = GenCounter.sub(term, 5)
-      assert {:ok, 5} = GenCounter.get(term)
-    end
-  end
-
-  describe "put/2" do
-    test "replactes a counter with `count`" do
-      term = {:domain, :metric, Ecto.UUID.generate()}
-      {:ok, _} = GenCounter.new(term)
-      :ok = GenCounter.put(term, 10)
-      assert {:ok, 10} = GenCounter.get(term)
-    end
-  end
-
-  describe "stop/2" do
+  describe "delete/1" do
     test "stops the child process the counter is linked to" do
       term = {:domain, :metric, Ecto.UUID.generate()}
-      {:ok, _} = GenCounter.new(term)
-      :ok = GenCounter.stop(term)
-      Process.sleep(100)
-      assert :error = GenCounter.info(term)
-    end
-  end
+      GenCounter.add(term, 10)
 
-  describe "info/2" do
-    test "gets some info on a counter" do
-      term = {:domain, :metric, Ecto.UUID.generate()}
-      {:ok, _} = GenCounter.new(term)
-      assert %{memory: _mem, size: _size} = GenCounter.info(term)
+      assert GenCounter.delete(term) == :ok
+      # When a counter doesn't exist it returns 0
+      assert GenCounter.get(term) == 0
     end
   end
 
   describe "get/1" do
     test "gets the count of a counter" do
       term = {:domain, :metric, Ecto.UUID.generate()}
-      {:ok, _} = GenCounter.new(term)
-      assert {:ok, 0} = GenCounter.get(term)
+      assert GenCounter.get(term) == 0
+
+      GenCounter.add(term)
+
+      assert GenCounter.get(term) == 1
     end
   end
 end

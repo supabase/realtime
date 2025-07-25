@@ -3,7 +3,6 @@ defmodule Realtime.Tenants.Connect.StartCounters do
   Start tenant counters.
   """
 
-  alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
 
@@ -23,7 +22,6 @@ defmodule Realtime.Tenants.Connect.StartCounters do
   def start_joins_per_second_counter(tenant) do
     %{max_joins_per_second: max_joins_per_second} = tenant
     id = Tenants.joins_per_second_key(tenant)
-    GenCounter.new(id)
 
     res =
       RateCounter.new(id,
@@ -47,8 +45,6 @@ defmodule Realtime.Tenants.Connect.StartCounters do
 
     key = Tenants.events_per_second_key(tenant)
 
-    GenCounter.new(key)
-
     res =
       RateCounter.new(key,
         idle_shutdown: :infinity,
@@ -68,7 +64,6 @@ defmodule Realtime.Tenants.Connect.StartCounters do
 
   def start_db_events_counter(tenant) do
     key = Tenants.db_events_per_second_key(tenant)
-    GenCounter.new(key)
 
     res =
       RateCounter.new(key,

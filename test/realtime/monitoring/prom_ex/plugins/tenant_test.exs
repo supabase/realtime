@@ -24,8 +24,6 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                 end
 
                 def fake_db_event(external_id) do
-                  external_id |> Realtime.Tenants.db_events_per_second_key() |> Realtime.GenCounter.new()
-
                   external_id
                   |> Realtime.Tenants.db_events_per_second_key()
                   |> Realtime.RateCounter.new(
@@ -42,8 +40,6 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                 end
 
                 def fake_event(external_id) do
-                  external_id |> Realtime.Tenants.events_per_second_key() |> Realtime.GenCounter.new()
-
                   external_id
                   |> Realtime.Tenants.events_per_second_key()
                   |> Realtime.RateCounter.new(
@@ -60,8 +56,6 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                 end
 
                 def fake_presence_event(external_id) do
-                  external_id |> Realtime.Tenants.presence_events_per_second_key() |> Realtime.GenCounter.new()
-
                   external_id
                   |> Realtime.Tenants.presence_events_per_second_key()
                   |> Realtime.RateCounter.new(

@@ -6,7 +6,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   import Generators
 
   alias Phoenix.Socket.Broadcast
-  alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
@@ -249,7 +248,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       })
 
     key = Tenants.events_per_second_key(tenant)
-    GenCounter.new(key)
     RateCounter.new(key)
     {:ok, rate_counter} = RateCounter.get(key)
 

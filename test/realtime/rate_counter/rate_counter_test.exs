@@ -1,5 +1,5 @@
 defmodule Realtime.RateCounterTest do
-  use Realtime.DataCase
+  use Realtime.DataCase, async: true
 
   alias Realtime.RateCounter
   alias Realtime.GenCounter
@@ -8,6 +8,13 @@ defmodule Realtime.RateCounterTest do
     test "starts a new rate counter from an Erlang term" do
       term = {:domain, :metric, Ecto.UUID.generate()}
       assert {:ok, _} = RateCounter.new(term)
+    end
+
+    test "reset counter if GenCounter already had something" do
+      term = {:domain, :metric, Ecto.UUID.generate()}
+      GenCounter.add(term, 100)
+      assert {:ok, _} = RateCounter.new(term)
+      assert GenCounter.get(term) == 0
     end
 
     test "rate counters are unique for an Erlang term" do
@@ -26,7 +33,7 @@ defmodule Realtime.RateCounterTest do
     test "rate counters reset GenCounter to zero after one tick and average the bucket" do
       term = {:domain, :metric, Ecto.UUID.generate()}
       {:ok, _} = RateCounter.new(term, tick: 5)
-      :ok = GenCounter.add(term)
+      assert GenCounter.add(term) == 1
       Process.sleep(10)
 
       assert {:ok,
@@ -40,6 +47,8 @@ defmodule Realtime.RateCounterTest do
                 tick: 5,
                 tick_ref: _ref2
               }} = RateCounter.get(term)
+
+      assert GenCounter.get(term) == 0
     end
   end
 
@@ -78,16 +87,5 @@ defmodule Realtime.RateCounterTest do
         assert {:ok, %RateCounter{}} = RateCounter.get(term)
       end
     end
-  end
-
-  test "handle handles counter shutdown and dies" do
-    term = {:domain, :metric, Ecto.UUID.generate()}
-    {:ok, pid} = RateCounter.new(term)
-
-    assert {:ok, %RateCounter{}} = RateCounter.get(term)
-    {_, _, counter_pid} = GenCounter.find_counter(term)
-    Process.exit(counter_pid, :shutdown)
-    Process.sleep(10)
-    refute Process.alive?(pid)
   end
 end

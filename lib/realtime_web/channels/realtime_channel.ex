@@ -493,7 +493,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def limit_joins(%{tenant: tenant, limits: limits}) do
     id = Tenants.joins_per_second_key(tenant)
-    GenCounter.new(id)
 
     RateCounter.new(id,
       idle_shutdown: :infinity,
@@ -541,8 +540,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   defp assign_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
     key = Tenants.events_per_second_key(tenant)
 
-    GenCounter.new(key)
-
     RateCounter.new(key,
       idle_shutdown: :infinity,
       telemetry: %{
@@ -561,8 +558,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp assign_presence_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
     key = Tenants.presence_events_per_second_key(tenant)
-
-    GenCounter.new(key)
 
     RateCounter.new(key,
       idle_shutdown: :infinity,
@@ -696,7 +691,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp start_db_rate_counter(tenant) do
     key = Tenants.db_events_per_second_key(tenant)
-    GenCounter.new(key)
 
     RateCounter.new(key,
       idle_shutdown: :infinity,
