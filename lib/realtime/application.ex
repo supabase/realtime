@@ -61,6 +61,7 @@ defmodule Realtime.Application do
     children =
       [
         Realtime.ErlSysMon,
+        Realtime.GenCounter,
         Realtime.PromEx,
         {Realtime.Telemetry.Logger, handler_id: "telemetry-logger"},
         Realtime.Repo,
@@ -69,7 +70,6 @@ defmodule Realtime.Application do
         {Phoenix.PubSub, name: Realtime.PubSub, pool_size: 10},
         {Cachex, name: Realtime.RateCounter},
         Realtime.Tenants.Cache,
-        Realtime.GenCounter.DynamicSupervisor,
         Realtime.RateCounter.DynamicSupervisor,
         Realtime.Latency,
         {Registry, keys: :duplicate, name: Realtime.Registry},

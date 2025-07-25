@@ -16,9 +16,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   @expired_token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MjEwNzMyOTAsImlhdCI6MTYyNzg4NjQ0MCwicm9sZSI6ImFub24ifQ.AHmuaydSU3XAxwoIFhd3gwGwjnBIKsjFil0JQEOLtRw"
 
   setup %{conn: conn} do
-    start_supervised(Realtime.RateCounter.DynamicSupervisor)
-    start_supervised(Realtime.GenCounter.DynamicSupervisor)
-
     tenant = Containers.checkout_tenant(run_migrations: true)
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
     Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
@@ -259,9 +256,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
   describe "authorization for broadcast" do
     setup %{conn: conn, tenant: tenant} = context do
-      start_supervised(Realtime.RateCounter.DynamicSupervisor)
-      start_supervised(Realtime.GenCounter.DynamicSupervisor)
-
       jwt_secret = Crypto.decrypt!(tenant.jwt_secret)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -498,7 +492,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         end)
 
       GenCounter
-      |> expect(:add, fn ^request_events_key -> :ok end)
+      |> expect(:add, fn ^request_events_key -> 1 end)
       |> reject(:add, 1)
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})

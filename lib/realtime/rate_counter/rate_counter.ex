@@ -2,10 +2,7 @@ defmodule Realtime.RateCounter do
   @moduledoc """
   Start a RateCounter for any Erlang term.
 
-  These rate counters use the GenCounter module which wraps the Erlang :counter module.
-  Counts and rates are not ran through the GenServer. `:counters` are addressed
-  directly do avoid any serialization bottlenecks.
-
+  These rate counters use the GenCounter module.
   Start your RateCounter here and increment it with a `GenCounter.add/1` call, for example.
   """
 
@@ -35,8 +32,7 @@ defmodule Realtime.RateCounter do
               event_name: [@app_name] ++ [:rate_counter],
               measurements: %{sum: 0},
               metadata: %{}
-            },
-            counter_pid: nil
+            }
 
   @type t :: %__MODULE__{
           id: term(),
@@ -52,8 +48,7 @@ defmodule Realtime.RateCounter do
             event_name: :telemetry.event_name(),
             measurements: :telemetry.event_measurements(),
             metadata: :telemetry.event_metadata()
-          },
-          counter_pid: pid()
+          }
         }
 
   @spec start_link([keyword()]) :: {:ok, pid()} | {:error, {:already_started, pid()}}
@@ -75,7 +70,7 @@ defmodule Realtime.RateCounter do
 
     Enum.each(keys, fn {{_, _, key}, {pid, _}} ->
       if Process.alive?(pid), do: GenServer.stop(pid)
-      GenCounter.stop(key)
+      GenCounter.delete(key)
       Cachex.del!(@cache, key)
     end)
 
@@ -118,54 +113,48 @@ defmodule Realtime.RateCounter do
     idle_shutdown_ms = Keyword.get(args, :idle_shutdown, @idle_shutdown)
     Logger.info("Starting #{__MODULE__} for: #{inspect(id)}")
 
-    case ensure_counter_started(id) do
-      {:ok, _ref, pid} ->
-        Process.monitor(pid)
+    # Always reset the counter in case the counter had already accumulated without
+    # a RateCounter running to calculate avg and buckets
+    GenCounter.reset(id)
 
-        telemetry =
-          if telem_opts do
-            Logger.metadata(telem_opts.metadata)
+    telemetry =
+      if telem_opts do
+        Logger.metadata(telem_opts.metadata)
 
-            %{
-              emit: true,
-              event_name: [@app_name] ++ [:rate_counter] ++ telem_opts.event_name,
-              measurements: Map.merge(%{sum: 0}, telem_opts.measurements),
-              metadata: Map.merge(%{id: id}, telem_opts.metadata)
-            }
-          else
-            %{emit: false}
-          end
-
-        ticker = tick(0)
-
-        idle_shutdown_ref =
-          if idle_shutdown_ms != :infinity, do: shutdown_after(idle_shutdown_ms), else: nil
-
-        state = %__MODULE__{
-          id: id,
-          tick: every,
-          tick_ref: ticker,
-          max_bucket_len: max_bucket_len,
-          idle_shutdown: idle_shutdown_ms,
-          idle_shutdown_ref: idle_shutdown_ref,
-          telemetry: telemetry,
-          counter_pid: pid
+        %{
+          emit: true,
+          event_name: [@app_name] ++ [:rate_counter] ++ telem_opts.event_name,
+          measurements: Map.merge(%{sum: 0}, telem_opts.measurements),
+          metadata: Map.merge(%{id: id}, telem_opts.metadata)
         }
+      else
+        %{emit: false}
+      end
 
-        Cachex.put!(@cache, id, state)
+    ticker = tick(0)
 
-        {:ok, state}
+    idle_shutdown_ref =
+      if idle_shutdown_ms != :infinity, do: shutdown_after(idle_shutdown_ms), else: nil
 
-      _ ->
-        {:shutdown, :kill, %{}}
-    end
+    state = %__MODULE__{
+      id: id,
+      tick: every,
+      tick_ref: ticker,
+      max_bucket_len: max_bucket_len,
+      idle_shutdown: idle_shutdown_ms,
+      idle_shutdown_ref: idle_shutdown_ref,
+      telemetry: telemetry
+    }
+
+    Cachex.put!(@cache, id, state)
+
+    {:ok, state}
   end
 
   @impl true
   def handle_info(:tick, state) do
     Process.cancel_timer(state.tick_ref)
-    {:ok, count} = GenCounter.get(state.id)
-    :ok = GenCounter.put(state.id, 0)
+    count = GenCounter.reset(state.id)
 
     if state.telemetry.emit and count > 0,
       do:
@@ -199,13 +188,9 @@ defmodule Realtime.RateCounter do
   @impl true
   def handle_info(:idle_shutdown, state) do
     Logger.warning("#{__MODULE__} idle_shutdown reached for: #{inspect(state.id)}")
-    GenCounter.stop(state.id)
+    GenCounter.delete(state.id)
     Cachex.del!(@cache, state.id)
     {:stop, :normal, state}
-  end
-
-  def handle_info({:DOWN, _, :process, counter_pid, _}, %{counter_pid: counter_pid} = state) do
-    {:stop, :shutdown, state}
   end
 
   defp tick(every) do
@@ -214,10 +199,5 @@ defmodule Realtime.RateCounter do
 
   defp shutdown_after(ms) do
     Process.send_after(self(), :idle_shutdown, ms)
-  end
-
-  defp ensure_counter_started(id) do
-    GenCounter.new(id)
-    GenCounter.find_counter(id)
   end
 end

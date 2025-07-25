@@ -216,7 +216,7 @@ defmodule Realtime.Api do
   def preload_counters(nil, _key), do: nil
 
   def preload_counters(%Tenant{} = tenant, counters_key) do
-    {:ok, current} = GenCounter.get(counters_key)
+    current = GenCounter.get(counters_key)
     {:ok, %RateCounter{avg: avg}} = RateCounter.get(counters_key)
 
     tenant
