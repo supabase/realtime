@@ -14,7 +14,13 @@ defmodule Realtime.RateCounter do
   alias Realtime.RateCounter
   alias Realtime.Telemetry
 
-  @idle_shutdown :timer.seconds(5)
+  defmodule Args do
+    @moduledoc false
+    @type t :: %__MODULE__{id: term(), opts: keyword}
+    defstruct id: nil, opts: []
+  end
+
+  @idle_shutdown :timer.minutes(15)
   @tick :timer.seconds(1)
   @max_bucket_len 60
   @cache __MODULE__
@@ -81,12 +87,12 @@ defmodule Realtime.RateCounter do
   Starts a new RateCounter under a DynamicSupervisor
   """
 
-  @spec new(term(), keyword()) :: DynamicSupervisor.on_start_child()
-  def new(term, opts \\ []) do
-    opts = [id: term] ++ opts
+  @spec new(Args.t(), keyword) :: DynamicSupervisor.on_start_child()
+  def new(%Args{id: id} = args, opts \\ []) do
+    opts = [id: id] ++ Keyword.merge(args.opts, opts)
 
     DynamicSupervisor.start_child(RateCounter.DynamicSupervisor, %{
-      id: term,
+      id: id,
       start: {__MODULE__, :start_link, [opts]},
       restart: :transient
     })
@@ -94,13 +100,29 @@ defmodule Realtime.RateCounter do
 
   @doc """
   Gets the state of the RateCounter.
-  """
 
-  @spec get(term()) :: {:ok, term()} | {:error, term()}
-  def get(term) do
-    case Cachex.get(@cache, term) do
-      {:ok, nil} -> {:error, :worker_not_found}
-      {:ok, term} -> {:ok, term}
+  Automatically starts the RateCounter if it does not exist or if it
+  has stopped due to idleness.
+  """
+  @spec get(term() | Args.t()) :: {:ok, t} | {:error, term()}
+  def get(%Args{id: id} = args) do
+    case do_get(id) do
+      {:ok, state} ->
+        {:ok, state}
+
+      {:error, :not_found} ->
+        case new(args) do
+          {:ok, _} -> do_get(id)
+          {:error, {:already_started, _}} -> do_get(id)
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp do_get(id) do
+    case Cachex.get(@cache, id) do
+      {:ok, nil} -> {:error, :not_found}
+      {:ok, state} -> {:ok, state}
     end
   end
 
@@ -164,11 +186,6 @@ defmodule Realtime.RateCounter do
           state.telemetry.metadata
         )
 
-    if is_reference(state.idle_shutdown_ref) and count > 0 do
-      Process.cancel_timer(state.idle_shutdown_ref)
-      shutdown_after(state.idle_shutdown)
-    end
-
     bucket = [count | state.bucket] |> Enum.take(state.max_bucket_len)
     bucket_len = Enum.count(bucket)
 
@@ -187,10 +204,26 @@ defmodule Realtime.RateCounter do
 
   @impl true
   def handle_info(:idle_shutdown, state) do
-    Logger.warning("#{__MODULE__} idle_shutdown reached for: #{inspect(state.id)}")
-    GenCounter.delete(state.id)
-    Cachex.del!(@cache, state.id)
-    {:stop, :normal, state}
+    if Enum.all?(state.bucket, &(&1 == 0)) do
+      # All the buckets are empty, so we can assume this RateCounter has not been useful recently
+      Logger.warning("#{__MODULE__} idle_shutdown reached for: #{inspect(state.id)}")
+      GenCounter.delete(state.id)
+      # We are expiring in the near future instead of deleting so that
+      # The process dies before the cache information disappears
+      # If we were using Cachex.delete instead then the following rare scenario would be possible:
+      # * RateCounter.get/2 is called;
+      # * Cache was deleted but the process has not stopped yet;
+      # * RateCounter.get/2 will then try to start a new RateCounter but the supervisor will return :already_started;
+      # * Process finally stops;
+      # * The cache is still empty because no new process was started causing an error
+
+      Cachex.expire(@cache, state.id, :timer.seconds(1))
+      {:stop, :normal, state}
+    else
+      Process.cancel_timer(state.idle_shutdown_ref)
+      idle_shutdown_ref = shutdown_after(state.idle_shutdown)
+      {:noreply, %{state | idle_shutdown_ref: idle_shutdown_ref}}
+    end
   end
 
   defp tick(every) do
