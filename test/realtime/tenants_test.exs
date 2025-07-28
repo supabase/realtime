@@ -13,7 +13,6 @@ defmodule Realtime.TenantsTest do
       keys = Tenants.limiter_keys(tenant)
 
       for key <- keys do
-        GenCounter.new(key)
         GenCounter.add(key, 9)
       end
 

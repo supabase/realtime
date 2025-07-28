@@ -20,7 +20,6 @@ defmodule Realtime.Integration.RtChannelTest do
 
   alias Realtime.Api.Tenant
   alias Realtime.Database
-  alias Realtime.GenCounter
   alias Realtime.Integration.WebsocketClient
   alias Realtime.RateCounter
   alias Realtime.Tenants
@@ -1920,7 +1919,6 @@ defmodule Realtime.Integration.RtChannelTest do
         )
 
       RateCounter.stop(tenant.external_id)
-      GenCounter.stop(tenant.external_id)
       :telemetry.detach(__MODULE__)
       :telemetry.attach_many(__MODULE__, events, &__MODULE__.handle_telemetry/4, [])
 

@@ -1,205 +1,60 @@
 defmodule Realtime.GenCounter do
   @moduledoc """
-  A generic counter interface for any Erlang term. One counter per term.
-  Counters are registered locally via the Registry so we can look them up by term.
-
-  GenServers are used to keep counters alive across callers, however calls to the
-  counters are not serialized through the GenServer keeping GenCounters as performant as possible.
+  Process holds an ETS table where each row is a key and a counter
   """
+
   use GenServer
 
-  use Realtime.Logs
-  alias Realtime.GenCounter
+  @name __MODULE__
+  @table :gen_counter
 
-  defstruct id: nil, counters: []
+  @spec start_link(any) :: GenServer.on_start()
+  def start_link(_), do: GenServer.start_link(__MODULE__, :ok, name: @name)
 
-  @type t :: %__MODULE__{
-          id: term(),
-          counters: list()
-        }
+  @spec add(term, integer) :: integer
+  def add(term), do: add(term, 1)
 
-  def start_link(args) do
-    id = Keyword.get(args, :id)
-    unless id, do: raise("Supply an identifier to start a counter!")
+  def add(term, count), do: :ets.update_counter(@table, term, count, {term, 0})
 
-    GenServer.start_link(__MODULE__, args,
-      name: {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, :worker, id}}}
-    )
-  end
-
-  @doc """
-  Creates a new counter from any Erlang term.
-  """
-  @spec new({atom(), atom(), term()}) ::
-          {:ok, {:write_concurrency, reference()}} | {:error, term()}
-  def new(term) do
-    id = :erlang.phash2(term)
-
-    worker =
-      DynamicSupervisor.start_child(GenCounter.DynamicSupervisor, %{
-        id: id,
-        start: {__MODULE__, :start_link, [[id: id]]},
-        restart: :transient
-      })
-
-    with {:ok, pid} <- worker,
-         {:ok, ref} <- GenServer.call(pid, :new) do
-      {:ok, ref}
-    else
-      {:error, {:already_started, _}} = started ->
-        started
-
-      err ->
-        log_error("UnableToCreateCounter", err)
-        {:error, :not_created}
-    end
-  end
-
-  @doc """
-  Incriments a counter by one.
-  """
-
-  @spec add(term()) :: :ok | :error
-  def add(term) do
-    add(term, 1)
-  end
-
-  @doc """
-  Incriments a counter by `count`.
-  """
-
-  @spec add(term(), integer()) :: :ok | :error
-  def add(term, count) when is_integer(count) do
-    case find_counter(term) do
-      {:ok, counter_ref, _pid} ->
-        :counters.add(counter_ref, 1, count)
-
-      err ->
-        log_error("UnableToIncrementCounter", err)
-        :error
-    end
-  end
-
-  @doc """
-  Decriments a counter by one.
-  """
-
-  @spec sub(term()) :: :ok | :error
-  def sub(term) do
-    sub(term, 1)
-  end
-
-  @doc """
-  Decriments a counter by `count`.
-  """
-
-  @spec sub(term(), integer()) :: :ok | :error
-  def sub(term, count) when is_integer(count) do
-    case find_counter(term) do
-      {:ok, counter_ref, _pid} ->
-        :counters.sub(counter_ref, 1, count)
-
-      err ->
-        log_error("UnableToDecrementCounter", err)
-        :error
-    end
-  end
-
-  @doc """
-  Replaces a counter with `count`.
-  """
-
-  @spec put(term(), integer()) :: :ok | :error
-  def put(term, count) when is_integer(count) do
-    case find_counter(term) do
-      {:ok, counter_ref, _pid} ->
-        :counters.put(counter_ref, 1, count)
-
-      err ->
-        log_error("UnableToUpdateCounter", err)
-        :error
-    end
-  end
-
-  @doc """
-  Gets info on a counter.
-  """
-
-  @spec info(term()) :: %{memory: integer(), size: integer()} | :error
-  def info(term) do
-    case find_counter(term) do
-      {:ok, counter_ref, _pid} ->
-        :counters.info(counter_ref)
-
-      _err ->
-        log_error("UnableToFindCounter", "Unable to find counter")
-        :error
-    end
-  end
-
-  @doc """
-  Gets the count of a counter.
-  """
-
-  @spec get(term()) ::
-          {:ok, integer()} | {:error, :counter_not_found}
+  @spec get(term) :: integer
   def get(term) do
-    case find_counter(term) do
-      {:ok, counter_ref, _pid} ->
-        count = :counters.get(counter_ref, 1)
-        {:ok, count}
-
-      err ->
-        log_error("UnableToFindCounter", "Counter not found")
-        err
+    case :ets.lookup(@table, term) do
+      [{^term, value}] -> value
+      [] -> 0
     end
   end
 
-  @spec stop(term()) :: :ok | {:error, :not_found | :counter_not_found}
-  def stop(term) do
-    case find_worker(term) do
-      {:ok, pid} -> DynamicSupervisor.terminate_child(GenCounter.DynamicSupervisor, pid)
-      error -> error
+  @doc "Reset counter to 0 and return previous value"
+  @spec reset(term) :: integer
+  def reset(term) do
+    # We might lose some updates between lookup and the delete
+    case :ets.lookup(@table, term) do
+      [{^term, previous}] ->
+        :ets.delete(@table, term)
+        previous
+
+      [] ->
+        0
     end
   end
 
-  @spec find_counter(term) ::
-          {:ok, :counters.counters_ref(), pid()} | {:error, :counter_not_found}
-  def find_counter(term) do
-    id = :erlang.phash2(term)
-
-    case Registry.lookup(Realtime.Registry.Unique, {__MODULE__, :counter, id}) do
-      [{pid, counter_ref}] -> {:ok, counter_ref, pid}
-      _error -> {:error, :counter_not_found}
-    end
-  end
-
-  # Callbacks
-
-  @impl true
-  def init(args) do
-    id = Keyword.fetch!(args, :id)
-    state = %__MODULE__{id: id, counters: []}
-    {:ok, state}
+  @spec delete(term) :: :ok
+  def delete(term) do
+    :ets.delete(@table, term)
+    :ok
   end
 
   @impl true
-  def handle_call(:new, _from, state) do
-    ref = :counters.new(1, [:write_concurrency])
+  def init(_) do
+    table =
+      :ets.new(@table, [
+        :set,
+        :public,
+        :named_table,
+        {:decentralized_counters, true},
+        {:write_concurrency, :auto}
+      ])
 
-    {:ok, _} = Registry.register(Realtime.Registry.Unique, {__MODULE__, :counter, state.id}, ref)
-
-    counters = [ref, state.counters]
-
-    {:reply, {:ok, ref}, %{state | counters: counters}}
-  end
-
-  defp find_worker(term) do
-    id = :erlang.phash2(term)
-
-    case Registry.lookup(Realtime.Registry.Unique, {__MODULE__, :worker, id}) do
-      [{pid, _}] -> {:ok, pid}
-      _error -> {:error, :worker_not_found}
-    end
+    {:ok, table}
   end
 end
