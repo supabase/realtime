@@ -153,10 +153,10 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
         # Wait for counters to increment. RateCounter tick is 1 second
         Process.sleep(2000)
-        {:ok, rate_counter} = RateCounter.get(Tenants.requests_per_second_key(tenant))
+        {:ok, rate_counter} = RateCounter.get(Tenants.requests_per_second_rate(tenant))
         assert rate_counter.avg != 0.0
 
-        {:ok, rate_counter} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, rate_counter} = RateCounter.get(Tenants.events_per_second_rate(tenant))
         assert rate_counter.avg == 0.0
 
         refute_receive {:socket_push, _, _}
@@ -166,14 +166,14 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
   describe "too many requests" do
     test "batch will exceed rate limit", %{conn: conn, tenant: tenant} do
-      requests_key = Tenants.requests_per_second_key(tenant)
-      events_key = Tenants.events_per_second_key(tenant)
+      requests_rate = Tenants.requests_per_second_rate(tenant)
+      events_rate = Tenants.events_per_second_rate(tenant)
 
       RateCounter
-      |> stub(:new, fn _, _ -> {:ok, nil} end)
+      |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn
-        ^requests_key -> {:ok, %RateCounter{avg: 0}}
-        ^events_key -> {:ok, %RateCounter{avg: 10}}
+        ^requests_rate -> {:ok, %RateCounter{avg: 0}}
+        ^events_rate -> {:ok, %RateCounter{avg: 10}}
       end)
 
       conn =
@@ -198,14 +198,14 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     end
 
     test "user has hit the rate limit", %{conn: conn, tenant: tenant} do
-      requests_key = Tenants.requests_per_second_key(tenant)
-      events_key = Tenants.events_per_second_key(tenant)
+      requests_rate = Tenants.requests_per_second_rate(tenant)
+      events_rate = Tenants.events_per_second_rate(tenant)
 
       RateCounter
-      |> stub(:new, fn _, _ -> {:ok, nil} end)
+      |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn
-        ^requests_key -> {:ok, %RateCounter{avg: 0}}
-        ^events_key -> {:ok, %RateCounter{avg: 1000}}
+        ^requests_rate -> {:ok, %RateCounter{avg: 0}}
+        ^events_rate -> {:ok, %RateCounter{avg: 1000}}
       end)
 
       messages = [

@@ -228,25 +228,17 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def handle_info(:update_rate_counter, %{assigns: %{limits: %{max_events_per_second: max}}} = socket) do
-    socket = count(socket)
+    count(socket)
 
-    if socket.assigns.rate_counter.avg > max do
+    {:ok, rate_counter} = RateCounter.get(socket.assigns.rate_counter)
+
+    if rate_counter.avg > max do
       message = "Too many messages per second"
 
       shutdown_response(socket, message)
     else
       {:noreply, socket}
     end
-  end
-
-  def handle_info(
-        _any,
-        %{assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}} = socket
-      )
-      when avg > max do
-    message = "Too many messages per second"
-
-    shutdown_response(socket, message)
   end
 
   def handle_info(%{event: "postgres_cdc_rls_down"}, socket) do
@@ -271,7 +263,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(%{event: type, payload: payload} = msg, socket) do
-    socket = socket |> count() |> Logging.maybe_log_handle_info(msg)
+    count(socket)
+    socket = Logging.maybe_log_handle_info(socket, msg)
     push(socket, type, payload)
     {:noreply, socket}
   end
@@ -464,7 +457,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in(type, payload, socket) do
-    socket = count(socket)
+    count(socket)
 
     # Log info here so that bad messages from clients won't flood Logflare
     # Can subscribe to a Channel with `log_level` `info` to see these messages
@@ -492,20 +485,12 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def limit_joins(%{tenant: tenant, limits: limits}) do
-    id = Tenants.joins_per_second_key(tenant)
+    rate_args = Tenants.joins_per_second_rate(tenant, limits.max_joins_per_second)
 
-    RateCounter.new(id,
-      idle_shutdown: :infinity,
-      telemetry: %{
-        event_name: [:channel, :joins],
-        measurements: %{limit: limits.max_joins_per_second},
-        metadata: %{tenant: tenant}
-      }
-    )
+    RateCounter.new(rate_args)
+    GenCounter.add(rate_args.id)
 
-    GenCounter.add(id)
-
-    case RateCounter.get(id) do
+    case RateCounter.get(rate_args) do
       {:ok, %{avg: avg}} when avg < limits.max_joins_per_second ->
         :ok
 
@@ -538,47 +523,23 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp assign_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
-    key = Tenants.events_per_second_key(tenant)
+    rate_args = Tenants.events_per_second_rate(tenant, limits.max_events_per_second)
 
-    RateCounter.new(key,
-      idle_shutdown: :infinity,
-      telemetry: %{
-        event_name: [:channel, :events],
-        measurements: %{limit: limits.max_events_per_second},
-        metadata: %{tenant: tenant}
-      }
-    )
-
-    {:ok, rate_counter} = RateCounter.get(key)
-
-    assign(socket, :rate_counter, rate_counter)
+    RateCounter.new(rate_args)
+    assign(socket, :rate_counter, rate_args)
   end
 
   defp assign_counter(socket), do: socket
 
   defp assign_presence_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
-    key = Tenants.presence_events_per_second_key(tenant)
+    rate_args = Tenants.presence_events_per_second_rate(tenant, limits.max_events_per_second)
 
-    RateCounter.new(key,
-      idle_shutdown: :infinity,
-      telemetry: %{
-        event_name: [:channel, :presence_events],
-        measurements: %{limit: limits.max_events_per_second},
-        metadata: %{tenant: tenant}
-      }
-    )
+    RateCounter.new(rate_args)
 
-    {:ok, rate_counter} = RateCounter.get(key)
-
-    assign(socket, :presence_rate_counter, rate_counter)
+    assign(socket, :presence_rate_counter, rate_args)
   end
 
-  defp count(%{assigns: %{rate_counter: counter}} = socket) do
-    GenCounter.add(counter.id)
-    {:ok, rate_counter} = RateCounter.get(counter.id)
-
-    assign(socket, :rate_counter, rate_counter)
-  end
+  defp count(%{assigns: %{rate_counter: counter}}), do: GenCounter.add(counter.id)
 
   defp presence_key(params) do
     case params["config"]["presence"]["key"] do
@@ -690,12 +651,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp start_db_rate_counter(tenant) do
-    key = Tenants.db_events_per_second_key(tenant)
+    rate_args = Tenants.db_events_per_second_rate(tenant)
 
-    RateCounter.new(key,
-      idle_shutdown: :infinity,
-      telemetry: %{event_name: [:channel, :db_events], measurements: %{}, metadata: %{tenant: tenant}}
-    )
+    RateCounter.new(rate_args)
 
     :ok
   end

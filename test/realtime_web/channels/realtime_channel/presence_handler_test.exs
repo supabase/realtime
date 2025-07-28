@@ -6,9 +6,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   import Generators
 
   alias Phoenix.Socket.Broadcast
-  alias Realtime.RateCounter
-  alias Realtime.RateCounter
-  alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
@@ -209,8 +206,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
     Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
 
-    RateCounter.stop(tenant.external_id)
-
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     assert Connect.ready?(tenant.external_id)
 
@@ -247,10 +242,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
         role: claims.role
       })
 
-    key = Tenants.events_per_second_key(tenant)
-    RateCounter.new(key)
-    {:ok, rate_counter} = RateCounter.get(key)
-
     tenant_topic = "realtime:#{topic}"
     self_broadcast = true
 
@@ -262,7 +253,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
         self_broadcast: self_broadcast,
         policies: policies,
         authorization_context: authorization_context,
-        rate_counter: rate_counter,
         private?: private?,
         presence_key: presence_key,
         presence_enabled?: enabled?

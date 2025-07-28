@@ -20,18 +20,10 @@ defmodule Realtime.Tenants.Connect.StartCounters do
   end
 
   def start_joins_per_second_counter(tenant) do
-    %{max_joins_per_second: max_joins_per_second} = tenant
-    id = Tenants.joins_per_second_key(tenant)
-
     res =
-      RateCounter.new(id,
-        idle_shutdown: :infinity,
-        telemetry: %{
-          event_name: [:channel, :joins],
-          measurements: %{limit: max_joins_per_second},
-          metadata: %{tenant: tenant.external_id}
-        }
-      )
+      tenant
+      |> Tenants.joins_per_second_rate()
+      |> RateCounter.new()
 
     case res do
       {:ok, _} -> :ok
@@ -41,19 +33,10 @@ defmodule Realtime.Tenants.Connect.StartCounters do
   end
 
   def start_max_events_counter(tenant) do
-    %{max_events_per_second: max_events_per_second} = tenant
-
-    key = Tenants.events_per_second_key(tenant)
-
     res =
-      RateCounter.new(key,
-        idle_shutdown: :infinity,
-        telemetry: %{
-          event_name: [:channel, :events],
-          measurements: %{limit: max_events_per_second},
-          metadata: %{tenant: tenant.external_id}
-        }
-      )
+      tenant
+      |> Tenants.events_per_second_rate()
+      |> RateCounter.new()
 
     case res do
       {:ok, _} -> :ok
@@ -63,17 +46,10 @@ defmodule Realtime.Tenants.Connect.StartCounters do
   end
 
   def start_db_events_counter(tenant) do
-    key = Tenants.db_events_per_second_key(tenant)
-
     res =
-      RateCounter.new(key,
-        idle_shutdown: :infinity,
-        telemetry: %{
-          event_name: [:channel, :db_events],
-          measurements: %{},
-          metadata: %{tenant: tenant.external_id}
-        }
-      )
+      tenant
+      |> Tenants.db_events_per_second_rate()
+      |> RateCounter.new()
 
     case res do
       {:ok, _} -> :ok

@@ -8,6 +8,7 @@ defmodule Realtime.Tenants do
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.RateCounter
   alias Realtime.Repo
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.Cache
@@ -123,24 +124,40 @@ defmodule Realtime.Tenants do
       joins_per_second_key(tenant),
       events_per_second_key(tenant),
       db_events_per_second_key(tenant),
-      connection_attempts_per_second_key(tenant),
       presence_events_per_second_key(tenant)
     ]
   end
 
-  @doc """
-  The GenCounter key to use for counting requests through Plug.
-  """
+  @spec requests_per_second_rate(Tenant.t()) :: RateCounter.Args.t()
+  def requests_per_second_rate(%Tenant{} = tenant) do
+    %RateCounter.Args{id: requests_per_second_key(tenant), opts: []}
+  end
 
+  @doc "The GenCounter key to use for counting requests through Plug."
   @spec requests_per_second_key(Tenant.t() | String.t()) :: {:plug, :requests, String.t()}
   def requests_per_second_key(%Tenant{} = tenant) do
     {:plug, :requests, tenant.external_id}
   end
 
-  @doc """
-  The GenCounter key to use for counting RealtimeChannel joins.
-  """
+  @doc "RateCounter arguments for counting joins per second."
+  @spec joins_per_second_rate(Tenant.t()) :: RateCounter.Args.t()
+  def joins_per_second_rate(%Tenant{} = tenant),
+    do: joins_per_second_rate(tenant.external_id, tenant.max_joins_per_second)
 
+  @spec joins_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
+  def joins_per_second_rate(tenant_id, max_joins_per_second) when is_binary(tenant_id) do
+    opts = [
+      telemetry: %{
+        event_name: [:channel, :joins],
+        measurements: %{limit: max_joins_per_second},
+        metadata: %{tenant: tenant_id}
+      }
+    ]
+
+    %RateCounter.Args{id: joins_per_second_key(tenant_id), opts: opts}
+  end
+
+  @doc "The GenCounter key to use for counting RealtimeChannel joins."
   @spec joins_per_second_key(Tenant.t() | String.t()) :: {:channel, :joins, String.t()}
   def joins_per_second_key(tenant) when is_binary(tenant) do
     {:channel, :joins, tenant}
@@ -150,10 +167,7 @@ defmodule Realtime.Tenants do
     {:channel, :joins, tenant.external_id}
   end
 
-  @doc """
-  The GenCounter key to use to limit the amount of clients connected to the same same channel.
-  """
-
+  @doc "The Register key to use to limit the amount of channels connected to the websocket."
   @spec channels_per_client_key(Tenant.t() | String.t()) :: {:channel, :clients_per, String.t()}
   def channels_per_client_key(tenant) when is_binary(tenant) do
     {:channel, :clients_per, tenant}
@@ -161,6 +175,22 @@ defmodule Realtime.Tenants do
 
   def channels_per_client_key(%Tenant{} = tenant) do
     {:channel, :clients_per, tenant.external_id}
+  end
+
+  @doc "RateCounter arguments for counting events per second."
+  @spec events_per_second_rate(Tenant.t()) :: RateCounter.Args.t()
+  def events_per_second_rate(tenant), do: events_per_second_rate(tenant.external_id, tenant.max_events_per_second)
+
+  def events_per_second_rate(tenant_id, max_events_per_second) do
+    opts = [
+      telemetry: %{
+        event_name: [:channel, :events],
+        measurements: %{limit: max_events_per_second},
+        metadata: %{tenant: tenant_id}
+      }
+    ]
+
+    %RateCounter.Args{id: events_per_second_key(tenant_id), opts: opts}
   end
 
   @doc """
@@ -180,6 +210,22 @@ defmodule Realtime.Tenants do
     {:channel, :events, tenant.external_id}
   end
 
+  @doc "RateCounter arguments for counting database events per second."
+  @spec db_events_per_second_rate(Tenant.t() | String.t()) :: RateCounter.Args.t()
+  def db_events_per_second_rate(%Tenant{} = tenant), do: db_events_per_second_rate(tenant.external_id)
+
+  def db_events_per_second_rate(tenant_id) when is_binary(tenant_id) do
+    opts = [
+      telemetry: %{
+        event_name: [:channel, :db_events],
+        measurements: %{},
+        metadata: %{tenant: tenant_id}
+      }
+    ]
+
+    %RateCounter.Args{id: db_events_per_second_key(tenant_id), opts: opts}
+  end
+
   @doc """
   The GenCounter key to use when counting events for RealtimeChannel events.
     iex> Realtime.Tenants.db_events_per_second_key("tenant_id")
@@ -194,6 +240,25 @@ defmodule Realtime.Tenants do
 
   def db_events_per_second_key(%Tenant{} = tenant) do
     {:channel, :db_events, tenant.external_id}
+  end
+
+  @doc "RateCounter arguments for counting presence events per second."
+  @spec presence_events_per_second_rate(Tenant.t()) :: RateCounter.Args.t()
+  def presence_events_per_second_rate(tenant) do
+    presence_events_per_second_rate(tenant.external_id, tenant.max_events_per_second)
+  end
+
+  @spec presence_events_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
+  def presence_events_per_second_rate(tenant_id, max_events_per_second) do
+    opts = [
+      telemetry: %{
+        event_name: [:channel, :presence_events],
+        measurements: %{limit: max_events_per_second},
+        metadata: %{tenant: tenant_id}
+      }
+    ]
+
+    %RateCounter.Args{id: presence_events_per_second_key(tenant_id), opts: opts}
   end
 
   @doc """
@@ -211,23 +276,6 @@ defmodule Realtime.Tenants do
 
   def presence_events_per_second_key(%Tenant{} = tenant) do
     {:channel, :presence_events, tenant.external_id}
-  end
-
-  @doc """
-  The GenCounter key to use when counting connection attempts against Realtime.Tenants.Connect
-  ## Examples
-    iex> Realtime.Tenants.connection_attempts_per_second_key("tenant_id")
-    {:tenant, :connection_attempts, "tenant_id"}
-    iex> Realtime.Tenants.connection_attempts_per_second_key(%Realtime.Api.Tenant{external_id: "tenant_id"})
-    {:tenant, :connection_attempts, "tenant_id"}
-  """
-  @spec connection_attempts_per_second_key(Tenant.t() | String.t()) :: {:tenant, :connection_attempts, String.t()}
-  def connection_attempts_per_second_key(tenant) when is_binary(tenant) do
-    {:tenant, :connection_attempts, tenant}
-  end
-
-  def connection_attempts_per_second_key(%Tenant{} = tenant) do
-    {:tenant, :connection_attempts, tenant.external_id}
   end
 
   @spec get_tenant_limits(Realtime.Api.Tenant.t(), maybe_improper_list) :: list

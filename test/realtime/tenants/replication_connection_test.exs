@@ -8,7 +8,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
   alias Realtime.Api.Message
   alias Realtime.Database
-  alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.ReplicationConnection
   alias RealtimeWeb.Endpoint
@@ -24,7 +23,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     name = "supabase_realtime_messages_replication_slot_test"
     Postgrex.query(db_conn, "SELECT pg_drop_replication_slot($1)", [name])
     Process.exit(db_conn, :normal)
-    tenant |> Tenants.limiter_keys() |> Enum.each(&RateCounter.new(&1))
 
     %{tenant: tenant}
   end

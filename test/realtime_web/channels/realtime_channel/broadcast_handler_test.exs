@@ -43,7 +43,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
-        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
         assert 100 in buckets
         assert avg > 0
       end
@@ -65,7 +65,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         refute_received _any
 
-        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
         assert avg == 0.0
       end
 
@@ -97,7 +97,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
-        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
         assert 100 in buckets
         assert avg > 0.0
       end
@@ -119,7 +119,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         refute_received _any
 
-        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
         assert avg == 0.0
       end
 
@@ -231,7 +231,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
         end
 
-        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
         assert 100 in buckets
         assert avg > 0.0
       end
@@ -259,7 +259,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         end
 
         Process.sleep(120)
-        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
         assert 100 in buckets
         assert avg > 0.0
       end
@@ -278,7 +278,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         assert log =~ "RlsPolicyError"
 
-        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_key(tenant))
+        {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
         assert avg == 0.0
       end
     end
@@ -292,8 +292,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
     Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
 
-    key = Tenants.events_per_second_key(tenant)
-    RateCounter.new(key, tick: 100)
+    rate = Tenants.events_per_second_rate(tenant)
+    RateCounter.new(rate, tick: 100)
 
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     assert Connect.ready?(tenant.external_id)
@@ -337,8 +337,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         role: claims.role
       })
 
-    key = Tenants.events_per_second_key(tenant)
-    {:ok, rate_counter} = RateCounter.get(key)
+    rate_counter = Tenants.events_per_second_rate(tenant)
 
     tenant_topic = "realtime:#{topic}"
     self_broadcast = true

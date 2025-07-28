@@ -11,7 +11,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Phoenix.Socket
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
-  alias Realtime.RateCounter
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
@@ -102,8 +101,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   defp increment_rate_counter(%{assigns: %{rate_counter: counter}} = socket) do
     GenCounter.add(counter.id)
-    {:ok, rate_counter} = RateCounter.get(counter.id)
-    assign(socket, :rate_counter, rate_counter)
+    socket
   end
 
   defp run_authorization_check(

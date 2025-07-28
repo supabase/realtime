@@ -44,7 +44,7 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
   end
 
   defp initialize_counters(tenant) do
-    RateCounter.new(Tenants.requests_per_second_key(tenant), idle_shutdown: :infinity)
-    RateCounter.new(Tenants.events_per_second_key(tenant), idle_shutdown: :infinity)
+    RateCounter.new(Tenants.requests_per_second_rate(tenant))
+    RateCounter.new(Tenants.events_per_second_rate(tenant))
   end
 end
