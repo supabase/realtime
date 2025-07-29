@@ -27,10 +27,10 @@ defmodule Realtime.GenCounter do
   @doc "Reset counter to 0 and return previous value"
   @spec reset(term) :: integer
   def reset(term) do
-    # We might lose some updates between lookup and the delete
+    # We might lose some updates between lookup and the update
     case :ets.lookup(@table, term) do
       [{^term, previous}] ->
-        :ets.delete(@table, term)
+        :ets.update_element(@table, term, {2, 0}, {term, 0})
         previous
 
       [] ->

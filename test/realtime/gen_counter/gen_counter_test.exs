@@ -22,12 +22,12 @@ defmodule Realtime.GenCounterTest do
   end
 
   describe "reset/2" do
-    test "delete a counter the previous value" do
+    test "reset a counter returning the previous value" do
       term = {:domain, :metric, Ecto.UUID.generate()}
       GenCounter.add(term, 10)
       assert 10 == GenCounter.reset(term)
       assert GenCounter.get(term) == 0
-      assert :ets.lookup(:gen_counter, term) == []
+      assert :ets.lookup(:gen_counter, term) == [{term, 0}]
     end
   end
 
