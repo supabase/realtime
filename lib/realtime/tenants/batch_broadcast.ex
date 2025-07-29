@@ -49,8 +49,8 @@ defmodule Realtime.Tenants.BatchBroadcast do
   def broadcast(auth_params, %Tenant{} = tenant, messages, super_user) do
     with %Ecto.Changeset{valid?: true} = changeset <- changeset(%__MODULE__{}, messages),
          %Ecto.Changeset{changes: %{messages: messages}} = changeset,
-         events_per_second_key = Tenants.events_per_second_key(tenant),
-         :ok <- check_rate_limit(events_per_second_key, tenant, length(messages)) do
+         events_per_second_rate = Tenants.events_per_second_rate(tenant),
+         :ok <- check_rate_limit(events_per_second_rate, tenant, length(messages)) do
       events =
         messages
         |> Enum.map(fn %{changes: event} -> event end)
@@ -60,7 +60,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
       events
       |> Map.get(false, [])
       |> Enum.each(fn %{topic: sub_topic, payload: payload, event: event} ->
-        send_message_and_count(tenant, sub_topic, event, payload, true)
+        send_message_and_count(tenant, events_per_second_rate, sub_topic, event, payload, true)
       end)
 
       # Handle events for private channel
@@ -70,13 +70,13 @@ defmodule Realtime.Tenants.BatchBroadcast do
       |> Enum.each(fn {topic, events} ->
         if super_user do
           Enum.each(events, fn %{topic: sub_topic, payload: payload, event: event} ->
-            send_message_and_count(tenant, sub_topic, event, payload, false)
+            send_message_and_count(tenant, events_per_second_rate, sub_topic, event, payload, false)
           end)
         else
           case permissions_for_message(tenant, auth_params, topic) do
             %Policies{broadcast: %BroadcastPolicies{write: true}} ->
               Enum.each(events, fn %{topic: sub_topic, payload: payload, event: event} ->
-                send_message_and_count(tenant, sub_topic, event, payload, false)
+                send_message_and_count(tenant, events_per_second_rate, sub_topic, event, payload, false)
               end)
 
             _ ->
@@ -112,14 +112,13 @@ defmodule Realtime.Tenants.BatchBroadcast do
   end
 
   @event_type "broadcast"
-  defp send_message_and_count(tenant, topic, event, payload, public?) do
-    events_per_second_key = Tenants.events_per_second_key(tenant)
+  defp send_message_and_count(tenant, events_per_second_rate, topic, event, payload, public?) do
     tenant_topic = Tenants.tenant_topic(tenant, topic, public?)
     payload = %{"payload" => payload, "event" => event, "type" => "broadcast"}
 
     broadcast = %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
 
-    GenCounter.add(events_per_second_key)
+    GenCounter.add(events_per_second_rate.id)
     TenantBroadcaster.pubsub_broadcast(tenant, tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
   end
 
@@ -140,9 +139,9 @@ defmodule Realtime.Tenants.BatchBroadcast do
     end
   end
 
-  defp check_rate_limit(events_per_second_key, %Tenant{} = tenant, total_messages_to_broadcast) do
+  defp check_rate_limit(events_per_second_rate, %Tenant{} = tenant, total_messages_to_broadcast) do
     %{max_events_per_second: max_events_per_second} = tenant
-    {:ok, %{avg: events_per_second}} = RateCounter.get(events_per_second_key)
+    {:ok, %{avg: events_per_second}} = RateCounter.get(events_per_second_rate)
 
     cond do
       events_per_second > max_events_per_second ->

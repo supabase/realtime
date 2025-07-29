@@ -25,14 +25,8 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
                 def fake_db_event(external_id) do
                   external_id
-                  |> Realtime.Tenants.db_events_per_second_key()
-                  |> Realtime.RateCounter.new(
-                    telemetry: %{
-                      event_name: [:channel, :db_events],
-                      measurements: %{},
-                      metadata: %{tenant: external_id}
-                    }
-                  )
+                  |> Realtime.Tenants.db_events_per_second_rate()
+                  |> Realtime.RateCounter.new()
 
                   external_id
                   |> Realtime.Tenants.db_events_per_second_key()
@@ -41,14 +35,8 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
                 def fake_event(external_id) do
                   external_id
-                  |> Realtime.Tenants.events_per_second_key()
-                  |> Realtime.RateCounter.new(
-                    telemetry: %{
-                      event_name: [:channel, :events],
-                      measurements: %{},
-                      metadata: %{tenant: external_id}
-                    }
-                  )
+                  |> Realtime.Tenants.events_per_second_rate(123)
+                  |> Realtime.RateCounter.new()
 
                   external_id
                   |> Realtime.Tenants.events_per_second_key()
@@ -57,14 +45,8 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
                 def fake_presence_event(external_id) do
                   external_id
-                  |> Realtime.Tenants.presence_events_per_second_key()
-                  |> Realtime.RateCounter.new(
-                    telemetry: %{
-                      event_name: [:channel, :presence_events],
-                      measurements: %{},
-                      metadata: %{tenant: external_id}
-                    }
-                  )
+                  |> Realtime.Tenants.presence_events_per_second_rate(123)
+                  |> Realtime.RateCounter.new()
 
                   external_id
                   |> Realtime.Tenants.presence_events_per_second_key()

@@ -10,7 +10,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias Phoenix.Socket
   alias Phoenix.Tracker.Shard
   alias Realtime.GenCounter
-  alias Realtime.RateCounter
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
@@ -43,7 +42,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   def sync(%{assigns: %{private?: false}} = socket) do
     %{assigns: %{tenant_topic: topic}} = socket
-    socket = count(socket)
+    count(socket)
     push(socket, "presence_state", presence_dirty_list(topic))
     {:noreply, socket}
   end
@@ -141,12 +140,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     end
   end
 
-  defp count(%{assigns: %{presence_rate_counter: presence_counter}} = socket) do
-    GenCounter.add(presence_counter.id)
-    {:ok, presence_rate_counter} = RateCounter.get(presence_counter.id)
-
-    assign(socket, :presence_rate_counter, presence_rate_counter)
-  end
+  defp count(%{assigns: %{presence_rate_counter: presence_counter}}), do: GenCounter.add(presence_counter.id)
 
   defp presence_dirty_list(topic) do
     [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
