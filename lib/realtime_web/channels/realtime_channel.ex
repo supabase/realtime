@@ -60,7 +60,6 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_joins(socket.assigns),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket.assigns),
-         :ok <- start_db_rate_counter(tenant_id),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          socket = assign_authorization_context(socket, sub_topic, access_token, claims),
@@ -648,14 +647,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       message: inspect(message),
       channel: channel_name
     })
-  end
-
-  defp start_db_rate_counter(tenant) do
-    rate_args = Tenants.db_events_per_second_rate(tenant)
-
-    RateCounter.new(rate_args)
-
-    :ok
   end
 
   defp new_api?(%{"config" => _}), do: true
