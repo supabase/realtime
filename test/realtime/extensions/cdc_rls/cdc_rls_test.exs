@@ -15,6 +15,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.PostgresCdc
+  alias Realtime.RateCounter
   alias Realtime.Tenants.Rebalancer
 
   @cdc_module Extensions.PostgresCdcRls
@@ -236,6 +237,8 @@ defmodule Realtime.Extensions.CdcRlsTest do
           Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
         end)
 
+        RateCounter.stop(tenant.external_id)
+
         %{tenant: tenant, conn: conn}
       end
 
@@ -309,6 +312,14 @@ defmodule Realtime.Extensions.CdcRlsTest do
                  "ref" => nil,
                  "topic" => "realtime:test"
                } = message
+
+        # Wait for RateCounter to update
+        Process.sleep(2000)
+
+        rate = Realtime.Tenants.db_events_per_second_rate(tenant)
+
+        assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} = RateCounter.get(rate)
+        assert 1 in bucket
       end
 
       @aux_mod (quote do
@@ -394,6 +405,14 @@ defmodule Realtime.Extensions.CdcRlsTest do
                  "ref" => nil,
                  "topic" => "realtime:test"
                } = message
+
+        # Wait for RateCounter to update
+        Process.sleep(2000)
+
+        rate = Realtime.Tenants.db_events_per_second_rate(tenant)
+
+        assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} = RateCounter.get(rate)
+        assert 1 in bucket
 
         :erpc.call(node, PostgresCdcRls, :handle_stop, [tenant.external_id, 10_000])
       end

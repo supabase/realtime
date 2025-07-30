@@ -7,15 +7,23 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
   """
 
   alias Phoenix.Socket.Broadcast
-  alias Realtime.Tenants
   alias Realtime.GenCounter
+  alias Realtime.RateCounter
+  alias Realtime.Tenants
 
   def dispatch([_ | _] = topic_subscriptions, _from, payload) do
     {sub_ids, payload} = Map.pop(payload, :subscription_ids)
 
+    [{_pid, {:subscriber_fastlane, _fastlane_pid, _serializer, _ids, _join_topic, tenant_id, _is_new_api}} | _] =
+      topic_subscriptions
+
+    # Ensure RateCounter is started
+    rate = Tenants.db_events_per_second_rate(tenant_id)
+    RateCounter.new(rate)
+
     _ =
       Enum.reduce(topic_subscriptions, %{}, fn
-        {_pid, {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, tenant, is_new_api}}, cache ->
+        {_pid, {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, _tenant, is_new_api}}, cache ->
           for {bin_id, id} <- ids, reduce: [] do
             acc ->
               if MapSet.member?(sub_ids, bin_id) do
@@ -41,7 +49,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
                   }
                 end
 
-              count(tenant)
+              GenCounter.add(rate.id)
               broadcast_message(cache, fastlane_pid, new_payload, serializer)
 
             _ ->
@@ -63,11 +71,5 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
         send(fastlane_pid, encoded_msg)
         Map.put(cache, msg, encoded_msg)
     end
-  end
-
-  defp count(tenant) do
-    tenant
-    |> Tenants.db_events_per_second_key()
-    |> GenCounter.add()
   end
 end

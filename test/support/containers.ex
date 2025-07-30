@@ -238,7 +238,7 @@ defmodule Containers do
     ]
     |> Realtime.Repo.with_dynamic_repo(fn repo ->
       try do
-        opts = [all: true, prefix: "realtime", dynamic_repo: repo]
+        opts = [all: true, prefix: "realtime", dynamic_repo: repo, log: false]
         migrations = Realtime.Tenants.Migrations.migrations()
         Ecto.Migrator.run(Realtime.Repo, migrations, :up, opts)
 
