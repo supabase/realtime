@@ -1914,23 +1914,21 @@ defmodule Realtime.Integration.RtChannelTest do
       ]
 
       {:ok, _} =
-        start_supervised(
-          {Agent, [fn -> %{joins: 0, events: 0, db_events: 0, presence_events: 0} end, name: TestCounter]}
-        )
+        start_supervised(%{
+          id: 1,
+          start:
+            {Agent, :start_link,
+             [fn -> %{joins: 0, events: 0, db_events: 0, presence_events: 0} end, [name: TestCounter]]}
+        })
 
       RateCounter.stop(tenant.external_id)
-      :telemetry.detach(__MODULE__)
+      on_exit(fn -> :telemetry.detach(__MODULE__) end)
       :telemetry.attach_many(__MODULE__, events, &__MODULE__.handle_telemetry/4, [])
 
       :ok
     end
 
-    @tag skip: "This tests are skipped because they are flaky due to the fact that it's using the same tenant database"
-
     test "join events", %{tenant: tenant} do
-      # Wait for timer to run GenCounter and RateCounter tickers to clean them
-      Process.sleep(5000)
-
       {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
@@ -1942,8 +1940,8 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "presence_state"}
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
-      # Wait for timer to run GenCounter and RateCounter tickers
-      Process.sleep(5000)
+      # Wait for RateCounter to run
+      Process.sleep(2000)
 
       # Expected billed
       # 1 joins due to two sockets
@@ -1956,12 +1954,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert 0 = get_count([:realtime, :rate_counter, :channel, :events])
     end
 
-    @tag skip: "This tests are skipped because they are flaky due to the fact that it's using the same tenant database"
-
     test "broadcast events", %{tenant: tenant} do
-      # Wait for timer to run GenCounter and RateCounter tickers to clean them
-      Process.sleep(5000)
-
       {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
@@ -1990,8 +1983,8 @@ defmodule Realtime.Integration.RtChannelTest do
         assert_receive %Message{topic: ^topic, event: "broadcast", payload: ^payload}
       end
 
-      # Wait for timer to run GenCounter and RateCounter tickers
-      Process.sleep(5000)
+      # Wait for RateCounter to run
+      Process.sleep(2000)
 
       # Expected billed
       # 2 joins due to two sockets
@@ -2004,12 +1997,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert 15 = get_count([:realtime, :rate_counter, :channel, :events])
     end
 
-    @tag skip: "This tests are skipped because they are flaky due to the fact that it's using the same tenant database"
-
     test "presence events", %{tenant: tenant} do
-      # Wait for timer to run GenCounter and RateCounter tickers to clean them
-      Process.sleep(5000)
-
       {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
@@ -2029,8 +2017,8 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "presence_state"}
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
-      # Wait for timer to run GenCounter and RateCounter tickers
-      Process.sleep(5000)
+      # Wait for RateCounter to run
+      Process.sleep(2000)
 
       # Expected billed
       # 2 joins due to two sockets
@@ -2043,12 +2031,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert 0 = get_count([:realtime, :rate_counter, :channel, :events])
     end
 
-    @tag skip: "This tests are skipped because they are flaky due to the fact that it's using the same tenant database"
-
     test "postgres changes events", %{tenant: tenant} do
-      # Wait for timer to run GenCounter and RateCounter tickers to clean them
-      Process.sleep(5000)
-
       {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
@@ -2067,12 +2050,13 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "presence_state"}, 500
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
-      # Postgres Change events
-      for _ <- 1..5 do
-        tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
-        {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-        Postgrex.query!(conn, "insert into test (details) values ('test')", [])
+      tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
 
+      # Postgres Change events
+      for _ <- 1..5, do: Postgrex.query!(conn, "insert into test (details) values ('test')", [])
+
+      for _ <- 1..5 do
         assert_receive %Message{
                          topic: ^topic,
                          event: "postgres_changes",
@@ -2081,8 +2065,8 @@ defmodule Realtime.Integration.RtChannelTest do
                        5000
       end
 
-      # Wait for timer to run GenCounter and RateCounter tickers
-      Process.sleep(5000)
+      # Wait for RateCounter to run
+      Process.sleep(2000)
 
       # Expected billed
       # 2 joins due to two sockets
@@ -2095,12 +2079,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert 0 = get_count([:realtime, :rate_counter, :channel, :events])
     end
 
-    @tag skip: "This tests are skipped because they are flaky due to the fact that it's using the same tenant database"
-
     test "postgres changes error events", %{tenant: tenant} do
-      # Wait for timer to run GenCounter and RateCounter tickers to clean them
-      Process.sleep(5000)
-
       {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "none"}]}
       topic = "realtime:any"
@@ -2112,8 +2091,8 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "presence_state"}, 500
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
-      # Wait for timer to run GenCounter and RateCounter tickers and to emulate pg changes retrying
-      Process.sleep(5000)
+      # Wait for RateCounter to run
+      Process.sleep(2000)
 
       # Expected billed
       # 1 joins due to one socket
