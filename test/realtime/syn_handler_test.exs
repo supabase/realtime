@@ -3,6 +3,7 @@ defmodule Realtime.SynHandlerTest do
   import ExUnit.CaptureLog
   alias Realtime.SynHandler
   alias Realtime.Tenants.Connect
+  alias RealtimeWeb.Endpoint
 
   @mod SynHandler
   @name "test"
@@ -36,43 +37,74 @@ defmodule Realtime.SynHandlerTest do
       %{peer_pid: pid, node: node}
     end
 
-    test "it resolves a Connect conflict", %{node: node, peer_pid: peer_pid} do
+    test "local node started first", %{node: node, peer_pid: peer_pid} do
       external_id = "dev_tenant"
       # start connect locally first
       {:ok, db_conn} = Connect.lookup_or_start_connection(external_id)
       assert Connect.ready?(external_id)
       connect = Connect.whereis(external_id)
       assert node(connect) == node()
-      name = {Connect, external_id, %{}}
-      opts = [name: {:via, :syn, name}]
-
-      {:ok, _} = GenServer.start_link(FakeConnect, external_id, opts)
 
       # Now let's force the remote node to start the fake Connect process
+      name = {Connect, external_id, %{conn: nil, region: "ap-southeast-2"}}
+      opts = [name: {:via, :syn, name}]
+      {:ok, remote_pid} = :peer.call(peer_pid, GenServer, :start_link, [FakeConnect, external_id, opts])
+
       log =
         capture_log(fn ->
-          name = {Connect, external_id, %{}}
-          opts = [name: {:via, :syn, name}]
-          {:ok, remote_pid} = :peer.call(peer_pid, GenServer, :start_link, [FakeConnect, external_id, opts]) |> dbg()
-          # Connect peer node to cause a conflict  on syn
+          Endpoint.subscribe("connect:dev_tenant")
+          # Connect to peer node to cause a conflict on syn
           true = Node.connect(node)
           # Give some time for the conflict resolution to happen
-          # assert_process_down(remote_pid, 500)
-          # Let's wait for any logs from remote to arrive
           Process.sleep(500)
 
-          :syn.lookup(Connect, external_id) |> dbg()
-          :peer.call(peer_pid, :syn, :lookup, [Connect, external_id]) |> dbg()
+          # Both nodes agree
+          assert {^connect, %{region: "us-east-1", conn: ^db_conn}} = :syn.lookup(Connect, external_id)
 
-          :peer.call(peer_pid, Process, :alive?, [remote_pid]) |> dbg()
-          Process.alive?(db_conn) |> dbg()
+          assert {^connect, %{region: "us-east-1", conn: ^db_conn}} =
+                   :peer.call(peer_pid, :syn, :lookup, [Connect, external_id])
+
+          refute :peer.call(peer_pid, Process, :alive?, [remote_pid])
+
+          assert Process.alive?(connect)
         end)
 
-      :"syn_registry_by_name_Elixir.Realtime.Tenants.Connect"
-      |> :ets.tab2list()
-      |> dbg()
+      assert log =~ "remote process will be stopped: #{inspect(remote_pid)}"
+    end
 
-      assert log =~ "has been terminated"
+    test "remote node started first", %{node: node, peer_pid: peer_pid} do
+      external_id = "dev_tenant"
+      # Start remote process first
+      name = {Connect, external_id, %{conn: nil, region: "ap-southeast-2"}}
+      opts = [name: {:via, :syn, name}]
+      {:ok, remote_pid} = :peer.call(peer_pid, GenServer, :start_link, [FakeConnect, external_id, opts])
+
+      # start connect locally later
+      {:ok, _db_conn} = Connect.lookup_or_start_connection(external_id)
+      assert Connect.ready?(external_id)
+      connect = Connect.whereis(external_id)
+      assert node(connect) == node()
+
+      log =
+        capture_log(fn ->
+          # Connect to peer node to cause a conflict on syn
+          true = Node.connect(node)
+          assert_process_down(connect)
+
+          # Both nodes agree
+          assert {^remote_pid, %{region: "ap-southeast-2", conn: "fake_conn"}} =
+                   :peer.call(peer_pid, :syn, :lookup, [Connect, external_id])
+
+          assert {^remote_pid, %{region: "ap-southeast-2", conn: "fake_conn"}} = :syn.lookup(Connect, external_id)
+
+          assert :peer.call(peer_pid, Process, :alive?, [remote_pid])
+
+          refute Process.alive?(connect)
+        end)
+
+      assert log =~ "stop local process: #{inspect(connect)}"
+      assert log =~ "Successfully stopped #{inspect(connect)}"
+      assert log =~ "Elixir.Realtime.Tenants.Connect terminated: \"dev_tenant\" #{node()}"
     end
   end
 

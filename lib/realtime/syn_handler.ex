@@ -45,48 +45,46 @@ defmodule Realtime.SynHandler do
     :ok
   end
 
-  # resolve_registry_conflict(Scope :: atom(),
-  #                           Name :: term(),
-  #                           {Pid1 :: pid(), Meta1 :: term(), Time1 :: non_neg_integer()},
-  #                           {Pid2 :: pid(), Meta2 :: term(), Time2 :: non_neg_integer()}) ->
-  #                              PidToKeep :: pid().
-  # %% by default, keep pid registered more recently
-  #          %% this is a simple mechanism that can be imprecise, as system clocks are not perfectly aligned in a cluster
-  #          %% if something more elaborate is desired (such as vector clocks) use Meta to store data and a custom event handler
-  #          PidToKeep = case Time1 > Time2 of
-  #              true -> Pid1;
-  #              _ -> Pid2
-  #          end,
-  #          {PidToKeep, true}
+  @doc """
+  We try to keep the oldest process. If the time they were registered is exactly the same we use
+  their node names to decide.
+  """
   @impl true
   def resolve_registry_conflict(mod, name, {pid1, _meta1, time1}, {pid2, _meta2, time2}) do
-    {pid_to_keep, pid_to_stop} = decide(pid1, time2, pid2, time2)
+    {pid_to_keep, pid_to_stop} = decide(pid1, time1, pid2, time2)
 
+    # Is this function running on the node that should stop?
     if node(pid_to_stop) == node() do
-      Logger.warning(
-        "SynHandler: Resolving conflict on scope #{inspect(mod)} for name #{inspect(name)} {#{inspect(pid1)}, #{time1}} vs {#{inspect(pid2)}, #{time2}}, stop local process: #{inspect(pid_to_stop)}"
+      log(
+        "Resolving conflict on scope #{inspect(mod)} for name #{inspect(name)} {#{inspect(pid1)}, #{time1}} vs {#{inspect(pid2)}, #{time2}}, stop local process: #{inspect(pid_to_stop)}"
       )
 
-      spawn(fn ->
-        Process.monitor(pid_to_stop)
-        Process.exit(pid_to_stop, {:shutdown, :syn_conflict_resolution})
-
-        receive do
-          {:DOWN, _ref, :process, ^pid_to_stop, reason} ->
-            Logger.warning("SynHandler: Successfully stopped #{inspect(pid_to_stop)}. Reason: #{inspect(reason)}")
-        after
-          30_000 ->
-            Logger.warning("SynHandler: Timed out while waiting for process #{inspect(pid_to_stop)} to stop")
-        end
-      end)
+      stop(pid_to_stop)
     else
-      Logger.warning(
-        "SynHandler: Resolving conflict on scope #{inspect(mod)} for name #{inspect(name)} {#{inspect(pid1)}, #{time1}} vs {#{inspect(pid2)}, #{time2}}, remote process will be stopped: #{inspect(pid_to_stop)}"
+      log(
+        "Resolving conflict on scope #{inspect(mod)} for name #{inspect(name)} {#{inspect(pid1)}, #{time1}} vs {#{inspect(pid2)}, #{time2}}, remote process will be stopped: #{inspect(pid_to_stop)}"
       )
     end
 
     pid_to_keep
   end
+
+  defp stop(pid_to_stop) do
+    spawn(fn ->
+      Process.monitor(pid_to_stop)
+      Process.exit(pid_to_stop, {:shutdown, :syn_conflict_resolution})
+
+      receive do
+        {:DOWN, _ref, :process, ^pid_to_stop, reason} ->
+          log("Successfully stopped #{inspect(pid_to_stop)}. Reason: #{inspect(reason)}")
+      after
+        30_000 ->
+          log("Timed out while waiting for process #{inspect(pid_to_stop)} to stop")
+      end
+    end)
+  end
+
+  defp log(message), do: Logger.warning("SynHandler(#{node()}): #{message}")
 
   # If the time on both pids are exactly the same
   # we compare the node names and pick one consistently
