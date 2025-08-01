@@ -101,7 +101,8 @@ defmodule Realtime.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       {:poolboy, "~> 1.5", only: :test},
-      {:req, "~> 0.5", only: :test}
+      {:req, "~> 0.5", only: :test},
+ {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false}
     ]
   end
 
