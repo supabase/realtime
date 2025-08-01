@@ -16,24 +16,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias RealtimeWeb.Presence
   alias RealtimeWeb.RealtimeChannel.Logging
 
-  @spec handle(map(), Socket.t()) :: {:reply, :error | :ok, Socket.t()}
-  def handle(_, %{assigns: %{presence_enabled?: false}} = socket), do: {:reply, :ok, socket}
-  def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
-
-  @spec handle(map(), pid() | nil, Socket.t()) :: {:reply, :error | :ok, Socket.t()}
-  def handle(_, _, %{assigns: %{presence_enabled?: false}} = socket), do: {:reply, :ok, socket}
-
-  def handle(%{"event" => event} = payload, db_conn, socket) do
-    event = String.downcase(event, :ascii)
-
-    case handle_presence_event(event, payload, db_conn, socket) do
-      {:ok, socket} -> {:reply, :ok, socket}
-      {:error, socket} -> {:reply, :error, socket}
-    end
-  end
-
-  def handle(_payload, _db_conn, socket), do: {:noreply, socket}
-
   @doc """
   Sends presence state to connected clients
   """
@@ -42,6 +24,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   def sync(%{assigns: %{private?: false}} = socket) do
     %{assigns: %{tenant_topic: topic}} = socket
+    socket = Logging.maybe_log_handle_info(socket, :sync_presence)
     count(socket)
     push(socket, "presence_state", presence_dirty_list(topic))
     {:noreply, socket}
@@ -58,12 +41,35 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
         _ ->
           socket = Logging.maybe_log_handle_info(socket, :sync_presence)
+          count(socket)
           push(socket, "presence_state", presence_dirty_list(topic))
           socket
       end
 
     {:noreply, socket}
   end
+
+  @spec handle(map(), Socket.t()) :: {:reply, :error | :ok, Socket.t()}
+  def handle(_, %{assigns: %{presence_enabled?: false}} = socket), do: {:reply, :ok, socket}
+  def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
+
+  @spec handle(map(), pid() | nil, Socket.t()) :: {:reply, :error | :ok, Socket.t()}
+  def handle(_, _, %{assigns: %{presence_enabled?: false}} = socket), do: {:reply, :ok, socket}
+
+  def handle(%{"event" => event} = payload, db_conn, socket) do
+    event = String.downcase(event, :ascii)
+
+    case handle_presence_event(event, payload, db_conn, socket) do
+      {:ok, socket} ->
+        count(socket)
+        {:reply, :ok, socket}
+
+      {:error, socket} ->
+        {:reply, :error, socket}
+    end
+  end
+
+  def handle(_payload, _db_conn, socket), do: {:noreply, socket}
 
   defp handle_presence_event("track", payload, _db_conn, %{assigns: %{private?: false}} = socket) do
     track(socket, payload)

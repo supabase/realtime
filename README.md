@@ -245,11 +245,6 @@ This is the list of operational codes that can help you understand your deployme
 | SubscriptionDeletionFailed         | Error when trying to delete a subscription for postgres changes                                                                                                                                       |
 | UnableToDeletePhantomSubscriptions | Error when trying to delete subscriptions that are no longer being used                                                                                                                               |
 | UnableToCheckProcessesOnRemoteNode | Error when trying to check the processes on a remote node                                                                                                                                             |
-| UnableToCreateCounter              | Error when trying to create a counter to track rate limits for a tenant                                                                                                                               |
-| UnableToIncrementCounter           | Error when trying to increment a counter to track rate limits for a tenant                                                                                                                            |
-| UnableToDecrementCounter           | Error when trying to decrement a counter to track rate limits for a tenant                                                                                                                            |
-| UnableToUpdateCounter              | Error when trying to update a counter to track rate limits for a tenant                                                                                                                               |
-| UnableToFindCounter                | Error when trying to find a counter to track rate limits for a tenant                                                                                                                                 |
 | UnhandledProcessMessage            | Unhandled message received by a Realtime process                                                                                                                                                      |
 | UnableToTrackPresence              | Error when handling track presence for this socket                                                                                                                                                    |
 | UnknownPresenceEvent               | Presence event type not recognized by service                                                                                                                                                         |
@@ -274,6 +269,7 @@ This is the list of operational codes that can help you understand your deployme
 | UnableToEncodeJson                 | An error were we are not handling correctly the response to be sent to the end user                                                                                                                   |
 | UnknownErrorOnController           | An error we are not handling correctly was triggered on a controller                                                                                                                                  |
 | UnknownErrorOnChannel              | An error we are not handling correctly was triggered on a channel                                                                                                                                     |
+| TooManyPresenceMessages            | Limit of presence events reached                                                                                                                                                                      |
 
 ## License
 
