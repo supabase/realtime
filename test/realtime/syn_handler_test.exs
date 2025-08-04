@@ -16,24 +16,26 @@ defmodule Realtime.SynHandlerTest do
                 def init([tenant_id, opts]) do
                   :syn.update_registry(Connect, tenant_id, fn _pid, meta -> %{meta | conn: "fake_conn"} end)
 
-                  if opts[:trap_exit] do
-                    Process.flag(:trap_exit, true)
-                  end
+                  if opts[:trap_exit], do: Process.flag(:trap_exit, true)
 
                   {:ok, nil}
                 end
 
-                def handle_info(:shutdown_connect, state) do
-                  {:stop, :normal, state}
-                end
+                def handle_info(:shutdown_connect, state), do: {:stop, :normal, state}
+                def handle_info(_, state), do: {:noreply, state}
               end
             end)
 
   Code.eval_quoted(@aux_mod)
 
-  defp assert_process_down(pid, timeout \\ 100) do
+  defp assert_process_down(pid, reason \\ nil, timeout \\ 100) do
     ref = Process.monitor(pid)
-    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
+
+    if reason do
+      assert_receive {:DOWN, ^ref, :process, ^pid, ^reason}, timeout
+    else
+      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
+    end
   end
 
   describe "integration test with a Connect conflict" do
@@ -86,7 +88,7 @@ defmodule Realtime.SynHandlerTest do
       name = {Connect, external_id, %{conn: nil, region: "ap-southeast-2"}}
       opts = [name: {:via, :syn, name}]
       {:ok, remote_pid} = :peer.call(peer_pid, GenServer, :start_link, [FakeConnect, [external_id, []], opts])
-      on_exit(fn -> Process.exit(remote_pid, :brutal_kill) end)
+      on_exit(fn -> Process.exit(remote_pid, :kill) end)
 
       # start connect locally later
       {:ok, _db_conn} = Connect.lookup_or_start_connection(external_id)
@@ -117,6 +119,45 @@ defmodule Realtime.SynHandlerTest do
 
       assert log =~
                "Elixir.Realtime.Tenants.Connect terminated due to syn conflict resolution: \"dev_tenant\" #{inspect(connect)}"
+    end
+
+    test "remote node started first but timed out stopping", %{node: node, peer_pid: peer_pid} do
+      external_id = "dev_tenant"
+      # Start remote process first
+      name = {Connect, external_id, %{conn: nil, region: "ap-southeast-2"}}
+      opts = [name: {:via, :syn, name}]
+      {:ok, remote_pid} = :peer.call(peer_pid, GenServer, :start_link, [FakeConnect, [external_id, []], opts])
+      on_exit(fn -> Process.exit(remote_pid, :brutal_kill) end)
+
+      {:ok, local_pid} =
+        start_supervised(%{
+          id: self(),
+          start: {GenServer, :start_link, [FakeConnect, [external_id, [trap_exit: true]], opts]}
+        })
+
+      log =
+        capture_log(fn ->
+          # Connect to peer node to cause a conflict on syn
+          true = Node.connect(node)
+          assert_process_down(local_pid, :killed, 6000)
+          assert_receive %{event: "connect_down"}
+
+          # Both nodes agree
+          assert {^remote_pid, %{region: "ap-southeast-2", conn: "fake_conn"}} =
+                   :peer.call(peer_pid, :syn, :lookup, [Connect, external_id])
+
+          assert {^remote_pid, %{region: "ap-southeast-2", conn: "fake_conn"}} = :syn.lookup(Connect, external_id)
+
+          assert :peer.call(peer_pid, Process, :alive?, [remote_pid])
+
+          refute Process.alive?(local_pid)
+        end)
+
+      assert log =~ "stop local process: #{inspect(local_pid)}"
+      assert log =~ "Timed out while waiting for process #{inspect(local_pid)} to stop. Sending kill exit signal"
+
+      assert log =~
+               "Elixir.Realtime.Tenants.Connect terminated due to syn conflict resolution: \"dev_tenant\" #{inspect(local_pid)}"
     end
   end
 

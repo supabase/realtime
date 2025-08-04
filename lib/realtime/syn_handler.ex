@@ -48,6 +48,9 @@ defmodule Realtime.SynHandler do
   their node names to decide.
 
   The most important part is that both nodes must 100% of the time agree on the decision
+
+  We first send an exit with reason {:shutdown, :syn_conflict_resolution}
+  If it times out an exit with reason :kill that can't be trapped
   """
   @impl true
   def resolve_registry_conflict(mod, name, {pid1, _meta1, time1}, {pid2, _meta2, time2}) do
@@ -78,8 +81,9 @@ defmodule Realtime.SynHandler do
         {:DOWN, _ref, :process, ^pid_to_stop, reason} ->
           log("Successfully stopped #{inspect(pid_to_stop)}. Reason: #{inspect(reason)}")
       after
-        30_000 ->
-          log("Timed out while waiting for process #{inspect(pid_to_stop)} to stop")
+        5000 ->
+          log("Timed out while waiting for process #{inspect(pid_to_stop)} to stop. Sending kill exit signal")
+          Process.exit(pid_to_stop, :kill)
       end
     end)
   end
