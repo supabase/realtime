@@ -1920,6 +1920,29 @@ defmodule Realtime.Integration.RtChannelTest do
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
       :telemetry.attach_many(__MODULE__, events, &__MODULE__.handle_telemetry/4, [])
 
+      {:ok, conn} = Database.connect(tenant, "realtime_test")
+
+      # Setup for postgres changes
+      Database.transaction(conn, fn db_conn ->
+        queries = [
+          "drop table if exists public.test",
+          "drop publication if exists supabase_realtime_test",
+          "create sequence if not exists test_id_seq;",
+          """
+          create table if not exists "public"."test" (
+          "id" int4 not null default nextval('test_id_seq'::regclass),
+          "details" text,
+          primary key ("id"));
+          """,
+          "grant all on table public.test to anon;",
+          "grant all on table public.test to postgres;",
+          "grant all on table public.test to authenticated;",
+          "create publication supabase_realtime_test for all tables"
+        ]
+
+        Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
+      end)
+
       :ok
     end
 
