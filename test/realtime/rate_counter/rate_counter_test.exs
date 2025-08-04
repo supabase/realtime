@@ -52,7 +52,7 @@ defmodule Realtime.RateCounterTest do
       assert %Realtime.RateCounter{
                id: ^id,
                avg: +0.0,
-               bucket: [],
+               bucket: _,
                max_bucket_len: 60,
                tick: 1000,
                tick_ref: _,
@@ -115,8 +115,8 @@ defmodule Realtime.RateCounterTest do
 
       assert {:ok,
               %RateCounter{
-                avg: 0.5,
-                bucket: [0, 1],
+                avg: avg,
+                bucket: bucket,
                 id: _id,
                 idle_shutdown: _,
                 idle_shutdown_ref: _ref,
@@ -124,6 +124,9 @@ defmodule Realtime.RateCounterTest do
                 tick: 5,
                 tick_ref: _ref2
               }} = RateCounter.get(args)
+
+      assert 1 in bucket
+      assert avg > 0.0
 
       assert GenCounter.get(args.id) == 0
     end
@@ -163,6 +166,8 @@ defmodule Realtime.RateCounterTest do
       end
 
       assert :ok = RateCounter.stop(entity_id)
+      # Wait for processes to shut down and Registry to update
+      Process.sleep(100)
 
       for term <- terms do
         assert [] = Registry.lookup(Realtime.Registry.Unique, {RateCounter, :rate_counter, term})

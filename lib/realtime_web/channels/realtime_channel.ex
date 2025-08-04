@@ -261,6 +261,23 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  def handle_info(%{event: "presence_diff", payload: payload} = msg, socket) do
+    %{presence_rate_counter: presence_rate_counter, limits: %{max_events_per_second: max}} = socket.assigns
+
+    GenCounter.add(presence_rate_counter.id)
+    {:ok, rate_counter} = RateCounter.get(presence_rate_counter)
+
+    # Let's just log for now
+    if rate_counter.avg > max do
+      message = "Too many presence messages per second"
+      log_warning("TooManyPresenceMessages", message)
+    end
+
+    socket = Logging.maybe_log_handle_info(socket, msg)
+    push(socket, "presence_diff", payload)
+    {:noreply, socket}
+  end
+
   def handle_info(%{event: type, payload: payload} = msg, socket) do
     count(socket)
     socket = Logging.maybe_log_handle_info(socket, msg)

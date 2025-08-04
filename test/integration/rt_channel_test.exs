@@ -42,15 +42,6 @@ defmodule Realtime.Integration.RtChannelTest do
     secret_key_base: String.duplicate("a", 64)
   )
 
-  setup do
-    tenant = Api.get_tenant_by_external_id("dev_tenant")
-
-    RateCounter.stop(tenant.external_id)
-    :ets.delete_all_objects(Tracker.table_name())
-
-    %{tenant: tenant}
-  end
-
   setup_all do
     capture_log(fn -> start_supervised!(TestEndpoint) end)
     start_supervised!({Phoenix.PubSub, name: __MODULE__})
@@ -1894,14 +1885,20 @@ defmodule Realtime.Integration.RtChannelTest do
     refute_receive %Message{event: "presence_state"}
   end
 
-  def handle_telemetry(event, %{sum: sum}, _, _) do
+  def handle_telemetry(event, %{sum: sum}, metadata, _) do
+    tenant = metadata[:tenant]
     [key] = Enum.take(event, -1)
-    Agent.update(TestCounter, fn state -> Map.update!(state, key, &(&1 + sum)) end)
+
+    Agent.update(TestCounter, fn state ->
+      state = Map.put_new(state, tenant, %{joins: 0, events: 0, db_events: 0, presence_events: 0})
+      update_in(state, [metadata[:tenant], key], fn v -> (v || 0) + sum end)
+    end)
   end
 
-  def get_count(event) do
+  defp get_count(event, tenant) do
     [key] = Enum.take(event, -1)
-    Agent.get(TestCounter, fn state -> Map.get(state, key, 0) end)
+
+    Agent.get(TestCounter, fn state -> get_in(state, [tenant, key]) || 0 end)
   end
 
   describe "billable events" do
@@ -1916,19 +1913,41 @@ defmodule Realtime.Integration.RtChannelTest do
       {:ok, _} =
         start_supervised(%{
           id: 1,
-          start:
-            {Agent, :start_link,
-             [fn -> %{joins: 0, events: 0, db_events: 0, presence_events: 0} end, [name: TestCounter]]}
+          start: {Agent, :start_link, [fn -> %{} end, [name: TestCounter]]}
         })
 
       RateCounter.stop(tenant.external_id)
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
       :telemetry.attach_many(__MODULE__, events, &__MODULE__.handle_telemetry/4, [])
 
+      {:ok, conn} = Database.connect(tenant, "realtime_test")
+
+      # Setup for postgres changes
+      Database.transaction(conn, fn db_conn ->
+        queries = [
+          "drop table if exists public.test",
+          "drop publication if exists supabase_realtime_test",
+          "create sequence if not exists test_id_seq;",
+          """
+          create table if not exists "public"."test" (
+          "id" int4 not null default nextval('test_id_seq'::regclass),
+          "details" text,
+          primary key ("id"));
+          """,
+          "grant all on table public.test to anon;",
+          "grant all on table public.test to postgres;",
+          "grant all on table public.test to authenticated;",
+          "create publication supabase_realtime_test for all tables"
+        ]
+
+        Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
+      end)
+
       :ok
     end
 
     test "join events", %{tenant: tenant} do
+      external_id = tenant.external_id
       {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
@@ -1948,15 +1967,16 @@ defmodule Realtime.Integration.RtChannelTest do
       # 1 presence events due to two sockets
       # 0 db events as no postgres changes used
       # 0 events broadcast is not used
-      assert 1 = get_count([:realtime, :rate_counter, :channel, :joins])
-      assert 1 = get_count([:realtime, :rate_counter, :channel, :presence_events])
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events])
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :events])
+      assert 1 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
+      assert 1 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
+      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
+      assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
     end
 
     test "broadcast events", %{tenant: tenant} do
+      external_id = tenant.external_id
       {socket, _} = get_connection(tenant)
-      config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
+      config = %{broadcast: %{self: true}}
       topic = "realtime:any"
 
       WebsocketClient.join(socket, topic, %{config: config})
@@ -1964,7 +1984,6 @@ defmodule Realtime.Integration.RtChannelTest do
       # Join events
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "presence_state"}
-      assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Add second client so we can test the "multiplication" of billable events
       {socket, _} = get_connection(tenant)
@@ -1973,7 +1992,6 @@ defmodule Realtime.Integration.RtChannelTest do
       # Join events
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "presence_state"}
-      assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Broadcast event
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
@@ -1991,15 +2009,16 @@ defmodule Realtime.Integration.RtChannelTest do
       # 2 presence events due to two sockets
       # 0 db events as no postgres changes used
       # 15 events as 5 events sent, 5 events received on client 1 and 5 events received on client 2
-      assert 2 = get_count([:realtime, :rate_counter, :channel, :joins])
-      assert 2 = get_count([:realtime, :rate_counter, :channel, :presence_events])
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events])
-      assert 15 = get_count([:realtime, :rate_counter, :channel, :events])
+      assert 2 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
+      assert 2 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
+      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
+      assert 15 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
     end
 
     test "presence events", %{tenant: tenant} do
+      external_id = tenant.external_id
       {socket, _} = get_connection(tenant)
-      config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
+      config = %{broadcast: %{self: true}, presence: %{enabled: true}}
       topic = "realtime:any"
 
       WebsocketClient.join(socket, topic, %{config: config})
@@ -2007,7 +2026,15 @@ defmodule Realtime.Integration.RtChannelTest do
       # Join events
       assert_receive %Message{event: "phx_reply", topic: ^topic}, 1000
       assert_receive %Message{topic: ^topic, event: "presence_state"}, 1000
-      assert_receive %Message{topic: ^topic, event: "system"}, 5000
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_1", t: 1814.7000000029802}
+      }
+
+      WebsocketClient.send_event(socket, topic, "presence", payload)
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}
 
       # Presence events
       {socket, _} = get_connection(tenant, "authenticated")
@@ -2015,23 +2042,33 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{topic: ^topic, event: "presence_state"}
-      assert_receive %Message{topic: ^topic, event: "system"}, 5000
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_2", t: 1814.7000000029802}
+      }
+
+      WebsocketClient.send_event(socket, topic, "presence", payload)
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}
 
       # Wait for RateCounter to run
       Process.sleep(2000)
 
       # Expected billed
       # 2 joins due to two sockets
-      # 2 presence events due to two sockets
+      # 7 presence events
       # 0 db events as no postgres changes used
       # 0 events as no broadcast used
-      assert 2 = get_count([:realtime, :rate_counter, :channel, :joins])
-      assert 2 = get_count([:realtime, :rate_counter, :channel, :presence_events])
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events])
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :events])
+      assert 2 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
+      assert 7 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
+      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
+      assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
     end
 
     test "postgres changes events", %{tenant: tenant} do
+      external_id = tenant.external_id
       {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
@@ -2073,13 +2110,14 @@ defmodule Realtime.Integration.RtChannelTest do
       # 2 presence events due to two sockets
       # 10 db events due to 5 inserts events sent to client 1 and 5 inserts events sent to client 2
       # 0 events as no broadcast used
-      assert 2 = get_count([:realtime, :rate_counter, :channel, :joins])
-      assert 2 = get_count([:realtime, :rate_counter, :channel, :presence_events])
-      assert 10 = get_count([:realtime, :rate_counter, :channel, :db_events])
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :events])
+      assert 2 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
+      assert 2 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
+      assert 10 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
+      assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
     end
 
     test "postgres changes error events", %{tenant: tenant} do
+      external_id = tenant.external_id
       {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "none"}]}
       topic = "realtime:any"
@@ -2099,10 +2137,10 @@ defmodule Realtime.Integration.RtChannelTest do
       # 1 presence events due to one socket
       # 0 db events
       # 0 events as no broadcast used
-      assert 1 = get_count([:realtime, :rate_counter, :channel, :joins])
-      assert 1 = get_count([:realtime, :rate_counter, :channel, :presence_events])
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events])
-      assert 0 = get_count([:realtime, :rate_counter, :channel, :events])
+      assert 1 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
+      assert 1 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
+      assert 0 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
+      assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
     end
   end
 
@@ -2190,7 +2228,12 @@ defmodule Realtime.Integration.RtChannelTest do
     assert count == 2
   end
 
-  defp mode(%{mode: :distributed, tenant: tenant}) do
+  defp mode(%{mode: :distributed}) do
+    tenant = Api.get_tenant_by_external_id("dev_tenant")
+
+    RateCounter.stop(tenant.external_id)
+    :ets.delete_all_objects(Tracker.table_name())
+
     Connect.shutdown(tenant.external_id)
     # Sleeping so that syn can forget about this Connect process
     Process.sleep(100)
@@ -2208,16 +2251,20 @@ defmodule Realtime.Integration.RtChannelTest do
     assert Connect.ready?(tenant.external_id)
 
     assert node(db_conn) == node
-    %{db_conn: db_conn, node: node}
+    %{db_conn: db_conn, node: node, tenant: tenant}
   end
 
-  defp mode(%{tenant: tenant}) do
+  defp mode(_) do
+    tenant = Containers.checkout_tenant(run_migrations: true)
+    RateCounter.stop(tenant.external_id)
+
+    :ets.delete_all_objects(Tracker.table_name())
     Realtime.Tenants.Connect.shutdown(tenant.external_id)
     # Sleeping so that syn can forget about this Connect process
     Process.sleep(100)
     {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
     assert Connect.ready?(tenant.external_id)
-    %{db_conn: db_conn}
+    %{db_conn: db_conn, tenant: tenant}
   end
 
   defp rls_context(%{tenant: tenant} = context) do
