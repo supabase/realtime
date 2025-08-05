@@ -34,5 +34,31 @@ defmodule Realtime.GenRpcMetricsTest do
                }
              } = GenRpcMetrics.info()
     end
+
+    test "metric matches on both sides", %{node: node} do
+      # We need to generate some load on gen_rpc first
+      Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 1)
+      Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 2)
+
+      local_metrics = GenRpcMetrics.info()[node]
+      remote_metrics = :erpc.call(node, GenRpcMetrics, :info, [])[node()]
+
+      assert local_metrics[:connections] == remote_metrics[:connections]
+
+      assert local_metrics[:send_avg] == remote_metrics[:recv_avg]
+      assert local_metrics[:recv_avg] == remote_metrics[:send_avg]
+
+      assert local_metrics[:send_oct] == remote_metrics[:recv_oct]
+      assert local_metrics[:recv_oct] == remote_metrics[:send_oct]
+
+      assert local_metrics[:send_cnt] == remote_metrics[:recv_cnt]
+      assert local_metrics[:recv_cnt] == remote_metrics[:send_cnt]
+
+      assert local_metrics[:send_max] == remote_metrics[:recv_max]
+      assert local_metrics[:recv_max] == remote_metrics[:send_max]
+
+      assert local_metrics[:send_max] == remote_metrics[:recv_max]
+      assert local_metrics[:recv_max] == remote_metrics[:send_max]
+    end
   end
 end
