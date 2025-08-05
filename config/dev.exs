@@ -86,3 +86,5 @@ config :phoenix, :plug_init_mode, :runtime
 config :open_api_spex, :cache_adapter, OpenApiSpex.Plug.NoneCache
 
 config :opentelemetry, traces_exporter: {:otel_exporter_stdout, []}
+
+config :mix_test_watch, clear: true
