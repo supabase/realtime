@@ -29,6 +29,22 @@ defmodule Realtime.GenCounterTest do
       assert GenCounter.get(term) == 0
       assert :ets.lookup(:gen_counter, term) == [{term, 0}]
     end
+
+    test "reset a counter returning the previous value when counter doesn't exist" do
+      term = {:domain, :metric, Ecto.UUID.generate()}
+      assert 0 == GenCounter.reset(term)
+      assert GenCounter.get(term) == 0
+      assert :ets.lookup(:gen_counter, term) == []
+    end
+
+    test "reset a counter returning the previous value when counter is 0" do
+      term = {:domain, :metric, Ecto.UUID.generate()}
+      GenCounter.add(term, 0)
+      assert 0 == GenCounter.reset(term)
+      assert 0 == GenCounter.reset(term)
+      assert GenCounter.get(term) == 0
+      assert :ets.lookup(:gen_counter, term) == [{term, 0}]
+    end
   end
 
   describe "delete/1" do

@@ -29,6 +29,9 @@ defmodule Realtime.GenCounter do
   def reset(term) do
     # We might lose some updates between lookup and the update
     case :ets.lookup(@table, term) do
+      [{^term, 0}] ->
+        0
+
       [{^term, previous}] ->
         :ets.update_element(@table, term, {2, 0}, {term, 0})
         previous
