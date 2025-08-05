@@ -44,7 +44,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         end
 
         {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
-        assert 100 in buckets
+        assert Enum.sum(buckets) == 100
         assert avg > 0
       end
 
@@ -98,7 +98,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         end
 
         {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
-        assert 100 in buckets
+        assert Enum.sum(buckets) == 100
         assert avg > 0.0
       end
 
@@ -232,7 +232,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         end
 
         {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
-        assert 100 in buckets
+        assert Enum.sum(buckets) == 100
         assert avg > 0.0
       end
 
@@ -260,7 +260,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
         Process.sleep(120)
         {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
-        assert 100 in buckets
+        assert Enum.sum(buckets) == 100
         assert avg > 0.0
       end
 
