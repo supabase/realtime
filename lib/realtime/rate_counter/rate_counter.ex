@@ -34,6 +34,7 @@ defmodule Realtime.RateCounter do
             tick_ref: nil,
             idle_shutdown: @idle_shutdown,
             idle_shutdown_ref: nil,
+            limit: %{log: false},
             telemetry: %{
               event_name: [@app_name] ++ [:rate_counter],
               measurements: %{sum: 0},
@@ -49,6 +50,12 @@ defmodule Realtime.RateCounter do
           tick_ref: reference(),
           idle_shutdown: integer() | :infinity,
           idle_shutdown_ref: reference(),
+          limit: %{
+            log: boolean(),
+            value: integer(),
+            triggered: boolean(),
+            log_fn: (-> term())
+          },
           telemetry: %{
             emit: false,
             event_name: :telemetry.event_name(),
@@ -133,6 +140,8 @@ defmodule Realtime.RateCounter do
     every = Keyword.get(args, :tick, @tick)
     max_bucket_len = Keyword.get(args, :max_bucket_len, @max_bucket_len)
     idle_shutdown_ms = Keyword.get(args, :idle_shutdown, @idle_shutdown)
+    limit_opts = Keyword.get(args, :limit)
+
     Logger.info("Starting #{__MODULE__} for: #{inspect(id)}")
 
     # Always reset the counter in case the counter had already accumulated without
@@ -153,6 +162,18 @@ defmodule Realtime.RateCounter do
         %{emit: false}
       end
 
+    limit =
+      if limit_opts do
+        %{
+          log: true,
+          value: limit_opts[:value],
+          log_fn: limit_opts[:log_fn],
+          triggered: false
+        }
+      else
+        %{log: false}
+      end
+
     ticker = tick(0)
 
     idle_shutdown_ref =
@@ -165,7 +186,8 @@ defmodule Realtime.RateCounter do
       max_bucket_len: max_bucket_len,
       idle_shutdown: idle_shutdown_ms,
       idle_shutdown_ref: idle_shutdown_ref,
-      telemetry: telemetry
+      telemetry: telemetry,
+      limit: limit
     }
 
     Cachex.put!(@cache, id, state)
@@ -195,6 +217,8 @@ defmodule Realtime.RateCounter do
       |> Kernel./(bucket_len)
 
     state = %{state | bucket: bucket, avg: avg}
+
+    state = maybe_trigger_limit(state)
     tick(state.tick)
 
     Cachex.put!(@cache, state.id, state)
@@ -223,6 +247,28 @@ defmodule Realtime.RateCounter do
       Process.cancel_timer(state.idle_shutdown_ref)
       idle_shutdown_ref = shutdown_after(state.idle_shutdown)
       {:noreply, %{state | idle_shutdown_ref: idle_shutdown_ref}}
+    end
+  end
+
+  defp maybe_trigger_limit(%{limit: %{log: false}} = state), do: state
+
+  defp maybe_trigger_limit(%{limit: %{triggered: true}} = state) do
+    # Limit has been triggered, but we need to check if it is still above the limit
+    if state.avg < state.limit.value do
+      %{state | limit: %{state.limit | triggered: false}}
+    else
+      # Limit is still above the threshold, so we keep the state as is
+      state
+    end
+  end
+
+  defp maybe_trigger_limit(state) do
+    if state.avg >= state.limit.value do
+      state.limit.log_fn.()
+
+      %{state | limit: %{state.limit | triggered: true}}
+    else
+      state
     end
   end
 

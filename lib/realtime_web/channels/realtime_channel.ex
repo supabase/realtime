@@ -137,7 +137,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, :too_many_joins} ->
         msg = "Too many joins per second"
-        Logging.log_error_message(:error, "ClientJoinRateLimitReached", msg)
+        {:error, %{reason: msg}}
 
       {:error, :increase_connection_pool} ->
         msg = "Please increase your connection pool size"
@@ -504,10 +504,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     rate_args = Tenants.joins_per_second_rate(tenant, limits.max_joins_per_second)
 
     RateCounter.new(rate_args)
-    GenCounter.add(rate_args.id)
 
     case RateCounter.get(rate_args) do
       {:ok, %{avg: avg}} when avg < limits.max_joins_per_second ->
+        GenCounter.add(rate_args.id)
         :ok
 
       {:ok, %{avg: _}} ->
