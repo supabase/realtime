@@ -53,24 +53,24 @@ defmodule RealtimeWeb.JwtVerificationTest do
       assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret, nil)
     end
 
-    test "when token header does not have typ or alg" do
+    test "when token header does not have kid or alg" do
       invalid_token =
-        Base.encode64("{\"typ\": \"JWT\"}") <>
-          "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
+        Base.encode64(~s[{"kid": "mykid123"}]) <>
+          "." <> Base.encode64("{}") <> "." <> Base.encode64(~s[<<"sig">>])
 
       assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret, nil)
 
       invalid_token =
-        Base.encode64("{\"alg\": \"HS256\"}") <>
-          "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
+        Base.encode64(~s[{"alg": "HS256"}]) <>
+          "." <> Base.encode64("{}") <> "." <> Base.encode64(~s[<<"sig">>])
 
       assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret, nil)
     end
 
     test "when token header alg is not allowed" do
       invalid_token =
-        Base.encode64("{\"typ\": \"JWT\", \"alg\": \"ZZ999\"}") <>
-          "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
+        Base.encode64(~s[{"alg": "ZZ999"}]) <>
+          "." <> Base.encode64("{}") <> "." <> Base.encode64(~s[<<"sig">>])
 
       assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret, nil)
     end
