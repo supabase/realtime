@@ -278,11 +278,9 @@ cluster_topologies =
         ] ++ acc
 
       "POSTGRES" ->
-        version = "#{Application.spec(:realtime)[:vsn]}" |> String.replace(".", "_")
-
         [
           postgres: [
-            strategy: Realtime.Cluster.Strategy.Postgres,
+            strategy: LibclusterPostgres.Strategy,
             config: [
               hostname: default_db_host,
               username: username,
@@ -294,9 +292,7 @@ cluster_topologies =
               ],
               socket_options: socket_options,
               ssl: ssl_opts,
-              heartbeat_interval: 5_000,
-              node_timeout: 15_000,
-              channel_name: System.get_env("POSTGRES_CLUSTER_CHANNEL_NAME", "realtime_cluster_#{version}")
+              heartbeat_interval: 5_000
             ]
           ]
         ] ++ acc
