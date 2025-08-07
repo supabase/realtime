@@ -1,9 +1,13 @@
 defmodule Realtime.RateCounterTest do
   use Realtime.DataCase, async: true
 
+  require Logger
+
   alias Realtime.RateCounter
   alias Realtime.RateCounter.Args
   alias Realtime.GenCounter
+
+  import ExUnit.CaptureLog
 
   describe "new/2" do
     test "starts a new rate counter without telemetry" do
@@ -14,13 +18,14 @@ defmodule Realtime.RateCounterTest do
       assert %Realtime.RateCounter{
                id: ^id,
                avg: +0.0,
-               bucket: [],
+               bucket: _,
                max_bucket_len: 60,
                tick: 1000,
                tick_ref: _,
                idle_shutdown: 900_000,
                idle_shutdown_ref: _,
-               telemetry: %{emit: false}
+               telemetry: %{emit: false},
+               limit: %{log: false}
              } = :sys.get_state(pid)
     end
 
@@ -39,6 +44,7 @@ defmodule Realtime.RateCounterTest do
       args = %Args{
         id: id,
         opts: [
+          tick: 10,
           telemetry: %{
             event_name: [:custom, :new_event],
             measurements: %{limit: 123},
@@ -54,7 +60,7 @@ defmodule Realtime.RateCounterTest do
                avg: +0.0,
                bucket: _,
                max_bucket_len: 60,
-               tick: 1000,
+               tick: 10,
                tick_ref: _,
                idle_shutdown: 900_000,
                idle_shutdown_ref: _,
@@ -73,6 +79,56 @@ defmodule Realtime.RateCounterTest do
         %{sum: 10, limit: 123},
         %{id: ^id, tenant: "abc"}
       }
+    end
+
+    test "starts a new rate counter with limit to log" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      args = %Args{
+        id: id,
+        opts: [
+          tick: 100,
+          max_bucket_len: 10,
+          limit: [
+            value: 10,
+            log_fn: fn ->
+              Logger.error("ErrorMessage: Reason", external_id: "tenant123", project: "tenant123")
+            end
+          ]
+        ]
+      }
+
+      assert {:ok, pid} = RateCounter.new(args)
+
+      assert %RateCounter{
+               id: ^id,
+               avg: +0.0,
+               bucket: _,
+               max_bucket_len: 10,
+               telemetry: %{emit: false},
+               limit: %{
+                 log: true,
+                 value: 10,
+                 triggered: false
+               }
+             } = :sys.get_state(pid)
+
+      log =
+        capture_log(fn ->
+          GenCounter.add(args.id, 50)
+          Process.sleep(300)
+        end)
+
+      assert {:ok, %RateCounter{limit: %{triggered: true}}} = RateCounter.get(args)
+      assert log =~ "project=tenant123 external_id=tenant123 [error] ErrorMessage: Reason"
+
+      # Only one log message should be emitted
+      # Splitting by the error message returns the error message and the rest of the log only
+      assert length(String.split(log, "ErrorMessage: Reason")) == 2
+
+      Process.sleep(300)
+
+      assert {:ok, %RateCounter{limit: %{triggered: false}}} = RateCounter.get(args)
     end
 
     test "reset counter if GenCounter already had something" do

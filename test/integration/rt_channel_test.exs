@@ -1812,21 +1812,31 @@ defmodule Realtime.Integration.RtChannelTest do
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{random_string()}"
 
-      for _ <- 1..1000 do
-        WebsocketClient.join(socket, realtime_topic, %{config: config})
-        1..5 |> Enum.random() |> Process.sleep()
-      end
+      log =
+        capture_log(fn ->
+          for _ <- 1..1000 do
+            WebsocketClient.join(socket, realtime_topic, %{config: config})
+            1..5 |> Enum.random() |> Process.sleep()
+          end
 
-      assert_receive %Message{
-                       event: "phx_reply",
-                       payload: %{
-                         "response" => %{"reason" => "Too many joins per second"},
-                         "status" => "error"
-                       }
-                     },
-                     2000
+          assert_receive %Message{
+                           event: "phx_reply",
+                           payload: %{
+                             "response" => %{"reason" => "Too many joins per second"},
+                             "status" => "error"
+                           }
+                         },
+                         2000
 
-      change_tenant_configuration(tenant, :max_joins_per_second, max_joins_per_second)
+          change_tenant_configuration(tenant, :max_joins_per_second, max_joins_per_second)
+        end)
+
+      assert log =~
+               "project=#{tenant.external_id} external_id=#{tenant.external_id} [critical] ClientJoinRateLimitReached: Too many joins per second"
+
+      # Only one log message should be emitted
+      # Splitting by the error message returns the error message and the rest of the log only
+      assert length(String.split(log, "ClientJoinRateLimitReached")) == 2
     end
   end
 

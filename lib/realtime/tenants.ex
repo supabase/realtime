@@ -151,7 +151,16 @@ defmodule Realtime.Tenants do
         event_name: [:channel, :joins],
         measurements: %{limit: max_joins_per_second},
         metadata: %{tenant: tenant_id}
-      }
+      },
+      limit: [
+        value: max_joins_per_second,
+        log_fn: fn ->
+          Logger.critical("ClientJoinRateLimitReached: Too many joins per second",
+            external_id: tenant_id,
+            project: tenant_id
+          )
+        end
+      ]
     ]
 
     %RateCounter.Args{id: joins_per_second_key(tenant_id), opts: opts}
