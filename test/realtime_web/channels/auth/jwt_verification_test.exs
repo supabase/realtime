@@ -53,24 +53,24 @@ defmodule RealtimeWeb.JwtVerificationTest do
       assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret, nil)
     end
 
-    test "when token header does not have typ or alg" do
+    test "when token header does not have kid or alg" do
       invalid_token =
-        Base.encode64("{\"typ\": \"JWT\"}") <>
-          "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
+        Base.encode64(~s[{"kid": "mykid123"}]) <>
+          "." <> Base.encode64("{}") <> "." <> Base.encode64(~s[<<"sig">>])
 
       assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret, nil)
 
       invalid_token =
-        Base.encode64("{\"alg\": \"HS256\"}") <>
-          "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
+        Base.encode64(~s[{"alg": "HS256"}]) <>
+          "." <> Base.encode64("{}") <> "." <> Base.encode64(~s[<<"sig">>])
 
       assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret, nil)
     end
 
     test "when token header alg is not allowed" do
       invalid_token =
-        Base.encode64("{\"typ\": \"JWT\", \"alg\": \"ZZ999\"}") <>
-          "." <> Base.encode64("{}") <> "." <> Base.encode64("<<\"sig\">>")
+        Base.encode64(~s[{"alg": "ZZ999"}]) <>
+          "." <> Base.encode64("{}") <> "." <> Base.encode64(~s[<<"sig">>])
 
       assert {:error, _reason} = JwtVerification.verify(invalid_token, @jwt_secret, nil)
     end
@@ -258,7 +258,7 @@ defmodule RealtimeWeb.JwtVerificationTest do
         "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6ImtleS1pZC0xIn0.eyJpYXQiOjE3MTIwNDk2NTcsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoidXNlci1pZCIsImV4cCI6MTcxMjA1MzI1N30.IIQBuEiSnZacGMqiqsrLAeRGOjIaB4F3x1gnLN5zvhFryJ-6tdgu96lFv5HUF13IL2UfHWad0OuvoDt4DEHRxw"
 
       # Check that the signature is valid even though time may be off.
-      assert JwtVerification.verify(token, @jwt_secret, jwks) != {:error, :signature_error}
+      assert {:error, [message: _, claim: "exp", claim_val: _]} = JwtVerification.verify(token, @jwt_secret, jwks)
     end
 
     test "using ES256 JWK with wrong signature" do
@@ -299,7 +299,29 @@ defmodule RealtimeWeb.JwtVerificationTest do
         "eyJhbGciOiJIUzI1NiIsImtpZCI6IjRGY0d3bEJ4a0JWMWJTWnciLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2hqbmRnYWdpZGlwY3RxdXFxeXloLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiJmZjA0NjVlMy1lZjk3LTRkYjItOWE1Zi0zZDI4Y2YxODE0MmYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzUyODA4NjE4LCJpYXQiOjE3NTI4MDUwMTgsImVtYWlsIjoiY2hhdEBlZHVhcmRvLmd1cmdlbC5tZSIsInBob25lIjoiIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiZW1haWwiLCJwcm92aWRlcnMiOlsiZW1haWwiXX0sInVzZXJfbWV0YWRhdGEiOnsiZW1haWwiOiJjaGF0QGVkdWFyZG8uZ3VyZ2VsLm1lIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBob25lX3ZlcmlmaWVkIjpmYWxzZSwic3ViIjoiZmYwNDY1ZTMtZWY5Ny00ZGIyLTlhNWYtM2QyOGNmMTgxNDJmIn0sInJvbGUiOiJhdXRoZW50aWNhdGVkIiwiYWFsIjoiYWFsMSIsImFtciI6W3sibWV0aG9kIjoicGFzc3dvcmQiLCJ0aW1lc3RhbXAiOjE3NTI4MDUwMTh9XSwic2Vzc2lvbl9pZCI6IjA2MDJkYWM0LWMwMjctNGIwNi1hZDM5LTMzN2ViMTZlODdlNSIsImlzX2Fub255bW91cyI6ZmFsc2V9.SnGzRjLfHPtT64kXYEQVBLKizCl76LqEPILyAPxoDwk"
 
       # Check that the signature is valid even though time may be off.
-      assert JwtVerification.verify(token, @jwt_secret, jwks) != {:error, :signature_error}
+      assert {:error, [message: _, claim: "exp", claim_val: _]} = JwtVerification.verify(token, @jwt_secret, jwks)
+    end
+
+    test "using JWT without typ header parameter" do
+      jwks = %{
+        "keys" => [
+          %{
+            "alg" => "RS256",
+            "e" => "AQAB",
+            "kid" => "sso_oidc_key_pair_01K20X7J43ZV31EKZMG7X3KW7K",
+            "kty" => "RSA",
+            "n" =>
+              "uyc8QVrMjJTZEZoGNIJrugvf6j3iZ2Uz2IEgFuHCeC5AbM4BwZ4V1JshcW2CRs8uAmEdnH_-jiibayGmoND7OLziZJZsLir_8_kZSc5jjJ-IVFMzB1XXKze44HB3IOpcaPW1IOx0NfSI6-xOFinX7yApTZxXxmLFMEXtOWVsY_MPMrjThfvCSqesDGLRGKCn_DA4Hhaixf4NG-etGUOiavHNpqfREM7td-9caWpIyo7acWcgfYyhkxZbuYRINje1V66HWIdzzZ8uhfLXm-85LZdaWn9J83OHh3TEQW2SIAfHSNZkwXu6h5ndd_ciWxTWuvU3yjWkS-k4C8dXB--bZQ",
+            "use" => "sig",
+            "x5t#S256" => "HmlJQWnNuujjOdcRTCu5amk1pttdFRMBR7Rl4zplobA"
+          }
+        ]
+      }
+
+      token =
+        "eyJhbGciOiJSUzI1NiIsImtpZCI6InNzb19vaWRjX2tleV9wYWlyXzAxSzIwWDdKNDNaVjMxRUtaTUc3WDNLVzdLIn0.eyJyb2xlIjoiYXV0aGVudGljYXRlZCIsImlzcyI6Imh0dHBzOi8vYXBpLndvcmtvcy5jb20vdXNlcl9tYW5hZ2VtZW50L2NsaWVudF8wMUsyMFg3SkNROVg1NDVXUzgwUVpQQTNGUSIsInN1YiI6InVzZXJfMDFLMjBYR1g3SkU1M1JNVEIzRjE0SEFUNTkiLCJzaWQiOiJzZXNzaW9uXzAxSzIwWEdYQVhINjhLMkI0VjcwWko3VzlZIiwianRpIjoiMDFLMjEyUzNLMEpXQ0U3Wk1URVk0RVM4UTYiLCJleHAiOjE3NTQ1MzA5MTQsImlhdCI6MTc1NDUzMDYxNH0.kt-zlPxaLVDMU9iAWCYvi3dtm9HzYponaX5E4lsS2k5F469obf4i9FyLDeXsaPyAN9V3DaAjUwys9lDyjiPsE7y1s2tFE1g9LU4goJbwinkoklUYrTmVVZcY4lkVEQSZZGwmkwgIsqKsdwTlYMzVjejsAk25Foq-FhGdsyoju21sU5S4fZPC-n8Rl8wBwD5rOPFWVHxk3z4z37585LDHhADyq1S17WxLJobfEgK_TeAlwXa2bK14vutVPpuL-qAn8nX8b6aqBoHtvRbfqsi2s72bA1S31rTgT2hgD5hqbn_g0rVmMJXt2u1zl4XDBzUj_c3lxNncUf1MgsVOHrbYRw"
+
+      assert {:error, [message: _, claim: "exp", claim_val: _]} = JwtVerification.verify(token, @jwt_secret, jwks)
     end
 
     test "using HS256 JWK with wrong signature" do

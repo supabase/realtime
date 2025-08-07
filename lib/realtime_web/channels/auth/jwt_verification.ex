@@ -64,7 +64,7 @@ defmodule RealtimeWeb.JwtVerification do
     end
   end
 
-  defp generate_signer(%{"typ" => "JWT", "alg" => alg, "kid" => kid}, _jwt_secret, %{
+  defp generate_signer(%{"alg" => alg, "kid" => kid}, _jwt_secret, %{
          "keys" => keys
        })
        when is_binary(kid) and alg in @rs_algorithms do
@@ -76,9 +76,7 @@ defmodule RealtimeWeb.JwtVerification do
     end
   end
 
-  defp generate_signer(%{"typ" => "JWT", "alg" => alg, "kid" => kid}, _jwt_secret, %{
-         "keys" => keys
-       })
+  defp generate_signer(%{"alg" => alg, "kid" => kid}, _jwt_secret, %{"keys" => keys})
        when is_binary(kid) and alg in @es_algorithms do
     jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "EC" and jwk["kid"] == kid end)
 
@@ -88,9 +86,7 @@ defmodule RealtimeWeb.JwtVerification do
     end
   end
 
-  defp generate_signer(%{"typ" => "JWT", "alg" => alg, "kid" => kid}, _jwt_secret, %{
-         "keys" => keys
-       })
+  defp generate_signer(%{"alg" => alg, "kid" => kid}, _jwt_secret, %{"keys" => keys})
        when is_binary(kid) and alg in @ed_algorithms do
     jwk = Enum.find(keys, fn jwk -> jwk["kty"] == "OKP" and jwk["kid"] == kid end)
 
@@ -103,7 +99,7 @@ defmodule RealtimeWeb.JwtVerification do
   # Most Supabase Auth JWTs fall in this case, as they're usually signed with
   # HS256, have a kid header, but there's no JWK as this is sensitive. In this
   # case, the jwt_secret should be used.
-  defp generate_signer(%{"typ" => "JWT", "alg" => alg, "kid" => kid}, jwt_secret, %{
+  defp generate_signer(%{"alg" => alg, "kid" => kid}, jwt_secret, %{
          "keys" => keys
        })
        when is_binary(kid) and alg in @hs_algorithms do
@@ -121,8 +117,7 @@ defmodule RealtimeWeb.JwtVerification do
     end
   end
 
-  defp generate_signer(%{"typ" => "JWT", "alg" => alg}, jwt_secret, _jwt_jwks)
-       when alg in @hs_algorithms do
+  defp generate_signer(%{"alg" => alg}, jwt_secret, _jwt_jwks) when alg in @hs_algorithms do
     {:ok, Joken.Signer.create(alg, jwt_secret)}
   end
 
