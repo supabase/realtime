@@ -55,6 +55,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign(:private?, !!params["config"]["private"])
       |> assign(:policies, nil)
 
+    token = socket.assigns.access_token
+    log_level = socket.assigns.log_level
+
     with :ok <- SignalHandler.shutdown_in_progress?(),
          :ok <- only_private?(tenant_id, socket),
          :ok <- limit_joins(socket.assigns),
@@ -118,11 +121,11 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:ok, state, assign(socket, assigns)}
     else
       {:error, :expired_token, msg} ->
-        Logging.log_error_with_token_metadata("InvalidJWTToken", msg, socket.assigns.access_token)
+        Logging.maybe_log_warning_with_token_metadata("InvalidJWTToken", msg, token, log_level)
 
       {:error, :missing_claims} ->
         msg = "Fields `role` and `exp` are required in JWT"
-        Logging.log_error_with_token_metadata("InvalidJWTToken", msg, socket.assigns.access_token)
+        Logging.maybe_log_warning_with_token_metadata("InvalidJWTToken", msg, token, log_level)
 
       {:error, :unauthorized, msg} ->
         Logging.log_error_message(:error, "Unauthorized", msg)

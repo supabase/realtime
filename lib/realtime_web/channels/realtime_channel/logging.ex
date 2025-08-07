@@ -29,14 +29,14 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   """
   @spec log_error_with_token_metadata(code :: binary(), msg :: binary(), token :: Joken.bearer_token()) ::
           {:error, %{reason: binary()}}
-  def log_error_with_token_metadata(code, msg, token) do
+  def log_error_with_token_metadata(code, msg, token) when is_binary(token) do
     metadata = Logger.metadata()
     metadata = update_metadata_with_token_claims(metadata, token)
     log_error_message(:error, code, msg, metadata)
   end
 
   @doc """
-  Logs an error with token metadata
+  Logs a warning with token metadata
   """
   @spec log_warning_with_token_metadata(
           code :: binary(),
@@ -44,10 +44,29 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
           token :: Joken.bearer_token(),
           metadata :: keyword()
         ) :: {:error, %{reason: binary()}}
-  def log_warning_with_token_metadata(code, msg, token, metadata \\ []) do
-    if metadata == [], do: Logger.metadata()
+
+  def log_warning_with_token_metadata(code, msg, token, metadata \\ []) when is_binary(token) do
+    metadata = if metadata == [], do: Logger.metadata(), else: metadata
     metadata = update_metadata_with_token_claims(metadata, token)
     log_error_message(:warning, code, msg, metadata)
+  end
+
+  @doc """
+  Maybe logs a warning with token metadata if the log level is set to warning
+  """
+  @spec maybe_log_warning_with_token_metadata(
+          code :: binary(),
+          msg :: binary(),
+          token :: Joken.bearer_token(),
+          log_level :: Logger.level()
+        ) :: {:error, %{reason: binary()}}
+
+  def maybe_log_warning_with_token_metadata(code, msg, token, log_level) when is_binary(token) do
+    if Logger.compare_levels(log_level, :warning) != :gt do
+      log_warning_with_token_metadata(code, msg, token)
+    end
+
+    {:error, %{reason: msg}}
   end
 
   defp update_metadata_with_token_claims(metadata, token) do
