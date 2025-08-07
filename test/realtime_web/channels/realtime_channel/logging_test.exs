@@ -242,6 +242,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert log =~ "exp=#{exp}"
       assert log =~ "iss=#{iss}"
     end
+
     test "does not log warning messages when log level is higher than warning" do
       token = random_string()
 
