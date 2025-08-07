@@ -155,7 +155,7 @@ defmodule Realtime.Tenants do
       limit: [
         value: max_joins_per_second,
         log_fn: fn ->
-          Logger.error("ClientJoinRateLimitReached: Too many joins per second",
+          Logger.critical("ClientJoinRateLimitReached: Too many joins per second",
             external_id: tenant_id,
             project: tenant_id
           )

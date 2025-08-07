@@ -1832,7 +1832,7 @@ defmodule Realtime.Integration.RtChannelTest do
         end)
 
       assert log =~
-               "project=#{tenant.external_id} external_id=#{tenant.external_id} [error] ClientJoinRateLimitReached: Too many joins per second"
+               "project=#{tenant.external_id} external_id=#{tenant.external_id} [critical] ClientJoinRateLimitReached: Too many joins per second"
 
       # Only one log message should be emitted
       # Splitting by the error message returns the error message and the rest of the log only
