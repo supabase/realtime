@@ -10,6 +10,9 @@ defmodule Realtime.GenRpcMetrics do
   def info do
     if :net_kernel.get_state()[:started] != :no do
       {:ok, nodes_info} = :net_kernel.nodes_info()
+      # Ignore "hidden" nodes (remote shell)
+      nodes_info = Enum.filter(nodes_info, fn {_k, v} -> v[:type] == :normal end)
+
       # All TCP server sockets are managed by gen_rpc_acceptor_sup supervisor
       # All TCP client sockets are managed by gen_rpc_client_sup supervisor
       # For each node gen_rpc might have multiple TCP sockets

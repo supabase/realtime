@@ -10,6 +10,8 @@ defmodule Realtime.DistributedMetrics do
     # First check if Erlang distribution is started
     if :net_kernel.get_state()[:started] != :no do
       {:ok, nodes_info} = :net_kernel.nodes_info()
+      # Ignore "hidden" nodes (remote shell)
+      nodes_info = Enum.filter(nodes_info, fn {_k, v} -> v[:type] == :normal end)
 
       port_addresses =
         :erlang.ports()
