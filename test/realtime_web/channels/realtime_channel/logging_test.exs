@@ -10,11 +10,14 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     :telemetry.attach(__MODULE__, [:realtime, :channel, :error], &__MODULE__.handle_telemetry/4, pid: self())
     level = Logger.level()
     Logger.configure(level: :info)
+    tenant = tenant_fixture()
 
     on_exit(fn ->
       :telemetry.detach(__MODULE__)
       Logger.configure(level: level)
     end)
+
+    %{tenant: tenant}
   end
 
   describe "maybe_log_handle_info/2" do
@@ -178,11 +181,6 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
   end
 
   describe "log_error_with_token_metadata/4" do
-    setup do
-      tenant = tenant_fixture()
-      %{tenant: tenant}
-    end
-
     test "logs error messages with token metadata", %{tenant: tenant} do
       sub = random_string()
       iss = "https://#{random_string()}.com"
@@ -198,11 +196,6 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
   end
 
   describe "log_warning_with_token_metadata/4" do
-    setup do
-      tenant = tenant_fixture()
-      %{tenant: tenant}
-    end
-
     test "logs warning messages with token metadata", %{tenant: tenant} do
       sub = random_string()
       iss = "https://#{random_string()}.com"
@@ -214,6 +207,51 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert log =~ "sub=#{sub}"
       assert log =~ "exp=#{exp}"
       assert log =~ "iss=#{iss}"
+    end
+  end
+
+  describe "maybe_log_warning_with_token_metadata/4" do
+    test "logs warning messages with token metadata", %{tenant: tenant} do
+      sub = random_string()
+      iss = "https://#{random_string()}.com"
+      exp = System.system_time(:second) + 1000
+
+      token = generate_jwt_token(tenant, %{sub: sub, exp: exp, iss: iss})
+
+      log =
+        capture_log(fn -> Logging.maybe_log_warning_with_token_metadata("TestCode", "test message", token, :warning) end)
+
+      assert log =~ "TestCode: test message"
+      assert log =~ "sub=#{sub}"
+      assert log =~ "exp=#{exp}"
+      assert log =~ "iss=#{iss}"
+    end
+
+    test "logs warning messages with token metadata when log level is lower than warning", %{tenant: tenant} do
+      sub = random_string()
+      iss = "https://#{random_string()}.com"
+      exp = System.system_time(:second) + 1000
+
+      token = generate_jwt_token(tenant, %{sub: sub, exp: exp, iss: iss})
+
+      log =
+        capture_log(fn -> Logging.maybe_log_warning_with_token_metadata("TestCode", "test message", token, :info) end)
+
+      assert log =~ "TestCode: test message"
+      assert log =~ "sub=#{sub}"
+      assert log =~ "exp=#{exp}"
+      assert log =~ "iss=#{iss}"
+    end
+
+    test "does not log warning messages when log level is higher than warning" do
+      token = random_string()
+
+      log =
+        capture_log(fn ->
+          Logging.maybe_log_warning_with_token_metadata("TestCode", "test message", token, :error)
+        end)
+
+      assert log == ""
     end
   end
 end

@@ -927,7 +927,9 @@ defmodule Realtime.Integration.RtChannelTest do
 
     test "invalid JWT with expired token", %{tenant: tenant} do
       log =
-        capture_log(fn -> get_connection(tenant, "authenticated", %{:exp => System.system_time(:second) - 1000}) end)
+        capture_log(fn ->
+          get_connection(tenant, "authenticated", %{:exp => System.system_time(:second) - 1000}, %{log_level: :info})
+        end)
 
       assert log =~ "InvalidJWTToken: Token has expired"
     end
@@ -1687,7 +1689,9 @@ defmodule Realtime.Integration.RtChannelTest do
 
     test "invalid JWT with expired token", %{tenant: tenant} do
       log =
-        capture_log(fn -> get_connection(tenant, "authenticated", %{:exp => System.system_time(:second) - 1000}) end)
+        capture_log(fn ->
+          get_connection(tenant, "authenticated", %{:exp => System.system_time(:second) - 1000}, %{log_level: :info})
+        end)
 
       assert log =~ "InvalidJWTToken: Token has expired"
     end

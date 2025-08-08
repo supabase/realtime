@@ -28,10 +28,11 @@ defmodule RealtimeWeb.UserSocket do
       %{uri: %{host: host}, x_headers: headers} = opts
 
       {:ok, external_id} = Database.get_external_id(host)
-      Logger.metadata(external_id: external_id, project: external_id)
-      Logger.put_process_level(self(), :error)
-
       token = access_token(params, headers)
+      log_level = log_level(params)
+
+      Logger.metadata(external_id: external_id, project: external_id)
+      Logger.put_process_level(self(), log_level)
 
       with %Tenant{
              jwt_secret: jwt_secret,
@@ -67,7 +68,7 @@ defmodule RealtimeWeb.UserSocket do
           postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
           postgres_cdc_module: postgres_cdc_module,
           tenant: external_id,
-          log_level: log_level(params),
+          log_level: log_level,
           tenant_token: token,
           headers: opts.x_headers
         }
@@ -85,11 +86,12 @@ defmodule RealtimeWeb.UserSocket do
           {:error, :tenant_suspended}
 
         {:error, :expired_token, msg} ->
-          Logging.log_error_with_token_metadata("InvalidJWTToken", msg, token)
+          Logging.maybe_log_warning_with_token_metadata("InvalidJWTToken", msg, token, log_level)
           {:error, :expired_token}
 
         {:error, :missing_claims} ->
-          Logging.log_error_with_token_metadata("InvalidJWTToken", "Fields `role` and `exp` are required in JWT", token)
+          msg = "Fields `role` and `exp` are required in JWT"
+          Logging.maybe_log_warning_with_token_metadata("InvalidJWTToken", msg, token, log_level)
           {:error, :missing_claims}
 
         {:error, :token_malformed} ->
