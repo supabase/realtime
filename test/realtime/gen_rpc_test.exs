@@ -121,6 +121,36 @@ defmodule Realtime.GenRpcTest do
                       }}
     end
 
+    test "local node exception" do
+      current_node = node()
+
+      assert {:error, :rpc_error, _} = GenRpc.call(current_node, Map, :fetch!, [%{}, :a], tenant_id: "123")
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^current_node,
+                        success: false,
+                        tenant: "123",
+                        mechanism: :gen_rpc
+                      }}
+    end
+
+    test "remote node exception", %{node: node} do
+      current_node = node()
+
+      assert {:error, :rpc_error, _} = GenRpc.call(node, Map, :fetch!, [%{}, :a], tenant_id: "123")
+
+      assert_receive {[:realtime, :rpc], %{latency: _},
+                      %{
+                        origin_node: ^current_node,
+                        target_node: ^node,
+                        success: false,
+                        tenant: "123",
+                        mechanism: :gen_rpc
+                      }}
+    end
+
     @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
     test "bad tcp error", %{node: node} do
       current_node = node()

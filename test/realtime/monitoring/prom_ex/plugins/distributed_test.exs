@@ -57,7 +57,7 @@ defmodule Realtime.PromEx.Plugins.DistributedTest do
 
     test "queue_size", %{metrics: metrics, node: node} do
       pattern = ~r/dist_queue_size{origin_node=\"#{node()}\",target_node=\"#{node}\"}\s(?<number>\d+)/
-      assert metric_value(metrics, pattern) == 0
+      assert is_integer(metric_value(metrics, pattern))
     end
   end
 

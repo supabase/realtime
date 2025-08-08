@@ -64,8 +64,8 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket.assigns),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
-         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          socket = assign_authorization_context(socket, sub_topic, access_token, claims),
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
@@ -424,19 +424,19 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_in("access_token", %{"access_token" => refresh_token}, socket) when is_binary(refresh_token) do
     %{
       assigns: %{
-        access_token: access_token,
+        tenant: tenant_id,
         pg_sub_ref: pg_sub_ref,
         channel_name: channel_name,
-        pg_change_params: pg_change_params,
-        tenant: tenant
+        pg_change_params: pg_change_params
       }
     } = socket
 
-    socket = assign(socket, :access_token, refresh_token)
+    # Update token and reset policies
+    socket = assign(socket, %{access_token: refresh_token, policies: nil})
 
     with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
-         socket = assign_authorization_context(socket, channel_name, access_token, claims),
-         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant),
+         socket = assign_authorization_context(socket, channel_name, refresh_token, claims),
+         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket) do
       Helpers.cancel_timer(pg_sub_ref)
       pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
@@ -455,23 +455,23 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:noreply, assign(socket, assigns)}
     else
-      {:error, :unauthorized, msg} ->
-        shutdown_response(socket, msg)
-
-      {:error, :expired_token, msg} ->
+      {:error, reason, msg} when reason in ~w(unauthorized expired_token token_malformed)a ->
         shutdown_response(socket, msg)
 
       {:error, :missing_claims} ->
         shutdown_response(socket, "Fields `role` and `exp` are required in JWT")
-
-      {:error, :token_malformed, msg} ->
-        shutdown_response(socket, msg)
 
       {:error, :unable_to_set_policies, _msg} ->
         shutdown_response(socket, "Realtime was unable to connect to the project database")
 
       {:error, error} ->
         shutdown_response(socket, inspect(error))
+
+      {:error, :rpc_error, :timeout} ->
+        shutdown_response(socket, "Node request timeout")
+
+      {:error, :rpc_error, reason} ->
+        shutdown_response(socket, "RPC call error: " <> inspect(reason))
     end
   end
 
@@ -595,22 +595,14 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp confirm_token(%{assigns: assigns} = socket) do
-    %{
-      jwt_secret: jwt_secret,
-      access_token: access_token,
-      tenant: tenant_id
-    } = assigns
+    %{jwt_secret: jwt_secret, access_token: access_token} = assigns
 
-    topic = Map.get(assigns, :topic)
-    socket = Map.put(socket, :policies, nil)
     jwt_jwks = Map.get(assigns, :jwt_jwks)
 
     with jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, %{"exp" => exp} = claims} when is_integer(exp) <-
            ChannelsAuthorization.authorize_conn(access_token, jwt_secret_dec, jwt_jwks),
-         exp_diff when exp_diff > 0 <- exp - Joken.current_time(),
-         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, socket} <- maybe_assign_policies(topic, db_conn, socket) do
+         exp_diff when exp_diff > 0 <- exp - Joken.current_time() do
       if ref = assigns[:confirm_token_ref], do: Helpers.cancel_timer(ref)
 
       interval = min(@confirm_token_ms_interval, exp_diff * 1000)
@@ -761,7 +753,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp maybe_assign_policies(topic, db_conn, %{assigns: %{private?: true}} = socket)
-       when not is_nil(topic) and not is_nil(db_conn) do
+       when not is_nil(topic) do
     authorization_context = socket.assigns.authorization_context
     policies = socket.assigns.policies || %Policies{}
 
@@ -785,9 +777,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp maybe_assign_policies(_, _, socket) do
-    {:ok, assign(socket, policies: nil)}
-  end
+  defp maybe_assign_policies(_, _, socket), do: {:ok, assign(socket, policies: nil)}
 
   defp only_private?(tenant_id, %{assigns: %{private?: private?}}) do
     tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)

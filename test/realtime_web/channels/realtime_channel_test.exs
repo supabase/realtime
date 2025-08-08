@@ -7,6 +7,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   alias Realtime.GenCounter
   alias Phoenix.Socket
+  alias Phoenix.Channel.Server
+
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
   alias Realtime.RateCounter
@@ -24,6 +26,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     tenant = Containers.checkout_tenant(run_migrations: true)
     {:ok, tenant: tenant}
   end
+
+  setup :rls_context
 
   describe "presence" do
     test "events are counted", %{tenant: tenant} do
@@ -117,8 +121,9 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :unexpected_error} end)
 
       assert capture_log(fn ->
-               assert {:error, %{reason: "Unknown Error on Channel"}} = subscribe_and_join(socket, "realtime:test", %{})
-             end) =~ "UnknownErrorOnChannel"
+               assert {:error, %{reason: "Unknown Error on Channel"}} =
+                        subscribe_and_join(socket, "realtime:test", %{})
+             end) =~ "UnknownErrorOnChannel: :unexpected_error"
     end
 
     test "unexpected error while setting policies", %{tenant: tenant} do
@@ -158,6 +163,268 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert {:error, %{reason: "Too many connected users"}} =
                subscribe_and_join(socket_over_capacity, "realtime:test", %{})
+    end
+  end
+
+  describe "access_token" do
+    @tag policies: [:authenticated_all_topic_read]
+    test "new valid access_token", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert socket = subscribe_and_join!(socket, "realtime:test", %{"config" => %{"private" => true}})
+      old_confirm_ref = socket.assigns.confirm_token_ref
+
+      assert socket.assigns.policies == %Realtime.Tenants.Authorization.Policies{
+               broadcast: %Realtime.Tenants.Authorization.Policies.BroadcastPolicies{read: true, write: nil},
+               presence: %Realtime.Tenants.Authorization.Policies.PresencePolicies{read: true, write: nil}
+             }
+
+      new_token =
+        Generators.generate_jwt_token(tenant, %{
+          exp: System.system_time(:second) + 10_000,
+          role: "authenticated",
+          sub: "123"
+        })
+
+      assert new_token != jwt
+
+      push(socket, "access_token", %{"access_token" => new_token})
+
+      socket = Server.socket(socket.channel_pid)
+
+      assert socket.assigns.access_token == new_token
+      assert socket.assigns.confirm_token_ref != old_confirm_ref
+    end
+
+    @tag policies: [:authenticated_all_topic_read]
+    test "new valid access_token and policy has changed", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert socket = subscribe_and_join!(socket, "realtime:test", %{"config" => %{"private" => true}})
+
+      assert socket.assigns.policies == %Realtime.Tenants.Authorization.Policies{
+               broadcast: %Realtime.Tenants.Authorization.Policies.BroadcastPolicies{read: true, write: nil},
+               presence: %Realtime.Tenants.Authorization.Policies.PresencePolicies{read: true, write: nil}
+             }
+
+      new_token =
+        Generators.generate_jwt_token(tenant, %{
+          exp: System.system_time(:second) + 10_000,
+          role: "authenticated",
+          sub: "123"
+        })
+
+      assert new_token != jwt
+
+      # RLS policies removed so it should now fail
+      {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test")
+      clean_table(db_conn, "realtime", "messages")
+
+      push(socket, "access_token", %{"access_token" => new_token})
+
+      # Channel closes
+      assert_process_down(socket.channel_pid)
+    end
+
+    test "new valid access_token but Connect timed out", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      new_token =
+        Generators.generate_jwt_token(tenant, %{
+          exp: System.system_time(:second) + 10_000,
+          role: "authenticated",
+          sub: "123"
+        })
+
+      assert new_token != jwt
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :rpc_error, :timeout} end)
+          allow(Connect, self(), channel_pid)
+
+          push(socket, "access_token", %{"access_token" => new_token})
+
+          # Channel closes
+          assert_process_down(channel_pid)
+        end)
+
+      assert log =~ "Node request timeout"
+    end
+
+    test "new valid access_token but Connect had an error", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      new_token =
+        Generators.generate_jwt_token(tenant, %{
+          exp: System.system_time(:second) + 10_000,
+          role: "authenticated",
+          sub: "123"
+        })
+
+      assert new_token != jwt
+
+      log =
+        capture_log(fn ->
+          expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :rpc_error, {:EXIT, :actual_error}} end)
+          allow(Connect, self(), channel_pid)
+
+          push(socket, "access_token", %{"access_token" => new_token})
+
+          # Channel closes
+          assert_process_down(channel_pid)
+        end)
+
+      assert log =~ "RPC call error: {:EXIT, :actual_error}"
+    end
+
+    test "new broken access_token", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      new_token = "not even a JWT"
+
+      push(socket, "access_token", %{"access_token" => new_token})
+
+      # Channel closes
+      assert_process_down(channel_pid)
+
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "system",
+        payload: %{
+          message: "The token provided is not a valid JWT",
+          status: "error",
+          extension: "system",
+          channel: "test"
+        }
+      }
+
+      # Socket also closes...
+      assert_receive {:socket_close, ^channel_pid, :normal}
+    end
+
+    test "new JWT missing role claim", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      new_token = Generators.generate_jwt_token(tenant, %{exp: System.system_time(:second) + 10_000})
+
+      push(socket, "access_token", %{"access_token" => new_token})
+
+      # Channel closes
+      assert_process_down(channel_pid)
+
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "system",
+        payload: %{
+          message: "Fields `role` and `exp` are required in JWT",
+          status: "error",
+          extension: "system",
+          channel: "test"
+        }
+      }
+
+      # Socket also closes...
+      assert_receive {:socket_close, ^channel_pid, :normal}
+    end
+
+    test "new JWT missing exp claim", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      new_token = Generators.generate_jwt_token(tenant, %{role: "authenticated"})
+
+      push(socket, "access_token", %{"access_token" => new_token})
+
+      # Channel closes
+      assert_process_down(channel_pid)
+
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "system",
+        payload: %{
+          message: "Fields `role` and `exp` are required in JWT",
+          status: "error",
+          extension: "system",
+          channel: "test"
+        }
+      }
+
+      # Socket also closes...
+      assert_receive {:socket_close, ^channel_pid, :normal}
+    end
+
+    test "new expired JWT", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} = socket = subscribe_and_join!(socket, "realtime:test", %{})
+
+      new_token =
+        Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1000})
+
+      push(socket, "access_token", %{"access_token" => new_token})
+
+      # Channel closes
+      assert_process_down(channel_pid)
+
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "system",
+        payload: %{
+          message: message,
+          status: "error",
+          extension: "system",
+          channel: "test"
+        }
+      }
+
+      assert message =~ ~r{Token has expired \d+ seconds ago}
+
+      # Socket also closes...
+      assert_receive {:socket_close, ^channel_pid, :normal}
+    end
+  end
+
+  describe "confirm token" do
+    test "token has expired", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) + 2})
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert %Socket{channel_pid: channel_pid} = subscribe_and_join!(socket, "realtime:test", %{})
+
+      Process.sleep(2000)
+      send(channel_pid, :confirm_token)
+
+      # Channel closes
+      assert_process_down(channel_pid)
+
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "system",
+        payload: %{
+          message: "Token has expired 0 seconds ago",
+          status: "error",
+          extension: "system",
+          channel: "test"
+        }
+      }
     end
   end
 
@@ -276,7 +543,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       assert {:error, %{reason: "Realtime was unable to connect to the project database"}} =
-               subscribe_and_join(socket, "realtime:test", %{})
+               subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
     end
 
     test "lack of connections halts join", %{tenant: tenant} do
@@ -305,7 +572,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       assert {:error, %{reason: "Database can't accept more connections, Realtime won't connect"}} =
-               subscribe_and_join(socket, "realtime:test", %{})
+               subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
     end
   end
 
@@ -341,4 +608,17 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
     Realtime.Api.update_tenant(tenant, %{extensions: extensions})
   end
+
+  defp assert_process_down(pid) do
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+  end
+
+  defp rls_context(%{tenant: tenant, policies: policies}) do
+    {:ok, conn} = Realtime.Database.connect(tenant, "realtime_test", :stop)
+    create_rls_policies(conn, policies, %{topic: "realtime:test"})
+    :ok
+  end
+
+  defp rls_context(_), do: :ok
 end
