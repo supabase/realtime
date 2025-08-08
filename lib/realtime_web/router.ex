@@ -1,4 +1,15 @@
 defmodule RealtimeWeb.Router do
+  @moduledoc """
+  The main Phoenix router for Supabase Realtime.
+
+  Responsible for:
+  - Defining all HTTP routes and pipelines
+  - Integrating API, browser, metrics, and admin endpoints
+  - Applying authentication, rate limiting, and CORS plugs
+  - Exposing OpenAPI documentation and LiveDashboard
+
+  See the README for a high-level overview of available endpoints.
+  """
   use RealtimeWeb, :router
 
   require Logger
