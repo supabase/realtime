@@ -530,12 +530,10 @@ defmodule Realtime.Integration.RtChannelTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
          mode: :distributed
-    test "private broadcast with valid channel with permissions sends message using a remote node (gen_rpc adapter)", %{
+    test "private broadcast with valid channel with permissions sends message using a remote node", %{
       tenant: tenant,
       topic: topic
     } do
-      {:ok, tenant} = Realtime.Api.update_tenant(tenant, %{broadcast_adapter: :gen_rpc})
-
       {:ok, token} =
         generate_token(tenant, %{exp: System.system_time(:second) + 1000, role: "authenticated", sub: random_string()})
 

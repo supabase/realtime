@@ -26,8 +26,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     tenant_id = args["id"]
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id)
-
     state = %{
       backoff: Backoff.new(backoff_min: 100, backoff_max: 5_000, backoff_type: :rand_exp),
       db_host: args["db_host"],
@@ -43,7 +41,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       retry_ref: nil,
       retry_count: 0,
       slot_name: args["slot_name"] <> slot_name_suffix(),
-      tenant: tenant
+      tenant_id: tenant_id
     }
 
     {:ok, _} = Registry.register(__MODULE__.Registry, tenant_id, %{})
@@ -76,7 +74,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           max_record_bytes: max_record_bytes,
           max_changes: max_changes,
           conn: conn,
-          tenant: tenant
+          tenant_id: tenant_id
         } = state
       ) do
     cancel_timer(poll_ref)
@@ -84,9 +82,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
     args = [conn, slot_name, publication, max_changes, max_record_bytes]
     {time, list_changes} = :timer.tc(Replications, :list_changes, args)
-    record_list_changes_telemetry(time, tenant.external_id)
+    record_list_changes_telemetry(time, tenant_id)
 
-    case handle_list_changes_result(list_changes, tenant) do
+    case handle_list_changes_result(list_changes, tenant_id) do
       {:ok, row_count} ->
         Backoff.reset(backoff)
 
@@ -179,18 +177,13 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
             rows: [_ | _] = rows,
             num_rows: rows_count
           }},
-         tenant
+         tenant_id
        ) do
     for row <- rows,
         change <- columns |> Enum.zip(row) |> generate_record() |> List.wrap() do
-      topic = "realtime:postgres:" <> tenant.external_id
+      topic = "realtime:postgres:" <> tenant_id
 
-      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(
-        tenant,
-        topic,
-        change,
-        MessageDispatcher
-      )
+      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(topic, change, MessageDispatcher)
     end
 
     {:ok, rows_count}
