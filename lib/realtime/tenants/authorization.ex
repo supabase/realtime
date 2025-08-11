@@ -21,12 +21,12 @@ defmodule Realtime.Tenants.Authorization do
   defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role]
 
   @type t :: %__MODULE__{
-          :tenant_id => binary() | nil,
-          :topic => binary() | nil,
-          :claims => map(),
-          :headers => keyword({binary(), binary()}),
-          :jwt => map(),
-          :role => binary()
+          :tenant_id => binary | nil,
+          :topic => binary | nil,
+          :claims => map,
+          :headers => list({binary, binary}),
+          :jwt => binary,
+          :role => binary
         }
 
   @doc """

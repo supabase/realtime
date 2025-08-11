@@ -377,6 +377,7 @@ defmodule Realtime.Tenants.Connect do
   defp call_external_node(tenant_id, opts) do
     rpc_timeout = Keyword.get(opts, :rpc_timeout, @rpc_timeout_default)
 
+    # FIXME should fail if tenant not defined
     with tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- tenant_suspended?(tenant),
          {:ok, node, region} <- Realtime.Nodes.get_node_for_tenant(tenant) do

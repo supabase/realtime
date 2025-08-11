@@ -35,11 +35,7 @@ defmodule Realtime.RateCounter do
             idle_shutdown: @idle_shutdown,
             idle_shutdown_ref: nil,
             limit: %{log: false},
-            telemetry: %{
-              event_name: [@app_name] ++ [:rate_counter],
-              measurements: %{sum: 0},
-              metadata: %{}
-            }
+            telemetry: %{emit: false}
 
   @type t :: %__MODULE__{
           id: term(),
@@ -47,21 +43,25 @@ defmodule Realtime.RateCounter do
           bucket: list(),
           max_bucket_len: integer(),
           tick: integer(),
-          tick_ref: reference(),
+          tick_ref: reference() | nil,
           idle_shutdown: integer() | :infinity,
-          idle_shutdown_ref: reference(),
-          limit: %{
-            log: boolean(),
-            value: integer(),
-            triggered: boolean(),
-            log_fn: (-> term())
-          },
-          telemetry: %{
-            emit: false,
-            event_name: :telemetry.event_name(),
-            measurements: :telemetry.event_measurements(),
-            metadata: :telemetry.event_metadata()
-          }
+          idle_shutdown_ref: reference() | nil,
+          limit:
+            %{log: false}
+            | %{
+                log: true,
+                value: integer(),
+                triggered: boolean(),
+                log_fn: (-> term())
+              },
+          telemetry:
+            %{emit: false}
+            | %{
+                emit: true,
+                event_name: :telemetry.event_name(),
+                measurements: :telemetry.event_measurements(),
+                metadata: :telemetry.event_metadata()
+              }
         }
 
   @spec start_link([keyword()]) :: {:ok, pid()} | {:error, {:already_started, pid()}}

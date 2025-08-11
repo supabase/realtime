@@ -23,8 +23,8 @@ defmodule RealtimeWeb.ChannelsAuthorizationTest do
     end
 
     test "when token is unauthorized" do
-      expect(JwtVerification, :verify, 1, fn _token, @secret, _jwks -> :error end)
-      assert :error = ChannelsAuthorization.authorize("bad_token", @secret, nil)
+      expect(JwtVerification, :verify, 1, fn _token, @secret, _jwks -> {:error, :invalid} end)
+      assert {:error, :invalid} = ChannelsAuthorization.authorize("bad_token", @secret, nil)
     end
 
     test "when token is not a jwt token" do

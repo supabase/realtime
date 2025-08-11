@@ -246,7 +246,7 @@ defmodule Realtime.ApiTest do
       assert Api.preload_counters(nil) == nil
 
       expect(GenCounter, :get, fn _ -> 1 end)
-      expect(RateCounter, :get, fn _ -> {:ok, %RateCounter{avg: 2}} end)
+      expect(RateCounter, :get, fn _ -> {:ok, %RateCounter{avg: 2.0}} end)
       counters = Api.preload_counters(tenant)
       assert counters.events_per_second_rolling == 2
       assert counters.events_per_second_now == 1

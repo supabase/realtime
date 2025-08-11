@@ -408,11 +408,14 @@ defmodule Realtime.Tenants.ConnectTest do
       assert log =~ "ReplicationMaxWalSendersReached"
     end
 
-    test "handle rpc errors gracefully" do
+    test "handle rpc errors gracefully", %{tenant: tenant} do
+      external_id = tenant.external_id
       expect(Realtime.Nodes, :get_node_for_tenant, fn _ -> {:ok, :potato@nohost, "us-east-1"} end)
 
-      assert capture_log(fn -> assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant") end) =~
-               "project=tenant external_id=tenant [error] ErrorOnRpcCall"
+      assert capture_log(fn ->
+               assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection(external_id)
+             end) =~
+               "project=#{external_id} external_id=#{external_id} [error] ErrorOnRpcCall"
     end
   end
 
