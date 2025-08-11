@@ -607,7 +607,7 @@ defmodule Realtime.Integration.RtChannelTest do
     @tag policies: []
     test "private broadcast with valid channel and no read permissions won't join", %{tenant: tenant, topic: topic} do
       config = %{private: true}
-      expected = "You do not have permissions to read from this Channel topic: #{topic}"
+      expected = "Unauthorized: You do not have permissions to read from this Channel topic: #{topic}"
 
       topic = "realtime:#{topic}"
       {socket, _} = get_connection(tenant, "authenticated")
@@ -619,7 +619,12 @@ defmodule Realtime.Integration.RtChannelTest do
           assert_receive %Message{
                            topic: ^topic,
                            event: "phx_reply",
-                           payload: %{"response" => %{"reason" => ^expected}, "status" => "error"}
+                           payload: %{
+                             "response" => %{
+                               "reason" => ^expected
+                             },
+                             "status" => "error"
+                           }
                          },
                          300
 
@@ -627,7 +632,7 @@ defmodule Realtime.Integration.RtChannelTest do
           refute_receive %Message{event: "presence_state"}, 300
         end)
 
-      assert log =~ "Unauthorized: #{expected}"
+      assert log =~ expected
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence]
@@ -1203,7 +1208,12 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{
                        event: "phx_reply",
-                       payload: %{"status" => "error", "response" => %{"reason" => "Token has expired 0 seconds ago"}},
+                       payload: %{
+                         "status" => "error",
+                         "response" => %{
+                           "reason" => "InvalidJWTToken: Token has expired 0 seconds ago"
+                         }
+                       },
                        topic: ^realtime_topic
                      },
                      500
@@ -1231,7 +1241,9 @@ defmodule Realtime.Integration.RtChannelTest do
                        event: "phx_reply",
                        payload: %{
                          "status" => "error",
-                         "response" => %{"reason" => "Fields `role` and `exp` are required in JWT"}
+                         "response" => %{
+                           "reason" => "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
+                         }
                        },
                        topic: ^realtime_topic
                      },
@@ -1257,7 +1269,9 @@ defmodule Realtime.Integration.RtChannelTest do
                        event: "phx_reply",
                        payload: %{
                          "status" => "error",
-                         "response" => %{"reason" => "The token provided is not a valid JWT"}
+                         "response" => %{
+                           "reason" => "MalformedJWT: The token provided is not a valid JWT"
+                         }
                        },
                        topic: ^realtime_topic
                      },
@@ -1565,7 +1579,9 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{
                        event: "phx_reply",
                        payload: %{
-                         "response" => %{"reason" => "This project only allows private channels"},
+                         "response" => %{
+                           "reason" => "PrivateOnly: This project only allows private channels"
+                         },
                          "status" => "error"
                        }
                      },
@@ -1727,7 +1743,9 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{
                        event: "phx_reply",
                        payload: %{
-                         "response" => %{"reason" => "Too many connected users"},
+                         "response" => %{
+                           "reason" => "ConnectionRateLimitReached: Too many connected users"
+                         },
                          "status" => "error"
                        }
                      },
@@ -1796,7 +1814,12 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{
                        event: "phx_reply",
-                       payload: %{"status" => "error", "response" => %{"reason" => "Too many channels"}},
+                       payload: %{
+                         "status" => "error",
+                         "response" => %{
+                           "reason" => "ChannelRateLimitReached: Too many channels"
+                         }
+                       },
                        topic: ^realtime_topic_2
                      },
                      500
@@ -1825,7 +1848,9 @@ defmodule Realtime.Integration.RtChannelTest do
           assert_receive %Message{
                            event: "phx_reply",
                            payload: %{
-                             "response" => %{"reason" => "Too many joins per second"},
+                             "response" => %{
+                               "reason" => "Too many joins per second"
+                             },
                              "status" => "error"
                            }
                          },
@@ -1859,12 +1884,14 @@ defmodule Realtime.Integration.RtChannelTest do
         capture_log(fn ->
           WebsocketClient.join(socket, realtime_topic, %{config: config})
 
-          msg = "You do not have permissions to read from this Channel topic: #{topic}"
+          msg = "Unauthorized: You do not have permissions to read from this Channel topic: #{topic}"
 
           assert_receive %Message{
                            event: "phx_reply",
                            payload: %{
-                             "response" => %{"reason" => ^msg},
+                             "response" => %{
+                               "reason" => ^msg
+                             },
                              "status" => "error"
                            }
                          },
@@ -1888,7 +1915,9 @@ defmodule Realtime.Integration.RtChannelTest do
     assert_receive %Message{
                      event: "phx_reply",
                      payload: %{
-                       "response" => %{"reason" => "You must provide a topic name"},
+                       "response" => %{
+                         "reason" => "TopicNameRequired: You must provide a topic name"
+                       },
                        "status" => "error"
                      }
                    },

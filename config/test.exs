@@ -32,7 +32,6 @@ config :realtime, RealtimeWeb.Endpoint,
 
 config :realtime,
   region: "us-east-1",
-  secure_channels: true,
   db_enc_key: "1234567890123456",
   jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
   api_jwt_secret: System.get_env("API_JWT_SECRET", "secret"),

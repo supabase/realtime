@@ -24,84 +24,88 @@ defmodule RealtimeWeb.UserSocket do
 
   @impl true
   def connect(params, socket, opts) do
-    if Application.fetch_env!(:realtime, :secure_channels) do
-      %{uri: %{host: host}, x_headers: headers} = opts
+    %{uri: %{host: host}, x_headers: headers} = opts
 
-      {:ok, external_id} = Database.get_external_id(host)
-      token = access_token(params, headers)
-      log_level = log_level(params)
+    {:ok, external_id} = Database.get_external_id(host)
+    token = access_token(params, headers)
+    log_level = log_level(params)
 
-      Logger.metadata(external_id: external_id, project: external_id)
-      Logger.put_process_level(self(), log_level)
+    Logger.metadata(external_id: external_id, project: external_id)
+    Logger.put_process_level(self(), log_level)
 
-      with %Tenant{
-             jwt_secret: jwt_secret,
-             jwt_jwks: jwt_jwks,
-             postgres_cdc_default: postgres_cdc_default,
-             suspend: false
-           } = tenant <- Tenants.Cache.get_tenant_by_external_id(external_id),
-           token when is_binary(token) <- token,
-           jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
-           {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
-           {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
-        %Tenant{
-          extensions: extensions,
+    socket =
+      socket
+      |> assign(:tenant, external_id)
+      |> assign(:log_level, log_level)
+      |> assign(:access_token, token)
+
+    with %Tenant{
+           jwt_secret: jwt_secret,
+           jwt_jwks: jwt_jwks,
+           postgres_cdc_default: postgres_cdc_default,
+           suspend: false
+         } = tenant <- Tenants.Cache.get_tenant_by_external_id(external_id),
+         token when is_binary(token) <- token,
+         jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
+         {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
+         {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
+      %Tenant{
+        extensions: extensions,
+        max_concurrent_users: max_conn_users,
+        max_events_per_second: max_events_per_second,
+        max_bytes_per_second: max_bytes_per_second,
+        max_joins_per_second: max_joins_per_second,
+        max_channels_per_client: max_channels_per_client,
+        postgres_cdc_default: postgres_cdc_default
+      } = tenant
+
+      assigns = %RealtimeChannel.Assigns{
+        claims: claims,
+        jwt_secret: jwt_secret,
+        jwt_jwks: jwt_jwks,
+        limits: %{
           max_concurrent_users: max_conn_users,
           max_events_per_second: max_events_per_second,
           max_bytes_per_second: max_bytes_per_second,
           max_joins_per_second: max_joins_per_second,
-          max_channels_per_client: max_channels_per_client,
-          postgres_cdc_default: postgres_cdc_default
-        } = tenant
+          max_channels_per_client: max_channels_per_client
+        },
+        postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
+        postgres_cdc_module: postgres_cdc_module,
+        tenant: external_id,
+        log_level: log_level,
+        tenant_token: token,
+        headers: opts.x_headers
+      }
 
-        assigns = %RealtimeChannel.Assigns{
-          claims: claims,
-          jwt_secret: jwt_secret,
-          jwt_jwks: jwt_jwks,
-          limits: %{
-            max_concurrent_users: max_conn_users,
-            max_events_per_second: max_events_per_second,
-            max_bytes_per_second: max_bytes_per_second,
-            max_joins_per_second: max_joins_per_second,
-            max_channels_per_client: max_channels_per_client
-          },
-          postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
-          postgres_cdc_module: postgres_cdc_module,
-          tenant: external_id,
-          log_level: log_level,
-          tenant_token: token,
-          headers: opts.x_headers
-        }
+      assigns = Map.from_struct(assigns)
 
-        assigns = Map.from_struct(assigns)
+      {:ok, assign(socket, assigns)}
+    else
+      nil ->
+        log_error("TenantNotFound", "Tenant not found: #{external_id}")
+        {:error, :tenant_not_found}
 
-        {:ok, assign(socket, assigns)}
-      else
-        nil ->
-          log_error("TenantNotFound", "Tenant not found: #{external_id}")
-          {:error, :tenant_not_found}
+      %Tenant{suspend: true} ->
+        Logging.log_error(socket, "RealtimeDisabledForTenant", "Realtime disabled for this tenant")
+        {:error, :tenant_suspended}
 
-        %Tenant{suspend: true} ->
-          Logging.log_error_message(:error, "RealtimeDisabledForTenant", "Realtime disabled for this tenant")
-          {:error, :tenant_suspended}
+      {:error, :expired_token, msg} ->
+        Logging.maybe_log_warning(socket, "InvalidJWTToken", msg)
+        {:error, :expired_token}
 
-        {:error, :expired_token, msg} ->
-          Logging.maybe_log_warning_with_token_metadata("InvalidJWTToken", msg, token, log_level)
-          {:error, :expired_token}
+      {:error, :missing_claims} ->
+        msg = "Fields `role` and `exp` are required in JWT"
+        Logging.maybe_log_warning(socket, "InvalidJWTToken", msg)
+        {:error, :missing_claims}
 
-        {:error, :missing_claims} ->
-          msg = "Fields `role` and `exp` are required in JWT"
-          Logging.maybe_log_warning_with_token_metadata("InvalidJWTToken", msg, token, log_level)
-          {:error, :missing_claims}
+      {:error, :token_malformed} ->
+        log_error("MalformedJWT", "The token provided is not a valid JWT")
+        {:error, :token_malformed}
 
-        {:error, :token_malformed} ->
-          log_error("MalformedJWT", "The token provided is not a valid JWT")
-          {:error, :token_malformed}
-
-        error ->
-          log_error("ErrorConnectingToWebsocket", error)
-          error
-      end
+      error ->
+        log_error("ErrorConnectingToWebsocket", error)
+        error
     end
   end
 

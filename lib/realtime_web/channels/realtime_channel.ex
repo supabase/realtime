@@ -31,8 +31,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   @confirm_token_ms_interval :timer.minutes(5)
 
   @impl true
-  def join("realtime:", _params, _socket) do
-    Logging.log_error_message(:error, "TopicNameRequired", "You must provide a topic name")
+  def join("realtime:", _params, socket) do
+    Logging.log_error(socket, "TopicNameRequired", "You must provide a topic name")
   end
 
   def join("realtime:" <> sub_topic = topic, params, socket) do
@@ -55,14 +55,11 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign(:private?, !!params["config"]["private"])
       |> assign(:policies, nil)
 
-    token = socket.assigns.access_token
-    log_level = socket.assigns.log_level
-
     with :ok <- SignalHandler.shutdown_in_progress?(),
          :ok <- only_private?(tenant_id, socket),
-         :ok <- limit_joins(socket.assigns),
+         :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
-         :ok <- limit_max_users(socket.assigns),
+         :ok <- limit_max_users(socket),
          {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
          socket = assign_authorization_context(socket, sub_topic, access_token, claims),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
@@ -70,7 +67,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
       # fastlane subscription
-      metadata = MessageDispatcher.fastlane_metadata(transport_pid, serializer, topic, log_level, tenant_id)
+      metadata =
+        MessageDispatcher.fastlane_metadata(transport_pid, serializer, topic, socket.assigns.log_level, tenant_id)
+
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
 
       Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
@@ -121,22 +120,22 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:ok, state, assign(socket, assigns)}
     else
       {:error, :expired_token, msg} ->
-        Logging.maybe_log_warning_with_token_metadata("InvalidJWTToken", msg, token, log_level)
+        Logging.maybe_log_warning(socket, "InvalidJWTToken", msg)
 
       {:error, :missing_claims} ->
         msg = "Fields `role` and `exp` are required in JWT"
-        Logging.maybe_log_warning_with_token_metadata("InvalidJWTToken", msg, token, log_level)
+        Logging.maybe_log_warning(socket, "InvalidJWTToken", msg)
 
       {:error, :unauthorized, msg} ->
-        Logging.log_error_message(:error, "Unauthorized", msg)
+        Logging.log_error(socket, "Unauthorized", msg)
 
       {:error, :too_many_channels} ->
         msg = "Too many channels"
-        Logging.log_error_message(:error, "ChannelRateLimitReached", msg)
+        Logging.log_error(socket, "ChannelRateLimitReached", msg)
 
       {:error, :too_many_connections} ->
         msg = "Too many connected users"
-        Logging.log_error_message(:error, "ConnectionRateLimitReached", msg)
+        Logging.log_error(socket, "ConnectionRateLimitReached", msg)
 
       {:error, :too_many_joins} ->
         msg = "Too many joins per second"
@@ -144,86 +143,54 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, :increase_connection_pool} ->
         msg = "Please increase your connection pool size"
-        Logging.log_error_message(:error, "IncreaseConnectionPool", msg)
+        Logging.log_error(socket, "IncreaseConnectionPool", msg)
 
       {:error, :tenant_db_too_many_connections} ->
         msg = "Database can't accept more connections, Realtime won't connect"
-        Logging.log_error_message(:error, "DatabaseLackOfConnections", msg)
+        Logging.log_error(socket, "DatabaseLackOfConnections", msg)
 
       {:error, :unable_to_set_policies, error} ->
-        Logging.log_error_message(:error, "UnableToSetPolicies", error)
+        Logging.log_error(socket, "UnableToSetPolicies", error)
         {:error, %{reason: "Realtime was unable to connect to the project database"}}
 
       {:error, :tenant_database_unavailable} ->
-        Logging.log_error_message(
-          :error,
-          "UnableToConnectToProject",
-          "Realtime was unable to connect to the project database"
-        )
+        Logging.log_error(socket, "UnableToConnectToProject", "Realtime was unable to connect to the project database")
 
       {:error, :rpc_error, :timeout} ->
-        Logging.log_error_message(:error, "TimeoutOnRpcCall", "Node request timeout")
+        Logging.log_error(socket, "TimeoutOnRpcCall", "Node request timeout")
 
       {:error, :rpc_error, reason} ->
-        Logging.log_error_message(:error, "ErrorOnRpcCall", "RPC call error: " <> inspect(reason))
+        Logging.log_error(socket, "ErrorOnRpcCall", "RPC call error: " <> inspect(reason))
 
       {:error, :initializing} ->
-        Logging.log_error_message(
-          :error,
-          "InitializingProjectConnection",
-          "Realtime is initializing the project connection"
-        )
+        Logging.log_error(socket, "InitializingProjectConnection", "Realtime is initializing the project connection")
 
       {:error, :tenant_database_connection_initializing} ->
-        Logging.log_error_message(
-          :error,
-          "InitializingProjectConnection",
-          "Connecting to the project database"
-        )
+        Logging.log_error(socket, "InitializingProjectConnection", "Connecting to the project database")
 
       {:error, :token_malformed, msg} ->
-        Logging.log_error_message(:error, "MalformedJWT", msg)
+        Logging.log_error(socket, "MalformedJWT", msg)
 
       {:error, invalid_exp} when is_integer(invalid_exp) and invalid_exp <= 0 ->
-        Logging.log_error_with_token_metadata(
-          "InvalidJWTToken",
-          "Token expiration time is invalid",
-          socket.assigns.access_token
-        )
+        Logging.log_error(socket, "InvalidJWTToken", "Token expiration time is invalid")
 
       {:error, :private_only} ->
-        Logging.log_error_message(
-          :error,
-          "PrivateOnly",
-          "This project only allows private channels"
-        )
+        Logging.log_error(socket, "PrivateOnly", "This project only allows private channels")
 
       {:error, :tenant_not_found} ->
-        Logging.log_error_message(
-          :error,
-          "TenantNotFound",
-          "Tenant with the given ID does not exist"
-        )
+        Logging.log_error(socket, "TenantNotFound", "Tenant with the given ID does not exist")
 
       {:error, :tenant_suspended} ->
-        Logging.log_error_message(
-          :error,
-          "RealtimeDisabledForTenant",
-          "Realtime disabled for this tenant"
-        )
+        Logging.log_error(socket, "RealtimeDisabledForTenant", "Realtime disabled for this tenant")
 
       {:error, :signature_error} ->
-        Logging.log_error_message(:error, "JwtSignatureError", "Failed to validate JWT signature")
+        Logging.log_error(socket, "JwtSignatureError", "Failed to validate JWT signature")
 
       {:error, :shutdown_in_progress} ->
-        Logging.log_error_message(
-          :error,
-          "RealtimeRestarting",
-          "Realtime is restarting, please standby"
-        )
+        Logging.log_error(socket, "RealtimeRestarting", "Realtime is restarting, please standby")
 
       {:error, error} ->
-        Logging.log_error_message(:error, "UnknownErrorOnChannel", error)
+        Logging.log_error(socket, "UnknownErrorOnChannel", error)
         {:error, %{reason: "Unknown Error on Channel"}}
     end
   end
@@ -276,14 +243,14 @@ defmodule RealtimeWeb.RealtimeChannel do
       log_warning("TooManyPresenceMessages", message)
     end
 
-    socket = Logging.maybe_log_handle_info(socket, msg)
+    Logging.maybe_log_info(socket, msg)
     push(socket, "presence_diff", payload)
     {:noreply, socket}
   end
 
   def handle_info(%{event: type, payload: payload} = msg, socket) do
     count(socket)
-    socket = Logging.maybe_log_handle_info(socket, msg)
+    Logging.maybe_log_info(socket, msg)
     push(socket, type, payload)
     {:noreply, socket}
   end
@@ -503,7 +470,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     wait
   end
 
-  def limit_joins(%{tenant: tenant, limits: limits}) do
+  def limit_joins(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
     rate_args = Tenants.joins_per_second_rate(tenant, limits.max_joins_per_second)
 
     RateCounter.new(rate_args)
@@ -517,7 +484,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         {:error, :too_many_joins}
 
       error ->
-        Logging.log_error_message(:error, "UnknownErrorOnCounter", error)
+        Logging.log_error(socket, "UnknownErrorOnCounter", error)
         {:error, error}
     end
   end
@@ -533,7 +500,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp limit_max_users(%{limits: %{max_concurrent_users: max_conn_users}, tenant: tenant}) do
+  defp limit_max_users(%{assigns: %{limits: %{max_concurrent_users: max_conn_users}, tenant: tenant}}) do
     conns = Realtime.UsersCounter.tenant_users(tenant)
 
     if conns < max_conn_users,

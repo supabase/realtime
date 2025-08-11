@@ -27,15 +27,13 @@ defmodule Realtime.Application do
 
     topologies = Application.get_env(:libcluster, :topologies) || []
 
-    if Application.fetch_env!(:realtime, :secure_channels) do
-      case Application.fetch_env!(:realtime, :jwt_claim_validators) |> Jason.decode() do
-        {:ok, claims} when is_map(claims) ->
-          Application.put_env(:realtime, :jwt_claim_validators, claims)
+    case Application.fetch_env!(:realtime, :jwt_claim_validators) |> Jason.decode() do
+      {:ok, claims} when is_map(claims) ->
+        Application.put_env(:realtime, :jwt_claim_validators, claims)
 
-        _ ->
-          raise JwtClaimValidatorsError,
-            message: "JWT claim validators is not a valid JSON object"
-      end
+      _ ->
+        raise JwtClaimValidatorsError,
+          message: "JWT claim validators is not a valid JSON object"
     end
 
     :ok =

@@ -118,19 +118,23 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
-      expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :unexpected_error} end)
+      expect(Connect, :lookup_or_start_connection, fn _ ->
+        {:error, "Realtime was unable to connect to the project database"}
+      end)
 
       assert capture_log(fn ->
                assert {:error, %{reason: "Unknown Error on Channel"}} =
                         subscribe_and_join(socket, "realtime:test", %{})
-             end) =~ "UnknownErrorOnChannel: :unexpected_error"
+             end) =~ "UnknownErrorOnChannel: Realtime was unable to connect to the project database"
     end
 
     test "unexpected error while setting policies", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
-      expect(Authorization, :get_read_authorizations, fn _, _, _ -> {:error, :unexpected_error} end)
+      expect(Authorization, :get_read_authorizations, fn _, _, _ ->
+        {:error, "Realtime was unable to connect to the project database"}
+      end)
 
       assert capture_log(fn ->
                assert {:error, %{reason: "Realtime was unable to connect to the project database"}} =
@@ -158,10 +162,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       socket_over_capacity =
         Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: -1}})
 
-      assert {:error, %{reason: "Too many connected users"}} =
+      assert {:error, %{reason: "ConnectionRateLimitReached: Too many connected users"}} =
                subscribe_and_join(socket_at_capacity, "realtime:test", %{})
 
-      assert {:error, %{reason: "Too many connected users"}} =
+      assert {:error, %{reason: "ConnectionRateLimitReached: Too many connected users"}} =
                subscribe_and_join(socket_over_capacity, "realtime:test", %{})
     end
   end
@@ -542,7 +546,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      assert {:error, %{reason: "Realtime was unable to connect to the project database"}} =
+      assert {:error, %{reason: "UnableToConnectToProject: Realtime was unable to connect to the project database"}} =
                subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
     end
 
@@ -571,7 +575,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      assert {:error, %{reason: "Database can't accept more connections, Realtime won't connect"}} =
+      assert {:error,
+              %{reason: "DatabaseLackOfConnections: Database can't accept more connections, Realtime won't connect"}} =
                subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
     end
   end
