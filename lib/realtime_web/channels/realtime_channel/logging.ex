@@ -14,19 +14,19 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   @doc """
   Logs an error if the log level is set to error
   """
-  @spec maybe_log_error(socket :: Phoenix.Socket.t(), code :: binary(), msg :: binary()) :: :ok
+  @spec maybe_log_error(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any()) :: :ok
   def maybe_log_error(socket, code, msg), do: maybe_log(socket, :error, code, msg)
 
   @doc """
   Logs a warning if the log level is set to warning
   """
-  @spec maybe_log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: binary()) :: :ok
+  @spec maybe_log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any()) :: :ok
   def maybe_log_warning(socket, code, msg), do: maybe_log(socket, :warning, code, msg)
 
   @doc """
   Logs an info if the log level is set to info
   """
-  @spec maybe_log_info(socket :: Phoenix.Socket.t(), msg :: binary()) :: :ok
+  @spec maybe_log_info(socket :: Phoenix.Socket.t(), msg :: any()) :: :ok
   def maybe_log_info(socket, msg), do: maybe_log(socket, :info, nil, msg)
 
   defp log(%{assigns: %{tenant: tenant, access_token: access_token}}, level, code, msg) do
