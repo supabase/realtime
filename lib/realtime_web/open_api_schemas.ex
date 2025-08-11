@@ -103,6 +103,14 @@ defmodule RealtimeWeb.OpenApiSchemas do
               type: :number,
               description: "Maximum channel joins per second"
             },
+            max_presence_events_per_second: %Schema{
+              type: :number,
+              description: "Maximum presence events per second"
+            },
+            max_payload_size_in_kb: %Schema{
+              type: :number,
+              description: "Maximum payload size in KB"
+            },
             extensions: %Schema{
               type: :array,
               items: %Schema{

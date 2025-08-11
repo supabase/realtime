@@ -34,7 +34,9 @@ defmodule Generators do
       ],
       "postgres_cdc_default" => "postgres_cdc_rls",
       "jwt_secret" => "new secret",
-      "jwt_jwks" => nil
+      "jwt_jwks" => nil,
+      "max_presence_events_per_second" => 50,
+      "max_payload_size_in_kb" => 3000
     }
 
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()

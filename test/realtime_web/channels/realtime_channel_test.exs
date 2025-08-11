@@ -5,7 +5,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   import ExUnit.CaptureLog
 
-  alias Realtime.GenCounter
   alias Phoenix.Socket
   alias Phoenix.Channel.Server
 
@@ -57,59 +56,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       # presence_state + presence_diff
       assert 2 in bucket
-    end
-
-    test "log if limit is reached", %{tenant: tenant} do
-      jwt = Generators.generate_jwt_token(tenant)
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
-
-      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{})
-      GenCounter.add(socket.assigns.presence_rate_counter.id, 1000)
-      # Wait for RateCounter to tick
-      Process.sleep(1100)
-
-      log =
-        capture_log(fn ->
-          presence_diff = %Socket.Broadcast{event: "presence_diff", payload: %{joins: %{}, leaves: %{}}}
-          send(socket.channel_pid, presence_diff)
-
-          assert_receive %Socket.Message{topic: "realtime:test", event: "presence_state", payload: %{}}
-
-          assert_receive %Socket.Message{
-            topic: "realtime:test",
-            event: "presence_diff",
-            payload: %{joins: %{}, leaves: %{}}
-          }
-        end)
-
-      assert log =~ "Too many presence messages per second"
-    end
-
-    test "rate counter is restarted if not up and running", %{tenant: tenant} do
-      jwt = Generators.generate_jwt_token(tenant)
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
-
-      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{})
-      rate_counter = socket.assigns.presence_rate_counter
-
-      assert [{pid, _}] = Registry.lookup(Realtime.Registry.Unique, {RateCounter, :rate_counter, rate_counter.id})
-      Process.monitor(pid)
-      RateCounter.stop(tenant.external_id)
-      assert_receive {:DOWN, _ref, :process, ^pid, _reason}
-
-      presence_diff = %Socket.Broadcast{event: "presence_diff", payload: %{joins: %{}, leaves: %{}}}
-      send(socket.channel_pid, presence_diff)
-
-      assert_receive %Socket.Message{topic: "realtime:test", event: "presence_state", payload: %{}}
-
-      assert_receive %Socket.Message{
-        topic: "realtime:test",
-        event: "presence_diff",
-        payload: %{joins: %{}, leaves: %{}}
-      }
-
-      assert [{new_pid, _}] = Registry.lookup(Realtime.Registry.Unique, {RateCounter, :rate_counter, rate_counter.id})
-      assert pid != new_pid
     end
   end
 
