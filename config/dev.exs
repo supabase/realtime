@@ -73,7 +73,19 @@ config :realtime, RealtimeWeb.Endpoint,
 # Do not include metadata nor timestamps in development logs
 config :logger, :console,
   format: "$time [$level] $message $metadata\n",
-  metadata: [:error_code, :file, :pid, :project, :external_id, :application_name, :region, :request_id]
+  metadata: [
+    :error_code,
+    :file,
+    :pid,
+    :project,
+    :external_id,
+    :application_name,
+    :region,
+    :request_id,
+    :sub,
+    :iss,
+    :exp
+  ]
 
 # Set a higher stacktrace during development. Avoid configuring such
 # in production as building large stacktraces may be expensive.
