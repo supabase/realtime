@@ -33,28 +33,27 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
   end
 
   setup context do
-    tenant = tenant_fixture(broadcast_adapter: context[:adapter])
     Endpoint.subscribe(@topic)
 
     :erpc.call(context.node, Subscriber, :subscribe, [self(), @topic])
     assert_receive :ready
-    %{tenant: tenant}
+    :ok
   end
 
-  describe "phoenix adapter" do
-    @describetag adapter: :phoenix
-
-    test "broadcast", %{tenant: tenant, node: node} do
+  describe "broadcast/3" do
+    test "broadcast", %{node: node} do
       payload = %{key: "value", from: self()}
-      TenantBroadcaster.broadcast(tenant, @topic, "broadcast", payload)
+      TenantBroadcaster.broadcast(@topic, "broadcast", payload)
 
       assert_receive %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}
 
       # Remote node received the broadcast
       assert_receive {:relay, ^node, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
     end
+  end
 
-    test "broadcast_from", %{tenant: tenant, node: node} do
+  describe "broadcast_from/4" do
+    test "broadcast_from", %{node: node} do
       payload = %{key: "value", from: self()}
       parent = self()
 
@@ -69,7 +68,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
       assert_receive :ready
 
-      TenantBroadcaster.broadcast_from(tenant, self(), @topic, "broadcast", payload)
+      TenantBroadcaster.broadcast_from(self(), @topic, "broadcast", payload)
 
       assert_receive {:other_process, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
 
@@ -79,57 +78,21 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       # This process does not receive the message
       refute_receive _any
     end
+  end
 
-    test "pubsub_broadcast", %{tenant: tenant, node: node} do
-      TenantBroadcaster.pubsub_broadcast(tenant, @topic, "a message", Phoenix.PubSub)
+  describe "pubsub_broadcast/3" do
+    test "pubsub_broadcast", %{node: node} do
+      TenantBroadcaster.pubsub_broadcast(@topic, "a message", Phoenix.PubSub)
 
       assert_receive "a message"
 
       # Remote node received the broadcast
       assert_receive {:relay, ^node, "a message"}
-    end
-
-    test "pubsub_broadcast_from", %{tenant: tenant, node: node} do
-      parent = self()
-
-      spawn_link(fn ->
-        Endpoint.subscribe(@topic)
-        send(parent, :ready)
-
-        receive do
-          msg -> send(parent, {:other_process, msg})
-        end
-      end)
-
-      assert_receive :ready
-
-      TenantBroadcaster.pubsub_broadcast_from(tenant, self(), @topic, "a message", Phoenix.PubSub)
-
-      assert_receive {:other_process, "a message"}
-
-      # Remote node received the broadcast
-      assert_receive {:relay, ^node, "a message"}
-
-      # This process does not receive the message
-      refute_receive _any
     end
   end
 
-  describe "gen_rpc adapter" do
-    @describetag adapter: :gen_rpc
-
-    test "broadcast", %{tenant: tenant, node: node} do
-      payload = %{key: "value", from: self()}
-      TenantBroadcaster.broadcast(tenant, @topic, "broadcast", payload)
-
-      assert_receive %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}
-
-      # Remote node received the broadcast
-      assert_receive {:relay, ^node, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
-    end
-
-    test "broadcast_from", %{tenant: tenant, node: node} do
-      payload = %{key: "value", from: self()}
+  describe "pubsub_broadcast_from/4" do
+    test "pubsub_broadcast_from", %{node: node} do
       parent = self()
 
       spawn_link(fn ->
@@ -143,41 +106,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
       assert_receive :ready
 
-      TenantBroadcaster.broadcast_from(tenant, self(), @topic, "broadcast", payload)
-
-      assert_receive {:other_process, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
-
-      # Remote node received the broadcast
-      assert_receive {:relay, ^node, %Broadcast{topic: @topic, event: "broadcast", payload: ^payload}}
-
-      # This process does not receive the message
-      refute_receive _any
-    end
-
-    test "pubsub_broadcast", %{tenant: tenant, node: node} do
-      TenantBroadcaster.pubsub_broadcast(tenant, @topic, "a message", Phoenix.PubSub)
-
-      assert_receive "a message"
-
-      # Remote node received the broadcast
-      assert_receive {:relay, ^node, "a message"}
-    end
-
-    test "pubsub_broadcast_from", %{tenant: tenant, node: node} do
-      parent = self()
-
-      spawn_link(fn ->
-        Endpoint.subscribe(@topic)
-        send(parent, :ready)
-
-        receive do
-          msg -> send(parent, {:other_process, msg})
-        end
-      end)
-
-      assert_receive :ready
-
-      TenantBroadcaster.pubsub_broadcast_from(tenant, self(), @topic, "a message", Phoenix.PubSub)
+      TenantBroadcaster.pubsub_broadcast_from(self(), @topic, "a message", Phoenix.PubSub)
 
       assert_receive {:other_process, "a message"}
 

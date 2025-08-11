@@ -9,12 +9,10 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.TenantBroadcaster
   alias Phoenix.Socket
-  alias Realtime.Api.Tenant
   alias Realtime.GenCounter
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Cache
 
   @event_type "broadcast"
   @spec handle(map(), Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
@@ -38,8 +36,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
           |> assign(:policies, policies)
           |> increment_rate_counter()
 
-        %{ack_broadcast: ack_broadcast, tenant: tenant_id} = socket.assigns
-        send_message(tenant_id, self_broadcast, tenant_topic, payload)
+        %{ack_broadcast: ack_broadcast} = socket.assigns
+        send_message(self_broadcast, tenant_topic, payload)
         if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
 
       {:ok, policies} ->
@@ -56,42 +54,28 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   end
 
   def handle(payload, _db_conn, %{assigns: %{private?: false}} = socket) do
-    %{
-      assigns: %{
-        tenant_topic: tenant_topic,
-        self_broadcast: self_broadcast,
-        ack_broadcast: ack_broadcast,
-        tenant: tenant_id
-      }
-    } = socket
+    %{assigns: %{tenant_topic: tenant_topic, self_broadcast: self_broadcast, ack_broadcast: ack_broadcast}} = socket
 
     socket = increment_rate_counter(socket)
-    send_message(tenant_id, self_broadcast, tenant_topic, payload)
+    send_message(self_broadcast, tenant_topic, payload)
 
     if ack_broadcast,
       do: {:reply, :ok, socket},
       else: {:noreply, socket}
   end
 
-  defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do
-    with %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id) do
-      broadcast = %Phoenix.Socket.Broadcast{
-        topic: tenant_topic,
-        event: @event_type,
-        payload: payload
-      }
+  defp send_message(self_broadcast, tenant_topic, payload) do
+    broadcast = %Phoenix.Socket.Broadcast{topic: tenant_topic, event: @event_type, payload: payload}
 
-      if self_broadcast do
-        TenantBroadcaster.pubsub_broadcast(tenant, tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
-      else
-        TenantBroadcaster.pubsub_broadcast_from(
-          tenant,
-          self(),
-          tenant_topic,
-          broadcast,
-          RealtimeChannel.MessageDispatcher
-        )
-      end
+    if self_broadcast do
+      TenantBroadcaster.pubsub_broadcast(tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
+    else
+      TenantBroadcaster.pubsub_broadcast_from(
+        self(),
+        tenant_topic,
+        broadcast,
+        RealtimeChannel.MessageDispatcher
+      )
     end
   end
 

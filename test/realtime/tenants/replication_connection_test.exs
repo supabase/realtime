@@ -27,301 +27,292 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     %{tenant: tenant}
   end
 
-  for adapter <- [:phoenix, :gen_rpc] do
-    describe "replication with #{adapter}" do
-      @describetag adapter: adapter
-
-      setup %{tenant: tenant, adapter: broadcast_adapter} do
-        {:ok, tenant} = Realtime.Api.update_tenant(tenant, %{broadcast_adapter: broadcast_adapter})
-        %{tenant: tenant}
-      end
-
-      test "fails if tenant connection is invalid" do
-        tenant =
-          tenant_fixture(%{
-            "extensions" => [
-              %{
-                "type" => "postgres_cdc_rls",
-                "settings" => %{
-                  "db_host" => "127.0.0.1",
-                  "db_name" => "postgres",
-                  "db_user" => "supabase_admin",
-                  "db_password" => "postgres",
-                  "db_port" => "9001",
-                  "poll_interval" => 100,
-                  "poll_max_changes" => 100,
-                  "poll_max_record_bytes" => 1_048_576,
-                  "region" => "us-east-1",
-                  "ssl_enforced" => true
-                }
+  describe "replication" do
+    test "fails if tenant connection is invalid" do
+      tenant =
+        tenant_fixture(%{
+          "extensions" => [
+            %{
+              "type" => "postgres_cdc_rls",
+              "settings" => %{
+                "db_host" => "127.0.0.1",
+                "db_name" => "postgres",
+                "db_user" => "supabase_admin",
+                "db_password" => "postgres",
+                "db_port" => "9001",
+                "poll_interval" => 100,
+                "poll_max_changes" => 100,
+                "poll_max_record_bytes" => 1_048_576,
+                "region" => "us-east-1",
+                "ssl_enforced" => true
               }
-            ]
-          })
+            }
+          ]
+        })
 
-        assert {:error, _} = ReplicationConnection.start(tenant, self())
-      end
+      assert {:error, _} = ReplicationConnection.start(tenant, self())
+    end
 
-      test "starts a handler for the tenant and broadcasts", %{tenant: tenant} do
-        start_link_supervised!(
-          {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
-          restart: :transient
-        )
+    test "starts a handler for the tenant and broadcasts", %{tenant: tenant} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
 
-        topic = random_string()
-        tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
-        subscribe(tenant_topic, topic)
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      subscribe(tenant_topic, topic)
 
-        total_messages = 5
-        # Works with one insert per transaction
-        for _ <- 1..total_messages do
-          value = random_string()
+      total_messages = 5
+      # Works with one insert per transaction
+      for _ <- 1..total_messages do
+        value = random_string()
 
-          row =
-            message_fixture(tenant, %{
-              "topic" => topic,
-              "private" => true,
-              "event" => "INSERT",
-              "payload" => %{"value" => value}
-            })
-
-          assert_receive {:socket_push, :text, data}
-          message = data |> IO.iodata_to_binary() |> Jason.decode!()
-
-          payload = %{
-            "event" => "INSERT",
-            "payload" => %{
-              "id" => row.id,
-              "value" => value
-            },
-            "type" => "broadcast"
-          }
-
-          assert message == %{"event" => "broadcast", "payload" => payload, "ref" => nil, "topic" => topic}
-        end
-
-        Process.sleep(500)
-        # Works with batch inserts
-        messages =
-          for _ <- 1..total_messages do
-            Message.changeset(%Message{}, %{
-              "topic" => topic,
-              "private" => true,
-              "event" => "INSERT",
-              "extension" => "broadcast",
-              "payload" => %{"value" => random_string()}
-            })
-          end
-
-        {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-        {:ok, _} = Realtime.Repo.insert_all_entries(db_conn, messages, Message)
-
-        messages_received =
-          for _ <- 1..total_messages, into: [] do
-            assert_receive {:socket_push, :text, data}
-            data |> IO.iodata_to_binary() |> Jason.decode!()
-          end
-
-        for row <- messages do
-          assert Enum.count(messages_received, fn message_received ->
-                   value = row |> Map.from_struct() |> get_in([:changes, :payload, "value"])
-
-                   match?(
-                     %{
-                       "event" => "broadcast",
-                       "payload" => %{
-                         "event" => "INSERT",
-                         "payload" => %{
-                           "id" => _,
-                           "value" => ^value
-                         }
-                       },
-                       "ref" => nil,
-                       "topic" => ^topic
-                     },
-                     message_received
-                   )
-                 end) == 1
-        end
-      end
-
-      test "monitored pid stopping brings down ReplicationConnection ", %{tenant: tenant} do
-        monitored_pid =
-          spawn(fn ->
-            receive do
-              :stop -> :ok
-            end
-          end)
-
-        logs =
-          capture_log(fn ->
-            pid =
-              start_supervised!(
-                {ReplicationConnection,
-                 %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: monitored_pid}},
-                restart: :transient
-              )
-
-            send(monitored_pid, :stop)
-
-            ref = Process.monitor(pid)
-            assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 100
-            refute Process.alive?(pid)
-          end)
-
-        assert logs =~ "Disconnecting broadcast changes handler in the step"
-      end
-
-      test "message without event logs error", %{tenant: tenant} do
-        logs =
-          capture_log(fn ->
-            start_supervised!(
-              {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
-              restart: :transient
-            )
-
-            topic = random_string()
-            tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
-            assert :ok = Endpoint.subscribe(tenant_topic)
-
-            message_fixture(tenant, %{
-              "topic" => "some_topic",
-              "private" => true,
-              "payload" => %{"value" => "something"}
-            })
-
-            refute_receive %Phoenix.Socket.Broadcast{}, 500
-          end)
-
-        assert logs =~ "UnableToBroadcastChanges"
-      end
-
-      test "payload without id", %{tenant: tenant} do
-        start_link_supervised!(
-          {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
-          restart: :transient
-        )
-
-        topic = random_string()
-        tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
-        subscribe(tenant_topic, topic)
-
-        fixture =
+        row =
           message_fixture(tenant, %{
             "topic" => topic,
             "private" => true,
             "event" => "INSERT",
+            "payload" => %{"value" => value}
+          })
+
+        assert_receive {:socket_push, :text, data}
+        message = data |> IO.iodata_to_binary() |> Jason.decode!()
+
+        payload = %{
+          "event" => "INSERT",
+          "payload" => %{
+            "id" => row.id,
+            "value" => value
+          },
+          "type" => "broadcast"
+        }
+
+        assert message == %{"event" => "broadcast", "payload" => payload, "ref" => nil, "topic" => topic}
+      end
+
+      Process.sleep(500)
+      # Works with batch inserts
+      messages =
+        for _ <- 1..total_messages do
+          Message.changeset(%Message{}, %{
+            "topic" => topic,
+            "private" => true,
+            "event" => "INSERT",
+            "extension" => "broadcast",
+            "payload" => %{"value" => random_string()}
+          })
+        end
+
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      {:ok, _} = Realtime.Repo.insert_all_entries(db_conn, messages, Message)
+
+      messages_received =
+        for _ <- 1..total_messages, into: [] do
+          assert_receive {:socket_push, :text, data}
+          data |> IO.iodata_to_binary() |> Jason.decode!()
+        end
+
+      for row <- messages do
+        assert Enum.count(messages_received, fn message_received ->
+                 value = row |> Map.from_struct() |> get_in([:changes, :payload, "value"])
+
+                 match?(
+                   %{
+                     "event" => "broadcast",
+                     "payload" => %{
+                       "event" => "INSERT",
+                       "payload" => %{
+                         "id" => _,
+                         "value" => ^value
+                       }
+                     },
+                     "ref" => nil,
+                     "topic" => ^topic
+                   },
+                   message_received
+                 )
+               end) == 1
+      end
+    end
+
+    test "monitored pid stopping brings down ReplicationConnection ", %{tenant: tenant} do
+      monitored_pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      logs =
+        capture_log(fn ->
+          pid =
+            start_supervised!(
+              {ReplicationConnection,
+               %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: monitored_pid}},
+              restart: :transient
+            )
+
+          send(monitored_pid, :stop)
+
+          ref = Process.monitor(pid)
+          assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 100
+          refute Process.alive?(pid)
+        end)
+
+      assert logs =~ "Disconnecting broadcast changes handler in the step"
+    end
+
+    test "message without event logs error", %{tenant: tenant} do
+      logs =
+        capture_log(fn ->
+          start_supervised!(
+            {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+            restart: :transient
+          )
+
+          topic = random_string()
+          tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+          assert :ok = Endpoint.subscribe(tenant_topic)
+
+          message_fixture(tenant, %{
+            "topic" => "some_topic",
+            "private" => true,
             "payload" => %{"value" => "something"}
           })
 
-        assert_receive {:socket_push, :text, data}, 500
-        message = data |> IO.iodata_to_binary() |> Jason.decode!()
+          refute_receive %Phoenix.Socket.Broadcast{}, 500
+        end)
 
-        assert %{
-                 "event" => "broadcast",
-                 "payload" => %{"event" => "INSERT", "payload" => payload, "type" => "broadcast"},
-                 "ref" => nil,
-                 "topic" => ^topic
-               } = message
+      assert logs =~ "UnableToBroadcastChanges"
+    end
 
-        id = fixture.id
+    test "payload without id", %{tenant: tenant} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
 
-        assert payload == %{
-                 "value" => "something",
-                 "id" => id
-               }
-      end
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      subscribe(tenant_topic, topic)
 
-      test "payload including id", %{tenant: tenant} do
-        start_link_supervised!(
-          {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
-          restart: :transient
-        )
-
-        topic = random_string()
-        tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
-        subscribe(tenant_topic, topic)
-
-        payload = %{"value" => "something", "id" => "123456"}
-
+      fixture =
         message_fixture(tenant, %{
           "topic" => topic,
           "private" => true,
           "event" => "INSERT",
-          "payload" => payload
+          "payload" => %{"value" => "something"}
         })
 
-        assert_receive {:socket_push, :text, data}, 500
-        message = data |> IO.iodata_to_binary() |> Jason.decode!()
+      assert_receive {:socket_push, :text, data}, 500
+      message = data |> IO.iodata_to_binary() |> Jason.decode!()
 
-        assert %{
-                 "event" => "broadcast",
-                 "payload" => %{"event" => "INSERT", "payload" => ^payload, "type" => "broadcast"},
-                 "ref" => nil,
-                 "topic" => ^topic
-               } = message
-      end
+      assert %{
+               "event" => "broadcast",
+               "payload" => %{"event" => "INSERT", "payload" => payload, "type" => "broadcast"},
+               "ref" => nil,
+               "topic" => ^topic
+             } = message
 
-      test "fails on existing replication slot", %{tenant: tenant} do
-        {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-        name = "supabase_realtime_messages_replication_slot_test"
+      id = fixture.id
 
-        Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [name])
+      assert payload == %{
+               "value" => "something",
+               "id" => id
+             }
+    end
 
-        assert {:error, {:shutdown, "Temporary Replication slot already exists and in use"}} =
-                 ReplicationConnection.start(tenant, self())
+    test "payload including id", %{tenant: tenant} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
 
-        Postgrex.query!(db_conn, "SELECT pg_drop_replication_slot($1)", [name])
-      end
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      subscribe(tenant_topic, topic)
 
-      test "times out when init takes too long", %{tenant: tenant} do
-        expect(ReplicationConnection, :init, 1, fn arg ->
-          :timer.sleep(1000)
-          call_original(ReplicationConnection, :init, [arg])
-        end)
+      payload = %{"value" => "something", "id" => "123456"}
 
-        {:error, :timeout} = ReplicationConnection.start(tenant, self(), 100)
-      end
+      message_fixture(tenant, %{
+        "topic" => topic,
+        "private" => true,
+        "event" => "INSERT",
+        "payload" => payload
+      })
 
-      test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
-        opts = Database.from_tenant(tenant, "realtime_test", :stop) |> Database.opts()
-        parent = self()
+      assert_receive {:socket_push, :text, data}, 500
+      message = data |> IO.iodata_to_binary() |> Jason.decode!()
 
-        # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
-        pids =
-          for i <- 0..5 do
-            replication_slot_opts =
-              %PostgresReplication{
-                connection_opts: opts,
-                table: :all,
-                output_plugin: "pgoutput",
-                output_plugin_options: [proto_version: "1", publication_names: "test_#{i}_publication"],
-                handler_module: Replication.TestHandler,
-                publication_name: "test_#{i}_publication",
-                replication_slot_name: "test_#{i}_slot"
-              }
+      assert %{
+               "event" => "broadcast",
+               "payload" => %{"event" => "INSERT", "payload" => ^payload, "type" => "broadcast"},
+               "ref" => nil,
+               "topic" => ^topic
+             } = message
+    end
 
-            spawn(fn ->
-              {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
-              send(parent, :ready)
+    test "fails on existing replication slot", %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      name = "supabase_realtime_messages_replication_slot_test"
 
-              receive do
-                :stop -> Process.exit(pid, :kill)
-              end
-            end)
-          end
+      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [name])
 
-        on_exit(fn ->
-          Enum.each(pids, &send(&1, :stop))
-          Process.sleep(2000)
-        end)
+      assert {:error, {:shutdown, "Temporary Replication slot already exists and in use"}} =
+               ReplicationConnection.start(tenant, self())
 
-        assert_receive :ready, 5000
-        assert_receive :ready, 5000
-        assert_receive :ready, 5000
-        assert_receive :ready, 5000
+      Postgrex.query!(db_conn, "SELECT pg_drop_replication_slot($1)", [name])
+    end
 
-        assert {:error, :max_wal_senders_reached} = ReplicationConnection.start(tenant, self())
-      end
+    test "times out when init takes too long", %{tenant: tenant} do
+      expect(ReplicationConnection, :init, 1, fn arg ->
+        :timer.sleep(1000)
+        call_original(ReplicationConnection, :init, [arg])
+      end)
+
+      {:error, :timeout} = ReplicationConnection.start(tenant, self(), 100)
+    end
+
+    test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
+      opts = Database.from_tenant(tenant, "realtime_test", :stop) |> Database.opts()
+      parent = self()
+
+      # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
+      pids =
+        for i <- 0..5 do
+          replication_slot_opts =
+            %PostgresReplication{
+              connection_opts: opts,
+              table: :all,
+              output_plugin: "pgoutput",
+              output_plugin_options: [proto_version: "1", publication_names: "test_#{i}_publication"],
+              handler_module: Replication.TestHandler,
+              publication_name: "test_#{i}_publication",
+              replication_slot_name: "test_#{i}_slot"
+            }
+
+          spawn(fn ->
+            {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
+            send(parent, :ready)
+
+            receive do
+              :stop -> Process.exit(pid, :kill)
+            end
+          end)
+        end
+
+      on_exit(fn ->
+        Enum.each(pids, &send(&1, :stop))
+        Process.sleep(2000)
+      end)
+
+      assert_receive :ready, 5000
+      assert_receive :ready, 5000
+      assert_receive :ready, 5000
+      assert_receive :ready, 5000
+
+      assert {:error, :max_wal_senders_reached} = ReplicationConnection.start(tenant, self())
     end
   end
 
