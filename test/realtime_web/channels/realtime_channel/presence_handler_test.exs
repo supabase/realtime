@@ -25,9 +25,10 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       db_conn: db_conn
     } do
       key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
 
       socket =
-        socket_fixture(tenant, topic, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
+        socket_fixture(tenant, topic, key, policies: policies)
 
       PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
       topic = socket.assigns.tenant_topic
@@ -36,15 +37,10 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert Map.has_key?(joins, key)
     end
 
-    test "when tracking already existing user, metadata updated", %{
-      tenant: tenant,
-      topic: topic,
-      db_conn: db_conn
-    } do
+    test "when tracking already existing user, metadata updated", %{tenant: tenant, topic: topic, db_conn: db_conn} do
       key = random_string()
-
-      socket =
-        socket_fixture(tenant, topic, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies)
 
       assert {:reply, :ok, socket} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
 
@@ -62,15 +58,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
     test "with false policy and is public, user can track their presence and changes", %{tenant: tenant, topic: topic} do
       key = random_string()
-
-      socket =
-        socket_fixture(
-          tenant,
-          topic,
-          key,
-          %Policies{presence: %PresencePolicies{read: false, write: false}},
-          false
-        )
+      policies = %Policies{presence: %PresencePolicies{read: false, write: false}}
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: false)
 
       assert {:reply, :ok, _socket} = PresenceHandler.handle(%{"event" => "track"}, socket)
 
@@ -81,9 +70,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
     test "user can untrack when they want", %{tenant: tenant, topic: topic, db_conn: db_conn} do
       key = random_string()
-
-      socket =
-        socket_fixture(tenant, topic, key, %Policies{presence: %PresencePolicies{read: true, write: true}})
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies)
 
       assert {:reply, :ok, socket} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
 
@@ -151,10 +139,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       reject(&Authorization.get_write_authorizations/3)
 
       key = random_string()
-
-      socket =
-        socket_fixture(tenant, topic, key, %Policies{broadcast: %BroadcastPolicies{read: false}}, false)
-
+      policies = %Policies{broadcast: %BroadcastPolicies{read: false}}
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: false)
       topic = socket.assigns.tenant_topic
 
       for _ <- 1..100, reduce: socket do
@@ -187,7 +173,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     } do
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
-      socket = socket_fixture(tenant, topic, key, policies, false, false)
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: false, enabled?: false)
 
       assert {:reply, :ok, _socket} = PresenceHandler.handle(%{"event" => "track"}, socket)
       topic = socket.assigns.tenant_topic
@@ -201,11 +187,67 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     } do
       key = random_string()
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
-      socket = socket_fixture(tenant, topic, key, policies, false, false)
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: false, enabled?: false)
 
       assert {:reply, :ok, _socket} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
       topic = socket.assigns.tenant_topic
       refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
+    test "rate limit is checked on private channel", %{tenant: tenant, topic: topic, db_conn: db_conn} do
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)
+
+      for _ <- 1..300, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+      Process.sleep(1000)
+
+      assert {:reply, :error, _} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+    end
+
+    test "rate limit is checked on public channel", %{tenant: tenant, topic: topic, db_conn: db_conn} do
+      key = random_string()
+      socket = socket_fixture(tenant, topic, key, private?: false)
+
+      for _ <- 1..300, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+      Process.sleep(1000)
+
+      assert {:reply, :error, _} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+    end
+  end
+
+  describe "sync/1" do
+    test "syncs presence state for public channels", %{tenant: tenant, topic: topic} do
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: false, write: false}}
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: false)
+
+      assert {:noreply, _socket} = PresenceHandler.sync(socket)
+    end
+
+    test "syncs presence state for private channels with read policy true", %{tenant: tenant, topic: topic} do
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)
+
+      assert {:noreply, _socket} = PresenceHandler.sync(socket)
+    end
+
+    test "ignores sync for private channels with read policy false", %{tenant: tenant, topic: topic} do
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: false, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)
+
+      assert {:noreply, _socket} = PresenceHandler.sync(socket)
+    end
+
+    test "ignores sync when presence is disabled", %{tenant: tenant, topic: topic} do
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: true, enabled?: false)
+
+      assert {:noreply, _socket} = PresenceHandler.sync(socket)
     end
   end
 
@@ -223,20 +265,19 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     {:ok, tenant: tenant, db_conn: db_conn, topic: topic}
   end
 
-  defp socket_fixture(
-         tenant,
-         topic,
-         presence_key,
-         policies \\ %Policies{
-           broadcast: %BroadcastPolicies{read: true},
-           presence: %PresencePolicies{read: true, write: nil}
-         },
-         private? \\ true,
-         enabled? \\ true
-       ) do
+  defp socket_fixture(tenant, topic, presence_key, opts \\ []) do
+    policies =
+      Keyword.get(opts, :policies, %Policies{
+        broadcast: %BroadcastPolicies{read: true},
+        presence: %PresencePolicies{read: true, write: nil}
+      })
+
+    private? = Keyword.get(opts, :private?, true)
+    enabled? = Keyword.get(opts, :enabled?, true)
+    log_level = Keyword.get(opts, :log_level, :error)
+
     claims = %{sub: random_string(), role: "authenticated", exp: Joken.current_time() + 1_000}
     signer = Joken.Signer.create("HS256", "secret")
-
     jwt = Joken.generate_and_sign!(%{}, claims, signer)
 
     authorization_context =
@@ -267,7 +308,10 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
         presence_rate_counter: rate,
         private?: private?,
         presence_key: presence_key,
-        presence_enabled?: enabled?
+        presence_enabled?: enabled?,
+        log_level: log_level,
+        channel_name: topic,
+        tenant: tenant.external_id
       }
     }
   end
