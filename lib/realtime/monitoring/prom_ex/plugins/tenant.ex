@@ -22,8 +22,28 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     [
       channel_events(),
       replication_metrics(),
-      subscription_metrics()
+      subscription_metrics(),
+      payload_size_metrics()
     ]
+  end
+
+  defp payload_size_metrics do
+    Event.build(
+      :realtime_tenant_payload_size_metrics,
+      [
+        distribution(
+          [:realtime, :tenants, :payload, :size],
+          event_name: [:realtime, :tenants, :payload, :size],
+          measurement: :size,
+          description: "Payload size",
+          tags: [:tenant],
+          unit: :byte,
+          reporter_options: [
+            buckets: [100, 250, 500, 1000, 2000, 3000, 5000]
+          ]
+        )
+      ]
+    )
   end
 
   defp concurrent_connections(poll_rate) do
