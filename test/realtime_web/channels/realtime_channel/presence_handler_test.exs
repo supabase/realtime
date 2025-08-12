@@ -224,6 +224,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: false)
 
       assert {:noreply, _socket} = PresenceHandler.sync(socket)
+      assert_receive {_, :text, msg}
+      msg = Jason.decode!(msg)
+      assert msg["event"] == "presence_state"
     end
 
     test "syncs presence state for private channels with read policy true", %{tenant: tenant, topic: topic} do
@@ -232,6 +235,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)
 
       assert {:noreply, _socket} = PresenceHandler.sync(socket)
+      assert_receive {_, :text, msg}
+      msg = Jason.decode!(msg)
+      assert msg["event"] == "presence_state"
     end
 
     test "ignores sync for private channels with read policy false", %{tenant: tenant, topic: topic} do
@@ -240,6 +246,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)
 
       assert {:noreply, _socket} = PresenceHandler.sync(socket)
+      refute_receive {_, :text, _}
     end
 
     test "ignores sync when presence is disabled", %{tenant: tenant, topic: topic} do
@@ -248,6 +255,28 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true, enabled?: false)
 
       assert {:noreply, _socket} = PresenceHandler.sync(socket)
+      refute_receive {_, :text, _}
+    end
+
+    test "respects rate limits on public channels", %{tenant: tenant, topic: topic, db_conn: db_conn} do
+      key = random_string()
+      socket = socket_fixture(tenant, topic, key, private?: false)
+
+      for _ <- 1..300, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+      Process.sleep(1000)
+
+      assert {:reply, :error, _} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
+    test "respects rate limits on private channels", %{tenant: tenant, topic: topic, db_conn: db_conn} do
+      key = random_string()
+      socket = socket_fixture(tenant, topic, key, private?: true)
+
+      for _ <- 1..300, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+      Process.sleep(1000)
+
+      assert {:reply, :error, _} = PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
     end
   end
 
@@ -300,6 +329,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     %Phoenix.Socket{
       joined: true,
       topic: "realtime:#{topic}",
+      transport_pid: self(),
+      serializer: Phoenix.Socket.V1.JSONSerializer,
       assigns: %{
         tenant_topic: tenant_topic,
         self_broadcast: true,

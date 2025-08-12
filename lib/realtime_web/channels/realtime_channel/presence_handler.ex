@@ -27,7 +27,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   def sync(%{assigns: %{private?: false}} = socket) do
     %{assigns: %{tenant_topic: topic}} = socket
 
-    socket = Logging.maybe_log_handle_info(socket, :sync_presence)
+    Logging.maybe_log_info(socket, :sync_presence)
 
     with :ok <- limit_presence_event(socket) do
       push(socket, "presence_state", presence_dirty_list(topic))
@@ -38,11 +38,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   def sync(%{assigns: assigns} = socket) do
-    %{tenant_topic: topic, policies: policies, channel_name: channel_name} = assigns
+    %{tenant_topic: topic, policies: policies} = assigns
 
     with :ok <- limit_presence_event(socket),
          %Policies{presence: %PresencePolicies{read: true}} <- policies do
-      socket = Logging.maybe_log_handle_info(socket, :sync_presence)
+      Logging.maybe_log_info(socket, :sync_presence)
       push(socket, "presence_state", presence_dirty_list(topic))
       {:noreply, socket}
     else
@@ -51,8 +51,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
         {:noreply, socket}
 
       _ ->
-        socket = Logging.maybe_log_handle_info(socket, :sync_presence)
-        count(socket)
+        Logging.maybe_log_info(socket, :sync_presence)
         push(socket, "presence_state", presence_dirty_list(topic))
         socket
     end
