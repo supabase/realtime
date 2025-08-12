@@ -63,7 +63,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 9},
+        %{size: 114},
         %{tenant: "realtime-dev"}
       }
     end
@@ -80,7 +80,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 20},
+        %{size: 130},
         %{tenant: "realtime-dev"}
       }
     end
@@ -97,7 +97,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 17},
+        %{size: 119},
         %{tenant: "realtime-dev"}
       }
     end
@@ -130,7 +130,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 9},
+        %{size: 114},
         %{tenant: "realtime-dev"}
       }
 

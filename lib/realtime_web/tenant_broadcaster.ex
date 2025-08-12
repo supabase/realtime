@@ -4,7 +4,6 @@ defmodule RealtimeWeb.TenantBroadcaster do
   """
 
   alias Phoenix.PubSub
-  alias Phoenix.Socket.Broadcast
 
   @spec pubsub_broadcast(tenant_id :: String.t(), PubSub.topic(), PubSub.message(), PubSub.dispatcher()) :: :ok
   def pubsub_broadcast(tenant_id, topic, message, dispatcher) do
@@ -38,23 +37,12 @@ defmodule RealtimeWeb.TenantBroadcaster do
 
   @payload_size_event [:realtime, :tenants, :payload, :size]
 
-  defp collect_payload_size(tenant_id, %Broadcast{payload: payload}) do
-    collect_payload_size(tenant_id, payload)
+  defp collect_payload_size(tenant_id, payload) when is_struct(payload) do
+    # Extracting from struct so the __struct__ bit is not calculated as part of the payload
+    collect_payload_size(tenant_id, Map.from_struct(payload))
   end
 
-  defp collect_payload_size(tenant_id, payload) when is_map(payload) or is_list(payload) do
-    case Jason.encode_to_iodata(payload) do
-      {:ok, encoded} ->
-        :telemetry.execute(@payload_size_event, %{size: :erlang.iolist_size(encoded)}, %{tenant: tenant_id})
-
-      _ ->
-        :ok
-    end
+  defp collect_payload_size(tenant_id, payload) do
+    :telemetry.execute(@payload_size_event, %{size: :erlang.external_size(payload)}, %{tenant: tenant_id})
   end
-
-  defp collect_payload_size(tenant_id, payload) when is_binary(payload) do
-    :telemetry.execute(@payload_size_event, %{size: byte_size(payload)}, %{tenant: tenant_id})
-  end
-
-  defp collect_payload_size(_tenant_id, _payload), do: :ok
 end

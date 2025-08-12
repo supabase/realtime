@@ -233,8 +233,6 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       pattern =
         ~r/realtime_tenants_payload_size_count{tenant="#{external_id}"}\s(?<number>\d+)/
 
-      dbg(pattern)
-
       metric_value = metric_value(pattern)
 
       message = %{topic: "a topic", event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}

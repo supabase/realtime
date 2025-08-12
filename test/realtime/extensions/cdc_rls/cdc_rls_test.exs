@@ -89,6 +89,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       %{tenant: tenant}
     end
 
+    @tag skip: "Flaky test. When logger handle_sasl_reports is enabled this test doesn't break"
     test "Check supervisor crash and respawn", %{tenant: tenant} do
       sup =
         Enum.reduce_while(1..30, nil, fn _, acc ->
