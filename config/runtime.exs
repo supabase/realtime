@@ -181,7 +181,6 @@ if config_env() != :test do
 
   config :realtime,
     request_id_baggage_key: System.get_env("REQUEST_ID_BAGGAGE_KEY", "request-id"),
-    secure_channels: System.get_env("SECURE_CHANNELS", "true") == "true",
     jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
     api_jwt_secret: System.get_env("API_JWT_SECRET"),
     api_blocklist: System.get_env("API_TOKEN_BLOCKLIST", "") |> String.split(","),
