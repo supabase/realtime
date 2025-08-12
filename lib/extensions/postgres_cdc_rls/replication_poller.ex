@@ -183,7 +183,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         change <- columns |> Enum.zip(row) |> generate_record() |> List.wrap() do
       topic = "realtime:postgres:" <> tenant_id
 
-      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(topic, change, MessageDispatcher)
+      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(tenant_id, topic, change, MessageDispatcher)
     end
 
     {:ok, rows_count}
