@@ -25,7 +25,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         self_broadcast: self_broadcast,
         tenant_topic: tenant_topic,
         authorization_context: authorization_context,
-        policies: policies
+        policies: policies,
+        tenant: tenant_id
       }
     } = socket
 
@@ -37,7 +38,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
           |> increment_rate_counter()
 
         %{ack_broadcast: ack_broadcast} = socket.assigns
-        send_message(self_broadcast, tenant_topic, payload)
+        send_message(tenant_id, self_broadcast, tenant_topic, payload)
         if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
 
       {:ok, policies} ->
@@ -54,23 +55,31 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   end
 
   def handle(payload, _db_conn, %{assigns: %{private?: false}} = socket) do
-    %{assigns: %{tenant_topic: tenant_topic, self_broadcast: self_broadcast, ack_broadcast: ack_broadcast}} = socket
+    %{
+      assigns: %{
+        tenant_topic: tenant_topic,
+        self_broadcast: self_broadcast,
+        ack_broadcast: ack_broadcast,
+        tenant: tenant_id
+      }
+    } = socket
 
     socket = increment_rate_counter(socket)
-    send_message(self_broadcast, tenant_topic, payload)
+    send_message(tenant_id, self_broadcast, tenant_topic, payload)
 
     if ack_broadcast,
       do: {:reply, :ok, socket},
       else: {:noreply, socket}
   end
 
-  defp send_message(self_broadcast, tenant_topic, payload) do
+  defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do
     broadcast = %Phoenix.Socket.Broadcast{topic: tenant_topic, event: @event_type, payload: payload}
 
     if self_broadcast do
-      TenantBroadcaster.pubsub_broadcast(tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
+      TenantBroadcaster.pubsub_broadcast(tenant_id, tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
     else
       TenantBroadcaster.pubsub_broadcast_from(
+        tenant_id,
         self(),
         tenant_topic,
         broadcast,
