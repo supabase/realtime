@@ -10,6 +10,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias Phoenix.Socket
   alias Phoenix.Tracker.Shard
   alias Realtime.GenCounter
+  alias Realtime.RateCounter
+  alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
@@ -23,30 +25,36 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   def sync(%{assigns: %{presence_enabled?: false}} = socket), do: {:noreply, socket}
 
   def sync(%{assigns: %{private?: false}} = socket) do
-    %{assigns: %{tenant_topic: topic, channel_name: channel_name}} = socket
-    msg = "Syncing presence state for #{channel_name}"
-    Logging.maybe_log_info(socket, msg)
-    count(socket)
-    push(socket, "presence_state", presence_dirty_list(topic))
-    {:noreply, socket}
+    %{assigns: %{tenant_topic: topic}} = socket
+
+    Logging.maybe_log_info(socket, :sync_presence)
+
+    with :ok <- limit_presence_event(socket) do
+      push(socket, "presence_state", presence_dirty_list(topic))
+      {:noreply, socket}
+    else
+      {:error, :rate_limit_exceeded} -> {:stop, :normal, socket}
+    end
   end
 
   def sync(%{assigns: assigns} = socket) do
-    %{tenant_topic: topic, policies: policies, channel_name: channel_name} = assigns
+    %{tenant_topic: topic, policies: policies} = assigns
 
-    socket =
-      case policies do
-        %Policies{presence: %PresencePolicies{read: false}} ->
-          Logger.info("Presence track message ignored on #{topic}")
-          socket
+    with :ok <- limit_presence_event(socket),
+         %Policies{presence: %PresencePolicies{read: true}} <- policies do
+      Logging.maybe_log_info(socket, :sync_presence)
+      push(socket, "presence_state", presence_dirty_list(topic))
+      {:noreply, socket}
+    else
+      %Policies{presence: %PresencePolicies{read: false}} ->
+        Logger.info("Presence track message ignored on #{topic}")
+        {:noreply, socket}
 
-        _ ->
-          msg = "Syncing presence state for #{channel_name}"
-          Logging.maybe_log_info(socket, msg)
-          count(socket)
-          push(socket, "presence_state", presence_dirty_list(topic))
-          socket
-      end
+      _ ->
+        Logging.maybe_log_info(socket, :sync_presence)
+        push(socket, "presence_state", presence_dirty_list(topic))
+        socket
+    end
 
     {:noreply, socket}
   end
@@ -60,15 +68,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   def handle(%{"event" => event} = payload, db_conn, socket) do
     event = String.downcase(event, :ascii)
-
-    case handle_presence_event(event, payload, db_conn, socket) do
-      {:ok, socket} ->
-        count(socket)
-        {:reply, :ok, socket}
-
-      {:error, socket} ->
-        {:reply, :error, socket}
-    end
+    handle_presence_event(event, payload, db_conn, socket)
   end
 
   def handle(_payload, _db_conn, socket), do: {:noreply, socket}
@@ -92,11 +92,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
       {:error, :rls_policy_error, error} ->
         log_error("RlsPolicyError", error)
-        {:error, socket}
+        {:reply, :error, socket}
 
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
-        {:error, socket}
+        {:reply, :error, socket}
     end
   end
 
@@ -115,40 +115,42 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
          _db_conn,
          %{assigns: %{private?: true, policies: %Policies{presence: %PresencePolicies{write: false}}}} = socket
        ) do
-    {:error, socket}
+    {:reply, :error, socket}
   end
 
   defp handle_presence_event("untrack", _, _, socket) do
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
-    {Presence.untrack(self(), tenant_topic, presence_key), socket}
+    :ok = Presence.untrack(self(), tenant_topic, presence_key)
+    {:reply, :ok, socket}
   end
 
   defp handle_presence_event(event, _, _, socket) do
     log_error("UnknownPresenceEvent", event)
-    {:error, socket}
+    {:reply, :error, socket}
   end
 
   defp track(socket, payload) do
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
     payload = Map.get(payload, "payload", %{})
 
-    case Presence.track(self(), tenant_topic, presence_key, payload) do
-      {:ok, _} ->
-        {:ok, socket}
-
+    with :ok <- limit_presence_event(socket),
+         {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload) do
+      {:reply, :ok, socket}
+    else
       {:error, {:already_tracked, pid, _, _}} ->
         case Presence.update(pid, tenant_topic, presence_key, payload) do
-          {:ok, _} -> {:ok, socket}
-          {:error, _} -> {:error, socket}
+          {:ok, _} -> {:reply, :ok, socket}
+          {:error, _} -> {:reply, :error, socket}
         end
+
+      {:error, :rate_limit_exceeded} ->
+        {:reply, :error, socket}
 
       {:error, error} ->
         log_error("UnableToTrackPresence", error)
-        {:error, socket}
+        {:reply, :error, socket}
     end
   end
-
-  defp count(%{assigns: %{presence_rate_counter: presence_counter}}), do: GenCounter.add(presence_counter.id)
 
   defp presence_dirty_list(topic) do
     [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)
@@ -157,5 +159,21 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     |> Shard.name_for_topic(topic, size)
     |> Shard.dirty_list(topic)
     |> Phoenix.Presence.group()
+  end
+
+  defp limit_presence_event(socket) do
+    %{assigns: %{presence_rate_counter: presence_counter, tenant: tenant_id}} = socket
+    GenCounter.add(presence_counter.id)
+    {:ok, rate_counter} = RateCounter.get(presence_counter)
+
+    tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
+
+    if rate_counter.avg > tenant.max_presence_events_per_second do
+      message = "Too many presence messages per second"
+      log_warning("TooManyPresenceMessages", message)
+      {:error, :rate_limit_exceeded}
+    else
+      :ok
+    end
   end
 end
