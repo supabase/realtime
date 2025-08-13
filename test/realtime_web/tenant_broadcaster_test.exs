@@ -101,6 +101,24 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
         %{tenant: "realtime-dev"}
       }
     end
+
+    test "pubsub_broadcast large payload", %{node: node} do
+      payload = String.duplicate("a", 1024)
+      message = %Broadcast{topic: @topic, event: "an event", payload: payload}
+      TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub)
+
+      assert_receive ^message
+
+      # Remote node received the broadcast
+      assert_receive {:relay, ^node, ^message}
+
+      assert_receive {
+        :telemetry,
+        [:realtime, :tenants, :payload, :size],
+        %{size: 1126},
+        %{tenant: "realtime-dev"}
+      }
+    end
   end
 
   describe "pubsub_broadcast_from/5" do
@@ -131,6 +149,41 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
         :telemetry,
         [:realtime, :tenants, :payload, :size],
         %{size: 114},
+        %{tenant: "realtime-dev"}
+      }
+
+      # This process does not receive the message
+      refute_receive _any
+    end
+
+    test "pubsub_broadcast_from large payload", %{node: node} do
+      parent = self()
+
+      spawn_link(fn ->
+        Endpoint.subscribe(@topic)
+        send(parent, :ready)
+
+        receive do
+          msg -> send(parent, {:other_process, msg})
+        end
+      end)
+
+      assert_receive :ready
+
+      payload = String.duplicate("a", 1024)
+      message = %Broadcast{topic: @topic, event: "an event", payload: payload}
+
+      TenantBroadcaster.pubsub_broadcast_from("realtime-dev", self(), @topic, message, Phoenix.PubSub)
+
+      assert_receive {:other_process, ^message}
+
+      # Remote node received the broadcast
+      assert_receive {:relay, ^node, ^message}
+
+      assert_receive {
+        :telemetry,
+        [:realtime, :tenants, :payload, :size],
+        %{size: 1126},
         %{tenant: "realtime-dev"}
       }
 

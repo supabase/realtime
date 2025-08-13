@@ -86,6 +86,10 @@ socket_options =
       end
   end
 
+# 1 kb by default
+pubsub_payload_size_compression_threshold =
+  System.get_env("PUBSUB_PAYLOAD_SIZE_COMPRESSION_THRESHOLD", "1000") |> String.to_integer()
+
 config :realtime,
   migration_partition_slots: migration_partition_slots,
   connect_partition_slots: connect_partition_slots,
@@ -101,7 +105,8 @@ config :realtime,
   disconnect_socket_on_no_channels_interval_in_ms: disconnect_socket_on_no_channels_interval_in_ms,
   rpc_timeout: rpc_timeout,
   max_gen_rpc_clients: max_gen_rpc_clients,
-  no_channel_timeout_in_ms: no_channel_timeout_in_ms
+  no_channel_timeout_in_ms: no_channel_timeout_in_ms,
+  pubsub_payload_size_compression_threshold: pubsub_payload_size_compression_threshold
 
 if config_env() == :test || !run_janitor? do
   config :realtime, run_janitor: false
