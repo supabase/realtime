@@ -7,7 +7,7 @@ defmodule Realtime.Tenants.Connect do
   * `:check_connect_region_interval` - The interval in milliseconds to check if this process is in the correct region. If the region is not correct it stops the connection.
   * `:erpc_timeout` - The timeout in milliseconds for the `:erpc` calls to the tenant's database.
   """
-  use GenServer, restart: :transient
+  use GenServer, restart: :temporary
 
   use Realtime.Logs
 

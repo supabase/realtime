@@ -97,7 +97,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     child_spec = %{
       id: __MODULE__,
       start: {Wrapper, :start_link, [opts, init_timeout]},
-      restart: :transient,
+      restart: :temporary,
       type: :worker
     }
 

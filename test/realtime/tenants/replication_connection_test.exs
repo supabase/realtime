@@ -27,6 +27,23 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     %{tenant: tenant}
   end
 
+  describe "temporary process" do
+    test "starts a temporary process", %{tenant: tenant} do
+      assert {:ok, pid} = ReplicationConnection.start(tenant, self())
+      assert conn = ReplicationConnection.whereis(tenant.external_id)
+
+      # Brutally kill the process
+      Process.exit(pid, :kill)
+      assert_process_down(pid)
+      assert_process_down(conn)
+      # Wait to ensure that the process has not restarted
+      Process.sleep(1000)
+
+      # Temporary process should not be registered
+      refute ReplicationConnection.whereis(tenant.external_id)
+    end
+  end
+
   describe "replication" do
     test "fails if tenant connection is invalid" do
       tenant =
@@ -386,5 +403,10 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       )
 
     Endpoint.subscribe(tenant_topic, metadata: fastlane)
+  end
+
+  defp assert_process_down(pid, timeout \\ 100) do
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
   end
 end
