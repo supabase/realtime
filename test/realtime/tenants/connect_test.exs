@@ -35,6 +35,21 @@ defmodule Realtime.Tenants.ConnectTest do
     refute_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
   end
 
+  describe "temporary process" do
+    test "starts a temporary process", %{tenant: tenant} do
+      assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
+      pid = Connect.whereis(tenant.external_id)
+      # Brutally kill the process
+      Process.exit(pid, :kill)
+      assert_process_down(pid)
+      # Wait to ensure that the process has not restarted
+      Process.sleep(1000)
+
+      # Temporary process should not be registered in syn
+      refute Connect.whereis(tenant.external_id)
+    end
+  end
+
   describe "handle cold start" do
     test "multiple proccesses succeed together", %{tenant: tenant} do
       parent = self()
