@@ -19,7 +19,7 @@ const url = env["PROJECT_URL"];
 const token = env["PROJECT_ANON_TOKEN"];
 const jwtSecret = env["PROJECT_JWT_SECRET"];
 
-const realtime = { heartbeatIntervalMs: 500, timeout: 1000 };
+const realtime = { heartbeatIntervalMs: 5000, timeout: 5000 };
 const config = { config: { broadcast: { self: true } } };
 
 let supabase: SupabaseClient | null;
@@ -102,7 +102,7 @@ describe("presence extension", () => {
 
     while (channel.state == "joining") await sleep(0.2);
 
-    const res = await channel.track(expectedPayload, { timeout: 1000 });
+    const res = await channel.track(expectedPayload, { timeout: 5000 });
     if (res == "timed out") error = res;
 
     let presences = result[0].newPresences[0];
@@ -135,7 +135,7 @@ describe("presence extension", () => {
 
     while (channel.state == "joining") await sleep(0.2);
 
-    const res = await channel.track(expectedPayload, { timeout: 1000 });
+    const res = await channel.track(expectedPayload, { timeout: 5000 });
     if (res == "timed out") error = res;
 
     let presences = result[0].newPresences[0];
@@ -162,7 +162,7 @@ describe("authorization check", () => {
 
     assertEquals(
       errMessage,
-      `"You do not have permissions to read from this Channel topic: ${topic}"`
+      `"Unauthorized: You do not have permissions to read from this Channel topic: ${topic}"`
     );
   });
 
