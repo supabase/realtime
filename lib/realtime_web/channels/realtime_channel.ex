@@ -366,13 +366,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     PresenceHandler.handle(payload, socket)
   end
 
-  def handle_in(_, _, %{assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}} = socket)
-      when avg > max do
-    message = "Too many messages per second"
-    Logging.log_error(socket, "MessagePerSecondRateLimitReached", message)
-    shutdown_response(socket, message)
-  end
-
   def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket) do
     {:noreply, socket}
   end
