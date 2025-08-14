@@ -104,4 +104,4 @@ INSERT INTO "auth"."users" ("instance_id", "id", "aud", "role", "email", "encryp
 ## Run tests
 
 Run the following command
-`deno test tests.ts --allow-read --allow-net --trace-leaks`
+`deno test tests.ts --allow-read --allow-net --trace-leaks --allow-env=WS_NO_BUFFER_UTIL`
