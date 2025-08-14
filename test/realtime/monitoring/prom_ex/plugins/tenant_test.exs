@@ -227,7 +227,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(bucket_pattern) > 0
     end
 
-    test "metric payload size", context do
+    test "tenant metric payload size", context do
       external_id = context.tenant.external_id
 
       pattern =
@@ -243,6 +243,24 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       bucket_pattern =
         ~r/realtime_tenants_payload_size_bucket{tenant="#{external_id}",le="100"}\s(?<number>\d+)/
+
+      assert metric_value(bucket_pattern) > 0
+    end
+
+    test "global metric payload size", context do
+      external_id = context.tenant.external_id
+
+      pattern = ~r/realtime_payload_size_count\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+
+      message = %{topic: "a topic", event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
+      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(external_id, "a topic", message, Phoenix.PubSub)
+
+      Process.sleep(200)
+      assert metric_value(pattern) == metric_value + 1
+
+      bucket_pattern = ~r/realtime_payload_size_bucket{le="100"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
