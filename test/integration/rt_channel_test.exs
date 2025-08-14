@@ -1222,7 +1222,6 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_close"}
       assert log =~ "#{tenant.external_id}"
-      assert log =~ "#{tenant.external_id}"
     end
 
     test "token loses claims in between joins", %{tenant: tenant, topic: topic} do
