@@ -138,7 +138,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         Logging.log_error(socket, "ConnectionRateLimitReached", msg)
 
       {:error, :too_many_joins} ->
-        msg = "Too many joins per second"
+        msg = "ClientJoinRateLimitReached: Too many joins per second"
         {:error, %{reason: msg}}
 
       {:error, :increase_connection_pool} ->
