@@ -432,49 +432,196 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
-  describe "JWT token validations" do
-    test "token has valid expiration", %{tenant: tenant} do
-      jwt = Generators.generate_jwt_token(tenant)
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+  describe "access_token validations" do
+    test "access_token has expired", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1})
+
+      assert {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, api_key))
+
+      assert {:error, %{reason: "InvalidJWTToken: Token has expired " <> _}} =
+               subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+    end
+
+    test "access_token has expired log_level=warning", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1})
+
+      assert {:ok, socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+
+      assert {:error, %{reason: "InvalidJWTToken: Token has expired " <> _}} =
+               subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+    end
+
+    test "access_token missing exp claim on join", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated"})
+
+      assert {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, api_key))
+
+      assert {:error, %{reason: "InvalidJWTToken: Fields `role` and `exp` are required in JWT"}} =
+               subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+    end
+
+    test "access_token missing exp claim on join log_level=warning", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated"})
+
+      assert {:ok, socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+
+      assert {:error, %{reason: "InvalidJWTToken: Fields `role` and `exp` are required in JWT"}} =
+               subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+    end
+
+    test "access_token missing role claim on join", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      jwt = Generators.generate_jwt_token(tenant, %{exp: System.system_time(:second) + 1000})
+
+      assert {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, api_key))
+
+      assert {:error, %{reason: "InvalidJWTToken: Fields `role` and `exp` are required in JWT"}} =
+               subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+    end
+
+    test "access_token missing role claim on join log_level=warning", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      jwt = Generators.generate_jwt_token(tenant, %{exp: System.system_time(:second) + 1000})
+
+      assert {:ok, socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+
+      assert {:error, %{reason: "InvalidJWTToken: Fields `role` and `exp` are required in JWT"}} =
+               subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+    end
+
+    test "missing claims returns error no logs", %{tenant: tenant} do
+      sub = random_string()
+      iss = "https://#{random_string()}.com"
+      exp = System.system_time(:second) + 10_000
+
+      api_key = Generators.generate_jwt_token(tenant)
+      jwt = Generators.generate_jwt_token(tenant, %{exp: exp, sub: sub, iss: iss})
+
+      assert {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, api_key))
+
+      log =
+        capture_log(fn ->
+          assert {:error, %{reason: "InvalidJWTToken: Fields `role` and `exp` are required in JWT"}} =
+                   subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+        end)
+
+      refute log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
+    end
+
+    test "missing claims returns a error with token exp, iss and sub in metadata if available log_level=warning", %{
+      tenant: tenant
+    } do
+      sub = random_string()
+      iss = "https://#{random_string()}.com"
+      exp = System.system_time(:second) + 10_000
+
+      api_key = Generators.generate_jwt_token(tenant)
+      jwt = Generators.generate_jwt_token(tenant, %{exp: exp, sub: sub, iss: iss})
+
+      assert {:ok, socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+
+      log =
+        capture_log(fn ->
+          assert {:error, %{reason: "InvalidJWTToken: Fields `role` and `exp` are required in JWT"}} =
+                   subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+        end)
+
+      assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
+      assert log =~ "sub=#{sub}"
+      assert log =~ "iss=#{iss}"
+      assert log =~ "exp=#{exp}"
+    end
+
+    test "expired jwt returns error no logs", %{tenant: tenant} do
+      sub = random_string()
+
+      api_key = Generators.generate_jwt_token(tenant)
+
+      jwt =
+        Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1, sub: sub})
+
+      assert {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, api_key))
+
+      log =
+        capture_log(fn ->
+          assert {:error, %{reason: "InvalidJWTToken: Token has expired " <> _}} =
+                   subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+        end)
+
+      refute log =~ "InvalidJWTToken: Token has expired"
+    end
+
+    test "expired jwt returns a error with sub data if available log_level=warning", %{tenant: tenant} do
+      sub = random_string()
+
+      api_key = Generators.generate_jwt_token(tenant)
+
+      jwt =
+        Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1, sub: sub})
+
+      assert {:ok, socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+
+      log =
+        capture_log(fn ->
+          assert {:error, %{reason: "InvalidJWTToken: Token has expired " <> _}} =
+                   subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+        end)
+
+      assert log =~ "InvalidJWTToken: Token has expired"
+      assert log =~ "sub=#{sub}"
+    end
+  end
+
+  describe "API Key validations" do
+    test "api_key has not expired", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "token has invalid expiration", %{tenant: tenant} do
+    test "api_key has expired", %{tenant: tenant} do
       assert capture_log(fn ->
-               jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second)})
+               api_key =
+                 Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second)})
 
                assert {:error, :expired_token} =
-                        connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+                        connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
 
                Process.sleep(300)
              end) =~ "InvalidJWTToken: Token has expired"
 
-      jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1})
+      api_key = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1})
 
       assert capture_log(fn ->
                assert {:error, :expired_token} =
-                        connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+                        connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
              end) =~ "InvalidJWTToken: Token has expired"
     end
 
     test "missing role claims returns a error", %{tenant: tenant} do
-      jwt = Generators.generate_jwt_token(tenant, %{exp: System.system_time(:second) + 1000})
+      api_key = Generators.generate_jwt_token(tenant, %{exp: System.system_time(:second) + 1000})
 
       log =
         capture_log(fn ->
-          assert {:error, :missing_claims} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+          assert {:error, :missing_claims} =
+                   connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
         end)
 
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
     end
 
     test "missing exp claims returns a error", %{tenant: tenant} do
-      jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated"})
+      api_key = Generators.generate_jwt_token(tenant, %{role: "authenticated"})
 
       log =
         capture_log(fn ->
-          assert {:error, :missing_claims} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+          assert {:error, :missing_claims} =
+                   connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
         end)
 
       assert log =~ "InvalidJWTToken: Fields `role` and `exp` are required in JWT"
@@ -485,11 +632,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       iss = "https://#{random_string()}.com"
       exp = System.system_time(:second) + 10_000
 
-      jwt = Generators.generate_jwt_token(tenant, %{exp: exp, sub: sub, iss: iss})
+      api_key = Generators.generate_jwt_token(tenant, %{exp: exp, sub: sub, iss: iss})
 
       log =
         capture_log(fn ->
-          assert {:error, :missing_claims} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+          assert {:error, :missing_claims} =
+                   connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
 
           Process.sleep(300)
         end)
@@ -500,15 +648,15 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert log =~ "exp=#{exp}"
     end
 
-    test "expired token returns a error with sub data if available", %{tenant: tenant} do
+    test "expired api_key returns a error with sub data if available", %{tenant: tenant} do
       sub = random_string()
 
-      jwt =
+      api_key =
         Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1, sub: sub})
 
       log =
         capture_log(fn ->
-          assert {:error, :expired_token} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+          assert {:error, :expired_token} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
 
           Process.sleep(300)
         end)
