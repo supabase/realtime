@@ -27,20 +27,28 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       for log_level <- log_levels do
         socket = %{assigns: %{log_level: log_level, tenant: random_string(), access_token: "test_token"}}
 
-        assert capture_log(fn -> Logging.maybe_log_error(socket, "TestCode", "test message") end) =~
-                 "TestCode: test message"
+        assert capture_log(fn ->
+                 assert Logging.maybe_log_error(socket, "TestCode", "test message") ==
+                          {:error, %{reason: "TestCode: test message"}}
+               end) =~ "TestCode: test message"
 
-        assert capture_log(fn -> Logging.maybe_log_error(socket, "TestCode", %{a: "b"}) end) =~
-                 "TestCode: %{a: \"b\"}"
+        assert capture_log(fn ->
+                 assert Logging.maybe_log_error(socket, "TestCode", %{a: "b"}) ==
+                          {:error, %{reason: "TestCode: %{a: \"b\"}"}}
+               end) =~ "TestCode: %{a: \"b\"}"
       end
     end
 
     test "does not log error message when log_level is higher than error" do
       socket = %{assigns: %{log_level: :critical, tenant: random_string(), access_token: "test_token"}}
-      assert capture_log(fn -> Logging.maybe_log_error(socket, "TestCode", "test message") end) == ""
+
+      assert capture_log(fn ->
+               assert Logging.maybe_log_error(socket, "TestCode", "test message") ==
+                        {:error, %{reason: "TestCode: test message"}}
+             end) == ""
     end
 
-    test "returns {:error, %{reason: msg}} when log_level is error" do
+    test "also returns {:error, %{reason: msg}} when log_level is error" do
       socket = %{assigns: %{log_level: :error, tenant: random_string(), access_token: "test_token"}}
 
       assert Logging.maybe_log_error(socket, "TestCode", "test message") ==
@@ -55,20 +63,29 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       for log_level <- log_levels do
         socket = %{assigns: %{log_level: log_level, tenant: random_string(), access_token: "test_token"}}
 
-        assert capture_log(fn -> Logging.maybe_log_warning(socket, "TestCode", "test message") end) =~
+        assert capture_log(fn ->
+                 assert Logging.maybe_log_warning(socket, "TestCode", "test message") ==
+                          {:error, %{reason: "TestCode: test message"}}
+               end) =~
                  "TestCode: test message"
 
-        assert capture_log(fn -> Logging.maybe_log_warning(socket, "TestCode", %{a: "b"}) end) =~
-                 "TestCode: %{a: \"b\"}"
+        assert capture_log(fn ->
+                 assert Logging.maybe_log_warning(socket, "TestCode", %{a: "b"}) ==
+                          {:error, %{reason: "TestCode: %{a: \"b\"}"}}
+               end) =~ "TestCode: %{a: \"b\"}"
       end
     end
 
     test "does not log error message when log_level is higher than warning" do
       socket = %{assigns: %{log_level: :error, tenant: random_string(), access_token: "test_token"}}
-      assert capture_log(fn -> Logging.maybe_log_warning(socket, "TestCode", "test message") end) == ""
+
+      assert capture_log(fn ->
+               assert Logging.maybe_log_warning(socket, "TestCode", "test message") ==
+                        {:error, %{reason: "TestCode: test message"}}
+             end) == ""
     end
 
-    test "returns {:error, %{reason: msg}} when log_level is warning" do
+    test "also returns {:error, %{reason: msg}} when log_level is warning" do
       socket = %{assigns: %{log_level: :warning, tenant: random_string(), access_token: "test_token"}}
 
       assert Logging.maybe_log_warning(socket, "TestCode", "test message") ==
@@ -109,11 +126,15 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     socket = %{assigns: %{log_level: :error, tenant: random_string(), access_token: "test_token"}}
 
     for error <- Logging.system_errors() do
-      Logging.maybe_log_error(socket, error, "test error")
+      assert Logging.maybe_log_error(socket, error, "test error") ==
+               {:error, %{reason: "#{error}: test error"}}
+
       assert_receive {[:realtime, :channel, :error], %{code: ^error}, %{code: ^error}}
     end
 
-    Logging.maybe_log_error(socket, "TestError", "test error")
+    assert Logging.maybe_log_error(socket, "TestError", "test error") ==
+             {:error, %{reason: "TestError: test error"}}
+
     refute_receive {[:realtime, :channel, :error], :_, :_}
   end
 
