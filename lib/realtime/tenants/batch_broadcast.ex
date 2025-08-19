@@ -38,7 +38,6 @@ defmodule Realtime.Tenants.BatchBroadcast do
     auth_params = %{
       tenant_id: tenant.external_id,
       headers: conn.req_headers,
-      jwt: conn.assigns.jwt,
       claims: conn.assigns.claims,
       role: conn.assigns.role
     }

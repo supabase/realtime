@@ -237,15 +237,11 @@ defmodule Realtime.Tenants.AuthorizationTest do
     create_rls_policies(db_conn, context.policies, %{topic: topic})
 
     claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
-    signer = Joken.Signer.create("HS256", "secret")
-
-    jwt = Joken.generate_and_sign!(%{}, claims, signer)
 
     authorization_context =
       Authorization.build_authorization_params(%{
         tenant_id: tenant.external_id,
         topic: topic,
-        jwt: jwt,
         claims: claims,
         headers: [{"header-1", "value-1"}],
         role: claims.role

@@ -60,8 +60,8 @@ defmodule RealtimeWeb.RealtimeChannel do
          :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
          :ok <- limit_max_users(socket),
-         {:ok, claims, confirm_token_ref, access_token, _} <- confirm_token(socket),
-         socket = assign_authorization_context(socket, sub_topic, access_token, claims),
+         {:ok, claims, confirm_token_ref} <- confirm_token(socket),
+         socket = assign_authorization_context(socket, sub_topic, claims),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
@@ -308,7 +308,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_info(:confirm_token, %{assigns: %{pg_change_params: pg_change_params}} = socket) do
     case confirm_token(socket) do
-      {:ok, claims, confirm_token_ref, _, _} ->
+      {:ok, claims, confirm_token_ref} ->
         pg_change_params = Enum.map(pg_change_params, &Map.put(&1, :claims, claims))
         {:noreply, assign(socket, %{confirm_token_ref: confirm_token_ref, pg_change_params: pg_change_params})}
 
@@ -393,8 +393,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     # Update token and reset policies
     socket = assign(socket, %{access_token: refresh_token, policies: nil})
 
-    with {:ok, claims, confirm_token_ref, _, socket} <- confirm_token(socket),
-         socket = assign_authorization_context(socket, channel_name, refresh_token, claims),
+    with {:ok, claims, confirm_token_ref} <- confirm_token(socket),
+         socket = assign_authorization_context(socket, channel_name, claims),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(channel_name, db_conn, socket) do
       Helpers.cancel_timer(pg_sub_ref)
@@ -567,7 +567,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       interval = min(@confirm_token_ms_interval, exp_diff * 1000)
       ref = Process.send_after(self(), :confirm_token, interval)
 
-      {:ok, claims, ref, access_token, socket}
+      {:ok, claims, ref}
     else
       {:error, :token_malformed} ->
         {:error, :token_malformed, "The token provided is not a valid JWT"}
@@ -696,13 +696,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     end)
   end
 
-  defp assign_authorization_context(socket, topic, access_token, claims) do
+  defp assign_authorization_context(socket, topic, claims) do
     authorization_context =
       Authorization.build_authorization_params(%{
         tenant_id: socket.assigns.tenant,
         topic: topic,
         headers: Map.get(socket.assigns, :headers, []),
-        jwt: access_token,
         claims: claims,
         role: claims["role"]
       })
