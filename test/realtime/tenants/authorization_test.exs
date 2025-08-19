@@ -80,6 +80,17 @@ defmodule Realtime.Tenants.AuthorizationTest do
                presence: %PresencePolicies{read: false, write: false}
              } == policies
     end
+
+    @tag role: "anon", policies: []
+    test "db process is down", context do
+      pid = spawn(fn -> :ok end)
+
+      {:error, :increase_connection_pool} =
+        Authorization.get_read_authorizations(%Policies{}, pid, context.authorization_context)
+
+      {:error, :increase_connection_pool} =
+        Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+    end
   end
 
   describe "database error" do
@@ -202,6 +213,9 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   def rls_context(context) do
     tenant = Containers.checkout_tenant(run_migrations: true)
+    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
+    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = context[:topic] || random_string()
 

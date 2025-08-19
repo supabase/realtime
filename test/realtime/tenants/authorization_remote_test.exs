@@ -4,8 +4,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   use RealtimeWeb.ConnCase, async: false
   use Mimic
 
-  import ExUnit.CaptureLog
-
   require Phoenix.ChannelTest
 
   alias Realtime.Database
@@ -73,6 +71,20 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
                broadcast: %BroadcastPolicies{read: false, write: false},
                presence: %PresencePolicies{read: false, write: false}
              } == policies
+    end
+
+    @tag role: "anon",
+         policies: []
+    test "db process is down", context do
+      # Grab a remote pid that will not exist in the near future. erpc uses a new process to perform the call.
+      # Once it has returned the process is not alive anymore
+      db_conn = :erpc.call(context.node, :erlang, :self, [])
+
+      {:error, :increase_connection_pool} =
+        Authorization.get_read_authorizations(%Policies{}, db_conn, context.authorization_context)
+
+      {:error, :increase_connection_pool} =
+        Authorization.get_write_authorizations(%Policies{}, db_conn, context.authorization_context)
     end
   end
 
@@ -159,45 +171,12 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     end
   end
 
-  describe "rpc error" do
-    @describetag role: "anon", policies: []
-
-    test "get_read_authorizations", context do
-      # Grab a remote pid that will not exist in the near future. :gen_rpc uses a new process to perform the call.
-      # Once it has returned the process is not alive anymore
-      db_conn = :erpc.call(context.node, :erlang, :self, [])
-
-      assert capture_log(fn ->
-               {:error, {:EXIT, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}}} =
-                 Authorization.get_read_authorizations(
-                   %Policies{},
-                   db_conn,
-                   context.authorization_context
-                 )
-             end) =~ "project=dev_tenant external_id=dev_tenant [error] ErrorOnRpcCall:"
-    end
-
-    test "get_write_authorizations", context do
-      # Grab a remote pid that will not exist in the near future. :gen_rpc uses a new process to perform the call.
-      # Once it has returned the process is not alive anymore
-      db_conn = :erpc.call(context.node, :erlang, :self, [])
-
-      assert capture_log(fn ->
-               {:error, {:EXIT, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}}} =
-                 Authorization.get_write_authorizations(
-                   %Policies{},
-                   db_conn,
-                   context.authorization_context
-                 )
-             end) =~ "project=dev_tenant external_id=dev_tenant [error] ErrorOnRpcCall:"
-    end
-  end
-
   defp rls_context(context) do
     tenant = Realtime.Tenants.get_tenant_by_external_id("dev_tenant")
     Connect.shutdown("dev_tenant")
     # Waiting for :syn to unregister
     Process.sleep(100)
+    Realtime.RateCounter.stop("dev_tenant")
 
     {:ok, local_db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()

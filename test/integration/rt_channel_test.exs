@@ -1759,18 +1759,19 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     test "max_events_per_second limit respected", %{tenant: tenant} do
-      %{max_events_per_second: max_concurrent_users} = Tenants.get_tenant_by_external_id(tenant.external_id)
-      on_exit(fn -> change_tenant_configuration(tenant, :max_events_per_second, max_concurrent_users) end)
-
-      {socket, _} = get_connection(tenant, "authenticated")
-      config = %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
-      realtime_topic = "realtime:#{random_string()}"
-
-      WebsocketClient.join(socket, realtime_topic, %{config: config})
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
+      %{max_events_per_second: max_events_per_second} = Tenants.get_tenant_by_external_id(tenant.external_id)
+      on_exit(fn -> change_tenant_configuration(tenant, :max_events_per_second, max_events_per_second) end)
+      RateCounter.stop(tenant.external_id)
 
       log =
         capture_log(fn ->
+          {socket, _} = get_connection(tenant, "authenticated")
+          config = %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
+          realtime_topic = "realtime:#{random_string()}"
+
+          WebsocketClient.join(socket, realtime_topic, %{config: config})
+          assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
+
           for _ <- 1..1000, Process.alive?(socket) do
             WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
             Process.sleep(10)
@@ -1778,9 +1779,9 @@ defmodule Realtime.Integration.RtChannelTest do
 
           # Wait for the rate counter to run logger function
           Process.sleep(1500)
+          assert_receive %Message{event: "phx_close"}
         end)
 
-      assert_receive %Message{event: "phx_close"}
       assert log =~ "MessagePerSecondRateLimitReached"
     end
 
@@ -1824,18 +1825,22 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     test "max_joins_per_second limit respected", %{tenant: tenant} do
-      %{max_joins_per_second: max_joins_per_second} = Tenants.get_tenant_by_external_id(tenant.external_id)
-      change_tenant_configuration(tenant, :max_joins_per_second, 1)
-
       {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{random_string()}"
 
       log =
         capture_log(fn ->
-          for _ <- 1..1000 do
+          # Burst of joins that won't be blocked as RateCounter tick won't run
+          for _ <- 1..300 do
             WebsocketClient.join(socket, realtime_topic, %{config: config})
-            1..5 |> Enum.random() |> Process.sleep()
+          end
+
+          # Wait for RateCounter tick
+          Process.sleep(1000)
+          # These ones will be blocked
+          for _ <- 1..300 do
+            WebsocketClient.join(socket, realtime_topic, %{config: config})
           end
 
           assert_receive %Message{
@@ -1848,8 +1853,6 @@ defmodule Realtime.Integration.RtChannelTest do
                            }
                          },
                          2000
-
-          change_tenant_configuration(tenant, :max_joins_per_second, max_joins_per_second)
         end)
 
       assert log =~
