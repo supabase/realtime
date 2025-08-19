@@ -21,12 +21,11 @@ defmodule Realtime.Tenants.Authorization do
   defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role]
 
   @type t :: %__MODULE__{
-          :tenant_id => binary() | nil,
-          :topic => binary() | nil,
-          :claims => map(),
-          :headers => keyword({binary(), binary()}),
-          :jwt => map(),
-          :role => binary()
+          :tenant_id => binary | nil,
+          :topic => binary | nil,
+          :claims => map,
+          :headers => list({binary, binary}),
+          :role => binary
         }
 
   @doc """
@@ -35,7 +34,6 @@ defmodule Realtime.Tenants.Authorization do
   Requires a map with the following keys:
   * topic: The name of the channel being accessed taken from the request
   * headers: Request headers when the connection was made or WS was updated
-  * jwt: JWT String
   * claims: JWT claims
   * role: JWT role
   """
@@ -45,7 +43,6 @@ defmodule Realtime.Tenants.Authorization do
       tenant_id: Map.get(map, :tenant_id),
       topic: Map.get(map, :topic),
       headers: Map.get(map, :headers),
-      jwt: Map.get(map, :jwt),
       claims: Map.get(map, :claims),
       role: Map.get(map, :role)
     }
