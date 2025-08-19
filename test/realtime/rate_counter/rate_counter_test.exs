@@ -81,7 +81,7 @@ defmodule Realtime.RateCounterTest do
       }
     end
 
-    test "starts a new rate counter with limit to log" do
+    test "raise error when limit is specified without measurement" do
       id = {:domain, :metric, Ecto.UUID.generate()}
 
       args = %Args{
@@ -91,6 +91,65 @@ defmodule Realtime.RateCounterTest do
           max_bucket_len: 10,
           limit: [
             value: 10,
+            log_fn: fn ->
+              Logger.error("ErrorMessage: Reason", external_id: "tenant123", project: "tenant123")
+            end
+          ]
+        ]
+      }
+
+      assert {:error, {%KeyError{key: :measurement, term: _}, _}} = RateCounter.new(args)
+    end
+
+    test "raise error when limit is specified without value" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      args = %Args{
+        id: id,
+        opts: [
+          tick: 100,
+          max_bucket_len: 10,
+          limit: [
+            measurement: :avg,
+            log_fn: fn ->
+              Logger.error("ErrorMessage: Reason", external_id: "tenant123", project: "tenant123")
+            end
+          ]
+        ]
+      }
+
+      assert {:error, {%KeyError{key: :value, term: _}, _}} = RateCounter.new(args)
+    end
+
+    test "raise error when limit is specified without log_fn" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      args = %Args{
+        id: id,
+        opts: [
+          tick: 100,
+          max_bucket_len: 10,
+          limit: [
+            measurement: :avg,
+            value: 100
+          ]
+        ]
+      }
+
+      assert {:error, {%KeyError{key: :log_fn, term: _}, _}} = RateCounter.new(args)
+    end
+
+    test "starts a new rate counter with avg limit to log" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      args = %Args{
+        id: id,
+        opts: [
+          tick: 100,
+          max_bucket_len: 10,
+          limit: [
+            value: 10,
+            measurement: :avg,
             log_fn: fn ->
               Logger.error("ErrorMessage: Reason", external_id: "tenant123", project: "tenant123")
             end
@@ -129,6 +188,59 @@ defmodule Realtime.RateCounterTest do
       Process.sleep(300)
 
       assert {:ok, %RateCounter{limit: %{triggered: false}}} = RateCounter.get(args)
+    end
+
+    test "starts a new rate counter with sum limit to log" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      args = %Args{
+        id: id,
+        opts: [
+          tick: 100,
+          max_bucket_len: 3,
+          limit: [
+            value: 49,
+            measurement: :sum,
+            log_fn: fn ->
+              Logger.error("ErrorMessage: Reason", external_id: "tenant123", project: "tenant123")
+            end
+          ]
+        ]
+      }
+
+      assert {:ok, pid} = RateCounter.new(args)
+
+      assert %RateCounter{
+               id: ^id,
+               avg: +0.0,
+               sum: 0,
+               bucket: _,
+               max_bucket_len: 3,
+               telemetry: %{emit: false},
+               limit: %{
+                 log: true,
+                 value: 49,
+                 measurement: :sum,
+                 triggered: false
+               }
+             } = :sys.get_state(pid)
+
+      log =
+        capture_log(fn ->
+          GenCounter.add(args.id, 50)
+          Process.sleep(100)
+        end)
+
+      assert {:ok, %RateCounter{sum: 50, limit: %{triggered: true}}} = RateCounter.get(args)
+      assert log =~ "project=tenant123 external_id=tenant123 [error] ErrorMessage: Reason"
+
+      # Only one log message should be emitted
+      # Splitting by the error message returns the error message and the rest of the log only
+      assert length(String.split(log, "ErrorMessage: Reason")) == 2
+
+      Process.sleep(400)
+
+      assert {:ok, %RateCounter{sum: 0, limit: %{triggered: false}}} = RateCounter.get(args)
     end
 
     test "reset counter if GenCounter already had something" do
