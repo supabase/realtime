@@ -138,7 +138,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         Logging.log_error(socket, "ConnectionRateLimitReached", msg)
 
       {:error, :too_many_joins} ->
-        msg = "Too many joins per second"
+        msg = "ClientJoinRateLimitReached: Too many joins per second"
         {:error, %{reason: msg}}
 
       {:error, :increase_connection_pool} ->
@@ -203,7 +203,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     if rate_counter.avg > max do
       message = "Too many messages per second"
-
       shutdown_response(socket, message)
     else
       {:noreply, socket}
@@ -365,13 +364,6 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_in("presence", payload, %{assigns: %{private?: false}} = socket) do
     PresenceHandler.handle(payload, socket)
-  end
-
-  def handle_in(_, _, %{assigns: %{rate_counter: %{avg: avg}, limits: %{max_events_per_second: max}}} = socket)
-      when avg > max do
-    message = "Too many messages per second"
-
-    shutdown_response(socket, message)
   end
 
   def handle_in("access_token", %{"access_token" => "sb_" <> _}, socket) do
@@ -592,10 +584,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp shutdown_response(socket, message) when is_binary(message) do
-    %{assigns: %{channel_name: channel_name, access_token: access_token}} = socket
-    metadata = log_metadata(access_token)
+    %{assigns: %{channel_name: channel_name}} = socket
     push_system_message("system", socket, "error", message, channel_name)
-    log_warning("ChannelShutdown", message, metadata)
+    Logging.maybe_log_warning(socket, "ChannelShutdown", message)
     {:stop, :normal, socket}
   end
 
@@ -752,18 +743,5 @@ defmodule RealtimeWeb.RealtimeChannel do
     if tenant.private_only and !private?,
       do: {:error, :private_only},
       else: :ok
-  end
-
-  defp log_metadata(access_token) do
-    access_token
-    |> Joken.peek_claims()
-    |> then(fn
-      {:ok, claims} -> Map.get(claims, "sub")
-      _ -> nil
-    end)
-    |> then(fn
-      nil -> []
-      sub -> [sub: sub]
-    end)
   end
 end
