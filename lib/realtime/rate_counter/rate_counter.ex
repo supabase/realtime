@@ -28,6 +28,7 @@ defmodule Realtime.RateCounter do
 
   defstruct id: nil,
             avg: 0.0,
+            sum: 0,
             bucket: [],
             max_bucket_len: @max_bucket_len,
             tick: @tick,
@@ -35,33 +36,35 @@ defmodule Realtime.RateCounter do
             idle_shutdown: @idle_shutdown,
             idle_shutdown_ref: nil,
             limit: %{log: false},
-            telemetry: %{
-              event_name: [@app_name] ++ [:rate_counter],
-              measurements: %{sum: 0},
-              metadata: %{}
-            }
+            telemetry: %{emit: false}
 
   @type t :: %__MODULE__{
           id: term(),
           avg: float(),
+          sum: non_neg_integer(),
           bucket: list(),
           max_bucket_len: integer(),
           tick: integer(),
-          tick_ref: reference(),
+          tick_ref: reference() | nil,
           idle_shutdown: integer() | :infinity,
-          idle_shutdown_ref: reference(),
-          limit: %{
-            log: boolean(),
-            value: integer(),
-            triggered: boolean(),
-            log_fn: (-> term())
-          },
-          telemetry: %{
-            emit: false,
-            event_name: :telemetry.event_name(),
-            measurements: :telemetry.event_measurements(),
-            metadata: :telemetry.event_metadata()
-          }
+          idle_shutdown_ref: reference() | nil,
+          limit:
+            %{log: false}
+            | %{
+                log: true,
+                value: integer(),
+                measurement: :sum | :avg,
+                triggered: boolean(),
+                log_fn: (-> term())
+              },
+          telemetry:
+            %{emit: false}
+            | %{
+                emit: true,
+                event_name: :telemetry.event_name(),
+                measurements: :telemetry.event_measurements(),
+                metadata: :telemetry.event_metadata()
+              }
         }
 
   @spec start_link([keyword()]) :: {:ok, pid()} | {:error, {:already_started, pid()}}
@@ -166,8 +169,9 @@ defmodule Realtime.RateCounter do
       if limit_opts do
         %{
           log: true,
-          value: limit_opts[:value],
-          log_fn: limit_opts[:log_fn],
+          value: Keyword.fetch!(limit_opts, :value),
+          measurement: Keyword.fetch!(limit_opts, :measurement),
+          log_fn: Keyword.fetch!(limit_opts, :log_fn),
           triggered: false
         }
       else
@@ -211,12 +215,10 @@ defmodule Realtime.RateCounter do
     bucket = [count | state.bucket] |> Enum.take(state.max_bucket_len)
     bucket_len = Enum.count(bucket)
 
-    avg =
-      bucket
-      |> Enum.sum()
-      |> Kernel./(bucket_len)
+    sum = Enum.sum(bucket)
+    avg = sum / bucket_len
 
-    state = %{state | bucket: bucket, avg: avg}
+    state = %{state | bucket: bucket, sum: sum, avg: avg}
 
     state = maybe_trigger_limit(state)
     tick(state.tick)
@@ -252,9 +254,9 @@ defmodule Realtime.RateCounter do
 
   defp maybe_trigger_limit(%{limit: %{log: false}} = state), do: state
 
-  defp maybe_trigger_limit(%{limit: %{triggered: true}} = state) do
+  defp maybe_trigger_limit(%{limit: %{triggered: true, measurement: measurement}} = state) do
     # Limit has been triggered, but we need to check if it is still above the limit
-    if state.avg < state.limit.value do
+    if Map.fetch!(state, measurement) < state.limit.value do
       %{state | limit: %{state.limit | triggered: false}}
     else
       # Limit is still above the threshold, so we keep the state as is
@@ -262,8 +264,8 @@ defmodule Realtime.RateCounter do
     end
   end
 
-  defp maybe_trigger_limit(state) do
-    if state.avg >= state.limit.value do
+  defp maybe_trigger_limit(%{limit: %{measurement: measurement}} = state) do
+    if Map.fetch!(state, measurement) >= state.limit.value do
       state.limit.log_fn.()
 
       %{state | limit: %{state.limit | triggered: true}}

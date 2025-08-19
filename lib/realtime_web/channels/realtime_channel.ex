@@ -205,12 +205,12 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def handle_info(:update_rate_counter, %{assigns: %{limits: %{max_events_per_second: max}}} = socket) do
+  def handle_info(:update_rate_counter, socket) do
     count(socket)
 
     {:ok, rate_counter} = RateCounter.get(socket.assigns.rate_counter)
 
-    if rate_counter.avg > max do
+    if rate_counter.limit.triggered do
       message = "Too many messages per second"
       shutdown_response(socket, message)
     else
@@ -490,11 +490,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     RateCounter.new(rate_args)
 
     case RateCounter.get(rate_args) do
-      {:ok, %{avg: avg}} when avg < limits.max_joins_per_second ->
+      {:ok, %{limit: %{triggered: false}}} ->
         GenCounter.add(rate_args.id)
         :ok
 
-      {:ok, %{avg: _}} ->
+      {:ok, %{limit: %{triggered: true}}} ->
         {:error, :too_many_joins}
 
       error ->
