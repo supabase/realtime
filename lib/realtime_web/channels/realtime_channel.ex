@@ -565,7 +565,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :access_token, tenant_token)
   end
 
-  defp confirm_token(%{assigns: assigns} = socket) do
+  defp confirm_token(%{assigns: assigns}) do
     %{jwt_secret: jwt_secret, access_token: access_token} = assigns
 
     jwt_jwks = Map.get(assigns, :jwt_jwks)
