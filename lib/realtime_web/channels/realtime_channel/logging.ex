@@ -26,7 +26,7 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   end
 
   @doc """
-  Logs an error message
+  Logs a warning message
   """
   @spec log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any()) ::
           {:error, %{reason: binary}}

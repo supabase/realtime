@@ -320,8 +320,13 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(:sync_presence, %{assigns: %{presence_enabled?: true}} = socket) do
-    PresenceHandler.sync(socket)
-    {:noreply, socket}
+    case PresenceHandler.sync(socket) do
+      :ok ->
+        {:noreply, socket}
+
+      {:error, :rate_limit_exceeded} ->
+        shutdown_response(socket, "Too many presence messages per second")
+    end
   end
 
   def handle_info(:sync_presence, socket), do: {:noreply, socket}
@@ -349,27 +354,27 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- PresenceHandler.handle(payload, db_conn, socket) do
-      {:noreply, socket}
+      {:reply, :ok, socket}
     else
       {:error, :rate_limit_exceeded} ->
         shutdown_response(socket, "Too many presence messages per second")
 
       {:error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
-        {:noreply, socket}
+        {:reply, :error, socket}
     end
   end
 
   def handle_in("presence", payload, %{assigns: %{private?: false}} = socket) do
     with {:ok, socket} <- PresenceHandler.handle(payload, socket) do
-      {:noreply, socket}
+      {:reply, :ok, socket}
     else
       {:error, :rate_limit_exceeded} ->
         shutdown_response(socket, "Too many presence messages per second")
 
       {:error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
-        {:noreply, socket}
+        {:reply, :error, socket}
     end
   end
 

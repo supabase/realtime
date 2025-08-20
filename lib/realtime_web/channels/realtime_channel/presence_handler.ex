@@ -27,8 +27,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   @doc """
   Sends presence state to connected clients
   """
-  @spec sync(Socket.t()) :: {:ok, Socket.t()} | {:error, :rls_policy_error | :unable_to_set_policies}
-  def sync(%{assigns: %{presence_enabled?: false}} = socket), do: {:ok, socket}
+  @spec sync(Socket.t()) ::
+          :ok | {:error, :rls_policy_error | :unable_to_set_policies | :rate_limit_exceeded}
+  def sync(%{assigns: %{presence_enabled?: false}}), do: :ok
 
   def sync(socket) when not is_private?(socket) do
     %{assigns: %{tenant_topic: topic}} = socket
@@ -37,11 +38,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
       push(socket, "presence_state", presence_dirty_list(topic))
       Logging.maybe_log_info(socket, :sync_presence)
 
-      {:ok, socket}
+      :ok
     end
   end
 
-  def sync(socket) when not can_read_presence?(socket), do: {:ok, :socket}
+  def sync(socket) when not can_read_presence?(socket), do: :ok
 
   def sync(socket) when can_read_presence?(socket) do
     %{tenant_topic: topic} = socket.assigns
@@ -50,16 +51,18 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
       push(socket, "presence_state", presence_dirty_list(topic))
       Logging.maybe_log_info(socket, :sync_presence)
 
-      {:ok, socket}
+      :ok
     end
   end
 
-  @spec handle(map(), Socket.t()) :: {:ok, Socket.t()} | {:error, :unauthorized} | {:error, :rate_limit_exceeded}
+  @spec handle(map(), Socket.t()) ::
+          {:ok, Socket.t()} | {:error, :rls_policy_error | :unable_to_set_policies | :rate_limit_exceeded}
   def handle(_, %{assigns: %{presence_enabled?: false}} = socket), do: {:ok, socket}
   def handle(payload, socket) when not is_private?(socket), do: handle(payload, nil, socket)
 
   @spec handle(map(), pid() | nil, Socket.t()) ::
-          {:ok, Socket.t()} | {:error, :unauthorized} | {:error, :rate_limit_exceeded}
+          {:ok, Socket.t()}
+          | {:error, :rls_policy_error | :unable_to_set_policies | :rate_limit_exceeded | :unable_to_track_presence}
   def handle(_, _, %{assigns: %{presence_enabled?: false}} = socket), do: {:ok, socket}
 
   def handle(%{"event" => event} = payload, db_conn, socket) do
@@ -145,7 +148,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   defp limit_presence_event(socket) do
     %{assigns: %{presence_rate_counter: presence_counter, tenant: tenant_id}} = socket
-    GenCounter.add(presence_counter.id)
     {:ok, rate_counter} = RateCounter.get(presence_counter)
 
     tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
@@ -153,6 +155,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     if rate_counter.avg > tenant.max_presence_events_per_second do
       {:error, :rate_limit_exceeded}
     else
+      GenCounter.add(presence_counter.id)
       :ok
     end
   end

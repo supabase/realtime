@@ -320,7 +320,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: false, write: false}}
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: false)
 
-      assert {:ok, _socket} = PresenceHandler.sync(socket)
+      assert :ok = PresenceHandler.sync(socket)
       assert_receive {_, :text, msg}
       msg = Jason.decode!(msg)
       assert msg["event"] == "presence_state"
@@ -331,7 +331,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)
 
-      assert {:ok, _socket} = PresenceHandler.sync(socket)
+      assert :ok = PresenceHandler.sync(socket)
       assert_receive {_, :text, msg}
       msg = Jason.decode!(msg)
       assert msg["event"] == "presence_state"
@@ -342,7 +342,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: false, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true)
 
-      assert {:ok, _socket} = PresenceHandler.sync(socket)
+      assert :ok = PresenceHandler.sync(socket)
       refute_receive {_, :text, _}
     end
 
@@ -351,7 +351,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
       socket = socket_fixture(tenant, topic, key, policies: policies, private?: true, enabled?: false)
 
-      assert {:ok, _socket} = PresenceHandler.sync(socket)
+      assert :ok = PresenceHandler.sync(socket)
       refute_receive {_, :text, _}
     end
 
