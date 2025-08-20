@@ -157,12 +157,61 @@ end
 
 if config_env() != :test do
   gen_rpc_socket_ip = System.get_env("GEN_RPC_SOCKET_IP", "0.0.0.0") |> to_charlist()
+  tcp_server_port = System.get_env("GEN_RPC_TCP_SERVER_PORT", "5369")
+
+  tcp_server_port =
+    if tcp_server_port != "false" do
+      String.to_integer(tcp_server_port)
+    else
+      false
+    end
+
+  ssl_server_port = System.get_env("GEN_RPC_SSL_SERVER_PORT", "false")
+
+  ssl_server_port =
+    if ssl_server_port != "false" do
+      String.to_integer(ssl_server_port)
+    else
+      false
+    end
+
+  gen_rpc_default_driver = if ssl_server_port, do: :ssl, else: :tcp
+
+  # {gen_rpc, [
+  #      {ssl_client_options, [
+  #          {certfile, "priv/cert.pem"},
+  #          {keyfile, "priv/cert.key"},
+  #          {cacertfile, "priv/ca.pem"}
+  #      ]},
+  #      {ssl_server_options, [
+  #          {certfile, "priv/cert.pem"},
+  #          {keyfile, "priv/cert.key"},
+  #          {cacertfile, "priv/ca.pem"}
+  #      ]}
+  #  ]}
+
+  if gen_rpc_default_driver == :ssl do
+    dbg(gen_rpc_default_driver)
+
+    gen_rpc_ssl_opts = [
+      certfile: System.get_env("GEN_RPC_CERTFILE", "certs/server.crt"),
+      keyfile: System.get_env("GEN_RPC_KEYFILE", "certs/server.key"),
+      cacertfile: System.get_env("GEN_RPC_CACERTFILE", "certs/ca.crt")
+    ]
+
+    config :gen_rpc,
+      ssl_client_options: gen_rpc_ssl_opts,
+      ssl_server_options: gen_rpc_ssl_opts
+  end
 
   case :inet.parse_address(gen_rpc_socket_ip) do
     {:ok, address} ->
       config :gen_rpc,
-        tcp_server_port: System.get_env("GEN_RPC_TCP_SERVER_PORT", "5369") |> String.to_integer(),
+        default_client_driver: gen_rpc_default_driver,
+        tcp_server_port: tcp_server_port,
         tcp_client_port: System.get_env("GEN_RPC_TCP_CLIENT_PORT", "5369") |> String.to_integer(),
+        ssl_server_port: ssl_server_port,
+        ssl_client_port: System.get_env("GEN_RPC_SSL_CLIENT_PORT", "6369") |> String.to_integer(),
         connect_timeout: System.get_env("GEN_RPC_CONNECT_TIMEOUT_IN_MS", "10000") |> String.to_integer(),
         send_timeout: System.get_env("GEN_RPC_SEND_TIMEOUT_IN_MS", "10000") |> String.to_integer(),
         ipv6_only: System.get_env("GEN_RPC_IPV6_ONLY", "false") == "true",
