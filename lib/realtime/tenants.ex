@@ -264,17 +264,26 @@ defmodule Realtime.Tenants do
   @doc "RateCounter arguments for counting presence events per second."
   @spec presence_events_per_second_rate(Tenant.t()) :: RateCounter.Args.t()
   def presence_events_per_second_rate(tenant) do
-    presence_events_per_second_rate(tenant.external_id, tenant.max_events_per_second)
+    presence_events_per_second_rate(tenant.external_id, tenant.max_presence_events_per_second)
   end
 
   @spec presence_events_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
-  def presence_events_per_second_rate(tenant_id, max_events_per_second) do
+  def presence_events_per_second_rate(tenant_id, max_presence_events_per_second) do
     opts = [
       telemetry: %{
         event_name: [:channel, :presence_events],
-        measurements: %{limit: max_events_per_second},
+        measurements: %{limit: max_presence_events_per_second},
         metadata: %{tenant: tenant_id}
-      }
+      },
+      limit: [
+        value: max_presence_events_per_second,
+        log_fn: fn ->
+          Logger.error("PresenceRateLimitReached: Too many presence events per second",
+            external_id: tenant_id,
+            project: tenant_id
+          )
+        end
+      ]
     ]
 
     %RateCounter.Args{id: presence_events_per_second_key(tenant_id), opts: opts}

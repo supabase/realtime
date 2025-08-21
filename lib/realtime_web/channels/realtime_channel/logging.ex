@@ -1,10 +1,17 @@
 defmodule RealtimeWeb.RealtimeChannel.Logging do
   @moduledoc """
-  Log functions for Realtime channels to ensure
+  Log functions for Realtime channels
   """
-  use Realtime.Logs
 
   alias Realtime.Telemetry
+  require Logger
+
+  defmacro __using__(_opts) do
+    quote do
+      require Logger
+      import RealtimeWeb.RealtimeChannel.Logging
+    end
+  end
 
   @doc """
   Logs an error message
@@ -15,6 +22,17 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
     msg = build_msg(code, msg)
     emit_system_error(:error, code)
     log(socket, :error, msg)
+    {:error, %{reason: msg}}
+  end
+
+  @doc """
+  Logs a warning message
+  """
+  @spec log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any()) ::
+          {:error, %{reason: binary}}
+  def log_warning(socket, code, msg) do
+    msg = build_msg(code, msg)
+    log(socket, :warning, msg)
     {:error, %{reason: msg}}
   end
 
@@ -44,7 +62,6 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   defp log(%{assigns: %{tenant: tenant, access_token: access_token}}, level, msg) do
     Logger.metadata(external_id: tenant, project: tenant)
     if level in [:error, :warning], do: update_metadata_with_token_claims(access_token)
-
     Logger.log(level, msg)
   end
 

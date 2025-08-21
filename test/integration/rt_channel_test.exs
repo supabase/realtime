@@ -706,7 +706,6 @@ defmodule Realtime.Integration.RtChannelTest do
 
       WebsocketClient.send_event(socket, topic, "presence", payload)
 
-      assert_receive %Phoenix.Socket.Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}
       assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}
 
       join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()

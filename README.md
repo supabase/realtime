@@ -270,7 +270,7 @@ This is the list of operational codes that can help you understand your deployme
 | UnableToEncodeJson                 | An error were we are not handling correctly the response to be sent to the end user                                                                                                                   |
 | UnknownErrorOnController           | An error we are not handling correctly was triggered on a controller                                                                                                                                  |
 | UnknownErrorOnChannel              | An error we are not handling correctly was triggered on a channel                                                                                                                                     |
-| TooManyPresenceMessages            | Limit of presence events reached                                                                                                                                                                      |
+| PresenceRateLimitReached           | Limit of presence events reached                                                                                                                                                                      |
 
 ## License
 

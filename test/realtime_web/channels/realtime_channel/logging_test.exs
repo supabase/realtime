@@ -20,6 +20,46 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     %{tenant: tenant}
   end
 
+  describe "log_error/3" do
+    test "logs error message with JWT claims in metadata", %{tenant: tenant} do
+      sub = random_string()
+      exp = System.system_time(:second) + 1000
+      iss = "https://#{random_string()}.com"
+      token = generate_jwt_token(tenant, %{sub: sub, exp: exp, iss: iss})
+      socket = %{assigns: %{log_level: :error, tenant: tenant.external_id, access_token: token}}
+
+      log =
+        capture_log(fn ->
+          {:error, %{reason: "TestError: test error"}} = Logging.log_error(socket, "TestError", "test error")
+        end)
+
+      assert log =~ "TestError: test error"
+      assert log =~ "sub=#{sub}"
+      assert log =~ "exp=#{exp}"
+      assert log =~ "iss=#{iss}"
+    end
+  end
+
+  describe "log_warning/3" do
+    test "logs warning message with JWT claims in metadata", %{tenant: tenant} do
+      sub = random_string()
+      exp = System.system_time(:second) + 1000
+      iss = "https://#{random_string()}.com"
+      token = generate_jwt_token(tenant, %{sub: sub, exp: exp, iss: iss})
+      socket = %{assigns: %{log_level: :warning, tenant: tenant.external_id, access_token: token}}
+
+      log =
+        capture_log(fn ->
+          {:error, %{reason: "TestWarning: test warning"}} = Logging.log_warning(socket, "TestWarning", "test warning")
+        end)
+
+      assert log =~ "TestWarning: test warning"
+      assert log =~ "sub=#{sub}"
+      assert log =~ "exp=#{exp}"
+      assert log =~ "iss=#{iss}"
+    end
+  end
+
   describe "maybe_log_error/3" do
     test "logs error message when log_level is less or equal to error" do
       log_levels = [:debug, :info, :warning, :error]
@@ -108,17 +148,6 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     test "does not log error message when log_level is higher than info" do
       socket = %{assigns: %{log_level: :warning, tenant: random_string(), access_token: "test_token"}}
       assert capture_log(fn -> :ok = Logging.maybe_log_info(socket, "test message") end) == ""
-    end
-  end
-
-  describe "log_error/3" do
-    test "logs error message" do
-      socket = %{assigns: %{log_level: :error, tenant: random_string(), access_token: "test_token"}}
-
-      assert capture_log(fn ->
-               {:error, %{reason: "TestError: test error"}} = Logging.log_error(socket, "TestError", "test error")
-             end) =~
-               "TestError: test error"
     end
   end
 
