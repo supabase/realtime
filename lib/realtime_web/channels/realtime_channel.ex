@@ -21,6 +21,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
 
+  alias RealtimeWeb.Channels.Payloads.Join
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
@@ -53,6 +54,15 @@ defmodule RealtimeWeb.RealtimeChannel do
       |> assign_presence_counter()
       |> assign(:private?, !!params["config"]["private"])
       |> assign(:policies, nil)
+
+    case Join.validate(params) do
+      {:ok, _join} ->
+        nil
+
+      {:error, :invalid_join_payload, errors} ->
+        log_params = params |> Map.put("access_token", "<redacted>") |> Map.put("user_token", "<redacted>")
+        log_error(socket, "InvalidJoinPayload", %{changeset_errors: errors, params: log_params})
+    end
 
     with :ok <- SignalHandler.shutdown_in_progress?(),
          :ok <- only_private?(tenant_id, socket),
