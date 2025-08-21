@@ -67,6 +67,17 @@ defmodule Realtime.Tenants.AuthorizationTest do
                presence: %PresencePolicies{read: false, write: false}
              } == policies
     end
+
+    @tag role: "anon", policies: []
+    test "db process is down", context do
+      pid = spawn(fn -> :ok end)
+
+      {:error, {:exit, {_, {DBConnection.Holder, :checkout, _}}}} =
+        Authorization.get_read_authorizations(%Policies{}, pid, context.authorization_context)
+
+      {:error, {:exit, {_, {DBConnection.Holder, :checkout, _}}}} =
+        Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+    end
   end
 
   describe "database error" do

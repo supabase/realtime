@@ -74,6 +74,20 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
                presence: %PresencePolicies{read: false, write: false}
              } == policies
     end
+
+    @tag role: "anon",
+         policies: []
+    test "db process is down", context do
+      # Grab a remote pid that will not exist in the near future. erpc uses a new process to perform the call.
+      # Once it has returned the process is not alive anymore
+      db_conn = :erpc.call(context.node, :erlang, :self, [])
+
+      {:error, {:exit, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}}} =
+        Authorization.get_read_authorizations(%Policies{}, db_conn, context.authorization_context)
+
+      {:error, {:exit, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}}} =
+        Authorization.get_write_authorizations(%Policies{}, db_conn, context.authorization_context)
+    end
   end
 
   describe "database error" do
@@ -156,40 +170,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
                  context.db_conn,
                  context.authorization_context
                )
-    end
-  end
-
-  describe "rpc error" do
-    @describetag role: "anon", policies: []
-
-    test "get_read_authorizations", context do
-      # Grab a remote pid that will not exist in the near future. :gen_rpc uses a new process to perform the call.
-      # Once it has returned the process is not alive anymore
-      db_conn = :erpc.call(context.node, :erlang, :self, [])
-
-      assert capture_log(fn ->
-               {:error, {:EXIT, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}}} =
-                 Authorization.get_read_authorizations(
-                   %Policies{},
-                   db_conn,
-                   context.authorization_context
-                 )
-             end) =~ "project=dev_tenant external_id=dev_tenant [error] ErrorOnRpcCall:"
-    end
-
-    test "get_write_authorizations", context do
-      # Grab a remote pid that will not exist in the near future. :gen_rpc uses a new process to perform the call.
-      # Once it has returned the process is not alive anymore
-      db_conn = :erpc.call(context.node, :erlang, :self, [])
-
-      assert capture_log(fn ->
-               {:error, {:EXIT, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}}} =
-                 Authorization.get_write_authorizations(
-                   %Policies{},
-                   db_conn,
-                   context.authorization_context
-                 )
-             end) =~ "project=dev_tenant external_id=dev_tenant [error] ErrorOnRpcCall:"
     end
   end
 
