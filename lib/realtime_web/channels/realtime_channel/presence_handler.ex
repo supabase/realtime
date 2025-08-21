@@ -25,8 +25,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   @doc """
   Sends presence state to connected clients
   """
-  @spec sync(Socket.t()) ::
-          :ok | {:error, :rls_policy_error | :unable_to_set_policies | :rate_limit_exceeded}
+  @spec sync(Socket.t()) :: :ok | {:error, :rate_limit_exceeded}
   def sync(%{assigns: %{presence_enabled?: false}}), do: :ok
 
   def sync(socket) when not is_private?(socket) do
