@@ -5,8 +5,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
   use RealtimeWeb.RealtimeChannel.Logging
 
-  alias RealtimeWeb.SocketDisconnect
   alias DBConnection.Backoff
+  alias Phoenix.Socket
 
   alias Realtime.Crypto
   alias Realtime.GenCounter
@@ -21,11 +21,15 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
 
+  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join
+  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join.Config
+  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join.Config.PostgresChange
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
   alias RealtimeWeb.RealtimeChannel.PresenceHandler
   alias RealtimeWeb.RealtimeChannel.Tracker
+  alias RealtimeWeb.SocketDisconnect
 
   @confirm_token_ms_interval :timer.minutes(5)
 
@@ -46,15 +50,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
 
-    socket =
-      socket
-      |> assign_access_token(params)
-      |> assign_counter()
-      |> assign_presence_counter()
-      |> assign(:private?, !!params["config"]["private"])
-      |> assign(:policies, nil)
+    # We always need to assign the access token so we can get the logs metadata working as expected
+    socket = assign_access_token(socket, params)
 
-    with :ok <- SignalHandler.shutdown_in_progress?(),
+    with {:ok, %Socket{} = socket, %Join{} = configuration} <- configure_socket(socket, params),
+         :ok <- SignalHandler.shutdown_in_progress?(),
          :ok <- only_private?(tenant_id, socket),
          :ok <- limit_joins(socket),
          :ok <- limit_channels(socket),
@@ -64,7 +64,6 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
-
       # fastlane subscription
       metadata =
         MessageDispatcher.fastlane_metadata(transport_pid, serializer, topic, socket.assigns.log_level, tenant_id)
@@ -73,15 +72,11 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
 
-      is_new_api = new_api?(params)
-      # TODO: Default will be moved to false in the future
-      presence_enabled? =
-        case get_in(params, ["config", "presence", "enabled"]) do
-          enabled when is_boolean(enabled) -> enabled
-          _ -> true
-        end
+      is_new_api = new_api?(configuration)
 
-      pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
+      presence_enabled? = Join.presence_enabled?(configuration)
+
+      pg_change_params = pg_change_params(is_new_api, configuration, channel_pid, claims, sub_topic)
 
       opts = %{
         is_new_api: is_new_api,
@@ -98,13 +93,13 @@ defmodule RealtimeWeb.RealtimeChannel do
       state = %{postgres_changes: add_id_to_postgres_changes(pg_change_params)}
 
       assigns = %{
-        ack_broadcast: !!params["config"]["broadcast"]["ack"],
+        ack_broadcast: Join.ack_broadcast?(configuration),
         confirm_token_ref: confirm_token_ref,
         is_new_api: is_new_api,
         pg_sub_ref: nil,
         pg_change_params: pg_change_params,
-        presence_key: presence_key(params),
-        self_broadcast: !!params["config"]["broadcast"]["self"],
+        presence_key: Join.presence_key(configuration),
+        self_broadcast: Join.self_broadcast?(configuration),
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
         presence_enabled?: presence_enabled?
@@ -118,6 +113,9 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:ok, state, assign(socket, assigns)}
     else
+      {:error, :invalid_join_payload, errors, socket} ->
+        log_error(socket, "InvalidJoinPayload", errors)
+
       {:error, :expired_token, msg} ->
         maybe_log_warning(socket, "InvalidJWTToken", msg)
 
@@ -191,6 +189,23 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, error} ->
         log_error(socket, "UnknownErrorOnChannel", error)
         {:error, %{reason: "Unknown Error on Channel"}}
+    end
+  end
+
+  defp configure_socket(socket, params) do
+    case Join.validate(params) do
+      {:ok, configuration} ->
+        socket =
+          socket
+          |> assign_counter()
+          |> assign_presence_counter()
+          |> assign(:private?, Join.private?(configuration))
+          |> assign(:policies, nil)
+
+        {:ok, socket, configuration}
+
+      {:error, :invalid_join_payload, errors} ->
+        {:error, :invalid_join_payload, errors, socket}
     end
   end
 
@@ -531,38 +546,22 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp count(%{assigns: %{rate_counter: counter}}), do: GenCounter.add(counter.id)
 
-  defp presence_key(params) do
-    case params["config"]["presence"]["key"] do
-      key when is_binary(key) and key != "" -> key
-      _ -> UUID.uuid1()
-    end
-  end
-
-  defp assign_access_token(%{assigns: %{headers: headers}} = socket, params) do
-    access_token = Map.get(params, "access_token") || Map.get(params, "user_token")
+  defp assign_access_token(socket, params) do
+    %{assigns: %{tenant_token: tenant_token, headers: headers}} = socket
     {_, header} = Enum.find(headers, {nil, nil}, fn {k, _} -> k == "x-api-key" end)
 
-    case access_token do
-      nil -> assign(socket, :access_token, header)
-      "sb_" <> _ -> assign(socket, :access_token, header)
-      _ -> handle_access_token(socket, params)
-    end
-  end
+    access_token = Map.get(params, "access_token")
+    user_token = Map.get(params, "user_token")
 
-  defp assign_access_token(socket, params), do: handle_access_token(socket, params)
+    access_token =
+      cond do
+        access_token != nil and !String.starts_with?(access_token, "sb_") -> access_token
+        user_token != nil and !String.starts_with?(user_token, "sb_") -> user_token
+        tenant_token != nil and !String.starts_with?(tenant_token, "sb_") -> tenant_token
+        true -> header
+      end
 
-  defp handle_access_token(%{assigns: %{tenant_token: _tenant_token}} = socket, %{"user_token" => user_token})
-       when is_binary(user_token) do
-    assign(socket, :access_token, user_token)
-  end
-
-  defp handle_access_token(%{assigns: %{tenant_token: _tenant_token}} = socket, %{"access_token" => access_token})
-       when is_binary(access_token) do
     assign(socket, :access_token, access_token)
-  end
-
-  defp handle_access_token(%{assigns: %{tenant_token: tenant_token}} = socket, _params) when is_binary(tenant_token) do
-    assign(socket, :access_token, tenant_token)
   end
 
   defp confirm_token(%{assigns: assigns}) do
@@ -631,27 +630,29 @@ defmodule RealtimeWeb.RealtimeChannel do
     })
   end
 
-  defp new_api?(%{"config" => _}), do: true
+  defp new_api?(%Join{config: config}) when not is_nil(config), do: true
   defp new_api?(_), do: false
 
-  defp pg_change_params(true, params, channel_pid, claims, _) do
-    case get_in(params, ["config", "postgres_changes"]) do
-      [_ | _] = params_list ->
-        params_list
-        |> Enum.reject(&is_nil/1)
-        |> Enum.map(fn params ->
-          %{
-            id: UUID.uuid1(),
-            channel_pid: channel_pid,
-            claims: claims,
-            params: params
-          }
-        end)
+  defp pg_change_params(true, %Join{config: %Config{postgres_changes: postgres_changes}}, channel_pid, claims, _)
+       when not is_nil(postgres_changes) do
+    postgres_changes
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(fn %PostgresChange{table: table, event: event, schema: schema, filter: filter} ->
+      params =
+        %{"table" => table, "filter" => filter, "schema" => schema, "event" => event}
+        |> Enum.reject(fn {_, v} -> is_nil(v) end)
+        |> Map.new()
 
-      _ ->
-        []
-    end
+      %{
+        id: UUID.uuid1(),
+        channel_pid: channel_pid,
+        claims: claims,
+        params: params
+      }
+    end)
   end
+
+  defp pg_change_params(true, _, _, _, _), do: []
 
   defp pg_change_params(false, _, channel_pid, claims, sub_topic) do
     params =
