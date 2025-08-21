@@ -20,9 +20,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   defguard can_read_presence?(socket) when is_private?(socket) and socket.assigns.policies.presence.read
 
-  defguard can_write_presence?(socket)
-           when is_private?(socket) and
-                  (is_nil(socket.assigns.policies.presence.write) or socket.assigns.policies.presence.write)
+  defguard can_write_presence?(socket) when is_private?(socket) and socket.assigns.policies.presence.write
 
   @doc """
   Sends presence state to connected clients
@@ -76,8 +74,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     track(socket, payload)
   end
 
-  defp handle_presence_event("track", payload, db_conn, socket)
-       when can_write_presence?(socket) and is_nil(socket.assigns.policies.presence.write) do
+  defp handle_presence_event("track", payload, db_conn, socket) when is_nil(socket.assigns.policies.presence.write) do
     %{assigns: %{authorization_context: authorization_context, policies: policies}} = socket
 
     case Authorization.get_write_authorizations(policies, db_conn, authorization_context) do

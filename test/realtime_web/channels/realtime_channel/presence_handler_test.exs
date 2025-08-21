@@ -82,12 +82,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert TestCanWritePresence.check(socket)
     end
 
-    test "returns true if the socket is a private channel and the presence write policy is nil", %{tenant: tenant} do
-      policies = %Policies{presence: %PresencePolicies{write: nil}}
-      socket = socket_fixture(tenant, random_string(), random_string(), policies: policies, private?: true)
-      assert TestCanWritePresence.check(socket)
-    end
-
     test "returns false if the socket is a private channel and the presence write policy is false", %{tenant: tenant} do
       policies = %Policies{presence: %PresencePolicies{write: false}}
       socket = socket_fixture(tenant, random_string(), random_string(), policies: policies, private?: true)
