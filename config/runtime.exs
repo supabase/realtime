@@ -166,7 +166,10 @@ if config_env() != :test do
         connect_timeout: System.get_env("GEN_RPC_CONNECT_TIMEOUT_IN_MS", "10000") |> String.to_integer(),
         send_timeout: System.get_env("GEN_RPC_SEND_TIMEOUT_IN_MS", "10000") |> String.to_integer(),
         ipv6_only: System.get_env("GEN_RPC_IPV6_ONLY", "false") == "true",
-        socket_ip: address
+        socket_ip: address,
+        max_batch_size: System.get_env("GEN_RPC_MAX_BATCH_SIZE", "0") |> String.to_integer(),
+        compress: System.get_env("GEN_RPC_COMPRESS", "0") |> String.to_integer(),
+        compression_threshold: System.get_env("GEN_RPC_COMPRESSION_THRESHOLD_IN_BYTES", "1000") |> String.to_integer()
 
     _ ->
       raise """
