@@ -304,8 +304,11 @@ defmodule Realtime.Tenants do
       ]
     ]
 
-    %RateCounter.Args{id: {:channel, :authorizations, external_id}, opts: opts}
+    %RateCounter.Args{id: authorizations_per_second_key(external_id), opts: opts}
   end
+
+  @spec authorizations_per_second_key(String.t()) :: {:channel, :authorizations, String.t()}
+  def authorizations_per_second_key(tenant_id), do: {:channel, :authorizations, tenant_id}
 
   defp pool_size(%{extensions: [%{settings: settings} | _]}) do
     Database.pool_size_by_application_name("realtime_connect", settings) || 1
