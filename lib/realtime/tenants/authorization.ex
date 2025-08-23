@@ -133,6 +133,7 @@ defmodule Realtime.Tenants.Authorization do
       role: role
     } = authorization_context
 
+    sub = claims["sub"]
     claims = Jason.encode!(claims)
     headers = headers |> Map.new() |> Jason.encode!()
 
@@ -140,12 +141,13 @@ defmodule Realtime.Tenants.Authorization do
       conn,
       """
       SELECT
-       set_config('role', $1, true),
-       set_config('realtime.topic', $2, true),
-       set_config('request.jwt.claims', $3, true),
-       set_config('request.headers', $4, true)
+        set_config('role', $1, true),
+        set_config('realtime.topic', $2, true),
+        set_config('request.jwt.claims', $3, true),
+        set_config('request.jwt.claim.sub', $4, true),
+        set_config('request.headers', $5, true)
       """,
-      [role, topic, claims, headers]
+      [role, topic, claims, sub, headers]
     )
   end
 

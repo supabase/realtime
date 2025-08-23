@@ -42,6 +42,21 @@ defmodule Realtime.Tenants.AuthorizationTest do
              } == policies
     end
 
+    @tag role: "authenticated",
+         policies: [:authenticated_read_topic_has_user_sub],
+         topic: "ccbdfd51-c5aa-4d61-8c17-647664466a26",
+         sub: "ccbdfd51-c5aa-4d61-8c17-647664466a26"
+    test "authenticated user uid", context do
+      {:ok, policies} =
+        Authorization.get_read_authorizations(
+          %Policies{},
+          context.db_conn,
+          context.authorization_context
+        )
+
+      assert %Policies{broadcast: %BroadcastPolicies{read: true, write: nil}} = policies
+    end
+
     @tag role: "anon",
          policies: [
            :authenticated_read_broadcast_and_presence,
@@ -232,11 +247,11 @@ defmodule Realtime.Tenants.AuthorizationTest do
   def rls_context(context) do
     tenant = Containers.checkout_tenant(run_migrations: true)
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-    topic = random_string()
+    topic = context[:topic] || random_string()
 
     create_rls_policies(db_conn, context.policies, %{topic: topic})
 
-    claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
+    claims = %{"sub" => context[:sub] || random_string(), "role" => context.role, "exp" => Joken.current_time() + 1_000}
 
     authorization_context =
       Authorization.build_authorization_params(%{
@@ -244,7 +259,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
         topic: topic,
         claims: claims,
         headers: [{"header-1", "value-1"}],
-        role: claims.role
+        role: claims["role"]
       })
 
     Realtime.Tenants.Migrations.create_partitions(db_conn)
