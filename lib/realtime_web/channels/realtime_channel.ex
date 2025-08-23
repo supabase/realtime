@@ -476,14 +476,15 @@ defmodule RealtimeWeb.RealtimeChannel do
     RateCounter.new(rate_args)
 
     case RateCounter.get(rate_args) do
-      {:ok, %{avg: avg}} when avg < limits.max_joins_per_second ->
+      {:ok, %{limit: %{triggered: false}}} ->
         GenCounter.add(rate_args.id)
         :ok
 
-      {:ok, %{avg: _}} ->
+      {:ok, %{limit: %{triggered: true}}} ->
         {:error, :too_many_joins}
 
       error ->
+        dbg(error)
         Logging.log_error(socket, "UnknownErrorOnCounter", error)
         {:error, error}
     end

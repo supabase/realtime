@@ -1831,32 +1831,29 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     test "max_joins_per_second limit respected", %{tenant: tenant} do
-      %{max_joins_per_second: max_joins_per_second} = Tenants.get_tenant_by_external_id(tenant.external_id)
-      change_tenant_configuration(tenant, :max_joins_per_second, 1)
-
       {socket, _} = get_connection(tenant, "authenticated")
       config = %{broadcast: %{self: true}, private: false}
       realtime_topic = "realtime:#{random_string()}"
 
       log =
         capture_log(fn ->
-          for _ <- 1..1000 do
+          # Burst of joins that won't be blocked as RateCounter tick won't run
+          for _ <- 1..300 do
             WebsocketClient.join(socket, realtime_topic, %{config: config})
-            1..5 |> Enum.random() |> Process.sleep()
+          end
+
+          # Wait for RateCounter tick
+          Process.sleep(1000)
+          # These ones will be blocked
+          for _ <- 1..300 do
+            WebsocketClient.join(socket, realtime_topic, %{config: config})
           end
 
           assert_receive %Message{
                            event: "phx_reply",
-                           payload: %{
-                             "response" => %{
-                               "reason" => "Too many joins per second"
-                             },
-                             "status" => "error"
-                           }
+                           payload: %{"response" => %{"reason" => "Too many joins per second"}, "status" => "error"}
                          },
                          2000
-
-          change_tenant_configuration(tenant, :max_joins_per_second, max_joins_per_second)
         end)
 
       assert log =~
