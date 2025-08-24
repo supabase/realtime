@@ -167,12 +167,20 @@ defmodule Generators do
     """
   end
 
-  def policy_query(:authenticated_read_topic_has_user_sub, _) do
+  def policy_query(:authenticated_read_matching_user_sub, %{sub: sub}) do
     """
     CREATE POLICY "authenticated_read_topic_has_user_sub"
     ON realtime.messages FOR SELECT
     TO authenticated
-    USING ( (realtime.topic() = (( SELECT auth.uid() AS uid))::text))
+    USING (((SELECT auth.uid() AS uid)::text) = '#{sub}')
+    """
+  end
+
+  def policy_query(:read_matching_user_role, %{role: role}) do
+    """
+    CREATE POLICY "authenticated_read_topic_has_user_role"
+    ON realtime.messages FOR SELECT
+    USING (((SELECT auth.role())::text) = '#{role}')
     """
   end
 

@@ -43,18 +43,54 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
 
     @tag role: "authenticated",
-         policies: [:authenticated_read_topic_has_user_sub],
-         topic: "ccbdfd51-c5aa-4d61-8c17-647664466a26",
+         policies: [:authenticated_read_matching_user_sub],
          sub: "ccbdfd51-c5aa-4d61-8c17-647664466a26"
-    test "authenticated user uid", context do
-      {:ok, policies} =
-        Authorization.get_read_authorizations(
-          %Policies{},
-          context.db_conn,
-          context.authorization_context
-        )
+    test "authenticated user sub is available", context do
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{read: true, write: nil}}} =
+               Authorization.get_read_authorizations(
+                 %Policies{},
+                 context.db_conn,
+                 context.authorization_context
+               )
 
-      assert %Policies{broadcast: %BroadcastPolicies{read: true, write: nil}} = policies
+      authorization_context = %{
+        context.authorization_context
+        | sub: "135f6d25-5840-4266-a8ca-b9a45960e424"
+      }
+
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{read: false, write: nil}}} =
+               Authorization.get_read_authorizations(
+                 %Policies{},
+                 context.db_conn,
+                 authorization_context
+               )
+    end
+
+    @tag role: "authenticated",
+         policies: [:read_matching_user_role]
+    test "user role is exposed", context do
+      # policy role is checking for "authenticated"
+      # set_config is setting request.jwt.claim.role to authenticated as well
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{read: true, write: nil}}} =
+               Authorization.get_read_authorizations(
+                 %Policies{},
+                 context.db_conn,
+                 context.authorization_context
+               )
+
+      authorization_context = %{
+        context.authorization_context
+        | role: "anon"
+      }
+
+      # policy role is checking for "authenticated"
+      # set_config is setting request.jwt.claim.role to anon
+      assert {:ok, %Policies{broadcast: %BroadcastPolicies{read: false, write: nil}}} =
+               Authorization.get_read_authorizations(
+                 %Policies{},
+                 context.db_conn,
+                 authorization_context
+               )
     end
 
     @tag role: "anon",
@@ -249,7 +285,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = context[:topic] || random_string()
 
-    create_rls_policies(db_conn, context.policies, %{topic: topic})
+    create_rls_policies(db_conn, context.policies, %{topic: topic, sub: context[:sub], role: context.role})
 
     claims = %{"sub" => context[:sub] || random_string(), "role" => context.role, "exp" => Joken.current_time() + 1_000}
 
@@ -259,7 +295,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
         topic: topic,
         claims: claims,
         headers: [{"header-1", "value-1"}],
-        role: claims["role"]
+        role: claims["role"],
+        sub: claims["sub"]
       })
 
     Realtime.Tenants.Migrations.create_partitions(db_conn)

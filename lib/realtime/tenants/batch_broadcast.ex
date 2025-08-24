@@ -39,7 +39,8 @@ defmodule Realtime.Tenants.BatchBroadcast do
       tenant_id: tenant.external_id,
       headers: conn.req_headers,
       claims: conn.assigns.claims,
-      role: conn.assigns.role
+      role: conn.assigns.role,
+      sub: conn.assigns.sub
     }
 
     broadcast(auth_params, %Tenant{} = tenant, messages, super_user)
