@@ -23,18 +23,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
          ]
     test "authenticated user has expected policies", context do
       {:ok, policies} =
-        Authorization.get_read_authorizations(
-          %Policies{},
-          context.db_conn,
-          context.authorization_context
-        )
+        Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
       {:ok, policies} =
-        Authorization.get_write_authorizations(
-          policies,
-          context.db_conn,
-          context.authorization_context
-        )
+        Authorization.get_write_authorizations(policies, context.db_conn, context.authorization_context)
 
       assert %Policies{
                broadcast: %BroadcastPolicies{read: true, write: true},
@@ -47,23 +39,12 @@ defmodule Realtime.Tenants.AuthorizationTest do
          sub: "ccbdfd51-c5aa-4d61-8c17-647664466a26"
     test "authenticated user sub is available", context do
       assert {:ok, %Policies{broadcast: %BroadcastPolicies{read: true, write: nil}}} =
-               Authorization.get_read_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
-      authorization_context = %{
-        context.authorization_context
-        | sub: "135f6d25-5840-4266-a8ca-b9a45960e424"
-      }
+      authorization_context = %{context.authorization_context | sub: "135f6d25-5840-4266-a8ca-b9a45960e424"}
 
       assert {:ok, %Policies{broadcast: %BroadcastPolicies{read: false, write: nil}}} =
-               Authorization.get_read_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 authorization_context
-               )
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, authorization_context)
     end
 
     @tag role: "authenticated",
@@ -72,25 +53,14 @@ defmodule Realtime.Tenants.AuthorizationTest do
       # policy role is checking for "authenticated"
       # set_config is setting request.jwt.claim.role to authenticated as well
       assert {:ok, %Policies{broadcast: %BroadcastPolicies{read: true, write: nil}}} =
-               Authorization.get_read_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
-      authorization_context = %{
-        context.authorization_context
-        | role: "anon"
-      }
+      authorization_context = %{context.authorization_context | role: "anon"}
 
       # policy role is checking for "authenticated"
       # set_config is setting request.jwt.claim.role to anon
       assert {:ok, %Policies{broadcast: %BroadcastPolicies{read: false, write: nil}}} =
-               Authorization.get_read_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 authorization_context
-               )
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, authorization_context)
     end
 
     @tag role: "anon",
@@ -100,18 +70,10 @@ defmodule Realtime.Tenants.AuthorizationTest do
          ]
     test "anon user has no policies", context do
       {:ok, policies} =
-        Authorization.get_read_authorizations(
-          %Policies{},
-          context.db_conn,
-          context.authorization_context
-        )
+        Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
       {:ok, policies} =
-        Authorization.get_write_authorizations(
-          policies,
-          context.db_conn,
-          context.authorization_context
-        )
+        Authorization.get_write_authorizations(policies, context.db_conn, context.authorization_context)
 
       assert %Policies{
                broadcast: %BroadcastPolicies{read: false, write: false},
@@ -170,39 +132,19 @@ defmodule Realtime.Tenants.AuthorizationTest do
          policies: [:broken_read_presence, :broken_write_presence]
     test "broken RLS policy sets policies to false and shows error to user", context do
       assert {:error, :rls_policy_error, %Postgrex.Error{}} =
-               Authorization.get_read_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
       assert {:error, :rls_policy_error, %Postgrex.Error{}} =
-               Authorization.get_write_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
       assert {:error, :rls_policy_error, %Postgrex.Error{}} =
-               Authorization.get_read_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
       assert {:error, :rls_policy_error, %Postgrex.Error{}} =
-               Authorization.get_write_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
       assert {:error, :rls_policy_error, %Postgrex.Error{}} =
-               Authorization.get_write_authorizations(
-                 %Policies{},
-                 context.db_conn,
-                 context.authorization_context
-               )
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context)
     end
   end
 
@@ -213,19 +155,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
            :authenticated_write_broadcast_and_presence
          ]
     test "authenticated user has expected policies", context do
-      {:ok, _} =
-        Authorization.get_read_authorizations(
-          %Policies{},
-          context.db_conn,
-          context.authorization_context
-        )
-
-      {:ok, _} =
-        Authorization.get_write_authorizations(
-          %Policies{},
-          context.db_conn,
-          context.authorization_context
-        )
+      {:ok, _} = Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+      {:ok, _} = Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
       {:ok, db_conn} = Database.connect(context.tenant, "realtime_test")
       assert {:ok, []} = Repo.all(db_conn, Message, Message)
@@ -256,19 +187,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
         %{}
       )
 
-      {:ok, _} =
-        Authorization.get_read_authorizations(
-          %Policies{},
-          context.db_conn,
-          context.authorization_context
-        )
-
-      {:ok, _} =
-        Authorization.get_write_authorizations(
-          %Policies{},
-          context.db_conn,
-          context.authorization_context
-        )
+      {:ok, _} = Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+      {:ok, _} = Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context)
 
       external_id = context.authorization_context.tenant_id
 

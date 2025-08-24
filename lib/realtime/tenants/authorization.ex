@@ -141,7 +141,7 @@ defmodule Realtime.Tenants.Authorization do
     claims = Jason.encode!(claims)
     headers = headers |> Map.new() |> Jason.encode!()
 
-    Postgrex.query(
+    Postgrex.query!(
       conn,
       """
       SELECT
@@ -152,7 +152,7 @@ defmodule Realtime.Tenants.Authorization do
         set_config('request.jwt.claim.role', $5, true),
         set_config('request.headers', $6, true)
       """,
-      [role, topic, claims, sub, role, headers] |> dbg()
+      [role, topic, claims, sub, role, headers]
     )
   end
 
