@@ -127,8 +127,7 @@ defmodule Realtime.Tenants.Authorization do
   * request.jwt.claims: The claims of the JWT token
   * request.headers: The headers of the request
   """
-  @spec set_conn_config(DBConnection.t(), t()) ::
-          {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
+  @spec set_conn_config(DBConnection.t(), t()) :: Postgrex.Result.t()
   def set_conn_config(conn, authorization_context) do
     %__MODULE__{
       topic: topic,
