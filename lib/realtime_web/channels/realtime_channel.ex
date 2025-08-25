@@ -21,9 +21,9 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
 
-  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join
-  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join.Config
-  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join.Config.PostgresChange
+  alias RealtimeWeb.Channels.Payloads.Join
+  alias RealtimeWeb.Channels.Payloads.Config
+  alias RealtimeWeb.Channels.Payloads.PostgresChange
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
@@ -555,9 +555,9 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     access_token =
       cond do
-        access_token != nil and !String.starts_with?(access_token, "sb_") -> access_token
-        user_token != nil and !String.starts_with?(user_token, "sb_") -> user_token
-        tenant_token != nil and !String.starts_with?(tenant_token, "sb_") -> tenant_token
+        is_binary(access_token) and !String.starts_with?(access_token, "sb_") -> access_token
+        is_binary(user_token) and !String.starts_with?(user_token, "sb_") -> user_token
+        is_binary(tenant_token) and !String.starts_with?(tenant_token, "sb_") -> tenant_token
         true -> header
       end
 

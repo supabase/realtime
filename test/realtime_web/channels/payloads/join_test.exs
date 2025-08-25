@@ -1,13 +1,13 @@
-defmodule RealtimeWeb.Channels.RealtimeChannel.Payloads.JoinTest do
+defmodule RealtimeWeb.Channels.Payloads.JoinTest do
   use ExUnit.Case
 
   import Generators
 
-  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join
-  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join.Config
-  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join.Config.Broadcast
-  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join.Config.Presence
-  alias RealtimeWeb.Channels.RealtimeChannel.Payloads.Join.Config.PostgresChange
+  alias RealtimeWeb.Channels.Payloads.Join
+  alias RealtimeWeb.Channels.Payloads.Config
+  alias RealtimeWeb.Channels.Payloads.Broadcast
+  alias RealtimeWeb.Channels.Payloads.Presence
+  alias RealtimeWeb.Channels.Payloads.PostgresChange
 
   describe "validate/1" do
     test "valid payload allows join" do
@@ -54,6 +54,12 @@ defmodule RealtimeWeb.Channels.RealtimeChannel.Payloads.JoinTest do
 
       assert key != ""
       assert is_binary(key)
+    end
+
+    test "missing enabled presence defaults to true" do
+      config = %{"config" => %{"presence" => %{}}}
+
+      assert {:ok, %Join{config: %Config{presence: %Presence{enabled: true}}}} = Join.validate(config)
     end
 
     test "invalid payload returns errors" do
