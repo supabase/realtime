@@ -158,21 +158,37 @@ defmodule Generators do
     """
   end
 
-  def policy_query(:authenticated_read_topic, %{topic: name}) do
+  def policy_query(:authenticated_read_matching_user_sub, %{sub: sub}) do
     """
-    CREATE POLICY "authenticated_read_topic_#{name}"
+    CREATE POLICY "authenticated_read_topic_has_user_sub"
     ON realtime.messages FOR SELECT
     TO authenticated
-    USING ( realtime.topic() = '#{name}' );
+    USING (((SELECT auth.uid() AS uid)::text) = '#{sub}')
     """
   end
 
-  def policy_query(:authenticated_write_topic, %{topic: name}) do
+  def policy_query(:read_matching_user_role, %{role: role}) do
     """
-    CREATE POLICY "authenticated_write_topic_#{name}"
+    CREATE POLICY "authenticated_read_topic_has_user_role"
+    ON realtime.messages FOR SELECT
+    USING (((SELECT auth.role())::text) = '#{role}')
+    """
+  end
+
+  def policy_query(:authenticated_write_matching_user_sub, %{sub: sub}) do
+    """
+    CREATE POLICY "authenticated_write_topic_has_user_sub"
     ON realtime.messages FOR INSERT
     TO authenticated
-    WITH CHECK ( realtime.topic() = '#{name}' );
+    WITH CHECK (((SELECT auth.uid() AS uid)::text) = '#{sub}')
+    """
+  end
+
+  def policy_query(:write_matching_user_role, %{role: role}) do
+    """
+    CREATE POLICY "authenticated_write_topic_has_user_role"
+    ON realtime.messages FOR INSERT
+    WITH CHECK (((SELECT auth.role())::text) = '#{role}')
     """
   end
 

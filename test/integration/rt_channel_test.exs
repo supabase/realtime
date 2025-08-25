@@ -1864,6 +1864,45 @@ defmodule Realtime.Integration.RtChannelTest do
   describe "authorization handling" do
     setup [:rls_context]
 
+    @tag policies: [:read_matching_user_role, :write_matching_user_role], role: "anon"
+    test "role policies are respected when accessing the channel", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant, "anon")
+      config = %{broadcast: %{self: true}, private: true, presence: %{enabled: false}}
+      topic = random_string()
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
+
+      {socket, _} = get_connection(tenant, "potato")
+      topic = random_string()
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+      refute_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
+    end
+
+    @tag policies: [:authenticated_read_matching_user_sub, :authenticated_write_matching_user_sub],
+         sub: Ecto.UUID.generate()
+    test "sub policies are respected when accessing the channel", %{tenant: tenant, sub: sub} do
+      {socket, _} = get_connection(tenant, "authenticated", %{sub: sub})
+      config = %{broadcast: %{self: true}, private: true, presence: %{enabled: false}}
+      topic = random_string()
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
+
+      {socket, _} = get_connection(tenant, "authenticated", %{sub: Ecto.UUID.generate()})
+      topic = random_string()
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+      refute_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
+    end
+
     @tag role: "authenticated",
          policies: [:broken_read_presence, :broken_write_presence]
 
@@ -2305,10 +2344,13 @@ defmodule Realtime.Integration.RtChannelTest do
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     clean_table(db_conn, "realtime", "messages")
     topic = Map.get(context, :topic, random_string())
+    policies = Map.get(context, :policies, nil)
+    role = Map.get(context, :role, nil)
+    sub = Map.get(context, :sub, nil)
 
-    if policies = context[:policies], do: create_rls_policies(db_conn, policies, %{topic: topic})
+    if policies, do: create_rls_policies(db_conn, policies, %{topic: topic, role: role, sub: sub})
 
-    %{topic: topic}
+    %{topic: topic, role: role, sub: sub}
   end
 
   defp setup_trigger(%{tenant: tenant, topic: topic}) do

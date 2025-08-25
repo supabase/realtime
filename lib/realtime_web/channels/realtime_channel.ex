@@ -715,7 +715,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         topic: topic,
         headers: Map.get(socket.assigns, :headers, []),
         claims: claims,
-        role: claims["role"]
+        role: claims["role"],
+        sub: claims["sub"]
       })
 
     assign(socket, :authorization_context, authorization_context)

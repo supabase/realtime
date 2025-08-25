@@ -18,24 +18,27 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.GenRpc
   alias Realtime.Tenants.Authorization.Policies
 
-  defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role]
+  defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role, :sub]
 
   @type t :: %__MODULE__{
           :tenant_id => binary | nil,
           :topic => binary | nil,
           :claims => map,
           :headers => list({binary, binary}),
-          :role => binary
+          :role => binary,
+          :sub => binary | nil
         }
 
   @doc """
   Builds a new authorization struct which will be used to retain the information required to check Policies.
 
   Requires a map with the following keys:
+  * tenant_id: The tenant id
   * topic: The name of the channel being accessed taken from the request
-  * headers: Request headers when the connection was made or WS was updated
+  * headers: Request headers when the connection was made or WS was upgraded
   * claims: JWT claims
-  * role: JWT role
+  * role: JWT role claim
+  * sub: JWT sub claim
   """
   @spec build_authorization_params(map()) :: t()
   def build_authorization_params(map) do
@@ -44,7 +47,8 @@ defmodule Realtime.Tenants.Authorization do
       topic: Map.get(map, :topic),
       headers: Map.get(map, :headers),
       claims: Map.get(map, :claims),
-      role: Map.get(map, :role)
+      role: Map.get(map, :role),
+      sub: Map.get(map, :sub)
     }
   end
 
@@ -123,29 +127,31 @@ defmodule Realtime.Tenants.Authorization do
   * request.jwt.claims: The claims of the JWT token
   * request.headers: The headers of the request
   """
-  @spec set_conn_config(DBConnection.t(), t()) ::
-          {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
+  @spec set_conn_config(DBConnection.t(), t()) :: Postgrex.Result.t()
   def set_conn_config(conn, authorization_context) do
     %__MODULE__{
       topic: topic,
       headers: headers,
       claims: claims,
-      role: role
+      role: role,
+      sub: sub
     } = authorization_context
 
     claims = Jason.encode!(claims)
     headers = headers |> Map.new() |> Jason.encode!()
 
-    Postgrex.query(
+    Postgrex.query!(
       conn,
       """
       SELECT
-       set_config('role', $1, true),
-       set_config('realtime.topic', $2, true),
-       set_config('request.jwt.claims', $3, true),
-       set_config('request.headers', $4, true)
+        set_config('role', $1, true),
+        set_config('realtime.topic', $2, true),
+        set_config('request.jwt.claims', $3, true),
+        set_config('request.jwt.claim.sub', $4, true),
+        set_config('request.jwt.claim.role', $5, true),
+        set_config('request.headers', $6, true)
       """,
-      [role, topic, claims, headers]
+      [role, topic, claims, sub, role, headers]
     )
   end
 
