@@ -24,6 +24,9 @@
 
 ## Status
 
+![GitHub License](https://img.shields.io/github/license/supabase/realtime)
+[![Coverage Status](https://coveralls.io/repos/github/supabase/realtime/badge.svg?branch=main)](https://coveralls.io/github/supabase/realtime?branch=main)
+
 | Features         | v1  | v2  | Status |
 | ---------------- | --- | --- | ------ |
 | Postgres Changes | ✔   | ✔   | GA     |
