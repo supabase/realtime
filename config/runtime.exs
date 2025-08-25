@@ -1,7 +1,21 @@
 import Config
 
-config :logflare_logger_backend,
-  url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
+defmodule Env do
+  def get_integer(env, default) do
+    value = System.get_env(env)
+    if value, do: String.to_integer(env), else: default
+  end
+
+  def get_charlist(env, default) do
+    value = System.get_env(env)
+    if value, do: String.to_charlist(env), else: default
+  end
+
+  def get_boolean(env, default) do
+    value = System.get_env(env)
+    if value, do: String.to_existing_atom(value), else: default
+  end
+end
 
 app_name = System.get_env("APP_NAME", "")
 default_db_host = System.get_env("DB_HOST", "127.0.0.1")
@@ -11,62 +25,44 @@ database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
 db_version = System.get_env("DB_IP_VERSION")
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
+db_ssl_enabled? = Env.get_boolean("DB_SSL", false)
+db_ssl_ca_cert = System.get_env("DB_SSL_CA_CERT")
 
 ssl_opts =
-  if System.get_env("DB_SSL", "false") == "true" do
-    if cert = System.get_env("DB_SSL_CA_CERT") do
-      [cacertfile: cert]
-    else
-      [verify: :verify_none]
-    end
-  else
-    false
+  cond do
+    db_ssl_enabled? and is_binary(db_ssl_ca_cert) -> [cacertfile: db_ssl_ca_cert]
+    db_ssl_enabled? -> [verify: :verify_none]
+    true -> false
   end
 
-tenant_cache_expiration =
-  System.get_env("TENANT_CACHE_EXPIRATION_IN_MS", "30000") |> String.to_integer()
-
-migration_partition_slots =
-  System.get_env("MIGRATION_PARTITION_SLOTS", "#{System.schedulers_online() * 2}") |> String.to_integer()
-
-connect_partition_slots =
-  System.get_env("CONNECT_PARTITION_SLOTS", "#{System.schedulers_online() * 2}") |> String.to_integer()
-
-# defaults to 30 minutes
-metrics_cleaner_schedule_timer_in_ms =
-  System.get_env("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", "1800000") |> String.to_integer()
-
-metrics_rpc_timeout_in_ms =
-  System.get_env("METRICS_RPC_TIMEOUT_IN_MS", "15000") |> String.to_integer()
-
-rebalance_check_interval_in_ms =
-  System.get_env("REBALANCE_CHECK_INTERVAL_IN_MS", to_string(:timer.minutes(10))) |> String.to_integer()
+tenant_cache_expiration = Env.get_integer("TENANT_CACHE_EXPIRATION_IN_MS", :timer.seconds(30))
+migration_partition_slots = Env.get_integer("MIGRATION_PARTITION_SLOTS", System.schedulers_online() * 2)
+connect_partition_slots = Env.get_integer("CONNECT_PARTITION_SLOTS", System.schedulers_online() * 2)
+metrics_cleaner_schedule_timer_in_ms = Env.get_integer("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", :timer.minutes(30))
+metrics_rpc_timeout_in_ms = Env.get_integer("METRICS_RPC_TIMEOUT_IN_MS", :timer.seconds(15))
+rebalance_check_interval_in_ms = Env.get_integer("REBALANCE_CHECK_INTERVAL_IN_MS", :timer.seconds(10))
+tenant_max_bytes_per_second = Env.get_integer("TENANT_MAX_BYTES_PER_SECOND", 100_000)
+tenant_max_channels_per_client = Env.get_integer("TENANT_MAX_CHANNELS_PER_CLIENT", 100)
+tenant_max_concurrent_users = Env.get_integer("TENANT_MAX_CONCURRENT_USERS", 200)
+tenant_max_events_per_second = Env.get_integer("TENANT_MAX_EVENTS_PER_SECOND", 100)
+tenant_max_joins_per_second = Env.get_integer("TENANT_MAX_JOINS_PER_SECOND", 100)
+rpc_timeout = Env.get_integer("RPC_TIMEOUT", :timer.seconds(30))
+max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
+run_janitor? = Env.get_boolean("RUN_JANITOR", false)
+janitor_schedule_randomize = Env.get_boolean("JANITOR_SCHEDULE_RANDOMIZE", true)
+janitor_max_children = Env.get_integer("JANITOR_MAX_CHILDREN", 5)
+janitor_chunk_size = Env.get_integer("JANITOR_CHUNK_SIZE", 10)
+janitor_run_after_in_ms = Env.get_integer("JANITOR_RUN_AFTER_IN_MS", :timer.minutes(10))
+janitor_children_timeout = Env.get_integer("JANITOR_CHILDREN_TIMEOUT", :timer.seconds(5))
+janitor_schedule_timer = Env.get_integer("JANITOR_SCHEDULE_TIMER_IN_MS", :timer.hours(4))
 
 disconnect_socket_on_no_channels_interval_in_ms =
-  System.get_env("DISCONNECT_SOCKET_ON_NO_CHANNELS_INTERVAL_IN_MS", "30000") |> String.to_integer()
+  Env.get_integer("DISCONNECT_SOCKET_ON_NO_CHANNELS_INTERVAL_IN_MS", :timer.seconds(30))
 
-tenant_max_bytes_per_second = System.get_env("TENANT_MAX_BYTES_PER_SECOND", "100000") |> String.to_integer()
-tenant_max_channels_per_client = System.get_env("TENANT_MAX_CHANNELS_PER_CLIENT", "100") |> String.to_integer()
-tenant_max_concurrent_users = System.get_env("TENANT_MAX_CONCURRENT_USERS", "200") |> String.to_integer()
-tenant_max_events_per_second = System.get_env("TENANT_MAX_EVENTS_PER_SECOND", "100") |> String.to_integer()
-tenant_max_joins_per_second = System.get_env("TENANT_MAX_JOINS_PER_SECOND", "100") |> String.to_integer()
-rpc_timeout = System.get_env("RPC_TIMEOUT", "30000") |> String.to_integer()
-max_gen_rpc_clients = System.get_env("MAX_GEN_RPC_CLIENTS", "5") |> String.to_integer()
-run_janitor? = System.get_env("RUN_JANITOR", "false") == "true"
-janitor_schedule_randomize = System.get_env("JANITOR_SCHEDULE_RANDOMIZE", "true") == "true"
-janitor_max_children = System.get_env("JANITOR_MAX_CHILDREN", "5") |> String.to_integer()
-janitor_chunk_size = System.get_env("JANITOR_CHUNK_SIZE", "10") |> String.to_integer()
-# defaults to 10 minutes
-janitor_run_after_in_ms = System.get_env("JANITOR_RUN_AFTER_IN_MS", "600000") |> String.to_integer()
-# defaults to 5 seconds
-janitor_children_timeout = System.get_env("JANITOR_CHILDREN_TIMEOUT", "5000") |> String.to_integer()
-# 4 hours by default
-janitor_schedule_timer = System.get_env("JANITOR_SCHEDULE_TIMER_IN_MS", "14400000") |> String.to_integer()
-# defaults to 10 minutes
 no_channel_timeout_in_ms =
   if config_env() == :test,
-    do: 3000,
-    else: System.get_env("NO_CHANNEL_TIMEOUT_IN_MS", "600000") |> String.to_integer()
+    do: :timer.seconds(3),
+    else: Env.get_integer("NO_CHANNEL_TIMEOUT_IN_MS", :timer.minutes(10))
 
 if !(db_version in [nil, "ipv6", "ipv4"]),
   do: raise("Invalid IP version, please set either ipv6 or ipv4")
@@ -103,58 +99,91 @@ config :realtime,
   max_gen_rpc_clients: max_gen_rpc_clients,
   no_channel_timeout_in_ms: no_channel_timeout_in_ms
 
-if config_env() == :test || !run_janitor? do
-  config :realtime, run_janitor: false
-else
+if config_env() != :test && run_janitor? do
   config :realtime,
-    # disabled for now by default
-    run_janitor: run_janitor?,
+    run_janitor: true,
     janitor_schedule_randomize: janitor_schedule_randomize,
     janitor_max_children: janitor_max_children,
     janitor_chunk_size: janitor_chunk_size,
-    # defaults the runner to only start after 10 minutes
     janitor_run_after_in_ms: janitor_run_after_in_ms,
     janitor_children_timeout: janitor_children_timeout,
-    # defaults to 4 hours
     janitor_schedule_timer: janitor_schedule_timer
 end
 
-if config_env() == :prod do
-  secret_key_base =
-    System.get_env("SECRET_KEY_BASE") ||
-      raise """
-      environment variable SECRET_KEY_BASE is missing.
-      You can generate one by calling: mix phx.gen.secret
-      """
-
-  if app_name == "" do
-    raise "APP_NAME not available"
+default_cluster_strategy =
+  case config_env() do
+    :prod -> "POSTGRES"
+    _ -> "EPMD"
   end
 
-  config :realtime, RealtimeWeb.Endpoint,
-    server: true,
-    url: [host: "#{app_name}.fly.dev", port: 80],
-    http: [
-      compress: true,
-      port: String.to_integer(System.get_env("PORT") || "4000"),
-      protocol_options: [
-        max_header_value_length: String.to_integer(System.get_env("MAX_HEADER_LENGTH") || "4096")
-      ],
-      transport_options: [
-        # max_connection is per connection supervisor
-        # num_conns_sups defaults to num_acceptors
-        # total conns accepted here is max_connections * num_acceptors
-        # ref: https://ninenines.eu/docs/en/ranch/2.0/manual/ranch/
-        max_connections: String.to_integer(System.get_env("MAX_CONNECTIONS") || "1000"),
-        num_acceptors: String.to_integer(System.get_env("NUM_ACCEPTORS") || "100"),
-        # IMPORTANT: support IPv6 addresses
-        socket_opts: [:inet6]
-      ]
-    ],
-    check_origin: false,
-    secret_key_base: secret_key_base
+cluster_topologies =
+  System.get_env("CLUSTER_STRATEGIES", default_cluster_strategy)
+  |> String.upcase()
+  |> String.split(",")
+  |> Enum.reduce([], fn strategy, acc ->
+    strategy
+    |> String.trim()
+    |> then(fn
+      "DNS" ->
+        [
+          dns: [
+            strategy: Cluster.Strategy.DNSPoll,
+            config: [polling_interval: 5_000, query: System.get_env("DNS_NODES"), node_basename: app_name]
+          ]
+        ] ++ acc
+
+      "POSTGRES" ->
+        [
+          postgres: [
+            strategy: LibclusterPostgres.Strategy,
+            config: [
+              hostname: default_db_host,
+              username: username,
+              password: password,
+              database: database,
+              port: port,
+              parameters: [application_name: "cluster_node_#{node()}"],
+              socket_options: socket_options,
+              ssl: ssl_opts,
+              heartbeat_interval: 5_000
+            ]
+          ]
+        ] ++ acc
+
+      "EPMD" ->
+        [
+          dev: [
+            strategy: Cluster.Strategy.Epmd,
+            config: [hosts: [:"orange@127.0.0.1", :"pink@127.0.0.1"]],
+            connect: {:net_kernel, :connect_node, []},
+            disconnect: {:net_kernel, :disconnect_node, []}
+          ]
+        ] ++ acc
+
+      _ ->
+        acc
+    end)
+  end)
+
+# Setup Logging
+
+if System.get_env("LOGS_ENGINE") == "logflare" do
+  config :logflare_logger_backend, url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
+
+  if !System.get_env("LOGFLARE_API_KEY") or !System.get_env("LOGFLARE_SOURCE_ID") do
+    raise """
+    Environment variable LOGFLARE_API_KEY or LOGFLARE_SOURCE_ID is missing.
+    Check those variables or choose another LOGS_ENGINE.
+    """
+  end
+
+  config :logger,
+    sync_threshold: 6_000,
+    discard_threshold: 6_000,
+    backends: [LogflareLogger.HttpBackend]
 end
 
+# Setup production and development environments
 if config_env() != :test do
   gen_rpc_socket_ip = System.get_env("GEN_RPC_SOCKET_IP", "0.0.0.0") |> to_charlist()
 
@@ -180,8 +209,6 @@ if config_env() != :test do
 
   config :logger, level: System.get_env("LOG_LEVEL", "info") |> String.to_existing_atom()
 
-  platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws, else: :fly
-
   config :realtime,
     request_id_baggage_key: System.get_env("REQUEST_ID_BAGGAGE_KEY", "request-id"),
     jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
@@ -191,12 +218,39 @@ if config_env() != :test do
     metrics_jwt_secret: System.get_env("METRICS_JWT_SECRET"),
     db_enc_key: System.get_env("DB_ENC_KEY"),
     region: System.get_env("REGION"),
-    prom_poll_rate: System.get_env("PROM_POLL_RATE", "5000") |> String.to_integer(),
-    platform: platform,
+    prom_poll_rate: Env.get_integer("PROM_POLL_RATE", 5000),
     slot_name_suffix: slot_name_suffix
+end
 
-  queue_target = System.get_env("DB_QUEUE_TARGET", "5000") |> String.to_integer()
-  queue_interval = System.get_env("DB_QUEUE_INTERVAL", "5000") |> String.to_integer()
+# Setup Production
+
+if config_env() == :prod do
+  config :libcluster, debug: false, topologies: cluster_topologies
+  secret_key_base = System.fetch_env!("SECRET_KEY_BASE")
+  if app_name == "", do: raise("APP_NAME not available")
+
+  config :realtime, RealtimeWeb.Endpoint,
+    server: true,
+    url: [host: "#{app_name}.supabase.co", port: 443],
+    http: [
+      compress: true,
+      port: Env.get_integer("PORT", 443),
+      protocol_options: [
+        max_header_value_length: Env.get_integer("MAX_HEADER_LENGTH", 4096)
+      ],
+      transport_options: [
+        max_connections: Env.get_integer("MAX_CONNECTIONS", 1000),
+        num_acceptors: Env.get_integer("NUM_ACCEPTORS", 100),
+        socket_opts: [:inet6]
+      ]
+    ],
+    check_origin: false,
+    secret_key_base: secret_key_base
+
+  # Setup Database
+  queue_target = Env.get_integer("DB_QUEUE_TARGET", 5000)
+  queue_interval = Env.get_integer("DB_QUEUE_INTERVAL", 5000)
+  pool_size = Env.get_integer("DB_POOL_SIZE", 5)
 
   after_connect_query_args =
     case System.get_env("DB_AFTER_CONNECT_QUERY") do
@@ -210,128 +264,34 @@ if config_env() != :test do
     password: password,
     database: database,
     port: port,
-    pool_size: System.get_env("DB_POOL_SIZE", "5") |> String.to_integer(),
+    pool_size: pool_size,
     queue_target: queue_target,
     queue_interval: queue_interval,
-    parameters: [
-      application_name: "supabase_mt_realtime"
-    ],
+    parameters: [application_name: "supabase_mt_realtime"],
     after_connect: after_connect_query_args,
     socket_options: socket_options,
     ssl: ssl_opts
 
-  replica_repos = %{
-    Realtime.Repo.Replica.FRA => System.get_env("DB_HOST_REPLICA_FRA", default_db_host),
-    Realtime.Repo.Replica.IAD => System.get_env("DB_HOST_REPLICA_IAD", default_db_host),
-    Realtime.Repo.Replica.SIN => System.get_env("DB_HOST_REPLICA_SIN", default_db_host),
-    Realtime.Repo.Replica.SJC => System.get_env("DB_HOST_REPLICA_SJC", default_db_host),
-    Realtime.Repo.Replica.Singapore => System.get_env("DB_HOST_REPLICA_SIN", default_db_host),
-    Realtime.Repo.Replica.London => System.get_env("DB_HOST_REPLICA_FRA", default_db_host),
-    Realtime.Repo.Replica.NorthVirginia => System.get_env("DB_HOST_REPLICA_IAD", default_db_host),
-    Realtime.Repo.Replica.Oregon => System.get_env("DB_HOST_REPLICA_SJC", default_db_host),
-    Realtime.Repo.Replica.SanJose => System.get_env("DB_HOST_REPLICA_SJC", default_db_host),
-    Realtime.Repo.Replica.Local => default_db_host
-  }
+  alias Realtime.Repo.Replica
+
+  replicas_hosts = Replica.replica_hosts(System.get_env())
+  replicas_regions = Replica.replica_regions(System.get_env())
 
   # username, password, database, and port must match primary credentials
-  for {replica_repo, hostname} <- replica_repos do
-    config :realtime, replica_repo,
+  for {module, hostname} <- replicas_hosts do
+    config :realtime, module,
       hostname: hostname,
       username: username,
       password: password,
       database: database,
       port: port,
-      pool_size: System.get_env("DB_REPLICA_POOL_SIZE", "5") |> String.to_integer(),
+      pool_size: Env.get_integer("DB_REPLICA_POOL_SIZE", 5),
       queue_target: queue_target,
       queue_interval: queue_interval,
-      parameters: [
-        application_name: "supabase_mt_realtime_ro"
-      ],
+      parameters: [application_name: "supabase_mt_realtime_ro"],
       socket_options: socket_options,
       ssl: ssl_opts
   end
-end
 
-default_cluster_strategy =
-  config_env()
-  |> case do
-    :prod -> "DNS"
-    _ -> "EPMD"
-  end
-
-cluster_topologies =
-  System.get_env("CLUSTER_STRATEGIES", default_cluster_strategy)
-  |> String.upcase()
-  |> String.split(",")
-  |> Enum.reduce([], fn strategy, acc ->
-    strategy
-    |> String.trim()
-    |> case do
-      "DNS" ->
-        [
-          fly6pn: [
-            strategy: Cluster.Strategy.DNSPoll,
-            config: [
-              polling_interval: 5_000,
-              query: System.get_env("DNS_NODES"),
-              node_basename: app_name
-            ]
-          ]
-        ] ++ acc
-
-      "POSTGRES" ->
-        [
-          postgres: [
-            strategy: LibclusterPostgres.Strategy,
-            config: [
-              hostname: default_db_host,
-              username: username,
-              password: password,
-              database: database,
-              port: port,
-              parameters: [
-                application_name: "cluster_node_#{node()}"
-              ],
-              socket_options: socket_options,
-              ssl: ssl_opts,
-              heartbeat_interval: 5_000
-            ]
-          ]
-        ] ++ acc
-
-      "EPMD" ->
-        [
-          dev: [
-            strategy: Cluster.Strategy.Epmd,
-            config: [
-              hosts: [:"orange@127.0.0.1", :"pink@127.0.0.1"]
-            ],
-            connect: {:net_kernel, :connect_node, []},
-            disconnect: {:net_kernel, :disconnect_node, []}
-          ]
-        ] ++ acc
-
-      _ ->
-        acc
-    end
-  end)
-
-if config_env() == :prod do
-  config :libcluster,
-    debug: false,
-    topologies: cluster_topologies
-end
-
-if System.get_env("LOGS_ENGINE") == "logflare" do
-  if !System.get_env("LOGFLARE_API_KEY") or !System.get_env("LOGFLARE_SOURCE_ID") do
-    raise """
-    Environment variable LOGFLARE_API_KEY or LOGFLARE_SOURCE_ID is missing.
-    Check those variables or choose another LOGS_ENGINE.
-    """
-  end
-
-  config :logger,
-    sync_threshold: 6_000,
-    discard_threshold: 6_000,
-    backends: [LogflareLogger.HttpBackend]
+  config :realtime, Realtime.ReplicaRepo, targets: replicas_regions
 end

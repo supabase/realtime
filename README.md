@@ -184,8 +184,21 @@ If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000
 | MAX_GEN_RPC_CLIENTS                             | number  | Max amount of `gen_rpc` TCP connections per node-to-node channel                                                                                                                                                                                                                                                                |
 | REBALANCE_CHECK_INTERVAL_IN_MS                  | number  | Time in ms to check if process is in the right region                                                                                                                                                                                                                                                                           |
 | DISCONNECT_SOCKET_ON_NO_CHANNELS_INTERVAL_IN_MS | number  | Time in ms to check if a socket has no channels open and if so, disconnect it                                                                                                                                                                                                                                                   |
+| DB_HOST_REPLICA_HOST_<REGION>                   | string  | Hostname of the replica database for a given region.                                                                                                                                                                                                                                                                           |
+| DB_HOST_REPLICA_TARGET_REGIONS_<REGION>         | string  | Comma separated list of regions that the replica database for a given region should replicate to.                                                                                                                                                                                                                                 |
+| DB_REPLICA_POOL_SIZE                            | number  | Sets the number of connections in the database pool for the replica databases. Defaults to '5'.                                                                                                                                                                                                                                      |
 
 The OpenTelemetry variables mentioned above are not an exhaustive list of all [supported environment variables](https://opentelemetry.io/docs/languages/sdk-configuration/).
+### Read Replica setup
+
+Realtime supports setting up read replicas per region using environment variables. For example, if you want to set up a read replica for the `us-east-1` region, you can set the following environment variables:
+
+```bash
+export DB_HOST_REPLICA_HOST_us-east-1='127.0.0.1'
+export DB_HOST_REPLICA_TARGET_REGIONS_us-east-1='us-east-1,us-east-2,us-east-3'
+```
+
+This will inform realtime that nodes connected to the `us-east-1` region will be able to connect to the replica database for the `us-east-1` region. If the region is not specified, the we will set the main repository as the default.
 
 ## WebSocket URL
 

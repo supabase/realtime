@@ -127,19 +127,18 @@ defmodule Realtime.Application do
   end
 
   defp janitor_tasks do
-    if Application.fetch_env!(:realtime, :run_janitor) do
-      janitor_max_children =
-        Application.get_env(:realtime, :janitor_max_children)
-
-      janitor_children_timeout =
-        Application.get_env(:realtime, :janitor_children_timeout)
+    if Application.get_env(:realtime, :run_janitor) do
+      janitor_max_children = Application.get_env(:realtime, :janitor_max_children)
+      janitor_children_timeout = Application.get_env(:realtime, :janitor_children_timeout)
 
       [
-        {Task.Supervisor,
-         name: Realtime.Tenants.Janitor.TaskSupervisor,
-         max_children: janitor_max_children,
-         max_seconds: janitor_children_timeout,
-         max_restarts: 1},
+        {
+          Task.Supervisor,
+          name: Realtime.Tenants.Janitor.TaskSupervisor,
+          max_children: janitor_max_children,
+          max_seconds: janitor_children_timeout,
+          max_restarts: 1
+        },
         Realtime.Tenants.Janitor,
         Realtime.MetricsCleaner
       ]
