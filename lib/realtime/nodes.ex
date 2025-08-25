@@ -27,11 +27,6 @@ defmodule Realtime.Nodes do
   def platform_region_translator(nil), do: nil
 
   def platform_region_translator(tenant_region) when is_binary(tenant_region) do
-    platform = Application.get_env(:realtime, :platform)
-    region_mapping(platform, tenant_region)
-  end
-
-  defp region_mapping(:aws, tenant_region) do
     case tenant_region do
       "ap-east-1" -> "ap-southeast-1"
       "ap-northeast-1" -> "ap-southeast-1"
@@ -54,28 +49,6 @@ defmodule Realtime.Nodes do
       _ -> nil
     end
   end
-
-  defp region_mapping(:fly, tenant_region) do
-    case tenant_region do
-      "us-east-1" -> "iad"
-      "us-west-1" -> "sea"
-      "sa-east-1" -> "iad"
-      "ca-central-1" -> "iad"
-      "ap-southeast-1" -> "syd"
-      "ap-northeast-1" -> "syd"
-      "ap-northeast-2" -> "syd"
-      "ap-southeast-2" -> "syd"
-      "ap-east-1" -> "syd"
-      "ap-south-1" -> "syd"
-      "eu-west-1" -> "lhr"
-      "eu-west-2" -> "lhr"
-      "eu-west-3" -> "lhr"
-      "eu-central-1" -> "lhr"
-      _ -> nil
-    end
-  end
-
-  defp region_mapping(_, tenant_region), do: tenant_region
 
   @doc """
   Lists the nodes in a region. Sorts by node name in case the list order
