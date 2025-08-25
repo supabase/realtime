@@ -107,7 +107,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
 
     @tag policies: [:authenticated_read_matching_user_sub, :authenticated_write_matching_user_sub], sub: UUID.generate()
-    test "with invalid sub, is able to send message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+    test "with invalid sub, is not able to send message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{broadcast: %BroadcastPolicies{write: nil, read: true}},
@@ -150,7 +150,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
 
     @tag policies: [:read_matching_user_role, :write_matching_user_role], role: "anon"
-    test "with invalid role, is able to send message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+    test "with invalid role, is not able to send message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{broadcast: %BroadcastPolicies{write: nil, read: true}},
