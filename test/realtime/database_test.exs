@@ -274,7 +274,7 @@ defmodule Realtime.DatabaseTest do
              end) =~ "project=123 external_id=123 [error] ErrorExecutingTransaction:"
     end
 
-    test "noproc" do
+    test "db process is not alive anymore" do
       metadata = [external_id: "123", project: "123", tenant_id: "123"]
       {:ok, node} = Clustered.start(@aux_mod)
       # Grab a remote pid that will not exist. :erpc uses a new process to perform the call.
