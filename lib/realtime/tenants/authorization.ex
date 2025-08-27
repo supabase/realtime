@@ -65,7 +65,8 @@ defmodule Realtime.Tenants.Authorization do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
     if rate_counter.limit.triggered == false do
-      get_read_policies_for_connection(db_conn, authorization_context, policies)
+      db_conn
+      |> get_read_policies_for_connection(authorization_context, policies)
       |> handle_policies_result(rate_counter)
     else
       {:error, :increase_connection_pool}
@@ -111,7 +112,8 @@ defmodule Realtime.Tenants.Authorization do
     rate_counter = rate_counter(authorization_context.tenant_id)
 
     if rate_counter.limit.triggered == false do
-      get_write_policies_for_connection(db_conn, authorization_context, policies)
+      db_conn
+      |> get_write_policies_for_connection(authorization_context, policies)
       |> handle_policies_result(rate_counter)
     else
       {:error, :increase_connection_pool}
