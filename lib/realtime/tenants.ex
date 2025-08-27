@@ -101,6 +101,8 @@ defmodule Realtime.Tenants do
         {:ok, db_conn} = Database.connect(tenant, "realtime_health_check")
         Process.alive?(db_conn) && GenServer.stop(db_conn)
         Migrations.run_migrations(tenant)
+        Realtime.Messages.delete_old_messages(conn)
+        Migrations.create_partitions(db_conn)
 
         {:ok,
          %{

@@ -425,6 +425,8 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
     end
 
+    # FIXME test to check if partitions were created and old partitions deleted
+
     test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
       external_id = tenant.external_id
       # opentelemetry_phoenix expects to be a child of the originating cowboy process hence the Task here :shrug:

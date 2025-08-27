@@ -165,4 +165,6 @@ defmodule Realtime.TenantsTest do
       assert Tenants.region(tenant) == nil
     end
   end
+
+  # FIXME add unit tests
 end
