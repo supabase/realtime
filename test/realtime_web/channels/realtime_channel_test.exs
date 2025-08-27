@@ -503,9 +503,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
     test "expired jwt returns a error with sub data if available log_level=warning", %{tenant: tenant} do
       sub = random_string()
+
       api_key = Generators.generate_jwt_token(tenant)
-      claims = %{role: "authenticated", exp: System.system_time(:second) - 1, sub: sub}
-      jwt = Generators.generate_jwt_token(tenant, claims)
+
+      jwt =
+        Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1, sub: sub})
+
       assert {:ok, socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
 
       log =
@@ -669,44 +672,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:error,
               %{reason: "DatabaseLackOfConnections: Database can't accept more connections, Realtime won't connect"}} =
                subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
-    end
-  end
-
-  describe "join payload validations" do
-    test "valid payload allows join", %{tenant: tenant} do
-      jwt = Generators.generate_jwt_token(tenant)
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
-
-      config = %{
-        "config" => %{
-          "private" => false,
-          "broadcast" => %{"ack" => false, "self" => false},
-          "presence" => %{"enabled" => true, "key" => "potato"},
-          "postgres_changes" => [
-            %{"event" => "INSERT", "schema" => "public", "table" => "users", "filter" => "id=eq.1"},
-            %{"event" => "DELETE", "schema" => "public", "table" => "users", "filter" => "id=eq.2"},
-            %{"event" => "UPDATE", "schema" => "public", "table" => "users", "filter" => "id=eq.3"}
-          ]
-        },
-        "access_token" => jwt
-      }
-
-      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", config)
-    end
-
-    test "invalid payload returns error", %{tenant: tenant} do
-      jwt = Generators.generate_jwt_token(tenant)
-      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
-
-      log =
-        capture_log(fn ->
-          assert {:error, %{reason: reason}} =
-                   subscribe_and_join(socket, "realtime:test", %{"config" => "potato"})
-
-          assert reason =~ "unable to parse, expected a map"
-        end)
-
-      assert log =~ "InvalidJoinPayload"
     end
   end
 

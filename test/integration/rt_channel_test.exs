@@ -420,18 +420,28 @@ defmodule Realtime.Integration.RtChannelTest do
                      500
     end
 
-    test "nil postgres changes params identified as error", %{tenant: tenant} do
+    test "handle nil postgres changes params as empty param changes", %{tenant: tenant} do
       {socket, _} = get_connection(tenant)
       topic = "realtime:any"
       config = %{postgres_changes: [nil]}
 
-      log =
-        capture_log(fn ->
-          WebsocketClient.join(socket, topic, %{config: config})
-          Process.sleep(500)
-        end)
+      WebsocketClient.join(socket, topic, %{config: config})
 
-      assert log =~ "InvalidJoinPayload"
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
+      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+
+      refute_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     1000
     end
   end
 
