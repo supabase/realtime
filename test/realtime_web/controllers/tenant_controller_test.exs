@@ -425,6 +425,41 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
     end
 
+    test "creates new partitions", %{conn: conn, tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      # Drop all partitions if any exist
+      db_conn
+      |> partitions()
+      |> Enum.each(&Postgrex.query!(db_conn, "DROP TABLE IF EXISTS realtime.#{&1}", []))
+
+      assert partitions(db_conn) == []
+
+      conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+      data = json_response(conn, 200)["data"]
+
+      assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
+
+      assert partitions(db_conn) != []
+    end
+
+    test "deletes old partitions", %{conn: conn, tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      date_start = Date.utc_today() |> Date.add(-7)
+      date_end = Date.utc_today()
+      create_messages_partitions(db_conn, date_start, date_end)
+
+      assert length(partitions(db_conn)) == 11
+
+      conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+      data = json_response(conn, 200)["data"]
+
+      assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
+
+      assert length(partitions(db_conn)) == 7
+    end
+
     test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
       external_id = tenant.external_id
       # opentelemetry_phoenix expects to be a child of the originating cowboy process hence the Task here :shrug:
@@ -483,5 +518,22 @@ defmodule RealtimeWeb.TenantControllerTest do
         Process.sleep(100)
         wait_on_postgres_cdc_rls(external_id, attempt - 1)
     end
+  end
+
+  defp partitions(conn) do
+    Postgrex.query!(
+      conn,
+      """
+      SELECT child.relname
+      FROM pg_inherits
+      JOIN pg_class parent ON pg_inherits.inhparent = parent.oid
+      JOIN pg_class child ON pg_inherits.inhrelid = child.oid
+      JOIN pg_namespace nmsp_parent ON nmsp_parent.oid = parent.relnamespace
+      JOIN pg_namespace nmsp_child ON nmsp_child.oid = child.relnamespace
+      WHERE parent.relname = 'messages'
+      AND nmsp_child.nspname = 'realtime'
+      """,
+      []
+    ).rows
   end
 end

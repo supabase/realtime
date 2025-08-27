@@ -98,9 +98,9 @@ defmodule Realtime.Tenants do
 
       connected_cluster when is_integer(connected_cluster) ->
         tenant = Cache.get_tenant_by_external_id(external_id)
-        {:ok, db_conn} = Database.connect(tenant, "realtime_health_check")
-        Process.alive?(db_conn) && GenServer.stop(db_conn)
         Migrations.run_migrations(tenant)
+
+        Realtime.Tenants.Janitor.MaintenanceTask.run(external_id)
 
         {:ok,
          %{
