@@ -12,79 +12,58 @@ defmodule Realtime.GenRpcMetrics do
       {:ok, nodes_info} = :net_kernel.nodes_info()
       # Ignore "hidden" nodes (remote shell)
       nodes_info = Enum.filter(nodes_info, fn {_k, v} -> v[:type] == :normal end)
+      gen_rpc_server_port = server_port()
+      ip_address_node = ip_address_node(nodes_info)
 
-      # All TCP server sockets are managed by gen_rpc_acceptor_sup supervisor
-      # All TCP client sockets are managed by gen_rpc_client_sup supervisor
-      # For each node gen_rpc might have multiple TCP sockets
+      {client_ports, server_ports} =
+        :erlang.ports()
+        |> Stream.filter(fn port -> :erlang.port_info(port, :name) == {:name, ~c"tcp_inet"} end)
+        |> Stream.map(&{:inet.peername(&1), :inet.sockname(&1), &1})
+        |> Stream.filter(fn
+          {{:ok, _peername}, {:ok, _sockname}, _port} -> true
+          _ -> false
+        end)
+        |> Stream.map(fn {{:ok, {peername_ipaddress, peername_port}}, {:ok, {_, server_port}}, port} ->
+          {ip_address_node[peername_ipaddress], peername_port, server_port, port}
+        end)
+        |> Stream.filter(fn
+          {nil, _, _} ->
+            false
 
-      # For client processes we use the remote address (peername)
-      client_port_addresses =
-        port_addresses(:gen_rpc_client_sup)
-        |> Enum.reduce(%{}, fn {address, port}, acc ->
-          update_in(acc, [address], fn value -> [port | value || []] end)
+          {node, peername_port, server_port, _port} ->
+            {_, client_tcp_or_ssl_port} = :gen_rpc_helper.get_client_config_per_node(node)
+            # Only keep Erlang ports that are either serving on the gen_rpc server tcp/ssl port or
+            # connecting to other nodes using the expected client tcp/ssl port for that node
+            peername_port == client_tcp_or_ssl_port or server_port == gen_rpc_server_port
+        end)
+        |> Enum.reduce({%{}, %{}}, fn {node, _peername_port, server_port, port}, {clients, servers} ->
+          if server_port == gen_rpc_server_port do
+            # This Erlang port is serving gen_rpc
+            {clients, update_in(servers, [node], fn value -> [port | value || []] end)}
+          else
+            # This Erlang port is requesting gen_rpc
+            {update_in(clients, [node], fn value -> [port | value || []] end), servers}
+          end
         end)
 
-      # For server processes we use the ip address without the tcp port because it's randomly assigned
-      server_port_addresses =
-        port_addresses(:gen_rpc_acceptor_sup)
-        |> Enum.reduce(%{}, fn {{ip_address, _tcp_port}, port}, acc ->
-          update_in(acc, [ip_address], fn value -> [port | value || []] end)
-        end)
-
-      Map.new(nodes_info, &info(&1, client_port_addresses, server_port_addresses))
+      Map.new(nodes_info, &info(&1, client_ports, server_ports))
     else
       %{}
     end
   end
 
-  defp port_addresses(supervisor) do
-    Supervisor.which_children(supervisor)
-    |> Stream.flat_map(fn {_, pid, _, _} ->
-      # We then grab the only linked port if available
-      case Process.info(pid, :links) do
-        {:links, links} ->
-          links
-          |> Enum.filter(&is_port/1)
-          |> hd()
-          |> List.wrap()
-
-        _ ->
-          []
-      end
-    end)
-    |> Stream.map(&{:inet.peername(&1), &1})
-    |> Stream.filter(fn
-      {{:ok, _sockname}, _port} -> true
-      _ -> false
-    end)
-    |> Stream.map(fn {{:ok, address}, port} -> {address, port} end)
-  end
-
-  defp info({node, info}, client_port_addresses, server_port_addresses) do
-    case info[:address] do
-      net_address(address: address) when address != :undefined ->
-        {node, info(node, client_port_addresses, server_port_addresses, address)}
-
-      _ ->
-        {node, %{}}
-    end
-  end
-
-  defp info(node, client_port_addresses, server_port_addresses, {ip_address, _}) do
-    {:tcp, client_tcp_port} = :gen_rpc_helper.get_client_config_per_node(node)
-
-    gen_rpc_client_ports = Map.get(client_port_addresses, {ip_address, client_tcp_port}, [])
-    gen_rpc_server_ports = Map.get(server_port_addresses, ip_address, [])
-    gen_rpc_ports = gen_rpc_client_ports ++ gen_rpc_server_ports
+  defp info({node, _}, client_ports, server_ports) do
+    gen_rpc_ports = Map.get(client_ports, node, []) ++ Map.get(server_ports, node, [])
 
     if gen_rpc_ports != [] do
-      %{
-        inet_stats: inet_stats(gen_rpc_ports),
-        queue_size: queue_size(gen_rpc_ports),
-        connections: length(gen_rpc_ports)
-      }
+      {node,
+       %{
+         inet_stats: inet_stats(gen_rpc_ports),
+         queue_size: queue_size(gen_rpc_ports),
+         connections: length(gen_rpc_ports)
+       }}
     else
-      %{}
+      {node, %{}}
     end
   end
 
@@ -102,5 +81,28 @@ defmodule Realtime.GenRpcMetrics do
       {:queue_size, queue_size} = :erlang.port_info(port, :queue_size)
       acc + queue_size
     end)
+  end
+
+  defp server_port() do
+    if Application.fetch_env!(:gen_rpc, :default_client_driver) == :tcp do
+      Application.fetch_env!(:gen_rpc, :tcp_server_port)
+    else
+      Application.fetch_env!(:gen_rpc, :ssl_server_port)
+    end
+  end
+
+  defp ip_address_node(nodes_info) do
+    nodes_info
+    |> Stream.map(fn {node, info} ->
+      case info[:address] do
+        net_address(address: {ip_address, _}) ->
+          {ip_address, node}
+
+        _ ->
+          {nil, node}
+      end
+    end)
+    |> Stream.filter(fn {ip_address, _node} -> ip_address != nil end)
+    |> Map.new()
   end
 end

@@ -40,8 +40,23 @@ defmodule Realtime.GenRpcMetricsTest do
       Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 1)
       Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 2)
 
-      local_metrics = GenRpcMetrics.info()[node]
-      remote_metrics = :erpc.call(node, GenRpcMetrics, :info, [])[node()]
+      :erpc.call(node, Realtime.GenRpc, :call, [node(), String, :to_integer, ["25"], [key: 1]])
+
+      local_metrics = GenRpcMetrics.info()[node][:inet_stats]
+      remote_metrics = :erpc.call(node, GenRpcMetrics, :info, [])[node()][:inet_stats]
+
+      assert Map.keys(local_metrics) == [
+               :send_pend,
+               :recv_avg,
+               :recv_cnt,
+               :recv_dvi,
+               :recv_max,
+               :recv_oct,
+               :send_avg,
+               :send_cnt,
+               :send_max,
+               :send_oct
+             ]
 
       assert local_metrics[:connections] == remote_metrics[:connections]
 

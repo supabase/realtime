@@ -158,11 +158,41 @@ end
 if config_env() != :test do
   gen_rpc_socket_ip = System.get_env("GEN_RPC_SOCKET_IP", "0.0.0.0") |> to_charlist()
 
+  gen_rpc_ssl_server_port = System.get_env("GEN_RPC_SSL_SERVER_PORT")
+
+  gen_rpc_ssl_server_port =
+    if gen_rpc_ssl_server_port do
+      String.to_integer(gen_rpc_ssl_server_port)
+    end
+
+  gen_rpc_default_driver = if gen_rpc_ssl_server_port, do: :ssl, else: :tcp
+
+  if gen_rpc_default_driver == :ssl do
+    gen_rpc_ssl_opts = [
+      certfile: System.fetch_env!("GEN_RPC_CERTFILE"),
+      keyfile: System.fetch_env!("GEN_RPC_KEYFILE"),
+      cacertfile: System.fetch_env!("GEN_RPC_CACERTFILE")
+    ]
+
+    config :gen_rpc,
+      ssl_server_port: gen_rpc_ssl_server_port,
+      ssl_client_port: System.get_env("GEN_RPC_SSL_CLIENT_PORT", "6369") |> String.to_integer(),
+      ssl_client_options: gen_rpc_ssl_opts,
+      ssl_server_options: gen_rpc_ssl_opts,
+      tcp_server_port: false,
+      tcp_client_port: false
+  else
+    config :gen_rpc,
+      ssl_server_port: false,
+      ssl_client_port: false,
+      tcp_server_port: System.get_env("GEN_RPC_TCP_SERVER_PORT", "5369") |> String.to_integer(),
+      tcp_client_port: System.get_env("GEN_RPC_TCP_CLIENT_PORT", "5369") |> String.to_integer()
+  end
+
   case :inet.parse_address(gen_rpc_socket_ip) do
     {:ok, address} ->
       config :gen_rpc,
-        tcp_server_port: System.get_env("GEN_RPC_TCP_SERVER_PORT", "5369") |> String.to_integer(),
-        tcp_client_port: System.get_env("GEN_RPC_TCP_CLIENT_PORT", "5369") |> String.to_integer(),
+        default_client_driver: gen_rpc_default_driver,
         connect_timeout: System.get_env("GEN_RPC_CONNECT_TIMEOUT_IN_MS", "10000") |> String.to_integer(),
         send_timeout: System.get_env("GEN_RPC_SEND_TIMEOUT_IN_MS", "10000") |> String.to_integer(),
         ipv6_only: System.get_env("GEN_RPC_IPV6_ONLY", "false") == "true",
