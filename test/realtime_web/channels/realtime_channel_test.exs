@@ -523,11 +523,69 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "API Key validations" do
-    test "api_key has not expired", %{tenant: tenant} do
+    test "x-api-key header has not expired", %{tenant: tenant} do
       api_key = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
 
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
+    end
+
+    test "apikey param has not expired", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+
+      conn_opts = [
+        connect_info: %{
+          uri: URI.parse("https://#{tenant.external_id}.localhost:4000/socket/websocket"),
+          x_headers: []
+        }
+      ]
+
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning", "apikey" => api_key}, conn_opts)
+
+      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{})
+      assert socket.assigns.access_token == api_key
+    end
+
+    test "join with access_token starting with sb_", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{"access_token" => "sb_something"})
+
+      assert socket.assigns.access_token == api_key
+    end
+
+    test "join with user_token starting with sb_", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{"user_token" => "sb_something"})
+
+      assert socket.assigns.access_token == api_key
+    end
+
+    test "join with access_token", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      access_token = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{"access_token" => access_token})
+
+      assert socket.assigns.access_token == access_token
+    end
+
+    test "join with user_token", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+      user_token = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, api_key))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{"user_token" => user_token})
+
+      assert socket.assigns.access_token == user_token
     end
 
     test "api_key has expired", %{tenant: tenant} do
@@ -688,13 +746,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     assert [{_, ^transport_pid_1}] = Registry.lookup(RealtimeWeb.SocketDisconnect.Registry, tenant.external_id)
   end
 
-  defp conn_opts(tenant, token, params \\ %{}) do
+  defp conn_opts(tenant, token) do
     [
       connect_info: %{
         uri: URI.parse("https://#{tenant.external_id}.localhost:4000/socket/websocket"),
         x_headers: [{"x-api-key", token}]
-      },
-      params: params
+      }
     ]
   end
 
