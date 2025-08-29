@@ -538,18 +538,14 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp assign_access_token(%{assigns: %{headers: headers}} = socket, params) do
+  defp assign_access_token(%{assigns: %{tenant_token: tenant_token}} = socket, params) do
     access_token = Map.get(params, "access_token") || Map.get(params, "user_token")
-    {_, header} = Enum.find(headers, {nil, nil}, fn {k, _} -> k == "x-api-key" end)
 
     case access_token do
-      nil -> assign(socket, :access_token, header)
-      "sb_" <> _ -> assign(socket, :access_token, header)
+      "sb_" <> _ -> assign(socket, :access_token, tenant_token)
       _ -> handle_access_token(socket, params)
     end
   end
-
-  defp assign_access_token(socket, params), do: handle_access_token(socket, params)
 
   defp handle_access_token(%{assigns: %{tenant_token: _tenant_token}} = socket, %{"user_token" => user_token})
        when is_binary(user_token) do
