@@ -13,9 +13,11 @@ defmodule Realtime.Tenants.Authorization do
 
   alias DBConnection.ConnectionError
   alias Realtime.Api.Message
+  alias Realtime.Api.Tenant
   alias Realtime.Database
-  alias Realtime.Repo
+  alias Realtime.GenCounter
   alias Realtime.GenRpc
+  alias Realtime.Repo
   alias Realtime.Tenants.Authorization.Policies
 
   defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role, :sub]
@@ -60,26 +62,42 @@ defmodule Realtime.Tenants.Authorization do
   @spec get_read_authorizations(Policies.t(), pid(), t()) ::
           {:ok, Policies.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
   def get_read_authorizations(policies, db_conn, authorization_context) when node() == node(db_conn) do
-    case get_read_policies_for_connection(db_conn, authorization_context, policies) do
-      {:ok, %Policies{} = policies} -> {:ok, policies}
-      {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
-      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
-      {:error, error} -> {:error, error}
+    rate_counter = rate_counter(authorization_context.tenant_id)
+
+    if rate_counter.limit.triggered == false do
+      db_conn
+      |> get_read_policies_for_connection(authorization_context, policies)
+      |> handle_policies_result(rate_counter)
+    else
+      {:error, :increase_connection_pool}
     end
   end
 
   # Remote call
   def get_read_authorizations(policies, db_conn, authorization_context) do
-    case GenRpc.call(
-           node(db_conn),
-           __MODULE__,
-           :get_read_authorizations,
-           [policies, db_conn, authorization_context],
-           tenant_id: authorization_context.tenant_id,
-           key: authorization_context.tenant_id
-         ) do
-      {:error, :rpc_error, reason} -> {:error, reason}
-      response -> response
+    rate_counter = rate_counter(authorization_context.tenant_id)
+
+    if rate_counter.limit.triggered == false do
+      case GenRpc.call(
+             node(db_conn),
+             __MODULE__,
+             :get_read_authorizations,
+             [policies, db_conn, authorization_context],
+             tenant_id: authorization_context.tenant_id,
+             key: authorization_context.tenant_id
+           ) do
+        {:error, :increase_connection_pool} = error ->
+          GenCounter.add(rate_counter.id)
+          error
+
+        {:error, :rpc_error, reason} ->
+          {:error, reason}
+
+        response ->
+          response
+      end
+    else
+      {:error, :increase_connection_pool}
     end
   end
 
@@ -91,31 +109,68 @@ defmodule Realtime.Tenants.Authorization do
   @spec get_write_authorizations(Policies.t(), pid(), __MODULE__.t()) ::
           {:ok, Policies.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
   def get_write_authorizations(policies, db_conn, authorization_context) when node() == node(db_conn) do
-    case get_write_policies_for_connection(db_conn, authorization_context, policies) do
-      {:ok, %Policies{} = policies} -> {:ok, policies}
-      {:ok, {:error, %Postgrex.Error{} = error}} -> {:error, :rls_policy_error, error}
-      {:error, %ConnectionError{reason: :queue_timeout}} -> {:error, :increase_connection_pool}
-      {:error, error} -> {:error, error}
+    rate_counter = rate_counter(authorization_context.tenant_id)
+
+    if rate_counter.limit.triggered == false do
+      db_conn
+      |> get_write_policies_for_connection(authorization_context, policies)
+      |> handle_policies_result(rate_counter)
+    else
+      {:error, :increase_connection_pool}
     end
   end
 
   # Remote call
   def get_write_authorizations(policies, db_conn, authorization_context) do
-    case GenRpc.call(
-           node(db_conn),
-           __MODULE__,
-           :get_write_authorizations,
-           [policies, db_conn, authorization_context],
-           tenant_id: authorization_context.tenant_id,
-           key: authorization_context.tenant_id
-         ) do
-      {:error, :rpc_error, reason} -> {:error, reason}
-      response -> response
+    rate_counter = rate_counter(authorization_context.tenant_id)
+
+    if rate_counter.limit.triggered == false do
+      case GenRpc.call(
+             node(db_conn),
+             __MODULE__,
+             :get_write_authorizations,
+             [policies, db_conn, authorization_context],
+             tenant_id: authorization_context.tenant_id,
+             key: authorization_context.tenant_id
+           ) do
+        {:error, :increase_connection_pool} = error ->
+          GenCounter.add(rate_counter.id)
+          error
+
+        {:error, :rpc_error, reason} ->
+          {:error, reason}
+
+        response ->
+          response
+      end
+    else
+      {:error, :increase_connection_pool}
     end
   end
 
   def get_write_authorizations(db_conn, authorization_context) do
     get_write_authorizations(%Policies{}, db_conn, authorization_context)
+  end
+
+  defp handle_policies_result(result, rate_counter) do
+    case result do
+      {:ok, %Policies{} = policies} ->
+        {:ok, policies}
+
+      {:ok, {:error, %Postgrex.Error{} = error}} ->
+        {:error, :rls_policy_error, error}
+
+      {:error, %ConnectionError{reason: :queue_timeout}} ->
+        GenCounter.add(rate_counter.id)
+        {:error, :increase_connection_pool}
+
+      {:error, {:exit, _}} ->
+        GenCounter.add(rate_counter.id)
+        {:error, :increase_connection_pool}
+
+      {:error, error} ->
+        {:error, error}
+    end
   end
 
   @doc """
@@ -281,5 +336,12 @@ defmodule Realtime.Tenants.Authorization do
       e ->
         e
     end
+  end
+
+  defp rate_counter(tenant_id) do
+    %Tenant{} = tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant_id)
+    rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(tenant)
+    {:ok, rate_counter} = Realtime.RateCounter.get(rate_counter)
+    rate_counter
   end
 end

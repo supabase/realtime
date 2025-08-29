@@ -74,6 +74,74 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
                presence: %PresencePolicies{read: false, write: false}
              } == policies
     end
+
+    @tag role: "anon",
+         policies: []
+    test "db process is down", context do
+      # Grab a remote pid that will not exist in the near future. erpc uses a new process to perform the call.
+      # Once it has returned the process is not alive anymore
+      db_conn = :erpc.call(context.node, :erlang, :self, [])
+
+      {:error, :increase_connection_pool} =
+        Authorization.get_read_authorizations(%Policies{}, db_conn, context.authorization_context)
+
+      {:error, :increase_connection_pool} =
+        Authorization.get_write_authorizations(%Policies{}, db_conn, context.authorization_context)
+    end
+
+    @tag role: "anon", policies: []
+    test "get_read_authorizations rate limit when db has many connection errors", context do
+      pid = :erpc.call(context.node, :erlang, :self, [])
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..6 do
+            {:error, :increase_connection_pool} =
+              Authorization.get_read_authorizations(%Policies{}, pid, context.authorization_context)
+          end
+
+          # Waiting for RateCounter to limit
+          Process.sleep(1100)
+
+          for _ <- 1..10 do
+            {:error, :increase_connection_pool} =
+              Authorization.get_read_authorizations(%Policies{}, pid, context.authorization_context)
+          end
+        end)
+
+      assert log =~ "IncreaseConnectionPool: Too many database timeouts"
+
+      # Only one log message should be emitted
+      # Splitting by the error message returns the error message and the rest of the log only
+      assert length(String.split(log, "IncreaseConnectionPool: Too many database timeouts")) == 2
+    end
+
+    @tag role: "anon", policies: []
+    test "get_write_authorizations rate limit when db has many connection errors", context do
+      pid = spawn(fn -> :ok end)
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..6 do
+            {:error, :increase_connection_pool} =
+              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+          end
+
+          # Waiting for RateCounter to limit
+          Process.sleep(1100)
+
+          for _ <- 1..10 do
+            {:error, :increase_connection_pool} =
+              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+          end
+        end)
+
+      assert log =~ "IncreaseConnectionPool: Too many database timeouts"
+
+      # Only one log message should be emitted
+      # Splitting by the error message returns the error message and the rest of the log only
+      assert length(String.split(log, "IncreaseConnectionPool: Too many database timeouts")) == 2
+    end
   end
 
   describe "database error" do
@@ -93,29 +161,38 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
       Process.sleep(100)
 
-      t1 =
-        Task.async(fn ->
-          assert {:error, :increase_connection_pool} =
-                   Authorization.get_read_authorizations(
-                     %Policies{},
-                     context.db_conn,
-                     context.authorization_context
-                   )
+      log =
+        capture_log(fn ->
+          t1 =
+            Task.async(fn ->
+              assert {:error, :increase_connection_pool} =
+                       Authorization.get_read_authorizations(
+                         %Policies{},
+                         context.db_conn,
+                         context.authorization_context
+                       )
+            end)
+
+          t2 =
+            Task.async(fn ->
+              assert {:error, :increase_connection_pool} =
+                       Authorization.get_write_authorizations(
+                         %Policies{},
+                         context.db_conn,
+                         context.authorization_context
+                       )
+            end)
+
+          Task.await_many([t1, t2], 20_000)
+          # Wait for RateCounter to log
+          Process.sleep(1000)
         end)
 
-      t2 =
-        Task.async(fn ->
-          assert {:error, :increase_connection_pool} =
-                   Authorization.get_write_authorizations(
-                     %Policies{},
-                     context.db_conn,
-                     context.authorization_context
-                   )
-        end)
+      external_id = context.tenant.external_id
 
-      Task.await_many([t1, t2], 20_000)
-      # Wait for logs to arrive from remote node
-      Process.sleep(200)
+      assert log =~
+               "project=#{external_id} external_id=#{external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
+
       Task.await(task, :timer.seconds(30))
     end
 
@@ -159,45 +236,12 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     end
   end
 
-  describe "rpc error" do
-    @describetag role: "anon", policies: []
-
-    test "get_read_authorizations", context do
-      # Grab a remote pid that will not exist in the near future. :gen_rpc uses a new process to perform the call.
-      # Once it has returned the process is not alive anymore
-      db_conn = :erpc.call(context.node, :erlang, :self, [])
-
-      assert capture_log(fn ->
-               {:error, {:EXIT, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}}} =
-                 Authorization.get_read_authorizations(
-                   %Policies{},
-                   db_conn,
-                   context.authorization_context
-                 )
-             end) =~ "project=dev_tenant external_id=dev_tenant [error] ErrorOnRpcCall:"
-    end
-
-    test "get_write_authorizations", context do
-      # Grab a remote pid that will not exist in the near future. :gen_rpc uses a new process to perform the call.
-      # Once it has returned the process is not alive anymore
-      db_conn = :erpc.call(context.node, :erlang, :self, [])
-
-      assert capture_log(fn ->
-               {:error, {:EXIT, {:noproc, {DBConnection.Holder, :checkout, [^db_conn, _]}}}} =
-                 Authorization.get_write_authorizations(
-                   %Policies{},
-                   db_conn,
-                   context.authorization_context
-                 )
-             end) =~ "project=dev_tenant external_id=dev_tenant [error] ErrorOnRpcCall:"
-    end
-  end
-
   defp rls_context(context) do
     tenant = Realtime.Tenants.get_tenant_by_external_id("dev_tenant")
     Connect.shutdown("dev_tenant")
     # Waiting for :syn to unregister
     Process.sleep(100)
+    Realtime.RateCounter.stop("dev_tenant")
 
     {:ok, local_db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()
