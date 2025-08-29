@@ -27,13 +27,9 @@ realtime-*.tar
 
 # Ignore Dialyzer .plt
 /priv/plts/*
-
 node_modules
-
 .supabase
-
 config/prod.secret.exs
-
 demo/.env
-
 .lexical
+.vscode
