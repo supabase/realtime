@@ -60,7 +60,7 @@ generate_certs() {
     jq -r '.key' cert_secrets | base64 -d > ca.key
     jq -r '.cert' cert_secrets | base64 -d > ca.cert
     openssl req -new -nodes -out server.csr -keyout server.key -subj "/C=US/ST=Delaware/L=New Castle/O=Supabase Inc/CN=$(hostname -f)"
-    openssl x509 -req -in server.csr -days 90 -CA ca.cert -CAkey ca.key -out server.crt
+    openssl x509 -req -in server.csr -days 90 -CA ca.cert -CAkey ca.key -out server.cert
     rm -f ca.key
     CWD=`pwd`
     export GEN_RPC_CACERTFILE="$CWD/ca.cert"
@@ -91,7 +91,7 @@ if [ "${ENABLE_ERL_CRASH_DUMP:-false}" = true ]; then
 fi
 
 if [[ -n "${GENERATE_CLUSTER_CERTS}" ]] ; then
-    generate_certs()
+    generate_certs
 fi
 
 echo "Running migrations"
