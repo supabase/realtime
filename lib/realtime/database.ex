@@ -186,6 +186,10 @@ defmodule Realtime.Database do
     e ->
       log_error("ErrorExecutingTransaction", e, metadata)
       {:error, e}
+  catch
+    :exit, reason ->
+      log_error("ErrorExecutingTransaction", reason, metadata)
+      {:error, {:exit, reason}}
   end
 
   @spec connect_db(__MODULE__.t()) :: {:ok, pid()} | {:error, any()}

@@ -154,6 +154,7 @@ defmodule Realtime.Tenants do
       },
       limit: [
         value: max_joins_per_second,
+        measurement: :avg,
         log_fn: fn ->
           Logger.critical("ClientJoinRateLimitReached: Too many joins per second",
             external_id: tenant_id,
@@ -199,6 +200,7 @@ defmodule Realtime.Tenants do
       },
       limit: [
         value: max_events_per_second,
+        measurement: :avg,
         log: true,
         log_fn: fn ->
           Logger.error("MessagePerSecondRateLimitReached: Too many messages per second",
@@ -277,6 +279,7 @@ defmodule Realtime.Tenants do
       },
       limit: [
         value: max_presence_events_per_second,
+        measurement: :avg,
         log_fn: fn ->
           Logger.error("PresenceRateLimitReached: Too many presence events per second",
             external_id: tenant_id,
@@ -305,6 +308,31 @@ defmodule Realtime.Tenants do
   def presence_events_per_second_key(%Tenant{} = tenant) do
     {:channel, :presence_events, tenant.external_id}
   end
+
+  @spec authorization_errors_per_second_rate(Tenant.t()) :: RateCounter.Args.t()
+  def authorization_errors_per_second_rate(%Tenant{external_id: external_id} = tenant) do
+    opts = [
+      max_bucket_len: 30,
+      limit: [
+        value: pool_size(tenant),
+        measurement: :sum,
+        log_fn: fn ->
+          Logger.critical("IncreaseConnectionPool: Too many database timeouts",
+            external_id: external_id,
+            project: external_id
+          )
+        end
+      ]
+    ]
+
+    %RateCounter.Args{id: {:channel, :authorization_errors, external_id}, opts: opts}
+  end
+
+  defp pool_size(%{extensions: [%{settings: settings} | _]}) do
+    Database.pool_size_by_application_name("realtime_connect", settings)
+  end
+
+  defp pool_size(_), do: 1
 
   @spec get_tenant_limits(Realtime.Api.Tenant.t(), maybe_improper_list) :: list
   def get_tenant_limits(%Tenant{} = tenant, keys) when is_list(keys) do

@@ -1,5 +1,6 @@
 defmodule Realtime.Tenants.AuthorizationTest do
   use RealtimeWeb.ConnCase, async: true
+  use Mimic
 
   require Phoenix.ChannelTest
 
@@ -80,6 +81,77 @@ defmodule Realtime.Tenants.AuthorizationTest do
                presence: %PresencePolicies{read: false, write: false}
              } == policies
     end
+
+    @tag role: "anon", policies: []
+    test "db process is down", context do
+      pid = spawn(fn -> :ok end)
+
+      {:error, :increase_connection_pool} =
+        Authorization.get_read_authorizations(%Policies{}, pid, context.authorization_context)
+
+      {:error, :increase_connection_pool} =
+        Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+    end
+
+    @tag role: "anon", policies: []
+    test "get_read_authorizations rate limit when db has many connection errors", context do
+      update_db_pool_size(context.tenant, 5)
+      pid = spawn(fn -> :ok end)
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..6 do
+            {:error, :increase_connection_pool} =
+              Authorization.get_read_authorizations(%Policies{}, pid, context.authorization_context)
+          end
+
+          # Waiting for RateCounter to limit
+          Process.sleep(1100)
+          # The next auth requests will not call the database due to being rate limited
+          reject(&Database.transaction/4)
+
+          for _ <- 1..10 do
+            {:error, :increase_connection_pool} =
+              Authorization.get_read_authorizations(%Policies{}, pid, context.authorization_context)
+          end
+        end)
+
+      assert log =~ "IncreaseConnectionPool: Too many database timeouts"
+
+      # Only one log message should be emitted
+      # Splitting by the error message returns the error message and the rest of the log only
+      assert length(String.split(log, "IncreaseConnectionPool: Too many database timeouts")) == 2
+    end
+
+    @tag role: "anon", policies: []
+    test "get_write_authorizations rate limit when db has many connection errors", context do
+      update_db_pool_size(context.tenant, 5)
+      pid = spawn(fn -> :ok end)
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..6 do
+            {:error, :increase_connection_pool} =
+              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+          end
+
+          # Waiting for RateCounter to limit
+          Process.sleep(1100)
+          # The next auth requests will not call the database due to being rate limited
+          reject(&Database.transaction/4)
+
+          for _ <- 1..10 do
+            {:error, :increase_connection_pool} =
+              Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
+          end
+        end)
+
+      assert log =~ "IncreaseConnectionPool: Too many database timeouts"
+
+      # Only one log message should be emitted
+      # Splitting by the error message returns the error message and the rest of the log only
+      assert length(String.split(log, "IncreaseConnectionPool: Too many database timeouts")) == 2
+    end
   end
 
   describe "database error" do
@@ -120,10 +192,15 @@ defmodule Realtime.Tenants.AuthorizationTest do
             end)
 
           Task.await_many([t1, t2], 20_000)
+          # Wait for RateCounter log
+          Process.sleep(1000)
         end)
 
       external_id = context.tenant.external_id
       assert log =~ "project=#{external_id} external_id=#{external_id} [error] ErrorExecutingTransaction"
+
+      assert log =~
+               "project=#{external_id} external_id=#{external_id} [critical] IncreaseConnectionPool: Too many database timeouts"
 
       Task.await(task, :timer.seconds(30))
     end
@@ -202,6 +279,9 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   def rls_context(context) do
     tenant = Containers.checkout_tenant(run_migrations: true)
+    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
+    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = context[:topic] || random_string()
 
@@ -229,5 +309,18 @@ defmodule Realtime.Tenants.AuthorizationTest do
       db_conn: db_conn,
       authorization_context: authorization_context
     }
+  end
+
+  defp update_db_pool_size(tenant, db_pool) do
+    extension = hd(tenant.extensions)
+
+    settings = Map.put(extension.settings, "db_pool", db_pool)
+
+    extensions = [Map.from_struct(%{extension | :settings => settings})]
+
+    {:ok, tenant} = Realtime.Api.update_tenant(tenant, %{extensions: extensions})
+
+    # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
+    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
   end
 end
