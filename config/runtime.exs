@@ -18,6 +18,8 @@ defmodule Env do
 end
 
 app_name = System.get_env("APP_NAME", "")
+
+# Setup Database
 default_db_host = System.get_env("DB_HOST", "127.0.0.1")
 username = System.get_env("DB_USER", "postgres")
 password = System.get_env("DB_PASSWORD", "postgres")
@@ -27,6 +29,15 @@ db_version = System.get_env("DB_IP_VERSION")
 slot_name_suffix = System.get_env("SLOT_NAME_SUFFIX")
 db_ssl_enabled? = Env.get_boolean("DB_SSL", false)
 db_ssl_ca_cert = System.get_env("DB_SSL_CA_CERT")
+queue_target = Env.get_integer("DB_QUEUE_TARGET", 5000)
+queue_interval = Env.get_integer("DB_QUEUE_INTERVAL", 5000)
+pool_size = Env.get_integer("DB_POOL_SIZE", 5)
+
+after_connect_query_args =
+  case System.get_env("DB_AFTER_CONNECT_QUERY") do
+    nil -> nil
+    query -> {Postgrex, :query!, [query, []]}
+  end
 
 ssl_opts =
   cond do
@@ -79,6 +90,20 @@ socket_options =
         {:error, reason} -> raise "Failed to detect IP version for DB_HOST: #{reason}"
       end
   end
+
+config :realtime, Realtime.Repo,
+  hostname: default_db_host,
+  username: username,
+  password: password,
+  database: database,
+  port: port,
+  pool_size: pool_size,
+  queue_target: queue_target,
+  queue_interval: queue_interval,
+  parameters: [application_name: "supabase_mt_realtime"],
+  after_connect: after_connect_query_args,
+  socket_options: socket_options,
+  ssl: ssl_opts
 
 config :realtime,
   migration_partition_slots: migration_partition_slots,
@@ -274,31 +299,6 @@ if config_env() == :prod do
     ],
     check_origin: false,
     secret_key_base: secret_key_base
-
-  # Setup Database
-  queue_target = Env.get_integer("DB_QUEUE_TARGET", 5000)
-  queue_interval = Env.get_integer("DB_QUEUE_INTERVAL", 5000)
-  pool_size = Env.get_integer("DB_POOL_SIZE", 5)
-
-  after_connect_query_args =
-    case System.get_env("DB_AFTER_CONNECT_QUERY") do
-      nil -> nil
-      query -> {Postgrex, :query!, [query, []]}
-    end
-
-  config :realtime, Realtime.Repo,
-    hostname: default_db_host,
-    username: username,
-    password: password,
-    database: database,
-    port: port,
-    pool_size: pool_size,
-    queue_target: queue_target,
-    queue_interval: queue_interval,
-    parameters: [application_name: "supabase_mt_realtime"],
-    after_connect: after_connect_query_args,
-    socket_options: socket_options,
-    ssl: ssl_opts
 
   alias Realtime.Repo.Replica
 
