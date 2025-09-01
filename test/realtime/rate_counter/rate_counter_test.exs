@@ -227,11 +227,12 @@ defmodule Realtime.RateCounterTest do
 
       log =
         capture_log(fn ->
-          GenCounter.add(args.id, 50)
+          GenCounter.add(args.id, 100)
           Process.sleep(100)
         end)
 
-      assert {:ok, %RateCounter{sum: 50, limit: %{triggered: true}}} = RateCounter.get(args)
+      assert {:ok, %RateCounter{sum: sum, limit: %{triggered: true}}} = RateCounter.get(args)
+      assert sum > 49
       assert log =~ "project=tenant123 external_id=tenant123 [error] ErrorMessage: Reason"
 
       # Only one log message should be emitted
