@@ -329,7 +329,7 @@ defmodule Realtime.Tenants do
   end
 
   defp pool_size(%{extensions: [%{settings: settings} | _]}) do
-    Database.pool_size_by_application_name("realtime_connect", settings) || 1
+    Database.pool_size_by_application_name("realtime_connect", settings)
   end
 
   defp pool_size(_), do: 1
