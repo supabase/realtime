@@ -74,7 +74,7 @@ ENV ECTO_IPV6 true
 ENV ERL_AFLAGS "-proto_dist inet6_tcp"
 
 RUN apt-get update -y && \
-    apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini curl && \
+    apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini curl awscli jq && \
     apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Set the locale
