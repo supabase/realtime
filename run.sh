@@ -69,6 +69,21 @@ generate_certs() {
     chmod a+r "$GEN_RPC_CACERTFILE"
     chmod a+r "$GEN_RPC_KEYFILE"
     chmod a+r "$GEN_RPC_CERTFILE"
+    cat > inet_tls.conf <<EOF
+[
+  {server, [
+    {certfile, "${GEN_RPC_CERTFILE}"},
+    {keyfile, "${GEN_RPC_KEYFILE}"},
+    {secure_renegotiate, true}
+  ]},
+  {client, [
+    {cacertfile, "${GEN_RPC_CACERTFILE}"},
+    {verify, verify_none},
+    {secure_renegotiate, true}
+  ]}
+].
+EOF
+    export ERL_AFLAGS="${ERL_AFLAGS} -proto_dist inet_tls -ssl_dist_optfile ${CWD}/inet_tls.conf"
 }
 
 if [ "${ENABLE_ERL_CRASH_DUMP:-false}" = true ]; then
