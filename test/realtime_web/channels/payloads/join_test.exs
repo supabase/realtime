@@ -6,6 +6,7 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
   alias RealtimeWeb.Channels.Payloads.Join
   alias RealtimeWeb.Channels.Payloads.Config
   alias RealtimeWeb.Channels.Payloads.Broadcast
+  alias RealtimeWeb.Channels.Payloads.Broadcast.Replay
   alias RealtimeWeb.Channels.Payloads.Presence
   alias RealtimeWeb.Channels.Payloads.PostgresChange
 
@@ -17,7 +18,7 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
       config = %{
         "config" => %{
           "private" => false,
-          "broadcast" => %{"ack" => false, "self" => false},
+          "broadcast" => %{"ack" => false, "self" => false, "replay" => %{"since" => 1, "limit" => 10}},
           "presence" => %{"enabled" => true, "key" => key},
           "postgres_changes" => [
             %{"event" => "INSERT", "schema" => "public", "table" => "users", "filter" => "id=eq.1"},
@@ -37,8 +38,9 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
                postgres_changes: postgres_changes
              } = config
 
-      assert %Broadcast{ack: false, self: false} = broadcast
+      assert %Broadcast{ack: false, self: false, replay: replay} = broadcast
       assert %Presence{enabled: true, key: ^key} = presence
+      assert %Replay{since: 1, limit: 10} = replay
 
       assert [
                %PostgresChange{event: "INSERT", schema: "public", table: "users", filter: "id=eq.1"},
@@ -54,6 +56,17 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
 
       assert key != ""
       assert is_binary(key)
+    end
+
+    test "invalid replay" do
+      config = %{"config" => %{"broadcast" => %{"replay" => 123}}}
+
+      assert {
+               :error,
+               :invalid_join_payload,
+               %{config: %{broadcast: %{replay: ["unable to parse, expected a map"]}}}
+             } =
+               Join.validate(config)
     end
 
     test "missing enabled presence defaults to true" do

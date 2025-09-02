@@ -98,6 +98,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
         payload = %{
           "event" => "INSERT",
+          "meta" => %{"id" => row.id},
           "payload" => %{
             "id" => row.id,
             "value" => value
@@ -139,8 +140,9 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                      "event" => "broadcast",
                      "payload" => %{
                        "event" => "INSERT",
+                       "meta" => %{"id" => id},
                        "payload" => %{
-                         "id" => _,
+                         "id" => id,
                          "value" => ^value
                        }
                      },
@@ -222,12 +224,19 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           "payload" => %{"value" => "something"}
         })
 
+      fixture_id = fixture.id
+
       assert_receive {:socket_push, :text, data}, 500
       message = data |> IO.iodata_to_binary() |> Jason.decode!()
 
       assert %{
                "event" => "broadcast",
-               "payload" => %{"event" => "INSERT", "payload" => payload, "type" => "broadcast"},
+               "payload" => %{
+                 "event" => "INSERT",
+                 "meta" => %{"id" => fixture_id},
+                 "payload" => payload,
+                 "type" => "broadcast"
+               },
                "ref" => nil,
                "topic" => ^topic
              } = message
@@ -252,19 +261,25 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
       payload = %{"value" => "something", "id" => "123456"}
 
-      message_fixture(tenant, %{
-        "topic" => topic,
-        "private" => true,
-        "event" => "INSERT",
-        "payload" => payload
-      })
+      %{id: fixture_id} =
+        message_fixture(tenant, %{
+          "topic" => topic,
+          "private" => true,
+          "event" => "INSERT",
+          "payload" => payload
+        })
 
       assert_receive {:socket_push, :text, data}, 500
       message = data |> IO.iodata_to_binary() |> Jason.decode!()
 
       assert %{
                "event" => "broadcast",
-               "payload" => %{"event" => "INSERT", "payload" => ^payload, "type" => "broadcast"},
+               "payload" => %{
+                 "meta" => %{"id" => fixture_id},
+                 "event" => "INSERT",
+                 "payload" => ^payload,
+                 "type" => "broadcast"
+               },
                "ref" => nil,
                "topic" => ^topic
              } = message
