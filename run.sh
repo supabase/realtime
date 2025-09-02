@@ -90,7 +90,7 @@ if [ "${ENABLE_ERL_CRASH_DUMP:-false}" = true ]; then
     trap upload_crash_dump_to_s3 INT TERM KILL EXIT
 fi
 
-if [[ -n "${GENERATE_CLUSTER_CERTS}" ]] ; then
+if [[ -n "${GENERATE_CLUSTER_CERTS:-}" ]] ; then
     generate_certs
 fi
 

@@ -3,12 +3,12 @@ import Config
 defmodule Env do
   def get_integer(env, default) do
     value = System.get_env(env)
-    if value, do: String.to_integer(env), else: default
+    if value, do: String.to_integer(value), else: default
   end
 
   def get_charlist(env, default) do
     value = System.get_env(env)
-    if value, do: String.to_charlist(env), else: default
+    if value, do: String.to_charlist(value), else: default
   end
 
   def get_boolean(env, default) do
