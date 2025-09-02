@@ -75,9 +75,29 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
+      replay_params = params["config"]["broadcast"]["replay"]
+
+      message_ids =
+        if replay_params do
+          {:ok, messages, message_ids} = Realtime.Messages.replay(db_conn, sub_topic, replay_params["since"], 10)
+          dbg(message_ids)
+          # FIXME must insert into an ETS table to avoid race conditions
+          send(self(), {:replay, messages})
+          message_ids
+        else
+          []
+        end
+
       # fastlane subscription
       metadata =
-        MessageDispatcher.fastlane_metadata(transport_pid, serializer, topic, socket.assigns.log_level, tenant_id)
+        MessageDispatcher.fastlane_metadata(
+          transport_pid,
+          serializer,
+          topic,
+          socket.assigns.log_level,
+          tenant_id,
+          message_ids
+        )
 
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
 
@@ -205,6 +225,18 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
+  def handle_info({:replay, messages}, socket) do
+    for message <- messages do
+      # broadcast_message = %{topic: topic, event: event, private: private, payload: Map.put_new(payload, "id", id)},
+      push(socket, "broadcast", %{
+        event: message.event,
+        payload: Map.put_new(message.payload, "id", message.id)
+      })
+    end
+
+    {:noreply, socket}
+  end
+
   def handle_info(:update_rate_counter, socket) do
     count(socket)
 

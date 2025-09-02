@@ -3,6 +3,38 @@ defmodule Realtime.Messages do
   Handles `realtime.messages` table operations
   """
 
+  alias Realtime.Api.Message
+
+  import Ecto.Query, only: [from: 2]
+
+  @hard_limit 100
+
+  @doc """
+  Fetch last `limit ` messages for a given `topic` inserted after `since`
+
+  Automatically uses RPC if the database connection is not in the same node
+  """
+  @spec replay(conn :: pid, topic :: String.t(), since :: non_neg_integer, limit :: non_neg_integer) ::
+          {:ok, Message.t(), [String.t()]} | {:error, term} | {:error, :rpc_error, term}
+  def replay(conn, topic, since, limit) when node(conn) == node() and is_integer(since) and is_integer(limit) do
+    limit = max(min(limit, @hard_limit), 1)
+    since = DateTime.from_unix!(since, :millisecond) |> DateTime.to_naive()
+
+    query =
+      from m in Message,
+        where: m.topic == ^topic and m.inserted_at >= ^since,
+        limit: ^limit,
+        order_by: [asc: m.inserted_at]
+
+    with {:ok, messages} <- Realtime.Repo.all(conn, query, Message) do
+      {:ok, messages, MapSet.new(messages, & &1.id)}
+    end
+  end
+
+  def replay(conn, topic, since, limit) when is_integer(since) and is_integer(limit) do
+    Realtime.GenRpc.call(node(conn), __MODULE__, :replay, [conn, topic, since, limit], key: topic)
+  end
+
   @doc """
   Deletes messages older than 72 hours for a given tenant connection
   """

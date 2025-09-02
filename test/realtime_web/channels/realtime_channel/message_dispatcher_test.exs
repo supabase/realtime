@@ -16,12 +16,12 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
   describe "fastlane_metadata/5" do
     test "info level" do
       assert MessageDispatcher.fastlane_metadata(self(), Serializer, "realtime:topic", :info, "tenant_id") ==
-               {:realtime_channel_fastlane, self(), Serializer, "realtime:topic", {:log, "tenant_id"}}
+               {:rc_fastlane, self(), Serializer, "realtime:topic", {:log, "tenant_id"}}
     end
 
     test "non-info level" do
       assert MessageDispatcher.fastlane_metadata(self(), Serializer, "realtime:topic", :warning, "tenant_id") ==
-               {:realtime_channel_fastlane, self(), Serializer, "realtime:topic"}
+               {:rc_fastlane, self(), Serializer, "realtime:topic"}
     end
   end
 
@@ -50,8 +50,8 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       from_pid = :erlang.list_to_pid(~c'<0.2.1>')
 
       subscribers = [
-        {subscriber_pid, {:realtime_channel_fastlane, self(), TestSerializer, "realtime:topic", {:log, "tenant123"}}},
-        {subscriber_pid, {:realtime_channel_fastlane, self(), TestSerializer, "realtime:topic"}}
+        {subscriber_pid, {:rc_fastlane, self(), TestSerializer, "realtime:topic", {:log, "tenant123"}}},
+        {subscriber_pid, {:rc_fastlane, self(), TestSerializer, "realtime:topic"}}
       ]
 
       msg = %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}

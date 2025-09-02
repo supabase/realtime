@@ -5,12 +5,18 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   require Logger
 
-  def fastlane_metadata(fastlane_pid, serializer, topic, :info, tenant_id) do
-    {:realtime_channel_fastlane, fastlane_pid, serializer, topic, {:log, tenant_id}}
+  def fastlane_metadata(fastlane_pid, serializer, topic, log_level, tenant_id, message_ids \\ MapSet.new())
+
+  def fastlane_metadata(fastlane_pid, serializer, topic, :info, tenant_id, message_ids) do
+    if MapSet.size(message_ids) == 0 do
+      {:rc_fastlane, fastlane_pid, serializer, topic, {:log, tenant_id}}
+    else
+      {:rc_fastlane, fastlane_pid, serializer, topic, {:log, tenant_id}, message_ids}
+    end
   end
 
-  def fastlane_metadata(fastlane_pid, serializer, topic, _log_level, _tenant_id) do
-    {:realtime_channel_fastlane, fastlane_pid, serializer, topic}
+  def fastlane_metadata(fastlane_pid, serializer, topic, _log_level, _tenant_id, message_ids) do
+    {:rc_fastlane, fastlane_pid, serializer, topic, message_ids}
   end
 
   @doc """
@@ -29,11 +35,11 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         {pid, _}, cache when pid == from ->
           cache
 
-        {pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic}}, cache ->
+        {pid, {:rc_fastlane, fastlane_pid, serializer, join_topic}}, cache ->
           send(pid, :update_rate_counter)
           do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
 
-        {pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic, {:log, tenant_id}}}, cache ->
+        {pid, {:rc_fastlane, fastlane_pid, serializer, join_topic, {:log, tenant_id}}}, cache ->
           send(pid, :update_rate_counter)
           log = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
           Logger.info(log, external_id: tenant_id, project: tenant_id)
