@@ -39,7 +39,7 @@ defmodule Realtime.Api.Message do
   end
 
   defp maybe_put_timestamp(changeset, field) do
-    case Map.get(changeset.data, field) do
+    case get_change(changeset, field) do
       nil -> put_timestamp(changeset, field)
       _ -> changeset
     end
