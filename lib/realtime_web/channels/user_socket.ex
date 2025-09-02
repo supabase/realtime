@@ -1,4 +1,14 @@
 defmodule RealtimeWeb.UserSocket do
+  @moduledoc """
+  Phoenix UserSocket for Supabase Realtime WebSocket connections.
+
+  This module:
+  - Defines the socket endpoint for all real-time channels
+  - Handles authentication, authorization, and assignment of tenant/channel context
+  - Integrates with tenant cache, JWT verification, and Postgres CDC
+
+  See also: RealtimeWeb.RealtimeChannel, Realtime.Tenants, RealtimeWeb.ChannelsAuthorization
+  """
   use Phoenix.Socket
   use Realtime.Logs
 

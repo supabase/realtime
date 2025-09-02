@@ -1,4 +1,16 @@
 defmodule RealtimeWeb.Endpoint do
+  @moduledoc """
+  The Phoenix Endpoint for Supabase Realtime.
+
+  Responsible for:
+  - Defining WebSocket and LiveView sockets
+  - Serving static assets
+  - Plug pipeline for request handling, telemetry, session, and routing
+  - Code reloading in development
+  - Integrating Prometheus, OpenTelemetry, and custom plugs
+
+  This is the main entry point for all HTTP and WebSocket traffic.
+  """
   use Phoenix.Endpoint, otp_app: :realtime
   alias RealtimeWeb.Plugs.BaggageRequestId
 

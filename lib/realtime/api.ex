@@ -1,6 +1,8 @@
 defmodule Realtime.Api do
   @moduledoc """
-  The Api context.
+  Public API functions for managing tenants, extensions, and messages in Supabase Realtime.
+
+  This module provides functions to create, update, and manage tenants and their extensions, as well as message handling and other core API operations.
   """
   require Logger
 

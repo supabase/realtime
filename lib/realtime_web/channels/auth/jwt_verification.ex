@@ -1,6 +1,13 @@
 defmodule RealtimeWeb.JwtVerification do
   @moduledoc """
-  Parse JWT and verify claims
+  JWT parsing and verification logic for Supabase Realtime.
+
+  This module:
+  - Verifies JWT tokens and validates claims for WebSocket and API authentication
+  - Supports multiple algorithms (HS, RS, ES, Ed)
+  - Provides helpers for claim and header validation
+
+  See also: RealtimeWeb.ChannelsAuthorization
   """
   # Matching error in Dialyzer when using Joken.peek_claims/1 but {:ok, []} is actually possible and covered by our testing
   @dialyzer {:nowarn_function, check_claims_format: 1}

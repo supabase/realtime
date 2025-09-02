@@ -1,6 +1,15 @@
 defmodule RealtimeWeb.RealtimeChannel do
   @moduledoc """
-  Used for handling channels and subscriptions.
+  Phoenix channel implementation for real-time messaging in Supabase Realtime.
+
+  This module handles:
+  - WebSocket join and message events for the "realtime:*" topic
+  - Authentication and authorization of clients
+  - Rate limiting, presence, and broadcast logic
+  - Integration with tenant configuration and database connections
+  - Error handling and system messages
+
+  See also: RealtimeWeb.UserSocket, Realtime.Tenants, Realtime.Tenants.Authorization
   """
   use RealtimeWeb, :channel
   use RealtimeWeb.RealtimeChannel.Logging

@@ -1,4 +1,24 @@
 defmodule Realtime.Application do
+  @moduledoc """
+  The main OTP application module for Supabase Realtime.
+
+  This module is responsible for:
+  - Setting up and starting the supervision tree for the Realtime server
+  - Initializing telemetry, clustering, and metrics
+  - Handling OpenTelemetry, Prometheus, and system monitoring setup
+  - Managing extensions, janitor tasks, and database connections
+  - Ensuring secure channel configuration and JWT claim validation
+
+  The supervision tree includes:
+  - Database repositories
+  - PubSub and Registry
+  - Telemetry and Prometheus
+  - Dynamic supervisors for tenant connections, migrations, and replication
+  - Endpoint and Presence
+  - Extensions and janitor/cleanup tasks
+
+  See the README for a high-level architecture overview.
+  """
   # See https://hexdocs.pm/elixir/Application.html
   # for more information on OTP Applications
   @moduledoc false
@@ -14,6 +34,9 @@ defmodule Realtime.Application do
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
 
+  @doc """
+  Application entry point. Sets up logging, telemetry, clustering, and starts the supervision tree.
+  """
   def start(_type, _args) do
     opentelemetry_setup()
     primary_config = :logger.get_primary_config()
@@ -110,6 +133,9 @@ defmodule Realtime.Application do
     Supervisor.start_link(children, opts)
   end
 
+  @doc """
+  Returns a list of child specs for extension supervisors, based on configuration.
+  """
   defp extensions_supervisors do
     Enum.reduce(Application.get_env(:realtime, :extensions), [], fn
       {_, %{supervisor: name}}, acc ->
@@ -126,6 +152,9 @@ defmodule Realtime.Application do
     end)
   end
 
+  @doc """
+  Returns a list of janitor/cleanup tasks if enabled in configuration.
+  """
   defp janitor_tasks do
     if Application.get_env(:realtime, :run_janitor) do
       janitor_max_children = Application.get_env(:realtime, :janitor_max_children)
@@ -147,6 +176,9 @@ defmodule Realtime.Application do
     end
   end
 
+  @doc """
+  Sets up OpenTelemetry instrumentation for Cowboy, Phoenix, and Ecto.
+  """
   defp opentelemetry_setup do
     :opentelemetry_cowboy.setup()
     OpentelemetryPhoenix.setup(adapter: :cowboy2)

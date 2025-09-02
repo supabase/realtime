@@ -1,6 +1,15 @@
 defmodule Realtime.Tenants do
   @moduledoc """
-  Everything to do with Tenants.
+  Tenant management and utilities for Supabase Realtime.
+
+  This module provides functions for:
+  - Managing tenant records and their configuration
+  - Handling tenant health checks and suspension
+  - Generating keys for rate limiting and counters
+  - Building PubSub topics for tenant channels
+  - Retrieving and updating tenant limits
+
+  See also: Realtime.Api.Tenant, Realtime.Tenants.Cache
   """
 
   require Logger

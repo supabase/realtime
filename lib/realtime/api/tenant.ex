@@ -1,6 +1,9 @@
 defmodule Realtime.Api.Tenant do
   @moduledoc """
-  Describes a database/tenant which makes use of the realtime service.
+  Ecto schema and changeset logic for tenants in Supabase Realtime.
+
+  This module defines the tenant database structure, default values, and changeset validation logic.
+  It also handles encryption of sensitive fields and setting of default configuration values.
   """
   use Ecto.Schema
   import Ecto.Changeset
