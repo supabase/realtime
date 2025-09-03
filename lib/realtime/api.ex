@@ -186,7 +186,7 @@ defmodule Realtime.Api do
     |> repo.preload(:extensions)
   end
 
-  defp list_extensions(type \\ "postgres_cdc_rls") do
+  defp list_extensions(type) do
     from(e in Extensions, where: e.type == ^type, select: e)
     |> Repo.all()
   end
