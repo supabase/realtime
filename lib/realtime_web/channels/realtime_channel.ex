@@ -79,9 +79,11 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       message_ids =
         if replay_params do
-          {:ok, messages, message_ids} = Realtime.Messages.replay(db_conn, sub_topic, replay_params["since"], 10)
+          {:ok, messages, message_ids} =
+            Realtime.Messages.replay(db_conn, sub_topic, socket.assigns.private?, replay_params["since"], 10)
+
           dbg(message_ids)
-          # FIXME must insert into an ETS table to avoid race conditions
+          # Send to self because we can't write to the socket before joining
           send(self(), {:replay, messages})
           message_ids
         else
@@ -227,11 +229,10 @@ defmodule RealtimeWeb.RealtimeChannel do
   @impl true
   def handle_info({:replay, messages}, socket) do
     for message <- messages do
-      # broadcast_message = %{topic: topic, event: event, private: private, payload: Map.put_new(payload, "id", id)},
-      push(socket, "broadcast", %{
-        event: message.event,
-        payload: Map.put_new(message.payload, "id", message.id)
-      })
+      meta = %{"replayed" => true, "id" => message.id}
+      payload = %{"payload" => message.payload, "event" => message.event, "type" => "broadcast", "meta" => meta}
+
+      push(socket, "broadcast", payload)
     end
 
     {:noreply, socket}

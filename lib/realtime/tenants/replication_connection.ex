@@ -310,7 +310,13 @@ defmodule Realtime.Tenants.ReplicationConnection do
          {:ok, topic} <- get_or_error(to_broadcast, "topic", :topic_missing),
          {:ok, private} <- get_or_error(to_broadcast, "private", :private_missing),
          %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id),
-         broadcast_message = %{topic: topic, event: event, private: private, payload: Map.put_new(payload, "id", id)},
+         broadcast_message = %{
+           id: id,
+           topic: topic,
+           event: event,
+           private: private,
+           payload: Map.put_new(payload, "id", id)
+         },
          :ok <- BatchBroadcast.broadcast(nil, tenant, %{messages: [broadcast_message]}, true) do
       inserted_at = NaiveDateTime.from_iso8601!(inserted_at)
       latency_inserted_at = NaiveDateTime.utc_now() |> NaiveDateTime.diff(inserted_at)

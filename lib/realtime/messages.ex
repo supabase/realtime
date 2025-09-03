@@ -14,19 +14,22 @@ defmodule Realtime.Messages do
 
   Automatically uses RPC if the database connection is not in the same node
   """
-  @spec replay(conn :: pid, topic :: String.t(), since :: non_neg_integer, limit :: non_neg_integer) ::
+  @spec replay(pid, String.t(), boolean, non_neg_integer, non_neg_integer) ::
           {:ok, Message.t(), [String.t()]} | {:error, term} | {:error, :rpc_error, term}
-  def replay(conn, topic, since, limit) when node(conn) == node() and is_integer(since) and is_integer(limit) do
+  def replay(conn, topic, private?, since, limit)
+      when node(conn) == node() and is_boolean(private?) and is_integer(since) and is_integer(limit) do
     limit = max(min(limit, @hard_limit), 1)
     since = DateTime.from_unix!(since, :millisecond) |> DateTime.to_naive()
 
+    # FIXME need an index for this query
     query =
       from m in Message,
-        where: m.topic == ^topic and m.inserted_at >= ^since,
+        where: m.topic == ^topic and m.private == ^private? and m.inserted_at >= ^since and m.extension == :broadcast,
         limit: ^limit,
         order_by: [asc: m.inserted_at]
 
     with {:ok, messages} <- Realtime.Repo.all(conn, query, Message) do
+      dbg(messages)
       {:ok, messages, MapSet.new(messages, & &1.id)}
     end
   end
