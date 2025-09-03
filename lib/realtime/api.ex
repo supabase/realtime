@@ -186,12 +186,9 @@ defmodule Realtime.Api do
     |> repo.preload(:extensions)
   end
 
-  def list_extensions(type \\ "postgres_cdc_rls") do
-    from(e in Extensions,
-      where: e.type == ^type,
-      select: e
-    )
-    |> Replica.replica().all()
+  defp list_extensions(type \\ "postgres_cdc_rls") do
+    from(e in Extensions, where: e.type == ^type, select: e)
+    |> Repo.all()
   end
 
   def rename_settings_field(from, to) do

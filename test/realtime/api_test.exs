@@ -236,10 +236,6 @@ defmodule Realtime.ApiTest do
     end
   end
 
-  test "list_extensions/1 ", %{tenants: tenants} do
-    assert length(Api.list_extensions()) == length(tenants)
-  end
-
   describe "preload_counters/1" do
     test "preloads counters for a given tenant ", %{tenants: [tenant | _]} do
       tenant = Repo.reload!(tenant)
