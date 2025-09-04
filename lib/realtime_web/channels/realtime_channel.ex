@@ -72,23 +72,10 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, claims, confirm_token_ref} <- confirm_token(socket),
          socket = assign_authorization_context(socket, sub_topic, claims),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
-         {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket) do
+         {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket),
+         {:ok, replayed_message_ids} <-
+           maybe_replay_messages(params["config"], sub_topic, db_conn, socket.assigns.private?) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
-
-      replay_params = params["config"]["broadcast"]["replay"]
-
-      message_ids =
-        if replay_params do
-          {:ok, messages, message_ids} =
-            Realtime.Messages.replay(db_conn, sub_topic, socket.assigns.private?, replay_params["since"], 10)
-
-          dbg(message_ids)
-          # Send to self because we can't write to the socket before joining
-          send(self(), {:replay, messages})
-          message_ids
-        else
-          []
-        end
 
       # fastlane subscription
       metadata =
@@ -96,9 +83,9 @@ defmodule RealtimeWeb.RealtimeChannel do
           transport_pid,
           serializer,
           topic,
-          socket.assigns.log_level,
+          log_level,
           tenant_id,
-          message_ids
+          replayed_message_ids
         )
 
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
@@ -219,6 +206,12 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, :shutdown_in_progress} ->
         log_error(socket, "RealtimeRestarting", "Realtime is restarting, please standby")
+
+      {:error, :failed_to_replay_messages} ->
+        log_error(socket, "UnableToReplayMessages", "Realtime was unable to replay messages")
+
+      {:error, :invalid_replay_params} ->
+        log_error(socket, "UnableToReplayMessages", "Replay params are not valid")
 
       {:error, error} ->
         log_error(socket, "UnknownErrorOnChannel", error)
@@ -795,4 +788,22 @@ defmodule RealtimeWeb.RealtimeChannel do
       do: {:error, :private_only},
       else: :ok
   end
+
+  defp maybe_replay_messages(%{"broadcast" => %{"replay" => replay_params}}, sub_topic, db_conn, private?)
+       when is_map(replay_params) do
+    with {:ok, messages, message_ids} <-
+           Realtime.Messages.replay(
+             db_conn,
+             sub_topic,
+             private?,
+             replay_params["since"],
+             replay_params["limit"] || 25
+           ) do
+      # Send to self because we can't write to the socket before finishing the join process
+      send(self(), {:replay, messages})
+      {:ok, message_ids}
+    end
+  end
+
+  defp maybe_replay_messages(_, _, _, _), do: {:ok, MapSet.new()}
 end
