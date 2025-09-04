@@ -1,6 +1,7 @@
 defmodule Realtime.PromEx.Plugins.PhoenixTest do
   use Realtime.DataCase, async: false
   alias Realtime.PromEx.Plugins
+  alias Realtime.Integration.WebsocketClient
 
   defmodule MetricsTest do
     use PromEx, otp_app: :realtime_test_phoenix
@@ -13,16 +14,20 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
   describe "pooling metrics" do
     setup do
       start_supervised!(MetricsTest)
-      :ok
+      %{tenant: Containers.checkout_tenant(run_migrations: true)}
     end
 
-    test "number of connections" do
-      # Trigger a connection by making a request to the endpoint
-      url = RealtimeWeb.Endpoint.url() <> "/healthcheck"
-      Req.get!(url)
+    test "number of connections", %{tenant: tenant} do
+      {:ok, token} = token_valid(tenant, "anon", %{})
+
+      {:ok, _} =
+        WebsocketClient.connect(self(), uri(tenant, 4002), Phoenix.Socket.V1.JSONSerializer, [{"x-api-key", token}])
+
+      {:ok, _} =
+        WebsocketClient.connect(self(), uri(tenant, 4002), Phoenix.Socket.V1.JSONSerializer, [{"x-api-key", token}])
 
       Process.sleep(200)
-      assert metric_value() > 0
+      assert metric_value() >= 2
     end
   end
 
