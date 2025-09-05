@@ -23,6 +23,9 @@ defmodule Realtime.MessagesTest do
 
       assert Messages.replay(self(), "a topic", true, 123, "not a number") ==
                {:error, :invalid_replay_params}
+
+      assert Messages.replay(self(), "a topic", true, 253_402_300_800_000, 10) ==
+               {:error, :invalid_replay_params}
     end
 
     test "empty replay", %{conn: conn} do

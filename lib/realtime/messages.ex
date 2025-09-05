@@ -8,6 +8,7 @@ defmodule Realtime.Messages do
   import Ecto.Query, only: [from: 2]
 
   @hard_limit 25
+  @default_timeout 5_000
 
   @doc """
   Fetch last `limit ` messages for a given `topic` inserted after `since`
@@ -20,21 +21,12 @@ defmodule Realtime.Messages do
       when node(conn) == node() and is_boolean(private?) and is_integer(since) and is_integer(limit) do
     limit = max(min(limit, @hard_limit), 1)
 
-    since =
-      DateTime.from_unix!(since, :millisecond)
-      |> DateTime.to_naive()
-
-    # FIXME need an index for this query
-    query =
-      from m in Message,
-        where: m.topic == ^topic and m.private == ^private? and m.inserted_at >= ^since and m.extension == :broadcast,
-        limit: ^limit,
-        order_by: [desc: m.inserted_at]
-
-    with {:ok, messages} <- Realtime.Repo.all(conn, query, Message) do
+    with {:ok, since} <- DateTime.from_unix(since, :millisecond),
+         {:ok, messages} <- messages(conn, topic, private?, since, limit) do
       {:ok, Enum.reverse(messages), MapSet.new(messages, & &1.id)}
     else
       {:error, :postgrex_exception} -> {:error, :failed_to_replay_messages}
+      {:error, :invalid_unix_time} -> {:error, :invalid_replay_params}
       error -> error
     end
   end
@@ -44,6 +36,25 @@ defmodule Realtime.Messages do
   end
 
   def replay(_, _, _, _, _), do: {:error, :invalid_replay_params}
+
+  defp messages(conn, topic, private?, since, limit) do
+    since = DateTime.to_naive(since)
+    # We want to avoid searching partitions in the future as they should be empty
+    # so we limit to 1 minute in the future to account for any potential drift
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.add(1, :minute)
+
+    query =
+      from m in Message,
+        where:
+          m.topic == ^topic and
+            m.private == ^private? and
+            m.inserted_at >= ^since and
+            m.inserted_at < ^now,
+        limit: ^limit,
+        order_by: [desc: m.inserted_at]
+
+    Realtime.Repo.all(conn, query, Message, timeout: @default_timeout)
+  end
 
   @doc """
   Deletes messages older than 72 hours for a given tenant connection
