@@ -909,6 +909,56 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       refute_receive %Message{event: "presence_state"}, 500
     end
+
+    test "presence automatically enabled when user sends track message for public channel", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
+      config = %{presence: %{key: "", enabled: false}, private: false}
+      topic = "realtime:any"
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      refute_receive %Message{event: "presence_state"}, 500
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_96", t: 1814.7000000029802}
+      }
+
+      WebsocketClient.send_event(socket, topic, "presence", payload)
+
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}
+
+      join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
+      assert get_in(join_payload, ["name"]) == payload.payload.name
+      assert get_in(join_payload, ["t"]) == payload.payload.t
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
+    test "presence automatically enabled when user sends track message for private channel",
+         %{tenant: tenant, topic: topic} do
+      {socket, _} = get_connection(tenant, "authenticated")
+      config = %{presence: %{key: "", enabled: false}, private: true}
+      topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      refute_receive %Message{event: "presence_state"}, 500
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_96", t: 1814.7000000029802}
+      }
+
+      WebsocketClient.send_event(socket, topic, "presence", payload)
+
+      assert_receive %Message{event: "presence_diff", payload: %{"joins" => joins, "leaves" => %{}}, topic: ^topic}, 500
+      join_payload = joins |> Map.values() |> hd() |> get_in(["metas"]) |> hd()
+      assert get_in(join_payload, ["name"]) == payload.payload.name
+      assert get_in(join_payload, ["t"]) == payload.payload.t
+    end
   end
 
   describe "token handling" do

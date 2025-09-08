@@ -187,8 +187,9 @@ defmodule Realtime.Api do
   end
 
   defp list_extensions(type) do
-    from(e in Extensions, where: e.type == ^type, select: e)
-    |> Repo.all()
+    query = from(e in Extensions, where: e.type == ^type, select: e)
+
+    Repo.all(query)
   end
 
   def rename_settings_field(from, to) do
