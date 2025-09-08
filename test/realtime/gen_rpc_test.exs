@@ -172,6 +172,18 @@ defmodule Realtime.GenRpcTest do
                         mechanism: :gen_rpc
                       }}
     end
+
+    test "bad node" do
+      node = :"unknown@1.1.1.1"
+
+      log =
+        capture_log(fn ->
+          assert GenRpc.call(node, Map, :fetch, [%{a: 1}, :a], tenant_id: 123) == {:error, :rpc_error, :badnode}
+        end)
+
+      assert log =~
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{+error: :badnode, mod: Map, func: :fetch, target: :"#{node}"/
+    end
   end
 
   describe "multicast/4" do
