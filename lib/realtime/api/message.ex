@@ -8,6 +8,8 @@ defmodule Realtime.Api.Message do
   @primary_key {:id, Ecto.UUID, autogenerate: true}
   @schema_prefix "realtime"
 
+  @type t :: %__MODULE__{}
+
   schema "messages" do
     field(:topic, :string)
     field(:extension, Ecto.Enum, values: [:broadcast, :presence])
