@@ -52,28 +52,22 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     end
   end
 
-  @spec handle(map(), Socket.t()) ::
-          {:ok, Socket.t()} | {:error, :rls_policy_error | :unable_to_set_policies | :rate_limit_exceeded}
-  def handle(_, %{assigns: %{presence_enabled?: false}} = socket), do: {:ok, socket}
-  def handle(payload, socket) when not is_private?(socket), do: handle(payload, nil, socket)
-
   @spec handle(map(), pid() | nil, Socket.t()) ::
           {:ok, Socket.t()}
           | {:error, :rls_policy_error | :unable_to_set_policies | :rate_limit_exceeded | :unable_to_track_presence}
-  def handle(_, _, %{assigns: %{presence_enabled?: false}} = socket), do: {:ok, socket}
-
   def handle(%{"event" => event} = payload, db_conn, socket) do
     event = String.downcase(event, :ascii)
     handle_presence_event(event, payload, db_conn, socket)
   end
 
-  def handle(_payload, _db_conn, socket), do: {:ok, socket}
+  def handle(_, _, socket), do: {:ok, socket}
 
-  defp handle_presence_event("track", payload, _db_conn, socket) when not is_private?(socket) do
+  defp handle_presence_event("track", payload, _, socket) when not is_private?(socket) do
     track(socket, payload)
   end
 
-  defp handle_presence_event("track", payload, db_conn, socket) when is_nil(socket.assigns.policies.presence.write) do
+  defp handle_presence_event("track", payload, db_conn, socket)
+       when is_private?(socket) and is_nil(socket.assigns.policies.presence.write) do
     %{assigns: %{authorization_context: authorization_context, policies: policies}} = socket
 
     case Authorization.get_write_authorizations(policies, db_conn, authorization_context) do
@@ -111,6 +105,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp track(socket, payload) do
+    socket = assign(socket, :presence_enabled?, true)
+
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
     payload = Map.get(payload, "payload", %{})
 

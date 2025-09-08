@@ -376,7 +376,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_in("presence", payload, %{assigns: %{private?: false}} = socket) do
-    with {:ok, socket} <- PresenceHandler.handle(payload, socket) do
+    with {:ok, socket} <- PresenceHandler.handle(payload, nil, socket) do
       {:reply, :ok, socket}
     else
       {:error, :rate_limit_exceeded} ->
