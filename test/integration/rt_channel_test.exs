@@ -25,6 +25,7 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.ReplicationConnection
 
   alias RealtimeWeb.RealtimeChannel.Tracker
   alias RealtimeWeb.SocketDisconnect
@@ -2352,6 +2353,133 @@ defmodule Realtime.Integration.RtChannelTest do
     assert_receive %Message{topic: ^topic, event: "phx_reply", payload: %{"status" => "ok"}}, 500
     assert [{_pid, count}] = Tracker.list_pids()
     assert count == 2
+  end
+
+  describe "WAL bloat handling" do
+    setup %{tenant: tenant} do
+      topic = random_string()
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      %{rows: [[max_wal_size]]} = Postgrex.query!(db_conn, "SHOW max_wal_size", [])
+      %{rows: [[wal_keep_size]]} = Postgrex.query!(db_conn, "SHOW wal_keep_size", [])
+      %{rows: [[max_slot_wal_keep_size]]} = Postgrex.query!(db_conn, "SHOW max_slot_wal_keep_size", [])
+
+      assert max_wal_size == "32MB"
+      assert wal_keep_size == "32MB"
+      assert max_slot_wal_keep_size == "32MB"
+
+      Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS wal_test (id INT, data TEXT)", [])
+
+      Postgrex.query!(
+        db_conn,
+        """
+          CREATE OR REPLACE FUNCTION wal_test_trigger_func() RETURNS TRIGGER AS $$
+          BEGIN
+            PERFORM realtime.send(json_build_object ('value', 'test' :: text)::jsonb, 'test', '#{topic}', false);
+            RETURN NULL;
+          END;
+          $$ LANGUAGE plpgsql;
+        """,
+        []
+      )
+
+      Postgrex.query!(db_conn, "DROP TRIGGER IF EXISTS wal_test_trigger ON wal_test", [])
+
+      Postgrex.query!(
+        db_conn,
+        """
+          CREATE TRIGGER wal_test_trigger
+          AFTER INSERT OR UPDATE OR DELETE ON wal_test
+          FOR EACH ROW
+          EXECUTE FUNCTION wal_test_trigger_func()
+        """,
+        []
+      )
+
+      GenServer.stop(db_conn)
+
+      on_exit(fn ->
+        {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+        Postgrex.query!(db_conn, "DROP TABLE IF EXISTS wal_test CASCADE", [])
+      end)
+
+      %{topic: topic}
+    end
+
+    test "track PID changes during WAL bloat creation", %{tenant: tenant, topic: topic} do
+      {socket, _} = get_connection(tenant, "authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      full_topic = "realtime:#{topic}"
+
+      active_slot_query =
+        "SELECT active_pid FROM pg_replication_slots where active_pid is not null and slot_name = 'supabase_realtime_messages_replication_slot_'"
+
+      WebsocketClient.join(socket, full_topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "presence_state"}, 500
+
+      assert Connect.ready?(tenant.external_id)
+
+      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      original_connect_pid = Connect.whereis(tenant.external_id)
+      original_replication_pid = ReplicationConnection.whereis(tenant.external_id)
+      %{rows: [[original_db_pid]]} = Postgrex.query!(db_conn, active_slot_query, [])
+
+      tasks =
+        for _ <- 1..10 do
+          Task.async(fn ->
+            {:ok, bloat_conn} = Database.connect(tenant, "realtime_bloat", :stop)
+
+            Postgrex.transaction(bloat_conn, fn conn ->
+              Postgrex.query(conn, "INSERT INTO wal_test SELECT generate_series(1, 100000), repeat('x', 2000)", [])
+              {:error, "test"}
+            end)
+
+            Process.exit(bloat_conn, :normal)
+          end)
+        end
+
+      Task.await_many(tasks, 20000)
+
+      # Kill all pending transactions still running
+      Postgrex.query!(
+        db_conn,
+        "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name='realtime_bloat'",
+        []
+      )
+
+      # Does it recover?
+      assert Connect.ready?(tenant.external_id)
+      {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      %{rows: [[new_db_pid]]} = Postgrex.query!(db_conn, active_slot_query, [])
+
+      assert new_db_pid != original_db_pid
+      assert ^original_connect_pid = Connect.whereis(tenant.external_id)
+      assert ^original_replication_pid = ReplicationConnection.whereis(tenant.external_id)
+
+      # Check if socket is still connected
+      payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
+      WebsocketClient.send_event(socket, full_topic, "broadcast", payload)
+      assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^full_topic}, 500
+      # Check if we are receiving the message from replication connection
+      Postgrex.query!(db_conn, "INSERT INTO wal_test VALUES (1, 'test')", [])
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "broadcast",
+                       payload: %{
+                         "event" => "test",
+                         "payload" => %{"value" => "test"},
+                         "type" => "broadcast"
+                       },
+                       join_ref: nil,
+                       ref: nil,
+                       topic: ^full_topic
+                     },
+                     5000
+    end
   end
 
   defp mode(%{mode: :distributed}) do

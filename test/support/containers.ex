@@ -267,7 +267,13 @@ defmodule Containers do
         @image,
         "postgres",
         "-c",
-        "config_file=/etc/postgresql/postgresql.conf"
+        "config_file=/etc/postgresql/postgresql.conf",
+        "-c",
+        "wal_keep_size=32MB",
+        "-c",
+        "max_wal_size=32MB",
+        "-c",
+        "max_slot_wal_keep_size=32MB"
       ])
   end
 end
