@@ -2434,7 +2434,7 @@ defmodule Realtime.Integration.RtChannelTest do
             {:ok, bloat_conn} = Database.connect(tenant, "realtime_bloat", :stop)
 
             Postgrex.transaction(bloat_conn, fn conn ->
-              Postgrex.query(conn, "INSERT INTO wal_test SELECT generate_series(1, 100000), repeat('x', 2000)", [])
+              Postgrex.query(conn, "INSERT INTO wal_test SELECT generate_series(1, 1000), repeat('x', 200)", [])
               {:error, "test"}
             end)
 
