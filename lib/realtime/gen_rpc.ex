@@ -11,6 +11,22 @@ defmodule Realtime.GenRpc do
   @type result :: any | {:error, :rpc_error, reason :: any}
 
   @doc """
+  Broadcasts the message `msg` asynchronously to the registered process `name` on the specified `nodes`.
+
+  Options:
+
+  - `:key` - Optional key to consistently select the same gen_rpc clients to guarantee message order between nodes
+  """
+  @spec abcast([node], atom, any, keyword()) :: :ok
+  def abcast(nodes, name, msg, opts) when is_list(nodes) and is_atom(name) and is_list(opts) do
+    key = Keyword.get(opts, :key, nil)
+    nodes = rpc_nodes(nodes, key)
+
+    :gen_rpc.abcast(nodes, name, msg)
+    :ok
+  end
+
+  @doc """
   Fire and forget apply(mod, func, args) on all nodes
 
   Options:

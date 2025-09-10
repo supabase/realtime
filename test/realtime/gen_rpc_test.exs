@@ -186,6 +186,39 @@ defmodule Realtime.GenRpcTest do
     end
   end
 
+  describe "abcast/4" do
+    test "abcast to registered process", %{node: node} do
+      name =
+        System.unique_integer()
+        |> to_string()
+        |> String.to_atom()
+
+      :erlang.register(name, self())
+
+      # Use erpc to make the other node abcast to this one
+      :erpc.call(node, GenRpc, :abcast, [[node()], name, "a message", []])
+
+      assert_receive "a message"
+      refute_receive _any
+    end
+
+    @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
+    test "tcp error" do
+      Logger.put_process_level(self(), :debug)
+
+      log =
+        capture_log(fn ->
+          assert GenRpc.abcast(Node.list(), :some_process_name, "a message", []) == :ok
+          # We have to wait for gen_rpc logs to show up
+          Process.sleep(100)
+        end)
+
+      assert log =~ "[error] event=connect_to_remote_server"
+
+      refute_receive _any
+    end
+  end
+
   describe "multicast/4" do
     test "evals everywhere" do
       parent = self()
