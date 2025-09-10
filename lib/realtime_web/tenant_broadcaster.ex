@@ -9,7 +9,7 @@ defmodule RealtimeWeb.TenantBroadcaster do
   def pubsub_broadcast(tenant_id, topic, message, dispatcher) do
     collect_payload_size(tenant_id, message)
 
-    Realtime.GenRpc.multicast(PubSub, :local_broadcast, [Realtime.PubSub, topic, message, dispatcher], key: topic)
+    PubSub.broadcast(Realtime.PubSub, topic, message, dispatcher)
 
     :ok
   end
@@ -25,13 +25,7 @@ defmodule RealtimeWeb.TenantBroadcaster do
   def pubsub_broadcast_from(tenant_id, from, topic, message, dispatcher) do
     collect_payload_size(tenant_id, message)
 
-    Realtime.GenRpc.multicast(
-      PubSub,
-      :local_broadcast_from,
-      [Realtime.PubSub, from, topic, message, dispatcher],
-      key: topic
-    )
-
+    PubSub.broadcast_from(Realtime.PubSub, from, topic, message, dispatcher)
     :ok
   end
 
