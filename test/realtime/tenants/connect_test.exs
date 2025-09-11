@@ -348,11 +348,13 @@ defmodule Realtime.Tenants.ConnectTest do
       assert replication_connection_before == replication_connection_after
     end
 
-    test "on replication connection postgres pid being stopped, also kills the Connect module", %{tenant: tenant} do
+    test "on replication connection postgres pid being stopped, Connect module recovers it", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+      Process.monitor(replication_connection_pid)
+
       assert Process.alive?(replication_connection_pid)
       pid = Connect.whereis(tenant.external_id)
 
@@ -362,21 +364,33 @@ defmodule Realtime.Tenants.ConnectTest do
         []
       )
 
-      assert_process_down(replication_connection_pid)
-      assert_process_down(pid)
+      assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
+
+      Process.sleep(500)
+      new_replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+
+      assert replication_connection_pid != new_replication_connection_pid
+      assert Process.alive?(new_replication_connection_pid)
+      assert Process.alive?(pid)
     end
 
-    test "on replication connection exit, also kills the Connect module", %{tenant: tenant} do
+    test "on replication connection exit, Connect module recovers it", %{tenant: tenant} do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
 
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+      Process.monitor(replication_connection_pid)
       assert Process.alive?(replication_connection_pid)
       pid = Connect.whereis(tenant.external_id)
       Process.exit(replication_connection_pid, :kill)
+      assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
 
-      assert_process_down(replication_connection_pid)
-      assert_process_down(pid)
+      Process.sleep(500)
+      new_replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+
+      assert replication_connection_pid != new_replication_connection_pid
+      assert Process.alive?(new_replication_connection_pid)
+      assert Process.alive?(pid)
     end
 
     test "handles max_wal_senders by logging the correct operational code", %{tenant: tenant} do

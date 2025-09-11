@@ -252,31 +252,10 @@ defmodule Realtime.Tenants.Connect do
   end
 
   def handle_continue(:start_replication, state) do
-    %{tenant: tenant} = state
-
-    with {:ok, replication_connection_pid} <- ReplicationConnection.start(tenant, self()) do
-      replication_connection_reference = Process.monitor(replication_connection_pid)
-
-      state = %{
-        state
-        | replication_connection_pid: replication_connection_pid,
-          replication_connection_reference: replication_connection_reference
-      }
-
-      {:noreply, state, {:continue, :setup_connected_user_events}}
-    else
-      {:error, :max_wal_senders_reached} ->
-        log_error("ReplicationMaxWalSendersReached", "Tenant database has reached the maximum number of WAL senders")
-        {:stop, :shutdown, state}
-
-      {:error, error} ->
-        log_error("StartReplicationFailed", error)
-        {:stop, :shutdown, state}
+    case start_replication_connection(state) do
+      {:ok, state} -> {:noreply, state, {:continue, :setup_connected_user_events}}
+      {:error, state} -> {:stop, :shutdown, state}
     end
-  rescue
-    error ->
-      log_error("StartReplicationFailed", error)
-      {:stop, :shutdown, state}
   end
 
   def handle_continue(:setup_connected_user_events, state) do
@@ -354,7 +333,20 @@ defmodule Realtime.Tenants.Connect do
         %{replication_connection_reference: replication_connection_reference} = state
       ) do
     Logger.warning("Replication connection has died")
-    {:stop, :shutdown, state}
+    Process.send_after(self(), :recover_replication_connection, 100)
+    {:noreply, state}
+  end
+
+  @replication_connection_query "SELECT * from pg_stat_activity where application_name='realtime_replication_connection'"
+  def handle_info(:recover_replication_connection, state) do
+    with %{num_rows: 0} <- Postgrex.query!(state.db_conn_pid, @replication_connection_query, []),
+         {:ok, state} <- start_replication_connection(state) do
+      {:noreply, state}
+    else
+      _ ->
+        Process.send_after(self(), :recover_replication_connection, 100)
+        {:noreply, state}
+    end
   end
 
   def handle_info(_, state), do: {:noreply, state}
@@ -414,4 +406,32 @@ defmodule Realtime.Tenants.Connect do
   defp tenant_suspended?(_), do: :ok
 
   defp rebalance_check_interval_in_ms(), do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
+
+  defp start_replication_connection(state) do
+    %{tenant: tenant} = state
+
+    with {:ok, replication_connection_pid} <- ReplicationConnection.start(tenant, self()) do
+      replication_connection_reference = Process.monitor(replication_connection_pid)
+
+      state = %{
+        state
+        | replication_connection_pid: replication_connection_pid,
+          replication_connection_reference: replication_connection_reference
+      }
+
+      {:ok, state}
+    else
+      {:error, :max_wal_senders_reached} ->
+        log_error("ReplicationMaxWalSendersReached", "Tenant database has reached the maximum number of WAL senders")
+        {:error, state}
+
+      {:error, error} ->
+        log_error("StartReplicationFailed", error)
+        {:error, state}
+    end
+  rescue
+    error ->
+      log_error("StartReplicationFailed", error)
+      {:error, state}
+  end
 end

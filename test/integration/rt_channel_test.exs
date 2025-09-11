@@ -2429,12 +2429,12 @@ defmodule Realtime.Integration.RtChannelTest do
       %{rows: [[original_db_pid]]} = Postgrex.query!(db_conn, active_slot_query, [])
 
       tasks =
-        for _ <- 1..10 do
+        for _ <- 1..5 do
           Task.async(fn ->
             {:ok, bloat_conn} = Database.connect(tenant, "realtime_bloat", :stop)
 
             Postgrex.transaction(bloat_conn, fn conn ->
-              Postgrex.query(conn, "INSERT INTO wal_test SELECT generate_series(1, 1000), repeat('x', 200)", [])
+              Postgrex.query(conn, "INSERT INTO wal_test SELECT generate_series(1, 100000), repeat('x', 2000)", [])
               {:error, "test"}
             end)
 
@@ -2454,16 +2454,18 @@ defmodule Realtime.Integration.RtChannelTest do
       # Does it recover?
       assert Connect.ready?(tenant.external_id)
       {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      Process.sleep(200)
       %{rows: [[new_db_pid]]} = Postgrex.query!(db_conn, active_slot_query, [])
 
       assert new_db_pid != original_db_pid
       assert ^original_connect_pid = Connect.whereis(tenant.external_id)
-      assert ^original_replication_pid = ReplicationConnection.whereis(tenant.external_id)
+      assert original_replication_pid != ReplicationConnection.whereis(tenant.external_id)
 
       # Check if socket is still connected
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, full_topic, "broadcast", payload)
       assert_receive %Message{event: "broadcast", payload: ^payload, topic: ^full_topic}, 500
+
       # Check if we are receiving the message from replication connection
       Postgrex.query!(db_conn, "INSERT INTO wal_test VALUES (1, 'test')", [])
 
