@@ -37,6 +37,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert log =~ "sub=#{sub}"
       assert log =~ "exp=#{exp}"
       assert log =~ "iss=#{iss}"
+      assert log =~ "error_code=TestError"
     end
   end
 
@@ -57,6 +58,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert log =~ "sub=#{sub}"
       assert log =~ "exp=#{exp}"
       assert log =~ "iss=#{iss}"
+      assert log =~ "error_code=TestWarning"
     end
   end
 
@@ -67,10 +69,14 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       for log_level <- log_levels do
         socket = %{assigns: %{log_level: log_level, tenant: random_string(), access_token: "test_token"}}
 
-        assert capture_log(fn ->
-                 assert Logging.maybe_log_error(socket, "TestCode", "test message") ==
-                          {:error, %{reason: "TestCode: test message"}}
-               end) =~ "TestCode: test message"
+        log =
+          capture_log(fn ->
+            assert Logging.maybe_log_error(socket, "TestCode", "test message") ==
+                     {:error, %{reason: "TestCode: test message"}}
+          end)
+
+        assert log =~ "TestCode: test message"
+        assert log =~ "error_code=TestCode"
 
         assert capture_log(fn ->
                  assert Logging.maybe_log_error(socket, "TestCode", %{a: "b"}) ==
@@ -103,11 +109,14 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       for log_level <- log_levels do
         socket = %{assigns: %{log_level: log_level, tenant: random_string(), access_token: "test_token"}}
 
-        assert capture_log(fn ->
-                 assert Logging.maybe_log_warning(socket, "TestCode", "test message") ==
-                          {:error, %{reason: "TestCode: test message"}}
-               end) =~
-                 "TestCode: test message"
+        log =
+          capture_log(fn ->
+            assert Logging.maybe_log_warning(socket, "TestCode", "test message") ==
+                     {:error, %{reason: "TestCode: test message"}}
+          end)
+
+        assert log =~ "TestCode: test message"
+        assert log =~ "error_code=TestCode"
 
         assert capture_log(fn ->
                  assert Logging.maybe_log_warning(socket, "TestCode", %{a: "b"}) ==
