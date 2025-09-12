@@ -21,7 +21,7 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   def log_error(socket, code, msg) do
     msg = build_msg(code, msg)
     emit_system_error(:error, code)
-    log(socket, :error, msg)
+    log(socket, :error, code, msg)
     {:error, %{reason: msg}}
   end
 
@@ -32,7 +32,7 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
           {:error, %{reason: binary}}
   def log_warning(socket, code, msg) do
     msg = build_msg(code, msg)
-    log(socket, :warning, msg)
+    log(socket, :warning, code, msg)
     {:error, %{reason: msg}}
   end
 
@@ -59,16 +59,16 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
     if code, do: "#{code}: #{msg}", else: msg
   end
 
-  defp log(%{assigns: %{tenant: tenant, access_token: access_token}}, level, msg) do
+  defp log(%{assigns: %{tenant: tenant, access_token: access_token}}, level, code, msg) do
     Logger.metadata(external_id: tenant, project: tenant)
     if level in [:error, :warning], do: update_metadata_with_token_claims(access_token)
-    Logger.log(level, msg)
+    Logger.log(level, msg, error_code: code)
   end
 
   defp maybe_log(%{assigns: %{log_level: log_level}} = socket, level, code, msg) do
     msg = build_msg(code, msg)
     emit_system_error(level, code)
-    if Logger.compare_levels(log_level, level) != :gt, do: log(socket, level, msg)
+    if Logger.compare_levels(log_level, level) != :gt, do: log(socket, level, code, msg)
     if level in [:error, :warning], do: {:error, %{reason: msg}}, else: :ok
   end
 
