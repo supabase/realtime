@@ -52,6 +52,14 @@ defmodule Realtime.Tenants.JanitorTest do
     utc_now = NaiveDateTime.utc_now()
     limit = NaiveDateTime.add(utc_now, -72, :hour)
 
+    Enum.map(tenants, fn tenant ->
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      date_start = Date.utc_today() |> Date.add(-5)
+      date_end = Date.utc_today()
+      create_messages_partitions(conn, date_start, date_end)
+    end)
+
     messages =
       for days <- -5..0 do
         inserted_at = NaiveDateTime.add(utc_now, days, :day)
@@ -62,7 +70,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
     to_keep =
       messages
-      |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gt))
+      |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gte))
       |> MapSet.new()
 
     start_supervised!(Janitor)
@@ -162,9 +170,9 @@ defmodule Realtime.Tenants.JanitorTest do
 
   defp verify_partitions(conn) do
     today = Date.utc_today()
-    yesterday = Date.add(today, -1)
+    three_days_ago = Date.add(today, -3)
     future = Date.add(today, 3)
-    dates = Date.range(yesterday, future)
+    dates = Date.range(three_days_ago, future)
 
     %{rows: rows} =
       Postgrex.query!(
