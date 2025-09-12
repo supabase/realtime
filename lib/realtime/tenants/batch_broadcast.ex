@@ -29,7 +29,9 @@ defmodule Realtime.Tenants.BatchBroadcast do
   @spec broadcast(
           auth_params :: map() | nil,
           tenant :: Tenant.t(),
-          messages :: %{messages: list(%{topic: String.t(), payload: map(), event: String.t(), private: boolean()})},
+          messages :: %{
+            messages: list(%{id: String.t(), topic: String.t(), payload: map(), event: String.t(), private: boolean()})
+          },
           super_user :: boolean()
         ) :: :ok | {:error, atom()}
   def broadcast(auth_params, tenant, messages, super_user \\ false)
@@ -59,8 +61,8 @@ defmodule Realtime.Tenants.BatchBroadcast do
       # Handle events for public channel
       events
       |> Map.get(false, [])
-      |> Enum.each(fn %{topic: sub_topic, payload: payload, event: event} ->
-        send_message_and_count(tenant, events_per_second_rate, sub_topic, event, payload, true)
+      |> Enum.each(fn message ->
+        send_message_and_count(tenant, events_per_second_rate, message, true)
       end)
 
       # Handle events for private channel
@@ -69,14 +71,14 @@ defmodule Realtime.Tenants.BatchBroadcast do
       |> Enum.group_by(fn event -> Map.get(event, :topic) end)
       |> Enum.each(fn {topic, events} ->
         if super_user do
-          Enum.each(events, fn %{topic: sub_topic, payload: payload, event: event} ->
-            send_message_and_count(tenant, events_per_second_rate, sub_topic, event, payload, false)
+          Enum.each(events, fn message ->
+            send_message_and_count(tenant, events_per_second_rate, message, false)
           end)
         else
           case permissions_for_message(tenant, auth_params, topic) do
             %Policies{broadcast: %BroadcastPolicies{write: true}} ->
-              Enum.each(events, fn %{topic: sub_topic, payload: payload, event: event} ->
-                send_message_and_count(tenant, events_per_second_rate, sub_topic, event, payload, false)
+              Enum.each(events, fn message ->
+                send_message_and_count(tenant, events_per_second_rate, message, false)
               end)
 
             _ ->
@@ -91,15 +93,15 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
   def broadcast(_, nil, _, _), do: {:error, :tenant_not_found}
 
-  def changeset(payload, attrs) do
+  defp changeset(payload, attrs) do
     payload
     |> cast(attrs, [])
     |> cast_embed(:messages, required: true, with: &message_changeset/2)
   end
 
-  def message_changeset(message, attrs) do
+  defp message_changeset(message, attrs) do
     message
-    |> cast(attrs, [:topic, :payload, :event, :private])
+    |> cast(attrs, [:id, :topic, :payload, :event, :private])
     |> maybe_put_private_change()
     |> validate_required([:topic, :payload, :event])
   end
@@ -112,11 +114,19 @@ defmodule Realtime.Tenants.BatchBroadcast do
   end
 
   @event_type "broadcast"
-  defp send_message_and_count(tenant, events_per_second_rate, topic, event, payload, public?) do
-    tenant_topic = Tenants.tenant_topic(tenant, topic, public?)
-    payload = %{"payload" => payload, "event" => event, "type" => "broadcast"}
+  defp send_message_and_count(tenant, events_per_second_rate, message, public?) do
+    tenant_topic = Tenants.tenant_topic(tenant, message.topic, public?)
 
-    broadcast = %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
+    payload = %{"payload" => message.payload, "event" => message.event, "type" => "broadcast"}
+
+    payload =
+      if message[:id] do
+        Map.put(payload, "meta", %{"id" => message.id})
+      else
+        payload
+      end
+
+    broadcast = %Phoenix.Socket.Broadcast{topic: message.topic, event: @event_type, payload: payload}
 
     GenCounter.add(events_per_second_rate.id)
     TenantBroadcaster.pubsub_broadcast(tenant.external_id, tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
