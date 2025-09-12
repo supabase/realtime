@@ -67,30 +67,35 @@ defmodule Realtime.Tenants.Migrations.CreateMessagesReplayIndexTest do
   end
 
   defp list_partitions(conn) do
-    %{rows: rows} = Postgrex.query!(
-      conn,
-      """
-      SELECT child.relname
-      FROM pg_inherits
-      JOIN pg_class parent ON pg_inherits.inhparent = parent.oid
-      JOIN pg_class child ON pg_inherits.inhrelid = child.oid
-      JOIN pg_namespace nmsp_parent ON nmsp_parent.oid = parent.relnamespace
-      JOIN pg_namespace nmsp_child ON nmsp_child.oid = child.relnamespace
-      WHERE parent.relname = 'messages'
-      AND nmsp_child.nspname = 'realtime'
-      """)
+    %{rows: rows} =
+      Postgrex.query!(
+        conn,
+        """
+        SELECT child.relname
+        FROM pg_inherits
+        JOIN pg_class parent ON pg_inherits.inhparent = parent.oid
+        JOIN pg_class child ON pg_inherits.inhrelid = child.oid
+        JOIN pg_namespace nmsp_parent ON nmsp_parent.oid = parent.relnamespace
+        JOIN pg_namespace nmsp_child ON nmsp_child.oid = child.relnamespace
+        WHERE parent.relname = 'messages'
+        AND nmsp_child.nspname = 'realtime'
+        """
+      )
 
     List.flatten(rows)
   end
 
   defp list_indices(conn) do
-    %{rows: rows} = Postgrex.query!(
-      conn,
-      """
-      SELECT tablename, indexname
-      FROM pg_indexes
-      WHERE schemaname = 'realtime' AND indexname LIKE '%_inserted_at_topic_private_idx'
-      """)
+    %{rows: rows} =
+      Postgrex.query!(
+        conn,
+        """
+        SELECT tablename, indexname
+        FROM pg_indexes
+        WHERE schemaname = 'realtime' AND indexname LIKE '%_inserted_at_topic_private_idx'
+        """
+      )
+
     Map.new(rows, fn [table_name, index_name] ->
       {table_name, index_name}
     end)
