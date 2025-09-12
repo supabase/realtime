@@ -118,7 +118,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
     payload = %{"payload" => message.payload, "event" => message.event, "type" => "broadcast"}
 
     payload =
-      if message.id do
+      if message[:id] do
         Map.put(payload, "meta", %{"id" => message.id})
       else
         payload
