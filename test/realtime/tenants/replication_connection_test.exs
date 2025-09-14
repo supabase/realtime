@@ -233,7 +233,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                "event" => "broadcast",
                "payload" => %{
                  "event" => "INSERT",
-                 "meta" => %{"id" => fixture_id},
+                 "meta" => %{"id" => ^fixture_id},
                  "payload" => payload,
                  "type" => "broadcast"
                },
@@ -241,11 +241,9 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                "topic" => ^topic
              } = message
 
-      id = fixture.id
-
       assert payload == %{
                "value" => "something",
-               "id" => id
+               "id" => fixture_id
              }
     end
 
@@ -275,7 +273,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert %{
                "event" => "broadcast",
                "payload" => %{
-                 "meta" => %{"id" => fixture_id},
+                 "meta" => %{"id" => ^fixture_id},
                  "event" => "INSERT",
                  "payload" => ^payload,
                  "type" => "broadcast"

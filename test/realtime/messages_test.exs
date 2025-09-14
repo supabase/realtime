@@ -154,15 +154,14 @@ defmodule Realtime.MessagesTest do
       assert :erpc.call(node, Messages, :replay, [conn, "test", false, 0, 30]) == {:ok, [m], MapSet.new([m.id])}
     end
 
-    test "distributed replay error", %{conn: conn, tenant: tenant} do
-      m =
-        message_fixture(tenant, %{
-          "inserted_at" => NaiveDateTime.utc_now(),
-          "event" => "event",
-          "extension" => "broadcast",
-          "topic" => "test",
-          "payload" => %{"value" => "message"}
-        })
+    test "distributed replay error", %{tenant: tenant} do
+      message_fixture(tenant, %{
+        "inserted_at" => NaiveDateTime.utc_now(),
+        "event" => "event",
+        "extension" => "broadcast",
+        "topic" => "test",
+        "payload" => %{"value" => "message"}
+      })
 
       {:ok, node} = Clustered.start()
 
