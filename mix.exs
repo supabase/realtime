@@ -90,8 +90,7 @@ defmodule Realtime.MixProject do
       {:opentelemetry_phoenix, "~> 2.0"},
       {:opentelemetry_cowboy, "~> 1.0"},
       {:opentelemetry_ecto, "~> 1.2"},
-      # FIXME
-      {:gen_rpc, git: "https://github.com/supabase/gen_rpc.git", branch: "fix/include-abcast-into-batches"},
+      {:gen_rpc, git: "https://github.com/supabase/gen_rpc.git", ref: "5aea098b300a0a6ad13533e030230132cbe9ca2c"},
       {:mimic, "~> 1.0", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
