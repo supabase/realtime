@@ -144,8 +144,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
         port: connection_opts.port,
         socket_options: connection_opts.socket_options,
         ssl: connection_opts.ssl,
-        backoff_type: :stop,
         sync_connect: true,
+        auto_reconnect: false,
         parameters: [application_name: "realtime_replication_connection"]
       ]
 
