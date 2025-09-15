@@ -192,7 +192,7 @@ defmodule Realtime.MessagesTest do
       to_keep =
         Enum.reject(
           messages,
-          &(NaiveDateTime.compare(limit, &1.inserted_at) == :gt)
+          &(NaiveDateTime.compare(NaiveDateTime.beginning_of_day(limit), &1.inserted_at) == :gt)
         )
 
       assert :ok = Messages.delete_old_messages(conn)

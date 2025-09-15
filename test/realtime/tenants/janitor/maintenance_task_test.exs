@@ -15,8 +15,14 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
   end
 
   test "cleans messages older than 72 hours and creates partitions", %{tenant: tenant} do
+    {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
     utc_now = NaiveDateTime.utc_now()
     limit = NaiveDateTime.add(utc_now, -72, :hour)
+
+    date_start = Date.utc_today() |> Date.add(-10)
+    date_end = Date.utc_today()
+    create_messages_partitions(conn, date_start, date_end)
 
     messages =
       for days <- -5..0 do
@@ -27,12 +33,11 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
 
     to_keep =
       messages
-      |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gt))
+      |> Enum.reject(&(NaiveDateTime.compare(NaiveDateTime.beginning_of_day(limit), &1.inserted_at) == :gt))
       |> MapSet.new()
 
     assert MaintenanceTask.run(tenant.external_id) == :ok
 
-    {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
     {:ok, res} = Repo.all(conn, from(m in Message), Message)
 
     verify_partitions(conn)
@@ -80,7 +85,7 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
 
   defp verify_partitions(conn) do
     today = Date.utc_today()
-    yesterday = Date.add(today, -1)
+    yesterday = Date.add(today, -3)
     future = Date.add(today, 3)
     dates = Date.range(yesterday, future)
 
