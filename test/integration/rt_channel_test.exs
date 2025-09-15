@@ -653,8 +653,8 @@ defmodule Realtime.Integration.RtChannelTest do
           :syn.update_registry(Connect, tenant.external_id, fn _pid, meta -> %{meta | conn: nil} end)
           payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
           WebsocketClient.send_event(service_role_socket, topic, "broadcast", payload)
-          # Waiting more than 5 seconds as this is the amount of time we will wait for the Connection to be ready
-          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 6000
+          # Waiting more than 15 seconds as this is the amount of time we will wait for the Connection to be ready
+          refute_receive %Message{event: "broadcast", payload: ^payload, topic: ^topic}, 16000
         end)
 
       assert log =~ "UnableToHandleBroadcast"
@@ -831,7 +831,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
           refute_receive %Message{event: "presence_diff"}, 500
           # Waiting more than 5 seconds as this is the amount of time we will wait for the Connection to be ready
-          refute_receive %Message{event: "phx_leave", topic: ^topic}, 6000
+          refute_receive %Message{event: "phx_leave", topic: ^topic}, 16000
         end)
 
       assert log =~ "UnableToHandlePresence"

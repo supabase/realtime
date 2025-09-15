@@ -78,31 +78,27 @@ defmodule Realtime.Tenants.ConnectTest do
       assert_receive {:ok, ^pid}
     end
 
-    test "more than 5 seconds passed error out", %{tenant: tenant} do
+    test "more than 15 seconds passed error out", %{tenant: tenant} do
       parent = self()
 
       # Let's slow down Connect starting
       expect(Database, :check_tenant_connection, fn t ->
-        :timer.sleep(5500)
+        Process.sleep(15500)
         call_original(Database, :check_tenant_connection, [t])
       end)
 
       connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
 
-      # Start an early connect
-      spawn(connect)
-      :timer.sleep(100)
-
-      # Start others
       spawn(connect)
       spawn(connect)
 
-      {:error, :tenant_database_unavailable} = Connect.lookup_or_start_connection(tenant.external_id)
+      {:error, :initializing} = Connect.lookup_or_start_connection(tenant.external_id)
+      # The above call waited 15 seconds
+      assert_receive {:error, :initializing}
+      assert_receive {:error, :initializing}
 
-      # Only one will succeed the others timed out waiting
-      assert_receive {:error, :tenant_database_unavailable}
-      assert_receive {:error, :tenant_database_unavailable}
-      assert_receive {:ok, _pid}, 7000
+      # This one will succeed
+      {:ok, _pid} = Connect.lookup_or_start_connection(tenant.external_id)
     end
   end
 
