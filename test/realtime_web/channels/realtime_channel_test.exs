@@ -29,11 +29,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   setup :rls_context
 
   describe "broadcast" do
+    @describetag policies: [:authenticated_all_topic_read]
+
     test "wrong replay params", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       config = %{
+        "private" => true,
         "broadcast" => %{
           "replay" => %{"limit" => "not a number", "since" => :erlang.system_time(:millisecond) - 5 * 60000}
         }
@@ -43,6 +46,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                subscribe_and_join(socket, "realtime:test", %{"config" => config})
 
       config = %{
+        "private" => true,
         "broadcast" => %{
           "replay" => %{"limit" => 1, "since" => "not a number"}
         }
@@ -52,6 +56,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                subscribe_and_join(socket, "realtime:test", %{"config" => config})
 
       config = %{
+        "private" => true,
         "broadcast" => %{
           "replay" => %{}
         }
@@ -66,10 +71,19 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       config = %{
+        "private" => true,
         "broadcast" => %{
           "replay" => %{"limit" => 12, "since" => :erlang.system_time(:millisecond) - 5 * 60000}
         }
       }
+
+      Authorization
+      |> expect(:get_read_authorizations, fn _, _, _ ->
+        {:ok,
+         %Authorization.Policies{
+           broadcast: %Authorization.Policies.BroadcastPolicies{read: true, write: nil}
+         }}
+      end)
 
       # Broken database connection
       conn = spawn(fn -> :ok end)
@@ -80,94 +94,19 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                subscribe_and_join(socket, "realtime:test", %{"config" => config})
     end
 
-    test "replay messages on public topic", %{tenant: tenant} do
+    test "replay messages on public topic not allowed", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
-
-      # Old message
-      message_fixture(tenant, %{
-        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :day),
-        "event" => "old",
-        "extension" => "broadcast",
-        "topic" => "test",
-        "payload" => %{"value" => "old"}
-      })
-
-      %{id: message1_id} =
-        message_fixture(tenant, %{
-          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
-          "event" => "first",
-          "extension" => "broadcast",
-          "topic" => "test",
-          "payload" => %{"value" => "first"}
-        })
-
-      message2 =
-        %{id: message2_id} =
-        message_fixture(tenant, %{
-          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
-          "event" => "second",
-          "extension" => "broadcast",
-          "topic" => "test",
-          "payload" => %{"value" => "second"}
-        })
-
-      # This one should not be received because of the limit
-      message_fixture(tenant, %{
-        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-3, :minute),
-        "event" => "third",
-        "extension" => "broadcast",
-        "topic" => "test",
-        "payload" => %{"value" => "third"}
-      })
 
       config = %{
         "presence" => %{"enabled" => false},
         "broadcast" => %{"replay" => %{"limit" => 2, "since" => :erlang.system_time(:millisecond) - 5 * 60000}}
       }
 
-      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
-
-      assert_receive %Socket.Message{
-        topic: "realtime:test",
-        event: "broadcast",
-        payload: %{
-          "event" => "first",
-          "meta" => %{"id" => ^message1_id, "replayed" => true},
-          "payload" => %{"value" => "first"},
-          "type" => "broadcast"
-        }
-      }
-
-      assert_receive %Socket.Message{
-        topic: "realtime:test",
-        event: "broadcast",
-        payload: %{
-          "event" => "second",
-          "meta" => %{"id" => ^message2_id, "replayed" => true},
-          "payload" => %{"value" => "second"},
-          "type" => "broadcast"
-        }
-      }
-
-      # Broadcasting the same message does not send it again to the websocket
-
-      payload = %{
-        "payload" => message2.payload,
-        "event" => message2.event,
-        "type" => "broadcast",
-        "meta" => %{"id" => message2.id}
-      }
-
-      broadcast = %Phoenix.Socket.Broadcast{topic: message2.topic, event: "broadcast", payload: payload}
-      tenant_topic = Realtime.Tenants.tenant_topic(tenant, message2.topic, _public = true)
-
-      RealtimeWeb.TenantBroadcaster.pubsub_broadcast(
-        tenant.external_id,
-        tenant_topic,
-        broadcast,
-        RealtimeWeb.RealtimeChannel.MessageDispatcher
-      )
+      assert {
+               :error,
+               %{reason: "UnableToReplayMessages: Replay params are not valid"}
+             } = subscribe_and_join(socket, "realtime:test", %{"config" => config})
 
       refute_receive _any
     end
