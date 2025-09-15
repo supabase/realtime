@@ -10,9 +10,9 @@ defmodule Realtime.SynHandler do
   @behaviour :syn_event_handler
 
   @impl true
-  def on_registry_process_updated(Connect, tenant_id, _pid, %{conn: conn}, :normal) when is_pid(conn) do
+  def on_registry_process_updated(Connect, tenant_id, pid, %{conn: conn}, :normal) when is_pid(conn) do
     # Update that a database connection is ready
-    Endpoint.local_broadcast(Connect.syn_topic(tenant_id), "ready", %{conn: conn})
+    Endpoint.local_broadcast(Connect.syn_topic(tenant_id), "ready", %{pid: pid, conn: conn})
   end
 
   def on_registry_process_updated(PostgresCdcRls, tenant_id, _pid, meta, _reason) do
@@ -38,7 +38,7 @@ defmodule Realtime.SynHandler do
     end
 
     topic = topic(mod)
-    Endpoint.local_broadcast(topic <> ":" <> name, topic <> "_down", nil)
+    Endpoint.local_broadcast(topic <> ":" <> name, topic <> "_down", %{pid: pid, reason: reason})
 
     :ok
   end

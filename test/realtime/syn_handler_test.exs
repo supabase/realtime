@@ -168,32 +168,40 @@ defmodule Realtime.SynHandlerTest do
 
     test "it handles :syn_conflict_resolution reason" do
       reason = :syn_conflict_resolution
+      pid = self()
 
       log =
         capture_log(fn ->
-          assert SynHandler.on_process_unregistered(@mod, @name, self(), %{}, reason) == :ok
+          assert SynHandler.on_process_unregistered(@mod, @name, pid, %{}, reason) == :ok
         end)
 
       topic = "#{@topic}:#{@name}"
       event = "#{@topic}_down"
 
       assert log =~ "#{@mod} terminated due to syn conflict resolution: #{inspect(@name)} #{inspect(self())}"
-      assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: ^event, payload: nil}
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: ^event, payload: %{reason: ^reason, pid: ^pid}}
     end
 
     test "it handles other reasons" do
       reason = :other_reason
+      pid = self()
 
       log =
         capture_log(fn ->
-          assert SynHandler.on_process_unregistered(@mod, @name, self(), %{}, reason) == :ok
+          assert SynHandler.on_process_unregistered(@mod, @name, pid, %{}, reason) == :ok
         end)
 
       topic = "#{@topic}:#{@name}"
       event = "#{@topic}_down"
 
       refute log =~ "#{@mod} terminated: #{inspect(@name)} #{node()}"
-      assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: ^event, payload: nil}, 500
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: ^event,
+                       payload: %{reason: ^reason, pid: ^pid}
+                     },
+                     500
     end
   end
 end
