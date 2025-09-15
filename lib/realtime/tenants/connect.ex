@@ -327,24 +327,28 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :shutdown, state}
   end
 
+  @replication_recovery_backoff 1000
+
   # Handle replication connection termination
   def handle_info(
         {:DOWN, replication_connection_reference, _, _, _},
         %{replication_connection_reference: replication_connection_reference} = state
       ) do
-    Logger.warning("Replication connection has died")
-    Process.send_after(self(), :recover_replication_connection, 100)
+    log_warning("ReplicationConnectionDown", "Replication connection has been terminated")
+    Process.send_after(self(), :recover_replication_connection, @replication_recovery_backoff)
+    state = %{state | replication_connection_pid: nil, replication_connection_reference: nil}
     {:noreply, state}
   end
 
-  @replication_connection_query "SELECT * from pg_stat_activity where application_name='realtime_replication_connection'"
+  @replication_connection_query "SELECT 1 from pg_stat_activity where application_name='realtime_replication_connection'"
   def handle_info(:recover_replication_connection, state) do
     with %{num_rows: 0} <- Postgrex.query!(state.db_conn_pid, @replication_connection_query, []),
          {:ok, state} <- start_replication_connection(state) do
       {:noreply, state}
     else
       _ ->
-        Process.send_after(self(), :recover_replication_connection, 100)
+        log_error("ReplicationConnectionRecoveryFailed", "Replication connection recovery failed")
+        Process.send_after(self(), :recover_replication_connection, @replication_recovery_backoff)
         {:noreply, state}
     end
   end

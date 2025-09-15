@@ -2454,7 +2454,7 @@ defmodule Realtime.Integration.RtChannelTest do
       # Does it recover?
       assert Connect.ready?(tenant.external_id)
       {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(200)
+      Process.sleep(1000)
       %{rows: [[new_db_pid]]} = Postgrex.query!(db_conn, active_slot_query, [])
 
       assert new_db_pid != original_db_pid

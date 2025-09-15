@@ -366,7 +366,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
 
-      Process.sleep(500)
+      Process.sleep(1500)
       new_replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
 
       assert replication_connection_pid != new_replication_connection_pid
@@ -385,7 +385,7 @@ defmodule Realtime.Tenants.ConnectTest do
       Process.exit(replication_connection_pid, :kill)
       assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
 
-      Process.sleep(500)
+      Process.sleep(1500)
       new_replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
 
       assert replication_connection_pid != new_replication_connection_pid
