@@ -789,11 +789,11 @@ defmodule RealtimeWeb.RealtimeChannel do
       else: :ok
   end
 
-  defp maybe_replay_messages(%{"broadcast" => %{"replay" => _}}, _sub_topic, _db_conn, _private = false) do
+  defp maybe_replay_messages(%{"broadcast" => %{"replay" => _}}, _sub_topic, _db_conn, false = _private?) do
     {:error, :invalid_replay_params}
   end
 
-  defp maybe_replay_messages(%{"broadcast" => %{"replay" => replay_params}}, sub_topic, db_conn, _private = true)
+  defp maybe_replay_messages(%{"broadcast" => %{"replay" => replay_params}}, sub_topic, db_conn, true = _private?)
        when is_map(replay_params) do
     with {:ok, messages, message_ids} <-
            Realtime.Messages.replay(
