@@ -331,6 +331,26 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
       assert {:error, :max_wal_senders_reached} = ReplicationConnection.start(tenant, self())
     end
+
+    test "handles WAL pressure gracefully", %{tenant: tenant} do
+      {:ok, replication_pid} = ReplicationConnection.start(tenant, self())
+
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      on_exit(fn -> Process.exit(conn, :normal) end)
+
+      large_payload = String.duplicate("x", 10 * 1024 * 1024)
+
+      for i <- 1..5 do
+        message_fixture_with_conn(tenant, conn, %{
+          "topic" => "stress_#{i}",
+          "private" => true,
+          "event" => "INSERT",
+          "payload" => %{"data" => large_payload}
+        })
+      end
+
+      assert Process.alive?(replication_pid)
+    end
   end
 
   describe "whereis/1" do
@@ -408,5 +428,21 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   defp assert_process_down(pid, timeout \\ 100) do
     ref = Process.monitor(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
+  end
+
+  defp message_fixture_with_conn(_tenant, conn, override) do
+    create_attrs = %{
+      "topic" => random_string(),
+      "extension" => "broadcast"
+    }
+
+    override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
+
+    {:ok, message} =
+      create_attrs
+      |> Map.merge(override)
+      |> TenantConnection.create_message(conn)
+
+    message
   end
 end
