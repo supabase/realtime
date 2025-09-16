@@ -94,7 +94,7 @@ You can add your own by making a `POST` request to the server. You must change b
             "region": "us-west-1",
             "poll_interval_ms": 100,
             "poll_max_record_bytes": 1048576,
-            "ssl_enforced": false  
+            "ssl_enforced": false
           }
         }
       ]
@@ -284,6 +284,7 @@ This is the list of operational codes that can help you understand your deployme
 | UnknownErrorOnController           | An error we are not handling correctly was triggered on a controller                                                                                                                                  |
 | UnknownErrorOnChannel              | An error we are not handling correctly was triggered on a channel                                                                                                                                     |
 | PresenceRateLimitReached           | Limit of presence events reached                                                                                                                                                                      |
+| UnableToReplayMessages             | An error while replaying messages                                                                                                                                                                     |
 
 ## License
 

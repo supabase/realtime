@@ -8,6 +8,8 @@ defmodule Realtime.Api.Message do
   @primary_key {:id, Ecto.UUID, autogenerate: true}
   @schema_prefix "realtime"
 
+  @type t :: %__MODULE__{}
+
   schema "messages" do
     field(:topic, :string)
     field(:extension, Ecto.Enum, values: [:broadcast, :presence])
@@ -39,7 +41,7 @@ defmodule Realtime.Api.Message do
   end
 
   defp maybe_put_timestamp(changeset, field) do
-    case Map.get(changeset.data, field) do
+    case get_field(changeset, field) do
       nil -> put_timestamp(changeset, field)
       _ -> changeset
     end

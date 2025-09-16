@@ -5,12 +5,14 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   require Logger
 
-  def fastlane_metadata(fastlane_pid, serializer, topic, :info, tenant_id) do
-    {:realtime_channel_fastlane, fastlane_pid, serializer, topic, {:log, tenant_id}}
+  def fastlane_metadata(fastlane_pid, serializer, topic, log_level, tenant_id, replayed_message_ids \\ MapSet.new())
+
+  def fastlane_metadata(fastlane_pid, serializer, topic, :info, tenant_id, replayed_message_ids) do
+    {:rc_fastlane, fastlane_pid, serializer, topic, {:log, tenant_id}, replayed_message_ids}
   end
 
-  def fastlane_metadata(fastlane_pid, serializer, topic, _log_level, _tenant_id) do
-    {:realtime_channel_fastlane, fastlane_pid, serializer, topic}
+  def fastlane_metadata(fastlane_pid, serializer, topic, _log_level, _tenant_id, replayed_message_ids) do
+    {:rc_fastlane, fastlane_pid, serializer, topic, replayed_message_ids}
   end
 
   @doc """
@@ -23,22 +25,34 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
     # This reduce caches the serialization and bypasses the channel process going straight to the
     # transport process
 
+    message_id = msg.payload["meta"]["id"]
+
     # Credo doesn't like that we don't use the result aggregation
     _ =
       Enum.reduce(subscribers, %{}, fn
         {pid, _}, cache when pid == from ->
           cache
 
-        {pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic}}, cache ->
-          send(pid, :update_rate_counter)
-          do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
+        {pid, {:rc_fastlane, fastlane_pid, serializer, join_topic, replayed_message_ids}}, cache ->
+          if already_replayed?(message_id, replayed_message_ids) do
+            # skip already replayed message
+            cache
+          else
+            send(pid, :update_rate_counter)
+            do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
+          end
 
-        {pid, {:realtime_channel_fastlane, fastlane_pid, serializer, join_topic, {:log, tenant_id}}}, cache ->
-          send(pid, :update_rate_counter)
-          log = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
-          Logger.info(log, external_id: tenant_id, project: tenant_id)
+        {pid, {:rc_fastlane, fastlane_pid, serializer, join_topic, {:log, tenant_id}, replayed_message_ids}}, cache ->
+          if already_replayed?(message_id, replayed_message_ids) do
+            # skip already replayed message
+            cache
+          else
+            send(pid, :update_rate_counter)
+            log = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
+            Logger.info(log, external_id: tenant_id, project: tenant_id)
 
-          do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
+            do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
+          end
 
         {pid, _}, cache ->
           send(pid, msg)
@@ -47,6 +61,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
     :ok
   end
+
+  defp already_replayed?(nil, _replayed_message_ids), do: false
+  defp already_replayed?(message_id, replayed_message_ids), do: MapSet.member?(replayed_message_ids, message_id)
 
   defp do_dispatch(msg, fastlane_pid, serializer, join_topic, cache) do
     case cache do

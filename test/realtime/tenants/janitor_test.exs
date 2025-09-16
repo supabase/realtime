@@ -31,6 +31,14 @@ defmodule Realtime.Tenants.JanitorTest do
         end
       )
 
+    date_start = Date.utc_today() |> Date.add(-10)
+    date_end = Date.utc_today()
+
+    Enum.map(tenants, fn tenant ->
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      create_messages_partitions(conn, date_start, date_end)
+    end)
+
     start_supervised!(
       {Task.Supervisor,
        name: Realtime.Tenants.Janitor.TaskSupervisor, max_children: 5, max_seconds: 500, max_restarts: 1}
@@ -62,7 +70,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
     to_keep =
       messages
-      |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gt))
+      |> Enum.reject(&(NaiveDateTime.compare(NaiveDateTime.beginning_of_day(limit), &1.inserted_at) == :gt))
       |> MapSet.new()
 
     start_supervised!(Janitor)
@@ -105,7 +113,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
     to_keep =
       messages
-      |> Enum.reject(&(NaiveDateTime.compare(limit, &1.inserted_at) == :gt))
+      |> Enum.reject(&(NaiveDateTime.compare(NaiveDateTime.beginning_of_day(limit), &1.inserted_at) == :gt))
       |> MapSet.new()
 
     start_supervised!(Janitor)
@@ -162,7 +170,7 @@ defmodule Realtime.Tenants.JanitorTest do
 
   defp verify_partitions(conn) do
     today = Date.utc_today()
-    yesterday = Date.add(today, -1)
+    yesterday = Date.add(today, -3)
     future = Date.add(today, 3)
     dates = Date.range(yesterday, future)
 
