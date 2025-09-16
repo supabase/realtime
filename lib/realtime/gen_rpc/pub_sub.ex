@@ -7,26 +7,27 @@ defmodule Realtime.GenRpcPubSub do
   alias Realtime.GenRpc
   use Supervisor
 
-  @adapter_name :gen_rpc
-
   @impl true
   def node_name(_), do: node()
 
   # Supervisor callbacks
 
   def start_link(opts) do
+    adapter_name = Keyword.fetch!(opts, :adapter_name)
     name = Keyword.fetch!(opts, :name)
     pool_size = Keyword.get(opts, :pool_size, 1)
     broadcast_pool_size = Keyword.get(opts, :broadcast_pool_size, pool_size)
 
-    Supervisor.start_link(__MODULE__, {name, broadcast_pool_size}, name: :"#{name}#{@adapter_name}_supervisor")
+    Supervisor.start_link(__MODULE__, {adapter_name, name, broadcast_pool_size},
+      name: :"#{name}#{adapter_name}_supervisor"
+    )
   end
 
   @impl true
-  def init({pubsub, pool_size}) do
-    workers = for number <- 1..pool_size, do: :"#{pubsub}#{@adapter_name}_#{number}"
+  def init({adapter_name, pubsub, pool_size}) do
+    workers = for number <- 1..pool_size, do: :"#{pubsub}#{adapter_name}_#{number}"
 
-    :persistent_term.put(@adapter_name, List.to_tuple(workers))
+    :persistent_term.put(adapter_name, List.to_tuple(workers))
 
     children =
       for worker <- workers do
@@ -36,20 +37,20 @@ defmodule Realtime.GenRpcPubSub do
     Supervisor.init(children, strategy: :one_for_one)
   end
 
-  defp worker(key) do
-    workers = :persistent_term.get(@adapter_name)
+  defp worker_name(adapter_name, key) do
+    workers = :persistent_term.get(adapter_name)
     elem(workers, :erlang.phash2(key, tuple_size(workers)))
   end
 
   @impl true
-  def broadcast(_adapter_name, topic, message, dispatcher) do
-    worker = worker(self())
+  def broadcast(adapter_name, topic, message, dispatcher) do
+    worker = worker_name(adapter_name, self())
     GenRpc.abcast(Node.list(), worker, forward_to_local(topic, message, dispatcher), key: worker)
   end
 
   @impl true
-  def direct_broadcast(_adapter_name, node_name, topic, message, dispatcher) do
-    worker = worker(self())
+  def direct_broadcast(adapter_name, node_name, topic, message, dispatcher) do
+    worker = worker_name(adapter_name, self())
     GenRpc.abcast([node_name], worker, forward_to_local(topic, message, dispatcher), key: worker)
   end
 
