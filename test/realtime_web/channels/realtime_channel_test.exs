@@ -31,6 +31,46 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   describe "broadcast" do
     @describetag policies: [:authenticated_all_topic_read]
 
+    test "broadcast map payload", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      config = %{
+        "presence" => %{"enabled" => false},
+        "broadcast" => %{"self" => true}
+      }
+
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      push(socket, "broadcast", %{"event" => "my_event", "payload" => %{"hello" => "world"}})
+
+      assert_receive %Phoenix.Socket.Message{
+        topic: "realtime:test",
+        event: "broadcast",
+        payload: %{"event" => "my_event", "payload" => %{"hello" => "world"}}
+      }
+    end
+
+    test "broadcast non-map payload", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      config = %{
+        "presence" => %{"enabled" => false},
+        "broadcast" => %{"self" => true}
+      }
+
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      push(socket, "broadcast", "not a map")
+
+      assert_receive %Phoenix.Socket.Message{
+        topic: "realtime:test",
+        event: "broadcast",
+        payload: "not a map"
+      }
+    end
+
     test "wrong replay params", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
