@@ -112,6 +112,49 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       refute_receive _any
     end
 
+    test "payload is not a map" do
+      parent = self()
+
+      subscriber_pid =
+        spawn(fn ->
+          loop = fn loop ->
+            receive do
+              msg ->
+                send(parent, {:subscriber, msg})
+                loop.(loop)
+            end
+          end
+
+          loop.(loop)
+        end)
+
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {subscriber_pid, {:rc_fastlane, self(), TestSerializer, "realtime:topic", {:log, "tenant123"}, MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), TestSerializer, "realtime:topic", MapSet.new()}}
+      ]
+
+      msg = %Broadcast{topic: "some:other:topic", event: "event", payload: "not a map"}
+
+      log =
+        capture_log(fn ->
+          assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+        end)
+
+      assert log =~ "Received message on realtime:topic with payload: #{inspect(msg, pretty: true)}"
+
+      assert_receive {:encoded, %Broadcast{event: "event", payload: "not a map", topic: "realtime:topic"}}
+      assert_receive {:encoded, %Broadcast{event: "event", payload: "not a map", topic: "realtime:topic"}}
+
+      assert Agent.get(TestSerializer, & &1) == 1
+
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+
+      refute_receive _any
+    end
+
     test "dispatches messages to non fastlane subscribers" do
       from_pid = :erlang.list_to_pid(~c'<0.2.1>')
 

@@ -25,7 +25,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
     # This reduce caches the serialization and bypasses the channel process going straight to the
     # transport process
 
-    message_id = msg.payload["meta"]["id"]
+    message_id = message_id(msg.payload)
 
     # Credo doesn't like that we don't use the result aggregation
     _ =
@@ -61,6 +61,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
     :ok
   end
+
+  defp message_id(%{"meta" => %{"id" => id}}), do: id
+  defp message_id(_), do: nil
 
   defp already_replayed?(nil, _replayed_message_ids), do: false
   defp already_replayed?(message_id, replayed_message_ids), do: MapSet.member?(replayed_message_ids, message_id)
