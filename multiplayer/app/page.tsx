@@ -3,6 +3,7 @@ import Link from "next/link";
 import { RealtimeCursors } from '@/components/realtime-cursors'
 import { nanoid } from 'nanoid'
 import { RealtimeChat } from '@/components/realtime-chat'
+import { RealtimeAvatarStack } from '@/components/realtime-avatar-stack'
 
 // Generate a random user id
 const userId = nanoid()
@@ -24,8 +25,9 @@ export default function Home() {
           </code>
         </div>
       </div>
-      <RealtimeCursors roomName="macrodata_refinement_office" username="Mark Scout" />
-      <RealtimeChat roomName="my-chat-room" username="" />
+      <RealtimeCursors roomName="cursor-room" username="Mark Scout" />
+      <RealtimeChat roomName="chat-room" username="" />
+      <RealtimeAvatarStack roomName="presence-room" />
     </main>
   );
 }
