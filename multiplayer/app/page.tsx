@@ -2,6 +2,7 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
 import Link from "next/link";
 import { RealtimeCursors } from '@/components/realtime-cursors'
 import { nanoid } from 'nanoid'
+import { RealtimeChat } from '@/components/realtime-chat'
 
 // Generate a random user id
 const userId = nanoid()
@@ -24,6 +25,7 @@ export default function Home() {
         </div>
       </div>
       <RealtimeCursors roomName="macrodata_refinement_office" username="Mark Scout" />
+      <RealtimeChat roomName="my-chat-room" username="" />
     </main>
   );
 }
