@@ -263,6 +263,34 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
     end
 
+    test "tenant not able to connect if database has not enough connections", %{
+      tenant: tenant
+    } do
+      extension = %{
+        "type" => "postgres_cdc_rls",
+        "settings" => %{
+          "db_host" => "127.0.0.1",
+          "db_name" => "postgres",
+          "db_user" => "supabase_admin",
+          "db_password" => "postgres",
+          "poll_interval" => 100,
+          "poll_max_changes" => 100,
+          "poll_max_record_bytes" => 1_048_576,
+          "region" => "us-east-1",
+          "ssl_enforced" => false,
+          "db_pool" => 100,
+          "subcriber_pool_size" => 100,
+          "subs_pool_size" => 100
+        }
+      }
+
+      {:ok, tenant} = update_extension(tenant, extension)
+
+      assert capture_log(fn ->
+               assert {:error, :tenant_db_too_many_connections} = Connect.lookup_or_start_connection(tenant.external_id)
+             end) =~ ~r/Only \d+ available connections\. At least \d+ connections are required/
+    end
+
     test "handles tenant suspension and unsuspension in a reactive way", %{tenant: tenant} do
       assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
@@ -458,30 +486,6 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "if tenant does not exist, does nothing" do
       assert :ok = Connect.shutdown("none")
-    end
-
-    test "tenant not able to connect if database has not enough connections", %{tenant: tenant} do
-      extension = %{
-        "type" => "postgres_cdc_rls",
-        "settings" => %{
-          "db_host" => "127.0.0.1",
-          "db_name" => "postgres",
-          "db_user" => "supabase_admin",
-          "db_password" => "postgres",
-          "poll_interval" => 100,
-          "poll_max_changes" => 100,
-          "poll_max_record_bytes" => 1_048_576,
-          "region" => "us-east-1",
-          "ssl_enforced" => false,
-          "db_pool" => 100,
-          "subcriber_pool_size" => 100,
-          "subs_pool_size" => 100
-        }
-      }
-
-      {:ok, tenant} = update_extension(tenant, extension)
-
-      assert {:error, :tenant_db_too_many_connections} = Connect.lookup_or_start_connection(tenant.external_id)
     end
   end
 

@@ -55,6 +55,7 @@ defmodule Realtime.Tenants.Connect do
           | {:error, :tenant_database_unavailable}
           | {:error, :initializing}
           | {:error, :tenant_database_connection_initializing}
+          | {:error, :tenant_db_too_many_connections}
           | {:error, :rpc_error, term()}
   def lookup_or_start_connection(tenant_id, opts \\ []) when is_binary(tenant_id) do
     case get_status(tenant_id) do
@@ -69,6 +70,9 @@ defmodule Realtime.Tenants.Connect do
 
       {:error, :initializing} ->
         {:error, :tenant_database_unavailable}
+
+      {:error, :tenant_db_too_many_connections} ->
+        {:error, :tenant_db_too_many_connections}
     end
   end
 
@@ -80,6 +84,7 @@ defmodule Realtime.Tenants.Connect do
           | {:error, :tenant_database_unavailable}
           | {:error, :initializing}
           | {:error, :tenant_database_connection_initializing}
+          | {:error, :tenant_db_too_many_connections}
   def get_status(tenant_id) do
     case :syn.lookup(__MODULE__, tenant_id) do
       {pid, %{conn: nil}} ->
