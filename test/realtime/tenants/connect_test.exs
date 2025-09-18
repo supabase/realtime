@@ -100,6 +100,54 @@ defmodule Realtime.Tenants.ConnectTest do
       # This one will succeed
       {:ok, _pid} = Connect.lookup_or_start_connection(tenant.external_id)
     end
+
+    test "too many db connections", %{tenant: tenant} do
+      extension = %{
+        "type" => "postgres_cdc_rls",
+        "settings" => %{
+          "db_host" => "127.0.0.1",
+          "db_name" => "postgres",
+          "db_user" => "supabase_admin",
+          "db_password" => "postgres",
+          "poll_interval" => 100,
+          "poll_max_changes" => 100,
+          "poll_max_record_bytes" => 1_048_576,
+          "region" => "us-east-1",
+          "ssl_enforced" => false,
+          "db_pool" => 100,
+          "subcriber_pool_size" => 100,
+          "subs_pool_size" => 100
+        }
+      }
+
+      {:ok, tenant} = update_extension(tenant, extension)
+
+      parent = self()
+
+      # Let's slow down Connect starting
+      expect(Database, :check_tenant_connection, fn t ->
+        :timer.sleep(1000)
+        call_original(Database, :check_tenant_connection, [t])
+      end)
+
+      connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
+
+      # Start an early connect
+      spawn(connect)
+      :timer.sleep(100)
+
+      # Start others
+      spawn(connect)
+      spawn(connect)
+
+      # This one should block and wait for the first Connect
+      {:error, :tenant_db_too_many_connections} = Connect.lookup_or_start_connection(tenant.external_id)
+
+      assert_receive {:error, :tenant_db_too_many_connections}
+      assert_receive {:error, :tenant_db_too_many_connections}
+      assert_receive {:error, :tenant_db_too_many_connections}
+      refute_receive _any
+    end
   end
 
   describe "region rebalancing" do
@@ -261,6 +309,34 @@ defmodule Realtime.Tenants.ConnectTest do
       tenant = tenant_fixture(suspend: true)
 
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
+    end
+
+    test "tenant not able to connect if database has not enough connections", %{
+      tenant: tenant
+    } do
+      extension = %{
+        "type" => "postgres_cdc_rls",
+        "settings" => %{
+          "db_host" => "127.0.0.1",
+          "db_name" => "postgres",
+          "db_user" => "supabase_admin",
+          "db_password" => "postgres",
+          "poll_interval" => 100,
+          "poll_max_changes" => 100,
+          "poll_max_record_bytes" => 1_048_576,
+          "region" => "us-east-1",
+          "ssl_enforced" => false,
+          "db_pool" => 100,
+          "subcriber_pool_size" => 100,
+          "subs_pool_size" => 100
+        }
+      }
+
+      {:ok, tenant} = update_extension(tenant, extension)
+
+      assert capture_log(fn ->
+               assert {:error, :tenant_db_too_many_connections} = Connect.lookup_or_start_connection(tenant.external_id)
+             end) =~ ~r/Only \d+ available connections\. At least \d+ connections are required/
     end
 
     test "handles tenant suspension and unsuspension in a reactive way", %{tenant: tenant} do
@@ -458,30 +534,6 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "if tenant does not exist, does nothing" do
       assert :ok = Connect.shutdown("none")
-    end
-
-    test "tenant not able to connect if database has not enough connections", %{tenant: tenant} do
-      extension = %{
-        "type" => "postgres_cdc_rls",
-        "settings" => %{
-          "db_host" => "127.0.0.1",
-          "db_name" => "postgres",
-          "db_user" => "supabase_admin",
-          "db_password" => "postgres",
-          "poll_interval" => 100,
-          "poll_max_changes" => 100,
-          "poll_max_record_bytes" => 1_048_576,
-          "region" => "us-east-1",
-          "ssl_enforced" => false,
-          "db_pool" => 100,
-          "subcriber_pool_size" => 100,
-          "subs_pool_size" => 100
-        }
-      }
-
-      {:ok, tenant} = update_extension(tenant, extension)
-
-      assert {:error, :tenant_db_too_many_connections} = Connect.lookup_or_start_connection(tenant.external_id)
     end
   end
 
