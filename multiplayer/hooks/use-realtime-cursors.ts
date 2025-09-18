@@ -60,11 +60,9 @@ type CursorEventPayload = {
 
 export const useRealtimeCursors = ({
   roomName,
-  username,
   throttleMs,
 }: {
   roomName: string
-  username: string
   throttleMs: number
 }) => {
   const [color] = useState(generateRandomColor())
@@ -83,8 +81,7 @@ export const useRealtimeCursors = ({
           y: clientY,
         },
         user: {
-          id: userId,
-          name: username,
+          id: userId
         },
         color: color,
         timestamp: new Date().getTime(),
@@ -96,7 +93,7 @@ export const useRealtimeCursors = ({
         payload: payload,
       })
     },
-    [color, userId, username]
+    [color, userId]
   )
 
   const handleMouseMove = useThrottleCallback(callback, throttleMs)
