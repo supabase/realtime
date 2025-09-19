@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.51.0",
+      version: "2.51.1",
       elixir: "~> 1.17.3",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -90,7 +90,7 @@ defmodule Realtime.MixProject do
       {:opentelemetry_phoenix, "~> 2.0"},
       {:opentelemetry_cowboy, "~> 1.0"},
       {:opentelemetry_ecto, "~> 1.2"},
-      {:gen_rpc, git: "https://github.com/supabase/gen_rpc.git", ref: "5aea098b300a0a6ad13533e030230132cbe9ca2c"},
+      {:gen_rpc, git: "https://github.com/supabase/gen_rpc.git", ref: "5df2453e644f525ca59db711b85c0ccb3513a662"},
       {:mimic, "~> 1.0", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:mint_web_socket, "~> 1.0", only: :test},
