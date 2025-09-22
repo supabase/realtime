@@ -12,11 +12,8 @@ export type RealtimeUser = {
   color: string
 }
 
-const generateRandomColor = () => `hsl(${Math.floor(Math.random() * 360)}, 100%, 70%)`
-
-export const useRealtimePresenceRoom = (roomName: string) => {
+export const useRealtimePresenceRoom = (roomName: string, currentUserColor: string) => {
   const currentUserName = useCurrentUserName()
-  const [currentUserColor] = useState(generateRandomColor())
 
   const [users, setUsers] = useState<Record<string, RealtimeUser>>({})
 

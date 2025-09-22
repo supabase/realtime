@@ -39,8 +39,6 @@ const useThrottleCallback = <Params extends unknown[], Return>(
 
 const supabase = createClient()
 
-const generateRandomColor = () => `hsl(${Math.floor(Math.random() * 360)}, 100%, 70%)`
-
 const generateRandomNumber = () => Math.floor(Math.random() * 100)
 
 const EVENT_NAME = 'realtime-cursor-move'
@@ -61,11 +59,12 @@ type CursorEventPayload = {
 export const useRealtimeCursors = ({
   roomName,
   throttleMs,
+  color
 }: {
   roomName: string
   throttleMs: number
+  color: string
 }) => {
-  const [color] = useState(generateRandomColor())
   const [userId] = useState(generateRandomNumber())
   const [cursors, setCursors] = useState<Record<string, CursorEventPayload>>({})
 

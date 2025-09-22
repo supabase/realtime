@@ -5,8 +5,8 @@ import { useRealtimeCursors } from '@/hooks/use-realtime-cursors'
 
 const THROTTLE_MS = 50
 
-export const RealtimeCursors = ({ roomName }: { roomName: string }) => {
-  const { cursors } = useRealtimeCursors({ roomName, throttleMs: THROTTLE_MS })
+export const RealtimeCursors = ({ roomName, color }: { roomName: string, color: string }) => {
+  const { cursors } = useRealtimeCursors({ roomName, color, throttleMs: THROTTLE_MS })
 
   return (
     <div>

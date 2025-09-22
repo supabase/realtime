@@ -5,10 +5,11 @@ import { nanoid } from 'nanoid'
 import { RealtimeChat } from '@/components/realtime-chat'
 import { RealtimeAvatarStack } from '@/components/realtime-avatar-stack'
 
-// Generate a random user id
-const userId = nanoid()
+const generateRandomColor = () => `hsl(${Math.floor(Math.random() * 360)}, 100%, 70%)`
+
 
 export default function Home() {
+  const color = generateRandomColor()
   return (
     <main className="min-h-screen flex flex-col items-center">
       <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center space-x-2 pointer-events-none">
@@ -25,9 +26,9 @@ export default function Home() {
           </code>
         </div>
       </div>
-      <RealtimeCursors roomName="cursor-room" username="Mark Scout" />
+      <RealtimeCursors roomName="cursor-room" color={color} username="Mark Scout" />
       <RealtimeChat roomName="chat-room" username="" />
-      <RealtimeAvatarStack roomName="presence-room" />
+      <RealtimeAvatarStack roomName="presence-room" color={color} />
     </main>
   );
 }
