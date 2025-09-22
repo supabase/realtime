@@ -28,6 +28,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   setup :rls_context
 
+  test "max heap size is set", %{tenant: tenant} do
+    jwt = Generators.generate_jwt_token(tenant)
+    {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+    assert Process.info(socket.transport_pid, :max_heap_size) ==
+             {:max_heap_size, %{error_logger: true, include_shared_binaries: false, kill: true, size: 6_250_000}}
+  end
+
   describe "broadcast" do
     @describetag policies: [:authenticated_all_topic_read]
 

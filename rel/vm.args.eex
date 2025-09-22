@@ -10,8 +10,8 @@
 ## Tweak GC to run more often
 ##-env ERL_FULLSWEEP_AFTER 10
 
-## Limit process heap for all procs to 1000 MB
-+hmax 1000000000
+## Limit process heap for all procs to 500 MB. The number here is the number of words
++hmax <%= div(500_000_000, :erlang.system_info(:wordsize)) %>
 
 ## Set distribution buffer busy limit (default is 1024)
 +zdbbl 100000
