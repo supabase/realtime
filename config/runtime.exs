@@ -68,6 +68,7 @@ janitor_children_timeout = Env.get_integer("JANITOR_CHILDREN_TIMEOUT", :timer.se
 janitor_schedule_timer = Env.get_integer("JANITOR_SCHEDULE_TIMER_IN_MS", :timer.hours(4))
 platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws, else: :fly
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
+pubsub_adapter = System.get_env("PUBSUB_ADAPTER", "pg2") |> String.to_atom()
 websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_000), :erlang.system_info(:wordsize))
 
 no_channel_timeout_in_ms =
@@ -124,6 +125,7 @@ config :realtime,
   max_gen_rpc_clients: max_gen_rpc_clients,
   no_channel_timeout_in_ms: no_channel_timeout_in_ms,
   platform: platform,
+  pubsub_adapter: pubsub_adapter,
   broadcast_pool_size: broadcast_pool_size
 
 if config_env() != :test && run_janitor? do
