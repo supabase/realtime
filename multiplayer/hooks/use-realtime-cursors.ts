@@ -98,10 +98,23 @@ export const useRealtimeCursors = ({
   const handleMouseMove = useThrottleCallback(callback, throttleMs)
 
   useEffect(() => {
-    const channel = supabase.channel(roomName)
+    const config = { broadcast: { ack: false, self: false }, presence: { key: userId } }
+    const channel = supabase.channel(roomName, { config: config })
     channelRef.current = channel
 
     channel
+      .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+        leftPresences.forEach(function(element) {
+           // Remove cursor when user leaves
+          setCursors((prev) => {
+            if (prev[element.presence_ref]) {
+              delete prev[element.presence_ref]
+            }
+
+            return prev
+          })
+        })
+      })
       .on('broadcast', { event: EVENT_NAME }, (data: { payload: CursorEventPayload }) => {
         const { user } = data.payload
         // Don't render your own cursor
@@ -118,7 +131,11 @@ export const useRealtimeCursors = ({
           }
         })
       })
-      .subscribe()
+    .subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        const status = await channel.track({ color: color })
+      }
+    })
 
     return () => {
       channel.unsubscribe()
