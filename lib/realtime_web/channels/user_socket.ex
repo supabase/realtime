@@ -1,4 +1,12 @@
 defmodule RealtimeWeb.UserSocket do
+  # This is defined up here before `use Phoenix.Socket` is called so that we can define `Phoenix.Socket.init/1`
+  # It has to be overridden because we need to set the `max_heap_size` flag from the transport process context
+  @impl true
+  def init(state) when is_tuple(state) do
+    Process.flag(:max_heap_size, max_heap_size())
+    Phoenix.Socket.__init__(state)
+  end
+
   use Phoenix.Socket
   use Realtime.Logs
 
@@ -122,4 +130,6 @@ defmodule RealtimeWeb.UserSocket do
       _ -> @default_log_level
     end
   end
+
+  defp max_heap_size(), do: Application.fetch_env!(:realtime, :websocket_max_heap_size)
 end
