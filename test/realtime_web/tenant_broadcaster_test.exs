@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.TenantBroadcasterTest do
-  # Usage of Clustered
+  # Usage of Clustered and changing Application env
   use Realtime.DataCase, async: false
 
   alias Phoenix.Socket.Broadcast
@@ -47,95 +47,107 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
       pid: self()
     )
 
+    original = Application.fetch_env!(:realtime, :pubsub_adapter)
+    on_exit(fn -> Application.put_env(:realtime, :pubsub_adapter, original) end)
+    Application.put_env(:realtime, :pubsub_adapter, context.pubsub_adapter)
+
     :ok
   end
 
-  describe "pubsub_broadcast/4" do
-    test "pubsub_broadcast", %{node: node} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
-      TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub)
+  for pubsub_adapter <- [:gen_rpc, :pg2] do
+    describe "pubsub_broadcast/4 #{pubsub_adapter}" do
+      @describetag pubsub_adapter: pubsub_adapter
 
-      assert_receive ^message
+      test "pubsub_broadcast", %{node: node} do
+        message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+        TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub)
 
-      # Remote node received the broadcast
-      assert_receive {:relay, ^node, ^message}
+        assert_receive ^message
 
-      assert_receive {
-        :telemetry,
-        [:realtime, :tenants, :payload, :size],
-        %{size: 114},
-        %{tenant: "realtime-dev"}
-      }
-    end
+        # Remote node received the broadcast
+        assert_receive {:relay, ^node, ^message}
 
-    test "pubsub_broadcast list payload", %{node: node} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
-      TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub)
+        assert_receive {
+          :telemetry,
+          [:realtime, :tenants, :payload, :size],
+          %{size: 114},
+          %{tenant: "realtime-dev"}
+        }
+      end
 
-      assert_receive ^message
+      test "pubsub_broadcast list payload", %{node: node} do
+        message = %Broadcast{topic: @topic, event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
+        TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub)
 
-      # Remote node received the broadcast
-      assert_receive {:relay, ^node, ^message}
+        assert_receive ^message
 
-      assert_receive {
-        :telemetry,
-        [:realtime, :tenants, :payload, :size],
-        %{size: 130},
-        %{tenant: "realtime-dev"}
-      }
-    end
+        # Remote node received the broadcast
+        assert_receive {:relay, ^node, ^message}
 
-    test "pubsub_broadcast string payload", %{node: node} do
-      message = %Broadcast{topic: @topic, event: "an event", payload: "some text payload"}
-      TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub)
+        assert_receive {
+          :telemetry,
+          [:realtime, :tenants, :payload, :size],
+          %{size: 130},
+          %{tenant: "realtime-dev"}
+        }
+      end
 
-      assert_receive ^message
+      test "pubsub_broadcast string payload", %{node: node} do
+        message = %Broadcast{topic: @topic, event: "an event", payload: "some text payload"}
+        TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub)
 
-      # Remote node received the broadcast
-      assert_receive {:relay, ^node, ^message}
+        assert_receive ^message
 
-      assert_receive {
-        :telemetry,
-        [:realtime, :tenants, :payload, :size],
-        %{size: 119},
-        %{tenant: "realtime-dev"}
-      }
+        # Remote node received the broadcast
+        assert_receive {:relay, ^node, ^message}
+
+        assert_receive {
+          :telemetry,
+          [:realtime, :tenants, :payload, :size],
+          %{size: 119},
+          %{tenant: "realtime-dev"}
+        }
+      end
     end
   end
 
-  describe "pubsub_broadcast_from/5" do
-    test "pubsub_broadcast_from", %{node: node} do
-      parent = self()
+  for pubsub_adapter <- [:gen_rpc, :pg2] do
+    describe "pubsub_broadcast_from/5 #{pubsub_adapter}" do
+      @describetag pubsub_adapter: pubsub_adapter
 
-      spawn_link(fn ->
-        Endpoint.subscribe(@topic)
-        send(parent, :ready)
+      test "pubsub_broadcast_from", %{node: node} do
+        parent = self()
 
-        receive do
-          msg -> send(parent, {:other_process, msg})
-        end
-      end)
+        spawn_link(fn ->
+          Endpoint.subscribe(@topic)
+          send(parent, :ready)
 
-      assert_receive :ready
+          receive do
+            msg -> send(parent, {:other_process, msg})
+          end
+        end)
 
-      message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
+        assert_receive :ready
 
-      TenantBroadcaster.pubsub_broadcast_from("realtime-dev", self(), @topic, message, Phoenix.PubSub)
+        message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
 
-      assert_receive {:other_process, ^message}
+        TenantBroadcaster.pubsub_broadcast_from("realtime-dev", self(), @topic, message, Phoenix.PubSub)
 
-      # Remote node received the broadcast
-      assert_receive {:relay, ^node, ^message}
+        assert_receive {:other_process, ^message}
 
-      assert_receive {
-        :telemetry,
-        [:realtime, :tenants, :payload, :size],
-        %{size: 114},
-        %{tenant: "realtime-dev"}
-      }
+        # Remote node received the broadcast
+        assert_receive {:relay, ^node, ^message}
 
-      # This process does not receive the message
-      refute_receive _any
+        assert_receive {
+          :telemetry,
+          [:realtime, :tenants, :payload, :size],
+          %{size: 114},
+          %{tenant: "realtime-dev"}
+        }
+
+        # This process does not receive the message
+        refute_receive _any
+      end
     end
   end
 

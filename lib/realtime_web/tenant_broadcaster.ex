@@ -9,7 +9,11 @@ defmodule RealtimeWeb.TenantBroadcaster do
   def pubsub_broadcast(tenant_id, topic, message, dispatcher) do
     collect_payload_size(tenant_id, message)
 
-    PubSub.broadcast(Realtime.PubSub, topic, message, dispatcher)
+    if pubsub_adapter() == :gen_rpc do
+      PubSub.broadcast(Realtime.PubSub, topic, message, dispatcher)
+    else
+      Realtime.GenRpc.multicast(PubSub, :local_broadcast, [Realtime.PubSub, topic, message, dispatcher], key: topic)
+    end
 
     :ok
   end
@@ -25,7 +29,17 @@ defmodule RealtimeWeb.TenantBroadcaster do
   def pubsub_broadcast_from(tenant_id, from, topic, message, dispatcher) do
     collect_payload_size(tenant_id, message)
 
-    PubSub.broadcast_from(Realtime.PubSub, from, topic, message, dispatcher)
+    if pubsub_adapter() == :gen_rpc do
+      PubSub.broadcast_from(Realtime.PubSub, from, topic, message, dispatcher)
+    else
+      Realtime.GenRpc.multicast(
+        PubSub,
+        :local_broadcast_from,
+        [Realtime.PubSub, from, topic, message, dispatcher],
+        key: topic
+      )
+    end
+
     :ok
   end
 
@@ -38,5 +52,9 @@ defmodule RealtimeWeb.TenantBroadcaster do
 
   defp collect_payload_size(tenant_id, payload) do
     :telemetry.execute(@payload_size_event, %{size: :erlang.external_size(payload)}, %{tenant: tenant_id})
+  end
+
+  defp pubsub_adapter do
+    Application.fetch_env!(:realtime, :pubsub_adapter)
   end
 end

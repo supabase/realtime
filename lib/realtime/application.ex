@@ -67,7 +67,7 @@ defmodule Realtime.Application do
         RealtimeWeb.Telemetry,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         {Phoenix.PubSub,
-         name: Realtime.PubSub, pool_size: 10, adapter: Realtime.GenRpcPubSub, broadcast_pool_size: broadcast_pool_size},
+         name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},
         {Cachex, name: Realtime.RateCounter},
         Realtime.Tenants.Cache,
         Realtime.RateCounter.DynamicSupervisor,
@@ -153,5 +153,13 @@ defmodule Realtime.Application do
     :opentelemetry_cowboy.setup()
     OpentelemetryPhoenix.setup(adapter: :cowboy2)
     OpentelemetryEcto.setup([:realtime, :repo], db_statement: :enabled)
+  end
+
+  defp pubsub_adapter do
+    if Application.fetch_env!(:realtime, :pubsub_adapter) == :gen_rpc do
+      Realtime.GenRpcPubSub
+    else
+      Phoenix.PubSub.PG2
+    end
   end
 end
