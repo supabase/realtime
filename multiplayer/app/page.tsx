@@ -10,8 +10,37 @@ const generateRandomColor = () => `hsl(${Math.floor(Math.random() * 360)}, 100%,
 
 export default function Home() {
   const color = generateRandomColor()
+
   return (
-    <main className="min-h-screen flex flex-col items-center">
+    <div
+      className={[
+        'h-screen w-screen p-4 flex flex-col justify-between relative',
+        'max-h-screen max-w-screen overflow-hidden',
+      ].join(' ')}
+    >
+      <div
+        className="absolute h-full w-full left-0 top-0 pointer-events-none"
+        style={{
+          opacity: 0.02,
+          backgroundSize: '16px 16px',
+          backgroundImage:
+            'linear-gradient(to right, gray 1px, transparent 1px),\n    linear-gradient(to bottom, gray 1px, transparent 1px)',
+        }}
+      />
+      <div className="flex flex-col h-full justify-between">
+        <div className="flex justify-between flex-row-reverse">
+          <RealtimeAvatarStack roomName="presence-room" color={color} />
+        </div>
+        <div className="flex items-end justify-between">
+          <div className="flex items-center space-x-4">
+              Badge and Dark Mode toggle thing
+          </div>
+          <div className="flex justify-end">
+          <RealtimeChat roomName="chat-room" username="" />
+          </div>
+        </div>
+      </div>
+
       <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center space-x-2 pointer-events-none">
         <div className="flex items-center justify-center space-x-2 border border-scale-1200 rounded-md px-3 py-2 opacity-20">
           <p className="text-scale-1200 cursor-default text-sm">Chat</p>
@@ -27,8 +56,6 @@ export default function Home() {
         </div>
       </div>
       <RealtimeCursors roomName="cursor-room" color={color} username="Mark Scout" />
-      <RealtimeChat roomName="chat-room" username="" />
-      <RealtimeAvatarStack roomName="presence-room" color={color} />
-    </main>
-  );
+    </div>
+  )
 }
