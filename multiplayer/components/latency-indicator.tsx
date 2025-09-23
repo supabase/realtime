@@ -7,5 +7,5 @@ import { nanoid } from 'nanoid'
 export const LatencyIndicator = () => {
   const { latency } = useRealtimeLatencyRoom(nanoid())
 
-  return <Badge>Latency: {latency.toFixed(1)}ms</Badge>
+  return <Badge>Latency: {latency.toFixed(0)}ms</Badge>
 }

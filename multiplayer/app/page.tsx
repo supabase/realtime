@@ -1,7 +1,6 @@
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import Link from "next/link";
 import { RealtimeCursors } from '@/components/realtime-cursors'
-import { nanoid } from 'nanoid'
 import { RealtimeChat } from '@/components/realtime-chat'
 import { RealtimeAvatarStack } from '@/components/realtime-avatar-stack'
 import { LatencyIndicator } from '@/components/latency-indicator'
