@@ -4,12 +4,14 @@ import { RealtimeCursors } from '@/components/realtime-cursors'
 import { RealtimeChat } from '@/components/realtime-chat'
 import { RealtimeAvatarStack } from '@/components/realtime-avatar-stack'
 import { LatencyIndicator } from '@/components/latency-indicator'
+import { nanoid } from 'nanoid'
 
 const generateRandomColor = () => `hsl(${Math.floor(Math.random() * 360)}, 100%, 70%)`
 
 
 export default function Home() {
   const color = generateRandomColor()
+  const userId = nanoid()
 
   return (
     <div
@@ -36,7 +38,7 @@ export default function Home() {
             <LatencyIndicator/>
           </div>
           <div className="flex justify-end">
-          <RealtimeChat roomName="chat-room" username="" />
+          <RealtimeChat roomName="chat-room" username={userId} />
           </div>
         </div>
       </div>
