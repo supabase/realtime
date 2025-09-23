@@ -7,18 +7,10 @@ defmodule Realtime.ErlSysMon do
 
   require Logger
 
-  @defaults [
-    :busy_dist_port,
-    :busy_port,
-    {:long_gc, 500},
-    {:long_schedule, 500},
-    {:long_message_queue, {0, 1_000}}
-  ]
-
   def start_link(args), do: GenServer.start_link(__MODULE__, args)
 
   def init(args) do
-    config = Keyword.get(args, :config, @defaults)
+    config = Keyword.get(args, :config, defaults())
     :erlang.system_monitor(self(), config)
 
     {:ok, []}
@@ -38,22 +30,43 @@ defmodule Realtime.ErlSysMon do
     pid_info =
       pid
       |> Process.info(:dictionary)
-      |> case do
+      |> then(fn
         {:dictionary, dict} when is_list(dict) ->
-          {List.keyfind(dict, :"$initial_call", 0), List.keyfind(dict, :"$ancestors", 0)}
+          {
+            List.keyfind(dict, :"$initial_call", 0),
+            List.keyfind(dict, :"$ancestors", 0),
+            List.keyfind(dict, :tenant_id, 0)
+          }
 
         other ->
           other
-      end
+      end)
 
     extra_info = Process.info(pid, [:registered_name, :message_queue_len, :total_heap_size])
 
+    {_, _, tenant_id} = pid_info
+
     Logger.warning(
       "#{__MODULE__} message: " <>
-        inspect(msg) <> "|\n process info: #{inspect(pid_info)} #{inspect(extra_info)}"
+        inspect(msg) <> "|\n process info: #{inspect(pid_info)} #{inspect(extra_info)}",
+      external_id: tenant_id,
+      project: tenant_id
     )
   rescue
     _ ->
       Logger.warning("#{__MODULE__} message: " <> inspect(msg))
+  end
+
+  defp defaults do
+    Process.flag(:max_heap_size, Application.fetch_env!(:realtime, :websocket_max_heap_size))
+
+    [
+      :busy_dist_port,
+      :busy_port,
+      {:long_gc, 500},
+      {:long_schedule, 500},
+      {:long_message_queue, {0, 1_000}},
+      {:large_heap, {0, 1_000}}
+    ]
   end
 end
