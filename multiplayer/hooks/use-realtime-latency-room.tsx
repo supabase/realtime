@@ -10,10 +10,6 @@ const EVENT_NAME = 'ping'
 
 const supabase = createClient()
 
-type LatencyEventPayload = {
-  time: number
-}
-
 export const useRealtimeLatencyRoom = (id : string) => {
   const [latency, setLatency] = useState<number>(0)
 
@@ -35,7 +31,6 @@ export const useRealtimeLatencyRoom = (id : string) => {
 
             if (resp !== 'ok') {
               console.log('pingChannel broadcast error')
-              setLatency(-1)
             } else {
               const end = performance.now()
               const newLatency = end - start
