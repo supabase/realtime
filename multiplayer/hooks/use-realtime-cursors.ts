@@ -99,7 +99,7 @@ export const useRealtimeCursors = ({
 
   useEffect(() => {
     const config = { broadcast: { ack: false, self: false }, presence: { key: userId } }
-    const channel = supabase.channel(roomName, { config: config })
+    const channel = supabase.channel(roomName, { config })
     channelRef.current = channel
 
     channel

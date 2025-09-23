@@ -4,6 +4,7 @@ import { RealtimeCursors } from '@/components/realtime-cursors'
 import { nanoid } from 'nanoid'
 import { RealtimeChat } from '@/components/realtime-chat'
 import { RealtimeAvatarStack } from '@/components/realtime-avatar-stack'
+import { LatencyIndicator } from '@/components/latency-indicator'
 
 const generateRandomColor = () => `hsl(${Math.floor(Math.random() * 360)}, 100%, 70%)`
 
@@ -33,7 +34,7 @@ export default function Home() {
         </div>
         <div className="flex items-end justify-between">
           <div className="flex items-center space-x-4">
-              Badge and Dark Mode toggle thing
+            <LatencyIndicator/>
           </div>
           <div className="flex justify-end">
           <RealtimeChat roomName="chat-room" username="" />
