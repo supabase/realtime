@@ -81,13 +81,13 @@ export const RealtimeChat = ({
   )
 
   return (
-    <div className="flex flex-col max-h-[400px] max-w-[400px] bg-background text-foreground antialiased overflow-y-scroll break-all">
+    <div className="flex flex-col max-h-1/2 max-w-[400px] bg-background text-foreground antialiased overflow-y-scroll break-all">
       {/* Messages */}
       <div ref={containerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         <div className="space-y-1">
           {allMessages.map((message, index) => {
             const prevMessage = index > 0 ? allMessages[index - 1] : null
-            const showHeader = !prevMessage || prevMessage.user.name !== message.user.name
+            const showHeader = !prevMessage || prevMessage.username !== message.username
 
             return (
               <div
@@ -96,7 +96,7 @@ export const RealtimeChat = ({
               >
                 <ChatMessageItem
                   message={message}
-                  isOwnMessage={message.user.name === username}
+                  isOwnMessage={message.username === username}
                   showHeader={showHeader}
                 />
               </div>

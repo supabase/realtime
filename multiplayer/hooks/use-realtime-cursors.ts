@@ -134,23 +134,15 @@ export const useRealtimeCursors = ({
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         const status = await channel.track({ color: color })
+        window.addEventListener('mousemove', handleMouseMove)
       }
     })
 
     return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
       channel.unsubscribe()
     }
   }, [])
-
-  useEffect(() => {
-    // Add event listener for mousemove
-    window.addEventListener('mousemove', handleMouseMove)
-
-    // Cleanup on unmount
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-    }
-  }, [handleMouseMove])
 
   return { cursors }
 }

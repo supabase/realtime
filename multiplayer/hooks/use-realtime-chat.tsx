@@ -11,9 +11,7 @@ interface UseRealtimeChatProps {
 export interface ChatMessage {
   id: string
   content: string
-  user: {
-    name: string
-  }
+  username: string
   createdAt: string
 }
 
@@ -23,13 +21,19 @@ export function useRealtimeChat({ roomName, username }: UseRealtimeChatProps) {
   const supabase = createClient()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [channel, setChannel] = useState<ReturnType<typeof supabase.channel> | null>(null)
-  const [isConnected, setIsConnected] = useState(false)
+
+  const twelveHours = 12 * 60 * 60 * 1000
+  const twelveHoursAgo = Date.now() - twelveHours
+
+ const [isConnected, setIsConnected] = useState(false)
 
   useEffect(() => {
-    const newChannel = supabase.channel(roomName)
+    const config = { private: true, broadcast: { replay: { since: twelveHoursAgo } } }
+    const newChannel = supabase.channel(roomName, { config })
 
     newChannel
       .on('broadcast', { event: EVENT_MESSAGE_TYPE }, (payload) => {
+        console.log(payload)
         setMessages((current) => [...current, payload.payload as ChatMessage])
       })
       .subscribe(async (status) => {
@@ -52,20 +56,21 @@ export function useRealtimeChat({ roomName, username }: UseRealtimeChatProps) {
       const message: ChatMessage = {
         id: crypto.randomUUID(),
         content,
-        user: {
-          name: username,
-        },
+        username,
         createdAt: new Date().toISOString(),
       }
 
       // Update local state immediately for the sender
       setMessages((current) => [...current, message])
 
-      await channel.send({
-        type: 'broadcast',
-        event: EVENT_MESSAGE_TYPE,
-        payload: message,
-      })
+      await supabase.from('messages').insert([
+        {
+          id: message.id,
+          content,
+          username,
+          room: roomName
+        },
+      ])
     },
     [channel, isConnected, username]
   )
