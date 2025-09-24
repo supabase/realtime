@@ -17,15 +17,13 @@ const avatarStackVariants = cva('flex -space-x-4 -space-y-4', {
 export interface AvatarStackProps
   extends React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof avatarStackVariants> {
-  avatars: { name: string; color: string }[]
-  maxAvatarsAmount?: number
+  avatars: { color: string }[]
 }
 
 const AvatarStack = ({
   className,
   orientation,
   avatars,
-  maxAvatarsAmount = 3,
   ...props
 }: AvatarStackProps) => {
   const shownAvatars = avatars
@@ -39,7 +37,7 @@ const AvatarStack = ({
       )}
       {...props}
     >
-      {shownAvatars.map(({ name, color }, index) => (
+      {shownAvatars.map(({ color }, index) => (
         <div key={index} className="relative">
           <div
             key={index}

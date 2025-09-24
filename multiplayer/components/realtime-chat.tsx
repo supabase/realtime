@@ -106,6 +106,15 @@ export const RealtimeChat = ({
       </div>
 
       <form onSubmit={handleSendMessage} className="flex w-full gap-2 border-t border-border p-4">
+      {isConnected && (
+        <Button
+          className="aspect-square rounded-full animate-in fade-in slide-in-from-right-4 duration-300"
+          type="submit"
+          disabled={!isConnected}
+        >
+          <Send className="size-4" />
+        </Button>
+      )}
         <Input
           className={cn(
             'rounded-full bg-background text-sm transition-all duration-300',
@@ -117,15 +126,6 @@ export const RealtimeChat = ({
           placeholder="Type a message..."
           disabled={!isConnected}
         />
-        {isConnected && newMessage.trim() && (
-          <Button
-            className="aspect-square rounded-full animate-in fade-in slide-in-from-right-4 duration-300"
-            type="submit"
-            disabled={!isConnected}
-          >
-            <Send className="size-4" />
-          </Button>
-        )}
       </form>
     </div>
   )

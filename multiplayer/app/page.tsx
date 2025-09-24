@@ -1,5 +1,4 @@
 import { ThemeSwitcher } from "@/components/theme-switcher";
-import Link from "next/link";
 import { RealtimeCursors } from '@/components/realtime-cursors'
 import { RealtimeChat } from '@/components/realtime-chat'
 import { RealtimeAvatarStack } from '@/components/realtime-avatar-stack'
@@ -58,7 +57,7 @@ export default function Home() {
           </code>
         </div>
       </div>
-      <RealtimeCursors roomName="cursor-room" color={color} username="Mark Scout" />
+      <RealtimeCursors roomName="cursor-room" color={color} />
     </div>
   )
 }
