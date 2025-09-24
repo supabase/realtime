@@ -33,7 +33,6 @@ export function useRealtimeChat({ roomName, username }: UseRealtimeChatProps) {
 
     newChannel
       .on('broadcast', { event: EVENT_MESSAGE_TYPE }, (payload) => {
-        console.log(payload)
         setMessages((current) => [...current, payload.payload as ChatMessage])
       })
       .subscribe(async (status) => {

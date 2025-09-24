@@ -10,7 +10,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Send } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 
 interface RealtimeChatProps {
   roomName: string
@@ -80,6 +80,23 @@ export const RealtimeChat = ({
     [newMessage, isConnected, sendMessage]
   )
 
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Enter" && document.activeElement !== inputRef.current) {
+        inputRef.current.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    // Cleanup on unmount
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
   return (
     <div className="flex flex-col max-h-1/2 max-w-[400px] bg-background text-foreground antialiased overflow-y-scroll break-all">
       {/* Messages */}
@@ -120,6 +137,7 @@ export const RealtimeChat = ({
             'rounded-full bg-background text-sm transition-all duration-300',
             isConnected && newMessage.trim() ? 'w-[calc(100%-36px)]' : 'w-full'
           )}
+          ref={inputRef}
           type="text"
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
