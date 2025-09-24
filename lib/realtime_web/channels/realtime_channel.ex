@@ -213,6 +213,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :invalid_replay_params} ->
         log_error(socket, "UnableToReplayMessages", "Replay params are not valid")
 
+      {:error, :invalid_replay_channel} ->
+        log_error(socket, "UnableToReplayMessages", "Replay is not allowed for public channels")
+
       {:error, error} ->
         log_error(socket, "UnknownErrorOnChannel", error)
         {:error, %{reason: "Unknown Error on Channel"}}
@@ -790,7 +793,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp maybe_replay_messages(%{"broadcast" => %{"replay" => _}}, _sub_topic, _db_conn, false = _private?) do
-    {:error, :invalid_replay_params}
+    {:error, :invalid_replay_channel}
   end
 
   defp maybe_replay_messages(%{"broadcast" => %{"replay" => replay_params}}, sub_topic, db_conn, true = _private?)
