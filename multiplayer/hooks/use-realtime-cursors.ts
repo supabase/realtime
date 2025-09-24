@@ -107,11 +107,11 @@ export const useRealtimeCursors = ({
         leftPresences.forEach(function(element) {
            // Remove cursor when user leaves
           setCursors((prev) => {
-            if (prev[element.presence_ref]) {
-              delete prev[element.presence_ref]
+            if (prev[element.key]) {
+              delete prev[element.key]
             }
 
-            return prev
+            return {...prev}
           })
         })
       })
@@ -133,7 +133,7 @@ export const useRealtimeCursors = ({
       })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
-        const status = await channel.track({ color: color })
+        const status = await channel.track({ key: userId, color: color })
         window.addEventListener('mousemove', handleMouseMove)
       }
     })

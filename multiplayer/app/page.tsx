@@ -36,6 +36,7 @@ export default function Home() {
         <div className="flex items-end justify-between">
           <div className="flex items-center space-x-4">
             <LatencyIndicator/>
+            <ThemeSwitcher />
           </div>
           <div className="flex justify-end">
           <RealtimeChat roomName="chat-room" username={userId} />
