@@ -153,7 +153,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert {
                :error,
-               %{reason: "UnableToReplayMessages: Replay params are not valid"}
+               %{reason: "UnableToReplayMessages: Replay is not allowed for public channels"}
              } = subscribe_and_join(socket, "realtime:test", %{"config" => config})
 
       refute_receive _any
