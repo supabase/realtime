@@ -13,6 +13,7 @@ export interface ChatMessage {
   content: string
   username: string
   createdAt: string
+  replayed: boolean
 }
 
 const EVENT_MESSAGE_TYPE = 'message'
@@ -33,7 +34,9 @@ export function useRealtimeChat({ roomName, username }: UseRealtimeChatProps) {
 
     newChannel
       .on('broadcast', { event: EVENT_MESSAGE_TYPE }, (payload) => {
-        setMessages((current) => [...current, payload.payload as ChatMessage])
+        const chatMessage = payload.payload as ChatMessage
+        chatMessage.replayed = payload?.meta?.replayed
+        setMessages((current) => [...current, chatMessage])
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
@@ -57,6 +60,7 @@ export function useRealtimeChat({ roomName, username }: UseRealtimeChatProps) {
         content,
         username,
         createdAt: new Date().toISOString(),
+        replayed: false
       }
 
       // Update local state immediately for the sender
