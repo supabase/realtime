@@ -340,7 +340,7 @@ defmodule Realtime.Tenants do
       max_bucket_len: 10,
       limit: [
         value: @connect_per_second_default,
-        measurement: :avg,
+        measurement: :sum,
         log_fn: fn ->
           Logger.critical(
             "DatabaseConnectionRateLimitReached: Too many connection attempts against the tenant database",

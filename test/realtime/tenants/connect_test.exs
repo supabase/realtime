@@ -537,12 +537,12 @@ defmodule Realtime.Tenants.ConnectTest do
       log =
         capture_log(fn ->
           res =
-            for _ <- 1..20 do
+            for _ <- 1..50 do
               Process.sleep(200)
               Connect.lookup_or_start_connection(tenant.external_id)
             end
 
-          assert Enum.any?(res, fn {_, res} -> res == :tenant_db_too_many_connections end)
+          assert Enum.any?(res, fn {_, res} -> res == :connect_rate_limit_reached end)
         end)
 
       assert log =~ "DatabaseConnectionRateLimitReached: Too many connection attempts against the tenant database"
@@ -553,7 +553,7 @@ defmodule Realtime.Tenants.ConnectTest do
         capture_log(fn ->
           res =
             for _ <- 1..20 do
-              Process.sleep(200)
+              Process.sleep(500)
               Connect.lookup_or_start_connection(tenant.external_id)
             end
 

@@ -167,6 +167,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         msg = "Database can't accept more connections, Realtime won't connect"
         log_error(socket, "DatabaseLackOfConnections", msg)
 
+      {:error, :connect_rate_limit_reached} ->
+        msg = "Too many database connections attempts per second"
+        log_error(socket, "DatabaseConnectionRateLimitReached", msg)
+
       {:error, :unable_to_set_policies, error} ->
         log_error(socket, "UnableToSetPolicies", error)
         {:error, %{reason: "Realtime was unable to connect to the project database"}}
