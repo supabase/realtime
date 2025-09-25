@@ -66,7 +66,7 @@ export function useRealtimeChat({ roomName, username }: UseRealtimeChatProps) {
       // Update local state immediately for the sender
       setMessages((current) => [...current, message])
 
-      await supabase.from('messages').insert([
+      await supabase.from('new_messages').insert([
         {
           id: message.id,
           content,

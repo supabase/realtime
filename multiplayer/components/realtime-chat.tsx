@@ -80,12 +80,12 @@ export const RealtimeChat = ({
     [newMessage, isConnected, sendMessage]
   )
 
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e : KeyboardEvent) => {
       if (e.key === "Enter" && document.activeElement !== inputRef.current) {
-        inputRef.current.focus();
+        inputRef?.current?.focus();
       }
     };
 

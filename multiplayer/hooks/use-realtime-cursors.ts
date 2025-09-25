@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/client'
 import { RealtimeChannel } from '@supabase/supabase-js'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { nanoid } from 'nanoid'
 
 /**
  * Throttle a callback to a certain delay, It will only call the callback if the delay has passed, with the arguments
@@ -39,8 +40,6 @@ const useThrottleCallback = <Params extends unknown[], Return>(
 
 const supabase = createClient()
 
-const generateRandomNumber = () => Math.floor(Math.random() * 100)
-
 const EVENT_NAME = 'realtime-cursor-move'
 
 type CursorEventPayload = {
@@ -49,8 +48,7 @@ type CursorEventPayload = {
     y: number
   }
   user: {
-    id: number
-    name: string
+    id: string
   }
   color: string
   timestamp: number
@@ -65,7 +63,7 @@ export const useRealtimeCursors = ({
   throttleMs: number
   color: string
 }) => {
-  const [userId] = useState(generateRandomNumber())
+  const [userId] = useState(nanoid())
   const [cursors, setCursors] = useState<Record<string, CursorEventPayload>>({})
 
   const channelRef = useRef<RealtimeChannel | null>(null)
