@@ -328,6 +328,32 @@ defmodule Realtime.Tenants do
     %RateCounter.Args{id: {:channel, :authorization_errors, external_id}, opts: opts}
   end
 
+  @connect_per_second_default 10
+  @doc "RateCounter arguments for counting connect per second."
+  @spec connect_per_second_rate(Tenant.t() | String.t()) :: RateCounter.Args.t()
+  def connect_per_second_rate(%Tenant{external_id: external_id}) do
+    connect_per_second_rate(external_id)
+  end
+
+  def connect_per_second_rate(tenant_id) do
+    opts = [
+      max_bucket_len: 10,
+      limit: [
+        value: @connect_per_second_default,
+        measurement: :sum,
+        log_fn: fn ->
+          Logger.critical(
+            "DatabaseConnectionRateLimitReached: Too many connection attempts against the tenant database",
+            external_id: tenant_id,
+            project: tenant_id
+          )
+        end
+      ]
+    ]
+
+    %RateCounter.Args{id: {:database, :connect, tenant_id}, opts: opts}
+  end
+
   defp pool_size(%{extensions: [%{settings: settings} | _]}) do
     Database.pool_size_by_application_name("realtime_connect", settings)
   end

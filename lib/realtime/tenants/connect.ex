@@ -11,8 +11,9 @@ defmodule Realtime.Tenants.Connect do
 
   use Realtime.Logs
 
-  alias Realtime.Tenants.Rebalancer
   alias Realtime.Api.Tenant
+  alias Realtime.GenCounter
+  alias Realtime.RateCounter
   alias Realtime.Rpc
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect.CheckConnection
@@ -20,6 +21,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants.Connect.Piper
   alias Realtime.Tenants.Connect.RegisterProcess
   alias Realtime.Tenants.Migrations
+  alias Realtime.Tenants.Rebalancer
   alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
 
@@ -39,11 +41,8 @@ defmodule Realtime.Tenants.Connect do
   @doc "Check if Connect has finished setting up connections"
   def ready?(tenant_id) do
     case whereis(tenant_id) do
-      pid when is_pid(pid) ->
-        GenServer.call(pid, :ready?)
-
-      _ ->
-        false
+      pid when is_pid(pid) -> GenServer.call(pid, :ready?)
+      _ -> false
     end
   end
 
@@ -55,24 +54,29 @@ defmodule Realtime.Tenants.Connect do
           | {:error, :tenant_database_unavailable}
           | {:error, :initializing}
           | {:error, :tenant_database_connection_initializing}
-          | {:error, :tenant_db_too_many_connections}
+          | {:error, :connect_rate_limit_reached}
           | {:error, :rpc_error, term()}
   def lookup_or_start_connection(tenant_id, opts \\ []) when is_binary(tenant_id) do
-    case get_status(tenant_id) do
-      {:ok, conn} ->
-        {:ok, conn}
+    rate_args = Tenants.connect_per_second_rate(tenant_id)
+    RateCounter.new(rate_args)
 
-      {:error, :tenant_database_unavailable} ->
-        {:error, :tenant_database_unavailable}
+    with {:ok, %{limit: %{triggered: false}}} <- RateCounter.get(rate_args),
+         {:ok, conn} <- get_status(tenant_id) do
+      {:ok, conn}
+    else
+      {:ok, %{limit: %{triggered: true}}} ->
+        {:error, :connect_rate_limit_reached}
 
       {:error, :tenant_database_connection_initializing} ->
+        GenCounter.add(rate_args.id)
         call_external_node(tenant_id, opts)
 
       {:error, :initializing} ->
         {:error, :tenant_database_unavailable}
 
-      {:error, :tenant_db_too_many_connections} ->
-        {:error, :tenant_db_too_many_connections}
+      {:error, reason} ->
+        GenCounter.add(rate_args.id)
+        {:error, reason}
     end
   end
 

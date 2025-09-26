@@ -272,6 +272,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
+      connect_events_key = Tenants.connect_per_second_rate(tenant).id
       expect(TenantBroadcaster, :pubsub_broadcast, 5, fn _, _, _, _ -> :ok end)
 
       messages_to_send =
@@ -290,7 +291,10 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       GenCounter
       |> expect(:add, fn ^request_events_key -> :ok end)
-      |> expect(:add, length(messages), fn ^broadcast_events_key -> :ok end)
+      |> expect(:add, length(messages), fn
+        ^broadcast_events_key -> :ok
+        ^connect_events_key -> :ok
+      end)
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
@@ -326,6 +330,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
+      connect_events_key = Tenants.connect_per_second_rate(tenant).id
       expect(TenantBroadcaster, :pubsub_broadcast, 6, fn _, _, _, _ -> :ok end)
 
       channels =
@@ -354,7 +359,10 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       GenCounter
       |> expect(:add, fn ^request_events_key -> :ok end)
-      |> expect(:add, length(messages), fn ^broadcast_events_key -> :ok end)
+      |> expect(:add, length(messages), fn
+        ^broadcast_events_key -> :ok
+        ^connect_events_key -> :ok
+      end)
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
@@ -408,6 +416,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
+      connect_events_key = Tenants.connect_per_second_rate(tenant).id
       expect(TenantBroadcaster, :pubsub_broadcast, 5, fn _, _, _, _ -> :ok end)
 
       messages_to_send =
@@ -428,7 +437,9 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       GenCounter
       |> expect(:add, fn ^request_events_key -> :ok end)
-      |> expect(:add, length(messages_to_send), fn ^broadcast_events_key -> :ok end)
+      # remove the one message that won't be broadcasted for this user
+      |> expect(:add, 1, fn ^connect_events_key -> :ok end)
+      |> expect(:add, length(messages) - 1, fn ^broadcast_events_key -> :ok end)
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
@@ -482,7 +493,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       GenCounter
       |> expect(:add, fn ^request_events_key -> 1 end)
-      |> reject(:add, 1)
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 

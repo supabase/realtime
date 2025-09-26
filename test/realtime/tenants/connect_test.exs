@@ -515,6 +515,53 @@ defmodule Realtime.Tenants.ConnectTest do
       assert capture_log(fn -> assert {:error, :rpc_error, _} = Connect.lookup_or_start_connection("tenant") end) =~
                "project=tenant external_id=tenant [error] ErrorOnRpcCall"
     end
+
+    test "rate limit connect when too many connections against bad database", %{tenant: tenant} do
+      extension = %{
+        "type" => "postgres_cdc_rls",
+        "settings" => %{
+          "db_host" => "127.0.0.1",
+          "db_name" => "postgres",
+          "db_user" => "supabase_admin",
+          "db_password" => "postgres",
+          "poll_interval" => 100,
+          "poll_max_changes" => 100,
+          "poll_max_record_bytes" => 1_048_576,
+          "region" => "us-east-1",
+          "ssl_enforced" => true
+        }
+      }
+
+      {:ok, tenant} = update_extension(tenant, extension)
+
+      log =
+        capture_log(fn ->
+          res =
+            for _ <- 1..50 do
+              Process.sleep(200)
+              Connect.lookup_or_start_connection(tenant.external_id)
+            end
+
+          assert Enum.any?(res, fn {_, res} -> res == :connect_rate_limit_reached end)
+        end)
+
+      assert log =~ "DatabaseConnectionRateLimitReached: Too many connection attempts against the tenant database"
+    end
+
+    test "rate limit connect will not trigger if connection is successful", %{tenant: tenant} do
+      log =
+        capture_log(fn ->
+          res =
+            for _ <- 1..20 do
+              Process.sleep(500)
+              Connect.lookup_or_start_connection(tenant.external_id)
+            end
+
+          refute Enum.any?(res, fn {_, res} -> res == :tenant_db_too_many_connections end)
+        end)
+
+      refute log =~ "DatabaseConnectionRateLimitReached: Too many connection attempts against the tenant database"
+    end
   end
 
   describe "shutdown/1" do
