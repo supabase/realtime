@@ -148,12 +148,12 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     |> Phoenix.Presence.group()
   end
 
-  @presence_limit 100
   defp limit_presence_event(socket) do
     %{assigns: %{presence_rate_counter: presence_counter, tenant: _tenant_id}} = socket
     {:ok, rate_counter} = RateCounter.get(presence_counter)
+    tenant = Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant)
 
-    if rate_counter.avg > @presence_limit do
+    if rate_counter.avg > tenant.max_presence_events_per_second do
       {:error, :rate_limit_exceeded}
     else
       GenCounter.add(presence_counter.id)
