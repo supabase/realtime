@@ -28,6 +28,8 @@ services:
       - "4000:4000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    cap_add:
+      - SYS_ADMIN
     environment:
       PORT: 4000
       DB_HOST: host.docker.internal
@@ -39,7 +41,7 @@ services:
       DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
       API_JWT_SECRET: dc447559-996d-4761-a306-f47a5eab1623
       SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
-      ERL_AFLAGS: -proto_dist inet_tcp
+      ERL_AFLAGS: "-proto_dist inet_tcp +JPperf true"
       RLIMIT_NOFILE: 1000000
       DNS_NODES: "''"
       APP_NAME: realtime
@@ -47,4 +49,6 @@ services:
       JANITOR_INTERVAL: 60000
       LOG_LEVEL: "info"
       SEED_SELF_HOST: true
+      DASHBOARD_USER: "realtime-admin"
+      DASHBOARD_PASSWORD: "realtime-password"
 

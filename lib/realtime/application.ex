@@ -97,7 +97,8 @@ defmodule Realtime.Application do
          partitions: connect_partition_slots},
         {RealtimeWeb.RealtimeChannel.Tracker, check_interval_in_ms: no_channel_timeout_in_ms},
         RealtimeWeb.Endpoint,
-        RealtimeWeb.Presence
+        RealtimeWeb.Presence,
+        Realtime.Profiler
       ] ++ extensions_supervisors() ++ janitor_tasks()
 
     children =

@@ -1,4 +1,4 @@
-defmodule Realtime.Dashboard.ProcessDump do
+defmodule RealtimeWeb.Dashboard.ProcessDump do
   @moduledoc """
   Live Dashboard page to dump the current processes tree
   """
