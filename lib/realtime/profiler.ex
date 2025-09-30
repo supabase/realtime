@@ -33,7 +33,7 @@ defmodule Realtime.Profiler do
 
     dbg(tmp_path)
 
-    args = ["record", "-F", "1000", "-g", "-a", "--pid", "#{:os.getpid()}", "-o", tmp_path]
+    args = ["record", "-F", "1000", "-g", "-a", "--pid", "#{:os.getpid()}", "-o", tmp_path, "--", "sleep", "60"]
     cmd = Enum.join(["perf" | args], " ")
 
     # Open the port
