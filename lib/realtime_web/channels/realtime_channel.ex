@@ -29,7 +29,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.RealtimeChannel.Tracker
 
   @confirm_token_ms_interval :timer.minutes(5)
-
   @impl true
   def join("realtime:", _params, socket) do
     log_error(socket, "TopicNameRequired", "You must provide a topic name")
@@ -238,16 +237,24 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, socket}
   end
 
+  @websocket_message_queue_length_limit 1000
   def handle_info(:update_rate_counter, socket) do
     count(socket)
 
     {:ok, rate_counter} = RateCounter.get(socket.assigns.rate_counter)
+    {:message_queue_len, len} = Process.info(self(), :message_queue_len)
 
-    if rate_counter.limit.triggered do
-      message = "Too many messages per second"
-      shutdown_response(socket, message)
-    else
-      {:noreply, socket}
+    cond do
+      rate_counter.limit.triggered ->
+        message = "Too many messages per second"
+        shutdown_response(socket, message)
+
+      len > @websocket_message_queue_length_limit ->
+        message = "Websocket message queue length is too long"
+        shutdown_response(socket, message)
+
+      true ->
+        {:noreply, socket}
     end
   end
 
@@ -373,6 +380,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(:sync_presence, socket), do: {:noreply, socket}
+
   def handle_info(_, socket), do: {:noreply, socket}
 
   @impl true

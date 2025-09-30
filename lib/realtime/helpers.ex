@@ -4,6 +4,9 @@ defmodule Realtime.Helpers do
   """
   require Logger
 
+  @doc """
+  Cancels a timer.
+  """
   @spec cancel_timer(reference() | nil) :: non_neg_integer() | false | :ok | nil
   def cancel_timer(nil), do: nil
   def cancel_timer(ref), do: Process.cancel_timer(ref)

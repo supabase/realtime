@@ -2484,6 +2484,45 @@ defmodule Realtime.Integration.RtChannelTest do
     end
   end
 
+  test "websocket message queue length limit", %{tenant: tenant} do
+    change_tenant_configuration(tenant, :max_events_per_second, 100_000) |> dbg()
+
+    on_exit(fn ->
+      change_tenant_configuration(tenant, :max_events_per_second, 100) |> dbg()
+    end)
+
+    {socket, _} = get_connection(tenant)
+
+    config = %{broadcast: %{self: true}, private: false}
+    channel = random_string()
+    full_topic = "realtime:#{channel}"
+
+    WebsocketClient.join(socket, full_topic, %{config: config})
+    assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 500
+
+    for _ <- 1..3000, Process.alive?(socket) do
+      spawn(fn -> WebsocketClient.send_event(socket, full_topic, "broadcast", %{"msg" => random_string()}) end)
+    end
+
+    assert_receive msg = %Message{
+                     event: "system",
+                     topic: ^full_topic,
+                     payload: %{
+                       "channel" => ^channel,
+                       "extension" => "system",
+                       "message" => "Websocket message queue length is too long",
+                       "status" => "error"
+                     }
+                   },
+                   500
+
+    assert_receive msg = %Message{
+                     event: "phx_close",
+                     topic: ^full_topic
+                   },
+                   500
+  end
+
   defp mode(%{mode: :distributed}) do
     tenant = Api.get_tenant_by_external_id("dev_tenant")
 
