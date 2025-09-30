@@ -65,7 +65,10 @@ defmodule Realtime.GenRpcPubSub.Worker do
   def start_link({pubsub, worker}), do: GenServer.start_link(__MODULE__, pubsub, name: worker)
 
   @impl true
-  def init(pubsub), do: {:ok, pubsub}
+  def init(pubsub) do
+    Process.flag(:message_queue_data, :off_heap)
+    {:ok, pubsub}
+  end
 
   @impl true
   def handle_info({:ftl, topic, message, dispatcher}, pubsub) do
