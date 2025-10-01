@@ -337,7 +337,7 @@ defmodule Realtime.Tenants do
 
   def connect_errors_per_second_rate(tenant_id) do
     opts = [
-      max_bucket_len: 10,
+      max_bucket_len: 30,
       limit: [
         value: @connect_errors_per_second_default,
         measurement: :sum,
