@@ -57,7 +57,7 @@ defmodule Realtime.Tenants.Connect do
           | {:error, :connect_rate_limit_reached}
           | {:error, :rpc_error, term()}
   def lookup_or_start_connection(tenant_id, opts \\ []) when is_binary(tenant_id) do
-    rate_args = Tenants.connect_per_second_rate(tenant_id)
+    rate_args = Tenants.connect_errors_per_second_rate(tenant_id)
     RateCounter.new(rate_args)
 
     with {:ok, %{limit: %{triggered: false}}} <- RateCounter.get(rate_args),
@@ -68,8 +68,14 @@ defmodule Realtime.Tenants.Connect do
         {:error, :connect_rate_limit_reached}
 
       {:error, :tenant_database_connection_initializing} ->
-        GenCounter.add(rate_args.id)
-        call_external_node(tenant_id, opts)
+        case call_external_node(tenant_id, opts) do
+          {:ok, pid} ->
+            {:ok, pid}
+
+          error ->
+            GenCounter.add(rate_args.id)
+            error
+        end
 
       {:error, :initializing} ->
         {:error, :tenant_database_unavailable}
