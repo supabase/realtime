@@ -51,6 +51,36 @@ defmodule Realtime.Tenants.ConnectTest do
   end
 
   describe "handle cold start" do
+    test "multiple processes connecting calling Connect.connect", %{tenant: tenant} do
+      parent = self()
+
+      # Let's slow down Connect.connect so that multiple RPC calls are executed
+      stub(Connect, :connect, fn x, y, z ->
+        :timer.sleep(1000)
+        call_original(Connect, :connect, [x, y, z])
+      end)
+
+      connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
+      # Let's call enough times to potentially trigger the Connect RateCounter
+
+      for _ <- 1..50, do: spawn(connect)
+
+      assert_receive({:ok, pid}, 1100)
+
+      for _ <- 1..49, do: assert_receive({:ok, ^pid})
+
+      # Does not trigger rate limit as connections eventually succeeded
+
+      {:ok, rate_counter} =
+        tenant.external_id
+        |> Tenants.connect_errors_per_second_rate()
+        |> Realtime.RateCounter.get()
+
+      assert rate_counter.sum == 0
+      assert rate_counter.avg == 0.0
+      assert rate_counter.limit.triggered == false
+    end
+
     test "multiple proccesses succeed together", %{tenant: tenant} do
       parent = self()
 
