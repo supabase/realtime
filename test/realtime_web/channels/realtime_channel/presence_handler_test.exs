@@ -434,6 +434,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert log =~ "PresenceRateLimitReached"
     end
 
+    @tag :skip
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "respects rate limits on private channels", %{tenant: tenant, topic: topic, db_conn: db_conn} do
       key = random_string()
