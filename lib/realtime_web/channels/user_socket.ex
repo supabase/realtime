@@ -16,7 +16,7 @@ defmodule RealtimeWeb.UserSocket do
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
 
-  alias RealtimeWeb.Channels.TenantRateLimiters
+  alias RealtimeWeb.TenantRateLimiters
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RealtimeChannel.Logging

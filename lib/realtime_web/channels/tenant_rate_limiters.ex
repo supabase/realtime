@@ -1,4 +1,4 @@
-defmodule RealtimeWeb.Channels.TenantRateLimiters do
+defmodule RealtimeWeb.TenantRateLimiters do
   @moduledoc """
   Rate limiters for tenants.
   """
@@ -15,7 +15,7 @@ defmodule RealtimeWeb.Channels.TenantRateLimiters do
     end
   end
 
-  def max_concurrent_users_check(%Tenant{max_concurrent_users: max_conn_users, external_id: external_id}) do
+  defp max_concurrent_users_check(%Tenant{max_concurrent_users: max_conn_users, external_id: external_id}) do
     total_conn_users = UsersCounter.tenant_users(external_id)
 
     if total_conn_users < max_conn_users,
@@ -23,7 +23,7 @@ defmodule RealtimeWeb.Channels.TenantRateLimiters do
       else: {:error, :too_many_connections}
   end
 
-  def max_joins_per_second_check(%Tenant{max_joins_per_second: max_joins_per_second} = tenant) do
+  defp max_joins_per_second_check(%Tenant{max_joins_per_second: max_joins_per_second} = tenant) do
     rate_args = Tenants.joins_per_second_rate(tenant.external_id, max_joins_per_second)
 
     RateCounter.new(rate_args)
