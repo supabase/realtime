@@ -16,6 +16,7 @@ defmodule RealtimeWeb.UserSocket do
   alias Realtime.PostgresCdc
   alias Realtime.Tenants
 
+  alias RealtimeWeb.TenantRateLimiters
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RealtimeChannel.Logging
@@ -56,6 +57,7 @@ defmodule RealtimeWeb.UserSocket do
          token when is_binary(token) <- token,
          jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
+         :ok <- TenantRateLimiters.check_tenant(tenant),
          {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
       %Tenant{
         extensions: extensions,
@@ -110,6 +112,16 @@ defmodule RealtimeWeb.UserSocket do
       {:error, :token_malformed} ->
         log_error("MalformedJWT", "The token provided is not a valid JWT")
         {:error, :token_malformed}
+
+      {:error, :too_many_connections} ->
+        msg = "Too many connected users"
+        Logging.log_error(socket, "ConnectionRateLimitReached", msg)
+        {:error, :too_many_connections}
+
+      {:error, :too_many_joins} ->
+        msg = "Too many joins per second"
+        Logging.log_error(socket, "JoinsRateLimitReached", msg)
+        {:error, :too_many_joins}
 
       error ->
         log_error("ErrorConnectingToWebsocket", error)
