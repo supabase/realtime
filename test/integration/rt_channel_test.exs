@@ -2029,7 +2029,6 @@ defmodule Realtime.Integration.RtChannelTest do
     Agent.get(TestCounter, fn state -> get_in(state, [tenant, key]) || 0 end)
   end
 
-  @describetag :skip
   describe "billable events" do
     setup %{tenant: tenant} do
       events = [
@@ -2075,6 +2074,7 @@ defmodule Realtime.Integration.RtChannelTest do
       :ok
     end
 
+    @tag :skip
     test "join events", %{tenant: tenant} do
       external_id = tenant.external_id
       {socket, _} = get_connection(tenant)
@@ -2102,6 +2102,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
     end
 
+    @tag :skip
     test "broadcast events", %{tenant: tenant} do
       external_id = tenant.external_id
       {socket, _} = get_connection(tenant)
@@ -2144,6 +2145,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert 15 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
     end
 
+    @tag :skip
     test "presence events", %{tenant: tenant} do
       external_id = tenant.external_id
       {socket, _} = get_connection(tenant)
@@ -2196,6 +2198,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
     end
 
+    @tag :skip
     test "postgres changes events", %{tenant: tenant} do
       external_id = tenant.external_id
       {socket, _} = get_connection(tenant)
@@ -2245,6 +2248,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
     end
 
+    @tag :skip
     test "postgres changes error events", %{tenant: tenant} do
       external_id = tenant.external_id
       {socket, _} = get_connection(tenant)
