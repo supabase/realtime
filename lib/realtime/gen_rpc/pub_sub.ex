@@ -67,7 +67,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
   @impl true
   def init(pubsub) do
     Process.flag(:message_queue_data, :off_heap)
-    Process.flag(:fullsweep_after, 1000)
+    Process.flag(:fullsweep_after, 100)
     {:ok, pubsub}
   end
 
