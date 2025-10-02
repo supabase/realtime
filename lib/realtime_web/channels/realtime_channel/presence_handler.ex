@@ -138,7 +138,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     |> Phoenix.Presence.group()
   end
 
-  @presence_limit 500
+  @presence_limit 100
   defp limit_presence_event(socket) do
     %{assigns: %{presence_rate_counter: presence_counter, tenant: _tenant_id}} = socket
     {:ok, rate_counter} = RateCounter.get(presence_counter)
