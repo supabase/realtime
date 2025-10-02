@@ -21,6 +21,15 @@ defmodule Realtime.PromEx.Plugins.Tenants do
         unit: {:microsecond, :millisecond},
         tags: [:success, :tenant, :mechanism],
         reporter_options: [buckets: [10, 250, 5000, 15_000]]
+      ),
+      distribution(
+        [:realtime, :global, :rpc],
+        event_name: [:realtime, :rpc],
+        description: "Global Latency of rpc calls",
+        measurement: :latency,
+        unit: {:microsecond, :millisecond},
+        tags: [:success, :mechanism],
+        reporter_options: [buckets: [10, 250, 5000, 15_000]]
       )
     ])
   end
