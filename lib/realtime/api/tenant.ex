@@ -19,7 +19,7 @@ defmodule Realtime.Api.Tenant do
     field(:postgres_cdc_default, :string)
     field(:max_concurrent_users, :integer)
     field(:max_events_per_second, :integer)
-    field(:max_presence_events_per_second, :integer, default: 10_000)
+    field(:max_presence_events_per_second, :integer, default: 1000)
     field(:max_payload_size_in_kb, :integer, default: 3000)
     field(:max_bytes_per_second, :integer)
     field(:max_channels_per_client, :integer)
