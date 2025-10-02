@@ -37,6 +37,16 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
       assert metric_value(pattern) == previous_value + 1
     end
 
+    test "global success" do
+      pattern = ~r/realtime_global_rpc_count{mechanism=\"erpc\",success="true"}\s(?<number>\d+)/
+      # Enough time for the poll rate to be triggered at least once
+      Process.sleep(200)
+      previous_value = metric_value(pattern)
+      assert {:ok, "success"} = Rpc.enhanced_call(node(), Test, :success, [], tenant_id: "123")
+      Process.sleep(200)
+      assert metric_value(pattern) == previous_value + 1
+    end
+
     test "failure" do
       pattern = ~r/realtime_rpc_count{mechanism=\"erpc\",success="false",tenant="123"}\s(?<number>\d+)/
       # Enough time for the poll rate to be triggered at least once
@@ -47,8 +57,31 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
       assert metric_value(pattern) == previous_value + 1
     end
 
+    test "global failure" do
+      pattern = ~r/realtime_global_rpc_count{mechanism=\"erpc\",success="false"}\s(?<number>\d+)/
+      # Enough time for the poll rate to be triggered at least once
+      Process.sleep(200)
+      previous_value = metric_value(pattern)
+      assert {:error, "failure"} = Rpc.enhanced_call(node(), Test, :failure, [], tenant_id: "123")
+      Process.sleep(200)
+      assert metric_value(pattern) == previous_value + 1
+    end
+
     test "exception" do
       pattern = ~r/realtime_rpc_count{mechanism=\"erpc\",success="false",tenant="123"}\s(?<number>\d+)/
+      # Enough time for the poll rate to be triggered at least once
+      Process.sleep(200)
+      previous_value = metric_value(pattern)
+
+      assert {:error, :rpc_error, %RuntimeError{message: "runtime error"}} =
+               Rpc.enhanced_call(node(), Test, :exception, [], tenant_id: "123")
+
+      Process.sleep(200)
+      assert metric_value(pattern) == previous_value + 1
+    end
+
+    test "global exception" do
+      pattern = ~r/realtime_global_rpc_count{mechanism=\"erpc\",success="false"}\s(?<number>\d+)/
       # Enough time for the poll rate to be triggered at least once
       Process.sleep(200)
       previous_value = metric_value(pattern)

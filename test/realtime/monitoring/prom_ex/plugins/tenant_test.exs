@@ -129,6 +129,17 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
     end
 
+    test "global event exists after counter added", %{tenant: %{external_id: external_id}} do
+      pattern =
+        ~r/realtime_channel_global_events\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+      FakeUserCounter.fake_event(external_id)
+
+      Process.sleep(200)
+      assert metric_value(pattern) == metric_value + 1
+    end
+
     test "db_event exists after counter added", %{tenant: %{external_id: external_id}} do
       pattern =
         ~r/realtime_channel_db_events{tenant="#{external_id}"}\s(?<number>\d+)/
@@ -139,9 +150,29 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
     end
 
+    test "global db_event exists after counter added", %{tenant: %{external_id: external_id}} do
+      pattern =
+        ~r/realtime_channel_global_db_events\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+      FakeUserCounter.fake_db_event(external_id)
+      Process.sleep(200)
+      assert metric_value(pattern) == metric_value + 1
+    end
+
     test "presence_event exists after counter added", %{tenant: %{external_id: external_id}} do
       pattern =
         ~r/realtime_channel_presence_events{tenant="#{external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+      FakeUserCounter.fake_presence_event(external_id)
+      Process.sleep(200)
+      assert metric_value(pattern) == metric_value + 1
+    end
+
+    test "global presence_event exists after counter added", %{tenant: %{external_id: external_id}} do
+      pattern =
+        ~r/realtime_channel_global_presence_events\s(?<number>\d+)/
 
       metric_value = metric_value(pattern)
       FakeUserCounter.fake_presence_event(external_id)
