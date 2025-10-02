@@ -15,7 +15,7 @@ defmodule RealtimeWeb.Endpoint do
     websocket: [
       connect_info: [:peer_data, :uri, :x_headers],
       fullsweep_after: 20,
-      max_frame_size: 8_000_000,
+      max_frame_size: 5_000_000,
       # https://github.com/ninenines/cowboy/blob/24d32de931a0c985ff7939077463fc8be939f0e9/doc/src/manual/cowboy_websocket.asciidoc#L228
       # active_n: The number of packets Cowboy will request from the socket at once.
       # This can be used to tweak the performance of the server. Higher values reduce
