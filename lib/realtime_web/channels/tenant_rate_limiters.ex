@@ -4,12 +4,11 @@ defmodule RealtimeWeb.Channels.TenantRateLimiters do
   """
   require Logger
   alias Realtime.UsersCounter
-  alias Realtime.GenCounter
   alias Realtime.Tenants
   alias Realtime.RateCounter
   alias Realtime.Api.Tenant
 
-  @spec check_tenant(any()) :: :ok | {:error, :too_many_connections | :too_many_joins}
+  @spec check_tenant(Realtime.Api.Tenant.t()) :: :ok | {:error, :too_many_connections | :too_many_joins}
   def check_tenant(tenant) do
     with :ok <- max_concurrent_users_check(tenant) do
       max_joins_per_second_check(tenant)
@@ -31,7 +30,6 @@ defmodule RealtimeWeb.Channels.TenantRateLimiters do
 
     case RateCounter.get(rate_args) do
       {:ok, %{limit: %{triggered: false}}} ->
-        GenCounter.add(rate_args.id)
         :ok
 
       {:ok, %{limit: %{triggered: true}}} ->
