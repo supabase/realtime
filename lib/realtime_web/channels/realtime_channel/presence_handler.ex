@@ -11,7 +11,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias Phoenix.Tracker.Shard
   alias Realtime.GenCounter
   alias Realtime.RateCounter
-  alias Realtime.Tenants
+  # alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias RealtimeWeb.Presence
   alias RealtimeWeb.RealtimeChannel.Logging

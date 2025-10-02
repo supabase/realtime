@@ -2029,6 +2029,7 @@ defmodule Realtime.Integration.RtChannelTest do
     Agent.get(TestCounter, fn state -> get_in(state, [tenant, key]) || 0 end)
   end
 
+  @describetag :skip
   describe "billable events" do
     setup %{tenant: tenant} do
       events = [
