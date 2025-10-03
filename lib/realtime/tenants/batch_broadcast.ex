@@ -129,7 +129,14 @@ defmodule Realtime.Tenants.BatchBroadcast do
     broadcast = %Phoenix.Socket.Broadcast{topic: message.topic, event: @event_type, payload: payload}
 
     GenCounter.add(events_per_second_rate.id)
-    TenantBroadcaster.pubsub_broadcast(tenant.external_id, tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
+
+    TenantBroadcaster.pubsub_broadcast(
+      tenant.external_id,
+      tenant_topic,
+      broadcast,
+      RealtimeChannel.MessageDispatcher,
+      :broadcast
+    )
   end
 
   defp permissions_for_message(_, nil, _), do: nil

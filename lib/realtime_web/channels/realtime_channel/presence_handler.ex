@@ -109,6 +109,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
     payload = Map.get(payload, "payload", %{})
+    RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence)
 
     with :ok <- limit_presence_event(socket),
          {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload) do

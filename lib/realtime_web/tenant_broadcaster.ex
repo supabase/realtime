@@ -5,9 +5,12 @@ defmodule RealtimeWeb.TenantBroadcaster do
 
   alias Phoenix.PubSub
 
-  @spec pubsub_broadcast(tenant_id :: String.t(), PubSub.topic(), PubSub.message(), PubSub.dispatcher()) :: :ok
-  def pubsub_broadcast(tenant_id, topic, message, dispatcher) do
-    collect_payload_size(tenant_id, message)
+  @type message_type :: :broadcast | :presence | :postgres_changes
+
+  @spec pubsub_broadcast(tenant_id :: String.t(), PubSub.topic(), PubSub.message(), PubSub.dispatcher(), message_type) ::
+          :ok
+  def pubsub_broadcast(tenant_id, topic, message, dispatcher, message_type) do
+    collect_payload_size(tenant_id, message, message_type)
 
     if pubsub_adapter() == :gen_rpc do
       PubSub.broadcast(Realtime.PubSub, topic, message, dispatcher)
@@ -23,11 +26,12 @@ defmodule RealtimeWeb.TenantBroadcaster do
           from :: pid,
           PubSub.topic(),
           PubSub.message(),
-          PubSub.dispatcher()
+          PubSub.dispatcher(),
+          message_type
         ) ::
           :ok
-  def pubsub_broadcast_from(tenant_id, from, topic, message, dispatcher) do
-    collect_payload_size(tenant_id, message)
+  def pubsub_broadcast_from(tenant_id, from, topic, message, dispatcher, message_type) do
+    collect_payload_size(tenant_id, message, message_type)
 
     if pubsub_adapter() == :gen_rpc do
       PubSub.broadcast_from(Realtime.PubSub, from, topic, message, dispatcher)
@@ -45,16 +49,18 @@ defmodule RealtimeWeb.TenantBroadcaster do
 
   @payload_size_event [:realtime, :tenants, :payload, :size]
 
-  defp collect_payload_size(tenant_id, payload) when is_struct(payload) do
+  @spec collect_payload_size(tenant_id :: String.t(), payload :: term, message_type :: message_type) :: :ok
+  def collect_payload_size(tenant_id, payload, message_type) when is_struct(payload) do
     # Extracting from struct so the __struct__ bit is not calculated as part of the payload
-    collect_payload_size(tenant_id, Map.from_struct(payload))
+    collect_payload_size(tenant_id, Map.from_struct(payload), message_type)
   end
 
-  defp collect_payload_size(tenant_id, payload) do
-    :telemetry.execute(@payload_size_event, %{size: :erlang.external_size(payload)}, %{tenant: tenant_id})
+  def collect_payload_size(tenant_id, payload, message_type) do
+    :telemetry.execute(@payload_size_event, %{size: :erlang.external_size(payload)}, %{
+      tenant: tenant_id,
+      message_type: message_type
+    })
   end
 
-  defp pubsub_adapter do
-    Application.fetch_env!(:realtime, :pubsub_adapter)
-  end
+  defp pubsub_adapter, do: Application.fetch_env!(:realtime, :pubsub_adapter)
 end

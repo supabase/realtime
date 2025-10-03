@@ -76,14 +76,21 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     broadcast = %Phoenix.Socket.Broadcast{topic: tenant_topic, event: @event_type, payload: payload}
 
     if self_broadcast do
-      TenantBroadcaster.pubsub_broadcast(tenant_id, tenant_topic, broadcast, RealtimeChannel.MessageDispatcher)
+      TenantBroadcaster.pubsub_broadcast(
+        tenant_id,
+        tenant_topic,
+        broadcast,
+        RealtimeChannel.MessageDispatcher,
+        :broadcast
+      )
     else
       TenantBroadcaster.pubsub_broadcast_from(
         tenant_id,
         self(),
         tenant_topic,
         broadcast,
-        RealtimeChannel.MessageDispatcher
+        RealtimeChannel.MessageDispatcher,
+        :broadcast
       )
     end
   end
