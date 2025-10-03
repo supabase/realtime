@@ -310,7 +310,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         }
 
         assert Enum.any?(broadcast_calls, fn
-                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
+                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher, :broadcast] -> true
                  _ -> false
                end)
       end)
@@ -374,7 +374,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         }
 
         assert Enum.count(broadcast_calls, fn
-                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
+                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher, :broadcast] -> true
                  _ -> false
                end) == 1
       end)
@@ -393,7 +393,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
       open_channel_topic = Tenants.tenant_topic(tenant, "open_channel", true)
 
       assert Enum.count(broadcast_calls, fn
-               [_, ^open_channel_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
+               [_, ^open_channel_topic, ^message, RealtimeChannel.MessageDispatcher, :broadcast] -> true
                _ -> false
              end) == 1
 
@@ -449,7 +449,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
         }
 
         assert Enum.count(broadcast_calls, fn
-                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher] -> true
+                 [_, ^broadcast_topic, ^message, RealtimeChannel.MessageDispatcher, :broadcast] -> true
                  _ -> false
                end) == 1
       end)

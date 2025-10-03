@@ -151,5 +151,38 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
     end
   end
 
+  describe "collect_payload_size/3" do
+    @describetag pubsub_adapter: :gen_rpc
+
+    test "emit telemetry for struct" do
+      TenantBroadcaster.collect_payload_size(
+        "realtime-dev",
+        %Phoenix.Socket.Broadcast{event: "broadcast", payload: %{"a" => "b"}},
+        :broadcast
+      )
+
+      assert_receive {:telemetry, [:realtime, :tenants, :payload, :size], %{size: 65},
+                      %{tenant: "realtime-dev", message_type: :broadcast}}
+    end
+
+    test "emit telemetry for map" do
+      TenantBroadcaster.collect_payload_size(
+        "realtime-dev",
+        %{event: "broadcast", payload: %{"a" => "b"}},
+        :postgres_changes
+      )
+
+      assert_receive {:telemetry, [:realtime, :tenants, :payload, :size], %{size: 53},
+                      %{tenant: "realtime-dev", message_type: :postgres_changes}}
+    end
+
+    test "emit telemetry for non-map" do
+      TenantBroadcaster.collect_payload_size("realtime-dev", "some blob", :presence)
+
+      assert_receive {:telemetry, [:realtime, :tenants, :payload, :size], %{size: 15},
+                      %{tenant: "realtime-dev", message_type: :presence}}
+    end
+  end
+
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {:telemetry, event, measures, metadata})
 end
