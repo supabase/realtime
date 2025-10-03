@@ -24,8 +24,8 @@ defmodule Realtime.ErlSysMon do
     {:ok, []}
   end
 
-  def handle_info({:monitor, pid, _type, _meta} = msg, state) when is_pid(pid) do
-    log_process_info(msg, pid)
+  def handle_info({:monitor, pid, type, _meta} = msg, state) when is_pid(pid) do
+    log_process_info(msg, pid, type)
     {:noreply, state}
   end
 
@@ -34,7 +34,7 @@ defmodule Realtime.ErlSysMon do
     {:noreply, state}
   end
 
-  defp log_process_info(msg, pid) do
+  defp log_process_info(msg, pid, type) do
     pid_info =
       pid
       |> Process.info(:dictionary)
@@ -47,6 +47,7 @@ defmodule Realtime.ErlSysMon do
       end
 
     extra_info = Process.info(pid, [:registered_name, :message_queue_len, :total_heap_size])
+    defensive_exit?(pid, pid_info, type)
 
     Logger.warning(
       "#{__MODULE__} message: " <>
@@ -55,5 +56,15 @@ defmodule Realtime.ErlSysMon do
   rescue
     _ ->
       Logger.warning("#{__MODULE__} message: " <> inspect(msg))
+  end
+
+  defp defensive_exit?(pid, pid_info, type) do
+    {{:"$initial_call", {mod, _, _}}, _} = pid_info
+    # credo:disable-for-next-line
+
+    cond do
+      mod == RealtimeWeb.RealtimeChannel && type == :long_message_queue -> Process.exit(pid, :kill)
+      true -> :ok
+    end
   end
 end
