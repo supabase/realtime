@@ -65,6 +65,27 @@ defmodule Realtime.Nodes do
   def region_nodes(nil), do: []
 
   @doc """
+  Picks a random node from a region based on the provided key
+  """
+  @spec random_node_from_region(String.t(), term()) :: {:ok, node} | {:error, :not_available}
+  def random_node_from_region(region, key) when is_binary(region) do
+    nodes = region_nodes(region)
+
+    case nodes do
+      [] ->
+        {:error, :not_available}
+
+      _ ->
+        member_count = Enum.count(nodes)
+        index = :erlang.phash2(key, member_count)
+
+        {:ok, Enum.fetch!(nodes, index)}
+    end
+  end
+
+  def random_node_from_region(_, _), do: {:error, :not_available}
+
+  @doc """
   Picks the node to launch the Postgres connection on.
 
   If there are not two nodes in a region the connection is established from
@@ -167,6 +188,12 @@ defmodule Realtime.Nodes do
       "ap-southeast-2"
     ]
   }
+
+  @all_regions Map.keys(@mapping_realtime_region_to_tenant_region_aws)
+
+  @spec all_node_regions() :: [String.t()]
+  @doc "List all the regions where nodes can be launched"
+  def all_node_regions(), do: @all_regions
 
   @doc """
   Fetches the tenant regions for a given realtime reagion
