@@ -256,7 +256,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                RateCounter.get(socket.assigns.presence_rate_counter)
 
       # presence_state
-      assert 1 in Enum.sum(bucket)
+      assert Enum.sum(bucket) == 1
     end
   end
 
