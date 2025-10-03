@@ -272,7 +272,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
-      expect(TenantBroadcaster, :pubsub_broadcast, 5, fn _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 5, fn _, _, _, _, _ -> :ok end)
 
       messages_to_send =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
@@ -294,7 +294,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/4)
+      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/5)
 
       Enum.each(messages_to_send, fn %{topic: topic} ->
         broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
@@ -326,7 +326,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
-      expect(TenantBroadcaster, :pubsub_broadcast, 6, fn _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 6, fn _, _, _, _, _ -> :ok end)
 
       channels =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
@@ -358,7 +358,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/4)
+      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/5)
 
       Enum.each(channels, fn %{topic: topic} ->
         broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
@@ -408,7 +408,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       request_events_key = Tenants.requests_per_second_key(tenant)
       broadcast_events_key = Tenants.events_per_second_key(tenant)
-      expect(TenantBroadcaster, :pubsub_broadcast, 5, fn _, _, _, _ -> :ok end)
+      expect(TenantBroadcaster, :pubsub_broadcast, 5, fn _, _, _, _, _ -> :ok end)
 
       messages_to_send =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)
@@ -433,7 +433,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{"messages" => messages})
 
-      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/4)
+      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/5)
 
       Enum.each(messages_to_send, fn %{topic: topic} ->
         broadcast_topic = Tenants.tenant_topic(tenant, topic, false)
@@ -462,7 +462,7 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     @tag role: "anon"
     test "user without permission won't broadcast", %{conn: conn, db_conn: db_conn, tenant: tenant} do
       request_events_key = Tenants.requests_per_second_key(tenant)
-      reject(&TenantBroadcaster.pubsub_broadcast/4)
+      reject(&TenantBroadcaster.pubsub_broadcast/5)
 
       messages =
         Stream.repeatedly(fn -> generate_message_with_policies(db_conn, tenant) end)

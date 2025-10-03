@@ -60,7 +60,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
       test "pubsub_broadcast", %{node: node} do
         message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
-        TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub)
+        TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub, :broadcast)
 
         assert_receive ^message
 
@@ -71,13 +71,13 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
           :telemetry,
           [:realtime, :tenants, :payload, :size],
           %{size: 114},
-          %{tenant: "realtime-dev"}
+          %{tenant: "realtime-dev", message_type: :broadcast}
         }
       end
 
       test "pubsub_broadcast list payload", %{node: node} do
         message = %Broadcast{topic: @topic, event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
-        TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub)
+        TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub, :broadcast)
 
         assert_receive ^message
 
@@ -88,13 +88,13 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
           :telemetry,
           [:realtime, :tenants, :payload, :size],
           %{size: 130},
-          %{tenant: "realtime-dev"}
+          %{tenant: "realtime-dev", message_type: :broadcast}
         }
       end
 
       test "pubsub_broadcast string payload", %{node: node} do
         message = %Broadcast{topic: @topic, event: "an event", payload: "some text payload"}
-        TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub)
+        TenantBroadcaster.pubsub_broadcast("realtime-dev", @topic, message, Phoenix.PubSub, :broadcast)
 
         assert_receive ^message
 
@@ -105,7 +105,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
           :telemetry,
           [:realtime, :tenants, :payload, :size],
           %{size: 119},
-          %{tenant: "realtime-dev"}
+          %{tenant: "realtime-dev", message_type: :broadcast}
         }
       end
     end
@@ -131,7 +131,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
 
         message = %Broadcast{topic: @topic, event: "an event", payload: %{"a" => "b"}}
 
-        TenantBroadcaster.pubsub_broadcast_from("realtime-dev", self(), @topic, message, Phoenix.PubSub)
+        TenantBroadcaster.pubsub_broadcast_from("realtime-dev", self(), @topic, message, Phoenix.PubSub, :broadcast)
 
         assert_receive {:other_process, ^message}
 
@@ -142,7 +142,7 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
           :telemetry,
           [:realtime, :tenants, :payload, :size],
           %{size: 114},
-          %{tenant: "realtime-dev"}
+          %{tenant: "realtime-dev", message_type: :broadcast}
         }
 
         # This process does not receive the message
