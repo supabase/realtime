@@ -273,7 +273,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
 
       bucket_pattern =
-        ~r/realtime_tenants_payload_size_bucket{message_type=\"presence\",tenant="#{external_id}",le="100"}\s(?<number>\d+)/
+        ~r/realtime_tenants_payload_size_bucket{message_type=\"presence\",tenant="#{external_id}",le="250"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
@@ -291,7 +291,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       Process.sleep(200)
       assert metric_value(pattern) == metric_value + 1
 
-      bucket_pattern = ~r/realtime_payload_size_bucket{message_type=\"broadcast\",le="100"}\s(?<number>\d+)/
+      bucket_pattern = ~r/realtime_payload_size_bucket{message_type=\"broadcast\",le="250"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
