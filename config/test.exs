@@ -59,3 +59,7 @@ config :opentelemetry,
 config :gen_rpc,
   tcp_server_port: 5969,
   tcp_client_port: 5970
+
+config :logger,
+  handle_otp_reports: true,
+  handle_sasl_reports: true

@@ -46,13 +46,11 @@ end)
 
 Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
 
-end_time = :os.system_time(:millisecond)
-IO.puts("[test_helper.exs] Time to start tests: #{end_time - start_time} ms")
-
 Mimic.copy(:syn)
 Mimic.copy(Extensions.PostgresCdcRls.Replications)
 Mimic.copy(Realtime.Database)
 Mimic.copy(Realtime.GenCounter)
+Mimic.copy(Realtime.GenRpc)
 Mimic.copy(Realtime.Nodes)
 Mimic.copy(Realtime.RateCounter)
 Mimic.copy(Realtime.Tenants.Authorization)
@@ -65,3 +63,13 @@ Mimic.copy(RealtimeWeb.ChannelsAuthorization)
 Mimic.copy(RealtimeWeb.Endpoint)
 Mimic.copy(RealtimeWeb.JwtVerification)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
+
+# Set the node as the name we use on Clustered.start
+# Also update syn metadata to reflect the new name
+:net_kernel.start([:"main@127.0.0.1"])
+region = Application.get_env(:realtime, :region)
+[{pid, _}] = :syn.members(RegionNodes, region)
+:syn.update_member(RegionNodes, region, pid, fn _ -> [node: node()] end)
+
+end_time = :os.system_time(:millisecond)
+IO.puts("[test_helper.exs] Time to start tests: #{end_time - start_time} ms")
