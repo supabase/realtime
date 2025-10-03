@@ -4,6 +4,64 @@ defmodule Realtime.NodesTest do
   alias Realtime.Nodes
   alias Realtime.Tenants
 
+  defp spawn_fake_node(region, node) do
+    parent = self()
+
+    fun = fn ->
+      :syn.join(RegionNodes, region, self(), node: node)
+      send(parent, :joined)
+
+      receive do
+        :ok -> :ok
+      end
+    end
+
+    {:ok, _pid} = start_supervised({Task, fun}, id: {region, node})
+    assert_receive :joined
+  end
+
+  describe "region_nodes/1" do
+    test "nil region returns empty list" do
+      assert Nodes.region_nodes(nil) == []
+    end
+
+    test "returns nodes from region" do
+      region = "ap-southeast-2"
+      spawn_fake_node(region, :node_1)
+      spawn_fake_node(region, :node_2)
+
+      spawn_fake_node("eu-west-2", :node_3)
+
+      assert Nodes.region_nodes(region) == [:node_1, :node_2]
+      assert Nodes.region_nodes("eu-west-2") == [:node_3]
+    end
+
+    test "on non-existing region, returns empty list" do
+      assert Nodes.region_nodes("non-existing-region") == []
+    end
+  end
+
+  describe "node_from_region/2" do
+    test "nil region returns error" do
+      assert {:error, :not_available} = Nodes.node_from_region(nil, :any_key)
+    end
+
+    test "empty region returns error" do
+      assert {:error, :not_available} = Nodes.node_from_region("empty-region", :any_key)
+    end
+
+    test "returns the same node given the same key" do
+      region = "ap-southeast-3"
+      spawn_fake_node(region, :node_1)
+      spawn_fake_node(region, :node_2)
+
+      spawn_fake_node("eu-west-3", :node_3)
+
+      assert {:ok, :node_2} = Nodes.node_from_region(region, :key1)
+      assert {:ok, :node_2} = Nodes.node_from_region(region, :key1)
+    end
+  end
+
   describe "get_node_for_tenant/1" do
     setup do
       tenant = Containers.checkout_tenant()
