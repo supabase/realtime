@@ -97,6 +97,8 @@ config :phoenix, :plug_init_mode, :runtime
 # Disable caching to ensure the rendered spec is refreshed
 config :open_api_spex, :cache_adapter, OpenApiSpex.Plug.NoneCache
 
-config :opentelemetry, traces_exporter: {:otel_exporter_stdout, []}
+# Disabled but can print to stdout with:
+# config :opentelemetry, traces_exporter: {:otel_exporter_stdout, []}
+config :opentelemetry, traces_exporter: :none
 
 config :mix_test_watch, clear: true

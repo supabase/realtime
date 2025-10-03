@@ -18,7 +18,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
-  alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.Channels.Payloads.Join
@@ -259,24 +258,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     {:noreply, assign(socket, %{pg_sub_ref: pg_sub_ref})}
   end
 
-  def handle_info(
-        %{event: "presence_diff"},
-        %{assigns: %{policies: %Policies{presence: %PresencePolicies{read: false}}}} = socket
-      ) do
-    Logger.warning("Presence message ignored")
-    {:noreply, socket}
-  end
-
   def handle_info(_msg, %{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{read: false}}}} = socket) do
     Logger.warning("Broadcast message ignored")
-    {:noreply, socket}
-  end
-
-  def handle_info(%{event: "presence_diff", payload: payload} = msg, socket) do
-    %{presence_rate_counter: presence_rate_counter} = socket.assigns
-    GenCounter.add(presence_rate_counter.id)
-    maybe_log_info(socket, msg)
-    push(socket, "presence_diff", payload)
     {:noreply, socket}
   end
 
