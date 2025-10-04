@@ -36,6 +36,14 @@ defmodule RealtimeWeb.RealtimeChannelTest do
              {:max_heap_size, %{error_logger: true, include_shared_binaries: false, kill: true, size: 6_250_000}}
   end
 
+  test "empty topic name", %{tenant: tenant} do
+    jwt = Generators.generate_jwt_token(tenant)
+    {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+    assert {:error, %{reason: "TopicNameRequired: You must provide a topic name"}} =
+             subscribe_and_join(socket, "realtime:", %{})
+  end
+
   describe "broadcast" do
     @describetag policies: [:authenticated_all_topic_read]
 

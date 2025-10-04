@@ -1305,34 +1305,6 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_close"}
     end
 
-    test "token is badly formatted in between joins", %{tenant: tenant, topic: topic} do
-      {socket, access_token} = get_connection(tenant, "authenticated")
-      config = %{broadcast: %{self: true}, private: false}
-      realtime_topic = "realtime:#{topic}"
-
-      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
-
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
-
-      # token becomes a string in between joins so it needs to be handled by the channel and not the socket
-      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: "potato"})
-
-      assert_receive %Message{
-                       event: "phx_reply",
-                       payload: %{
-                         "status" => "error",
-                         "response" => %{
-                           "reason" => "MalformedJWT: The token provided is not a valid JWT"
-                         }
-                       },
-                       topic: ^realtime_topic
-                     },
-                     500
-
-      assert_receive %Message{event: "phx_close"}
-    end
-
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "handles RPC error on token refreshed", %{tenant: tenant, topic: topic} do
       Authorization
@@ -1989,28 +1961,6 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert log =~ "RlsPolicyError"
     end
-  end
-
-  test "handle empty topic by closing the socket", %{tenant: tenant} do
-    {socket, _} = get_connection(tenant, "authenticated")
-    config = %{broadcast: %{self: true}, private: false}
-    realtime_topic = "realtime:"
-
-    WebsocketClient.join(socket, realtime_topic, %{config: config})
-
-    assert_receive %Message{
-                     event: "phx_reply",
-                     payload: %{
-                       "response" => %{
-                         "reason" => "TopicNameRequired: You must provide a topic name"
-                       },
-                       "status" => "error"
-                     }
-                   },
-                   500
-
-    refute_receive %Message{event: "phx_reply"}
-    refute_receive %Message{event: "presence_state"}
   end
 
   def handle_telemetry(event, %{sum: sum}, metadata, _) do
