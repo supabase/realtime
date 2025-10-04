@@ -3,6 +3,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   Inspired by Phoenix.Channel.Server.dispatch/3
   """
 
+  alias Phoenix.Socket.Broadcast
+  alias Phoenix.Socket.V1
+  alias Phoenix.Socket.V2
   require Logger
 
   def fastlane_metadata(fastlane_pid, serializer, topic, log_level, tenant_id, replayed_message_ids \\ MapSet.new()) do
@@ -13,8 +16,8 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   This dispatch function caches encoded messages if fastlane is used
   It also sends  an :update_rate_counter to the subscriber and it can conditionally log
   """
-  @spec dispatch(list, pid, Phoenix.Socket.Broadcast.t()) :: :ok
-  def dispatch(subscribers, from, %Phoenix.Socket.Broadcast{event: event} = msg) do
+  @spec dispatch(list, pid, Broadcast.t()) :: :ok
+  def dispatch(subscribers, from, %Broadcast{event: event} = msg) do
     # fastlane_pid is the actual socket transport pid
     # This reduce caches the serialization and bypasses the channel process going straight to the
     # transport process
@@ -82,11 +85,23 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
       %{} ->
         # Use the original topic that was joined without the external_id
         msg = %{msg | topic: join_topic}
-        encoded_msg = serializer.fastlane!(msg)
+        # encoded_msg = serializer.fastlane!(msg)
+        encoded_msg = serialize(serializer, msg)
         send(fastlane_pid, encoded_msg)
         Map.put(cache, serializer, encoded_msg)
     end
   end
+
+  defp serialize(V1.JSONSerializer, %Broadcast{payload: {:binary, payload}} = broadcast) do
+    case Phoenix.json_library().decode(payload) do
+      {:ok, decoded} -> V1.JSONSerializer.fastlane!(%{broadcast | payload: decoded})
+      _ -> raise "FIX ME LATTER"
+    end
+  end
+
+  defp serialize(V1.JSONSerializer, broadcast), do: V1.JSONSerializer.fastlane!(broadcast)
+
+  defp serialize(V2.JSONSerializer, msg), do: V2.JSONSerializer.fastlane!(msg)
 
   defp tenant_id([{_pid, {:rc_fastlane, _, _, _, _, tenant_id, _}} | _]) do
     tenant_id
