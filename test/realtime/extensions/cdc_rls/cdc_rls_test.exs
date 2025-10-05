@@ -236,6 +236,15 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       RateCounter.stop(tenant.external_id)
 
+      on_exit(fn -> :telemetry.detach(__MODULE__) end)
+
+      :telemetry.attach(
+        __MODULE__,
+        [:realtime, :tenants, :payload, :size],
+        &__MODULE__.handle_telemetry/4,
+        pid: self()
+      )
+
       %{tenant: tenant, conn: conn}
     end
 
@@ -317,6 +326,13 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} = RateCounter.get(rate)
       assert 1 in bucket
+
+      assert_receive {
+        :telemetry,
+        [:realtime, :tenants, :payload, :size],
+        %{size: 341},
+        %{tenant: "dev_tenant", message_type: :postgres_changes}
+      }
     end
 
     @aux_mod (quote do
@@ -414,4 +430,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
       :erpc.call(node, PostgresCdcRls, :handle_stop, [tenant.external_id, 10_000])
     end
   end
+
+  def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {:telemetry, event, measures, metadata})
 end

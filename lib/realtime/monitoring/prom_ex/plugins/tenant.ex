@@ -36,10 +36,10 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           event_name: [:realtime, :tenants, :payload, :size],
           measurement: :size,
           description: "Tenant payload size",
-          tags: [:tenant],
+          tags: [:tenant, :message_type],
           unit: :byte,
           reporter_options: [
-            buckets: [100, 250, 500, 1000, 2000, 3000, 5000, 10_000, 25_000]
+            buckets: [250, 500, 1000, 3000, 5000, 10_000, 25_000, 100_000, 500_000, 1_000_000, 3_000_000]
           ]
         ),
         distribution(
@@ -47,9 +47,10 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           event_name: [:realtime, :tenants, :payload, :size],
           measurement: :size,
           description: "Payload size",
+          tags: [:message_type],
           unit: :byte,
           reporter_options: [
-            buckets: [100, 250, 500, 1000, 2000, 3000, 5000, 10_000, 25_000]
+            buckets: [250, 500, 1000, 3000, 5000, 10_000, 25_000, 100_000, 500_000, 1_000_000, 3_000_000]
           ]
         )
       ]
