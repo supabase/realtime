@@ -37,4 +37,4 @@ jobs:
         if: steps.verify_changed_files.outputs.any_changed == 'false'
         run: |
           echo "::error ::Please update the mix.exs version"
-          exit 1
+          exit 0

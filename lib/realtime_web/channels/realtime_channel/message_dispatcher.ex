@@ -16,8 +16,6 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   @spec dispatch(list, pid, Phoenix.Socket.Broadcast.t()) :: :ok
   def dispatch(subscribers, from, %Phoenix.Socket.Broadcast{event: event} = msg) do
     # fastlane_pid is the actual socket transport pid
-    # This reduce caches the serialization and bypasses the channel process going straight to the
-    # transport process
 
     message_id = message_id(msg.payload)
 
