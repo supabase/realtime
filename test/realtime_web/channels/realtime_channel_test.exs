@@ -239,22 +239,13 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "presence" do
-    test "events are counted", %{tenant: tenant} do
+    test "presence state event is counted", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{})
 
-      presence_diff = %Socket.Broadcast{event: "presence_diff", payload: %{joins: %{}, leaves: %{}}}
-      send(socket.channel_pid, presence_diff)
-
       assert_receive %Socket.Message{topic: "realtime:test", event: "presence_state", payload: %{}}
-
-      assert_receive %Socket.Message{
-        topic: "realtime:test",
-        event: "presence_diff",
-        payload: %{joins: %{}, leaves: %{}}
-      }
 
       tenant_id = tenant.external_id
 
@@ -264,8 +255,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:ok, %RateCounter{id: {:channel, :presence_events, ^tenant_id}, bucket: bucket}} =
                RateCounter.get(socket.assigns.presence_rate_counter)
 
-      # presence_state + presence_diff
-      assert 2 in bucket
+      # presence_state
+      assert Enum.sum(bucket) == 1
     end
   end
 

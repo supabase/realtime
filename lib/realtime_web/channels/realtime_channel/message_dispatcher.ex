@@ -5,14 +5,8 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   require Logger
 
-  def fastlane_metadata(fastlane_pid, serializer, topic, log_level, tenant_id, replayed_message_ids \\ MapSet.new())
-
-  def fastlane_metadata(fastlane_pid, serializer, topic, :info, tenant_id, replayed_message_ids) do
-    {:rc_fastlane, fastlane_pid, serializer, topic, {:log, tenant_id}, replayed_message_ids}
-  end
-
-  def fastlane_metadata(fastlane_pid, serializer, topic, _log_level, _tenant_id, replayed_message_ids) do
-    {:rc_fastlane, fastlane_pid, serializer, topic, replayed_message_ids}
+  def fastlane_metadata(fastlane_pid, serializer, topic, log_level, tenant_id, replayed_message_ids \\ MapSet.new()) do
+    {:rc_fastlane, fastlane_pid, serializer, topic, log_level, tenant_id, replayed_message_ids}
   end
 
   @doc """
@@ -20,47 +14,57 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
   It also sends  an :update_rate_counter to the subscriber and it can conditionally log
   """
   @spec dispatch(list, pid, Phoenix.Socket.Broadcast.t()) :: :ok
-  def dispatch(subscribers, from, %Phoenix.Socket.Broadcast{} = msg) do
+  def dispatch(subscribers, from, %Phoenix.Socket.Broadcast{event: event} = msg) do
     # fastlane_pid is the actual socket transport pid
     # This reduce caches the serialization and bypasses the channel process going straight to the
     # transport process
 
     message_id = message_id(msg.payload)
 
-    # Credo doesn't like that we don't use the result aggregation
-    _ =
-      Enum.reduce(subscribers, %{}, fn
-        {pid, _}, cache when pid == from ->
-          cache
+    {_cache, count} =
+      Enum.reduce(subscribers, {%{}, 0}, fn
+        {pid, _}, {cache, count} when pid == from ->
+          {cache, count}
 
-        {pid, {:rc_fastlane, fastlane_pid, serializer, join_topic, replayed_message_ids}}, cache ->
+        {pid, {:rc_fastlane, fastlane_pid, serializer, join_topic, log_level, tenant_id, replayed_message_ids}},
+        {cache, count} ->
           if already_replayed?(message_id, replayed_message_ids) do
             # skip already replayed message
-            cache
+            {cache, count}
           else
-            send(pid, :update_rate_counter)
-            do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
+            if event != "presence_diff", do: send(pid, :update_rate_counter)
+
+            maybe_log(log_level, join_topic, msg, tenant_id)
+
+            cache = do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
+            {cache, count + 1}
           end
 
-        {pid, {:rc_fastlane, fastlane_pid, serializer, join_topic, {:log, tenant_id}, replayed_message_ids}}, cache ->
-          if already_replayed?(message_id, replayed_message_ids) do
-            # skip already replayed message
-            cache
-          else
-            send(pid, :update_rate_counter)
-            log = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
-            Logger.info(log, external_id: tenant_id, project: tenant_id)
-
-            do_dispatch(msg, fastlane_pid, serializer, join_topic, cache)
-          end
-
-        {pid, _}, cache ->
+        {pid, _}, {cache, count} ->
           send(pid, msg)
-          cache
+          {cache, count}
       end)
+
+    tenant_id = tenant_id(subscribers)
+    increment_presence_counter(tenant_id, event, count)
 
     :ok
   end
+
+  defp increment_presence_counter(tenant_id, "presence_diff", count) when is_binary(tenant_id) do
+    tenant_id
+    |> Realtime.Tenants.presence_events_per_second_key()
+    |> Realtime.GenCounter.add(count)
+  end
+
+  defp increment_presence_counter(_tenant_id, _event, _count), do: :ok
+
+  defp maybe_log(:info, join_topic, msg, tenant_id) do
+    log = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
+    Logger.info(log, external_id: tenant_id, project: tenant_id)
+  end
+
+  defp maybe_log(_level, _join_topic, _msg, _tenant_id), do: :ok
 
   defp message_id(%{"meta" => %{"id" => id}}), do: id
   defp message_id(_), do: nil
@@ -82,4 +86,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         Map.put(cache, serializer, encoded_msg)
     end
   end
+
+  defp tenant_id([{_pid, {:rc_fastlane, _, _, _, _, tenant_id, _}} | _]) do
+    tenant_id
+  end
+
+  defp tenant_id(_), do: nil
 end
