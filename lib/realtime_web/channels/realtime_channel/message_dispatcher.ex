@@ -21,7 +21,6 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
     message_id = message_id(msg.payload)
 
-    # Credo doesn't like that we don't use the result aggregation
     {_cache, count} =
       Enum.reduce(subscribers, {%{}, 0}, fn
         {pid, _}, {cache, count} when pid == from ->

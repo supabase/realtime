@@ -239,7 +239,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "presence" do
-    test "track events is counted", %{tenant: tenant} do
+    test "presence state event is counted", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
