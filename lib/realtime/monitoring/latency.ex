@@ -7,7 +7,7 @@ defmodule Realtime.Latency do
   use Realtime.Logs
 
   alias Realtime.Nodes
-  alias Realtime.Rpc
+  alias Realtime.GenRpc
 
   defmodule Payload do
     @moduledoc false
@@ -33,7 +33,7 @@ defmodule Realtime.Latency do
           }
   end
 
-  @every 5_000
+  @every 15_000
   def start_link(args) do
     GenServer.start_link(__MODULE__, args, name: __MODULE__)
   end
@@ -76,7 +76,7 @@ defmodule Realtime.Latency do
         Task.Supervisor.async(Realtime.TaskSupervisor, fn ->
           {latency, response} =
             :timer.tc(fn ->
-              Rpc.call(n, __MODULE__, :pong, [pong_timeout], timeout: timer_timeout)
+              GenRpc.call(n, __MODULE__, :pong, [pong_timeout], timeout: timer_timeout)
             end)
 
           latency_ms = latency / 1_000
@@ -85,7 +85,7 @@ defmodule Realtime.Latency do
           from_node = Nodes.short_node_id_from_name(Node.self())
 
           case response do
-            {:badrpc, reason} ->
+            {:error, :rpc_error, reason} ->
               log_error(
                 "RealtimeNodeDisconnected",
                 "Unable to connect to #{short_name} from #{region}: #{reason}"
