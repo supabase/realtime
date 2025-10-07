@@ -247,6 +247,31 @@ defmodule Realtime.Tenants do
     %RateCounter.Args{id: db_events_per_second_key(tenant_id), opts: opts}
   end
 
+  @doc "RateCounter arguments for counting database events per second with a limit."
+  @spec db_events_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
+  def db_events_per_second_rate(tenant_id, max_events_per_second) when is_binary(tenant_id) do
+    opts = [
+      telemetry: %{
+        event_name: [:channel, :db_events],
+        measurements: %{},
+        metadata: %{tenant: tenant_id}
+      },
+      limit: [
+        value: max_events_per_second,
+        measurement: :avg,
+        log: true,
+        log_fn: fn ->
+          Logger.error("MessagePerSecondRateLimitReached: Too many postgres changes messages per second",
+            external_id: tenant_id,
+            project: tenant_id
+          )
+        end
+      ]
+    ]
+
+    %RateCounter.Args{id: db_events_per_second_key(tenant_id), opts: opts}
+  end
+
   @doc """
   The GenCounter key to use when counting events for RealtimeChannel events.
     iex> Realtime.Tenants.db_events_per_second_key("tenant_id")

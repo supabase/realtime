@@ -41,6 +41,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-
 
+      - name: Pull postgres image quietly in background (used by test/support/containers.ex)
+        run: docker pull supabase/postgres:15.8.1.040 > /dev/null 2>&1 &
       - name: Install dependencies
         run: mix deps.get
       - name: Set up Postgres
