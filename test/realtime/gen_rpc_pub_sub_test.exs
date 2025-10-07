@@ -13,6 +13,6 @@ defmodule Realtime.GenRpcPubSubTest do
   test "it sets fullsweep_after flag on the workers" do
     assert Realtime.PubSubElixir.Realtime.PubSub.Adapter_1
            |> Process.whereis()
-           |> Process.info(:fullsweep_after) == {:fullsweep_after, 100}
+           |> Process.info(:fullsweep_after) == {:fullsweep_after, 20}
   end
 end
