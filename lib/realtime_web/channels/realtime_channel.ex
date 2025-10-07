@@ -42,6 +42,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       transport_pid: transport_pid
     } = socket
 
+    Process.flag(:max_heap_size, max_heap_size())
     Tracker.track(socket.transport_pid)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
@@ -799,4 +800,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp maybe_replay_messages(_, _, _, _), do: {:ok, MapSet.new()}
+
+  defp max_heap_size(), do: Application.fetch_env!(:realtime, :websocket_max_heap_size)
 end
