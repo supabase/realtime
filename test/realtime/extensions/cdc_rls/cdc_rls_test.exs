@@ -235,6 +235,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       end)
 
       RateCounter.stop(tenant.external_id)
+      on_exit(fn -> RateCounter.stop(tenant.external_id) end)
 
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
@@ -324,8 +325,11 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
 
-      assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} = RateCounter.get(rate)
-      assert 1 in bucket
+      assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} =
+               RateCounter.get(rate)
+
+      # 1 from ReplicationPoller and 1 from MessageDispatcher
+      assert Enum.sum(bucket) == 2
 
       assert_receive {
         :telemetry,
@@ -333,6 +337,79 @@ defmodule Realtime.Extensions.CdcRlsTest do
         %{size: 341},
         %{tenant: "dev_tenant", message_type: :postgres_changes}
       }
+    end
+
+    test "rate limit works", %{tenant: tenant, conn: conn} do
+      on_exit(fn -> PostgresCdcRls.handle_stop(tenant.external_id, 10_000) end)
+
+      %Tenant{extensions: extensions, external_id: external_id} = tenant
+      postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
+      args = Map.put(postgres_extension, "id", external_id)
+
+      pg_change_params = [
+        %{
+          id: UUID.uuid1(),
+          params: %{"event" => "*", "schema" => "public"},
+          channel_pid: self(),
+          claims: %{
+            "exp" => System.system_time(:second) + 100_000,
+            "iat" => 0,
+            "ref" => "127.0.0.1",
+            "role" => "anon"
+          }
+        }
+      ]
+
+      ids =
+        Enum.map(pg_change_params, fn %{id: id, params: params} ->
+          {UUID.string_to_binary!(id), :erlang.phash2(params)}
+        end)
+
+      topic = "realtime:test"
+      serializer = Phoenix.Socket.V1.JSONSerializer
+
+      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, external_id, true}
+      metadata = [metadata: subscription_metadata]
+      :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
+
+      # First time it will return nil
+      PostgresCdcRls.handle_connect(args)
+      # Wait for it to start
+      Process.sleep(3000)
+      {:ok, response} = PostgresCdcRls.handle_connect(args)
+
+      # Now subscribe to the Postgres Changes
+      {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params)
+      assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+
+      log =
+        capture_log(fn ->
+          # increment artifically the counter to  reach the limit
+          tenant.external_id
+          |> Realtime.Tenants.db_events_per_second_key()
+          |> Realtime.GenCounter.add(100_000_000)
+
+          # Wait for RateCounter to update
+          Process.sleep(1500)
+        end)
+
+      assert log =~ "MessagePerSecondRateLimitReached: Too many postgres changes messages per second"
+
+      # Insert a record
+      %{rows: [[_id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      refute_receive {:socket_push, :text, _}, 5000
+
+      # Wait for RateCounter to update
+      Process.sleep(2000)
+
+      rate = Realtime.Tenants.db_events_per_second_rate(tenant)
+
+      assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket, limit: %{triggered: true}}} =
+               RateCounter.get(rate)
+
+      # Nothing has changed
+      assert Enum.sum(bucket) == 100_000_000
     end
 
     @aux_mod (quote do

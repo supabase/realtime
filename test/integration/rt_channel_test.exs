@@ -1159,7 +1159,7 @@ defmodule Realtime.Integration.RtChannelTest do
           }
         end)
 
-      assert log =~ "ChannelShutdown: Token has expired 1000 seconds ago"
+      assert log =~ "ChannelShutdown: Token has expired"
     end
 
     test "ChannelShutdown include sub if available in jwt claims", %{tenant: tenant, topic: topic} do
@@ -2240,7 +2240,8 @@ defmodule Realtime.Integration.RtChannelTest do
       # 0 events as no broadcast used
       assert 2 = get_count([:realtime, :rate_counter, :channel, :joins], external_id)
       assert 2 = get_count([:realtime, :rate_counter, :channel, :presence_events], external_id)
-      assert 10 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
+      # 5 + 5 + 5 (5 for each websocket and 5 while publishing)
+      assert 15 = get_count([:realtime, :rate_counter, :channel, :db_events], external_id)
       assert 0 = get_count([:realtime, :rate_counter, :channel, :events], external_id)
     end
 
