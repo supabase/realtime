@@ -41,6 +41,16 @@ defmodule RealtimeWeb.RealtimeChannelTest do
              {:max_heap_size, %{error_logger: true, include_shared_binaries: false, kill: true, size: 6_250_000}}
   end
 
+  # We don't test the socket because on unit tests Phoenix is not setting the fullsweep_after config
+  test "fullsweep_after is set on channel process", %{tenant: tenant} do
+    jwt = Generators.generate_jwt_token(tenant)
+    {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+    assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{})
+
+    assert Process.info(socket.channel_pid, :fullsweep_after) == {:fullsweep_after, 20}
+  end
+
   describe "broadcast" do
     @describetag policies: [:authenticated_all_topic_read]
 

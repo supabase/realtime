@@ -8,6 +8,7 @@
 import Config
 
 config :realtime,
+  websocket_fullsweep_after: 20,
   ecto_repos: [Realtime.Repo],
   version: Mix.Project.config()[:version]
 
