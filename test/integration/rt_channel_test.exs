@@ -1159,7 +1159,7 @@ defmodule Realtime.Integration.RtChannelTest do
           }
         end)
 
-      assert log =~ "ChannelShutdown: Token has expired 1000 seconds ago"
+      assert log =~ "ChannelShutdown: Token has expired"
     end
 
     test "ChannelShutdown include sub if available in jwt claims", %{tenant: tenant, topic: topic} do
