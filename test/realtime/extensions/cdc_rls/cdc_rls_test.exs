@@ -235,6 +235,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       end)
 
       RateCounter.stop(tenant.external_id)
+      on_exit(fn -> RateCounter.stop(tenant.external_id) end)
 
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
