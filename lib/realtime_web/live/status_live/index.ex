@@ -3,10 +3,11 @@ defmodule RealtimeWeb.StatusLive.Index do
 
   alias Realtime.Latency.Payload
   alias Realtime.Nodes
+  alias RealtimeWeb.Endpoint
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: RealtimeWeb.Endpoint.subscribe("admin:cluster")
+    if connected?(socket), do: Endpoint.subscribe("admin:cluster")
 
     socket =
       socket
@@ -23,16 +24,14 @@ defmodule RealtimeWeb.StatusLive.Index do
 
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{payload: %Payload{} = payload}, socket) do
-    pair = payload.from_node <> "_" <> payload.node
+    pair = pair_id(payload.from_node, payload.node)
 
-    pings = [%{id: pair, payload: payload}]
-
-    {:noreply, stream(socket, :pings, pings)}
+    {:noreply, stream(socket, :pings, [%{id: pair, payload: payload}])}
   end
 
   defp apply_action(socket, :index, _params) do
     socket
-    |> assign(:page_title, "Status - Supabase Realtime")
+    |> assign(:page_title, "Realtime Status")
   end
 
   defp all_nodes do
@@ -41,8 +40,13 @@ defmodule RealtimeWeb.StatusLive.Index do
 
   defp default_pings do
     for n <- all_nodes(), f <- all_nodes() do
-      pair = n <> "_" <> f
+      pair = pair_id(f, n)
+
       %{id: pair, payload: %Payload{from_node: f, latency: "Loading...", node: n, timestamp: "Loading..."}}
     end
+  end
+
+  defp pair_id(from, to) do
+    from <> "_" <> to
   end
 end
