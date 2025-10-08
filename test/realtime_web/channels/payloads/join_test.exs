@@ -63,7 +63,7 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
 
       assert {:ok, %Join{config: %Config{presence: %Presence{key: key}}}} = Join.validate(config)
 
-      assert key == "123"
+      assert key == 123
     end
 
     test "invalid replay" do
