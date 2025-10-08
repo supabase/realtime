@@ -1,7 +1,7 @@
 defmodule Realtime.Extensions.CdcRlsTest do
   # async: false due to usage of dev_tenant
   # Also global mimic mock
-  use RealtimeWeb.ChannelCase, async: false
+  use Realtime.DataCase, async: false
   use Mimic
 
   import ExUnit.CaptureLog
