@@ -328,9 +328,9 @@ defmodule Realtime.Tenants.ConnectTest do
       region = Tenants.region(tenant)
       assert {_pid, %{conn: ^db_conn, region: ^region}} = :syn.lookup(Connect, external_id)
       Process.sleep(1000)
-      :syn.leave(:users, external_id, self())
+      external_id |> UsersCounter.scope() |> :syn.leave(external_id, self())
       Process.sleep(1000)
-      assert :undefined = :syn.lookup(Connect, external_id)
+      assert :undefined = external_id |> UsersCounter.scope() |> :syn.lookup(external_id)
       refute Process.alive?(db_conn)
       Connect.shutdown(external_id)
     end

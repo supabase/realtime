@@ -46,8 +46,7 @@ defmodule Realtime.Application do
     Realtime.PromEx.set_metrics_tags()
     :ets.new(Realtime.Tenants.Connect, [:named_table, :set, :public])
     :syn.set_event_handler(Realtime.SynHandler)
-
-    :ok = :syn.add_node_to_scopes([:users, RegionNodes, Realtime.Tenants.Connect])
+    :ok = :syn.add_node_to_scopes([RegionNodes, Realtime.Tenants.Connect | Realtime.UsersCounter.scopes()])
 
     region = Application.get_env(:realtime, :region)
     :syn.join(RegionNodes, region, self(), node: node())
