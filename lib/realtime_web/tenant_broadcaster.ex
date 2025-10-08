@@ -7,6 +7,37 @@ defmodule RealtimeWeb.TenantBroadcaster do
 
   @type message_type :: :broadcast | :presence | :postgres_changes
 
+  @spec pubsub_direct_broadcast(
+          node :: node(),
+          tenant_id :: String.t(),
+          PubSub.topic(),
+          PubSub.message(),
+          PubSub.dispatcher(),
+          message_type
+        ) ::
+          :ok
+  def pubsub_direct_broadcast(node, tenant_id, topic, message, dispatcher, message_type) do
+    collect_payload_size(tenant_id, message, message_type)
+
+    do_direct_broadcast(node, topic, message, dispatcher)
+
+    :ok
+  end
+
+  # Remote
+  defp do_direct_broadcast(node, topic, message, dispatcher) when node != node() do
+    if pubsub_adapter() == :gen_rpc do
+      PubSub.direct_broadcast(node, Realtime.PubSub, topic, message, dispatcher)
+    else
+      Realtime.GenRpc.cast(node, PubSub, :local_broadcast, [Realtime.PubSub, topic, message, dispatcher], key: topic)
+    end
+  end
+
+  # Local
+  defp do_direct_broadcast(_node, topic, message, dispatcher) do
+    PubSub.local_broadcast(Realtime.PubSub, topic, message, dispatcher)
+  end
+
   @spec pubsub_broadcast(tenant_id :: String.t(), PubSub.topic(), PubSub.message(), PubSub.dispatcher(), message_type) ::
           :ok
   def pubsub_broadcast(tenant_id, topic, message, dispatcher, message_type) do

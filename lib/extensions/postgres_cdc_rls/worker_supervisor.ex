@@ -19,12 +19,19 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
     Logger.metadata(external_id: tenant, project: tenant)
     unless Api.get_tenant_by_external_id(tenant, :primary), do: raise(Exception)
 
-    tid_args = Map.merge(args, %{"subscribers_tid" => :ets.new(__MODULE__, [:public, :bag])})
+    subscribers_pids_table = :ets.new(__MODULE__, [:public, :bag])
+    subscribers_nodes_table = :ets.new(__MODULE__, [:public, :set])
+
+    tid_args =
+      Map.merge(args, %{
+        "subscribers_pids_table" => subscribers_pids_table,
+        "subscribers_nodes_table" => subscribers_nodes_table
+      })
 
     children = [
       %{
         id: ReplicationPoller,
-        start: {ReplicationPoller, :start_link, [args]},
+        start: {ReplicationPoller, :start_link, [tid_args]},
         restart: :transient
       },
       %{
