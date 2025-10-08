@@ -17,6 +17,14 @@ defmodule RealtimeWeb.Channels.Payloads.Config do
   end
 
   def changeset(config, attrs) do
+    attrs =
+      attrs
+      |> Enum.map(fn
+        {k, v} when is_list(v) -> {k, Enum.filter(v, fn v -> v != nil end)}
+        {k, v} -> {k, v}
+      end)
+      |> Map.new()
+
     config
     |> cast(attrs, [:private], message: &Join.error_message/2)
     |> cast_embed(:broadcast, invalid_message: "unable to parse, expected a map")
