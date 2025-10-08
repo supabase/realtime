@@ -1,16 +1,16 @@
 <.h1>Supabase Realtime: Multiplayer Edition</.h1>
+
 <.h2>Cluster Status</.h2>
+
 <p>Understand the latency between nodes across the Realtime cluster.</p>
 
 <div class="my-5">
-  <div class="grid grid-cols-4 gap-12 py-4">
-    <%= for {_pair, p} <- @pings do %>
-      <div class="p-4 border-2 whitespace-nowrap overflow-hidden">
-        <div>From: <%= p.from_region %> - <%= p.from_node %></div>
-        <div>To: <%= p.region %> - <%= p.node %></div>
-        <div><%= p.latency %> ms</div>
-        <div><%= p.timestamp %></div>
-      </div>
-    <% end %>
+  <div id="pings" phx-update="stream" class="grid grid-cols-4 gap-12 py-4">
+    <div :for={{id, p} <- @streams.pings} id={id} class="p-4 border-2 whitespace-nowrap overflow-hidden">
+      <div>From: <%= p.payload.from_region %> - <%= p.payload.from_node %></div>
+      <div>To: <%= p.payload.region %> - <%= p.payload.node %></div>
+      <div><%= p.payload.latency %> ms</div>
+      <div><%= p.payload.timestamp %></div>
+    </div>
   </div>
 </div>

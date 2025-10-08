@@ -105,7 +105,7 @@ defmodule Realtime.Nodes do
 
       iex> node = :"pink@127.0.0.1"
       iex> Realtime.Helpers.short_node_id_from_name(node)
-      "127.0.0.1"
+      "pink@127.0.0.1"
 
       iex> node = :"pink@10.0.1.1"
       iex> Realtime.Helpers.short_node_id_from_name(node)
@@ -123,6 +123,9 @@ defmodule Realtime.Nodes do
     case String.split(host, ":", parts: 8) do
       [_, _, _, _, _, one, two, _] ->
         one <> two
+
+      ["127.0.0.1"] ->
+        Atom.to_string(name)
 
       _other ->
         host
