@@ -1,4 +1,4 @@
-name: Tests
+name: Lint
 on:
   pull_request:
     paths:
@@ -20,12 +20,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  MIX_ENV: test
-
 jobs:
   tests:
-    name: Tests
+    name: Lint
     runs-on: ubuntu-latest
 
     steps:
@@ -46,15 +43,36 @@ jobs:
           restore-keys: |
             ${{ github.workflow }}-${{ runner.os }}-mix-${{ env.elixir }}-${{ env.otp }}-
 
-      - name: Pull postgres image quietly in background (used by test/support/containers.ex)
-        run: docker pull supabase/postgres:15.8.1.040 > /dev/null 2>&1 &
       - name: Install dependencies
         run: mix deps.get
       - name: Set up Postgres
         run: docker compose -f docker-compose.dbs.yml up -d
-      - name: Start epmd
-        run: epmd -daemon
-      - name: Run tests
-        run: MIX_ENV=test MAX_CASES=3 mix coveralls.github
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run main database migrations
+        run: mix ecto.migrate --log-migrator-sql
+      - name: Run database tenant migrations
+        run: mix ecto.migrate --migrations-path lib/realtime/tenants/repo/migrations
+      - name: Run format check
+        run: mix format --check-formatted
+      - name: Credo checks
+        run: mix credo
+      - name: Run hex audit
+        run: mix hex.audit
+      - name: Run mix_audit
+        run: mix deps.audit
+      - name: Run sobelow
+        run: mix sobelow --config .sobelow-conf
+      - name: Retrieve PLT Cache
+        uses: actions/cache@v4
+        id: plt-cache
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-plts-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
+      - name: Create PLTs
+        if: steps.plt-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p priv/plts
+          mix dialyzer.build
+      - name: Run dialyzer
+        run: mix dialyzer
+      - name: Run dev seeds
+        run: DB_ENC_KEY="1234567890123456" mix ecto.setup
