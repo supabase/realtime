@@ -9,7 +9,7 @@ defmodule Realtime.Nodes do
   @doc """
   Gets the node to launch the Postgres connection on for a tenant.
   """
-  @spec get_node_for_tenant(Tenant.t()) :: {:ok, node(), binary()} | {:error, term()}
+  @spec get_node_for_tenant(Tenant.t() | nil) :: {:ok, node(), binary()} | {:error, term()}
   def get_node_for_tenant(nil), do: {:error, :tenant_not_found}
 
   def get_node_for_tenant(%Tenant{external_id: tenant_id} = tenant) do
