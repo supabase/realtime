@@ -58,6 +58,14 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
       assert is_binary(key)
     end
 
+    test "presence key can be number" do
+      config = %{"config" => %{"presence" => %{"enabled" => true, "key" => 123}}}
+
+      assert {:ok, %Join{config: %Config{presence: %Presence{key: key}}}} = Join.validate(config)
+
+      assert key == 123
+    end
+
     test "invalid replay" do
       config = %{"config" => %{"broadcast" => %{"replay" => 123}}}
 
@@ -104,6 +112,12 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
                access_token: ["unable to parse, expected string"],
                user_token: ["unable to parse, expected string"]
              }
+    end
+
+    test "handles postgres changes with nil value in array as empty array" do
+      config = %{"config" => %{"postgres_changes" => [nil]}}
+
+      assert {:ok, %Join{config: %Config{postgres_changes: []}}} = Join.validate(config)
     end
   end
 end

@@ -8,7 +8,7 @@ defmodule RealtimeWeb.Channels.Payloads.Presence do
 
   embedded_schema do
     field :enabled, :boolean, default: true
-    field :key, :string, default: UUID.uuid1()
+    field :key, :any, default: UUID.uuid1(), virtual: true
   end
 
   def changeset(presence, attrs) do
