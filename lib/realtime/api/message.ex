@@ -9,6 +9,7 @@ defmodule Realtime.Api.Message do
   @schema_prefix "realtime"
 
   @type t :: %__MODULE__{}
+  @timestamps_opts [type: :naive_datetime_usec]
 
   schema "messages" do
     field(:topic, :string)
@@ -37,7 +38,7 @@ defmodule Realtime.Api.Message do
   end
 
   defp put_timestamp(changeset, field) do
-    changeset |> put_change(field, NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second))
+    changeset |> put_change(field, NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.truncate(:second))
   end
 
   defp maybe_put_timestamp(changeset, field) do

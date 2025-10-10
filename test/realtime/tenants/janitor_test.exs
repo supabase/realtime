@@ -57,7 +57,7 @@ defmodule Realtime.Tenants.JanitorTest do
        %{
          tenants: tenants
        } do
-    utc_now = NaiveDateTime.utc_now()
+    utc_now = NaiveDateTime.utc_now(:microsecond)
     limit = NaiveDateTime.add(utc_now, -72, :hour)
 
     messages =
@@ -100,7 +100,7 @@ defmodule Realtime.Tenants.JanitorTest do
     Connect.shutdown(hd(tenants).external_id)
     Process.sleep(100)
 
-    utc_now = NaiveDateTime.utc_now()
+    utc_now = NaiveDateTime.utc_now(:microsecond)
     limit = NaiveDateTime.add(utc_now, -72, :hour)
 
     messages =

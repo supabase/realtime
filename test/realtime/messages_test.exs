@@ -35,7 +35,7 @@ defmodule Realtime.MessagesTest do
     test "replay respects limit", %{conn: conn, tenant: tenant} do
       m1 =
         message_fixture(tenant, %{
-          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+          "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-1, :minute),
           "event" => "new",
           "extension" => "broadcast",
           "topic" => "test",
@@ -44,7 +44,7 @@ defmodule Realtime.MessagesTest do
         })
 
       message_fixture(tenant, %{
-        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+        "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-2, :minute),
         "event" => "old",
         "extension" => "broadcast",
         "topic" => "test",
@@ -59,7 +59,7 @@ defmodule Realtime.MessagesTest do
       privatem =
         message_fixture(tenant, %{
           "private" => true,
-          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+          "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-1, :minute),
           "event" => "new",
           "extension" => "broadcast",
           "topic" => "test",
@@ -68,7 +68,7 @@ defmodule Realtime.MessagesTest do
 
       message_fixture(tenant, %{
         "private" => false,
-        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+        "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-2, :minute),
         "event" => "old",
         "extension" => "broadcast",
         "topic" => "test",
@@ -82,7 +82,7 @@ defmodule Realtime.MessagesTest do
       privatem =
         message_fixture(tenant, %{
           "private" => true,
-          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+          "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-1, :minute),
           "event" => "new",
           "extension" => "broadcast",
           "topic" => "test",
@@ -91,7 +91,7 @@ defmodule Realtime.MessagesTest do
 
       message_fixture(tenant, %{
         "private" => true,
-        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+        "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-2, :minute),
         "event" => "old",
         "extension" => "presence",
         "topic" => "test",
@@ -104,7 +104,7 @@ defmodule Realtime.MessagesTest do
     test "replay respects since", %{conn: conn, tenant: tenant} do
       m1 =
         message_fixture(tenant, %{
-          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+          "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-2, :minute),
           "event" => "first",
           "extension" => "broadcast",
           "topic" => "test",
@@ -114,7 +114,7 @@ defmodule Realtime.MessagesTest do
 
       m2 =
         message_fixture(tenant, %{
-          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+          "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-1, :minute),
           "event" => "second",
           "extension" => "broadcast",
           "topic" => "test",
@@ -123,7 +123,7 @@ defmodule Realtime.MessagesTest do
         })
 
       message_fixture(tenant, %{
-        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-10, :minute),
+        "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-10, :minute),
         "event" => "old",
         "extension" => "broadcast",
         "topic" => "test",
@@ -139,7 +139,7 @@ defmodule Realtime.MessagesTest do
     test "replay respects hard max limit of 25", %{conn: conn, tenant: tenant} do
       for _i <- 1..30 do
         message_fixture(tenant, %{
-          "inserted_at" => NaiveDateTime.utc_now(),
+          "inserted_at" => NaiveDateTime.utc_now(:microsecond),
           "event" => "event",
           "extension" => "broadcast",
           "topic" => "test",
@@ -155,7 +155,7 @@ defmodule Realtime.MessagesTest do
 
     test "replay respects hard min limit of 1", %{conn: conn, tenant: tenant} do
       message_fixture(tenant, %{
-        "inserted_at" => NaiveDateTime.utc_now(),
+        "inserted_at" => NaiveDateTime.utc_now(:microsecond),
         "event" => "event",
         "extension" => "broadcast",
         "topic" => "test",
@@ -171,7 +171,7 @@ defmodule Realtime.MessagesTest do
     test "distributed replay", %{conn: conn, tenant: tenant} do
       m =
         message_fixture(tenant, %{
-          "inserted_at" => NaiveDateTime.utc_now(),
+          "inserted_at" => NaiveDateTime.utc_now(:microsecond),
           "event" => "event",
           "extension" => "broadcast",
           "topic" => "test",
@@ -187,7 +187,7 @@ defmodule Realtime.MessagesTest do
 
     test "distributed replay error", %{tenant: tenant} do
       message_fixture(tenant, %{
-        "inserted_at" => NaiveDateTime.utc_now(),
+        "inserted_at" => NaiveDateTime.utc_now(:microsecond),
         "event" => "event",
         "extension" => "broadcast",
         "topic" => "test",
@@ -210,7 +210,7 @@ defmodule Realtime.MessagesTest do
       date_start: date_start,
       date_end: date_end
     } do
-      utc_now = NaiveDateTime.utc_now()
+      utc_now = NaiveDateTime.utc_now(:microsecond)
       limit = NaiveDateTime.add(utc_now, -72, :hour)
 
       messages =

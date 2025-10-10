@@ -75,7 +75,8 @@ defmodule Realtime.Tenants.Migrations do
     SubscriptionIndexBridgingDisabled,
     RunSubscriptionIndexBridgingDisabled,
     BroadcastSendErrorLogging,
-    CreateMessagesReplayIndex
+    CreateMessagesReplayIndex,
+    IncreaseRealtimeMessagesTsResolution
   }
 
   @migrations [
@@ -142,7 +143,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_250_506_224_012, SubscriptionIndexBridgingDisabled},
     {20_250_523_164_012, RunSubscriptionIndexBridgingDisabled},
     {20_250_714_121_412, BroadcastSendErrorLogging},
-    {20_250_905_041_441, CreateMessagesReplayIndex}
+    {20_250_905_041_441, CreateMessagesReplayIndex},
+    {20_251_008_232_541, IncreaseRealtimeMessagesTsResolution}
   ]
 
   defstruct [:tenant_external_id, :settings]
