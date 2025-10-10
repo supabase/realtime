@@ -42,7 +42,7 @@ defmodule Realtime.Messages do
     since = DateTime.to_naive(since)
     # We want to avoid searching partitions in the future as they should be empty
     # so we limit to 1 minute in the future to account for any potential drift
-    now = NaiveDateTime.utc_now() |> NaiveDateTime.add(1, :minute)
+    now = NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(1, :minute)
 
     query =
       from m in Message,
@@ -64,7 +64,7 @@ defmodule Realtime.Messages do
   @spec delete_old_messages(pid()) :: :ok
   def delete_old_messages(conn) do
     limit =
-      NaiveDateTime.utc_now()
+      NaiveDateTime.utc_now(:microsecond)
       |> NaiveDateTime.add(-72, :hour)
       |> NaiveDateTime.to_date()
 

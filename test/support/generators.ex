@@ -57,13 +57,13 @@ defmodule Generators do
 
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()
 
-    {:ok, channel} =
+    {:ok, message} =
       create_attrs
       |> Map.merge(override)
       |> TenantConnection.create_message(db_conn)
 
     Process.exit(db_conn, :normal)
-    channel
+    message
   end
 
   def random_string(length \\ 20) do

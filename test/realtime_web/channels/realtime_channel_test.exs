@@ -167,7 +167,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       # Old message
       message_fixture(tenant, %{
         "private" => true,
-        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :day),
+        "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-1, :day),
         "event" => "old",
         "extension" => "broadcast",
         "topic" => "test",
@@ -177,7 +177,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       %{id: message1_id} =
         message_fixture(tenant, %{
           "private" => true,
-          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+          "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-1, :minute),
           "event" => "first",
           "extension" => "broadcast",
           "topic" => "test",
@@ -187,7 +187,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       %{id: message2_id} =
         message_fixture(tenant, %{
           "private" => true,
-          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+          "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-2, :minute),
           "event" => "second",
           "extension" => "broadcast",
           "topic" => "test",
@@ -197,7 +197,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       # This one should not be received because of the limit
       message_fixture(tenant, %{
         "private" => true,
-        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-3, :minute),
+        "inserted_at" => NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.add(-3, :minute),
         "event" => "third",
         "extension" => "broadcast",
         "topic" => "test",
