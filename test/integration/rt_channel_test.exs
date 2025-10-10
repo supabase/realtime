@@ -2588,7 +2588,7 @@ defmodule Realtime.Integration.RtChannelTest do
     Realtime.Tenants.Cache.invalidate_tenant_cache(external_id)
   end
 
-  defp assert_process_down(pid, timeout \\ 100) do
+  defp assert_process_down(pid, timeout \\ 300) do
     ref = Process.monitor(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
   end

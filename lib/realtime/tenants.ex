@@ -21,7 +21,8 @@ defmodule Realtime.Tenants do
   """
   @spec list_connected_tenants(atom()) :: [String.t()]
   def list_connected_tenants(node) do
-    :syn.group_names(:users, node)
+    UsersCounter.scopes()
+    |> Enum.flat_map(fn scope -> :syn.group_names(scope, node) end)
   end
 
   @doc """
