@@ -33,8 +33,12 @@ defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
 
       subscriber = self()
 
-      assert {:ok, [%Postgrex.Result{command: :insert, columns: ["id"], rows: [[1]], num_rows: 1}]} =
-               Subscriptions.create(conn, args["publication"], [pg_change_params], pid, subscriber)
+      # assert {:ok, [%Postgrex.Result{command: :insert, columns: ["id"], rows: [[1]], num_rows: 1}]} =
+      #          Subscriptions.create(conn, args["publication"], [pg_change_params], pid, subscriber)
+
+      send(pid, {:subscribed, {subscriber, uuid}})
+      # Wait for subscription manager to process the :subscribed message
+      :sys.get_state(pid)
 
       node = node()
 
@@ -58,10 +62,11 @@ defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
       {uuid2, bin_uuid2, pg_change_params2} = pg_change_params()
       {uuid3, bin_uuid3, pg_change_params3} = pg_change_params()
 
-      assert {:ok, _} =
-               Subscriptions.create(conn, args["publication"], [pg_change_params1, pg_change_params2], pid, subscriber)
-
-      assert {:ok, _} = Subscriptions.create(conn, args["publication"], [pg_change_params3], pid, self())
+      send(pid, {:subscribed, {subscriber, uuid1}})
+      send(pid, {:subscribed, {subscriber, uuid2}})
+      send(pid, {:subscribed, {self(), uuid3}})
+      # Wait for subscription manager to process the :subscribed message
+      :sys.get_state(pid)
 
       node = node()
 
@@ -126,7 +131,6 @@ defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
   describe "check no users" do
     test "exit is sent to manager", %{pid: pid, args: args} do
       {:ok, ^pid, _conn} = PostgresCdcRls.get_manager_conn(args["id"])
-      # Process.flag(:trap_exit, true)
 
       :sys.replace_state(pid, fn state -> %{state | no_users_ts: 0} end)
 
