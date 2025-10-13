@@ -219,6 +219,53 @@ defmodule Realtime.GenRpcTest do
     end
   end
 
+  describe "cast/5" do
+    test "apply on a local node" do
+      parent = self()
+
+      assert GenRpc.cast(node(), Kernel, :send, [parent, :sent]) == :ok
+
+      assert_receive :sent
+      refute_receive _any
+    end
+
+    test "apply on a remote node", %{node: node} do
+      parent = self()
+
+      assert GenRpc.cast(node, Kernel, :send, [parent, :sent]) == :ok
+
+      assert_receive :sent
+      refute_receive _any
+    end
+
+    test "bad node does nothing" do
+      node = :"unknown@1.1.1.1"
+
+      parent = self()
+
+      assert GenRpc.cast(node, Kernel, :send, [parent, :sent]) == :ok
+
+      refute_receive _any
+    end
+
+    @tag extra_config: [{:gen_rpc, :tcp_server_port, 9999}]
+    test "tcp error", %{node: node} do
+      parent = self()
+      Logger.put_process_level(self(), :debug)
+
+      log =
+        capture_log(fn ->
+          assert GenRpc.cast(node, Kernel, :send, [parent, :sent]) == :ok
+          # We have to wait for gen_rpc logs to show up
+          Process.sleep(100)
+        end)
+
+      assert log =~ "[error] event=connect_to_remote_server"
+
+      refute_receive _any
+    end
+  end
+
   describe "multicast/4" do
     test "evals everywhere" do
       parent = self()

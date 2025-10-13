@@ -35,6 +35,14 @@ defmodule Realtime.GenRpc do
   """
   @spec cast(node, module, atom, list(any), keyword()) :: :ok
   def cast(node, mod, func, args, opts \\ [])
+
+  # Local
+  def cast(node, mod, func, args, _opts) when node == node() do
+    :erpc.cast(node, mod, func, args)
+    :ok
+  end
+
+  def cast(node, mod, func, args, opts)
       when is_atom(node) and is_atom(mod) and is_atom(func) and is_list(args) and is_list(opts) do
     key = Keyword.get(opts, :key, nil)
 
