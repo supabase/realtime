@@ -20,7 +20,7 @@ name: Default Checks
 jobs:
   versions_updated:
     name: Versions Updated
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout code
         uses: actions/checkout@v3

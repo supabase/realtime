@@ -16,10 +16,7 @@ defmodule Realtime.NodesTest do
       reject(&:syn.members/2)
     end
 
-    test "on existing tenant id, returns the node for the region using syn", %{
-      tenant: tenant,
-      region: region
-    } do
+    test "on existing tenant id, returns the node for the region using syn", %{tenant: tenant, region: region} do
       expected_nodes = [:tenant@closest1, :tenant@closest2]
 
       expect(:syn, :members, fn RegionNodes, ^region ->
