@@ -7,7 +7,7 @@ defmodule Realtime.Extensionsubscriptions.CdcRlsSubscriptionsTest do
   alias Realtime.Tenants
 
   setup do
-    tenant = Tenants.get_tenant_by_external_id("dev_tenant")
+    tenant = Containers.checkout_tenant(run_migrations: true)
 
     {:ok, conn} =
       tenant
