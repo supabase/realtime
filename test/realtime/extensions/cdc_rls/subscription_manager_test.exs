@@ -3,6 +3,7 @@ defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
 
   alias Extensions.PostgresCdcRls
   alias Extensions.PostgresCdcRls.SubscriptionManager
+  alias Extensions.PostgresCdcRls.Subscriptions
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
@@ -27,11 +28,14 @@ defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
 
   describe "subscription" do
     test "subscription", %{pid: pid, args: args} do
-      {uuid, bin_uuid} = uuid()
+      {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
+      {uuid, bin_uuid, pg_change_params} = pg_change_params()
 
       subscriber = self()
 
-      send(pid, {:subscribed, {subscriber, uuid}})
+      assert {:ok, [%Postgrex.Result{command: :insert, columns: ["id"], rows: [[1]], num_rows: 1}]} =
+               Subscriptions.create(conn, args["publication"], [pg_change_params], pid, subscriber)
+
       # Wait for subscription manager to process the :subscribed message
       :sys.get_state(pid)
 
@@ -43,6 +47,7 @@ defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
     end
 
     test "subscriber died", %{pid: pid, args: args} do
+      {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
       self = self()
 
       subscriber =
@@ -52,13 +57,15 @@ defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
           end
         end)
 
-      {uuid1, bin_uuid1} = uuid()
-      {uuid2, bin_uuid2} = uuid()
-      {uuid3, bin_uuid3} = uuid()
+      {uuid1, bin_uuid1, pg_change_params1} = pg_change_params()
+      {uuid2, bin_uuid2, pg_change_params2} = pg_change_params()
+      {uuid3, bin_uuid3, pg_change_params3} = pg_change_params()
 
-      send(pid, {:subscribed, {subscriber, uuid1}})
-      send(pid, {:subscribed, {subscriber, uuid2}})
-      send(pid, {:subscribed, {self(), uuid3}})
+      assert {:ok, _} =
+               Subscriptions.create(conn, args["publication"], [pg_change_params1, pg_change_params2], pid, subscriber)
+
+      assert {:ok, _} = Subscriptions.create(conn, args["publication"], [pg_change_params3], pid, self())
+
       # Wait for subscription manager to process the :subscribed message
       :sys.get_state(pid)
 
@@ -89,7 +96,8 @@ defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
 
   describe "subscription deletion" do
     test "subscription is deleted when process goes away", %{pid: pid, args: args} do
-      {uuid, _bin_uuid} = uuid()
+      {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
+      {_uuid, _bin_uuid, pg_change_params} = pg_change_params()
 
       subscriber =
         spawn(fn ->
@@ -98,12 +106,16 @@ defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
           end
         end)
 
-      send(pid, {:subscribed, {subscriber, uuid}})
+      assert {:ok, [%Postgrex.Result{command: :insert, columns: ["id"], rows: [[1]], num_rows: 1}]} =
+               Subscriptions.create(conn, args["publication"], [pg_change_params], pid, subscriber)
+
       # Wait for subscription manager to process the :subscribed message
       :sys.get_state(pid)
 
       assert :ets.info(args["subscribers_pids_table"], :size) == 1
       assert :ets.info(args["subscribers_nodes_table"], :size) == 1
+
+      assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
 
       send(subscriber, :stop)
       # Wait for subscription manager to receive the :DOWN message
@@ -128,9 +140,19 @@ defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
     end
   end
 
-  defp uuid do
+  defp pg_change_params do
     uuid = UUID.uuid1()
 
-    {uuid, UUID.string_to_binary!(uuid)}
+    pg_change_params = %{
+      id: uuid,
+      params: %{"event" => "*", "schema" => "public"},
+      claims: %{
+        "exp" => System.system_time(:second) + 100_000,
+        "iat" => 0,
+        "role" => "anon"
+      }
+    }
+
+    {uuid, UUID.string_to_binary!(uuid), pg_change_params}
   end
 end
