@@ -242,6 +242,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         _ -> {:halt, {:error, :node_not_found}}
       end
     end)
+  rescue
+    _ -> {:error, :node_not_found}
   end
 
   def generate_record([
