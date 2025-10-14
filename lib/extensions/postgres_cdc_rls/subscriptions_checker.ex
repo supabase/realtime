@@ -17,13 +17,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
   defmodule State do
     @moduledoc false
-    defstruct [:id, :conn, :check_active_pids, :subscribers_tid, :delete_queue]
+    defstruct [:id, :conn, :check_active_pids, :subscribers_pids_table, :subscribers_nodes_table, :delete_queue]
 
     @type t :: %__MODULE__{
             id: String.t(),
             conn: Postgrex.conn(),
             check_active_pids: reference(),
-            subscribers_tid: :ets.tid(),
+            subscribers_pids_table: :ets.tid(),
+            subscribers_nodes_table: :ets.tid(),
             delete_queue: %{
               ref: reference(),
               queue: :queue.queue()
@@ -47,7 +48,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
   @impl true
   def handle_continue({:connect, args}, _) do
-    %{"id" => id, "subscribers_tid" => subscribers_tid} = args
+    %{
+      "id" => id,
+      "subscribers_pids_table" => subscribers_pids_table,
+      "subscribers_nodes_table" => subscribers_nodes_table
+    } = args
 
     realtime_subscription_checker_settings =
       Database.from_settings(args, "realtime_subscription_checker")
@@ -58,7 +63,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       id: id,
       conn: conn,
       check_active_pids: check_active_pids(),
-      subscribers_tid: subscribers_tid,
+      subscribers_pids_table: subscribers_pids_table,
+      subscribers_nodes_table: subscribers_nodes_table,
       delete_queue: %{
         ref: nil,
         queue: :queue.new()
@@ -69,18 +75,14 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
   end
 
   @impl true
-  def handle_info(
-        :check_active_pids,
-        %State{check_active_pids: ref, subscribers_tid: tid, delete_queue: delete_queue, id: id} =
-          state
-      ) do
+  def handle_info(:check_active_pids, %State{check_active_pids: ref, delete_queue: delete_queue, id: id} = state) do
     Helpers.cancel_timer(ref)
 
     ids =
-      tid
+      state.subscribers_pids_table
       |> subscribers_by_node()
       |> not_alive_pids_dist()
-      |> pop_not_alive_pids(tid, id)
+      |> pop_not_alive_pids(state.subscribers_pids_table, state.subscribers_nodes_table, id)
 
     new_delete_queue =
       if length(ids) > 0 do
@@ -128,10 +130,10 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
   ## Internal functions
 
-  @spec pop_not_alive_pids([pid()], :ets.tid(), binary()) :: [Ecto.UUID.t()]
-  def pop_not_alive_pids(pids, tid, tenant_id) do
+  @spec pop_not_alive_pids([pid()], :ets.tid(), :ets.tid(), binary()) :: [Ecto.UUID.t()]
+  def pop_not_alive_pids(pids, subscribers_pids_table, subscribers_nodes_table, tenant_id) do
     Enum.reduce(pids, [], fn pid, acc ->
-      case :ets.lookup(tid, pid) do
+      case :ets.lookup(subscribers_pids_table, pid) do
         [] ->
           Telemetry.execute(
             [:realtime, :subscriptions_checker, :pid_not_found],
@@ -149,8 +151,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
               %{tenant_id: tenant_id}
             )
 
-            :ets.delete(tid, pid)
-            UUID.string_to_binary!(postgres_id)
+            :ets.delete(subscribers_pids_table, pid)
+            bin_id = UUID.string_to_binary!(postgres_id)
+
+            :ets.delete(subscribers_nodes_table, bin_id)
+            bin_id
           end ++ acc
       end
     end)

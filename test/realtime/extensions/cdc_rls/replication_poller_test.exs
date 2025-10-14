@@ -1,14 +1,355 @@
-defmodule ReplicationPollerTest do
-  use ExUnit.Case, async: false
+defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
+  # Tweaking application env
+  use Realtime.DataCase, async: false
+
+  alias Extensions.PostgresCdcRls.MessageDispatcher
+  use Mimic
 
   alias Extensions.PostgresCdcRls.ReplicationPoller, as: Poller
-  import Poller, only: [generate_record: 1]
+  alias Extensions.PostgresCdcRls.Replications
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
     NewRecord,
     UpdatedRecord
   }
+
+  alias RealtimeWeb.TenantBroadcaster
+
+  import Poller, only: [generate_record: 1]
+
+  setup :set_mimic_global
+
+  describe "poll" do
+    setup do
+      :telemetry.attach(
+        __MODULE__,
+        [:realtime, :replication, :poller, :query, :stop],
+        &__MODULE__.handle_telemetry/4,
+        pid: self()
+      )
+
+      on_exit(fn -> :telemetry.detach(__MODULE__) end)
+
+      tenant = Containers.checkout_tenant(run_migrations: true)
+
+      subscribers_pids_table = :ets.new(__MODULE__, [:public, :bag])
+      subscribers_nodes_table = :ets.new(__MODULE__, [:public, :set])
+
+      args =
+        hd(tenant.extensions).settings
+        |> Map.put("id", tenant.external_id)
+        |> Map.put("subscribers_pids_table", subscribers_pids_table)
+        |> Map.put("subscribers_nodes_table", subscribers_nodes_table)
+
+      # unless specified it will return empty results
+      empty_results = {:ok, %Postgrex.Result{rows: [], num_rows: 0}}
+      stub(Replications, :list_changes, fn _, _, _, _, _ -> empty_results end)
+
+      %{args: args}
+    end
+
+    test "handles no new changes", %{args: args} do
+      tenant_id = args["id"]
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
+      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      {:ok, _pid} = start_supervised({Poller, args})
+
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     500
+
+      refute_receive _any
+    end
+
+    test "handles new changes with missing ets table", %{args: args} do
+      tenant_id = args["id"]
+
+      :ets.delete(args["subscribers_nodes_table"])
+
+      results =
+        {:ok,
+         %Postgrex.Result{
+           command: :select,
+           columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"],
+           rows: [
+             [
+               %{
+                 "columns" => [
+                   %{"name" => "id", "type" => "int4"},
+                   %{"name" => "details", "type" => "text"}
+                 ],
+                 "commit_timestamp" => "2025-10-13T07:50:28.066Z",
+                 "record" => %{"details" => "test", "id" => 55},
+                 "schema" => "public",
+                 "table" => "test",
+                 "type" => "INSERT"
+               },
+               false,
+               [
+                 <<71, 36, 83, 212, 168, 9, 17, 240, 165, 186, 118, 202, 193, 157, 232, 187>>,
+                 <<251, 188, 190, 118, 168, 119, 17, 240, 188, 87, 118, 202, 193, 157, 232, 187>>
+               ],
+               []
+             ]
+           ],
+           num_rows: 1,
+           connection_id: 123,
+           messages: []
+         }}
+
+      expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
+
+      # Broadcast to the whole cluster due to missing node information
+      expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
+                                                      "realtime:postgres:" <> ^tenant_id,
+                                                      _change,
+                                                      MessageDispatcher,
+                                                      :postgres_changes ->
+        :ok
+      end)
+
+      {:ok, _pid} = start_supervised({Poller, args})
+
+      # First poll with changes
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     500
+
+      # Second poll without changes
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     500
+    end
+
+    test "handles new changes with no subscription nodes", %{args: args} do
+      tenant_id = args["id"]
+
+      results =
+        {:ok,
+         %Postgrex.Result{
+           command: :select,
+           columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"],
+           rows: [
+             [
+               %{
+                 "columns" => [
+                   %{"name" => "id", "type" => "int4"},
+                   %{"name" => "details", "type" => "text"}
+                 ],
+                 "commit_timestamp" => "2025-10-13T07:50:28.066Z",
+                 "record" => %{"details" => "test", "id" => 55},
+                 "schema" => "public",
+                 "table" => "test",
+                 "type" => "INSERT"
+               },
+               false,
+               [
+                 <<71, 36, 83, 212, 168, 9, 17, 240, 165, 186, 118, 202, 193, 157, 232, 187>>,
+                 <<251, 188, 190, 118, 168, 119, 17, 240, 188, 87, 118, 202, 193, 157, 232, 187>>
+               ],
+               []
+             ]
+           ],
+           num_rows: 1,
+           connection_id: 123,
+           messages: []
+         }}
+
+      expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
+
+      # Broadcast to the whole cluster due to missing node information
+      expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
+                                                      "realtime:postgres:" <> ^tenant_id,
+                                                      _change,
+                                                      MessageDispatcher,
+                                                      :postgres_changes ->
+        :ok
+      end)
+
+      {:ok, _pid} = start_supervised({Poller, args})
+
+      # First poll with changes
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     500
+
+      # Second poll without changes
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     500
+    end
+
+    test "handles new changes with missing subscription nodes", %{args: args} do
+      tenant_id = args["id"]
+
+      results =
+        {:ok,
+         %Postgrex.Result{
+           command: :select,
+           columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"],
+           rows: [
+             [
+               %{
+                 "columns" => [
+                   %{"name" => "id", "type" => "int4"},
+                   %{"name" => "details", "type" => "text"}
+                 ],
+                 "commit_timestamp" => "2025-10-13T07:50:28.066Z",
+                 "record" => %{"details" => "test", "id" => 55},
+                 "schema" => "public",
+                 "table" => "test",
+                 "type" => "INSERT"
+               },
+               false,
+               [
+                 sub1 = <<71, 36, 83, 212, 168, 9, 17, 240, 165, 186, 118, 202, 193, 157, 232, 187>>,
+                 <<251, 188, 190, 118, 168, 119, 17, 240, 188, 87, 118, 202, 193, 157, 232, 187>>
+               ],
+               []
+             ]
+           ],
+           num_rows: 1,
+           connection_id: 123,
+           messages: []
+         }}
+
+      # Only one subscription has node information
+      :ets.insert(args["subscribers_nodes_table"], {sub1, node()})
+
+      expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
+
+      # Broadcast to the whole cluster due to missing node information
+      expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
+                                                      "realtime:postgres:" <> ^tenant_id,
+                                                      _change,
+                                                      MessageDispatcher,
+                                                      :postgres_changes ->
+        :ok
+      end)
+
+      {:ok, _pid} = start_supervised({Poller, args})
+
+      # First poll with changes
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     500
+
+      # Second poll without changes
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     500
+    end
+
+    test "handles new changes with subscription nodes information", %{args: args} do
+      tenant_id = args["id"]
+
+      results =
+        {:ok,
+         %Postgrex.Result{
+           command: :select,
+           columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"],
+           rows: [
+             [
+               %{
+                 "columns" => [
+                   %{"name" => "id", "type" => "int4"},
+                   %{"name" => "details", "type" => "text"}
+                 ],
+                 "commit_timestamp" => "2025-10-13T07:50:28.066Z",
+                 "record" => %{"details" => "test", "id" => 55},
+                 "schema" => "public",
+                 "table" => "test",
+                 "type" => "INSERT"
+               },
+               false,
+               [
+                 sub1 = <<71, 36, 83, 212, 168, 9, 17, 240, 165, 186, 118, 202, 193, 157, 232, 187>>,
+                 sub2 = <<251, 188, 190, 118, 168, 119, 17, 240, 188, 87, 118, 202, 193, 157, 232, 187>>
+               ],
+               []
+             ]
+           ],
+           num_rows: 1,
+           connection_id: 123,
+           messages: []
+         }}
+
+      # Both subscriptions have node information
+      :ets.insert(args["subscribers_nodes_table"], {sub1, node()})
+      :ets.insert(args["subscribers_nodes_table"], {sub2, :"someothernode@127.0.0.1"})
+
+      expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
+      reject(&TenantBroadcaster.pubsub_broadcast/5)
+
+      topic = "realtime:postgres:" <> tenant_id
+
+      # # Broadcast to the exact nodes only
+      expect(TenantBroadcaster, :pubsub_direct_broadcast, 2, fn
+        _node, ^tenant_id, ^topic, _change, MessageDispatcher, :postgres_changes ->
+          :ok
+      end)
+
+      {:ok, _pid} = start_supervised({Poller, args})
+
+      # First poll with changes
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     500
+
+      # Second poll without changes
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     500
+
+      calls = calls(TenantBroadcaster, :pubsub_direct_broadcast, 6)
+
+      assert Enum.count(calls) == 2
+
+      Enum.each(calls, fn [node, _, _, _, _, _] ->
+        assert node in [node(), :"someothernode@127.0.0.1"]
+      end)
+    end
+  end
 
   @columns [
     %{"name" => "id", "type" => "int8"},
@@ -305,4 +646,6 @@ defmodule ReplicationPollerTest do
       assert Poller.slot_name_suffix() == ""
     end
   end
+
+  def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {:telemetry, event, measures, metadata})
 end

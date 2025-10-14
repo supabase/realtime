@@ -24,7 +24,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     defstruct [
       :id,
       :publication,
-      :subscribers_tid,
+      :subscribers_pids_table,
+      :subscribers_nodes_table,
       :conn,
       :delete_queue,
       :no_users_ref,
@@ -37,7 +38,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     @type t :: %__MODULE__{
             id: String.t(),
             publication: String.t(),
-            subscribers_tid: :ets.tid(),
+            subscribers_pids_table: :ets.tid(),
+            subscribers_nodes_table: :ets.tid(),
             conn: Postgrex.conn(),
             oids: map(),
             check_oid_ref: reference() | nil,
@@ -67,7 +69,12 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
   @impl true
   def handle_continue({:connect, args}, _) do
-    %{"id" => id, "publication" => publication, "subscribers_tid" => subscribers_tid} = args
+    %{
+      "id" => id,
+      "publication" => publication,
+      "subscribers_pids_table" => subscribers_pids_table,
+      "subscribers_nodes_table" => subscribers_nodes_table
+    } = args
 
     subscription_manager_settings = Database.from_settings(args, "realtime_subscription_manager")
 
@@ -85,19 +92,21 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     check_region_interval = Map.get(args, :check_region_interval, rebalance_check_interval_in_ms())
     send_region_check_message(check_region_interval)
 
-    state = %State{
-      id: id,
-      conn: conn,
-      publication: publication,
-      subscribers_tid: subscribers_tid,
-      oids: oids,
-      delete_queue: %{
-        ref: check_delete_queue(),
-        queue: :queue.new()
-      },
-      no_users_ref: check_no_users(),
-      check_region_interval: check_region_interval
-    }
+    state =
+      %State{
+        id: id,
+        conn: conn,
+        publication: publication,
+        subscribers_pids_table: subscribers_pids_table,
+        subscribers_nodes_table: subscribers_nodes_table,
+        oids: oids,
+        delete_queue: %{
+          ref: check_delete_queue(),
+          queue: :queue.new()
+        },
+        no_users_ref: check_no_users(),
+        check_region_interval: check_region_interval
+      }
 
     send(self(), :check_oids)
     {:noreply, state}
@@ -105,10 +114,12 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
   @impl true
   def handle_info({:subscribed, {pid, id}}, state) do
-    case :ets.match(state.subscribers_tid, {pid, id, :"$1", :_}) do
-      [] -> :ets.insert(state.subscribers_tid, {pid, id, Process.monitor(pid), node(pid)})
+    case :ets.match(state.subscribers_pids_table, {pid, id, :"$1", :_}) do
+      [] -> :ets.insert(state.subscribers_pids_table, {pid, id, Process.monitor(pid), node(pid)})
       _ -> :ok
     end
+
+    :ets.insert(state.subscribers_nodes_table, {UUID.string_to_binary!(id), node(pid)})
 
     {:noreply, %{state | no_users_ts: nil}}
   end
@@ -132,7 +143,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
             Process.demonitor(ref, [:flush])
             send(pid, :postgres_subscribe)
           end
-          |> :ets.foldl([], state.subscribers_tid)
+          |> :ets.foldl([], state.subscribers_pids_table)
 
           new_oids
       end
@@ -142,19 +153,25 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
   def handle_info(
         {:DOWN, _ref, :process, pid, _reason},
-        %State{subscribers_tid: tid, delete_queue: %{queue: q}} = state
+        %State{
+          subscribers_pids_table: subscribers_pids_table,
+          subscribers_nodes_table: subscribers_nodes_table,
+          delete_queue: %{queue: q}
+        } = state
       ) do
     q1 =
-      case :ets.take(tid, pid) do
+      case :ets.take(subscribers_pids_table, pid) do
         [] ->
           q
 
         values ->
           for {_pid, id, _ref, _node} <- values, reduce: q do
             acc ->
-              id
-              |> UUID.string_to_binary!()
-              |> :queue.in(acc)
+              bin_id = UUID.string_to_binary!(id)
+
+              :ets.delete(subscribers_nodes_table, bin_id)
+
+              :queue.in(bin_id, acc)
           end
       end
 
@@ -187,7 +204,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     {:noreply, %{state | delete_queue: %{ref: ref, queue: q1}}}
   end
 
-  def handle_info(:check_no_users, %{subscribers_tid: tid, no_users_ts: ts} = state) do
+  def handle_info(:check_no_users, %{subscribers_pids_table: tid, no_users_ts: ts} = state) do
     Helpers.cancel_timer(state.no_users_ref)
 
     ts_new =

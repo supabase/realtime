@@ -27,6 +27,36 @@ defmodule Realtime.GenRpc do
   end
 
   @doc """
+  Fire and forget apply(mod, func, args) on one node
+
+  Options:
+
+  - `:key` - Optional key to consistently select the same gen_rpc client to guarantee some message order between nodes
+  """
+  @spec cast(node, module, atom, list(any), keyword()) :: :ok
+  def cast(node, mod, func, args, opts \\ [])
+
+  # Local
+  def cast(node, mod, func, args, _opts) when node == node() do
+    :erpc.cast(node, mod, func, args)
+    :ok
+  end
+
+  def cast(node, mod, func, args, opts)
+      when is_atom(node) and is_atom(mod) and is_atom(func) and is_list(args) and is_list(opts) do
+    key = Keyword.get(opts, :key, nil)
+
+    # Ensure this node is part of the connected nodes
+    if node in Node.list() do
+      node_key = rpc_node(node, key)
+
+      :gen_rpc.cast(node_key, mod, func, args)
+    end
+
+    :ok
+  end
+
+  @doc """
   Fire and forget apply(mod, func, args) on all nodes
 
   Options:

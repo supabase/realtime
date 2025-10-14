@@ -21,14 +21,14 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   alias Realtime.RateCounter
   alias Realtime.Tenants
 
+  alias RealtimeWeb.TenantBroadcaster
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
   @impl true
   def init(args) do
     tenant_id = args["id"]
     Logger.metadata(external_id: tenant_id, project: tenant_id)
-
-    %Realtime.Api.Tenant{} = Tenants.Cache.get_tenant_by_external_id(tenant_id)
 
     rate_counter_args = Tenants.db_events_per_second_rate(tenant_id, 4000)
 
@@ -50,7 +50,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       retry_count: 0,
       slot_name: args["slot_name"] <> slot_name_suffix(),
       tenant_id: tenant_id,
-      rate_counter_args: rate_counter_args
+      rate_counter_args: rate_counter_args,
+      subscribers_nodes_table: args["subscribers_nodes_table"]
     }
 
     {:ok, _} = Registry.register(__MODULE__.Registry, tenant_id, %{})
@@ -84,6 +85,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           max_changes: max_changes,
           conn: conn,
           tenant_id: tenant_id,
+          subscribers_nodes_table: subscribers_nodes_table,
           rate_counter_args: rate_counter_args
         } = state
       ) do
@@ -94,7 +96,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     {time, list_changes} = :timer.tc(Replications, :list_changes, args)
     record_list_changes_telemetry(time, tenant_id)
 
-    case handle_list_changes_result(list_changes, tenant_id, rate_counter_args) do
+    case handle_list_changes_result(list_changes, subscribers_nodes_table, tenant_id, rate_counter_args) do
       {:ok, row_count} ->
         Backoff.reset(backoff)
 
@@ -187,6 +189,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
             rows: [_ | _] = rows,
             num_rows: rows_count
           }},
+         subscribers_nodes_table,
          tenant_id,
          rate_counter_args
        ) do
@@ -201,15 +204,47 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
             change <- columns |> Enum.zip(row) |> generate_record() |> List.wrap() do
           topic = "realtime:postgres:" <> tenant_id
 
-          RealtimeWeb.TenantBroadcaster.pubsub_broadcast(tenant_id, topic, change, MessageDispatcher, :postgres_changes)
+          case collect_subscription_nodes(subscribers_nodes_table, change.subscription_ids) do
+            {:ok, nodes} ->
+              for node <- nodes do
+                TenantBroadcaster.pubsub_direct_broadcast(
+                  node,
+                  tenant_id,
+                  topic,
+                  change,
+                  MessageDispatcher,
+                  :postgres_changes
+                )
+              end
+
+            {:error, :node_not_found} ->
+              TenantBroadcaster.pubsub_broadcast(
+                tenant_id,
+                topic,
+                change,
+                MessageDispatcher,
+                :postgres_changes
+              )
+          end
         end
     end
 
     {:ok, rows_count}
   end
 
-  defp handle_list_changes_result({:ok, _}, _, _), do: {:ok, 0}
-  defp handle_list_changes_result({:error, reason}, _, _), do: {:error, reason}
+  defp handle_list_changes_result({:ok, _}, _, _, _), do: {:ok, 0}
+  defp handle_list_changes_result({:error, reason}, _, _, _), do: {:error, reason}
+
+  defp collect_subscription_nodes(subscribers_nodes_table, subscription_ids) do
+    Enum.reduce_while(subscription_ids, {:ok, MapSet.new()}, fn subscription_id, {:ok, acc} ->
+      case :ets.lookup(subscribers_nodes_table, subscription_id) do
+        [{_, node}] -> {:cont, {:ok, MapSet.put(acc, node)}}
+        _ -> {:halt, {:error, :node_not_found}}
+      end
+    end)
+  rescue
+    _ -> {:error, :node_not_found}
+  end
 
   def generate_record([
         {"wal",

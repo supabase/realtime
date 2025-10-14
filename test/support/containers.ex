@@ -149,6 +149,28 @@ defmodule Containers do
         :poolboy.checkin(Containers.Pool, container)
       end)
 
+      publication = "supabase_realtime_test"
+
+      Postgrex.transaction(conn, fn db_conn ->
+        queries = [
+          "DROP TABLE IF EXISTS public.test",
+          "DROP PUBLICATION IF EXISTS #{publication}",
+          "create sequence if not exists test_id_seq;",
+          """
+          create table "public"."test" (
+          "id" int4 not null default nextval('test_id_seq'::regclass),
+          "details" text,
+          primary key ("id"));
+          """,
+          "grant all on table public.test to anon;",
+          "grant all on table public.test to postgres;",
+          "grant all on table public.test to authenticated;",
+          "create publication #{publication} for all tables"
+        ]
+
+        Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
+      end)
+
       tenant =
         if run_migrations? do
           case run_migrations(tenant) do
