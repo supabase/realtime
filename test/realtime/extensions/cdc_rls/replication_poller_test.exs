@@ -2,7 +2,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
   # Tweaking application env
   use Realtime.DataCase, async: false
 
-  import ExUnit.CaptureLog
   alias Extensions.PostgresCdcRls.MessageDispatcher
   use Mimic
 

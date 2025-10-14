@@ -4,7 +4,6 @@ defmodule Realtime.Extensionsubscriptions.CdcRlsSubscriptionsTest do
 
   alias Extensions.PostgresCdcRls.Subscriptions
   alias Realtime.Database
-  alias Realtime.Tenants
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
