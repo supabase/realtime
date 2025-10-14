@@ -28,12 +28,27 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   setup :rls_context
 
-  test "max heap size is set", %{tenant: tenant} do
+  test "max heap size is set for both transport and channel processes", %{tenant: tenant} do
     jwt = Generators.generate_jwt_token(tenant)
     {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
     assert Process.info(socket.transport_pid, :max_heap_size) ==
              {:max_heap_size, %{error_logger: true, include_shared_binaries: false, kill: true, size: 6_250_000}}
+
+    assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{})
+
+    assert Process.info(socket.channel_pid, :max_heap_size) ==
+             {:max_heap_size, %{error_logger: true, include_shared_binaries: false, kill: true, size: 6_250_000}}
+  end
+
+  # We don't test the socket because on unit tests Phoenix is not setting the fullsweep_after config
+  test "fullsweep_after is set on channel process", %{tenant: tenant} do
+    jwt = Generators.generate_jwt_token(tenant)
+    {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+    assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{})
+
+    assert Process.info(socket.channel_pid, :fullsweep_after) == {:fullsweep_after, 20}
   end
 
   describe "broadcast" do
