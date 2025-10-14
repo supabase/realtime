@@ -30,8 +30,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     tenant_id = args["id"]
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
-    %Realtime.Api.Tenant{} = Tenants.Cache.get_tenant_by_external_id(tenant_id)
-
     rate_counter_args = Tenants.db_events_per_second_rate(tenant_id, 4000)
 
     RateCounter.new(rate_counter_args)

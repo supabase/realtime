@@ -1,7 +1,9 @@
 defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
   # Tweaking application env
-  alias Extensions.PostgresCdcRls.MessageDispatcher
   use Realtime.DataCase, async: false
+
+  import ExUnit.CaptureLog
+  alias Extensions.PostgresCdcRls.MessageDispatcher
   use Mimic
 
   alias Extensions.PostgresCdcRls.ReplicationPoller, as: Poller
@@ -45,12 +47,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       empty_results = {:ok, %Postgrex.Result{rows: [], num_rows: 0}}
       stub(Replications, :list_changes, fn _, _, _, _, _ -> empty_results end)
 
-      # # register this process with syn as if this was the WorkersSupervisor
-      # :syn.register(PostgresCdcRls, tenant.external_id, self(), %{region: "us-east-1", manager: nil, subs_pool: nil})
-      #
-      # {:ok, pid} = SubscriptionManager.start_link(Map.put(args, "id", tenant.external_id))
-      # # This serves so that we know that handle_continue has finished
-      # :sys.get_state(pid)
       %{args: args}
     end
 
