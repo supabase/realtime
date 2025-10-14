@@ -273,6 +273,35 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       # presence_state
       assert Enum.sum(bucket) == 1
     end
+
+    test "presence track closes on high payload size", %{tenant: tenant} do
+      topic = "realtime:test"
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, topic, %{})
+
+      assert_receive %Phoenix.Socket.Message{topic: "realtime:test", event: "presence_state"}, 500
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_96", t: 1814.7000000029802, content: String.duplicate("a", 3_500_000)}
+      }
+
+      push(socket, "presence", payload)
+
+      assert_receive %Phoenix.Socket.Message{
+                       event: "system",
+                       payload: %{
+                         extension: "system",
+                         message: "Track message size exceeded",
+                         status: "error"
+                       },
+                       topic: ^topic
+                     },
+                     500
+    end
   end
 
   describe "unexpected errors" do
