@@ -3,6 +3,26 @@ defmodule Realtime.Extensions.PostgresCdcRl.SubscriptionsCheckerTest do
   alias Extensions.PostgresCdcRls.SubscriptionsChecker, as: Checker
   import UUID, only: [uuid1: 0, string_to_binary!: 1]
 
+  describe "check active pids" do
+    setup do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+
+      subscribers_pids_table = :ets.new(__MODULE__, [:public, :bag])
+      subscribers_nodes_table = :ets.new(__MODULE__, [:public, :set])
+
+      args =
+        hd(tenant.extensions).settings
+        |> Map.put("id", tenant.external_id)
+        |> Map.put("subscribers_pids_table", subscribers_pids_table)
+        |> Map.put("subscribers_nodes_table", subscribers_nodes_table)
+
+      {:ok, pid} = Checker.start_link(Map.put(args, "id", tenant.external_id))
+      # This serves so that we know that handle_continue has finished
+      :sys.get_state(pid)
+      %{args: args, pid: pid}
+    end
+  end
+
   test "subscribers_by_node/1" do
     subscribers_pids_table = :ets.new(:table, [:public, :bag])
 
