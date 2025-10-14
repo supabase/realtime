@@ -388,6 +388,9 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :rate_limit_exceeded} ->
         shutdown_response(socket, "Too many presence messages per second")
 
+      {:error, :payload_size_exceeded} ->
+        shutdown_response(socket, "Track message size exceeded")
+
       {:error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
         {:reply, :error, socket}
@@ -400,6 +403,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     else
       {:error, :rate_limit_exceeded} ->
         shutdown_response(socket, "Too many presence messages per second")
+
+      {:error, :payload_size_exceeded} ->
+        shutdown_response(socket, "Track message size exceeded")
 
       {:error, error} ->
         log_error(socket, "UnableToHandlePresence", error)

@@ -54,7 +54,12 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   @spec handle(map(), pid() | nil, Socket.t()) ::
           {:ok, Socket.t()}
-          | {:error, :rls_policy_error | :unable_to_set_policies | :rate_limit_exceeded | :unable_to_track_presence}
+          | {:error,
+             :rls_policy_error
+             | :unable_to_set_policies
+             | :rate_limit_exceeded
+             | :unable_to_track_presence
+             | :payload_size_exceeded}
   def handle(%{"event" => event} = payload, db_conn, socket) do
     event = String.downcase(event, :ascii)
     handle_presence_event(event, payload, db_conn, socket)
@@ -112,8 +117,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
          :ok <- validate_payload_size(tenant, payload),
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
          :ok <- limit_presence_event(socket),
-         {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload),
-         socket = assign(socket, :presence_enabled?, true) do
+         {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload) do
+      socket = assign(socket, :presence_enabled?, true)
       {:ok, socket}
     else
       {:error, {:already_tracked, pid, _, _}} ->

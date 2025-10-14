@@ -714,6 +714,36 @@ defmodule Realtime.Integration.RtChannelTest do
       assert get_in(join_payload, ["t"]) == payload.payload.t
     end
 
+    test "presence track closes on high payload size", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
+      config = %{presence: %{key: "", enabled: true}, private: false}
+      topic = "realtime:any"
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
+      assert_receive %Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+
+      payload = %{
+        type: "presence",
+        event: "TRACK",
+        payload: %{name: "realtime_presence_96", t: 1814.7000000029802, content: random_string(3_500_000)}
+      }
+
+      WebsocketClient.send_event(socket, topic, "presence", payload)
+
+      assert_receive %Phoenix.Socket.Message{
+                       topic: ^topic,
+                       event: "system",
+                       payload: %{
+                         "extension" => "system",
+                         "message" => "Track message size exceeded",
+                         "status" => "error"
+                       }
+                     },
+                     500
+    end
+
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "private presence with read and write permissions will be able to track and receive presence changes",
          %{tenant: tenant, topic: topic} do
