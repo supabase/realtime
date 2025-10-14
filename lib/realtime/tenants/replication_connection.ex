@@ -57,7 +57,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
             publication_name: nil,
             replication_slot_name: nil,
             output_plugin: "pgoutput",
-            proto_version: 1,
+            proto_version: 3,
             relations: %{},
             buffer: [],
             monitored_pid: nil,
@@ -236,7 +236,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     )
 
     query =
-      "START_REPLICATION SLOT #{replication_slot_name} LOGICAL 0/0 (proto_version '#{proto_version}', publication_names '#{publication_name}')"
+      "START_REPLICATION SLOT #{replication_slot_name} LOGICAL 0/0 (proto_version '#{proto_version}', publication_names '#{publication_name}', binary 'true')"
 
     {:stream, query, [], %{state | step: :streaming}}
   end
@@ -318,8 +318,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
            payload: Map.put_new(payload, "id", id)
          },
          :ok <- BatchBroadcast.broadcast(nil, tenant, %{messages: [broadcast_message]}, true) do
-      inserted_at = NaiveDateTime.from_iso8601!(inserted_at)
-      latency_inserted_at = NaiveDateTime.utc_now() |> NaiveDateTime.diff(inserted_at)
+      latency_inserted_at = NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.diff(inserted_at)
 
       Telemetry.execute(
         [:realtime, :tenants, :broadcast_from_database],
@@ -377,7 +376,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
     |> Map.new(fn
       {nil, %{name: name}} -> {name, nil}
       {value, %{name: name, type: "jsonb"}} -> {name, Jason.decode!(value)}
-      {value, %{name: name, type: "bool"}} -> {name, value == "t"}
       {value, %{name: name}} -> {name, value}
     end)
   end
