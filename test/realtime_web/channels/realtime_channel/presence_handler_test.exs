@@ -407,7 +407,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     test "fails on high payload size", %{tenant: tenant, topic: topic, db_conn: db_conn} do
       key = random_string()
       socket = socket_fixture(tenant, topic, key, private?: false)
-      payload_size = tenant.max_payload_size_in_kb * 1024
+      payload_size = tenant.max_payload_size_in_kb * 1000
 
       payload = %{content: random_string(payload_size)}
 
