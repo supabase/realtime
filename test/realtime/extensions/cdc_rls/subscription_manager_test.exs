@@ -1,4 +1,4 @@
-defmodule Realtime.Extensions.CdcRls.SubscritionManagerTest do
+defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
   use Realtime.DataCase, async: true
 
   alias Extensions.PostgresCdcRls
