@@ -115,7 +115,7 @@ defmodule Realtime.PostgresDecoderTest do
   describe "data message (TupleData) decoder" do
     test "decodes insert messages" do
       assert Decoder.decode_message(
-               <<73, 0, 0, 96, 0, 78, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 116, 0, 0, 0, 3, 53, 54, 48>>
+               <<73, 0, 0, 96, 0, 78, 0, 2, 98, 0, 0, 0, 3, 98, 97, 122, 98, 0, 0, 0, 3, 53, 54, 48>>
              ) == %Insert{
                relation_id: 24_576,
                tuple_data: {"baz", "560"}
@@ -123,14 +123,14 @@ defmodule Realtime.PostgresDecoderTest do
     end
 
     test "decodes insert messages with null values" do
-      assert Decoder.decode_message(<<73, 0, 0, 96, 0, 78, 0, 2, 110, 116, 0, 0, 0, 3, 53, 54, 48>>) == %Insert{
+      assert Decoder.decode_message(<<73, 0, 0, 96, 0, 78, 0, 2, 110, 98, 0, 0, 0, 3, 53, 54, 48>>) == %Insert{
                relation_id: 24_576,
                tuple_data: {nil, "560"}
              }
     end
 
     test "decodes insert messages with unchanged toasted values" do
-      assert Decoder.decode_message(<<73, 0, 0, 96, 0, 78, 0, 2, 117, 116, 0, 0, 0, 3, 53, 54, 48>>) == %Insert{
+      assert Decoder.decode_message(<<73, 0, 0, 96, 0, 78, 0, 2, 117, 98, 0, 0, 0, 3, 53, 54, 48>>) == %Insert{
                relation_id: 24_576,
                tuple_data: {:unchanged_toast, "560"}
              }
@@ -138,7 +138,7 @@ defmodule Realtime.PostgresDecoderTest do
 
     test "decodes update messages with default replica identity setting" do
       assert Decoder.decode_message(
-               <<85, 0, 0, 96, 0, 78, 0, 2, 116, 0, 0, 0, 7, 101, 120, 97, 109, 112, 108, 101, 116, 0, 0, 0, 3, 53, 54,
+               <<85, 0, 0, 96, 0, 78, 0, 2, 98, 0, 0, 0, 7, 101, 120, 97, 109, 112, 108, 101, 98, 0, 0, 0, 3, 53, 54,
                  48>>
              ) == %Update{
                relation_id: 24_576,
@@ -150,8 +150,8 @@ defmodule Realtime.PostgresDecoderTest do
 
     test "decodes update messages with FULL replica identity setting" do
       assert Decoder.decode_message(
-               <<85, 0, 0, 96, 0, 79, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 116, 0, 0, 0, 3, 53, 54, 48, 78, 0, 2, 116, 0,
-                 0, 0, 7, 101, 120, 97, 109, 112, 108, 101, 116, 0, 0, 0, 3, 53, 54, 48>>
+               <<85, 0, 0, 96, 0, 79, 0, 2, 98, 0, 0, 0, 3, 98, 97, 122, 98, 0, 0, 0, 3, 53, 54, 48, 78, 0, 2, 98, 0, 0,
+                 0, 7, 101, 120, 97, 109, 112, 108, 101, 98, 0, 0, 0, 3, 53, 54, 48>>
              ) == %Update{
                relation_id: 24_576,
                changed_key_tuple_data: nil,
@@ -162,8 +162,8 @@ defmodule Realtime.PostgresDecoderTest do
 
     test "decodes update messages with USING INDEX replica identity setting" do
       assert Decoder.decode_message(
-               <<85, 0, 0, 96, 0, 75, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 110, 78, 0, 2, 116, 0, 0, 0, 7, 101, 120, 97,
-                 109, 112, 108, 101, 116, 0, 0, 0, 3, 53, 54, 48>>
+               <<85, 0, 0, 96, 0, 75, 0, 2, 98, 0, 0, 0, 3, 98, 97, 122, 110, 78, 0, 2, 98, 0, 0, 0, 7, 101, 120, 97,
+                 109, 112, 108, 101, 98, 0, 0, 0, 3, 53, 54, 48>>
              ) == %Update{
                relation_id: 24_576,
                changed_key_tuple_data: {"baz", nil},
@@ -174,7 +174,7 @@ defmodule Realtime.PostgresDecoderTest do
 
     test "decodes DELETE messages with USING INDEX replica identity setting" do
       assert Decoder.decode_message(
-               <<68, 0, 0, 96, 0, 75, 0, 2, 116, 0, 0, 0, 7, 101, 120, 97, 109, 112, 108, 101, 110>>
+               <<68, 0, 0, 96, 0, 75, 0, 2, 98, 0, 0, 0, 7, 101, 120, 97, 109, 112, 108, 101, 110>>
              ) == %Delete{
                relation_id: 24_576,
                changed_key_tuple_data: {"example", nil}
@@ -183,7 +183,7 @@ defmodule Realtime.PostgresDecoderTest do
 
     test "decodes DELETE messages with FULL replica identity setting" do
       assert Decoder.decode_message(
-               <<68, 0, 0, 96, 0, 79, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 116, 0, 0, 0, 3, 53, 54, 48>>
+               <<68, 0, 0, 96, 0, 79, 0, 2, 98, 0, 0, 0, 3, 98, 97, 122, 98, 0, 0, 0, 3, 53, 54, 48>>
              ) == %Delete{
                relation_id: 24_576,
                old_tuple_data: {"baz", "560"}
