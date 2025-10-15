@@ -11,7 +11,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   alias Phoenix.Tracker.Shard
   alias Realtime.GenCounter
   alias Realtime.RateCounter
-  # alias Realtime.Tenants
+  alias Realtime.Tenants
   alias Realtime.Tenants.Authorization
   alias RealtimeWeb.Presence
   alias RealtimeWeb.RealtimeChannel.Logging
@@ -54,7 +54,12 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
   @spec handle(map(), pid() | nil, Socket.t()) ::
           {:ok, Socket.t()}
-          | {:error, :rls_policy_error | :unable_to_set_policies | :rate_limit_exceeded | :unable_to_track_presence}
+          | {:error,
+             :rls_policy_error
+             | :unable_to_set_policies
+             | :rate_limit_exceeded
+             | :unable_to_track_presence
+             | :payload_size_exceeded}
   def handle(%{"event" => event} = payload, db_conn, socket) do
     event = String.downcase(event, :ascii)
     handle_presence_event(event, payload, db_conn, socket)
@@ -105,14 +110,15 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   end
 
   defp track(socket, payload) do
-    socket = assign(socket, :presence_enabled?, true)
-
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
     payload = Map.get(payload, "payload", %{})
-    RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence)
 
-    with :ok <- limit_presence_event(socket),
+    with tenant <- Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant),
+         :ok <- validate_payload_size(tenant, payload),
+         _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
+         :ok <- limit_presence_event(socket),
          {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload) do
+      socket = assign(socket, :presence_enabled?, true)
       {:ok, socket}
     else
       {:error, {:already_tracked, pid, _, _}} ->
@@ -123,6 +129,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
       {:error, :rate_limit_exceeded} ->
         {:error, :rate_limit_exceeded}
+
+      {:error, :payload_size_exceeded} ->
+        {:error, :payload_size_exceeded}
 
       {:error, error} ->
         log_error("UnableToTrackPresence", error)
@@ -144,12 +153,20 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     %{assigns: %{presence_rate_counter: presence_counter, tenant: _tenant_id}} = socket
     {:ok, rate_counter} = RateCounter.get(presence_counter)
 
-    # tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
-
     if rate_counter.avg > @presence_limit do
       {:error, :rate_limit_exceeded}
     else
       GenCounter.add(presence_counter.id)
+      :ok
+    end
+  end
+
+  # Added due to the fact that JSON decoding adds some overhead and erlang term will be slighly larger
+  @payload_size_padding 500
+  defp validate_payload_size(tenant, payload) do
+    if :erlang.external_size(payload) > tenant.max_payload_size_in_kb * 1000 + @payload_size_padding do
+      {:error, :payload_size_exceeded}
+    else
       :ok
     end
   end

@@ -403,6 +403,17 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       assert log =~ "PresenceRateLimitReached"
     end
+
+    test "fails on high payload size", %{tenant: tenant, topic: topic, db_conn: db_conn} do
+      key = random_string()
+      socket = socket_fixture(tenant, topic, key, private?: false)
+      payload_size = tenant.max_payload_size_in_kb * 1000
+
+      payload = %{content: random_string(payload_size)}
+
+      assert {:error, :payload_size_exceeded} =
+               PresenceHandler.handle(%{"event" => "track", "payload" => payload}, db_conn, socket)
+    end
   end
 
   describe "sync/1" do
@@ -461,7 +472,6 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert log =~ "PresenceRateLimitReached"
     end
 
-    @tag :skip
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "respects rate limits on private channels", %{tenant: tenant, topic: topic, db_conn: db_conn} do
       key = random_string()
