@@ -1,6 +1,5 @@
 defmodule RealtimeWeb.RealtimeChannelTest do
-  # Can't run async true because under the hood Cachex is used and it doesn't see Ecto Sandbox
-  use RealtimeWeb.ChannelCase, async: false
+  use RealtimeWeb.ChannelCase, async: true
   use Mimic
 
   import ExUnit.CaptureLog
@@ -23,6 +22,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
+    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
     {:ok, tenant: tenant}
   end
 
@@ -978,7 +978,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       put_in(extension, ["settings", "db_port"], db_port)
     ]
 
-    Realtime.Api.update_tenant(tenant, %{extensions: extensions})
+    with {:ok, tenant} <- Realtime.Api.update_tenant(tenant, %{extensions: extensions}) do
+      Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+      {:ok, tenant}
+    end
   end
 
   defp assert_process_down(pid) do
