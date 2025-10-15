@@ -4,8 +4,6 @@ defmodule Realtime.DatabaseTest do
   import ExUnit.CaptureLog
 
   alias Realtime.Database
-  alias Realtime.Rpc
-  alias Realtime.Tenants.Connect
 
   doctest Realtime.Database
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
