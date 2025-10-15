@@ -7,7 +7,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
   alias Realtime.Database
   alias Realtime.Helpers
-  alias Realtime.Rpc
+  alias Realtime.GenRpc
   alias Realtime.Telemetry
 
   alias Rls.Subscriptions
@@ -177,8 +177,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       if node == node() do
         acc ++ not_alive_pids(pids)
       else
-        case Rpc.call(node, __MODULE__, :not_alive_pids, [pids], timeout: 15_000) do
-          {:badrpc, _} = error ->
+        case GenRpc.call(node, __MODULE__, :not_alive_pids, [pids], timeout: 15_000) do
+          {:error, :rpc_error, _} = error ->
             log_error("UnableToCheckProcessesOnRemoteNode", error)
             acc
 
