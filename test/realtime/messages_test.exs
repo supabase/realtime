@@ -1,5 +1,6 @@
 defmodule Realtime.MessagesTest do
-  use Realtime.DataCase, async: true
+  # usage of Clustered
+  use Realtime.DataCase, async: false
 
   alias Realtime.Api.Message
   alias Realtime.Database
