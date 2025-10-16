@@ -318,7 +318,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
            payload: Map.put_new(payload, "id", id)
          },
          :ok <- BatchBroadcast.broadcast(nil, tenant, %{messages: [broadcast_message]}, true) do
-      latency_inserted_at = NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.diff(inserted_at)
+      latency_inserted_at = NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.diff(inserted_at, :microsecond)
 
       Telemetry.execute(
         [:realtime, :tenants, :broadcast_from_database],
