@@ -39,7 +39,12 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
   describe "dispatch/3" do
     setup do
-      {:ok, _pid} = Agent.start_link(fn -> 0 end, name: TestSerializer)
+      {:ok, _pid} =
+        start_supervised(%{
+          id: TestSerializer,
+          start: {Agent, :start_link, [fn -> 0 end, [name: TestSerializer]]}
+        })
+
       :ok
     end
 
