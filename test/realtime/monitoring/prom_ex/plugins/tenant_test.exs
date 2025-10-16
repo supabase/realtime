@@ -58,7 +58,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                     [:realtime, :tenants, :broadcast_from_database],
                     %{
                       latency_committed_at: 10,
-                      latency_inserted_at: 1
+                      latency_inserted_at: 10
                     },
                     %{tenant: external_id}
                   )
