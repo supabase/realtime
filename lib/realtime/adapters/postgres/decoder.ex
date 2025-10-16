@@ -323,7 +323,8 @@ defmodule Realtime.Adapters.Postgres.Decoder do
           binary
 
         <<microseconds::signed-big-64>> ->
-          NaiveDateTime.from_iso8601!(@start_date)
+          @start_date
+          |> NaiveDateTime.from_iso8601!()
           |> NaiveDateTime.add(microseconds, :microsecond)
 
         <<uuid_binary::binary-16>> ->
