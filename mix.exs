@@ -5,7 +5,7 @@ defmodule Realtime.MixProject do
     [
       app: :realtime,
       version: "2.54.3",
-      elixir: "~> 1.17.3",
+      elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -79,6 +79,7 @@ defmodule Realtime.MixProject do
       {:recon, "~> 2.5"},
       {:mint, "~> 1.4"},
       {:logflare_logger_backend, "~> 0.11"},
+      {:logger_backends, "~> 1.0"},
       {:syn, "~> 3.3"},
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},

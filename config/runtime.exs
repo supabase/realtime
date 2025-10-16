@@ -199,6 +199,7 @@ cluster_topologies =
 # Setup Logging
 
 if System.get_env("LOGS_ENGINE") == "logflare" do
+  config :realtime, logs_engine: :logflare
   config :logflare_logger_backend, url: System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 
   if !System.get_env("LOGFLARE_API_KEY") or !System.get_env("LOGFLARE_SOURCE_ID") do
@@ -210,8 +211,7 @@ if System.get_env("LOGS_ENGINE") == "logflare" do
 
   config :logger,
     sync_threshold: 6_000,
-    discard_threshold: 6_000,
-    backends: [LogflareLogger.HttpBackend]
+    discard_threshold: 6_000
 end
 
 # Setup production and development environments
