@@ -40,9 +40,7 @@ config :realtime,
   request_id_baggage_key: "sb-request-id"
 
 # Print nothing during tests unless captured or a test failure happens
-config :logger,
-  backends: [],
-  level: :info
+config :logger, level: :info
 
 # Configures Elixir's Logger
 config :logger, :console,

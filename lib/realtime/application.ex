@@ -18,6 +18,10 @@ defmodule Realtime.Application do
     opentelemetry_setup()
     primary_config = :logger.get_primary_config()
 
+    if Application.get_env(:realtime, :logs_engine) == :logflare do
+      LoggerBackends.add(LogflareLogger.HttpBackend)
+    end
+
     # add the region to logs
     :ok =
       :logger.set_primary_config(
