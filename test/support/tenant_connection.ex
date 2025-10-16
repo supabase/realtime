@@ -13,7 +13,7 @@ defmodule TenantConnection do
 
     {:ok, result} =
       Database.transaction(conn, fn transaction_conn ->
-        with {:ok, %Message{} = message} <- Repo.insert(transaction_conn, message, Message, opts) |> dbg() do
+        with {:ok, %Message{} = message} <- Repo.insert(transaction_conn, message, Message, opts) do
           message
         end
       end)
