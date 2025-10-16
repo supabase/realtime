@@ -2,7 +2,8 @@ Application.put_env(:phoenix_pubsub, :test_adapter, {Realtime.GenRpcPubSub, []})
 Code.require_file("../../deps/phoenix_pubsub/test/shared/pubsub_test.exs", __DIR__)
 
 defmodule Realtime.GenRpcPubSubTest do
-  use ExUnit.Case, async: true
+  # Application env being changed
+  use ExUnit.Case, async: false
 
   test "it sets off_heap message_queue_data flag on the workers" do
     assert Realtime.PubSubElixir.Realtime.PubSub.Adapter_1
@@ -72,6 +73,7 @@ defmodule Realtime.GenRpcPubSubTest do
 
         extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
 
+        on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
         Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
 
         us_extra_config =
