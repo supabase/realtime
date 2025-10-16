@@ -727,7 +727,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       end)
 
     subscription_metadata =
-      {:subscriber_fastlane, transport_pid, serializer, ids, topic, tenant, is_new_api}
+      {:subscriber_fastlane, transport_pid, serializer, ids, topic, is_new_api}
 
     metadata = [metadata: subscription_metadata]
 
