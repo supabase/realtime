@@ -124,10 +124,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
       {subscriber_manager_pid, conn} =
         Enum.reduce_while(1..25, nil, fn _, acc ->
           case PostgresCdcRls.get_manager_conn(tenant.external_id) do
-            nil ->
-              Process.sleep(200)
-              {:cont, acc}
-
             {:error, :wait} ->
               Process.sleep(200)
               {:cont, acc}
