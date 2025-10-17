@@ -215,15 +215,12 @@ defmodule Realtime.Adapters.Postgres.Decoder do
   end
 
   defp decode_message_impl(<<"I", relation_id::integer-32, "N", number_of_columns::integer-16, tuple_data::binary>>) do
-    IO.inspect(tuple_data, label: "tuple_data")
-
     {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns)
 
     %Insert{relation_id: relation_id, tuple_data: decoded_tuple_data}
   end
 
   defp decode_message_impl(<<"U", relation_id::integer-32, "N", number_of_columns::integer-16, tuple_data::binary>>) do
-    IO.inspect(tuple_data, label: "tuple_data")
     {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns)
 
     %Update{relation_id: relation_id, tuple_data: decoded_tuple_data}
@@ -233,8 +230,6 @@ defmodule Realtime.Adapters.Postgres.Decoder do
          <<"U", relation_id::integer-32, key_or_old::binary-1, number_of_columns::integer-16, tuple_data::binary>>
        )
        when key_or_old == "O" or key_or_old == "K" do
-    IO.inspect(tuple_data, label: "tuple_data")
-
     {<<"N", new_number_of_columns::integer-16, new_tuple_binary::binary>>, old_decoded_tuple_data} =
       decode_tuple_data(tuple_data, number_of_columns)
 
@@ -252,8 +247,6 @@ defmodule Realtime.Adapters.Postgres.Decoder do
          <<"D", relation_id::integer-32, key_or_old::binary-1, number_of_columns::integer-16, tuple_data::binary>>
        )
        when key_or_old == "K" or key_or_old == "O" do
-    IO.inspect(tuple_data, label: "tuple_data")
-
     {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns)
 
     base_delete_msg = %Delete{relation_id: relation_id}

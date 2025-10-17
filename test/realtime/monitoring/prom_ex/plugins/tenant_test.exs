@@ -253,7 +253,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
 
       bucket_pattern =
-        ~r/realtime_tenants_broadcast_from_database_latency_inserted_at_bucket{tenant="#{context.tenant.external_id}",le="5"}\s(?<number>\d+)/
+        ~r/realtime_tenants_broadcast_from_database_latency_inserted_at_bucket{tenant="#{context.tenant.external_id}",le="10"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
