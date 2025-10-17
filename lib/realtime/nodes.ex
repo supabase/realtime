@@ -65,6 +65,27 @@ defmodule Realtime.Nodes do
   def region_nodes(nil), do: []
 
   @doc """
+  Picks a node from a region based on the provided key
+  """
+  @spec node_from_region(String.t(), term()) :: {:ok, node} | {:error, :not_available}
+  def node_from_region(region, key) when is_binary(region) do
+    nodes = region_nodes(region)
+
+    case nodes do
+      [] ->
+        {:error, :not_available}
+
+      _ ->
+        member_count = Enum.count(nodes)
+        index = :erlang.phash2(key, member_count)
+
+        {:ok, Enum.fetch!(nodes, index)}
+    end
+  end
+
+  def node_from_region(_, _), do: {:error, :not_available}
+
+  @doc """
   Picks the node to launch the Postgres connection on.
 
   If there are not two nodes in a region the connection is established from
@@ -132,59 +153,9 @@ defmodule Realtime.Nodes do
     end
   end
 
-  @mapping_realtime_region_to_tenant_region_aws %{
-    "ap-southeast-1" => [
-      "ap-east-1",
-      "ap-northeast-1",
-      "ap-northeast-2",
-      "ap-south-1",
-      "ap-southeast-1"
-    ],
-    "ap-southeast-2" => ["ap-southeast-2"],
-    "eu-west-2" => [
-      "eu-central-1",
-      "eu-central-2",
-      "eu-north-1",
-      "eu-west-1",
-      "eu-west-2",
-      "eu-west-3"
-    ],
-    "us-east-1" => [
-      "ca-central-1",
-      "sa-east-1",
-      "us-east-1",
-      "us-east-2"
-    ],
-    "us-west-1" => ["us-west-1", "us-west-2"]
-  }
-  @mapping_realtime_region_to_tenant_region_fly %{
-    "iad" => ["ca-central-1", "sa-east-1", "us-east-1"],
-    "lhr" => ["eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3"],
-    "sea" => ["us-west-1"],
-    "syd" => [
-      "ap-east-1",
-      "ap-northeast-1",
-      "ap-northeast-2",
-      "ap-south-1",
-      "ap-southeast-1",
-      "ap-southeast-2"
-    ]
-  }
+  @all_regions ~w(eu-west-2 us-east-1 us-west-1 ap-southeast-1 ap-southeast-2)
 
-  @doc """
-  Fetches the tenant regions for a given realtime reagion
-  """
-  @spec region_to_tenant_regions(String.t()) :: list() | nil
-  def region_to_tenant_regions(region) do
-    platform = Application.get_env(:realtime, :platform)
-
-    mappings =
-      case platform do
-        :aws -> @mapping_realtime_region_to_tenant_region_aws
-        :fly -> @mapping_realtime_region_to_tenant_region_fly
-        _ -> %{}
-      end
-
-    Map.get(mappings, region)
-  end
+  @spec all_node_regions() :: [String.t()]
+  @doc "List all the regions where nodes can be launched"
+  def all_node_regions(), do: @all_regions
 end

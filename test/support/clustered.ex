@@ -39,6 +39,7 @@ defmodule Clustered do
   def start_disconnected(aux_mod \\ nil, opts \\ []) do
     extra_config = Keyword.get(opts, :extra_config, [])
     phoenix_port = Keyword.get(opts, :phoenix_port, 4012)
+    name = Keyword.get(opts, :name, :peer.random_name())
 
     :ok =
       case :net_kernel.start([:"main@127.0.0.1"]) do
@@ -53,7 +54,6 @@ defmodule Clustered do
       end
 
     true = :erlang.set_cookie(:cookie)
-    name = :peer.random_name()
 
     {:ok, pid, node} =
       ExUnit.Callbacks.start_supervised(%{

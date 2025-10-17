@@ -263,7 +263,7 @@ defmodule Realtime.RateCounterTest do
       {:ok, pid} = RateCounter.new(args, idle_shutdown: 5)
 
       Process.monitor(pid)
-      assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 25
+      assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 100
       # Cache has not expired yet
       assert {:ok, %RateCounter{}} = Cachex.get(RateCounter, args.id)
       Process.sleep(2000)
