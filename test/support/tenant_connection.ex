@@ -9,12 +9,12 @@ defmodule TenantConnection do
   alias RealtimeWeb.Endpoint
 
   def create_message(attrs, conn, opts \\ [mode: :savepoint]) do
-    channel = Message.changeset(%Message{}, attrs)
+    message = Message.changeset(%Message{}, attrs)
 
     {:ok, result} =
       Database.transaction(conn, fn transaction_conn ->
-        with {:ok, %Message{} = channel} <- Repo.insert(transaction_conn, channel, Message, opts) do
-          channel
+        with {:ok, %Message{} = message} <- Repo.insert(transaction_conn, message, Message, opts) do
+          message
         end
       end)
 
