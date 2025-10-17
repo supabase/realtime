@@ -20,10 +20,10 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   def authorize_conn(token, jwt_secret, jwt_jwks) do
     case authorize(token, jwt_secret, jwt_jwks) do
       {:ok, claims} ->
-        required = MapSet.new(["role", "exp"])
-        claims_keys = claims |> Map.keys() |> MapSet.new()
+        required = ["role", "exp"]
+        claims_keys = Map.keys(claims)
 
-        if MapSet.subset?(required, claims_keys),
+        if Enum.all?(required, &(&1 in claims_keys)),
           do: {:ok, claims},
           else: {:error, :missing_claims}
 
