@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "test": "deno test --allow-net test.ts"
+  },
+  "imports": {
+    "realtimejs": "npm:@supabase/realtime-js@2.75.0"
+  },
+  "links": [
+    "../../../supabase-js/packages/core/realtime-js"
+  ],
+  "nodeModulesDir": "auto"
+}

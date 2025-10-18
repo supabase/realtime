@@ -25,11 +25,11 @@ defmodule RealtimeWeb.Endpoint do
       # the expense of potentially higher memory being used.
       active_n: 100,
       # Skip validating UTF8 for faster frame processing.
-      # Currently all text frames as handled only with JSON which already requires UTF-8
+      # Currently all text frames are handled only with JSON which already requires UTF-8
       validate_utf8: false,
       serializer: [
         {Phoenix.Socket.V1.JSONSerializer, "~> 1.0.0"},
-        {Phoenix.Socket.V2.JSONSerializer, "~> 2.0.0"}
+        {RealtimeWeb.Socket.V2Serializer, "~> 2.0.0"}
       ]
     ],
     longpoll: [
