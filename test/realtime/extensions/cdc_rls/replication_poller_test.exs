@@ -296,7 +296,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                false,
                [
                  sub1 = <<71, 36, 83, 212, 168, 9, 17, 240, 165, 186, 118, 202, 193, 157, 232, 187>>,
-                 sub2 = <<251, 188, 190, 118, 168, 119, 17, 240, 188, 87, 118, 202, 193, 157, 232, 187>>
+                 sub2 = <<251, 188, 190, 118, 168, 119, 17, 240, 188, 87, 118, 202, 193, 157, 232, 187>>,
+                 sub3 = <<49, 59, 209, 112, 173, 77, 17, 240, 191, 41, 118, 202, 193, 157, 232, 187>>
                ],
                []
              ]
@@ -306,9 +307,10 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
            messages: []
          }}
 
-      # Both subscriptions have node information
+      # All subscriptions have node information
       :ets.insert(args["subscribers_nodes_table"], {sub1, node()})
       :ets.insert(args["subscribers_nodes_table"], {sub2, :"someothernode@127.0.0.1"})
+      :ets.insert(args["subscribers_nodes_table"], {sub3, node()})
 
       expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
       reject(&TenantBroadcaster.pubsub_broadcast/5)
@@ -345,9 +347,10 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       assert Enum.count(calls) == 2
 
-      Enum.each(calls, fn [node, _, _, _, _, _] ->
-        assert node in [node(), :"someothernode@127.0.0.1"]
-      end)
+      node_subs = Enum.map(calls, fn [node, _, _, change, _, _] -> {node, change.subscription_ids} end)
+
+      assert {node(), MapSet.new([sub1, sub3])} in node_subs
+      assert {:"someothernode@127.0.0.1", MapSet.new([sub2])} in node_subs
     end
   end
 
