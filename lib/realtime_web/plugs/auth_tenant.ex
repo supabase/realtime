@@ -42,6 +42,9 @@ defmodule RealtimeWeb.AuthTenant do
         [] ->
           nil
 
+        [""] ->
+          nil
+
         [value | _] ->
           [bearer, token] = value |> String.split(" ")
           bearer = String.downcase(bearer)

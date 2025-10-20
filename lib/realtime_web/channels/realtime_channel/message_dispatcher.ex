@@ -81,6 +81,38 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
       %{} ->
         # Use the original topic that was joined without the external_id
         msg = %{msg | topic: join_topic}
+
+        msg =
+          if serializer == Phoenix.Socket.V1.JSONSerializer do
+            case msg.payload do
+              payload when is_map(payload) ->
+                msg
+
+              {user_event, metadata, :json, payload} ->
+                # Reconstruct the payload as expected by V1 serializer
+                payload = %{
+                  "event" => user_event,
+                  "payload" => Jason.decode!(payload),
+                  "type" => "broadcast"
+                }
+
+                if metadata do
+                  metadata = Jason.decode!(metadata)
+                  Map.put(payload, "metadata", metadata)
+                else
+                  payload
+                end
+
+                %{msg | payload: payload}
+
+              {_user_event, _metadata, :binary, _payload} ->
+                # FIXME this should log if log_level is info
+                raise "Unexpected binary payload for V1 serializer"
+            end
+          else
+            msg
+          end
+
         encoded_msg = serializer.fastlane!(msg)
         send(fastlane_pid, encoded_msg)
         Map.put(cache, serializer, encoded_msg)
