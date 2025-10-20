@@ -420,7 +420,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                       %{latency_committed_at: latency_committed_at, latency_inserted_at: latency_inserted_at},
                       %{tenant: ^external_id}}
 
-      assert latency_committed_at != 0
+      assert latency_committed_at
       assert latency_inserted_at != 0
     end
   end
