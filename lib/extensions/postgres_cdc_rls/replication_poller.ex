@@ -206,12 +206,13 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
           case collect_subscription_nodes(subscribers_nodes_table, change.subscription_ids) do
             {:ok, nodes} ->
-              for node <- nodes do
+              for {node, subscription_ids} <- nodes do
                 TenantBroadcaster.pubsub_direct_broadcast(
                   node,
                   tenant_id,
                   topic,
-                  change,
+                  # Send only the subscription IDs relevant to this node
+                  %{change | subscription_ids: MapSet.new(subscription_ids)},
                   MessageDispatcher,
                   :postgres_changes
                 )
@@ -236,10 +237,16 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   defp handle_list_changes_result({:error, reason}, _, _, _), do: {:error, reason}
 
   defp collect_subscription_nodes(subscribers_nodes_table, subscription_ids) do
-    Enum.reduce_while(subscription_ids, {:ok, MapSet.new()}, fn subscription_id, {:ok, acc} ->
+    Enum.reduce_while(subscription_ids, {:ok, %{}}, fn subscription_id, {:ok, acc} ->
       case :ets.lookup(subscribers_nodes_table, subscription_id) do
-        [{_, node}] -> {:cont, {:ok, MapSet.put(acc, node)}}
-        _ -> {:halt, {:error, :node_not_found}}
+        [{_, node}] ->
+          updated_acc =
+            Map.update(acc, node, [subscription_id], fn existing_ids -> [subscription_id | existing_ids] end)
+
+          {:cont, {:ok, updated_acc}}
+
+        _ ->
+          {:halt, {:error, :node_not_found}}
       end
     end)
   rescue
