@@ -15,6 +15,22 @@ defmodule Realtime.Tenants.ReplicationConnection do
   * `handler_module` - The module that will handle the data received from the replication stream.
   * `metadata` - The metadata to pass to the handler module.
 
+  ## How did we understood the data tuple format when pgoutput uses binary mode?
+  We checked the documentation with the help of AI and understood that pgoutput does the following logic:
+  * When `pgoutput` uses binary mode goes to https://doxygen.postgresql.org/proto_8c_source.html#l00767
+  * We end up in `OidSendFunctionCall` which gets the write function to call and transform into a binary payload based on OID - https://doxygen.postgresql.org/fmgr_8c.html#ad028dec5dc28e883308be264689f4559
+  * The functions are referenced in https://doxygen.postgresql.org/dir_19ba549c088f18020d0eadfcd07e87be.html
+  * It does `<data_tupe>.c` and calls `<data_type>_send` as the function to use
+    * Jsonb - https://doxygen.postgresql.org/jsonb_8c.html#afa4708e251f3078084e9986a46f228e9
+        * First byte is JSONB version (1), remainder is the text value
+    * Timestamp - https://doxygen.postgresql.org/backend_2utils_2adt_2timestamp_8c.html#ab0f80b3ae44bdcc50d0c0abb0c1d7939
+        * 64 bytes integer with microseconds since `2000-01-01`
+    * Boolean - https://doxygen.postgresql.org/bool_8c.html#a71cfb4f6c28259924b231dae4781b3fc
+        * 1 is true, 0 is false
+    * UUID - https://doxygen.postgresql.org/uuid_8c.html#a3cd205c61c108aaf08d6746c1d321e81
+        * 16 byte binary ( https://doxygen.postgresql.org/uuid_8h.html#a9692a0205a857ed2cc29558470c2ed77 )
+    * Text - https://doxygen.postgresql.org/varlena_8c.html#a0ea0ddd71c614e3fbd3571e70c53ed77
+        * Sends binary data
   """
   use Postgrex.ReplicationConnection
   use Realtime.Logs
@@ -236,7 +252,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     )
 
     query =
-      "START_REPLICATION SLOT #{replication_slot_name} LOGICAL 0/0 (proto_version '#{proto_version}', publication_names '#{publication_name}')"
+      "START_REPLICATION SLOT #{replication_slot_name} LOGICAL 0/0 (proto_version '#{proto_version}', publication_names '#{publication_name}', binary 'true')"
 
     {:stream, query, [], %{state | step: :streaming}}
   end
@@ -318,8 +334,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
            payload: Map.put_new(payload, "id", id)
          },
          :ok <- BatchBroadcast.broadcast(nil, tenant, %{messages: [broadcast_message]}, true) do
-      inserted_at = NaiveDateTime.from_iso8601!(inserted_at)
-      latency_inserted_at = NaiveDateTime.utc_now() |> NaiveDateTime.diff(inserted_at)
+      latency_inserted_at = NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.diff(inserted_at, :microsecond)
 
       Telemetry.execute(
         [:realtime, :tenants, :broadcast_from_database],
@@ -377,7 +392,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
     |> Map.new(fn
       {nil, %{name: name}} -> {name, nil}
       {value, %{name: name, type: "jsonb"}} -> {name, Jason.decode!(value)}
-      {value, %{name: name, type: "bool"}} -> {name, value == "t"}
       {value, %{name: name}} -> {name, value}
     end)
   end
