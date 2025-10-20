@@ -4,8 +4,8 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.54.4",
-      elixir: "~> 1.17.3",
+      version: "2.55.0",
+      elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),

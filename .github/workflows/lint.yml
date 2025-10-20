@@ -32,7 +32,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: 27.x # Define the OTP version [required]
-          elixir-version: 1.17.x # Define the elixir version [required]
+          elixir-version: 1.18.x # Define the elixir version [required]
       - name: Cache Mix
         uses: actions/cache@v4
         with:
