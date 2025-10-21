@@ -29,7 +29,7 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
     103
   >>
 
-  @client_user_push <<
+  @client_binary_user_broadcast_push <<
     # push
     3::size(8),
     # join_ref_size
@@ -38,23 +38,20 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
     3,
     # topic_size
     5,
-    # event_size
-    5,
     # user_event_size
     10,
+    # binary encoding
+    0::size(8),
     "12",
     "123",
     "topic",
-    "event",
     "user_event",
-    # binary encoding
-    0::size(8),
     101,
     102,
     103
   >>
 
-  @client_user_push_json <<
+  @client_json_user_broadcast_push <<
     # push
     3::size(8),
     # join_ref_size
@@ -63,17 +60,14 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
     3,
     # topic_size
     5,
-    # event_size
-    5,
     # user_event_size
     10,
+    # json encoding
+    1::size(8),
     "12",
     "123",
     "topic",
-    "event",
     "user_event",
-    # json encoding
-    1::size(8),
     123,
     34,
     97,
@@ -119,39 +113,75 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
     103
   >>
 
-  @user_broadcast <<
+  @binary_user_broadcast <<
     # broadcast
     4::size(8),
     # topic_size
     5,
-    # event_size
-    5,
     # user_event_size
     10,
-    "topic",
-    "event",
-    "user_event",
+    # metadata_size
+    17,
     # binary encoding
     0::size(8),
+    "topic",
+    "user_event",
+    # metadata
+    123,
+    34,
+    114,
+    101,
+    112,
+    108,
+    97,
+    121,
+    101,
+    100,
+    34,
+    58,
+    116,
+    114,
+    117,
+    101,
+    125,
+    # payload
     101,
     102,
     103
   >>
 
-  @user_broadcast_json <<
+  @json_user_broadcast <<
     # broadcast
     4::size(8),
     # topic_size
     5,
-    # event_size
-    5,
     # user_event_size
     10,
-    "topic",
-    "event",
-    "user_event",
+    # metadata_size
+    17,
     # json encoding
     1::size(8),
+    "topic",
+    "user_event",
+    # metadata
+    123,
+    34,
+    114,
+    101,
+    112,
+    108,
+    97,
+    121,
+    101,
+    100,
+    34,
+    58,
+    116,
+    114,
+    117,
+    101,
+    125,
+    # payload
     123,
     34,
     97,
@@ -320,21 +350,21 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
     test "fastlane binary UserBroadcast" do
       assert fastlane!(@serializer, %UserBroadcast{
                topic: "topic",
-               event: "event",
                user_event: "user_event",
+               metadata: %{"replayed" => true} |> Jason.encode!(),
                payload_encoding: :binary,
                payload: <<101, 102, 103>>
-             }) == @user_broadcast
+             }) == @binary_user_broadcast
     end
 
     test "fastlane json UserBroadcast" do
       assert fastlane!(@serializer, %UserBroadcast{
                topic: "topic",
-               event: "event",
                user_event: "user_event",
+               metadata: %{"replayed" => true} |> Jason.encode!(),
                payload_encoding: :json,
                payload: "{\"a\":\"b\"}"
-             }) == @user_broadcast_json
+             }) == @json_user_broadcast
     end
 
     test "fastlane with oversized headers" do
@@ -353,6 +383,16 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
           payload: {:binary, <<101, 102, 103>>}
         })
       end
+
+      assert_raise ArgumentError, ~r/unable to convert metadata to binary/, fn ->
+        fastlane!(@serializer, %UserBroadcast{
+          topic: "topic",
+          user_event: "user_event",
+          metadata: String.duplicate("e", 256),
+          payload_encoding: :json,
+          payload: "{\"a\":\"b\"}"
+        })
+      end
     end
   end
 
@@ -368,22 +408,22 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
     end
 
     test "binary user pushed message" do
-      assert decode!(@serializer, @client_user_push, opcode: :binary) == %Phoenix.Socket.Message{
+      assert decode!(@serializer, @client_binary_user_broadcast_push, opcode: :binary) == %Phoenix.Socket.Message{
                join_ref: "12",
                ref: "123",
                topic: "topic",
-               event: "event",
-               payload: {:binary, "user_event", <<101, 102, 103>>}
+               event: "broadcast",
+               payload: {"user_event", :binary, <<101, 102, 103>>}
              }
     end
 
     test "json binary user pushed message" do
-      assert decode!(@serializer, @client_user_push_json, opcode: :binary) == %Phoenix.Socket.Message{
+      assert decode!(@serializer, @client_json_user_broadcast_push, opcode: :binary) == %Phoenix.Socket.Message{
                join_ref: "12",
                ref: "123",
                topic: "topic",
-               event: "event",
-               payload: {:json, "user_event", "{\"a\":\"b\"}"}
+               event: "broadcast",
+               payload: {"user_event", :json, "{\"a\":\"b\"}"}
              }
     end
   end

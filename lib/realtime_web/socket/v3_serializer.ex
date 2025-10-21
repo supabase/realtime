@@ -1,48 +1,6 @@
 defmodule RealtimeWeb.Socket.V3Serializer do
   @moduledoc """
-  Custom serializer that handles broadcast and user push with:
-
-  First class:
-  * user_event
-  * payload encoding (JSON or binary)
-  * meta payload (JSON)
-  # {
-  #   "ref": null,
-  #   "event": "broadcast",
-  #   "payload": {
-  #     "event": "message",
-  #     "meta": {
-  #       "id": "67a7f1a3-44df-4708-937d-c3f157e84f78",
-  #       "replayed": true
-  #     },
-  #     "payload": {
-  #       "content": " :D",
-  #       "createdAt": "2025-10-19T18:08:26Z",
-  #       "id": "6e018938-5c27-4f3c-aa2a-de9f43f712e1",
-  #       "username": "mcqBpK-0WhE4pLTEszGCH"
-  #     },
-  #     "type": "broadcast"
-  #   },
-  #   "topic": "realtime:chat-room"
-  # }
-  #
-
-  # {
-  #   "ref": null,
-  #   "topic": "realtime:chat-room",
-  #   "user_event" : "message",
-  #   "meta": {
-  #     "id": "67a7f1a3-44df-4708-937d-c3f157e84f78",
-  #     "replayed": true
-  #   },
-  #   "payload": {
-  #     "content": " :D",
-  #     "createdAt": "2025-10-19T18:08:26Z",
-  #     "id": "6e018938-5c27-4f3c-aa2a-de9f43f712e1",
-  #     "username": "mcqBpK-0WhE4pLTEszGCH"
-  #   }
-  # }
-  #
+  Custom serializer that handles user broadcast and user broadcast push with
   """
 
   @behaviour Phoenix.Socket.Serializer
@@ -54,35 +12,14 @@ defmodule RealtimeWeb.Socket.V3Serializer do
   @user_broadcast 4
 
   alias Phoenix.Socket.{Message, Reply, Broadcast}
-  # alias RealtimeWeb.Socket.UserBroadcast
+  alias RealtimeWeb.Socket.UserBroadcast
 
   @impl true
-  # def fastlane!(%UserBroadcast{} = msg) do
-  #   topic_size = byte_size!(msg.topic, :topic, 255)
-  #   user_event_size = byte_size!(msg.user_event, :user_event, 255)
-  #   metadata_size = byte_size!(msg.metadata, :metadata, 255)
-  #   payload_encoding = if msg.payload_encoding == :json, do: 1, else: 0
-  #
-  #   bin = <<
-  #     @user_broadcast::size(8),
-  #     topic_size::size(8),
-  #     user_event_size::size(8),
-  #     metadata_size::size(8),
-  #     payload_encoding::size(8),
-  #     msg.topic::binary-size(topic_size),
-  #     msg.user_event::binary-size(user_event_size),
-  #     msg.metadata::binary-size(metadata_size),
-  #     msg.payload::binary
-  #   >>
-  #
-  #   {:socket_push, :binary, bin}
-  # end
-
-  def fastlane!(%Broadcast{payload: {user_event, metadata, payload_encoding, payload}} = msg) do
+  def fastlane!(%UserBroadcast{} = msg) do
     topic_size = byte_size!(msg.topic, :topic, 255)
-    user_event_size = byte_size!(user_event, :user_event, 255)
-    metadata_size = byte_size!(metadata, :metadata, 255)
-    payload_encoding = if payload_encoding == :json, do: 1, else: 0
+    user_event_size = byte_size!(msg.user_event, :user_event, 255)
+    metadata_size = byte_size!(msg.metadata, :metadata, 255)
+    payload_encoding = if msg.payload_encoding == :json, do: 1, else: 0
 
     bin = <<
       @user_broadcast::size(8),
@@ -91,12 +28,21 @@ defmodule RealtimeWeb.Socket.V3Serializer do
       metadata_size::size(8),
       payload_encoding::size(8),
       msg.topic::binary-size(topic_size),
-      user_event::binary-size(user_event_size),
-      metadata || <<>>::binary-size(metadata_size),
-      payload::binary
+      msg.user_event::binary-size(user_event_size),
+      msg.metadata || <<>>::binary-size(metadata_size),
+      msg.payload::binary
     >>
 
     {:socket_push, :binary, bin}
+  end
+
+  def fastlane!(%Broadcast{payload: {user_event, payload_encoding, payload}} = msg) do
+    fastlane!(%UserBroadcast{
+      topic: msg.topic,
+      user_event: user_event,
+      payload: payload,
+      payload_encoding: payload_encoding
+    })
   end
 
   def fastlane!(%Broadcast{payload: {:binary, data}} = msg) do
@@ -252,7 +198,7 @@ defmodule RealtimeWeb.Socket.V3Serializer do
     %Message{
       topic: topic,
       event: "broadcast",
-      payload: {user_event, nil, payload_encoding, data},
+      payload: {user_event, payload_encoding, data},
       ref: ref,
       join_ref: join_ref
     }

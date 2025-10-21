@@ -82,26 +82,20 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         # Use the original topic that was joined without the external_id
         msg = %{msg | topic: join_topic}
 
+        # Move this to V3 with a new function like V3Serializer.convert_to_v1(...)
         msg =
           if serializer == Phoenix.Socket.V1.JSONSerializer do
             case msg.payload do
               payload when is_map(payload) ->
                 msg
 
-              {user_event, metadata, :json, payload} ->
+              {user_event, :json, payload} ->
                 # Reconstruct the payload as expected by V1 serializer
                 payload = %{
                   "event" => user_event,
                   "payload" => Jason.decode!(payload),
                   "type" => "broadcast"
                 }
-
-                if metadata do
-                  metadata = Jason.decode!(metadata)
-                  Map.put(payload, "metadata", metadata)
-                else
-                  payload
-                end
 
                 %{msg | payload: payload}
 

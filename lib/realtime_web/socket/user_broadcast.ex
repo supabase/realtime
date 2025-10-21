@@ -6,7 +6,7 @@ defmodule RealtimeWeb.Socket.UserBroadcast do
 
     * `:topic` - The string topic or topic:subtopic pair namespace, for example "messages", "messages:123"
     * `:user_event`- The string user event name, for example "my-event"
-    * `:encoding`- :json or :binary
+    * `:payload_encoding`- :json or :binary
     * `:payload` - The actual message payload
 
   Optionally metadata which is an optional string encode as JSON
