@@ -198,11 +198,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         :ok
 
       _ ->
-        Realtime.GenCounter.add(rate_counter_args.id, rows_count)
-
         for row <- rows,
             change <- columns |> Enum.zip(row) |> generate_record() |> List.wrap() do
           topic = "realtime:postgres:" <> tenant_id
+
+          Realtime.GenCounter.add(rate_counter_args.id, MapSet.size(change.subscription_ids))
 
           case collect_subscription_nodes(subscribers_nodes_table, change.subscription_ids) do
             {:ok, nodes} ->
