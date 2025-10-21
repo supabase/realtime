@@ -1,8 +1,5 @@
 import { load } from "https://deno.land/std@0.224.0/dotenv/mod.ts";
-import {
-  createClient,
-  SupabaseClient,
-} from "npm:@supabase/supabase-js@2.49.5-next.5";
+import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@latest";
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   describe,

@@ -49,7 +49,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
   end
 
   def broadcast(auth_params, %Tenant{} = tenant, messages, super_user) do
-    with %Ecto.Changeset{valid?: true} = changeset <- changeset(%__MODULE__{}, messages),
+    with %Ecto.Changeset{valid?: true} = changeset <- changeset(%__MODULE__{}, messages, tenant),
          %Ecto.Changeset{changes: %{messages: messages}} = changeset,
          events_per_second_rate = Tenants.events_per_second_rate(tenant),
          :ok <- check_rate_limit(events_per_second_rate, tenant, length(messages)) do
@@ -93,17 +93,18 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
   def broadcast(_, nil, _, _), do: {:error, :tenant_not_found}
 
-  defp changeset(payload, attrs) do
+  defp changeset(payload, attrs, tenant) do
     payload
     |> cast(attrs, [])
-    |> cast_embed(:messages, required: true, with: &message_changeset/2)
+    |> cast_embed(:messages, required: true, with: fn message, attrs -> message_changeset(message, tenant, attrs) end)
   end
 
-  defp message_changeset(message, attrs) do
+  defp message_changeset(message, tenant, attrs) do
     message
     |> cast(attrs, [:id, :topic, :payload, :event, :private])
     |> maybe_put_private_change()
     |> validate_required([:topic, :payload, :event])
+    |> validate_payload_size(tenant)
   end
 
   defp maybe_put_private_change(changeset) do
@@ -111,6 +112,16 @@ defmodule Realtime.Tenants.BatchBroadcast do
       nil -> put_change(changeset, :private, false)
       _ -> changeset
     end
+  end
+
+  defp validate_payload_size(changeset, tenant) do
+    payload = get_change(changeset, :payload)
+    payload_size = byte_size(Jason.encode!(payload))
+    max_payload_size = tenant.max_payload_size_in_kb * 1000
+
+    if payload_size > max_payload_size,
+      do: add_error(changeset, :payload, "Payload size exceeds tenant limit"),
+      else: changeset
   end
 
   @event_type "broadcast"
