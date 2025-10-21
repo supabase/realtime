@@ -99,7 +99,7 @@ defmodule Extensions.PostgresCdcRls do
       %{
         id: tenant,
         start: {Rls.WorkerSupervisor, :start_link, [args]},
-        restart: :transient
+        restart: :temporary
       }
     )
   end

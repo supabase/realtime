@@ -76,21 +76,23 @@ defmodule Realtime.Extensions.CdcRlsTest do
       metadata = [metadata: subscription_metadata]
       :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
 
+      RealtimeWeb.Endpoint.subscribe(PostgresCdcRls.syn_topic(tenant.external_id))
       # First time it will return nil
       PostgresCdcRls.handle_connect(args)
       # Wait for it to start
-      Process.sleep(3000)
+      assert_receive %{event: "ready"}, 1000
+
+      on_exit(fn -> PostgresCdcRls.handle_stop(external_id, 10_000) end)
       {:ok, response} = PostgresCdcRls.handle_connect(args)
 
       # Now subscribe to the Postgres Changes
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params)
 
-      on_exit(fn -> PostgresCdcRls.handle_stop(external_id, 10_000) end)
+      RealtimeWeb.Endpoint.unsubscribe(PostgresCdcRls.syn_topic(tenant.external_id))
       %{tenant: tenant}
     end
 
-    @tag skip: "Flaky test. When logger handle_sasl_reports is enabled this test doesn't break"
-    test "Check supervisor crash and respawn", %{tenant: tenant} do
+    test "supervisor crash must not respawn", %{tenant: tenant} do
       sup =
         Enum.reduce_while(1..30, nil, fn _, acc ->
           :syn.lookup(Extensions.PostgresCdcRls, tenant.external_id)
@@ -112,12 +114,11 @@ defmodule Realtime.Extensions.CdcRlsTest do
       Process.exit(sup, :kill)
       assert_receive {:DOWN, _, :process, ^sup, _reason}, 5000
 
-      assert_receive %{event: "ready"}, 5000
+      assert_receive %{event: "postgres_cdc_rls_down"}
 
-      {sup2, _} = :syn.lookup(Extensions.PostgresCdcRls, tenant.external_id)
+      refute_receive %{event: "ready"}, 1000
 
-      assert(sup != sup2)
-      assert Process.alive?(sup2)
+      :undefined = :syn.lookup(Extensions.PostgresCdcRls, tenant.external_id)
     end
 
     test "Subscription manager updates oids", %{tenant: tenant} do
