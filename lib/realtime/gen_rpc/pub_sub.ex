@@ -56,7 +56,7 @@ defmodule Realtime.GenRpcPubSub do
       GenRpc.abcast(other_nodes, worker, Worker.forward_to_local(topic, message, dispatcher), key: worker)
 
       # send a message to a node in each region to forward to the rest of the region
-      other_region_nodes = nodes_from_other_regions(my_region, worker)
+      other_region_nodes = nodes_from_other_regions(my_region, self())
 
       GenRpc.abcast(other_region_nodes, worker, Worker.forward_to_region(topic, message, dispatcher), key: worker)
     else
