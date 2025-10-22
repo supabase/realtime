@@ -41,19 +41,6 @@ default_db_host = "127.0.0.1"
       })
       |> Repo.insert!()
 
-    publication = "supabase_realtime"
-
-    [
-      "drop publication if exists #{publication}",
-      "drop table if exists public.test_tenant;",
-      "create table public.test_tenant ( id SERIAL PRIMARY KEY, details text );",
-      "grant all on table public.test_tenant to anon;",
-      "grant all on table public.test_tenant to postgres;",
-      "grant all on table public.test_tenant to authenticated;",
-      "create publication #{publication} for table public.test_tenant"
-    ]
-    |> Enum.each(&query!(Repo, &1, []))
-
     tenant
   end)
 
@@ -61,10 +48,22 @@ default_db_host = "127.0.0.1"
 settings = Database.from_tenant(tenant, "realtime_migrations", :stop)
 settings = %{settings | max_restarts: 0, ssl: false}
 {:ok, tenant_conn} = Database.connect_db(settings)
+publication = "supabase_realtime"
 
 Postgrex.transaction(tenant_conn, fn db_conn ->
   Postgrex.query!(db_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
   Postgrex.query!(db_conn, "CREATE SCHEMA IF NOT EXISTS realtime", [])
+
+  [
+    "drop publication if exists #{publication}",
+    "drop table if exists public.test_tenant;",
+    "create table public.test_tenant ( id SERIAL PRIMARY KEY, details text );",
+    "grant all on table public.test_tenant to anon;",
+    "grant all on table public.test_tenant to postgres;",
+    "grant all on table public.test_tenant to authenticated;",
+    "create publication #{publication} for table public.test_tenant"
+  ]
+  |> Enum.each(&Postgrex.query!(db_conn, &1))
 end)
 
 case Tenants.Migrations.run_migrations(tenant) do
