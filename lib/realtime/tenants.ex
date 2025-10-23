@@ -501,4 +501,19 @@ defmodule Realtime.Tenants do
   @spec region(Tenant.t()) :: String.t() | nil
   def region(%Tenant{extensions: [%{settings: settings}]}), do: Map.get(settings, "region")
   def region(_), do: nil
+
+  @doc """
+  """
+  @spec validate_payload_size(%Tenant{} | binary(), map()) :: :ok | {:error, :payload_size_exceeded}
+  def validate_payload_size(tenant_id, payload) when is_binary(tenant_id) do
+    tenant_id
+    |> Cache.get_tenant_by_external_id()
+    |> validate_payload_size(payload)
+  end
+
+  def validate_payload_size(%Tenant{max_payload_size_in_kb: max_payload_size_in_kb}, payload) do
+    max_payload_size = max_payload_size_in_kb * 1000
+    payload_size = :erlang.external_size(payload)
+    if payload_size > max_payload_size, do: {:error, :payload_size_exceeded}, else: :ok
+  end
 end

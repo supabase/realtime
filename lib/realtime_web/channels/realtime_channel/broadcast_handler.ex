@@ -6,6 +6,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
 
   import Phoenix.Socket, only: [assign: 3]
 
+  alias Realtime.Tenants
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.TenantBroadcaster
   alias Phoenix.Socket
@@ -38,8 +39,23 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
           |> increment_rate_counter()
 
         %{ack_broadcast: ack_broadcast} = socket.assigns
-        send_message(tenant_id, self_broadcast, tenant_topic, payload)
-        if ack_broadcast, do: {:reply, :ok, socket}, else: {:noreply, socket}
+
+        res =
+          case Tenants.validate_payload_size(tenant_id, payload) do
+            :ok -> send_message(tenant_id, self_broadcast, tenant_topic, payload)
+            {:error, error} -> {:error, error}
+          end
+
+        cond do
+          ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
+            {:reply, {:error, :payload_size_exceeded}, socket}
+
+          ack_broadcast ->
+            {:reply, :ok, socket}
+
+          true ->
+            {:noreply, socket}
+        end
 
       {:ok, policies} ->
         {:noreply, assign(socket, :policies, policies)}
@@ -65,11 +81,23 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     } = socket
 
     socket = increment_rate_counter(socket)
-    send_message(tenant_id, self_broadcast, tenant_topic, payload)
 
-    if ack_broadcast,
-      do: {:reply, :ok, socket},
-      else: {:noreply, socket}
+    res =
+      case Tenants.validate_payload_size(tenant_id, payload) do
+        :ok -> send_message(tenant_id, self_broadcast, tenant_topic, payload)
+        {:error, error} -> {:error, error}
+      end
+
+    cond do
+      ack_broadcast && match?({:error, :payload_size_exceeded}, res) ->
+        {:reply, {:error, :payload_size_exceeded}, socket}
+
+      ack_broadcast ->
+        {:reply, :ok, socket}
+
+      true ->
+        {:noreply, socket}
+    end
   end
 
   defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do

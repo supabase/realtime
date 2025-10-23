@@ -116,12 +116,11 @@ defmodule Realtime.Tenants.BatchBroadcast do
 
   defp validate_payload_size(changeset, tenant) do
     payload = get_change(changeset, :payload)
-    payload_size = byte_size(Jason.encode!(payload))
-    max_payload_size = tenant.max_payload_size_in_kb * 1000
 
-    if payload_size > max_payload_size,
-      do: add_error(changeset, :payload, "Payload size exceeds tenant limit"),
-      else: changeset
+    case Tenants.validate_payload_size(tenant, payload) do
+      :ok -> changeset
+      _ -> add_error(changeset, :payload, "Payload size exceeds tenant limit")
+    end
   end
 
   @event_type "broadcast"
