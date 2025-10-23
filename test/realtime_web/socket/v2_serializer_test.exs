@@ -1,13 +1,13 @@
-defmodule RealtimeWeb.Socket.V3SerializerTest do
+defmodule RealtimeWeb.Socket.V2SerializerTest do
   use ExUnit.Case, async: true
 
   alias Phoenix.Socket.{Broadcast, Message, Reply}
   alias RealtimeWeb.Socket.UserBroadcast
-  alias RealtimeWeb.Socket.V3Serializer
+  alias RealtimeWeb.Socket.V2Serializer
 
-  @serializer V3Serializer
-  @v3_fastlane_json "[null,null,\"t\",\"e\",{\"m\":1}]"
-  @v3_msg_json "[null,null,\"t\",\"e\",{\"m\":1}]"
+  @serializer V2Serializer
+  @v2_fastlane_json "[null,null,\"t\",\"e\",{\"m\":1}]"
+  @v2_msg_json "[null,null,\"t\",\"e\",{\"m\":1}]"
 
   @client_push <<
     # push
@@ -193,7 +193,7 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
     125
   >>
 
-  def encode!(serializer, msg) do
+  defp encode!(serializer, msg) do
     case serializer.encode!(msg) do
       {:socket_push, :text, encoded} ->
         assert is_list(encoded)
@@ -205,9 +205,9 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
     end
   end
 
-  def decode!(serializer, msg, opts \\ []), do: serializer.decode!(msg, opts)
+  defp decode!(serializer, msg, opts \\ []), do: serializer.decode!(msg, opts)
 
-  def fastlane!(serializer, msg) do
+  defp fastlane!(serializer, msg) do
     case serializer.fastlane!(msg) do
       {:socket_push, :text, encoded} ->
         assert is_list(encoded)
@@ -221,7 +221,7 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
 
   test "encode!/1 encodes `Phoenix.Socket.Message` as JSON" do
     msg = %Message{topic: "t", event: "e", payload: %{m: 1}}
-    assert encode!(@serializer, msg) == @v3_msg_json
+    assert encode!(@serializer, msg) == @v2_msg_json
   end
 
   test "encode!/1 raises when payload is not a map" do
@@ -244,12 +244,12 @@ defmodule RealtimeWeb.Socket.V3SerializerTest do
 
   test "decode!/2 decodes `Phoenix.Socket.Message` from JSON" do
     assert %Message{topic: "t", event: "e", payload: %{"m" => 1}} ==
-             decode!(@serializer, @v3_msg_json, opcode: :text)
+             decode!(@serializer, @v2_msg_json, opcode: :text)
   end
 
   test "fastlane!/1 encodes a broadcast into a message as JSON" do
     msg = %Broadcast{topic: "t", event: "e", payload: %{m: 1}}
-    assert fastlane!(@serializer, msg) == @v3_fastlane_json
+    assert fastlane!(@serializer, msg) == @v2_fastlane_json
   end
 
   test "fastlane!/1 raises when payload is not a map" do

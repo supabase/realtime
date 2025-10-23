@@ -1,6 +1,7 @@
-defmodule RealtimeWeb.Socket.V3Serializer do
+defmodule RealtimeWeb.Socket.V2Serializer do
   @moduledoc """
-  Custom serializer that handles user broadcast and user broadcast push with
+  Custom serializer that is a superset of Phoenix's V2 JSONSerializer
+  that handles user broadcast and user broadcast push
   """
 
   @behaviour Phoenix.Socket.Serializer

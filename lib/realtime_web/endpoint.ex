@@ -29,7 +29,7 @@ defmodule RealtimeWeb.Endpoint do
       validate_utf8: false,
       serializer: [
         {Phoenix.Socket.V1.JSONSerializer, "~> 1.0.0"},
-        {RealtimeWeb.Socket.V3Serializer, "~> 3.0.0"}
+        {RealtimeWeb.Socket.V2Serializer, "~> 2.0.0"}
       ]
     ],
     longpoll: [

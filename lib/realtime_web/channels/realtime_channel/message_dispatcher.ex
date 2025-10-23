@@ -82,7 +82,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         # Use the original topic that was joined without the external_id
         msg = %{msg | topic: join_topic}
 
-        # Move this to V3 with a new function like V3Serializer.convert_to_v1(...)
+        # Move this to V2 with a new function like V2Serializer.convert_to_v1(...)
         msg =
           if serializer == Phoenix.Socket.V1.JSONSerializer do
             case msg.payload do
