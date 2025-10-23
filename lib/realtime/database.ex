@@ -246,9 +246,9 @@ defmodule Realtime.Database do
   @spec pool_size_by_application_name(binary(), map() | nil) :: non_neg_integer()
   def pool_size_by_application_name(application_name, settings) do
     case application_name do
-      "realtime_subscription_manager" -> settings["subcriber_pool_size"] || 1
+      "realtime_subscription_manager" -> 1
       "realtime_subscription_manager_pub" -> settings["subs_pool_size"] || 1
-      "realtime_subscription_checker" -> settings["subs_pool_size"] || 1
+      "realtime_subscription_checker" -> 1
       "realtime_connect" -> settings["db_pool"] || 1
       "realtime_health_check" -> 1
       "realtime_janitor" -> 1
