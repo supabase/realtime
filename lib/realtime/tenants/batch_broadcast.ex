@@ -130,11 +130,9 @@ defmodule Realtime.Tenants.BatchBroadcast do
     payload = %{"payload" => message.payload, "event" => message.event, "type" => "broadcast"}
 
     payload =
-      if message[:id] do
-        Map.put(payload, "meta", %{"id" => message.id})
-      else
-        payload
-      end
+      if message[:id],
+        do: Map.put(payload, "meta", %{"id" => message.id}),
+        else: payload
 
     broadcast = %Phoenix.Socket.Broadcast{topic: message.topic, event: @event_type, payload: payload}
 
