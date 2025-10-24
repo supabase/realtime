@@ -151,6 +151,32 @@ defmodule RealtimeWeb.BroadcastControllerTest do
 
       refute_receive {:socket_push, _, _}
     end
+
+    test "returns 422 when batch of messages includes a message that exceeds the tenant payload size", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      sub_topic_1 = "sub_topic_1"
+      sub_topic_2 = "sub_topic_2"
+      topic_1 = Tenants.tenant_topic(tenant, sub_topic_1)
+      topic_2 = Tenants.tenant_topic(tenant, sub_topic_2)
+
+      payload_1 = %{"data" => "data"}
+      payload_2 = %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 100)}
+      event_1 = "event_1"
+      event_2 = "event_2"
+
+      conn =
+        post(conn, Routes.broadcast_path(conn, :broadcast), %{
+          "messages" => [
+            %{"topic" => sub_topic_1, "payload" => payload_1, "event" => event_1},
+            %{"topic" => sub_topic_1, "payload" => payload_1, "event" => event_1},
+            %{"topic" => sub_topic_2, "payload" => payload_2, "event" => event_2}
+          ]
+        })
+
+      assert conn.status == 422
+    end
   end
 
   describe "too many requests" do

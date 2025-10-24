@@ -333,6 +333,10 @@ defmodule Realtime.Tenants.ReplicationConnection do
         log_error("UnableToBroadcastChanges", error)
         {:noreply, state}
 
+      %Ecto.Changeset{valid?: false, changes: %{messages: [%{errors: [payload: {error, _}]} | _]}} ->
+        log_error("UnableToBroadcastChanges", error)
+        {:noreply, state}
+
       _ ->
         {:noreply, state}
     end

@@ -312,6 +312,82 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
       assert avg == 0.0
     end
+
+    test "handle payload size excedding limits in private channels", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true}},
+          ack_broadcast: false
+        )
+
+      assert {:noreply, _} =
+               BroadcastHandler.handle(
+                 %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
+                 db_conn,
+                 socket
+               )
+
+      Process.sleep(120)
+
+      refute_received {:socket_push, :text, _}
+    end
+
+    test "handle payload size excedding limits in public channels", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic, ack_broadcast: false, private?: false)
+
+      assert {:noreply, _} =
+               BroadcastHandler.handle(
+                 %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
+                 db_conn,
+                 socket
+               )
+
+      Process.sleep(120)
+
+      refute_received {:socket_push, :text, _}
+    end
+
+    test "handle payload size excedding limits in private channel and if ack it will receive error", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true}},
+          ack_broadcast: true
+        )
+
+      assert {:reply, {:error, :payload_size_exceeded}, _} =
+               BroadcastHandler.handle(
+                 %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
+                 db_conn,
+                 socket
+               )
+
+      Process.sleep(120)
+
+      refute_received {:socket_push, :text, _}
+    end
+
+    test "handle payload size excedding limits in public channels and if ack it will receive error", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket = socket_fixture(tenant, topic, ack_broadcast: true, private?: false)
+
+      assert {:reply, {:error, :payload_size_exceeded}, _} =
+               BroadcastHandler.handle(
+                 %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
+                 db_conn,
+                 socket
+               )
+
+      Process.sleep(120)
+
+      refute_received {:socket_push, :text, _}
+    end
   end
 
   defp initiate_tenant(context) do
