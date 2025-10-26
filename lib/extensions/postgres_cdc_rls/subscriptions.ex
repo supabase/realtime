@@ -7,13 +7,16 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
 
   @type conn() :: Postgrex.conn()
+  @type filter :: {binary, binary, binary}
+  @type subscription_params :: {binary, binary, [filter]}
+  @type subscription_list :: [%{id: binary, claims: map, subscription_params: subscription_params}]
 
   @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
 
-  @spec create(conn(), String.t(), [map()], pid(), pid()) ::
+  @spec create(conn(), String.t(), subscription_list, pid(), pid()) ::
           {:ok, Postgrex.Result.t()}
           | {:error, Exception.t() | :malformed_subscription_params | {:subscription_insert_failed, map()}}
-  def create(conn, publication, params_list, manager, caller) do
+  def create(conn, publication, subscription_list, manager, caller) do
     sql = "with sub_tables as (
         select
         rr.entity
@@ -50,37 +53,30 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
          id"
 
     transaction(conn, fn conn ->
-      Enum.map(params_list, fn %{id: id, claims: claims, params: params} ->
-        case parse_subscription_params(params) do
-          {:ok, [schema, table, filters]} ->
-            case query(conn, sql, [publication, schema, table, id, claims, filters]) do
-              {:ok, %{num_rows: num} = result} when num > 0 ->
-                send(manager, {:subscribed, {caller, id}})
-                result
+      Enum.map(subscription_list, fn %{id: id, claims: claims, subscription_params: params = {schema, table, filters}} ->
+        case query(conn, sql, [publication, schema, table, id, claims, filters]) do
+          {:ok, %{num_rows: num} = result} when num > 0 ->
+            send(manager, {:subscribed, {caller, id}})
+            result
 
-              {:ok, _} ->
-                msg =
-                  "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [#{params_to_log(params)}]"
+          {:ok, _} ->
+            msg =
+              "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [#{params_to_log(params)}]"
 
-                rollback(conn, msg)
+            rollback(conn, msg)
 
-              {:error, exception} ->
-                msg =
-                  "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
+          {:error, exception} ->
+            msg =
+              "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
 
-                rollback(conn, msg)
-            end
-
-          {:error, reason} ->
-            rollback(conn, reason)
+            rollback(conn, msg)
         end
       end)
     end)
   end
 
-  defp params_to_log(map) do
-    map
-    |> Map.to_list()
+  defp params_to_log({schema, table, filters}) do
+    [schema: schema, table: table, filters: filters]
     |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{to_log(v)}" end)
   end
 
@@ -166,31 +162,47 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   ## Examples
 
-      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=eq.hey"}
-      iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
-      {:ok, ["public", "messages", [{"subject", "eq", "hey"}]]}
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=eq.hey"})
+      {:ok, {"public", "messages", [{"subject", "eq", "hey"}]}}
 
   `in` filter:
 
-      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=in.(hidee,ho)"}
-      iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
-      {:ok, ["public", "messages", [{"subject", "in", "{hidee,ho}"}]]}
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=in.(hidee,ho)"})
+      {:ok, {"public", "messages", [{"subject", "in", "{hidee,ho}"}]}}
+
+  no filter:
+
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages"})
+      {:ok, {"public", "messages", []}}
+
+  only schema:
+
+      iex> parse_subscription_params(%{"schema" => "public"})
+      {:ok, {"public", "*", []}}
+
+  only table:
+
+      iex> parse_subscription_params(%{"table" => "messages"})
+      {:ok, {"public", "messages", []}}
 
   An unsupported filter will respond with an error tuple:
 
-      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "subject=like.hey"}
-      iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=like.hey"})
       {:error, ~s(Error parsing `filter` params: ["like", "hey"])}
 
   Catch `undefined` filters:
 
-      iex> params = %{"schema" => "public", "table" => "messages", "filter" => "undefined"}
-      iex> Extensions.PostgresCdcRls.Subscriptions.parse_subscription_params(params)
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "undefined"})
       {:error, ~s(Error parsing `filter` params: ["undefined"])}
+
+  Catch `missing params`:
+
+      iex> parse_subscription_params(%{})
+      {:error, ~s(No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: %{})}
 
   """
 
-  @spec parse_subscription_params(map()) :: {:ok, list} | {:error, binary()}
+  @spec parse_subscription_params(map()) :: {:ok, subscription_params} | {:error, binary()}
   def parse_subscription_params(params) do
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
@@ -198,7 +210,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
              [filter_type, value] when filter_type in @filter_types <-
                String.split(rest, ".", parts: 2),
              {:ok, formatted_value} <- format_filter_value(filter_type, value) do
-          {:ok, [schema, table, [{col, filter_type, formatted_value}]]}
+          {:ok, {schema, table, [{col, filter_type, formatted_value}]}}
         else
           {:error, msg} ->
             {:error, "Error parsing `filter` params: #{msg}"}
@@ -208,13 +220,13 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         end
 
       %{"schema" => schema, "table" => table} ->
-        {:ok, [schema, table, []]}
+        {:ok, {schema, table, []}}
 
       %{"schema" => schema} ->
-        {:ok, [schema, "*", []]}
+        {:ok, {schema, "*", []}}
 
       %{"table" => table} ->
-        {:ok, ["public", table, []]}
+        {:ok, {"public", table, []}}
 
       map when is_map_key(map, "user_token") or is_map_key(map, "auth_token") ->
         {:error,

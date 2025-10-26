@@ -11,6 +11,7 @@ defmodule Extensions.PostgresCdcRls do
   alias Rls.Subscriptions
   alias Realtime.GenRpc
 
+  @impl true
   @spec handle_connect(map()) :: {:ok, {pid(), pid()}} | nil
   def handle_connect(args) do
     case get_manager_conn(args["id"]) do
@@ -26,22 +27,39 @@ defmodule Extensions.PostgresCdcRls do
     end
   end
 
-  def handle_after_connect({manager_pid, conn}, settings, params) do
-    publication = settings["publication"]
-    opts = [conn, publication, params, manager_pid, self()]
-    conn_node = node(conn)
+  @impl true
+  def handle_after_connect({manager_pid, conn}, settings, params_list) do
+    with {:ok, subscription_list} <- subscription_list(params_list) do
+      publication = settings["publication"]
+      opts = [conn, publication, subscription_list, manager_pid, self()]
+      conn_node = node(conn)
 
-    if conn_node !== node() do
-      GenRpc.call(conn_node, Subscriptions, :create, opts, timeout: 15_000)
-    else
-      apply(Subscriptions, :create, opts)
+      if conn_node !== node() do
+        GenRpc.call(conn_node, Subscriptions, :create, opts, timeout: 15_000)
+      else
+        apply(Subscriptions, :create, opts)
+      end
     end
   end
 
+  defp subscription_list(params_list) do
+    Enum.reduce_while(params_list, [], fn params, acc ->
+      case Subscriptions.parse_subscription_params(params[:params]) do
+        {:ok, subscription_params} ->
+          {:cont, {:ok, [%{id: params.id, claims: params.claims, subscription_params: subscription_params} | acc]}}
+
+        {:error, reason} ->
+          {:halt, {:error, :malformed_subscription_params, reason}}
+      end
+    end)
+  end
+
+  @impl true
   def handle_subscribe(_, tenant, metadata) do
     Endpoint.subscribe("realtime:postgres:" <> tenant, metadata)
   end
 
+  @impl true
   @doc """
   Stops the Supervision tree for a tenant.
 

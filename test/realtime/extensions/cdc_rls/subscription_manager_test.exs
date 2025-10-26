@@ -145,7 +145,7 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
 
     pg_change_params = %{
       id: uuid,
-      params: %{"event" => "*", "schema" => "public"},
+      subscription_params: {"public", "*", []},
       claims: %{
         "exp" => System.system_time(:second) + 100_000,
         "iat" => 0,

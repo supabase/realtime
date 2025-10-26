@@ -297,6 +297,12 @@ defmodule RealtimeWeb.RealtimeChannel do
             push_system_message("postgres_changes", socket, "ok", message, channel_name)
             {:noreply, assign(socket, :pg_sub_ref, nil)}
 
+          {:error, :malformed_subscription_params, error} ->
+            maybe_log_warning(socket, "RealtimeDisabledForConfiguration", error)
+            push_system_message("postgres_changes", socket, "error", error, channel_name)
+            # No point in retrying if the params are invalid
+            {:noreply, assign(socket, :pg_sub_ref, nil)}
+
           error ->
             maybe_log_warning(socket, "RealtimeDisabledForConfiguration", error)
 
