@@ -214,7 +214,7 @@ defmodule Realtime.ApiTest do
     end
 
     test "valid data and no changes to tenant will not refresh cache", %{tenant: tenant} do
-      reject(&Realtime.Tenants.Cache.get_tenant_by_external_id/1)
+      reject(&Realtime.Tenants.Cache.distributed_invalidate_tenant_cache/1)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{name: tenant.name})
     end
   end

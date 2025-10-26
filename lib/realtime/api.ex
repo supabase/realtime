@@ -6,6 +6,7 @@ defmodule Realtime.Api do
 
   import Ecto.Query
 
+  alias Ecto.Changeset
   alias Realtime.Api.Extensions
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
@@ -198,7 +199,7 @@ defmodule Realtime.Api do
       new_settings = Map.put(settings, to, value)
 
       extension
-      |> Ecto.Changeset.cast(%{settings: new_settings}, [:settings])
+      |> Changeset.cast(%{settings: new_settings}, [:settings])
       |> Repo.update!()
     end
   end
@@ -222,23 +223,21 @@ defmodule Realtime.Api do
     |> Map.put(:events_per_second_now, current)
   end
 
-  defp maybe_invalidate_cache(
-         %Ecto.Changeset{changes: changes, valid?: true, data: %{external_id: external_id}} = changeset
-       )
-       when changes != %{} and requires_restarting_db_connection(changeset) do
+  defp maybe_invalidate_cache(%Changeset{changes: changes, valid?: true, data: %{external_id: external_id}})
+       when changes != %{} do
     Tenants.Cache.distributed_invalidate_tenant_cache(external_id)
   end
 
   defp maybe_invalidate_cache(_changeset), do: nil
 
-  defp maybe_trigger_disconnect(%Ecto.Changeset{data: %{external_id: external_id}} = changeset)
+  defp maybe_trigger_disconnect(%Changeset{data: %{external_id: external_id}} = changeset)
        when requires_disconnect(changeset) do
     SocketDisconnect.distributed_disconnect(external_id)
   end
 
   defp maybe_trigger_disconnect(_changeset), do: nil
 
-  defp maybe_restart_db_connection(%Ecto.Changeset{data: %{external_id: external_id}} = changeset)
+  defp maybe_restart_db_connection(%Changeset{data: %{external_id: external_id}} = changeset)
        when requires_restarting_db_connection(changeset) do
     Connect.shutdown(external_id)
   end
