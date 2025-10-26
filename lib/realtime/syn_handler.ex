@@ -53,19 +53,19 @@ defmodule Realtime.SynHandler do
   If it times out an exit with reason :kill that can't be trapped
   """
   @impl true
-  def resolve_registry_conflict(mod, name, {pid1, _meta1, time1}, {pid2, _meta2, time2}) do
-    {pid_to_keep, pid_to_stop} = decide(pid1, time1, pid2, time2)
+  def resolve_registry_conflict(mod, name, {pid1, _meta1, _time1}, {pid2, _meta2, _time2}) do
+    {pid_to_keep, pid_to_stop} = decide(pid1, pid2, name)
 
     # Is this function running on the node that should stop?
     if node(pid_to_stop) == node() do
       log(
-        "Resolving conflict on scope #{inspect(mod)} for name #{inspect(name)} {#{inspect(pid1)}, #{time1}} vs {#{inspect(pid2)}, #{time2}}, stop local process: #{inspect(pid_to_stop)}"
+        "Resolving conflict on scope #{inspect(mod)} for name #{inspect(name)} {#{node(pid1)}, #{inspect(pid1)}} vs {#{node(pid2)}, #{inspect(pid2)}}, stop local process: #{inspect(pid_to_stop)}"
       )
 
       stop(pid_to_stop)
     else
       log(
-        "Resolving conflict on scope #{inspect(mod)} for name #{inspect(name)} {#{inspect(pid1)}, #{time1}} vs {#{inspect(pid2)}, #{time2}}, remote process will be stopped: #{inspect(pid_to_stop)}"
+        "Resolving conflict on scope #{inspect(mod)} for name #{inspect(name)} {#{node(pid1)}, #{inspect(pid1)}} vs {#{node(pid2)}, #{inspect(pid2)}}, remote process will be stopped: #{inspect(pid_to_stop)}"
       )
     end
 
@@ -90,23 +90,26 @@ defmodule Realtime.SynHandler do
 
   defp log(message), do: Logger.warning("SynHandler(#{node()}): #{message}")
 
-  # If the time on both pids are exactly the same
-  # we compare the node names and pick one consistently
-  # Node names are necessarily unique
-  defp decide(pid1, time1, pid2, time2) when time1 == time2 do
-    if node(pid1) < node(pid2) do
-      {pid1, pid2}
-    else
-      {pid2, pid1}
-    end
-  end
+  # We use node and the name to decide who lives and who dies
+  # This way both nodes will always agree on the same outcome
+  # regardless of timing issues
+  defp decide(pid1, pid2, name) do
+    # We hash the name to not always pick one specific node when a conflict happens
+    # between these 2 nodes
+    hash = :erlang.phash2(name, 2)
 
-  defp decide(pid1, time1, pid2, time2) do
-    # We pick the one that started first.
-    if time1 < time2 do
-      {pid1, pid2}
+    if hash == 1 do
+      if node(pid1) < node(pid2) do
+        {pid1, pid2}
+      else
+        {pid2, pid1}
+      end
     else
-      {pid2, pid1}
+      if node(pid1) < node(pid2) do
+        {pid2, pid1}
+      else
+        {pid1, pid2}
+      end
     end
   end
 
