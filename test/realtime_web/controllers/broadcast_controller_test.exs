@@ -158,8 +158,6 @@ defmodule RealtimeWeb.BroadcastControllerTest do
     } do
       sub_topic_1 = "sub_topic_1"
       sub_topic_2 = "sub_topic_2"
-      topic_1 = Tenants.tenant_topic(tenant, sub_topic_1)
-      topic_2 = Tenants.tenant_topic(tenant, sub_topic_2)
 
       payload_1 = %{"data" => "data"}
       payload_2 = %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 100)}

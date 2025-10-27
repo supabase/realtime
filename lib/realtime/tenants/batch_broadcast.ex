@@ -33,7 +33,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
             messages: list(%{id: String.t(), topic: String.t(), payload: map(), event: String.t(), private: boolean()})
           },
           super_user :: boolean()
-        ) :: :ok | {:error, atom()}
+        ) :: :ok | {:error, atom() | Ecto.Changeset.t()}
   def broadcast(auth_params, tenant, messages, super_user \\ false)
 
   def broadcast(%Plug.Conn{} = conn, %Tenant{} = tenant, messages, super_user) do
@@ -71,15 +71,11 @@ defmodule Realtime.Tenants.BatchBroadcast do
       |> Enum.group_by(fn event -> Map.get(event, :topic) end)
       |> Enum.each(fn {topic, events} ->
         if super_user do
-          Enum.each(events, fn message ->
-            send_message_and_count(tenant, events_per_second_rate, message, false)
-          end)
+          Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
         else
           case permissions_for_message(tenant, auth_params, topic) do
             %Policies{broadcast: %BroadcastPolicies{write: true}} ->
-              Enum.each(events, fn message ->
-                send_message_and_count(tenant, events_per_second_rate, message, false)
-              end)
+              Enum.each(events, fn message -> send_message_and_count(tenant, events_per_second_rate, message, false) end)
 
             _ ->
               nil
@@ -88,6 +84,9 @@ defmodule Realtime.Tenants.BatchBroadcast do
       end)
 
       :ok
+    else
+      %Ecto.Changeset{valid?: false} = changeset -> {:error, changeset}
+      error -> error
     end
   end
 

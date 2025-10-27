@@ -511,8 +511,9 @@ defmodule Realtime.Tenants do
     |> validate_payload_size(payload)
   end
 
+  @payload_size_padding 500
   def validate_payload_size(%Tenant{max_payload_size_in_kb: max_payload_size_in_kb}, payload) do
-    max_payload_size = max_payload_size_in_kb * 1000
+    max_payload_size = max_payload_size_in_kb * 1000 + @payload_size_padding
     payload_size = :erlang.external_size(payload)
     if payload_size > max_payload_size, do: {:error, :payload_size_exceeded}, else: :ok
   end

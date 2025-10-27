@@ -372,7 +372,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
       result = BatchBroadcast.broadcast(nil, tenant, messages, false)
-      assert %Ecto.Changeset{valid?: false} = result
+      assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
 
     test "returns changeset error when payload is missing", %{tenant: tenant} do
@@ -382,7 +382,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
       result = BatchBroadcast.broadcast(nil, tenant, messages, false)
-      assert %Ecto.Changeset{valid?: false} = result
+      assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
 
     test "returns changeset error when event is missing", %{tenant: tenant} do
@@ -391,14 +391,14 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
       result = BatchBroadcast.broadcast(nil, tenant, messages, false)
-      assert %Ecto.Changeset{valid?: false} = result
+      assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
 
     test "returns changeset error when messages array is empty", %{tenant: tenant} do
       messages = %{messages: []}
       reject(&TenantBroadcaster.pubsub_broadcast/5)
       result = BatchBroadcast.broadcast(nil, tenant, messages, false)
-      assert %Ecto.Changeset{valid?: false} = result
+      assert {:error, %Ecto.Changeset{valid?: false}} = result
     end
   end
 
@@ -410,9 +410,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
-      |> stub(:get, fn ^events_per_second_rate ->
-        {:ok, %RateCounter{avg: tenant.max_events_per_second + 1}}
-      end)
+      |> stub(:get, fn ^events_per_second_rate -> {:ok, %RateCounter{avg: tenant.max_events_per_second + 1}} end)
 
       reject(&TenantBroadcaster.pubsub_broadcast/5)
 
@@ -482,10 +480,11 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
       result = BatchBroadcast.broadcast(nil, tenant, messages, false)
 
-      assert %Ecto.Changeset{
-               valid?: false,
-               changes: %{messages: [%{errors: [payload: {"Payload size exceeds tenant limit", []}]}]}
-             } = result
+      assert {:error,
+              %Ecto.Changeset{
+                valid?: false,
+                changes: %{messages: [%{errors: [payload: {"Payload size exceeds tenant limit", []}]}]}
+              }} = result
     end
   end
 

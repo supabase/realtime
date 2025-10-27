@@ -228,7 +228,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           refute_receive %Phoenix.Socket.Broadcast{}, 500
         end)
 
-      assert logs =~ "UnableToBroadcastChanges: Payload size exceeds tenant limit"
+      assert logs =~ "UnableToBroadcastChanges: %{messages: [%{payload: [\"Payload size exceeds tenant limit\"]}]}"
     end
 
     test "payload without id", %{tenant: tenant} do

@@ -45,7 +45,7 @@ defmodule RealtimeWeb.FallbackController do
     |> render("error.json", message: message)
   end
 
-  def call(conn, %Ecto.Changeset{valid?: true} = changeset) do
+  def call(conn, {:error, %Ecto.Changeset{valid?: false} = changeset}) do
     log_error(
       "UnprocessableEntity",
       Ecto.Changeset.traverse_errors(changeset, &translate_error/1)

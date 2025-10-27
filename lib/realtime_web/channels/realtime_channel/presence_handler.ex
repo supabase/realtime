@@ -161,13 +161,5 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     end
   end
 
-  # Added due to the fact that JSON decoding adds some overhead and erlang term will be slighly larger
-  @payload_size_padding 500
-  defp validate_payload_size(tenant, payload) do
-    if :erlang.external_size(payload) > tenant.max_payload_size_in_kb * 1000 + @payload_size_padding do
-      {:error, :payload_size_exceeded}
-    else
-      :ok
-    end
-  end
+  defp validate_payload_size(tenant, payload), do: Tenants.validate_payload_size(tenant, payload)
 end
