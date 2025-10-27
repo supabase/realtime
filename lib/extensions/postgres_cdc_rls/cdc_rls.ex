@@ -68,7 +68,9 @@ defmodule Extensions.PostgresCdcRls do
 
   @spec handle_stop(String.t(), non_neg_integer()) :: :ok
   def handle_stop(tenant, timeout) when is_binary(tenant) do
-    case :syn.whereis_name({__MODULE__, tenant}) do
+    scope = Realtime.Syn.PostgresCdc.scope(tenant)
+
+    case :syn.whereis_name({scope, tenant}) do
       :undefined ->
         Logger.warning("Database supervisor not found for tenant #{tenant}")
         :ok
@@ -124,7 +126,9 @@ defmodule Extensions.PostgresCdcRls do
 
   @spec get_manager_conn(String.t()) :: {:error, nil | :wait} | {:ok, pid(), pid()}
   def get_manager_conn(id) do
-    case :syn.lookup(__MODULE__, id) do
+    scope = Realtime.Syn.PostgresCdc.scope(id)
+
+    case :syn.lookup(scope, id) do
       {_, %{manager: nil, subs_pool: nil}} -> {:error, :wait}
       {_, %{manager: manager, subs_pool: conn}} -> {:ok, manager, conn}
       _ -> {:error, nil}
@@ -133,12 +137,15 @@ defmodule Extensions.PostgresCdcRls do
 
   @spec supervisor_id(String.t(), String.t()) :: {atom(), String.t(), map()}
   def supervisor_id(tenant, region) do
-    {__MODULE__, tenant, %{region: region, manager: nil, subs_pool: nil}}
+    scope = Realtime.Syn.PostgresCdc.scope(tenant)
+    {scope, tenant, %{region: region, manager: nil, subs_pool: nil}}
   end
 
   @spec update_meta(String.t(), pid(), pid()) :: {:ok, {pid(), term()}} | {:error, term()}
   def update_meta(tenant, manager_pid, subs_pool) do
-    :syn.update_registry(__MODULE__, tenant, fn pid, meta ->
+    scope = Realtime.Syn.PostgresCdc.scope(tenant)
+
+    :syn.update_registry(scope, tenant, fn pid, meta ->
       if node(pid) == node(manager_pid) do
         %{meta | manager: manager_pid, subs_pool: subs_pool}
       else
@@ -148,6 +155,4 @@ defmodule Extensions.PostgresCdcRls do
       end
     end)
   end
-
-  def syn_topic(tenant_id), do: "cdc_rls:#{tenant_id}"
 end

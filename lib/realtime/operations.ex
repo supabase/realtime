@@ -9,7 +9,9 @@ defmodule Realtime.Operations do
   """
   def rebalance do
     Enum.reduce(:syn.group_names(:users), 0, fn tenant, acc ->
-      case :syn.lookup(Extensions.PostgresCdcRls, tenant) do
+      scope = Realtime.Syn.PostgresCdc.scope(tenant)
+
+      case :syn.lookup(scope, tenant) do
         {pid, %{region: region}} ->
           platform_region = Realtime.Nodes.platform_region_translator(region)
           current_node = node(pid)

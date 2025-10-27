@@ -18,7 +18,9 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       |> Map.put("subscribers_nodes_table", subscribers_nodes_table)
 
     # register this process with syn as if this was the WorkersSupervisor
-    :syn.register(PostgresCdcRls, tenant.external_id, self(), %{region: "us-east-1", manager: nil, subs_pool: nil})
+
+    scope = Realtime.Syn.PostgresCdc.scope(tenant.external_id)
+    :syn.register(scope, tenant.external_id, self(), %{region: "us-east-1", manager: nil, subs_pool: nil})
 
     {:ok, pid} = SubscriptionManager.start_link(Map.put(args, "id", tenant.external_id))
     # This serves so that we know that handle_continue has finished
