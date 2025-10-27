@@ -80,7 +80,7 @@ defmodule Realtime.PostgresCdc do
   end
 
   @callback handle_connect(any()) :: {:ok, any()} | nil
-  @callback handle_after_connect(any(), any(), any()) :: {:ok, any()} | {:error, any()}
+  @callback handle_after_connect(any(), any(), any()) :: {:ok, any()} | {:error, any()} | {:error, any(), any()}
   @callback handle_subscribe(any(), any(), any()) :: :ok
   @callback handle_stop(any(), any()) :: any()
 end

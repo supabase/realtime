@@ -1,6 +1,7 @@
-defmodule Realtime.Extensionsubscriptions.CdcRlsSubscriptionsTest do
+defmodule Realtime.Extensions.PostgresCdcRls.Subscriptions do
   use RealtimeWeb.ChannelCase, async: true
-  doctest Extensions.PostgresCdcRls.Subscriptions
+
+  doctest Extensions.PostgresCdcRls.Subscriptions, import: true
 
   alias Extensions.PostgresCdcRls.Subscriptions
   alias Realtime.Database
@@ -15,106 +16,141 @@ defmodule Realtime.Extensionsubscriptions.CdcRlsSubscriptionsTest do
       |> Keyword.new()
       |> Postgrex.start_link()
 
+    Subscriptions.delete_all(conn)
+    assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+
     %{conn: conn}
   end
 
-  test "create", %{conn: conn} do
-    Subscriptions.delete_all(conn)
+  describe "create/5" do
+    test "create all tables & all events", %{conn: conn} do
+      {:ok, subscription_params} = Subscriptions.parse_subscription_params(%{"event" => "*", "schema" => "public"})
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
-    assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
 
-    params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), params: %{"event" => "*", "schema" => "public"}}]
+      %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
 
-    assert {:ok, [%Postgrex.Result{}]} =
-             Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+    test "create specific table all events", %{conn: conn} do
+      {:ok, subscription_params} = Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
 
-    Process.sleep(500)
+      subscription_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
-    params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), params: %{"schema" => "public", "table" => "test"}}]
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
 
-    assert {:ok, [%Postgrex.Result{}]} =
-             Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+      %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
 
-    Process.sleep(500)
+    test "column does not exist", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "subject=eq.hey"
+        })
 
-    params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), params: %{}}]
+      subscription_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
-    assert {:error,
-            "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: %{}"} =
-             Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+      assert {:error,
+              "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [schema: public, table: test, filters: [{\"subject\", \"eq\", \"hey\"}]]. Exception: ERROR P0001 (raise_exception) invalid column for filter subject"} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
 
-    Process.sleep(500)
+      %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
 
-    params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), params: %{"user_token" => "potato"}}]
+    test "column type is wrong", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "id=eq.hey"
+        })
 
-    assert {:error,
-            "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: <redacted>"} =
-             Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+      subscription_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
-    Process.sleep(500)
+      assert {:error,
+              "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [schema: public, table: test, filters: [{\"id\", \"eq\", \"hey\"}]]. Exception: ERROR 22P02 (invalid_text_representation) invalid input syntax for type integer: \"hey\""} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
 
-    params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), params: %{"auth_token" => "potato"}}]
-
-    assert {:error,
-            "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: <redacted>"} =
-             Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
-
-    Process.sleep(500)
-
-    %Postgrex.Result{rows: [[num]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
-    assert num != 0
+      %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
   end
 
-  test "delete_all", %{conn: conn} do
-    create_subscriptions(conn, 10)
-    assert {:ok, %Postgrex.Result{}} = Subscriptions.delete_all(conn)
-    assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+  describe "delete_all/1" do
+    test "delete_all", %{conn: conn} do
+      create_subscriptions(conn, 10)
+      assert {:ok, %Postgrex.Result{}} = Subscriptions.delete_all(conn)
+      assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
   end
 
-  test "delete", %{conn: conn} do
-    Subscriptions.delete_all(conn)
-    id = UUID.uuid1()
-    bin_id = UUID.string_to_binary!(id)
+  describe "delete/2" do
+    test "delete", %{conn: conn} do
+      id = UUID.uuid1()
+      bin_id = UUID.string_to_binary!(id)
 
-    params_list = [%{id: id, claims: %{"role" => "anon"}, params: %{"event" => "*"}}]
-    Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
-    Process.sleep(500)
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "id=eq.hey"
+        })
 
-    assert {:ok, %Postgrex.Result{}} = Subscriptions.delete(conn, bin_id)
-    assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      subscription_list = [%{claims: %{"role" => "anon"}, id: id, subscription_params: subscription_params}]
+      Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+
+      assert {:ok, %Postgrex.Result{}} = Subscriptions.delete(conn, bin_id)
+      assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
   end
 
-  test "delete_multi", %{conn: conn} do
-    Subscriptions.delete_all(conn)
-    id1 = UUID.uuid1()
-    id2 = UUID.uuid1()
+  describe "delete_multi/2" do
+    test "delete_multi", %{conn: conn} do
+      Subscriptions.delete_all(conn)
+      id1 = UUID.uuid1()
+      id2 = UUID.uuid1()
 
-    bin_id2 = UUID.string_to_binary!(id2)
-    bin_id1 = UUID.string_to_binary!(id1)
+      bin_id2 = UUID.string_to_binary!(id2)
+      bin_id1 = UUID.string_to_binary!(id1)
 
-    params_list = [
-      %{claims: %{"role" => "anon"}, id: id1, params: %{"event" => "*"}},
-      %{claims: %{"role" => "anon"}, id: id2, params: %{"event" => "*"}}
-    ]
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "id=eq.123"
+        })
 
-    Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
-    Process.sleep(500)
+      subscription_list = [
+        %{claims: %{"role" => "anon"}, id: id1, subscription_params: subscription_params},
+        %{claims: %{"role" => "anon"}, id: id2, subscription_params: subscription_params}
+      ]
 
-    assert {:ok, %Postgrex.Result{}} = Subscriptions.delete_multi(conn, [bin_id1, bin_id2])
-    assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      assert {:ok, _} = Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+
+      assert %Postgrex.Result{rows: [[2]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      assert {:ok, %Postgrex.Result{}} = Subscriptions.delete_multi(conn, [bin_id1, bin_id2])
+      assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
   end
 
-  test "maybe_delete_all", %{conn: conn} do
-    Subscriptions.delete_all(conn)
-    create_subscriptions(conn, 10)
+  describe "maybe_delete_all/1" do
+    test "maybe_delete_all", %{conn: conn} do
+      Subscriptions.delete_all(conn)
+      create_subscriptions(conn, 10)
 
-    assert {:ok, %Postgrex.Result{}} = Subscriptions.maybe_delete_all(conn)
-    assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      assert {:ok, %Postgrex.Result{}} = Subscriptions.maybe_delete_all(conn)
+      assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
   end
 
-  test "fetch_publication_tables", %{conn: conn} do
-    tables = Subscriptions.fetch_publication_tables(conn, "supabase_realtime_test")
-    assert tables[{"*"}] != nil
+  describe "fetch_publication_tables/2" do
+    test "fetch_publication_tables", %{conn: conn} do
+      tables = Subscriptions.fetch_publication_tables(conn, "supabase_realtime_test")
+      assert tables[{"*"}] != nil
+    end
   end
 
   defp create_subscriptions(conn, num) do
@@ -130,13 +166,12 @@ defmodule Realtime.Extensionsubscriptions.CdcRlsSubscriptionsTest do
               "role" => "anon"
             },
             id: UUID.uuid1(),
-            params: %{"event" => "*", "schema" => "public"}
+            subscription_params: {"public", "*", []}
           }
           | acc
         ]
       end)
 
     Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
-    Process.sleep(500)
   end
 end

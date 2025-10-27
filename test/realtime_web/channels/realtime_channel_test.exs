@@ -4,8 +4,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   import ExUnit.CaptureLog
 
-  alias Phoenix.Socket
   alias Phoenix.Channel.Server
+  alias Phoenix.Socket
 
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Connect
@@ -28,27 +28,103 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   setup :rls_context
 
-  test "max heap size is set for both transport and channel processes", %{tenant: tenant} do
-    jwt = Generators.generate_jwt_token(tenant)
-    {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+  describe "process flags" do
+    test "max heap size is set for both transport and channel processes", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
-    assert Process.info(socket.transport_pid, :max_heap_size) ==
-             {:max_heap_size, %{error_logger: true, include_shared_binaries: false, kill: true, size: 6_250_000}}
+      assert Process.info(socket.transport_pid, :max_heap_size) ==
+               {:max_heap_size, %{error_logger: true, include_shared_binaries: false, kill: true, size: 6_250_000}}
 
-    assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{})
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{})
 
-    assert Process.info(socket.channel_pid, :max_heap_size) ==
-             {:max_heap_size, %{error_logger: true, include_shared_binaries: false, kill: true, size: 6_250_000}}
+      assert Process.info(socket.channel_pid, :max_heap_size) ==
+               {:max_heap_size, %{error_logger: true, include_shared_binaries: false, kill: true, size: 6_250_000}}
+    end
+
+    # We don't test the socket because on unit tests Phoenix is not setting the fullsweep_after config
+    test "fullsweep_after is set on channel process", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{})
+
+      assert Process.info(socket.channel_pid, :fullsweep_after) == {:fullsweep_after, 20}
+    end
   end
 
-  # We don't test the socket because on unit tests Phoenix is not setting the fullsweep_after config
-  test "fullsweep_after is set on channel process", %{tenant: tenant} do
-    jwt = Generators.generate_jwt_token(tenant)
-    {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+  describe "postgres changes" do
+    test "subscribes to inserts", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
-    assert {:ok, _, socket} = subscribe_and_join(socket, "realtime:test", %{})
+      config = %{
+        "presence" => %{"enabled" => false},
+        "postgres_changes" => [%{"event" => "INSERT", "schema" => "public", "table" => "test"}]
+      }
 
-    assert Process.info(socket.channel_pid, :fullsweep_after) == {:fullsweep_after, 20}
+      assert {:ok, reply, _socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      assert %{postgres_changes: [%{:id => sub_id, "event" => "INSERT", "schema" => "public", "table" => "test"}]} =
+               reply
+
+      assert_push "system",
+                  %{
+                    message: "Subscribed to PostgreSQL",
+                    status: "ok",
+                    extension: "postgres_changes",
+                    channel: "test"
+                  },
+                  3000
+
+      {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      assert_push "postgres_changes",
+                  %{
+                    data: %Realtime.Adapters.Changes.NewRecord{
+                      table: "test",
+                      type: "INSERT",
+                      record: %{"details" => "test", "id" => ^id},
+                      columns: [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+                      errors: nil,
+                      schema: "public",
+                      commit_timestamp: _
+                    },
+                    ids: [^sub_id]
+                  },
+                  500
+
+      refute_receive _any
+    end
+
+    test "malformed subscription params", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      config = %{
+        "presence" => %{"enabled" => false},
+        "postgres_changes" => [%{"event" => "*", "schema" => "public", "table" => "test", "filter" => "wrong"}]
+      }
+
+      assert {:ok, reply, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      assert %{postgres_changes: [%{"event" => "*", "schema" => "public", "table" => "test"}]} = reply
+
+      assert_push "system",
+                  %{
+                    message: "Error parsing `filter` params: [\"wrong\"]",
+                    status: "error",
+                    extension: "postgres_changes",
+                    channel: "test"
+                  },
+                  3000
+
+      socket = Server.socket(socket.channel_pid)
+
+      # It won't re-subscribe
+      assert socket.assigns.pg_sub_ref == nil
+    end
   end
 
   describe "broadcast" do

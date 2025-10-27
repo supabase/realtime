@@ -6,7 +6,7 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
   alias PostgresCdcRls.ReplicationPoller
   alias PostgresCdcRls.SubscriptionManager
   alias PostgresCdcRls.SubscriptionsChecker
-  alias Realtime.Api
+  alias Realtime.Tenants.Cache
   alias Realtime.PostgresCdc.Exception
 
   def start_link(args) do
@@ -17,7 +17,7 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
   @impl true
   def init(%{"id" => tenant} = args) when is_binary(tenant) do
     Logger.metadata(external_id: tenant, project: tenant)
-    unless Api.get_tenant_by_external_id(tenant, :primary), do: raise(Exception)
+    unless Cache.get_tenant_by_external_id(tenant), do: raise(Exception)
 
     subscribers_pids_table = :ets.new(__MODULE__, [:public, :bag])
     subscribers_nodes_table = :ets.new(__MODULE__, [:public, :set])
