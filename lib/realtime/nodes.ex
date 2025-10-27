@@ -153,9 +153,7 @@ defmodule Realtime.Nodes do
     end
   end
 
-  @all_regions ~w(eu-west-2 us-east-1 us-west-1 ap-southeast-1 ap-southeast-2)
-
   @spec all_node_regions() :: [String.t()]
   @doc "List all the regions where nodes can be launched"
-  def all_node_regions(), do: @all_regions
+  def all_node_regions(), do: :syn.group_names(RegionNodes)
 end

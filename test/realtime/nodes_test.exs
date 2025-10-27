@@ -20,6 +20,20 @@ defmodule Realtime.NodesTest do
     assert_receive :joined
   end
 
+  describe "all_node_regions/0" do
+    test "returns all regions with nodes" do
+      spawn_fake_node("us-east-1", :node_1)
+      spawn_fake_node("ap-2", :node_2)
+      spawn_fake_node("ap-2", :node_3)
+
+      assert Nodes.all_node_regions() |> Enum.sort() == ["ap-2", "us-east-1"]
+    end
+
+    test "with no other nodes, returns my region only" do
+      assert Nodes.all_node_regions() == ["us-east-1"]
+    end
+  end
+
   describe "region_nodes/1" do
     test "nil region returns empty list" do
       assert Nodes.region_nodes(nil) == []
