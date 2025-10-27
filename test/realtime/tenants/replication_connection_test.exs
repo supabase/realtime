@@ -206,6 +206,31 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert logs =~ "UnableToBroadcastChanges"
     end
 
+    test "message that exceeds payload size logs error", %{tenant: tenant} do
+      logs =
+        capture_log(fn ->
+          start_supervised!(
+            {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+            restart: :transient
+          )
+
+          topic = random_string()
+          tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+          assert :ok = Endpoint.subscribe(tenant_topic)
+
+          message_fixture(tenant, %{
+            "event" => random_string(),
+            "topic" => random_string(),
+            "private" => true,
+            "payload" => %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
+          })
+
+          refute_receive %Phoenix.Socket.Broadcast{}, 500
+        end)
+
+      assert logs =~ "UnableToBroadcastChanges: %{messages: [%{payload: [\"Payload size exceeds tenant limit\"]}]}"
+    end
+
     test "payload without id", %{tenant: tenant} do
       start_link_supervised!(
         {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},

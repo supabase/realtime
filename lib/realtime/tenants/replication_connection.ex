@@ -329,6 +329,11 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
       {:noreply, state}
     else
+      {:error, %Ecto.Changeset{valid?: false} = changeset} ->
+        error = Ecto.Changeset.traverse_errors(changeset, &elem(&1, 0))
+        log_error("UnableToBroadcastChanges", error)
+        {:noreply, state}
+
       {:error, error} ->
         log_error("UnableToBroadcastChanges", error)
         {:noreply, state}

@@ -27,14 +27,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           socket
       end
 
-      Process.sleep(120)
-
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_receive {:socket_push, :text, data}
         message = data |> IO.iodata_to_binary() |> Jason.decode!()
         assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
       end
+
+      Process.sleep(120)
 
       {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
       assert Enum.sum(buckets) == 100
@@ -49,8 +49,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           {:noreply, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
           socket
       end
-
-      Process.sleep(120)
 
       refute_received _any
 
@@ -68,8 +66,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           socket
       end
 
-      Process.sleep(120)
-
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_received {:socket_push, :text, data}
@@ -77,6 +73,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
       end
 
+      Process.sleep(120)
       {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
       assert Enum.sum(buckets) == 100
       assert avg > 0.0
@@ -95,8 +92,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
           socket
       end
-
-      Process.sleep(120)
 
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
@@ -120,9 +115,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           socket
       end
 
-      Process.sleep(120)
-
-      refute_received {:socket_push, :text, _}
+      refute_received {:socket_push, :text, _}, 120
     end
 
     @tag policies: [:read_matching_user_role, :write_matching_user_role], role: "anon"
@@ -138,8 +131,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
           socket
       end
-
-      Process.sleep(120)
 
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
@@ -163,9 +154,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           socket
       end
 
-      Process.sleep(120)
-
-      refute_received {:socket_push, :text, _}
+      refute_received {:socket_push, :text, _}, 120
     end
 
     test "with nil policy and invalid user, won't send message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
@@ -176,8 +165,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           {:noreply, socket} = BroadcastHandler.handle(%{}, db_conn, socket)
           socket
       end
-
-      Process.sleep(120)
 
       refute_received _any
 
@@ -259,8 +246,6 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           socket
       end
 
-      Process.sleep(120)
-
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_received {:socket_push, :text, data}
@@ -268,6 +253,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
       end
 
+      Process.sleep(120)
       {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
       assert Enum.sum(buckets) == 100
       assert avg > 0.0
@@ -290,6 +276,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       end
 
       Process.sleep(120)
+
       {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
       assert Enum.sum(buckets) == 100
       assert avg > 0.0
@@ -311,6 +298,74 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
       assert avg == 0.0
+    end
+
+    test "handle payload size excedding limits in private channels", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true}},
+          ack_broadcast: false
+        )
+
+      assert {:noreply, _} =
+               BroadcastHandler.handle(
+                 %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
+                 db_conn,
+                 socket
+               )
+
+      refute_received {:socket_push, :text, _}, 120
+    end
+
+    test "handle payload size excedding limits in public channels", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic, ack_broadcast: false, private?: false)
+
+      assert {:noreply, _} =
+               BroadcastHandler.handle(
+                 %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
+                 db_conn,
+                 socket
+               )
+
+      refute_received {:socket_push, :text, _}, 120
+    end
+
+    test "handle payload size excedding limits in private channel and if ack it will receive error", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket =
+        socket_fixture(tenant, topic,
+          policies: %Policies{broadcast: %BroadcastPolicies{write: true}},
+          ack_broadcast: true
+        )
+
+      assert {:reply, {:error, :payload_size_exceeded}, _} =
+               BroadcastHandler.handle(
+                 %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
+                 db_conn,
+                 socket
+               )
+
+      refute_received {:socket_push, :text, _}, 120
+    end
+
+    test "handle payload size excedding limits in public channels and if ack it will receive error", %{
+      topic: topic,
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      socket = socket_fixture(tenant, topic, ack_broadcast: true, private?: false)
+
+      assert {:reply, {:error, :payload_size_exceeded}, _} =
+               BroadcastHandler.handle(
+                 %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)},
+                 db_conn,
+                 socket
+               )
+
+      refute_received {:socket_push, :text, _}, 120
     end
   end
 
