@@ -93,6 +93,58 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       refute_receive _any
     end
 
+    test "multiple subscriptions", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      config = %{
+        "presence" => %{"enabled" => false},
+        "postgres_changes" => [
+          %{"event" => "INSERT", "schema" => "public", "table" => "test"},
+          %{"event" => "DELETE", "schema" => "public", "table" => "test"}
+        ]
+      }
+
+      assert {:ok, reply, _socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      assert %{
+               postgres_changes: [
+                 %{:id => sub_id, "event" => "INSERT", "schema" => "public", "table" => "test"},
+                 %{
+                   :id => 4_845_530,
+                   "event" => "DELETE",
+                   "schema" => "public",
+                   "table" => "test"
+                 }
+               ]
+             } =
+               reply
+
+      assert_push "system",
+                  %{message: "Subscribed to PostgreSQL", status: "ok", extension: "postgres_changes", channel: "test"},
+                  5000
+
+      {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      assert_push "postgres_changes",
+                  %{
+                    data: %Realtime.Adapters.Changes.NewRecord{
+                      table: "test",
+                      type: "INSERT",
+                      record: %{"details" => "test", "id" => ^id},
+                      columns: [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+                      errors: nil,
+                      schema: "public",
+                      commit_timestamp: _
+                    },
+                    ids: [4_845_530, ^sub_id]
+                  },
+                  500
+
+      refute_receive _any
+    end
+
     test "malformed subscription params", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))

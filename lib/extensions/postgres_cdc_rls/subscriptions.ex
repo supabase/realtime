@@ -75,7 +75,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       end)
     end)
   rescue
-    e -> {:error, e}
+    e in DBConnection.ConnectionError -> {:error, e}
   catch
     :exit, reason -> {:error, {:exit, reason}}
   end

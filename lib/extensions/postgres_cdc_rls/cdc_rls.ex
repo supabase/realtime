@@ -43,7 +43,7 @@ defmodule Extensions.PostgresCdcRls do
   end
 
   defp subscription_list(params_list) do
-    Enum.reduce_while(params_list, [], fn params, acc ->
+    Enum.reduce_while(params_list, {:ok, []}, fn params, {:ok, acc} ->
       case Subscriptions.parse_subscription_params(params[:params]) do
         {:ok, subscription_params} ->
           {:cont, {:ok, [%{id: params.id, claims: params.claims, subscription_params: subscription_params} | acc]}}
