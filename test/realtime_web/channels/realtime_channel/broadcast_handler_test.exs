@@ -115,7 +115,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           socket
       end
 
-      refute_received {:socket_push, :text, _}, 120
+      refute_receive {:socket_push, :text, _}, 120
     end
 
     @tag policies: [:read_matching_user_role, :write_matching_user_role], role: "anon"
@@ -154,7 +154,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           socket
       end
 
-      refute_received {:socket_push, :text, _}, 120
+      refute_receive {:socket_push, :text, _}, 120
     end
 
     test "with nil policy and invalid user, won't send message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
@@ -209,9 +209,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           socket
       end
 
-      Process.sleep(100)
-
-      refute_received _
+      refute_receive _, 100
     end
 
     test "no ack still sends message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
@@ -291,7 +289,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
           {:noreply, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
 
           # Enough for the RateCounter to calculate the last bucket
-          refute_received _, 1200
+          refute_receive _, 1200
         end)
 
       assert log =~ "RlsPolicyError"
@@ -314,7 +312,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                  socket
                )
 
-      refute_received {:socket_push, :text, _}, 120
+      refute_receive {:socket_push, :text, _}, 120
     end
 
     test "handle payload size excedding limits in public channels", %{topic: topic, tenant: tenant, db_conn: db_conn} do
@@ -327,7 +325,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                  socket
                )
 
-      refute_received {:socket_push, :text, _}, 120
+      refute_receive {:socket_push, :text, _}, 120
     end
 
     test "handle payload size excedding limits in private channel and if ack it will receive error", %{
@@ -348,7 +346,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                  socket
                )
 
-      refute_received {:socket_push, :text, _}, 120
+      refute_receive {:socket_push, :text, _}, 120
     end
 
     test "handle payload size excedding limits in public channels and if ack it will receive error", %{
@@ -365,7 +363,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
                  socket
                )
 
-      refute_received {:socket_push, :text, _}, 120
+      refute_receive {:socket_push, :text, _}, 120
     end
   end
 
