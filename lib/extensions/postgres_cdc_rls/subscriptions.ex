@@ -15,7 +15,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   @spec create(conn(), String.t(), subscription_list, pid(), pid()) ::
           {:ok, Postgrex.Result.t()}
-          | {:error, Exception.t() | :malformed_subscription_params | {:subscription_insert_failed, map()}}
+          | {:error, Exception.t() | {:exit, term} | {:subscription_insert_failed, String.t()}}
+
   def create(conn, publication, subscription_list, manager, caller) do
     sql = "with sub_tables as (
         select
@@ -63,16 +64,20 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
             msg =
               "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [#{params_to_log(params)}]"
 
-            rollback(conn, msg)
+            rollback(conn, {:subscription_insert_failed, msg})
 
           {:error, exception} ->
             msg =
               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
 
-            rollback(conn, msg)
+            rollback(conn, {:subscription_insert_failed, msg})
         end
       end)
     end)
+  rescue
+    e -> {:error, e}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   defp params_to_log({schema, table, filters}) do

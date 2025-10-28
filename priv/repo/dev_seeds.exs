@@ -1,5 +1,3 @@
-import Ecto.Adapters.SQL, only: [query!: 3]
-
 alias Realtime.Api.Tenant
 alias Realtime.Database
 alias Realtime.Repo

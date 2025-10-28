@@ -69,13 +69,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                reply
 
       assert_push "system",
-                  %{
-                    message: "Subscribed to PostgreSQL",
-                    status: "ok",
-                    extension: "postgres_changes",
-                    channel: "test"
-                  },
-                  3000
+                  %{message: "Subscribed to PostgreSQL", status: "ok", extension: "postgres_changes", channel: "test"},
+                  5000
 
       {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
@@ -124,6 +119,107 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       # It won't re-subscribe
       assert socket.assigns.pg_sub_ref == nil
+    end
+
+    test "invalid subscription table does not exist", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      config = %{
+        "presence" => %{"enabled" => false},
+        "postgres_changes" => [%{"event" => "*", "schema" => "public", "table" => "doesnotexist"}]
+      }
+
+      assert {:ok, reply, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      assert %{postgres_changes: [%{"event" => "*", "schema" => "public", "table" => "doesnotexist"}]} = reply
+
+      assert_push "system",
+                  %{
+                    message:
+                      "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [schema: public, table: doesnotexist, filters: []]",
+                    status: "error",
+                    extension: "postgres_changes",
+                    channel: "test"
+                  },
+                  5000
+
+      socket = Server.socket(socket.channel_pid)
+
+      # It won't re-subscribe
+      assert socket.assigns.pg_sub_ref == nil
+    end
+
+    test "invalid subscription column does not exist", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      config = %{
+        "presence" => %{"enabled" => false},
+        "postgres_changes" => [
+          %{"event" => "*", "schema" => "public", "table" => "test", "filter" => "notacolumn=eq.123"}
+        ]
+      }
+
+      assert {:ok, reply, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      assert %{postgres_changes: [%{"event" => "*", "schema" => "public", "table" => "test"}]} = reply
+
+      assert_push "system",
+                  %{
+                    message:
+                      "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [schema: public, table: test, filters: [{\"notacolumn\", \"eq\", \"123\"}]]. Exception: ERROR P0001 (raise_exception) invalid column for filter notacolumn",
+                    status: "error",
+                    extension: "postgres_changes",
+                    channel: "test"
+                  },
+                  5000
+
+      socket = Server.socket(socket.channel_pid)
+
+      # It won't re-subscribe
+      assert socket.assigns.pg_sub_ref == nil
+    end
+
+    test "connection error", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      config = %{
+        "presence" => %{"enabled" => false},
+        "postgres_changes" => [%{"event" => "*", "schema" => "public", "table" => "test"}]
+      }
+
+      conn = spawn(fn -> :ok end)
+      # Let's set the subscription manager conn to be a pid that is no more
+
+      assert {:ok, reply, socket} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      assert %{postgres_changes: [%{"event" => "*", "schema" => "public", "table" => "test"}]} = reply
+
+      assert_push "system",
+                  %{
+                    message: "Subscribed to PostgreSQL",
+                    status: "ok",
+                    extension: "postgres_changes",
+                    channel: "test"
+                  },
+                  5000
+
+      {:ok, manager_pid, _conn} = Extensions.PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Extensions.PostgresCdcRls.update_meta(tenant.external_id, manager_pid, conn)
+
+      assert {:ok, reply, socket} = subscribe_and_join(socket, "realtime:test_fail", %{"config" => config})
+
+      assert_push "system",
+                  %{message: message, status: "error", extension: "postgres_changes", channel: "test_fail"},
+                  5000
+
+      assert message =~ "{:error, {:exit, {:noproc, {DBConnection.Holder, :checkout"
+      socket = Server.socket(socket.channel_pid)
+
+      # It will try again in the future
+      assert socket.assigns.pg_sub_ref != nil
     end
   end
 
