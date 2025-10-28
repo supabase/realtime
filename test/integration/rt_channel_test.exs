@@ -100,7 +100,7 @@ defmodule Realtime.Integration.RtChannelTest do
                              "channel" => "any",
                              "extension" => "postgres_changes",
                              "message" =>
-                               "{:error, \"Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [schema: public, table: *, filters: []]\"}",
+                               "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [schema: public, table: *, filters: []]",
                              "status" => "error"
                            },
                            ref: nil,

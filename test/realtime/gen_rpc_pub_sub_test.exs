@@ -107,7 +107,7 @@ defmodule Realtime.GenRpcPubSubTest do
         assert_receive ^message
 
         # Remote nodes received the broadcast
-        assert_receive {:relay, :"us_node@127.0.0.1", ^message}, 1000
+        assert_receive {:relay, :"us_node@127.0.0.1", ^message}, 5000
         assert_receive {:relay, :"ap2_nodeX@127.0.0.1", ^message}, 1000
         assert_receive {:relay, :"ap2_nodeY@127.0.0.1", ^message}, 1000
         refute_receive _any

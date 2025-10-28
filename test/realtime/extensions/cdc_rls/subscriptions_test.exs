@@ -44,6 +44,35 @@ defmodule Realtime.Extensions.PostgresCdcRls.Subscriptions do
       %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
     end
 
+    test "publication does not exist", %{conn: conn} do
+      {:ok, subscription_params} = Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      subscription_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      Postgrex.query!(conn, "drop publication if exists supabase_realtime_test", [])
+
+      assert {:error,
+              {:subscription_insert_failed,
+               "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [schema: public, table: test, filters: []]"}} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+
+      %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
+    test "table does not exist", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "doesnotexist"})
+
+      subscription_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:error,
+              {:subscription_insert_failed,
+               "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [schema: public, table: doesnotexist, filters: []]"}} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+
+      %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
     test "column does not exist", %{conn: conn} do
       {:ok, subscription_params} =
         Subscriptions.parse_subscription_params(%{
@@ -55,7 +84,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.Subscriptions do
       subscription_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
       assert {:error,
-              "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [schema: public, table: test, filters: [{\"subject\", \"eq\", \"hey\"}]]. Exception: ERROR P0001 (raise_exception) invalid column for filter subject"} =
+              {:subscription_insert_failed,
+               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [schema: public, table: test, filters: [{\"subject\", \"eq\", \"hey\"}]]. Exception: ERROR P0001 (raise_exception) invalid column for filter subject"}} =
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -72,10 +102,33 @@ defmodule Realtime.Extensions.PostgresCdcRls.Subscriptions do
       subscription_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
       assert {:error,
-              "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [schema: public, table: test, filters: [{\"id\", \"eq\", \"hey\"}]]. Exception: ERROR 22P02 (invalid_text_representation) invalid input syntax for type integer: \"hey\""} =
+              {:subscription_insert_failed,
+               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [schema: public, table: test, filters: [{\"id\", \"eq\", \"hey\"}]]. Exception: ERROR 22P02 (invalid_text_representation) invalid input syntax for type integer: \"hey\""}} =
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
+    test "connection error" do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      subscription_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+      conn = spawn(fn -> :ok end)
+
+      assert {:error, {:exit, _}} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+    end
+
+    test "timeout", %{conn: conn} do
+      {:ok, subscription_params} = Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
+
+      Task.start(fn -> Postgrex.query!(conn, "SELECT pg_sleep(20)", []) end)
+
+      subscription_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:error, %DBConnection.ConnectionError{reason: :queue_timeout}} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
     end
   end
 

@@ -49,7 +49,7 @@ defmodule Extensions.PostgresCdcRls do
           {:cont, {:ok, [%{id: params.id, claims: params.claims, subscription_params: subscription_params} | acc]}}
 
         {:error, reason} ->
-          {:halt, {:error, :malformed_subscription_params, reason}}
+          {:halt, {:error, {:malformed_subscription_params, reason}}}
       end
     end)
   end
