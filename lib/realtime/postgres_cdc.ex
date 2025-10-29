@@ -16,8 +16,8 @@ defmodule Realtime.PostgresCdc do
     apply(module, :handle_connect, [opts])
   end
 
-  def after_connect(module, connect_response, extension, params) do
-    apply(module, :handle_after_connect, [connect_response, extension, params])
+  def after_connect(module, connect_response, extension, params, tenant) do
+    apply(module, :handle_after_connect, [connect_response, extension, params, tenant])
   end
 
   def subscribe(module, pg_change_params, tenant, metadata) do
@@ -80,7 +80,8 @@ defmodule Realtime.PostgresCdc do
   end
 
   @callback handle_connect(any()) :: {:ok, any()} | nil
-  @callback handle_after_connect(any(), any(), any()) :: {:ok, any()} | {:error, any()} | {:error, any(), any()}
+  @callback handle_after_connect(any(), any(), any(), tenant_id :: String.t()) ::
+              {:ok, any()} | {:error, any()} | {:error, any(), any()}
   @callback handle_subscribe(any(), any(), any()) :: :ok
   @callback handle_stop(any(), any()) :: any()
 end
