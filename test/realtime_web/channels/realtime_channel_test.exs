@@ -261,7 +261,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, manager_pid, _conn} = Extensions.PostgresCdcRls.get_manager_conn(tenant.external_id)
       Extensions.PostgresCdcRls.update_meta(tenant.external_id, manager_pid, conn)
 
-      assert {:ok, reply, socket} = subscribe_and_join(socket, "realtime:test_fail", %{"config" => config})
+      assert {:ok, _reply, socket} = subscribe_and_join(socket, "realtime:test_fail", %{"config" => config})
 
       assert_push "system",
                   %{message: message, status: "error", extension: "postgres_changes", channel: "test_fail"},

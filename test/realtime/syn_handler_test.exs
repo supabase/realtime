@@ -271,7 +271,7 @@ defmodule Realtime.SynHandlerTest do
     end
   end
 
-  defp assert_process_down(pid, reason \\ nil, timeout \\ 100) do
+  defp assert_process_down(pid, reason, timeout) do
     ref = Process.monitor(pid)
 
     if reason do
