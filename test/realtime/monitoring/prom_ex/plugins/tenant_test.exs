@@ -227,6 +227,27 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(bucket_pattern) > 0
     end
 
+    test "metric replay exists after check", context do
+      external_id = context.tenant.external_id
+
+      pattern =
+        ~r/realtime_tenants_replay_count{tenant="#{external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+
+      assert {:ok, _, _} = Realtime.Messages.replay(context.db_conn, external_id, "test", 0, 1)
+
+      # Wait enough time for the poll rate to be triggered at least once
+      Process.sleep(200)
+
+      assert metric_value(pattern) == metric_value + 1
+
+      bucket_pattern =
+        ~r/realtime_tenants_replay_bucket{tenant="#{external_id}",le="250"}\s(?<number>\d+)/
+
+      assert metric_value(bucket_pattern) > 0
+    end
+
     test "metric realtime_tenants_broadcast_from_database_latency_committed_at exists after check", context do
       pattern =
         ~r/realtime_tenants_broadcast_from_database_latency_committed_at_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/

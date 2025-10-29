@@ -516,7 +516,7 @@ defmodule Realtime.Integration.RtChannelTest do
       {:ok, remote_socket} = WebsocketClient.connect(self(), uri(tenant, 4012), @serializer, [{"x-api-key", token}])
       {:ok, socket} = WebsocketClient.connect(self(), uri(tenant), @serializer, [{"x-api-key", token}])
 
-      config = %{broadcast: %{self: false}, private: true}
+      config = %{broadcast: %{self: false, replay: %{"limit" => 2, "since" => 0}}, private: true}
       topic = "realtime:#{topic}"
 
       WebsocketClient.join(remote_socket, topic, %{config: config})
