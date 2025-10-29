@@ -48,7 +48,7 @@ defmodule Realtime.DatabaseDistributedTest do
 
     test "success call returns output" do
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
+      {:ok, db_conn} = Rpc.enhanced_call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
       assert node(db_conn) == node
       assert {:ok, %Postgrex.Result{rows: [[1]]}} = Database.transaction(db_conn, &DatabaseAux.checker/1)
     end
@@ -56,7 +56,7 @@ defmodule Realtime.DatabaseDistributedTest do
     test "handles database errors" do
       metadata = [external_id: "123", project: "123"]
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
+      {:ok, db_conn} = Rpc.enhanced_call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
       assert node(db_conn) == node
 
       assert capture_log(fn ->
@@ -69,7 +69,7 @@ defmodule Realtime.DatabaseDistributedTest do
     test "handles exception" do
       metadata = [external_id: "123", project: "123"]
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
+      {:ok, db_conn} = Rpc.enhanced_call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
       assert node(db_conn) == node
 
       assert capture_log(fn ->
@@ -85,7 +85,7 @@ defmodule Realtime.DatabaseDistributedTest do
       # Grab a remote pid that will not exist. :erpc uses a new process to perform the call.
       # Once it has returned the process is not alive anymore
 
-      pid = Rpc.call(node, :erlang, :self, [])
+      pid = Rpc.enhanced_call(node, :erlang, :self, [])
       assert node(pid) == node
 
       assert capture_log(fn ->

@@ -25,51 +25,6 @@ defmodule Realtime.RpcTest do
     %{node: node}
   end
 
-  describe "call/5" do
-    test "successful RPC call returns exactly what the original function returns", %{node: node} do
-      assert {:ok, "success"} = Rpc.call(node, TestRpc, :test_success, [])
-      origin_node = node()
-
-      assert_receive {[:realtime, :rpc], %{latency: _},
-                      %{
-                        mod: TestRpc,
-                        func: :test_success,
-                        origin_node: ^origin_node,
-                        target_node: ^node
-                      }}
-    end
-
-    test "raised exceptions are properly caught and logged", %{node: node} do
-      assert {:badrpc, {:EXIT, {%RuntimeError{message: "test"}, [{TestRpc, :test_raise, 0, _}]}}} =
-               Rpc.call(node, TestRpc, :test_raise, [])
-
-      origin_node = node()
-
-      assert_receive {[:realtime, :rpc], %{latency: _},
-                      %{
-                        mod: TestRpc,
-                        func: :test_raise,
-                        origin_node: ^origin_node,
-                        target_node: ^node
-                      }}
-    end
-
-    test "timeouts are properly caught and logged", %{node: node} do
-      assert {:badrpc, :timeout} =
-               Rpc.call(node, TestRpc, :test_timeout, [], timeout: 100)
-
-      origin_node = node()
-
-      assert_receive {[:realtime, :rpc], %{latency: _},
-                      %{
-                        mod: TestRpc,
-                        func: :test_timeout,
-                        origin_node: ^origin_node,
-                        target_node: ^node
-                      }}
-    end
-  end
-
   describe "enhanced_call/5" do
     test "successful RPC call returns exactly what the original function returns", %{node: node} do
       assert {:ok, "success"} = Rpc.enhanced_call(node, TestRpc, :test_success, [], tenant_id: "123")

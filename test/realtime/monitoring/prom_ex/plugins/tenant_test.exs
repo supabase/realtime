@@ -87,7 +87,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       # Add bad tenant id
       UsersCounter.add(self(), random_string())
 
-      _ = Rpc.call(node, FakeUserCounter, :fake_add, [external_id])
+      _ = Rpc.enhanced_call(node, FakeUserCounter, :fake_add, [external_id])
       Process.sleep(500)
       Tenant.execute_tenant_metrics()
 

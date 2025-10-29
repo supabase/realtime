@@ -36,7 +36,7 @@ defmodule Realtime.UsersCounterTest do
       tenant_id = random_string()
       generate_load(tenant_id)
       {:ok, node} = Clustered.start(@aux_mod)
-      pid = Rpc.call(node, Aux, :ping, [])
+      pid = Rpc.enhanced_call(node, Aux, :ping, [])
       UsersCounter.add(pid, tenant_id)
       assert UsersCounter.tenant_users(node, tenant_id) == 1
     end
@@ -52,7 +52,7 @@ defmodule Realtime.UsersCounterTest do
       {:ok, node} = Clustered.start(@aux_mod, extra_config: extra_config, phoenix_port: 4012 + i)
 
       for _ <- 1..processes do
-        pid = Rpc.call(node, Aux, :ping, [])
+        pid = Rpc.enhanced_call(node, Aux, :ping, [])
 
         for _ <- 1..10 do
           # replicate same pid added multiple times concurrently
@@ -62,7 +62,7 @@ defmodule Realtime.UsersCounterTest do
 
           # noisy neighbors to test handling of bigger loads on concurrent calls
           Task.start(fn ->
-            pid = Rpc.call(node, Aux, :ping, [])
+            pid = Rpc.enhanced_call(node, Aux, :ping, [])
             UsersCounter.add(pid, random_string())
           end)
         end

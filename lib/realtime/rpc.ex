@@ -6,24 +6,6 @@ defmodule Realtime.Rpc do
   alias Realtime.Telemetry
 
   @doc """
-  Calls external node using :rpc.call/5 and collects telemetry
-  """
-  @spec call(atom(), atom(), atom(), any(), keyword()) :: any()
-  def call(node, mod, func, args, opts \\ []) do
-    tenant_id = Keyword.get(opts, :tenant_id)
-    timeout = Keyword.get(opts, :timeout, Application.get_env(:realtime, :rpc_timeout))
-    {latency, response} = :timer.tc(fn -> :rpc.call(node, mod, func, args, timeout) end)
-
-    Telemetry.execute(
-      [:realtime, :rpc],
-      %{latency: latency},
-      %{mod: mod, func: func, target_node: node, origin_node: node(), mechanism: :rpc, tenant: tenant_id, success: nil}
-    )
-
-    response
-  end
-
-  @doc """
   Calls external node using :erpc.call/5 and collects telemetry
   """
   @spec enhanced_call(atom(), atom(), atom(), any(), keyword()) ::

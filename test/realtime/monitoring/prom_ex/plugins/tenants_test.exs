@@ -99,7 +99,7 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
     # Enough time for the poll rate to be triggered at least once
     Process.sleep(200)
     previous_value = metric_value(pattern)
-    assert {:ok, "success"} = Rpc.call(node(), Test, :success, [], tenant_id: "123")
+    assert {:ok, "success"} = Rpc.enhanced_call(node(), Test, :success, [], tenant_id: "123")
     Process.sleep(200)
     assert metric_value(pattern) == previous_value + 1
   end
