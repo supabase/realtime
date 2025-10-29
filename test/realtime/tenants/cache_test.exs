@@ -1,11 +1,11 @@
 defmodule Realtime.Tenants.CacheTest do
-  alias Realtime.Rpc
   # async: false due to the usage of dev_realtime tenant
   use Realtime.DataCase, async: false
 
   alias Realtime.Api
-  alias Realtime.Tenants.Cache
+  alias Realtime.Rpc
   alias Realtime.Tenants
+  alias Realtime.Tenants.Cache
 
   setup do
     {:ok, tenant: tenant_fixture()}
@@ -15,7 +15,9 @@ defmodule Realtime.Tenants.CacheTest do
     test "tenants cache returns a cached result", %{tenant: tenant} do
       external_id = tenant.external_id
       assert %Api.Tenant{name: "tenant"} = Cache.get_tenant_by_external_id(external_id)
-      Api.update_tenant(tenant, %{name: "new name"})
+
+      changeset = Api.Tenant.changeset(tenant, %{name: "new name"})
+      Repo.update!(changeset)
       assert %Api.Tenant{name: "new name"} = Tenants.get_tenant_by_external_id(external_id)
       assert %Api.Tenant{name: "tenant"} = Cache.get_tenant_by_external_id(external_id)
     end
