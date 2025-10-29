@@ -17,13 +17,14 @@ defmodule Realtime.Messages do
 
   Only allowed for private channels
   """
-  @spec replay(pid, String.t(), non_neg_integer, non_neg_integer) ::
+  @spec replay(pid, String.t(), String.t(), non_neg_integer, non_neg_integer) ::
           {:ok, Message.t(), [String.t()]} | {:error, term} | {:error, :rpc_error, term}
-  def replay(conn, topic, since, limit) when node(conn) == node() and is_integer(since) and is_integer(limit) do
+  def replay(conn, tenant_id, topic, since, limit)
+      when node(conn) == node() and is_integer(since) and is_integer(limit) do
     limit = max(min(limit, @hard_limit), 1)
 
     with {:ok, since} <- DateTime.from_unix(since, :millisecond),
-         {:ok, messages} <- messages(conn, topic, since, limit) do
+         {:ok, messages} <- messages(conn, tenant_id, topic, since, limit) do
       {:ok, Enum.reverse(messages), MapSet.new(messages, & &1.id)}
     else
       {:error, :postgrex_exception} -> {:error, :failed_to_replay_messages}
@@ -32,13 +33,16 @@ defmodule Realtime.Messages do
     end
   end
 
-  def replay(conn, topic, since, limit) when is_integer(since) and is_integer(limit) do
-    Realtime.GenRpc.call(node(conn), __MODULE__, :replay, [conn, topic, since, limit], key: topic)
+  def replay(conn, tenant_id, topic, since, limit) when is_integer(since) and is_integer(limit) do
+    Realtime.GenRpc.call(node(conn), __MODULE__, :replay, [conn, tenant_id, topic, since, limit],
+      key: topic,
+      tenant_id: tenant_id
+    )
   end
 
-  def replay(_, _, _, _), do: {:error, :invalid_replay_params}
+  def replay(_, _, _, _, _), do: {:error, :invalid_replay_params}
 
-  defp messages(conn, topic, since, limit) do
+  defp messages(conn, tenant_id, topic, since, limit) do
     since = DateTime.to_naive(since)
     # We want to avoid searching partitions in the future as they should be empty
     # so we limit to 1 minute in the future to account for any potential drift
@@ -55,7 +59,9 @@ defmodule Realtime.Messages do
         limit: ^limit,
         order_by: [desc: m.inserted_at]
 
-    Realtime.Repo.all(conn, query, Message, timeout: @default_timeout)
+    {latency, value} = :timer.tc(Realtime.Repo, :all, [conn, query, Message, [timeout: @default_timeout]], :millisecond)
+    :telemetry.execute([:realtime, :tenants, :replay], %{latency: latency}, %{tenant: tenant_id})
+    value
   end
 
   @doc """

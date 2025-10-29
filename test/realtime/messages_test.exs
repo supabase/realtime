@@ -14,26 +14,38 @@ defmodule Realtime.MessagesTest do
     date_start = Date.utc_today() |> Date.add(-10)
     date_end = Date.utc_today()
     create_messages_partitions(conn, date_start, date_end)
+
+    on_exit(fn -> :telemetry.detach(__MODULE__) end)
+
+    :telemetry.attach(
+      __MODULE__,
+      [:realtime, :tenants, :replay],
+      &__MODULE__.handle_telemetry/4,
+      pid: self()
+    )
+
     %{conn: conn, tenant: tenant, date_start: date_start, date_end: date_end}
   end
 
   describe "replay/5" do
-    test "invalid replay params" do
-      assert Messages.replay(self(), "a topic", "not a number", 123) ==
+    test "invalid replay params", %{tenant: tenant} do
+      assert Messages.replay(self(), tenant.external_id, "a topic", "not a number", 123) ==
                {:error, :invalid_replay_params}
 
-      assert Messages.replay(self(), "a topic", 123, "not a number") ==
+      assert Messages.replay(self(), tenant.external_id, "a topic", 123, "not a number") ==
                {:error, :invalid_replay_params}
 
-      assert Messages.replay(self(), "a topic", 253_402_300_800_000, 10) ==
+      assert Messages.replay(self(), tenant.external_id, "a topic", 253_402_300_800_000, 10) ==
                {:error, :invalid_replay_params}
     end
 
     test "empty replay", %{conn: conn} do
-      assert Messages.replay(conn, "test", 0, 10) == {:ok, [], MapSet.new()}
+      assert Messages.replay(conn, "tenant_id", "test", 0, 10) == {:ok, [], MapSet.new()}
     end
 
     test "replay respects limit", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+
       m1 =
         message_fixture(tenant, %{
           "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
@@ -53,7 +65,14 @@ defmodule Realtime.MessagesTest do
         "payload" => %{"value" => "old"}
       })
 
-      assert Messages.replay(conn, "test", 0, 1) == {:ok, [m1], MapSet.new([m1.id])}
+      assert Messages.replay(conn, external_id, "test", 0, 1) == {:ok, [m1], MapSet.new([m1.id])}
+
+      assert_receive {
+        :telemetry,
+        [:realtime, :tenants, :replay],
+        %{latency: _},
+        %{tenant: ^external_id}
+      }
     end
 
     test "replay private topic only", %{conn: conn, tenant: tenant} do
@@ -76,7 +95,7 @@ defmodule Realtime.MessagesTest do
         "payload" => %{"value" => "old"}
       })
 
-      assert Messages.replay(conn, "test", 0, 10) == {:ok, [privatem], MapSet.new([privatem.id])}
+      assert Messages.replay(conn, tenant.external_id, "test", 0, 10) == {:ok, [privatem], MapSet.new([privatem.id])}
     end
 
     test "replay extension=broadcast", %{conn: conn, tenant: tenant} do
@@ -99,7 +118,7 @@ defmodule Realtime.MessagesTest do
         "payload" => %{"value" => "old"}
       })
 
-      assert Messages.replay(conn, "test", 0, 10) == {:ok, [privatem], MapSet.new([privatem.id])}
+      assert Messages.replay(conn, tenant.external_id, "test", 0, 10) == {:ok, [privatem], MapSet.new([privatem.id])}
     end
 
     test "replay respects since", %{conn: conn, tenant: tenant} do
@@ -134,7 +153,7 @@ defmodule Realtime.MessagesTest do
 
       since = DateTime.utc_now() |> DateTime.add(-3, :minute) |> DateTime.to_unix(:millisecond)
 
-      assert Messages.replay(conn, "test", since, 10) == {:ok, [m1, m2], MapSet.new([m1.id, m2.id])}
+      assert Messages.replay(conn, tenant.external_id, "test", since, 10) == {:ok, [m1, m2], MapSet.new([m1.id, m2.id])}
     end
 
     test "replay respects hard max limit of 25", %{conn: conn, tenant: tenant} do
@@ -149,7 +168,7 @@ defmodule Realtime.MessagesTest do
         })
       end
 
-      assert {:ok, messages, set} = Messages.replay(conn, "test", 0, 30)
+      assert {:ok, messages, set} = Messages.replay(conn, tenant.external_id, "test", 0, 30)
       assert length(messages) == 25
       assert MapSet.size(set) == 25
     end
@@ -164,7 +183,7 @@ defmodule Realtime.MessagesTest do
         "payload" => %{"value" => "message"}
       })
 
-      assert {:ok, messages, set} = Messages.replay(conn, "test", 0, 0)
+      assert {:ok, messages, set} = Messages.replay(conn, tenant.external_id, "test", 0, 0)
       assert length(messages) == 1
       assert MapSet.size(set) == 1
     end
@@ -183,7 +202,8 @@ defmodule Realtime.MessagesTest do
       {:ok, node} = Clustered.start()
 
       # Call remote node passing the database connection that is local to this node
-      assert :erpc.call(node, Messages, :replay, [conn, "test", 0, 30]) == {:ok, [m], MapSet.new([m.id])}
+      assert :erpc.call(node, Messages, :replay, [conn, tenant.external_id, "test", 0, 30]) ==
+               {:ok, [m], MapSet.new([m.id])}
     end
 
     test "distributed replay error", %{tenant: tenant} do
@@ -200,7 +220,9 @@ defmodule Realtime.MessagesTest do
 
       # Call remote node passing the database connection that is local to this node
       pid = spawn(fn -> :ok end)
-      assert :erpc.call(node, Messages, :replay, [pid, "test", 0, 30]) == {:error, :failed_to_replay_messages}
+
+      assert :erpc.call(node, Messages, :replay, [pid, tenant.external_id, "test", 0, 30]) ==
+               {:error, :failed_to_replay_messages}
     end
   end
 
@@ -234,4 +256,6 @@ defmodule Realtime.MessagesTest do
       assert Enum.sort(current) == Enum.sort(to_keep)
     end
   end
+
+  def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {:telemetry, event, measures, metadata})
 end

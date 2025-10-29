@@ -246,6 +246,15 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Latency of database inserted_at until reaches server to be broadcasted",
           tags: [:tenant],
           reporter_options: [buckets: [1, 2, 5]]
+        ),
+        distribution(
+          [:realtime, :tenants, :replay],
+          event_name: [:realtime, :tenants, :replay],
+          measurement: :latency,
+          unit: :millisecond,
+          description: "Latency of broadcast replay",
+          tags: [:tenant],
+          reporter_options: [buckets: [10, 250, 5000, 15_000]]
         )
       ]
     )

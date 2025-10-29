@@ -76,7 +76,7 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket),
          {:ok, replayed_message_ids} <-
-           maybe_replay_messages(params["config"], sub_topic, db_conn, socket.assigns.private?) do
+           maybe_replay_messages(params["config"], sub_topic, db_conn, tenant_id, socket.assigns.private?) do
       tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
 
       # fastlane subscription
@@ -794,15 +794,22 @@ defmodule RealtimeWeb.RealtimeChannel do
       else: :ok
   end
 
-  defp maybe_replay_messages(%{"broadcast" => %{"replay" => _}}, _sub_topic, _db_conn, false = _private?) do
+  defp maybe_replay_messages(%{"broadcast" => %{"replay" => _}}, _sub_topic, _db_conn, _tenant_id, false = _private?) do
     {:error, :invalid_replay_channel}
   end
 
-  defp maybe_replay_messages(%{"broadcast" => %{"replay" => replay_params}}, sub_topic, db_conn, true = _private?)
+  defp maybe_replay_messages(
+         %{"broadcast" => %{"replay" => replay_params}},
+         sub_topic,
+         db_conn,
+         tenant_id,
+         true = _private?
+       )
        when is_map(replay_params) do
     with {:ok, messages, message_ids} <-
            Realtime.Messages.replay(
              db_conn,
+             tenant_id,
              sub_topic,
              replay_params["since"],
              replay_params["limit"] || 25
@@ -813,7 +820,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp maybe_replay_messages(_, _, _, _), do: {:ok, MapSet.new()}
+  defp maybe_replay_messages(_, _, _, _, _), do: {:ok, MapSet.new()}
 
   defp max_heap_size(), do: Application.fetch_env!(:realtime, :websocket_max_heap_size)
 end

@@ -181,8 +181,8 @@ defmodule Containers do
               {:ok, tenant} = Realtime.Api.update_tenant(tenant, %{migrations_ran: count})
               tenant
 
-            _ ->
-              raise "Faled to run migrations"
+            error ->
+              raise "Failed to run migrations: #{inspect(error)}"
           end
         else
           tenant
