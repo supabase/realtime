@@ -3,9 +3,9 @@ defmodule Realtime.SynHandler do
   Custom defined Syn's callbacks
   """
   require Logger
-  alias Extensions.PostgresCdcRls
-  alias RealtimeWeb.Endpoint
+  alias Realtime.Syn.PostgresCdc
   alias Realtime.Tenants.Connect
+  alias RealtimeWeb.Endpoint
 
   @behaviour :syn_event_handler
 
@@ -15,12 +15,17 @@ defmodule Realtime.SynHandler do
     Endpoint.local_broadcast(Connect.syn_topic(tenant_id), "ready", %{pid: pid, conn: conn})
   end
 
-  def on_registry_process_updated(PostgresCdcRls, tenant_id, _pid, meta, _reason) do
-    # Update that the CdCRls connection is ready
-    Endpoint.local_broadcast(PostgresCdcRls.syn_topic(tenant_id), "ready", meta)
-  end
+  def on_registry_process_updated(scope, tenant_id, _pid, meta, _reason) do
+    scope = Atom.to_string(scope)
 
-  def on_registry_process_updated(_scope, _name, _pid, _meta, _reason), do: :ok
+    case scope do
+      "realtime_postgres_cdc_" <> _ ->
+        Endpoint.local_broadcast(PostgresCdc.syn_topic(tenant_id), "ready", meta)
+
+      _ ->
+        :ok
+    end
+  end
 
   @doc """
   When processes registered with :syn are unregistered, either manually or by stopping, this
@@ -31,14 +36,20 @@ defmodule Realtime.SynHandler do
   We want to log conflict resolutions to know when more than one process on the cluster
   was started, and subsequently stopped because :syn handled the conflict.
   """
+  @postgres_cdc_scope_prefix PostgresCdc.syn_topic_prefix()
   @impl true
-  def on_process_unregistered(mod, name, pid, _meta, reason) do
-    if reason == :syn_conflict_resolution do
-      log("#{mod} terminated due to syn conflict resolution: #{inspect(name)} #{inspect(pid)}")
+  def on_process_unregistered(scope, name, pid, _meta, reason) do
+    case Atom.to_string(scope) do
+      @postgres_cdc_scope_prefix <> _ = scope ->
+        Endpoint.local_broadcast(PostgresCdc.syn_topic(name), scope <> "_down", %{pid: pid, reason: reason})
+
+      _ ->
+        topic = topic(scope)
+        Endpoint.local_broadcast(topic <> ":" <> name, topic <> "_down", %{pid: pid, reason: reason})
     end
 
-    topic = topic(mod)
-    Endpoint.local_broadcast(topic <> ":" <> name, topic <> "_down", %{pid: pid, reason: reason})
+    if reason == :syn_conflict_resolution,
+      do: log("#{scope} terminated due to syn conflict resolution: #{inspect(name)} #{inspect(pid)}")
 
     :ok
   end

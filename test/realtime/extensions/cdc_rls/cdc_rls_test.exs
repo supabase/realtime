@@ -76,7 +76,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       metadata = [metadata: subscription_metadata]
       :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
 
-      RealtimeWeb.Endpoint.subscribe(PostgresCdcRls.syn_topic(tenant.external_id))
+      RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
       # First time it will return nil
       PostgresCdcRls.handle_connect(args)
       # Wait for it to start
@@ -88,14 +88,17 @@ defmodule Realtime.Extensions.CdcRlsTest do
       # Now subscribe to the Postgres Changes
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params)
 
-      RealtimeWeb.Endpoint.unsubscribe(PostgresCdcRls.syn_topic(tenant.external_id))
+      RealtimeWeb.Endpoint.unsubscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
       %{tenant: tenant}
     end
 
     test "supervisor crash must not respawn", %{tenant: tenant} do
+      scope = Realtime.Syn.PostgresCdc.scope(tenant.external_id)
+
       sup =
         Enum.reduce_while(1..30, nil, fn _, acc ->
-          :syn.lookup(Extensions.PostgresCdcRls, tenant.external_id)
+          scope
+          |> :syn.lookup(tenant.external_id)
           |> case do
             :undefined ->
               Process.sleep(500)
@@ -109,16 +112,16 @@ defmodule Realtime.Extensions.CdcRlsTest do
       assert Process.alive?(sup)
       Process.monitor(sup)
 
-      RealtimeWeb.Endpoint.subscribe(PostgresCdcRls.syn_topic(tenant.external_id))
+      RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
 
       Process.exit(sup, :kill)
+      scope_down = Atom.to_string(scope) <> "_down"
+
       assert_receive {:DOWN, _, :process, ^sup, _reason}, 5000
-
-      assert_receive %{event: "postgres_cdc_rls_down"}
-
+      assert_receive %{event: ^scope_down}
       refute_receive %{event: "ready"}, 1000
 
-      :undefined = :syn.lookup(Extensions.PostgresCdcRls, tenant.external_id)
+      :undefined = :syn.lookup(Realtime.Syn.PostgresCdc.scope(tenant.external_id), tenant.external_id)
     end
 
     test "Subscription manager updates oids", %{tenant: tenant} do
@@ -150,7 +153,10 @@ defmodule Realtime.Extensions.CdcRlsTest do
     test "Stop tenant supervisor", %{tenant: tenant} do
       sup =
         Enum.reduce_while(1..10, nil, fn _, acc ->
-          case :syn.lookup(Extensions.PostgresCdcRls, tenant.external_id) do
+          tenant.external_id
+          |> Realtime.Syn.PostgresCdc.scope()
+          |> :syn.lookup(tenant.external_id)
+          |> case do
             :undefined ->
               Process.sleep(500)
               {:cont, acc}
