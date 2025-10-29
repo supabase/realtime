@@ -290,7 +290,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     case PostgresCdc.connect(module, args) do
       {:ok, response} ->
-        case PostgresCdc.after_connect(module, response, postgres_extension, pg_change_params) do
+        case PostgresCdc.after_connect(module, response, postgres_extension, pg_change_params, tenant) do
           {:ok, _response} ->
             message = "Subscribed to PostgreSQL"
             maybe_log_info(socket, message)

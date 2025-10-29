@@ -86,7 +86,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       {:ok, response} = PostgresCdcRls.handle_connect(args)
 
       # Now subscribe to the Postgres Changes
-      {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params)
+      {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
 
       RealtimeWeb.Endpoint.unsubscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
       %{tenant: tenant}
@@ -242,9 +242,9 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
-      :telemetry.attach(
+      :telemetry.attach_many(
         __MODULE__,
-        [:realtime, :tenants, :payload, :size],
+        [[:realtime, :tenants, :payload, :size], [:realtime, :rpc]],
         &__MODULE__.handle_telemetry/4,
         pid: self()
       )
@@ -291,8 +291,19 @@ defmodule Realtime.Extensions.CdcRlsTest do
       Process.sleep(3000)
       {:ok, response} = PostgresCdcRls.handle_connect(args)
 
+      assert_receive {
+        :telemetry,
+        [:realtime, :rpc],
+        %{latency: _},
+        %{
+          tenant: "dev_tenant",
+          mechanism: :gen_rpc,
+          success: true
+        }
+      }
+
       # Now subscribe to the Postgres Changes
-      {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params)
+      {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
       assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
 
       # Insert a record
@@ -382,7 +393,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       {:ok, response} = PostgresCdcRls.handle_connect(args)
 
       # Now subscribe to the Postgres Changes
-      {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params)
+      {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
       assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
 
       log =
@@ -468,7 +479,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
 
       # Now subscribe to the Postgres Changes
-      {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params)
+      {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
       assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
 
       # Insert a record
@@ -506,6 +517,19 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} = RateCounter.get(rate)
       assert 1 in bucket
+
+      assert_receive {
+        :telemetry,
+        [:realtime, :rpc],
+        %{latency: _},
+        %{
+          tenant: "dev_tenant",
+          mechanism: :gen_rpc,
+          origin_node: _,
+          success: true,
+          target_node: ^node
+        }
+      }
 
       :erpc.call(node, PostgresCdcRls, :handle_stop, [tenant.external_id, 10_000])
     end

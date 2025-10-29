@@ -28,14 +28,14 @@ defmodule Extensions.PostgresCdcRls do
   end
 
   @impl true
-  def handle_after_connect({manager_pid, conn}, settings, params_list) do
+  def handle_after_connect({manager_pid, conn}, settings, params_list, tenant) do
     with {:ok, subscription_list} <- subscription_list(params_list) do
       publication = settings["publication"]
       opts = [conn, publication, subscription_list, manager_pid, self()]
       conn_node = node(conn)
 
       if conn_node !== node() do
-        GenRpc.call(conn_node, Subscriptions, :create, opts, timeout: 15_000)
+        GenRpc.call(conn_node, Subscriptions, :create, opts, timeout: 15_000, tenant_id: tenant)
       else
         apply(Subscriptions, :create, opts)
       end
@@ -90,7 +90,7 @@ defmodule Extensions.PostgresCdcRls do
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, platform_region: platform_region)}"
     )
 
-    case GenRpc.call(launch_node, __MODULE__, :start, [args], timeout: 30_000, tenant: tenant) do
+    case GenRpc.call(launch_node, __MODULE__, :start, [args], timeout: 30_000, tenant_id: tenant) do
       {:ok, _pid} = ok ->
         ok
 
