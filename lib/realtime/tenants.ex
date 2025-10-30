@@ -340,7 +340,7 @@ defmodule Realtime.Tenants do
     opts = [
       max_bucket_len: 30,
       limit: [
-        value: pool_size(tenant),
+        value: authorization_pool_size(tenant),
         measurement: :sum,
         log_fn: fn ->
           Logger.critical("IncreaseConnectionPool: Too many database timeouts",
@@ -352,6 +352,25 @@ defmodule Realtime.Tenants do
     ]
 
     %RateCounter.Args{id: {:channel, :authorization_errors, external_id}, opts: opts}
+  end
+
+  @spec subscription_errors_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
+  def subscription_errors_per_second_rate(tenant_id, pool_size) do
+    opts = [
+      max_bucket_len: 30,
+      limit: [
+        value: pool_size,
+        measurement: :sum,
+        log_fn: fn ->
+          Logger.error("IncreaseSubscriptionConnectionPool: Too many database timeouts",
+            external_id: tenant_id,
+            project: tenant_id
+          )
+        end
+      ]
+    ]
+
+    %RateCounter.Args{id: {:channel, :subscription_errors, tenant_id}, opts: opts}
   end
 
   @connect_errors_per_second_default 10
@@ -380,11 +399,11 @@ defmodule Realtime.Tenants do
     %RateCounter.Args{id: {:database, :connect, tenant_id}, opts: opts}
   end
 
-  defp pool_size(%{extensions: [%{settings: settings} | _]}) do
+  defp authorization_pool_size(%{extensions: [%{settings: settings} | _]}) do
     Database.pool_size_by_application_name("realtime_connect", settings)
   end
 
-  defp pool_size(_), do: 1
+  defp authorization_pool_size(_), do: 1
 
   @spec get_tenant_limits(Realtime.Api.Tenant.t(), maybe_improper_list) :: list
   def get_tenant_limits(%Tenant{} = tenant, keys) when is_list(keys) do
