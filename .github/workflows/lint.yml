@@ -51,6 +51,8 @@ jobs:
         run: mix ecto.migrate --log-migrator-sql
       - name: Run database tenant migrations
         run: mix ecto.migrate --migrations-path lib/realtime/tenants/repo/migrations
+      - name: Check for warnings
+        run: mix compile --force --warnings-as-errors
       - name: Run format check
         run: mix format --check-formatted
       - name: Credo checks
