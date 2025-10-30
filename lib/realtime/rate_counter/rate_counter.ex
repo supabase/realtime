@@ -20,7 +20,7 @@ defmodule Realtime.RateCounter do
     defstruct id: nil, opts: []
   end
 
-  @idle_shutdown :timer.minutes(15)
+  @idle_shutdown :timer.minutes(10)
   @tick :timer.seconds(1)
   @max_bucket_len 60
   @cache __MODULE__

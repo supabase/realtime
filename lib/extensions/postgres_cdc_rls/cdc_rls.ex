@@ -45,9 +45,6 @@ defmodule Extensions.PostgresCdcRls do
 
     if rate_counter.limit.triggered == false do
       case Subscriptions.create(conn, publication, subscription_list, manager_pid, caller) do
-        {:ok, response} ->
-          {:ok, response}
-
         {:error, %DBConnection.ConnectionError{}} ->
           GenCounter.add(rate_counter.id)
           {:error, @database_timeout_reason}
@@ -56,8 +53,8 @@ defmodule Extensions.PostgresCdcRls do
           GenCounter.add(rate_counter.id)
           {:error, @database_timeout_reason}
 
-        {:error, reason} ->
-          {:error, reason}
+        response ->
+          response
       end
     else
       {:error, @database_timeout_reason}
@@ -71,15 +68,12 @@ defmodule Extensions.PostgresCdcRls do
       args = [conn, tenant, publication, pool_size, subscription_list, manager_pid, caller]
 
       case GenRpc.call(node(conn), __MODULE__, :create_subscription, args, timeout: 15_000, tenant_id: tenant) do
-        {:ok, response} ->
-          {:ok, response}
-
         {:error, @database_timeout_reason} ->
           GenCounter.add(rate_counter.id)
           {:error, @database_timeout_reason}
 
-        error ->
-          error
+        response ->
+          response
       end
     else
       {:error, @database_timeout_reason}

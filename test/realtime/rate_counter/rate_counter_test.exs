@@ -22,7 +22,7 @@ defmodule Realtime.RateCounterTest do
                max_bucket_len: 60,
                tick: 1000,
                tick_ref: _,
-               idle_shutdown: 900_000,
+               idle_shutdown: 600_000,
                idle_shutdown_ref: _,
                telemetry: %{emit: false},
                limit: %{log: false}
@@ -62,7 +62,7 @@ defmodule Realtime.RateCounterTest do
                max_bucket_len: 60,
                tick: 10,
                tick_ref: _,
-               idle_shutdown: 900_000,
+               idle_shutdown: 600_000,
                idle_shutdown_ref: _,
                telemetry: %{
                  emit: true,
