@@ -1,5 +1,7 @@
 defmodule RealtimeWeb.RealtimeChannel.TrackerTest do
-  use Realtime.DataCase
+  # It kills websockets when no channels are open
+  # It can affect other tests
+  use Realtime.DataCase, async: false
   alias RealtimeWeb.RealtimeChannel.Tracker
 
   setup do

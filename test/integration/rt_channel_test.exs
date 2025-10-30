@@ -2295,8 +2295,9 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "phx_close"}, 500
     end
 
+    start_supervised!({Tracker, check_interval_in_ms: 100})
     # wait to trigger tracker
-    assert_process_down(socket, 5000)
+    assert_process_down(socket, 1000)
     assert [] = Tracker.list_pids()
   end
 
