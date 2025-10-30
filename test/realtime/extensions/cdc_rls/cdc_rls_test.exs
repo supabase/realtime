@@ -408,7 +408,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       }
     end
 
-    test "subscription error rate limit", %{tenant: tenant, conn: conn, node: node} do
+    test "subscription error rate limit", %{tenant: tenant, node: node} do
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
 
