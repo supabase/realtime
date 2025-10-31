@@ -8,9 +8,7 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
 
   alias Phoenix.Socket.Broadcast
 
-  def dispatch([_ | _] = topic_subscriptions, _from, payload) do
-    {sub_ids, payload} = Map.pop(payload, :subscription_ids)
-
+  def dispatch([_ | _] = topic_subscriptions, _from, {type, payload, sub_ids}) do
     _ =
       Enum.reduce(topic_subscriptions, %{}, fn
         {_pid, {:subscriber_fastlane, fastlane_pid, serializer, ids, join_topic, is_new_api}}, cache ->
@@ -26,9 +24,13 @@ defmodule Extensions.PostgresCdcRls.MessageDispatcher do
             [_ | _] = valid_ids ->
               new_payload =
                 if is_new_api do
-                  %Broadcast{topic: join_topic, event: "postgres_changes", payload: %{ids: valid_ids, data: payload}}
+                  %Broadcast{
+                    topic: join_topic,
+                    event: "postgres_changes",
+                    payload: %{ids: valid_ids, data: Jason.Fragment.new(payload)}
+                  }
                 else
-                  %Broadcast{topic: join_topic, event: payload.type, payload: payload}
+                  %Broadcast{topic: join_topic, event: type, payload: Jason.Fragment.new(payload)}
                 end
 
               broadcast_message(cache, fastlane_pid, new_payload, serializer)
