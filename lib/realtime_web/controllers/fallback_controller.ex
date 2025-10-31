@@ -29,13 +29,6 @@ defmodule RealtimeWeb.FallbackController do
     |> render("error.json", changeset: changeset)
   end
 
-  def call(conn, {:error, _}) do
-    conn
-    |> put_status(:unauthorized)
-    |> put_view(RealtimeWeb.ErrorView)
-    |> render("error.json", message: "Unauthorized")
-  end
-
   def call(conn, {:error, status, message}) when is_atom(status) and is_binary(message) do
     log_error("UnprocessableEntity", message)
 
@@ -55,6 +48,13 @@ defmodule RealtimeWeb.FallbackController do
     |> put_status(:unprocessable_entity)
     |> put_view(RealtimeWeb.ChangesetView)
     |> render("error.json", changeset: changeset)
+  end
+
+  def call(conn, {:error, _}) do
+    conn
+    |> put_status(:unauthorized)
+    |> put_view(RealtimeWeb.ErrorView)
+    |> render("error.json", message: "Unauthorized")
   end
 
   def call(conn, %Ecto.Changeset{valid?: false} = changeset) do

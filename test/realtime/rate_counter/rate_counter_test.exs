@@ -22,7 +22,7 @@ defmodule Realtime.RateCounterTest do
                max_bucket_len: 60,
                tick: 1000,
                tick_ref: _,
-               idle_shutdown: 900_000,
+               idle_shutdown: 600_000,
                idle_shutdown_ref: _,
                telemetry: %{emit: false},
                limit: %{log: false}
@@ -62,7 +62,7 @@ defmodule Realtime.RateCounterTest do
                max_bucket_len: 60,
                tick: 10,
                tick_ref: _,
-               idle_shutdown: 900_000,
+               idle_shutdown: 600_000,
                idle_shutdown_ref: _,
                telemetry: %{
                  emit: true,
@@ -260,10 +260,10 @@ defmodule Realtime.RateCounterTest do
 
     test "rate counters shut themselves down when no activity occurs on the GenCounter" do
       args = %Args{id: {:domain, :metric, Ecto.UUID.generate()}}
-      {:ok, pid} = RateCounter.new(args, idle_shutdown: 5)
+      {:ok, pid} = RateCounter.new(args, idle_shutdown: 100)
 
       Process.monitor(pid)
-      assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 100
+      assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 200
       # Cache has not expired yet
       assert {:ok, %RateCounter{}} = Cachex.get(RateCounter, args.id)
       Process.sleep(2000)

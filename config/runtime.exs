@@ -73,11 +73,7 @@ websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_
 users_scope_shards = Env.get_integer("USERS_SCOPE_SHARDS", 5)
 postgres_cdc_scope_shards = Env.get_integer("POSTGRES_CDC_SCOPE_SHARDS", 5)
 regional_broadcasting = Env.get_boolean("REGIONAL_BROADCASTING", false)
-
-no_channel_timeout_in_ms =
-  if config_env() == :test,
-    do: :timer.seconds(3),
-    else: Env.get_integer("NO_CHANNEL_TIMEOUT_IN_MS", :timer.minutes(10))
+no_channel_timeout_in_ms = Env.get_integer("NO_CHANNEL_TIMEOUT_IN_MS", :timer.minutes(10))
 
 if !(db_version in [nil, "ipv6", "ipv4"]),
   do: raise("Invalid IP version, please set either ipv6 or ipv4")

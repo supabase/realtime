@@ -9,6 +9,8 @@ defmodule Realtime.SynHandler do
 
   @behaviour :syn_event_handler
 
+  @postgres_cdc_scope_prefix PostgresCdc.syn_topic_prefix()
+
   @impl true
   def on_registry_process_updated(Connect, tenant_id, pid, %{conn: conn}, :normal) when is_pid(conn) do
     # Update that a database connection is ready
@@ -19,7 +21,7 @@ defmodule Realtime.SynHandler do
     scope = Atom.to_string(scope)
 
     case scope do
-      "realtime_postgres_cdc_" <> _ ->
+      @postgres_cdc_scope_prefix <> _ ->
         Endpoint.local_broadcast(PostgresCdc.syn_topic(tenant_id), "ready", meta)
 
       _ ->
@@ -36,7 +38,6 @@ defmodule Realtime.SynHandler do
   We want to log conflict resolutions to know when more than one process on the cluster
   was started, and subsequently stopped because :syn handled the conflict.
   """
-  @postgres_cdc_scope_prefix PostgresCdc.syn_topic_prefix()
   @impl true
   def on_process_unregistered(scope, name, pid, _meta, reason) do
     case Atom.to_string(scope) do

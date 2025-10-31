@@ -267,7 +267,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                   %{message: message, status: "error", extension: "postgres_changes", channel: "test_fail"},
                   5000
 
-      assert message =~ "{:error, {:exit, {:noproc, {DBConnection.Holder, :checkout"
+      assert message =~ "{:error, \"Too many database timeouts\"}"
       socket = Server.socket(socket.channel_pid)
 
       # It will try again in the future

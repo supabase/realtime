@@ -9,6 +9,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
   setup :set_mimic_global
 
   alias Extensions.PostgresCdcRls
+  alias Extensions.PostgresCdcRls.Subscriptions
   alias PostgresCdcRls.SubscriptionManager
   alias Postgrex
   alias Realtime.Api
@@ -24,57 +25,11 @@ defmodule Realtime.Extensions.CdcRlsTest do
     setup do
       tenant = Containers.checkout_tenant(run_migrations: true)
 
-      {:ok, conn} = Database.connect(tenant, "realtime_test")
-
-      Database.transaction(conn, fn db_conn ->
-        queries = [
-          "drop table if exists public.test",
-          "drop publication if exists supabase_realtime_test",
-          "create sequence if not exists test_id_seq;",
-          """
-          create table if not exists "public"."test" (
-          "id" int4 not null default nextval('test_id_seq'::regclass),
-          "details" text,
-          primary key ("id"));
-          """,
-          "grant all on table public.test to anon;",
-          "grant all on table public.test to postgres;",
-          "grant all on table public.test to authenticated;",
-          "create publication supabase_realtime_test for all tables"
-        ]
-
-        Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
-      end)
-
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
       args = Map.put(postgres_extension, "id", external_id)
 
-      pg_change_params = [
-        %{
-          id: UUID.uuid1(),
-          params: %{"event" => "*", "schema" => "public"},
-          channel_pid: self(),
-          claims: %{
-            "exp" => System.system_time(:second) + 100_000,
-            "iat" => 0,
-            "ref" => "127.0.0.1",
-            "role" => "anon"
-          }
-        }
-      ]
-
-      ids =
-        Enum.map(pg_change_params, fn %{id: id, params: params} ->
-          {UUID.string_to_binary!(id), :erlang.phash2(params)}
-        end)
-
-      topic = "realtime:test"
-      serializer = Phoenix.Socket.V1.JSONSerializer
-
-      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, true}
-      metadata = [metadata: subscription_metadata]
-      :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
+      pg_change_params = pubsub_subscribe(external_id)
 
       RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
       # First time it will return nil
@@ -172,6 +127,41 @@ defmodule Realtime.Extensions.CdcRlsTest do
     end
   end
 
+  describe "handle_after_connect/4" do
+    setup do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+      %{tenant: tenant}
+    end
+
+    test "subscription error rate limit", %{tenant: tenant} do
+      %Tenant{extensions: extensions, external_id: external_id} = tenant
+      postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
+
+      stub(Subscriptions, :create, fn _conn, _publication, _subscription_list, _manager, _caller ->
+        {:error, %DBConnection.ConnectionError{}}
+      end)
+
+      # Now try to subscribe to the Postgres Changes
+      for _x <- 1..6 do
+        assert {:error, "Too many database timeouts"} =
+                 PostgresCdcRls.handle_after_connect({:manager_pid, self()}, postgres_extension, %{}, external_id)
+      end
+
+      Process.sleep(1200)
+
+      rate = Realtime.Tenants.subscription_errors_per_second_rate(external_id, 4)
+
+      assert {:ok, %RateCounter{id: {:channel, :subscription_errors, ^external_id}, sum: 6, limit: %{triggered: true}}} =
+               RateCounter.get(rate)
+
+      # It won't even be called now
+      reject(&Subscriptions.create/5)
+
+      assert {:error, "Too many database timeouts"} =
+               PostgresCdcRls.handle_after_connect({:manager_pid, self()}, postgres_extension, %{}, external_id)
+    end
+  end
+
   describe "Region rebalancing" do
     setup do
       tenant = Containers.checkout_tenant(run_migrations: true)
@@ -211,46 +201,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
   end
 
   describe "integration" do
-    setup do
-      tenant = Api.get_tenant_by_external_id("dev_tenant")
-      PostgresCdcRls.handle_stop(tenant.external_id, 10_000)
-
-      {:ok, conn} = Database.connect(tenant, "realtime_test")
-
-      Database.transaction(conn, fn db_conn ->
-        queries = [
-          "drop table if exists public.test",
-          "drop publication if exists supabase_realtime_test",
-          "create sequence if not exists test_id_seq;",
-          """
-          create table if not exists "public"."test" (
-          "id" int4 not null default nextval('test_id_seq'::regclass),
-          "details" text,
-          primary key ("id"));
-          """,
-          "grant all on table public.test to anon;",
-          "grant all on table public.test to postgres;",
-          "grant all on table public.test to authenticated;",
-          "create publication supabase_realtime_test for all tables"
-        ]
-
-        Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
-      end)
-
-      RateCounter.stop(tenant.external_id)
-      on_exit(fn -> RateCounter.stop(tenant.external_id) end)
-
-      on_exit(fn -> :telemetry.detach(__MODULE__) end)
-
-      :telemetry.attach_many(
-        __MODULE__,
-        [[:realtime, :tenants, :payload, :size], [:realtime, :rpc]],
-        &__MODULE__.handle_telemetry/4,
-        pid: self()
-      )
-
-      %{tenant: tenant, conn: conn}
-    end
+    setup [:integration]
 
     test "subscribe inserts", %{tenant: tenant, conn: conn} do
       on_exit(fn -> PostgresCdcRls.handle_stop(tenant.external_id, 10_000) end)
@@ -259,36 +210,12 @@ defmodule Realtime.Extensions.CdcRlsTest do
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
       args = Map.put(postgres_extension, "id", external_id)
 
-      pg_change_params = [
-        %{
-          id: UUID.uuid1(),
-          params: %{"event" => "*", "schema" => "public"},
-          channel_pid: self(),
-          claims: %{
-            "exp" => System.system_time(:second) + 100_000,
-            "iat" => 0,
-            "ref" => "127.0.0.1",
-            "role" => "anon"
-          }
-        }
-      ]
-
-      ids =
-        Enum.map(pg_change_params, fn %{id: id, params: params} ->
-          {UUID.string_to_binary!(id), :erlang.phash2(params)}
-        end)
-
-      topic = "realtime:test"
-      serializer = Phoenix.Socket.V1.JSONSerializer
-
-      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, true}
-      metadata = [metadata: subscription_metadata]
-      :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
+      pg_change_params = pubsub_subscribe(external_id)
 
       # First time it will return nil
       PostgresCdcRls.handle_connect(args)
       # Wait for it to start
-      Process.sleep(3000)
+      assert_receive %{event: "ready"}, 3000
       {:ok, response} = PostgresCdcRls.handle_connect(args)
 
       assert_receive {
@@ -351,43 +278,19 @@ defmodule Realtime.Extensions.CdcRlsTest do
       }
     end
 
-    test "rate limit works", %{tenant: tenant, conn: conn} do
+    test "db events rate limit works", %{tenant: tenant, conn: conn} do
       on_exit(fn -> PostgresCdcRls.handle_stop(tenant.external_id, 10_000) end)
 
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
       args = Map.put(postgres_extension, "id", external_id)
 
-      pg_change_params = [
-        %{
-          id: UUID.uuid1(),
-          params: %{"event" => "*", "schema" => "public"},
-          channel_pid: self(),
-          claims: %{
-            "exp" => System.system_time(:second) + 100_000,
-            "iat" => 0,
-            "ref" => "127.0.0.1",
-            "role" => "anon"
-          }
-        }
-      ]
-
-      ids =
-        Enum.map(pg_change_params, fn %{id: id, params: params} ->
-          {UUID.string_to_binary!(id), :erlang.phash2(params)}
-        end)
-
-      topic = "realtime:test"
-      serializer = Phoenix.Socket.V1.JSONSerializer
-
-      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, true}
-      metadata = [metadata: subscription_metadata]
-      :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
+      pg_change_params = pubsub_subscribe(external_id)
 
       # First time it will return nil
       PostgresCdcRls.handle_connect(args)
       # Wait for it to start
-      Process.sleep(3000)
+      assert_receive %{event: "ready"}, 1000
       {:ok, response} = PostgresCdcRls.handle_connect(args)
 
       # Now subscribe to the Postgres Changes
@@ -423,58 +326,41 @@ defmodule Realtime.Extensions.CdcRlsTest do
       # Nothing has changed
       assert Enum.sum(bucket) == 100_000_000
     end
+  end
 
-    @aux_mod (quote do
-                defmodule Subscriber do
-                  # Start CDC remotely
-                  def subscribe(tenant) do
-                    %Tenant{extensions: extensions, external_id: external_id} = tenant
-                    postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
-                    args = Map.put(postgres_extension, "id", external_id)
+  @aux_mod (quote do
+              defmodule Subscriber do
+                # Start CDC remotely
+                def subscribe(tenant) do
+                  %Tenant{extensions: extensions, external_id: external_id} = tenant
+                  postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
+                  args = Map.put(postgres_extension, "id", external_id)
 
-                    # Boot it
-                    PostgresCdcRls.start(args)
-                    # Wait for it to start
-                    Process.sleep(3000)
-                    {:ok, manager, conn} = PostgresCdcRls.get_manager_conn(external_id)
-                    {:ok, {manager, conn}}
-                  end
+                  RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
+                  # First time it will return nil
+                  PostgresCdcRls.start(args)
+                  # Wait for it to start
+                  assert_receive %{event: "ready"}, 3000
+                  {:ok, manager, conn} = PostgresCdcRls.get_manager_conn(external_id)
+                  {:ok, {manager, conn}}
                 end
-              end)
+              end
+            end)
+  describe "distributed integration" do
+    setup [:integration]
 
-    test "subscribe inserts distributed mode", %{tenant: tenant, conn: conn} do
+    setup(%{tenant: tenant}) do
       {:ok, node} = Clustered.start(@aux_mod)
       {:ok, response} = :erpc.call(node, Subscriber, :subscribe, [tenant])
 
+      %{node: node, response: response}
+    end
+
+    test "subscribe inserts distributed mode", %{tenant: tenant, conn: conn, node: node, response: response} do
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
 
-      pg_change_params = [
-        %{
-          id: UUID.uuid1(),
-          params: %{"event" => "*", "schema" => "public"},
-          channel_pid: self(),
-          claims: %{
-            "exp" => System.system_time(:second) + 100_000,
-            "iat" => 0,
-            "ref" => "127.0.0.1",
-            "role" => "anon"
-          }
-        }
-      ]
-
-      ids =
-        Enum.map(pg_change_params, fn %{id: id, params: params} ->
-          {UUID.string_to_binary!(id), :erlang.phash2(params)}
-        end)
-
-      # Subscribe to the topic as a websocket client
-      topic = "realtime:test"
-      serializer = Phoenix.Socket.V1.JSONSerializer
-
-      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, true}
-      metadata = [metadata: subscription_metadata]
-      :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
+      pg_change_params = pubsub_subscribe(external_id)
 
       # Now subscribe to the Postgres Changes
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
@@ -520,9 +406,108 @@ defmodule Realtime.Extensions.CdcRlsTest do
           target_node: ^node
         }
       }
-
-      :erpc.call(node, PostgresCdcRls, :handle_stop, [tenant.external_id, 10_000])
     end
+
+    test "subscription error rate limit", %{tenant: tenant, node: node} do
+      %Tenant{extensions: extensions, external_id: external_id} = tenant
+      postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
+
+      pg_change_params = pubsub_subscribe(external_id)
+
+      # Grab a process that is not alive to cause subscriptions to error out
+      pid = :erpc.call(node, :erlang, :self, [])
+
+      # Now subscribe to the Postgres Changes multiple times to reach the rate limit
+      for _ <- 1..6 do
+        assert {:error, "Too many database timeouts"} =
+                 PostgresCdcRls.handle_after_connect({pid, pid}, postgres_extension, pg_change_params, external_id)
+      end
+
+      Process.sleep(1200)
+
+      rate = Realtime.Tenants.subscription_errors_per_second_rate(external_id, 4)
+
+      assert {:ok, %RateCounter{id: {:channel, :subscription_errors, ^external_id}, sum: 6, limit: %{triggered: true}}} =
+               RateCounter.get(rate)
+
+      # It won't even be called now
+      reject(&Realtime.GenRpc.call/5)
+
+      assert {:error, "Too many database timeouts"} =
+               PostgresCdcRls.handle_after_connect({pid, pid}, postgres_extension, pg_change_params, external_id)
+    end
+  end
+
+  defp integration(_) do
+    tenant = Api.get_tenant_by_external_id("dev_tenant")
+    PostgresCdcRls.handle_stop(tenant.external_id, 10_000)
+
+    {:ok, conn} = Database.connect(tenant, "realtime_test")
+
+    Database.transaction(conn, fn db_conn ->
+      queries = [
+        "drop table if exists public.test",
+        "drop publication if exists supabase_realtime_test",
+        "create sequence if not exists test_id_seq;",
+        """
+        create table if not exists "public"."test" (
+        "id" int4 not null default nextval('test_id_seq'::regclass),
+        "details" text,
+        primary key ("id"));
+        """,
+        "grant all on table public.test to anon;",
+        "grant all on table public.test to postgres;",
+        "grant all on table public.test to authenticated;",
+        "create publication supabase_realtime_test for all tables"
+      ]
+
+      Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
+    end)
+
+    RateCounter.stop(tenant.external_id)
+    on_exit(fn -> RateCounter.stop(tenant.external_id) end)
+
+    on_exit(fn -> :telemetry.detach(__MODULE__) end)
+
+    :telemetry.attach_many(
+      __MODULE__,
+      [[:realtime, :tenants, :payload, :size], [:realtime, :rpc]],
+      &__MODULE__.handle_telemetry/4,
+      pid: self()
+    )
+
+    RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
+
+    %{tenant: tenant, conn: conn}
+  end
+
+  defp pubsub_subscribe(external_id) do
+    pg_change_params = [
+      %{
+        id: UUID.uuid1(),
+        params: %{"event" => "*", "schema" => "public"},
+        channel_pid: self(),
+        claims: %{
+          "exp" => System.system_time(:second) + 100_000,
+          "iat" => 0,
+          "ref" => "127.0.0.1",
+          "role" => "anon"
+        }
+      }
+    ]
+
+    topic = "realtime:test"
+    serializer = Phoenix.Socket.V1.JSONSerializer
+
+    ids =
+      Enum.map(pg_change_params, fn %{id: id, params: params} ->
+        {UUID.string_to_binary!(id), :erlang.phash2(params)}
+      end)
+
+    subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, true}
+    metadata = [metadata: subscription_metadata]
+    :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
+    pg_change_params
   end
 
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {:telemetry, event, measures, metadata})

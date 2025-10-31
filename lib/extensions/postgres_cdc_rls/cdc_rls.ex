@@ -6,10 +6,11 @@ defmodule Extensions.PostgresCdcRls do
   @behaviour Realtime.PostgresCdc
   use Realtime.Logs
 
-  alias RealtimeWeb.Endpoint
   alias Extensions.PostgresCdcRls, as: Rls
-  alias Rls.Subscriptions
+  alias Realtime.GenCounter
   alias Realtime.GenRpc
+  alias RealtimeWeb.Endpoint
+  alias Rls.Subscriptions
 
   @impl true
   @spec handle_connect(map()) :: {:ok, {pid(), pid()}} | nil
@@ -30,16 +31,59 @@ defmodule Extensions.PostgresCdcRls do
   @impl true
   def handle_after_connect({manager_pid, conn}, settings, params_list, tenant) do
     with {:ok, subscription_list} <- subscription_list(params_list) do
+      pool_size = Map.get(settings, "subcriber_pool_size", 4)
       publication = settings["publication"]
-      opts = [conn, publication, subscription_list, manager_pid, self()]
-      conn_node = node(conn)
-
-      if conn_node !== node() do
-        GenRpc.call(conn_node, Subscriptions, :create, opts, timeout: 15_000, tenant_id: tenant)
-      else
-        apply(Subscriptions, :create, opts)
-      end
+      create_subscription(conn, tenant, publication, pool_size, subscription_list, manager_pid, self())
     end
+  end
+
+  @database_timeout_reason "Too many database timeouts"
+
+  def create_subscription(conn, tenant, publication, pool_size, subscription_list, manager_pid, caller)
+      when node(conn) == node() do
+    rate_counter = rate_counter(tenant, pool_size)
+
+    if rate_counter.limit.triggered == false do
+      case Subscriptions.create(conn, publication, subscription_list, manager_pid, caller) do
+        {:error, %DBConnection.ConnectionError{}} ->
+          GenCounter.add(rate_counter.id)
+          {:error, @database_timeout_reason}
+
+        {:error, {:exit, _}} ->
+          GenCounter.add(rate_counter.id)
+          {:error, @database_timeout_reason}
+
+        response ->
+          response
+      end
+    else
+      {:error, @database_timeout_reason}
+    end
+  end
+
+  def create_subscription(conn, tenant, publication, pool_size, subscription_list, manager_pid, caller) do
+    rate_counter = rate_counter(tenant, pool_size)
+
+    if rate_counter.limit.triggered == false do
+      args = [conn, tenant, publication, pool_size, subscription_list, manager_pid, caller]
+
+      case GenRpc.call(node(conn), __MODULE__, :create_subscription, args, timeout: 15_000, tenant_id: tenant) do
+        {:error, @database_timeout_reason} ->
+          GenCounter.add(rate_counter.id)
+          {:error, @database_timeout_reason}
+
+        response ->
+          response
+      end
+    else
+      {:error, @database_timeout_reason}
+    end
+  end
+
+  defp rate_counter(tenant_id, pool_size) do
+    rate_counter_args = Realtime.Tenants.subscription_errors_per_second_rate(tenant_id, pool_size)
+    {:ok, rate_counter} = Realtime.RateCounter.get(rate_counter_args)
+    rate_counter
   end
 
   defp subscription_list(params_list) do
