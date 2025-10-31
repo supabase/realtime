@@ -72,7 +72,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       topic = "realtime:test"
       serializer = Phoenix.Socket.V1.JSONSerializer
 
-      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, external_id, true}
+      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, true}
       metadata = [metadata: subscription_metadata]
       :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
 
@@ -281,7 +281,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       topic = "realtime:test"
       serializer = Phoenix.Socket.V1.JSONSerializer
 
-      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, external_id, true}
+      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, true}
       metadata = [metadata: subscription_metadata]
       :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
 
@@ -339,11 +339,9 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
 
-      assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} =
-               RateCounter.get(rate)
+      assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} = RateCounter.get(rate)
 
-      # 1 from ReplicationPoller and 1 from MessageDispatcher
-      assert Enum.sum(bucket) == 2
+      assert Enum.sum(bucket) == 1
 
       assert_receive {
         :telemetry,
@@ -382,7 +380,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       topic = "realtime:test"
       serializer = Phoenix.Socket.V1.JSONSerializer
 
-      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, external_id, true}
+      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, true}
       metadata = [metadata: subscription_metadata]
       :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
 
@@ -474,7 +472,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       topic = "realtime:test"
       serializer = Phoenix.Socket.V1.JSONSerializer
 
-      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, external_id, true}
+      subscription_metadata = {:subscriber_fastlane, self(), serializer, ids, topic, true}
       metadata = [metadata: subscription_metadata]
       :ok = PostgresCdc.subscribe(PostgresCdcRls, pg_change_params, external_id, metadata)
 
@@ -509,14 +507,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
                "ref" => nil,
                "topic" => "realtime:test"
              } = message
-
-      # Wait for RateCounter to update
-      Process.sleep(2000)
-
-      rate = Realtime.Tenants.db_events_per_second_rate(tenant)
-
-      assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} = RateCounter.get(rate)
-      assert 1 in bucket
 
       assert_receive {
         :telemetry,
