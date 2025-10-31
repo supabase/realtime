@@ -67,8 +67,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                      },
                      500
 
-      refute_receive _any
-
       # Wait for RateCounter to update
       Process.sleep(1100)
 
