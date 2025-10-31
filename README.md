@@ -30,8 +30,8 @@
 | Features         | v1  | v2  | Status |
 | ---------------- | --- | --- | ------ |
 | Postgres Changes | ✔   | ✔   | GA     |
-| Broadcast        |     | ✔   | Beta   |
-| Presence         |     | ✔   | Beta   |
+| Broadcast        |     | ✔   | GA     |
+| Presence         |     | ✔   | GA     |
 
 This repository focuses on version 2 but you can still access the previous version's [code](https://github.com/supabase/realtime/tree/v1) and [Docker image](https://hub.docker.com/layers/supabase/realtime/v1.0.0/images/sha256-e2766e0e3b0d03f7e9aa1b238286245697d0892c2f6f192fd2995dca32a4446a). For the latest Docker images go to https://hub.docker.com/r/supabase/realtime.
 
@@ -55,12 +55,14 @@ The server does not guarantee that every message will be delivered to your clien
 
 ## Quick start
 
-You can check out the [Multiplayer demo](https://multiplayer.dev) that features Broadcast, Presence and Postgres Changes under the demo directory: https://github.com/supabase/realtime/tree/main/demo.
+You can check out the [Supabase UI Library](https://supabase.com/ui) Realtime components and the [multiplayer.dev](https://multiplayer.dev) demo app source code [here](https://github.com/supabase/multiplayer.dev)
 
 ## Client libraries
 
-- JavaScript: [@supabase/realtime-js](https://github.com/supabase/realtime-js)
-- Dart: [@supabase/realtime-dart](https://github.com/supabase/realtime-dart)
+- [JavaScript](https://github.com/supabase/supabase-js/tree/master/packages/core/realtime-js)
+- [Flutter/Dart](https://github.com/supabase/supabase-flutter/tree/main/packages/realtime_client)
+- [Python](https://github.com/supabase/supabase-py/tree/main/src/realtime)
+- [Swift](https://github.com/supabase/supabase-swift/tree/main/Sources/Realtime)
 
 ## Server Setup
 
