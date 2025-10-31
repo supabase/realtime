@@ -75,20 +75,18 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
 
-      assert_push "postgres_changes",
-                  %{
-                    data: %Realtime.Adapters.Changes.NewRecord{
-                      table: "test",
-                      type: "INSERT",
-                      record: %{"details" => "test", "id" => ^id},
-                      columns: [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
-                      errors: nil,
-                      schema: "public",
-                      commit_timestamp: _
-                    },
-                    ids: [^sub_id]
-                  },
-                  500
+      assert_push "postgres_changes", %{data: data, ids: [^sub_id]}, 500
+
+      # we encode and decode because the data is a Jason.Fragment
+      assert %{
+               "table" => "test",
+               "type" => "INSERT",
+               "record" => %{"details" => "test", "id" => ^id},
+               "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+               "errors" => nil,
+               "schema" => "public",
+               "commit_timestamp" => _
+             } = Jason.encode!(data) |> Jason.decode!()
 
       refute_receive _any
     end
@@ -127,20 +125,18 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
 
-      assert_push "postgres_changes",
-                  %{
-                    data: %Realtime.Adapters.Changes.NewRecord{
-                      table: "test",
-                      type: "INSERT",
-                      record: %{"details" => "test", "id" => ^id},
-                      columns: [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
-                      errors: nil,
-                      schema: "public",
-                      commit_timestamp: _
-                    },
-                    ids: [4_845_530, ^sub_id]
-                  },
-                  500
+      assert_push "postgres_changes", %{data: data, ids: [4_845_530, ^sub_id]}, 500
+
+      # we encode and decode because the data is a Jason.Fragment
+      assert %{
+               "table" => "test",
+               "type" => "INSERT",
+               "record" => %{"details" => "test", "id" => ^id},
+               "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+               "errors" => nil,
+               "schema" => "public",
+               "commit_timestamp" => _
+             } = Jason.encode!(data) |> Jason.decode!()
 
       refute_receive _any
     end

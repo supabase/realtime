@@ -22,6 +22,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
   setup :set_mimic_global
 
+  @change_json ~s({"table":"test","type":"INSERT","record":{"details":"test","id":55},"columns":[{"name":"id","type":"int4"},{"name":"details","type":"text"}],"errors":null,"schema":"public","commit_timestamp":"2025-10-13T07:50:28.066Z"})
+
   describe "poll" do
     setup do
       :telemetry.attach(
@@ -55,7 +57,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       tenant_id = args["id"]
       reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
       reject(&TenantBroadcaster.pubsub_broadcast/5)
-      {:ok, _pid} = start_supervised({Poller, args})
+      start_link_supervised!({Poller, args})
 
       assert_receive {
                        :telemetry,
@@ -92,13 +94,13 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       # Broadcast to the whole cluster due to missing node information
       expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
                                                       "realtime:postgres:" <> ^tenant_id,
-                                                      _change,
+                                                      {"INSERT", @change_json, _sub_ids},
                                                       MessageDispatcher,
                                                       :postgres_changes ->
         :ok
       end)
 
-      {:ok, _pid} = start_supervised({Poller, args})
+      start_link_supervised!({Poller, args})
 
       # First poll with changes
       assert_receive {
@@ -141,13 +143,13 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       # Broadcast to the whole cluster due to missing node information
       expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
                                                       "realtime:postgres:" <> ^tenant_id,
-                                                      _change,
+                                                      {"INSERT", @change_json, _sub_ids},
                                                       MessageDispatcher,
                                                       :postgres_changes ->
         :ok
       end)
 
-      {:ok, _pid} = start_supervised({Poller, args})
+      start_link_supervised!({Poller, args})
 
       # First poll with changes
       assert_receive {
@@ -193,13 +195,13 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       # Broadcast to the whole cluster due to missing node information
       expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
                                                       "realtime:postgres:" <> ^tenant_id,
-                                                      _change,
+                                                      {"INSERT", @change_json, _sub_ids},
                                                       MessageDispatcher,
                                                       :postgres_changes ->
         :ok
       end)
 
-      {:ok, _pid} = start_supervised({Poller, args})
+      start_link_supervised!({Poller, args})
 
       # First poll with changes
       assert_receive {
@@ -249,11 +251,11 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       # # Broadcast to the exact nodes only
       expect(TenantBroadcaster, :pubsub_direct_broadcast, 2, fn
-        _node, ^tenant_id, ^topic, _change, MessageDispatcher, :postgres_changes ->
+        _node, ^tenant_id, ^topic, {"INSERT", @change_json, _sub_ids}, MessageDispatcher, :postgres_changes ->
           :ok
       end)
 
-      {:ok, _pid} = start_supervised({Poller, args})
+      start_link_supervised!({Poller, args})
 
       # First poll with changes
       assert_receive {
@@ -277,7 +279,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       assert Enum.count(calls) == 2
 
-      node_subs = Enum.map(calls, fn [node, _, _, change, _, _] -> {node, change.subscription_ids} end)
+      node_subs = Enum.map(calls, fn [node, _, _, {"INSERT", @change_json, sub_ids}, _, _] -> {node, sub_ids} end)
 
       assert {node(), MapSet.new([sub1, sub3])} in node_subs
       assert {:"someothernode@127.0.0.1", MapSet.new([sub2])} in node_subs

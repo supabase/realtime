@@ -273,7 +273,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       assert_receive {
         :telemetry,
         [:realtime, :tenants, :payload, :size],
-        %{size: 341},
+        %{size: _},
         %{tenant: "dev_tenant", message_type: :postgres_changes}
       }
     end

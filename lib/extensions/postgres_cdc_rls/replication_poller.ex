@@ -27,6 +27,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   @impl true
   def init(args) do
+    Process.flag(:fullsweep_after, 20)
     tenant_id = args["id"]
     Logger.metadata(external_id: tenant_id, project: tenant_id)
 
@@ -204,6 +205,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
           Realtime.GenCounter.add(rate_counter_args.id, MapSet.size(change.subscription_ids))
 
+          payload =
+            change
+            |> Map.drop([:subscription_ids])
+            |> Jason.encode!()
+
           case collect_subscription_nodes(subscribers_nodes_table, change.subscription_ids) do
             {:ok, nodes} ->
               for {node, subscription_ids} <- nodes do
@@ -212,7 +218,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
                   tenant_id,
                   topic,
                   # Send only the subscription IDs relevant to this node
-                  %{change | subscription_ids: MapSet.new(subscription_ids)},
+                  {change.type, payload, MapSet.new(subscription_ids)},
                   MessageDispatcher,
                   :postgres_changes
                 )
@@ -222,7 +228,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
               TenantBroadcaster.pubsub_broadcast(
                 tenant_id,
                 topic,
-                change,
+                {change.type, payload, change.subscription_ids},
                 MessageDispatcher,
                 :postgres_changes
               )
