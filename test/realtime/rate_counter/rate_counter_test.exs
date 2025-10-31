@@ -197,7 +197,7 @@ defmodule Realtime.RateCounterTest do
         id: id,
         opts: [
           tick: 100,
-          max_bucket_len: 3,
+          max_bucket_len: 5,
           limit: [
             value: 49,
             measurement: :sum,
@@ -215,7 +215,7 @@ defmodule Realtime.RateCounterTest do
                avg: +0.0,
                sum: 0,
                bucket: _,
-               max_bucket_len: 3,
+               max_bucket_len: 5,
                telemetry: %{emit: false},
                limit: %{
                  log: true,
@@ -239,7 +239,7 @@ defmodule Realtime.RateCounterTest do
       # Splitting by the error message returns the error message and the rest of the log only
       assert length(String.split(log, "ErrorMessage: Reason")) == 2
 
-      Process.sleep(400)
+      Process.sleep(600)
 
       assert {:ok, %RateCounter{sum: 0, limit: %{triggered: false}}} = RateCounter.get(args)
     end
