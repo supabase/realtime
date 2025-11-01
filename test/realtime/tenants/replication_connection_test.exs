@@ -100,7 +100,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           "event" => "INSERT",
           "meta" => %{"id" => row.id},
           "payload" => %{
-            "id" => row.id,
             "value" => value
           },
           "type" => "broadcast"
@@ -142,7 +141,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                        "event" => "INSERT",
                        "meta" => %{"id" => id},
                        "payload" => %{
-                         "id" => id,
                          "value" => ^value
                        }
                      },
@@ -229,83 +227,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         end)
 
       assert logs =~ "UnableToBroadcastChanges: %{messages: [%{payload: [\"Payload size exceeds tenant limit\"]}]}"
-    end
-
-    test "payload without id", %{tenant: tenant} do
-      start_link_supervised!(
-        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
-        restart: :transient
-      )
-
-      topic = random_string()
-      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
-      subscribe(tenant_topic, topic)
-
-      fixture =
-        message_fixture(tenant, %{
-          "topic" => topic,
-          "private" => true,
-          "event" => "INSERT",
-          "payload" => %{"value" => "something"}
-        })
-
-      fixture_id = fixture.id
-
-      assert_receive {:socket_push, :text, data}, 500
-      message = data |> IO.iodata_to_binary() |> Jason.decode!()
-
-      assert %{
-               "event" => "broadcast",
-               "payload" => %{
-                 "event" => "INSERT",
-                 "meta" => %{"id" => ^fixture_id},
-                 "payload" => payload,
-                 "type" => "broadcast"
-               },
-               "ref" => nil,
-               "topic" => ^topic
-             } = message
-
-      assert payload == %{
-               "value" => "something",
-               "id" => fixture_id
-             }
-    end
-
-    test "payload including id", %{tenant: tenant} do
-      start_link_supervised!(
-        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
-        restart: :transient
-      )
-
-      topic = random_string()
-      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
-      subscribe(tenant_topic, topic)
-
-      payload = %{"value" => "something", "id" => "123456"}
-
-      %{id: fixture_id} =
-        message_fixture(tenant, %{
-          "topic" => topic,
-          "private" => true,
-          "event" => "INSERT",
-          "payload" => payload
-        })
-
-      assert_receive {:socket_push, :text, data}, 500
-      message = data |> IO.iodata_to_binary() |> Jason.decode!()
-
-      assert %{
-               "event" => "broadcast",
-               "payload" => %{
-                 "meta" => %{"id" => ^fixture_id},
-                 "event" => "INSERT",
-                 "payload" => ^payload,
-                 "type" => "broadcast"
-               },
-               "ref" => nil,
-               "topic" => ^topic
-             } = message
     end
 
     test "fails on existing replication slot", %{tenant: tenant} do
