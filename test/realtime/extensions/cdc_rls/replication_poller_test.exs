@@ -22,7 +22,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
   setup :set_mimic_global
 
-  @change_json ~s({"table":"test","type":"INSERT","record":{"details":"test","id":55},"columns":[{"name":"id","type":"int4"},{"name":"details","type":"text"}],"errors":null,"schema":"public","commit_timestamp":"2025-10-13T07:50:28.066Z"})
+  @change_json ~s({"table":"test","type":"INSERT","record":{"id": 34, "details": "test"},"columns":[{"name": "id", "type": "int4"}, {"name": "details", "type": "text"}],"errors":null,"schema":"public","commit_timestamp":"2025-10-13T07:50:28.066Z"})
 
   describe "poll" do
     setup do
@@ -302,36 +302,37 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
   @ts "2021-11-05T17:20:51.52406+00:00"
 
   @subscription_id "417e76fd-9bc5-4b3e-bd5d-a031389c4a6b"
+  @subscription_ids MapSet.new(["417e76fd-9bc5-4b3e-bd5d-a031389c4a6b"])
+  @record %{"details" => "test", "id" => 12, "user_id" => 1}
 
   describe "generate_record/1" do
     test "INSERT" do
-      record = [
-        {"wal",
-         %{
-           "columns" => @columns,
-           "commit_timestamp" => @ts,
-           "record" => %{"details" => "test", "id" => 12, "user_id" => 1},
-           "schema" => "public",
-           "table" => "todos",
-           "type" => "INSERT"
-         }},
-        {"is_rls_enabled", false},
+      wal_record = [
+        {"type", "INSERT"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", Jason.encode!(@record)},
+        {"old_record", nil},
+        {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
         {"errors", []}
       ]
 
-      expected = %NewRecord{
-        columns: @columns,
-        commit_timestamp: @ts,
-        schema: "public",
-        table: "todos",
-        type: "INSERT",
-        subscription_ids: MapSet.new([@subscription_id]),
-        record: %{"details" => "test", "id" => 12, "user_id" => 1},
-        errors: nil
-      }
+      assert %NewRecord{
+               columns: columns,
+               commit_timestamp: @ts,
+               schema: "public",
+               table: "todos",
+               type: "INSERT",
+               subscription_ids: @subscription_ids,
+               record: record,
+               errors: nil
+             } = generate_record(wal_record)
 
-      assert expected == generate_record(record)
+      # Encode then decode to get rid of the fragment
+      assert record |> Jason.encode!() |> Jason.decode!() == @record
+      assert columns |> Jason.encode!() |> Jason.decode!() == @columns
     end
 
     test "UPDATE" do
@@ -595,21 +596,26 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     {:ok,
      %Postgrex.Result{
        command: :select,
-       columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"],
+       columns: [
+         "type",
+         "schema",
+         "table",
+         "columns",
+         "record",
+         "old_record",
+         "commit_timestamp",
+         "subscription_ids",
+         "errors"
+       ],
        rows: [
          [
-           %{
-             "columns" => [
-               %{"name" => "id", "type" => "int4"},
-               %{"name" => "details", "type" => "text"}
-             ],
-             "commit_timestamp" => "2025-10-13T07:50:28.066Z",
-             "record" => %{"details" => "test", "id" => 55},
-             "schema" => "public",
-             "table" => "test",
-             "type" => "INSERT"
-           },
-           false,
+           "INSERT",
+           "public",
+           "test",
+           "[{\"name\": \"id\", \"type\": \"int4\"}, {\"name\": \"details\", \"type\": \"text\"}]",
+           "{\"id\": 34, \"details\": \"test\"}",
+           nil,
+           "2025-10-13T07:50:28.066Z",
            subscription_ids,
            []
          ]
