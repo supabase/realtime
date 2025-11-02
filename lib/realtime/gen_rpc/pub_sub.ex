@@ -53,14 +53,14 @@ defmodule Realtime.GenRpcPubSub do
       # broadcast to all other nodes in the region
 
       other_nodes = for node <- Realtime.Nodes.region_nodes(my_region), node != node(), do: node
-      GenRpc.abcast(other_nodes, worker, Worker.forward_to_local(topic, message, dispatcher), key: worker)
+      GenRpc.abcast(other_nodes, worker, Worker.forward_to_local(topic, message, dispatcher), key: self())
 
       # send a message to a node in each region to forward to the rest of the region
       other_region_nodes = nodes_from_other_regions(my_region, self())
 
-      GenRpc.abcast(other_region_nodes, worker, Worker.forward_to_region(topic, message, dispatcher), key: worker)
+      GenRpc.abcast(other_region_nodes, worker, Worker.forward_to_region(topic, message, dispatcher), key: self())
     else
-      GenRpc.abcast(Node.list(), worker, Worker.forward_to_local(topic, message, dispatcher), key: worker)
+      GenRpc.abcast(Node.list(), worker, Worker.forward_to_local(topic, message, dispatcher), key: self())
     end
 
     :ok
@@ -82,7 +82,7 @@ defmodule Realtime.GenRpcPubSub do
   @impl true
   def direct_broadcast(adapter_name, node_name, topic, message, dispatcher) do
     worker = worker_name(adapter_name, self())
-    GenRpc.abcast([node_name], worker, Worker.forward_to_local(topic, message, dispatcher), key: worker)
+    GenRpc.abcast([node_name], worker, Worker.forward_to_local(topic, message, dispatcher), key: self())
   end
 end
 
@@ -120,7 +120,7 @@ defmodule Realtime.GenRpcPubSub.Worker do
     other_nodes = for node <- Realtime.Nodes.region_nodes(my_region), node != node(), do: node
 
     if other_nodes != [] do
-      Realtime.GenRpc.abcast(other_nodes, worker, forward_to_local(topic, message, dispatcher), key: worker)
+      Realtime.GenRpc.abcast(other_nodes, worker, forward_to_local(topic, message, dispatcher), [])
     end
 
     {:noreply, {pubsub, worker}}

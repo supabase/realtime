@@ -95,7 +95,7 @@ defmodule Realtime.GenRpcPubSubTest do
         :erpc.multicall(Node.list(), Subscriber, :subscribe, [self(), @topic])
 
         # Ensuring that syn had enough time to propagate to all nodes the group information
-        Process.sleep(500)
+        Process.sleep(2000)
 
         assert_receive :ready
         assert_receive :ready

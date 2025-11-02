@@ -43,7 +43,7 @@ defmodule Realtime.GenRpcPubSub.WorkerTest do
       expect(GenRpc, :abcast, fn [:node_us_2, :node_us_3],
                                  Realtime.GenRpcPubSub.WorkerTest,
                                  {:ftl, "test_topic", "le message", Phoenix.PubSub},
-                                 [key: Realtime.GenRpcPubSub.WorkerTest] ->
+                                 [] ->
         send(parent, :abcast_called)
         :ok
       end)
