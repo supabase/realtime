@@ -186,7 +186,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   defp handle_list_changes_result(
          {:ok,
           %Postgrex.Result{
-            columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"] = columns,
+            columns: columns,
             rows: [_ | _] = rows,
             num_rows: rows_count
           }},
@@ -260,75 +260,75 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   def generate_record([
-        {"wal",
-         %{
-           "type" => "INSERT" = type,
-           "schema" => schema,
-           "table" => table
-         } = wal},
-        {"is_rls_enabled", _},
+        {"type", "INSERT" = type},
+        {"schema", schema},
+        {"table", table},
+        {"columns", columns},
+        {"record", record},
+        {"old_record", _},
+        {"commit_timestamp", commit_timestamp},
         {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
       when is_list(subscription_ids) do
     %NewRecord{
-      columns: Map.get(wal, "columns", []),
-      commit_timestamp: Map.get(wal, "commit_timestamp"),
+      columns: Jason.Fragment.new(columns),
+      commit_timestamp: commit_timestamp,
       errors: convert_errors(errors),
       schema: schema,
       table: table,
       type: type,
       subscription_ids: MapSet.new(subscription_ids),
-      record: Map.get(wal, "record", %{})
+      record: Jason.Fragment.new(record)
     }
   end
 
   def generate_record([
-        {"wal",
-         %{
-           "type" => "UPDATE" = type,
-           "schema" => schema,
-           "table" => table
-         } = wal},
-        {"is_rls_enabled", _},
+        {"type", "UPDATE" = type},
+        {"schema", schema},
+        {"table", table},
+        {"columns", columns},
+        {"record", record},
+        {"old_record", old_record},
+        {"commit_timestamp", commit_timestamp},
         {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
       when is_list(subscription_ids) do
     %UpdatedRecord{
-      columns: Map.get(wal, "columns", []),
-      commit_timestamp: Map.get(wal, "commit_timestamp"),
+      columns: Jason.Fragment.new(columns),
+      commit_timestamp: commit_timestamp,
       errors: convert_errors(errors),
       schema: schema,
       table: table,
       type: type,
       subscription_ids: MapSet.new(subscription_ids),
-      old_record: Map.get(wal, "old_record", %{}),
-      record: Map.get(wal, "record", %{})
+      old_record: Jason.Fragment.new(old_record),
+      record: Jason.Fragment.new(record)
     }
   end
 
   def generate_record([
-        {"wal",
-         %{
-           "type" => "DELETE" = type,
-           "schema" => schema,
-           "table" => table
-         } = wal},
-        {"is_rls_enabled", _},
+        {"type", "DELETE" = type},
+        {"schema", schema},
+        {"table", table},
+        {"columns", columns},
+        {"record", _},
+        {"old_record", old_record},
+        {"commit_timestamp", commit_timestamp},
         {"subscription_ids", subscription_ids},
         {"errors", errors}
       ])
       when is_list(subscription_ids) do
     %DeletedRecord{
-      columns: Map.get(wal, "columns", []),
-      commit_timestamp: Map.get(wal, "commit_timestamp"),
+      columns: Jason.Fragment.new(columns),
+      commit_timestamp: commit_timestamp,
       errors: convert_errors(errors),
       schema: schema,
       table: table,
       type: type,
       subscription_ids: MapSet.new(subscription_ids),
-      old_record: Map.get(wal, "old_record", %{})
+      old_record: Jason.Fragment.new(old_record)
     }
   end
 

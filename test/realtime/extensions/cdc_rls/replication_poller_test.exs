@@ -22,7 +22,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
   setup :set_mimic_global
 
-  @change_json ~s({"table":"test","type":"INSERT","record":{"details":"test","id":55},"columns":[{"name":"id","type":"int4"},{"name":"details","type":"text"}],"errors":null,"schema":"public","commit_timestamp":"2025-10-13T07:50:28.066Z"})
+  @change_json ~s({"table":"test","type":"INSERT","record":{"id": 34, "details": "test"},"columns":[{"name": "id", "type": "int4"}, {"name": "details", "type": "text"}],"errors":null,"schema":"public","commit_timestamp":"2025-10-13T07:50:28.066Z"})
 
   describe "poll" do
     setup do
@@ -302,272 +302,277 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
   @ts "2021-11-05T17:20:51.52406+00:00"
 
   @subscription_id "417e76fd-9bc5-4b3e-bd5d-a031389c4a6b"
+  @subscription_ids MapSet.new(["417e76fd-9bc5-4b3e-bd5d-a031389c4a6b"])
+
+  @old_record %{"id" => 12}
+  @record %{"details" => "test", "id" => 12, "user_id" => 1}
 
   describe "generate_record/1" do
     test "INSERT" do
-      record = [
-        {"wal",
-         %{
-           "columns" => @columns,
-           "commit_timestamp" => @ts,
-           "record" => %{"details" => "test", "id" => 12, "user_id" => 1},
-           "schema" => "public",
-           "table" => "todos",
-           "type" => "INSERT"
-         }},
-        {"is_rls_enabled", false},
+      wal_record = [
+        {"type", "INSERT"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", Jason.encode!(@record)},
+        {"old_record", nil},
+        {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
         {"errors", []}
       ]
 
-      expected = %NewRecord{
-        columns: @columns,
-        commit_timestamp: @ts,
-        schema: "public",
-        table: "todos",
-        type: "INSERT",
-        subscription_ids: MapSet.new([@subscription_id]),
-        record: %{"details" => "test", "id" => 12, "user_id" => 1},
-        errors: nil
-      }
+      assert %NewRecord{
+               columns: columns,
+               commit_timestamp: @ts,
+               schema: "public",
+               table: "todos",
+               type: "INSERT",
+               subscription_ids: @subscription_ids,
+               record: record,
+               errors: nil
+             } = generate_record(wal_record)
 
-      assert expected == generate_record(record)
+      # Encode then decode to get rid of the fragment
+      assert record |> Jason.encode!() |> Jason.decode!() == @record
+      assert columns |> Jason.encode!() |> Jason.decode!() == @columns
     end
 
     test "UPDATE" do
-      record = [
-        {"wal",
-         %{
-           "columns" => @columns,
-           "commit_timestamp" => @ts,
-           "old_record" => %{"id" => 12},
-           "record" => %{"details" => "test1", "id" => 12, "user_id" => 1},
-           "schema" => "public",
-           "table" => "todos",
-           "type" => "UPDATE"
-         }},
-        {"is_rls_enabled", false},
+      wal_record = [
+        {"type", "UPDATE"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", Jason.encode!(@record)},
+        {"old_record", Jason.encode!(@old_record)},
+        {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
         {"errors", []}
       ]
 
-      expected = %UpdatedRecord{
-        columns: @columns,
-        commit_timestamp: @ts,
-        schema: "public",
-        table: "todos",
-        type: "UPDATE",
-        subscription_ids: MapSet.new([@subscription_id]),
-        old_record: %{"id" => 12},
-        record: %{"details" => "test1", "id" => 12, "user_id" => 1},
-        errors: nil
-      }
+      assert %UpdatedRecord{
+               columns: columns,
+               commit_timestamp: @ts,
+               schema: "public",
+               table: "todos",
+               type: "UPDATE",
+               subscription_ids: @subscription_ids,
+               record: record,
+               old_record: old_record,
+               errors: nil
+             } = generate_record(wal_record)
 
-      assert expected == generate_record(record)
+      # Encode then decode to get rid of the fragment
+      assert record |> Jason.encode!() |> Jason.decode!() == @record
+      assert old_record |> Jason.encode!() |> Jason.decode!() == @old_record
+      assert columns |> Jason.encode!() |> Jason.decode!() == @columns
     end
 
     test "DELETE" do
-      record = [
-        {"wal",
-         %{
-           "columns" => @columns,
-           "commit_timestamp" => @ts,
-           "old_record" => %{"id" => 15},
-           "schema" => "public",
-           "table" => "todos",
-           "type" => "DELETE"
-         }},
-        {"is_rls_enabled", false},
+      wal_record = [
+        {"type", "DELETE"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", nil},
+        {"old_record", Jason.encode!(@old_record)},
+        {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
         {"errors", []}
       ]
 
-      expected = %DeletedRecord{
-        columns: @columns,
-        commit_timestamp: @ts,
-        schema: "public",
-        table: "todos",
-        type: "DELETE",
-        subscription_ids: MapSet.new([@subscription_id]),
-        old_record: %{"id" => 15},
-        errors: nil
-      }
+      assert %DeletedRecord{
+               columns: columns,
+               commit_timestamp: @ts,
+               schema: "public",
+               table: "todos",
+               type: "DELETE",
+               subscription_ids: @subscription_ids,
+               old_record: old_record,
+               errors: nil
+             } = generate_record(wal_record)
 
-      assert expected == generate_record(record)
+      # Encode then decode to get rid of the fragment
+      assert old_record |> Jason.encode!() |> Jason.decode!() == @old_record
+      assert columns |> Jason.encode!() |> Jason.decode!() == @columns
     end
 
     test "INSERT, large payload error present" do
-      record = [
-        {"wal",
-         %{
-           "columns" => @columns,
-           "commit_timestamp" => @ts,
-           "record" => %{"details" => "test", "id" => 12, "user_id" => 1},
-           "schema" => "public",
-           "table" => "todos",
-           "type" => "INSERT"
-         }},
-        {"is_rls_enabled", false},
+      wal_record = [
+        {"type", "INSERT"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", Jason.encode!(@record)},
+        {"old_record", nil},
+        {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
         {"errors", ["Error 413: Payload Too Large"]}
       ]
 
-      expected = %NewRecord{
-        columns: @columns,
-        commit_timestamp: @ts,
-        schema: "public",
-        table: "todos",
-        type: "INSERT",
-        subscription_ids: MapSet.new([@subscription_id]),
-        record: %{"details" => "test", "id" => 12, "user_id" => 1},
-        errors: ["Error 413: Payload Too Large"]
-      }
+      assert %NewRecord{
+               columns: columns,
+               commit_timestamp: @ts,
+               schema: "public",
+               table: "todos",
+               type: "INSERT",
+               subscription_ids: @subscription_ids,
+               record: record,
+               errors: ["Error 413: Payload Too Large"]
+             } = generate_record(wal_record)
 
-      assert expected == generate_record(record)
+      # Encode then decode to get rid of the fragment
+      assert record |> Jason.encode!() |> Jason.decode!() == @record
+      assert columns |> Jason.encode!() |> Jason.decode!() == @columns
     end
 
     test "INSERT, other errors present" do
-      record = [
-        {"wal",
-         %{
-           "schema" => "public",
-           "table" => "todos",
-           "type" => "INSERT"
-         }},
-        {"is_rls_enabled", false},
+      wal_record = [
+        {"type", "INSERT"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", Jason.encode!(@record)},
+        {"old_record", nil},
+        {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
         {"errors", ["Error..."]}
       ]
 
-      expected = %NewRecord{
-        columns: [],
-        commit_timestamp: nil,
-        schema: "public",
-        table: "todos",
-        type: "INSERT",
-        subscription_ids: MapSet.new([@subscription_id]),
-        record: %{},
-        errors: ["Error..."]
-      }
+      assert %NewRecord{
+               columns: columns,
+               commit_timestamp: @ts,
+               schema: "public",
+               table: "todos",
+               type: "INSERT",
+               subscription_ids: @subscription_ids,
+               record: record,
+               errors: ["Error..."]
+             } = generate_record(wal_record)
 
-      assert expected == generate_record(record)
+      # Encode then decode to get rid of the fragment
+      assert record |> Jason.encode!() |> Jason.decode!() == @record
+      assert columns |> Jason.encode!() |> Jason.decode!() == @columns
     end
 
     test "UPDATE, large payload error present" do
-      record = [
-        {"wal",
-         %{
-           "columns" => @columns,
-           "commit_timestamp" => @ts,
-           "old_record" => %{"details" => "prev test", "id" => 12, "user_id" => 1},
-           "record" => %{"details" => "test", "id" => 12, "user_id" => 1},
-           "schema" => "public",
-           "table" => "todos",
-           "type" => "UPDATE"
-         }},
-        {"is_rls_enabled", false},
+      wal_record = [
+        {"type", "UPDATE"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", Jason.encode!(@record)},
+        {"old_record", Jason.encode!(@old_record)},
+        {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
         {"errors", ["Error 413: Payload Too Large"]}
       ]
 
-      expected = %UpdatedRecord{
-        columns: @columns,
-        commit_timestamp: @ts,
-        schema: "public",
-        table: "todos",
-        type: "UPDATE",
-        subscription_ids: MapSet.new([@subscription_id]),
-        old_record: %{"details" => "prev test", "id" => 12, "user_id" => 1},
-        record: %{"details" => "test", "id" => 12, "user_id" => 1},
-        errors: ["Error 413: Payload Too Large"]
-      }
+      assert %UpdatedRecord{
+               columns: columns,
+               commit_timestamp: @ts,
+               schema: "public",
+               table: "todos",
+               type: "UPDATE",
+               subscription_ids: @subscription_ids,
+               record: record,
+               old_record: old_record,
+               errors: ["Error 413: Payload Too Large"]
+             } = generate_record(wal_record)
 
-      assert expected == generate_record(record)
+      # Encode then decode to get rid of the fragment
+      assert record |> Jason.encode!() |> Jason.decode!() == @record
+      assert old_record |> Jason.encode!() |> Jason.decode!() == @old_record
+      assert columns |> Jason.encode!() |> Jason.decode!() == @columns
     end
 
     test "UPDATE, other errors present" do
-      record = [
-        {"wal",
-         %{
-           "schema" => "public",
-           "table" => "todos",
-           "type" => "UPDATE"
-         }},
-        {"is_rls_enabled", false},
+      wal_record = [
+        {"type", "UPDATE"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", Jason.encode!(@record)},
+        {"old_record", Jason.encode!(@old_record)},
+        {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
         {"errors", ["Error..."]}
       ]
 
-      expected = %UpdatedRecord{
-        columns: [],
-        commit_timestamp: nil,
-        schema: "public",
-        table: "todos",
-        type: "UPDATE",
-        subscription_ids: MapSet.new([@subscription_id]),
-        old_record: %{},
-        record: %{},
-        errors: ["Error..."]
-      }
+      assert %UpdatedRecord{
+               columns: columns,
+               commit_timestamp: @ts,
+               schema: "public",
+               table: "todos",
+               type: "UPDATE",
+               subscription_ids: @subscription_ids,
+               record: record,
+               old_record: old_record,
+               errors: ["Error..."]
+             } = generate_record(wal_record)
 
-      assert expected == generate_record(record)
+      # Encode then decode to get rid of the fragment
+      assert record |> Jason.encode!() |> Jason.decode!() == @record
+      assert old_record |> Jason.encode!() |> Jason.decode!() == @old_record
+      assert columns |> Jason.encode!() |> Jason.decode!() == @columns
     end
 
     test "DELETE, large payload error present" do
-      record = [
-        {"wal",
-         %{
-           "columns" => @columns,
-           "commit_timestamp" => @ts,
-           "old_record" => %{"details" => "test", "id" => 12, "user_id" => 1},
-           "schema" => "public",
-           "table" => "todos",
-           "type" => "DELETE"
-         }},
-        {"is_rls_enabled", false},
+      wal_record = [
+        {"type", "DELETE"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", nil},
+        {"old_record", Jason.encode!(@old_record)},
+        {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
         {"errors", ["Error 413: Payload Too Large"]}
       ]
 
-      expected = %DeletedRecord{
-        columns: @columns,
-        commit_timestamp: @ts,
-        schema: "public",
-        table: "todos",
-        type: "DELETE",
-        subscription_ids: MapSet.new([@subscription_id]),
-        old_record: %{"details" => "test", "id" => 12, "user_id" => 1},
-        errors: ["Error 413: Payload Too Large"]
-      }
+      assert %DeletedRecord{
+               columns: columns,
+               commit_timestamp: @ts,
+               schema: "public",
+               table: "todos",
+               type: "DELETE",
+               subscription_ids: @subscription_ids,
+               old_record: old_record,
+               errors: ["Error 413: Payload Too Large"]
+             } = generate_record(wal_record)
 
-      assert expected == generate_record(record)
+      # Encode then decode to get rid of the fragment
+      assert old_record |> Jason.encode!() |> Jason.decode!() == @old_record
+      assert columns |> Jason.encode!() |> Jason.decode!() == @columns
     end
 
     test "DELETE, other errors present" do
-      record = [
-        {"wal",
-         %{
-           "schema" => "public",
-           "table" => "todos",
-           "type" => "DELETE"
-         }},
-        {"is_rls_enabled", false},
+      wal_record = [
+        {"type", "DELETE"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", nil},
+        {"old_record", Jason.encode!(@old_record)},
+        {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
         {"errors", ["Error..."]}
       ]
 
-      expected = %DeletedRecord{
-        columns: [],
-        commit_timestamp: nil,
-        schema: "public",
-        table: "todos",
-        type: "DELETE",
-        subscription_ids: MapSet.new([@subscription_id]),
-        old_record: %{},
-        errors: ["Error..."]
-      }
+      assert %DeletedRecord{
+               columns: columns,
+               commit_timestamp: @ts,
+               schema: "public",
+               table: "todos",
+               type: "DELETE",
+               subscription_ids: @subscription_ids,
+               old_record: old_record,
+               errors: ["Error..."]
+             } = generate_record(wal_record)
 
-      assert expected == generate_record(record)
+      # Encode then decode to get rid of the fragment
+      assert old_record |> Jason.encode!() |> Jason.decode!() == @old_record
+      assert columns |> Jason.encode!() |> Jason.decode!() == @columns
     end
   end
 
@@ -595,21 +600,26 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     {:ok,
      %Postgrex.Result{
        command: :select,
-       columns: ["wal", "is_rls_enabled", "subscription_ids", "errors"],
+       columns: [
+         "type",
+         "schema",
+         "table",
+         "columns",
+         "record",
+         "old_record",
+         "commit_timestamp",
+         "subscription_ids",
+         "errors"
+       ],
        rows: [
          [
-           %{
-             "columns" => [
-               %{"name" => "id", "type" => "int4"},
-               %{"name" => "details", "type" => "text"}
-             ],
-             "commit_timestamp" => "2025-10-13T07:50:28.066Z",
-             "record" => %{"details" => "test", "id" => 55},
-             "schema" => "public",
-             "table" => "test",
-             "type" => "INSERT"
-           },
-           false,
+           "INSERT",
+           "public",
+           "test",
+           "[{\"name\": \"id\", \"type\": \"int4\"}, {\"name\": \"details\", \"type\": \"text\"}]",
+           "{\"id\": 34, \"details\": \"test\"}",
+           nil,
+           "2025-10-13T07:50:28.066Z",
            subscription_ids,
            []
          ]

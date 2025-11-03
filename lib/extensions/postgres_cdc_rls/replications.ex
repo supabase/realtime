@@ -72,7 +72,18 @@ defmodule Extensions.PostgresCdcRls.Replications do
   def list_changes(conn, slot_name, publication, max_changes, max_record_bytes) do
     query(
       conn,
-      "select * from realtime.list_changes($1, $2, $3, $4)",
+      """
+      SELECT wal->>'type' as type,
+             wal->>'schema' as schema,
+             wal->>'table' as table,
+             wal->>'columns' as columns,
+             wal->>'record' as record,
+             wal->>'old_record' as old_record,
+             wal->>'commit_timestamp' as commit_timestamp,
+             subscription_ids,
+             errors
+      FROM realtime.list_changes($1, $2, $3, $4)
+      """,
       [
         publication,
         slot_name,
