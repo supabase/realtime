@@ -12,7 +12,8 @@ defmodule Realtime.Telemetry.Logger do
     [:realtime, :rate_counter, :channel, :events],
     [:realtime, :rate_counter, :channel, :joins],
     [:realtime, :rate_counter, :channel, :db_events],
-    [:realtime, :rate_counter, :channel, :presence_events]
+    [:realtime, :rate_counter, :channel, :presence_events],
+    [:realtime, :connections, :output_bytes]
   ]
 
   def start_link(args) do
@@ -29,13 +30,24 @@ defmodule Realtime.Telemetry.Logger do
   Logs billing metrics for a tenant aggregated and emitted by a PromEx metric poller.
   """
 
+  def handle_event([:realtime, :connections, :output_bytes], %{output_bytes: output_bytes}, %{tenant: tenant}, _config) do
+    meta = %{project: tenant}
+
+    Logger.info(
+      ["Billing metrics: [:realtime, :connections, :output_bytes] output_bytes=" <> inspect(output_bytes)],
+      meta
+    )
+
+    :ok
+  end
+
   def handle_event(event, measurements, %{tenant: tenant}, _config) do
     meta = %{project: tenant, measurements: measurements}
     Logger.info(["Billing metrics: ", inspect(event)], meta)
     :ok
   end
 
-  def handle_event(_event, _measurements, _metadata, _config) do
+  def handle_event(_, _, _, _config) do
     :ok
   end
 
