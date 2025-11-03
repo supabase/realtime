@@ -110,12 +110,27 @@ defmodule Containers do
     end
   end
 
+  defp storage_up!(tenant) do
+    settings =
+      Database.from_tenant(tenant, "realtime_test", :stop)
+      |> Map.from_struct()
+      |> Keyword.new()
+
+    case Ecto.Adapters.Postgres.storage_up(settings) do
+      :ok -> :ok
+      {:error, :already_up} -> :ok
+      _ -> raise "Failed to create database"
+    end
+  end
+
   # Might be worth changing this to {:ok, tenant}
   def checkout_tenant(opts \\ []) do
     with container when is_pid(container) <- :poolboy.checkout(Containers.Pool, true, 5_000),
          port <- Container.port(container) do
       tenant = Generators.tenant_fixture(%{port: port, migrations_ran: 0})
       run_migrations? = Keyword.get(opts, :run_migrations, false)
+
+      storage_up!(tenant)
 
       settings = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | max_restarts: 0, ssl: false}
