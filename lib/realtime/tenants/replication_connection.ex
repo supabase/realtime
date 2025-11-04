@@ -159,6 +159,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @impl true
   def init(%__MODULE__{tenant_id: tenant_id, monitored_pid: monitored_pid} = state) do
+    Process.flag(:fullsweep_after, 20)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Process.monitor(monitored_pid)
 
@@ -315,7 +316,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
            topic: topic,
            event: event,
            private: private,
-           payload: Map.put_new(payload, "id", id)
+           payload: Jason.Fragment.new(payload)
          },
          :ok <- BatchBroadcast.broadcast(nil, tenant, %{messages: [broadcast_message]}, true) do
       inserted_at = NaiveDateTime.from_iso8601!(inserted_at)
@@ -381,7 +382,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
     |> Enum.zip(columns)
     |> Map.new(fn
       {nil, %{name: name}} -> {name, nil}
-      {value, %{name: name, type: "jsonb"}} -> {name, Jason.decode!(value)}
       {value, %{name: name, type: "bool"}} -> {name, value == "t"}
       {value, %{name: name}} -> {name, value}
     end)

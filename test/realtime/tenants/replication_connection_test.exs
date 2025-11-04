@@ -22,9 +22,8 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     name = "supabase_realtime_messages_replication_slot_test"
     Postgrex.query(db_conn, "SELECT pg_drop_replication_slot($1)", [name])
-    Process.exit(db_conn, :normal)
 
-    %{tenant: tenant}
+    %{tenant: tenant, db_conn: db_conn}
   end
 
   describe "temporary process" do
@@ -70,7 +69,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert {:error, _} = ReplicationConnection.start(tenant, self())
     end
 
-    test "starts a handler for the tenant and broadcasts", %{tenant: tenant} do
+    test "starts a handler for the tenant and broadcasts", %{tenant: tenant, db_conn: db_conn} do
       start_link_supervised!(
         {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
         restart: :transient
@@ -100,7 +99,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           "event" => "INSERT",
           "meta" => %{"id" => row.id},
           "payload" => %{
-            "id" => row.id,
             "value" => value
           },
           "type" => "broadcast"
@@ -122,7 +120,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           })
         end
 
-      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
       {:ok, _} = Realtime.Repo.insert_all_entries(db_conn, messages, Message)
 
       messages_received =
@@ -140,9 +137,8 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                      "event" => "broadcast",
                      "payload" => %{
                        "event" => "INSERT",
-                       "meta" => %{"id" => id},
+                       "meta" => %{"id" => _id},
                        "payload" => %{
-                         "id" => id,
                          "value" => ^value
                        }
                      },
@@ -231,7 +227,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert logs =~ "UnableToBroadcastChanges: %{messages: [%{payload: [\"Payload size exceeds tenant limit\"]}]}"
     end
 
-    test "payload without id", %{tenant: tenant} do
+    test "payload without id", %{tenant: tenant, db_conn: db_conn} do
       start_link_supervised!(
         {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
         restart: :transient
@@ -241,15 +237,16 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
       subscribe(tenant_topic, topic)
 
-      fixture =
-        message_fixture(tenant, %{
-          "topic" => topic,
-          "private" => true,
-          "event" => "INSERT",
-          "payload" => %{"value" => "something"}
-        })
+      value = "something"
+      event = "INSERT"
 
-      fixture_id = fixture.id
+      Postgrex.query!(
+        db_conn,
+        "SELECT realtime.send (json_build_object ('value', $1 :: text)::jsonb, $2 :: text, $3 :: text, TRUE::bool);",
+        [value, event, topic]
+      )
+
+      {:ok, [%{id: id}]} = Repo.all(db_conn, from(m in Message), Message)
 
       assert_receive {:socket_push, :text, data}, 500
       message = data |> IO.iodata_to_binary() |> Jason.decode!()
@@ -258,7 +255,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                "event" => "broadcast",
                "payload" => %{
                  "event" => "INSERT",
-                 "meta" => %{"id" => ^fixture_id},
+                 "meta" => %{"id" => ^id},
                  "payload" => payload,
                  "type" => "broadcast"
                },
@@ -268,11 +265,11 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
       assert payload == %{
                "value" => "something",
-               "id" => fixture_id
+               "id" => id
              }
     end
 
-    test "payload including id", %{tenant: tenant} do
+    test "payload including id", %{tenant: tenant, db_conn: db_conn} do
       start_link_supervised!(
         {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
         restart: :transient
@@ -282,15 +279,17 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
       subscribe(tenant_topic, topic)
 
-      payload = %{"value" => "something", "id" => "123456"}
+      id = "123456"
+      value = "something"
+      event = "INSERT"
 
-      %{id: fixture_id} =
-        message_fixture(tenant, %{
-          "topic" => topic,
-          "private" => true,
-          "event" => "INSERT",
-          "payload" => payload
-        })
+      Postgrex.query!(
+        db_conn,
+        "SELECT realtime.send (json_build_object ('value', $1 :: text, 'id', $2 :: text)::jsonb, $3 :: text, $4 :: text, TRUE::bool);",
+        [value, id, event, topic]
+      )
+
+      {:ok, [%{id: message_id}]} = Repo.all(db_conn, from(m in Message), Message)
 
       assert_receive {:socket_push, :text, data}, 500
       message = data |> IO.iodata_to_binary() |> Jason.decode!()
@@ -298,9 +297,9 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert %{
                "event" => "broadcast",
                "payload" => %{
-                 "meta" => %{"id" => ^fixture_id},
+                 "meta" => %{"id" => ^message_id},
                  "event" => "INSERT",
-                 "payload" => ^payload,
+                 "payload" => %{"value" => "something", "id" => ^id},
                  "type" => "broadcast"
                },
                "ref" => nil,
