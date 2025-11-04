@@ -63,6 +63,14 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                     %{tenant: external_id}
                   )
                 end
+
+                def fake_output_bytes(external_id) do
+                  Realtime.Telemetry.execute(
+                    [:realtime, :connections, :output_bytes],
+                    %{output_bytes: 100},
+                    %{tenant: external_id}
+                  )
+                end
               end
             end)
 
@@ -315,6 +323,16 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       bucket_pattern = ~r/realtime_payload_size_bucket{message_type=\"broadcast\",le="250"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
+    end
+
+    test "egress bytes metric exists after check", context do
+      external_id = context.tenant.external_id
+      pattern = ~r/realtime_connections_output_bytes{tenant="#{external_id}"}\s(?<number>\d+)/
+
+      FakeUserCounter.fake_output_bytes(external_id)
+
+      Process.sleep(200)
+      assert metric_value(pattern) == 100
     end
   end
 

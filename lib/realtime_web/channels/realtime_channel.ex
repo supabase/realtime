@@ -45,7 +45,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     Process.flag(:max_heap_size, max_heap_size())
     Process.flag(:fullsweep_after, @fullsweep_after)
-    Tracker.track(socket.transport_pid)
+    Tracker.track(socket.transport_pid, tenant_id)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
 
@@ -499,10 +499,10 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   @impl true
-  def terminate(reason, %{transport_pid: transport_pid}) do
+  def terminate(reason, %{transport_pid: transport_pid, assigns: %{tenant: tenant_id}}) do
     Logger.debug("Channel terminated with reason: #{reason}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
-    Tracker.untrack(transport_pid)
+    Tracker.untrack(transport_pid, tenant_id)
     :ok
   end
 

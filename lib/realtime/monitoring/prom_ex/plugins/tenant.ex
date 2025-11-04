@@ -23,8 +23,24 @@ defmodule Realtime.PromEx.Plugins.Tenant do
       channel_events(),
       replication_metrics(),
       subscription_metrics(),
-      payload_size_metrics()
+      payload_size_metrics(),
+      output_bytes_metrics()
     ]
+  end
+
+  defp output_bytes_metrics do
+    Event.build(
+      :realtime_connections_output_bytes_metrics,
+      [
+        last_value(
+          [:realtime, :connections, :output_bytes],
+          event_name: [:realtime, :connections, :output_bytes],
+          description: "The total count of output bytes for a tenant.",
+          measurement: :output_bytes,
+          tags: [:tenant]
+        )
+      ]
+    )
   end
 
   defp payload_size_metrics do
