@@ -101,7 +101,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   end
 
   defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do
-    broadcast = %Phoenix.Socket.Broadcast{topic: tenant_topic, event: @event_type, payload: payload}
+    broadcast = build_broadcast(tenant_topic, payload)
 
     if self_broadcast do
       TenantBroadcaster.pubsub_broadcast(
@@ -121,6 +121,20 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         :broadcast
       )
     end
+  end
+
+  # Message payload was built by V2 Serializer which was originally UserBroadcast
+  defp build_broadcast(topic, {user_event, user_payload_encoding, user_payload}) do
+    %RealtimeWeb.Socket.UserBroadcast{
+      topic: topic,
+      user_event: user_event,
+      user_payload_encoding: user_payload_encoding,
+      user_payload: user_payload
+    }
+  end
+
+  defp build_broadcast(topic, payload) do
+    %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
   end
 
   defp increment_rate_counter(%{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: false}}}} = socket) do
