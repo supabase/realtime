@@ -25,7 +25,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
                 def fake_db_event(external_id) do
                   external_id
-                  |> Realtime.Tenants.db_events_per_second_rate()
+                  |> Realtime.Tenants.db_events_per_second_rate(100)
                   |> Realtime.RateCounter.new()
 
                   external_id

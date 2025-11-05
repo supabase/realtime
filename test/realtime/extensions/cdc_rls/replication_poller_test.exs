@@ -37,6 +37,10 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       tenant = Containers.checkout_tenant(run_migrations: true)
 
+      {:ok, tenant} =
+        Realtime.Api.get_tenant_by_external_id(tenant.external_id)
+        |> Realtime.Api.update_tenant(%{"max_events_per_second" => 123})
+
       subscribers_pids_table = :ets.new(__MODULE__, [:public, :bag])
       subscribers_nodes_table = :ets.new(__MODULE__, [:public, :set])
 
@@ -71,7 +75,17 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       Process.sleep(1100)
 
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
-      assert {:ok, %RateCounter{sum: sum}} = RateCounter.get(rate)
+
+      assert {:ok,
+              %RateCounter{
+                sum: sum,
+                limit: %{
+                  value: 123,
+                  measurement: :avg,
+                  triggered: false
+                }
+              }} = RateCounter.get(rate)
+
       assert sum == 0
     end
 
