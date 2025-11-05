@@ -9,7 +9,13 @@ defmodule TestEndpoint do
     websocket: [
       connect_info: [:peer_data, :uri, :x_headers],
       fullsweep_after: 20,
-      max_frame_size: 8_000_000
+      max_frame_size: 5_000_000,
+      active_n: 100,
+      validate_utf8: false,
+      serializer: [
+        {Phoenix.Socket.V1.JSONSerializer, "~> 1.0.0"},
+        {RealtimeWeb.Socket.V2Serializer, "~> 2.0.0"}
+      ]
     ]
   )
 

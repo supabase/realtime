@@ -21,10 +21,20 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
       {:ok, token} = token_valid(tenant, "anon", %{})
 
       {:ok, _} =
-        WebsocketClient.connect(self(), uri(tenant, 4002), Phoenix.Socket.V1.JSONSerializer, [{"x-api-key", token}])
+        WebsocketClient.connect(
+          self(),
+          uri(tenant, Phoenix.Socket.V1.JSONSerializer, 4002),
+          Phoenix.Socket.V1.JSONSerializer,
+          [{"x-api-key", token}]
+        )
 
       {:ok, _} =
-        WebsocketClient.connect(self(), uri(tenant, 4002), Phoenix.Socket.V1.JSONSerializer, [{"x-api-key", token}])
+        WebsocketClient.connect(
+          self(),
+          uri(tenant, Phoenix.Socket.V1.JSONSerializer, 4002),
+          Phoenix.Socket.V1.JSONSerializer,
+          [{"x-api-key", token}]
+        )
 
       Process.sleep(200)
       assert metric_value() >= 2

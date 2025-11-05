@@ -86,7 +86,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
         send(fastlane_pid, encoded_msg)
         cache
 
-      %{^serializer => {:error, reason}} ->
+      %{^serializer => {:error, _reason}} ->
         # We do nothing at this stage. It has been already logged depending on the log level
         cache
 
