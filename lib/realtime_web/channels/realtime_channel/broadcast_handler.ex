@@ -123,7 +123,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     end
   end
 
-  # Message payload was built by V2 Serializer which was originally UserBroadcast
+  # Message payload was built by V2 Serializer which was originally UserBroadcastPush
   defp build_broadcast(topic, {user_event, user_payload_encoding, user_payload}) do
     %RealtimeWeb.Socket.UserBroadcast{
       topic: topic,

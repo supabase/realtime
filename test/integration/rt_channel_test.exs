@@ -2,9 +2,11 @@ defmodule Realtime.Integration.RtChannelTest do
   # async: false due to the fact that multiple operations against the same tenant and usage of mocks
   # Also using dev_tenant due to distributed test
   alias Realtime.Api
-  alias Phoenix.Socket.V1
-  alias RealtimeWeb.Socket.V2Serializer
-  use RealtimeWeb.ConnCase, async: false, parameterize: [%{serializer: V1.JSONSerializer}, %{serializer: V2Serializer}]
+
+  use RealtimeWeb.ConnCase,
+    async: false,
+    parameterize: [%{serializer: Phoenix.Socket.V1.JSONSerializer}, %{serializer: RealtimeWeb.Socket.V2Serializer}]
+
   use Mimic
   import ExUnit.CaptureLog
   import Generators
