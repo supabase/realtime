@@ -233,20 +233,9 @@ defmodule Realtime.Tenants do
   end
 
   @doc "RateCounter arguments for counting database events per second."
-  @spec db_events_per_second_rate(Tenant.t() | String.t()) :: RateCounter.Args.t()
-  def db_events_per_second_rate(%Tenant{} = tenant), do: db_events_per_second_rate(tenant.external_id)
-
-  def db_events_per_second_rate(tenant_id) when is_binary(tenant_id) do
-    opts = [
-      telemetry: %{
-        event_name: [:channel, :db_events],
-        measurements: %{},
-        metadata: %{tenant: tenant_id}
-      }
-    ]
-
-    %RateCounter.Args{id: db_events_per_second_key(tenant_id), opts: opts}
-  end
+  @spec db_events_per_second_rate(Tenant.t()) :: RateCounter.Args.t()
+  def db_events_per_second_rate(%Tenant{} = tenant),
+    do: db_events_per_second_rate(tenant.external_id, tenant.max_events_per_second)
 
   @doc "RateCounter arguments for counting database events per second with a limit."
   @spec db_events_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
