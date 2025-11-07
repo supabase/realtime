@@ -22,7 +22,7 @@ defmodule Realtime.Application do
     :ok =
       :logger.set_primary_config(
         :metadata,
-        Enum.into([region: System.get_env("REGION")], primary_config.metadata)
+        Enum.into([region: System.get_env("REGION"), cluster: System.get_env("CLUSTER")], primary_config.metadata)
       )
 
     topologies = Application.get_env(:libcluster, :topologies) || []
