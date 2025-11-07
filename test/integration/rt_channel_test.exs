@@ -766,7 +766,7 @@ defmodule Realtime.Integration.RtChannelTest do
           refute_receive %Message{event: "phx_leave", topic: ^topic}, 16000
         end)
 
-      assert log =~ "UnableToHandlePresence"
+      assert log =~ ~r/external_id=#{tenant.external_id}.*UnableToHandlePresence/
     end
 
     @tag policies: []
@@ -791,7 +791,7 @@ defmodule Realtime.Integration.RtChannelTest do
           refute_receive %Message{event: "phx_leave", topic: ^topic}
         end)
 
-      refute log =~ "UnableToHandlePresence"
+      refute log =~ ~r/external_id=#{tenant.external_id}.*UnableToHandlePresence/
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
