@@ -15,11 +15,13 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
 
+  @type payload :: map | {String.t(), :json | :binary, binary}
+
   @event_type "broadcast"
-  @spec handle(map(), Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
+  @spec handle(payload, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
   def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
 
-  @spec handle(map(), pid() | nil, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
+  @spec handle(payload, pid() | nil, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
   def handle(payload, db_conn, %{assigns: %{private?: true}} = socket) do
     %{
       assigns: %{
