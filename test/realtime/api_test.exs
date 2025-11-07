@@ -1,5 +1,5 @@
 defmodule Realtime.ApiTest do
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
 
   use Mimic
 
@@ -13,22 +13,24 @@ defmodule Realtime.ApiTest do
 
   @db_conf Application.compile_env(:realtime, Realtime.Repo)
 
-  setup do
-    tenant1 = Containers.checkout_tenant(run_migrations: true)
-    tenant2 = Containers.checkout_tenant(run_migrations: true)
-    Api.update_tenant(tenant1, %{max_concurrent_users: 10_000_000})
-    Api.update_tenant(tenant2, %{max_concurrent_users: 20_000_000})
-
-    %{tenants: Api.list_tenants(), tenant: tenant1}
+  defp create_tenants(_) do
+    tenant1 = tenant_fixture(%{max_concurrent_users: 10_000_000})
+    tenant2 = tenant_fixture(%{max_concurrent_users: 20_000_000})
+    dev_tenant = Realtime.Api.get_tenant_by_external_id("dev_tenant")
+    %{tenants: [tenant1, tenant2, dev_tenant]}
   end
 
   describe "list_tenants/0" do
+    setup [:create_tenants]
+
     test "returns all tenants", %{tenants: tenants} do
       assert Enum.sort(Api.list_tenants()) == Enum.sort(tenants)
     end
   end
 
   describe "list_tenants/1" do
+    setup [:create_tenants]
+
     test "list_tenants/1 returns filtered tenants", %{tenants: tenants} do
       assert hd(Api.list_tenants(search: hd(tenants).external_id)) == hd(tenants)
 
@@ -38,6 +40,8 @@ defmodule Realtime.ApiTest do
   end
 
   describe "get_tenant!/1" do
+    setup [:create_tenants]
+
     test "returns the tenant with given id", %{tenants: [tenant | _]} do
       result = tenant.id |> Api.get_tenant!() |> Map.delete(:extensions)
       expected = tenant |> Map.delete(:extensions)
@@ -90,6 +94,8 @@ defmodule Realtime.ApiTest do
   end
 
   describe "get_tenant_by_external_id/1" do
+    setup [:create_tenants]
+
     test "fetch by external id", %{tenants: [tenant | _]} do
       %Tenant{extensions: [%Extensions{} = extension]} =
         Api.get_tenant_by_external_id(tenant.external_id)
@@ -101,7 +107,9 @@ defmodule Realtime.ApiTest do
   end
 
   describe "update_tenant/2" do
-    test "valid data updates the tenant", %{tenant: tenant} do
+    setup [:create_tenants]
+
+    test "valid data updates the tenant", %{tenants: [tenant | _]} do
       update_attrs = %{
         external_id: tenant.external_id,
         jwt_secret: "some updated jwt_secret",
@@ -115,35 +123,36 @@ defmodule Realtime.ApiTest do
       assert tenant.name == "some updated name"
     end
 
-    test "invalid data returns error changeset", %{tenant: tenant} do
+    test "invalid data returns error changeset", %{tenants: [tenant | _]} do
       assert {:error, %Ecto.Changeset{}} = Api.update_tenant(tenant, %{external_id: nil, jwt_secret: nil, name: nil})
     end
 
-    test "valid data and jwks change will send disconnect event", %{tenant: tenant} do
+    test "valid data and jwks change will send disconnect event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["test"]}})
       assert_receive :disconnect, 500
     end
 
-    test "valid data and jwt_secret change will send disconnect event", %{tenant: tenant} do
+    test "valid data and jwt_secret change will send disconnect event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{jwt_secret: "potato"})
       assert_receive :disconnect, 500
     end
 
-    test "valid data and suspend change will send disconnect event", %{tenant: tenant} do
+    test "valid data and suspend change will send disconnect event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{suspend: true})
       assert_receive :disconnect, 500
     end
 
-    test "valid data but not updating jwt_secret or jwt_jwks won't send event", %{tenant: tenant} do
+    test "valid data but not updating jwt_secret or jwt_jwks won't send event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{max_events_per_second: 100})
       refute_receive :disconnect, 500
     end
 
-    test "valid data and jwt_secret change will restart the database connection", %{tenant: tenant} do
+    test "valid data and jwt_secret change will restart the database connection" do
+      tenant = Containers.checkout_tenant(run_migrations: true)
       {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
 
       Process.monitor(old_pid)
@@ -155,7 +164,8 @@ defmodule Realtime.ApiTest do
       assert %Postgrex.Result{} = Postgrex.query!(new_pid, "SELECT 1", [])
     end
 
-    test "valid data and suspend change will restart the database connection", %{tenant: tenant} do
+    test "valid data and suspend change will restart the database connection" do
+      tenant = Containers.checkout_tenant(run_migrations: true)
       {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
 
       Process.monitor(old_pid)
@@ -166,7 +176,9 @@ defmodule Realtime.ApiTest do
       assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
     end
 
-    test "valid data and tenant data change will not restart the database connection", %{tenant: tenant} do
+    test "valid data and tenant data change will not restart the database connection" do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+      expect(Realtime.Tenants.Cache, :distributed_invalidate_tenant_cache, fn _ -> :ok end)
       {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
 
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{max_concurrent_users: 100})
@@ -176,7 +188,8 @@ defmodule Realtime.ApiTest do
       assert old_pid == new_pid
     end
 
-    test "valid data and extensions data change will restart the database connection", %{tenant: tenant} do
+    test "valid data and extensions data change will restart the database connection" do
+      tenant = Containers.checkout_tenant(run_migrations: true)
       config = Realtime.Database.from_tenant(tenant, "realtime_test", :stop)
 
       extensions = [
@@ -208,12 +221,12 @@ defmodule Realtime.ApiTest do
       assert %Postgrex.Result{} = Postgrex.query!(new_pid, "SELECT 1", [])
     end
 
-    test "valid data and change to tenant data will refresh cache", %{tenant: tenant} do
+    test "valid data and change to tenant data will refresh cache", %{tenants: [tenant | _]} do
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{name: "new_name"})
       assert %Tenant{name: "new_name"} = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
     end
 
-    test "valid data and no changes to tenant will not refresh cache", %{tenant: tenant} do
+    test "valid data and no changes to tenant will not refresh cache", %{tenants: [tenant | _]} do
       reject(&Realtime.Tenants.Cache.distributed_invalidate_tenant_cache/1)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{name: tenant.name})
     end
@@ -237,6 +250,8 @@ defmodule Realtime.ApiTest do
   end
 
   describe "preload_counters/1" do
+    setup [:create_tenants]
+
     test "preloads counters for a given tenant ", %{tenants: [tenant | _]} do
       tenant = Repo.reload!(tenant)
       assert Api.preload_counters(nil) == nil
