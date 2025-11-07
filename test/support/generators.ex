@@ -283,7 +283,8 @@ defmodule Generators do
     jwt
   end
 
-  @port 4003
+  # default test port
+  @port 4002
 
   def get_connection(tenant, serializer, opts \\ []) do
     params = Keyword.get(opts, :params, %{log_level: :warning})

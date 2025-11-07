@@ -291,7 +291,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       user_broadcast_payload = %{"a" => "b"}
       json_encoded_user_broadcast_payload = Jason.encode!(user_broadcast_payload)
 
-      {:reply, :ok, socket} =
+      {:reply, :ok, _socket} =
         BroadcastHandler.handle({"event123", :json, json_encoded_user_broadcast_payload}, db_conn, socket)
 
       topic = "realtime:#{topic}"

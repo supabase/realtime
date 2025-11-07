@@ -23,7 +23,7 @@ defmodule Realtime.GenRpcPubSubTest do
                 def subscribe(subscriber, topic) do
                   spawn(fn ->
                     RealtimeWeb.Endpoint.subscribe(topic)
-                    send(subscriber, :ready)
+                    send(subscriber, {:ready, Application.get_env(:realtime, :region)})
 
                     loop = fn f ->
                       receive do
@@ -97,9 +97,12 @@ defmodule Realtime.GenRpcPubSubTest do
         # Ensuring that syn had enough time to propagate to all nodes the group information
         Process.sleep(3000)
 
-        assert_receive :ready
-        assert_receive :ready
-        assert_receive :ready
+        assert length(Realtime.Nodes.region_nodes("us-east-1")) == 2
+        assert length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
+
+        assert_receive {:ready, "us-east-1"}
+        assert_receive {:ready, "ap-southeast-2"}
+        assert_receive {:ready, "ap-southeast-2"}
 
         message = %Phoenix.Socket.Broadcast{topic: @topic, event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
         Phoenix.PubSub.broadcast(Realtime.PubSub, @topic, message)
