@@ -201,6 +201,8 @@ defmodule Containers do
           tenant
         end
 
+      GenServer.stop(conn)
+
       tenant
     else
       _ -> {:error, "failed to checkout a container"}
