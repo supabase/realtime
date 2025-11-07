@@ -332,7 +332,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       user_broadcast_payload = <<123, 456, 789>>
 
-      {:reply, :ok, socket} =
+      {:reply, :ok, _socket} =
         BroadcastHandler.handle({"event123", :binary, user_broadcast_payload}, db_conn, socket)
 
       topic = "realtime:#{topic}"
