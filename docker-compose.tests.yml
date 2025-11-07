@@ -22,11 +22,11 @@ services:
     build: .
     container_name: test-realtime-server
     ports:
-      - "4000:4000"
+      - "4100:4100"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      PORT: 4000
+      PORT: 4100
       DB_HOST: host.docker.internal
       DB_PORT: 5532
       DB_USER: postgres
@@ -50,7 +50,7 @@ services:
           - realtime-dev.local
           - realtime-dev.localhost
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:4100/"]
       interval: 10s
       timeout: 5s
       retries: 5
