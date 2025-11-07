@@ -1112,14 +1112,16 @@ defmodule Realtime.Integration.RtChannelTest do
       {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) - 1000, sub: sub})
 
       log =
-        capture_log([log_level: :warning], fn ->
+        capture_log(fn ->
           WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => token})
 
           assert_receive %Message{
             topic: ^realtime_topic,
             event: "system",
-            payload: %{"extension" => "system", "message" => "Token has expired 1000 seconds ago", "status" => "error"}
+            payload: %{"extension" => "system", "message" => "Token has expired " <> _, "status" => "error"}
           }
+
+          assert_receive %Message{event: "phx_close", topic: ^realtime_topic}
         end)
 
       assert log =~ "ChannelShutdown: Token has expired"
