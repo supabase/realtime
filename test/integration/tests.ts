@@ -1,4 +1,4 @@
-import { RealtimeClient } from "https://esm.sh/pr/supabase/supabase-js/@supabase/realtime-js@2b95471";
+import { RealtimeClient } from "https://esm.sh/pr/supabase/supabase-js/@supabase/realtime-js@eb0c799";
 import { sleep } from "https://deno.land/x/sleep/mod.ts";
 import { describe, it } from "jsr:@std/testing/bdd";
 import { assertEquals } from "jsr:@std/assert";
@@ -102,11 +102,7 @@ describe("broadcast extension", { sanitizeOps: false, sanitizeResources: false }
     while (channelV1.state != "joined" || channelV2.state != "joined") await sleep(0.2);
 
     // Send from unsubscribed channel - both should receive
-    new RealtimeClient(url, realtimeServiceRole).channel(topic, config).send({
-      type: "broadcast",
-      event,
-      payload: expectedPayload,
-    });
+    new RealtimeClient(url, realtimeServiceRole).channel(topic, config).httpSend(event, expectedPayload);
 
     while (resultV1 == null || resultV2 == null) await sleep(0.2);
 
