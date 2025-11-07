@@ -286,7 +286,7 @@ defmodule Generators do
   # default test port
   @port 4002
 
-  def get_connection(tenant, serializer, opts \\ []) do
+  def get_connection(tenant, serializer \\ Phoenix.Socket.V1.JSONSerializer, opts \\ []) do
     params = Keyword.get(opts, :params, %{log_level: :warning})
     claims = Keyword.get(opts, :claims, %{})
     role = Keyword.get(opts, :role, "anon")

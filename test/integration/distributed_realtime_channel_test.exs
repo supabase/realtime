@@ -1,4 +1,5 @@
 defmodule Realtime.Integration.DistributedRealtimeChannelTest do
+  # Use of Clustered
   use RealtimeWeb.ConnCase,
     async: false,
     parameterize: [%{serializer: Phoenix.Socket.V1.JSONSerializer}, %{serializer: RealtimeWeb.Socket.V2Serializer}]
