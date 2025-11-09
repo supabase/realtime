@@ -1,0 +1,83 @@
+services:
+  # Supabase Realtime service
+  test_db:
+    image: supabase/postgres:14.1.0.105
+    container_name: test-realtime-db
+    ports:
+      - "5532:5432"
+    volumes:
+      - ./dev/postgres:/docker-entrypoint-initdb.d/
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  test_realtime:
+    depends_on:
+      - test_db
+    build: .
+    container_name: test-realtime-server
+    ports:
+      - "4100:4100"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PORT: 4100
+      DB_HOST: host.docker.internal
+      DB_PORT: 5532
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: postgres
+      DB_ENC_KEY: 1234567890123456
+      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      API_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+      SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
+      ERL_AFLAGS: -proto_dist inet_tcp
+      RLIMIT_NOFILE: 1000000
+      DNS_NODES: "''"
+      APP_NAME: realtime
+      RUN_JANITOR: true
+      JANITOR_INTERVAL: 60000
+      LOG_LEVEL: "info"
+      SEED_SELF_HOST: true
+    networks:
+      test-network:
+        aliases:
+          - realtime-dev.local
+          - realtime-dev.localhost
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4100/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # Deno test runner
+  test-runner:
+    image: denoland/deno:alpine-2.5.6
+    container_name: deno-test-runner
+    depends_on:
+      test_realtime:
+        condition: service_healthy
+      test_db:
+        condition: service_healthy
+    volumes:
+      - ./test/integration/tests.ts:/app/tests.ts:ro
+    working_dir: /app
+    command: >
+      sh -c "
+      echo 'Running tests...' &&
+      deno test tests.ts --allow-import --no-check --allow-read --allow-net --trace-leaks --allow-env=WS_NO_BUFFER_UTIL
+      "
+    networks:
+      - test-network
+    extra_hosts:
+      - "realtime-dev.localhost:host-gateway"
+
+networks:
+  test-network:
+    driver: bridge

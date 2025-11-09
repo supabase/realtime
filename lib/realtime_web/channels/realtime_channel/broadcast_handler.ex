@@ -15,11 +15,13 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
 
+  @type payload :: map | {String.t(), :json | :binary, binary}
+
   @event_type "broadcast"
-  @spec handle(map(), Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
+  @spec handle(payload, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
   def handle(payload, %{assigns: %{private?: false}} = socket), do: handle(payload, nil, socket)
 
-  @spec handle(map(), pid() | nil, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
+  @spec handle(payload, pid() | nil, Socket.t()) :: {:reply, :ok, Socket.t()} | {:noreply, Socket.t()}
   def handle(payload, db_conn, %{assigns: %{private?: true}} = socket) do
     %{
       assigns: %{
@@ -101,7 +103,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   end
 
   defp send_message(tenant_id, self_broadcast, tenant_topic, payload) do
-    broadcast = %Phoenix.Socket.Broadcast{topic: tenant_topic, event: @event_type, payload: payload}
+    broadcast = build_broadcast(tenant_topic, payload)
 
     if self_broadcast do
       TenantBroadcaster.pubsub_broadcast(
@@ -121,6 +123,23 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         :broadcast
       )
     end
+  end
+
+  # No idea why Dialyzer is complaining here
+  @dialyzer {:nowarn_function, build_broadcast: 2}
+
+  # Message payload was built by V2 Serializer which was originally UserBroadcastPush
+  defp build_broadcast(topic, {user_event, user_payload_encoding, user_payload}) do
+    %RealtimeWeb.Socket.UserBroadcast{
+      topic: topic,
+      user_event: user_event,
+      user_payload_encoding: user_payload_encoding,
+      user_payload: user_payload
+    }
+  end
+
+  defp build_broadcast(topic, payload) do
+    %Phoenix.Socket.Broadcast{topic: topic, event: @event_type, payload: payload}
   end
 
   defp increment_rate_counter(%{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{write: false}}}} = socket) do

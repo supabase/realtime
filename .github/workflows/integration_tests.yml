@@ -1,0 +1,33 @@
+name: Integration Tests
+on:
+  pull_request:
+    paths:
+      - "lib/**"
+      - "test/**"
+      - "config/**"
+      - "priv/**"
+      - "assets/**"
+      - "rel/**"
+      - "mix.exs"
+      - "Dockerfile"
+      - "run.sh"
+      - "docker-compose.test.yml"
+
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run integration test
+        run: docker compose -f docker-compose.tests.yml up --abort-on-container-exit --exit-code-from test-runner
+

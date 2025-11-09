@@ -283,25 +283,28 @@ defmodule Generators do
     jwt
   end
 
-  @port 4003
-  @serializer Phoenix.Socket.V1.JSONSerializer
+  # default test port
+  @port 4002
 
-  def get_connection(
-        tenant,
-        role \\ "anon",
-        claims \\ %{},
-        params \\ %{vsn: "1.0.0", log_level: :warning}
-      ) do
+  def get_connection(tenant, serializer \\ Phoenix.Socket.V1.JSONSerializer, opts \\ []) do
+    params = Keyword.get(opts, :params, %{log_level: :warning})
+    claims = Keyword.get(opts, :claims, %{})
+    role = Keyword.get(opts, :role, "anon")
+
     params = Enum.reduce(params, "", fn {k, v}, acc -> "#{acc}&#{k}=#{v}" end)
-    uri = "#{uri(tenant)}?#{params}"
+    uri = "#{uri(tenant, serializer)}&#{params}"
 
     with {:ok, token} <- token_valid(tenant, role, claims),
-         {:ok, socket} <- WebsocketClient.connect(self(), uri, @serializer, [{"x-api-key", token}]) do
+         {:ok, socket} <- WebsocketClient.connect(self(), uri, serializer, [{"x-api-key", token}]) do
       {socket, token}
     end
   end
 
-  def uri(tenant, port \\ @port), do: "ws://#{tenant.external_id}.localhost:#{port}/socket/websocket"
+  def uri(tenant, serializer, port \\ @port),
+    do: "ws://#{tenant.external_id}.localhost:#{port}/socket/websocket?vsn=#{vsn(serializer)}"
+
+  defp vsn(Phoenix.Socket.V1.JSONSerializer), do: "1.0.0"
+  defp vsn(RealtimeWeb.Socket.V2Serializer), do: "2.0.0"
 
   @spec token_valid(Tenant.t(), binary(), map()) :: {:ok, binary()}
   def token_valid(tenant, role, claims \\ %{}), do: generate_token(tenant, Map.put(claims, :role, role))

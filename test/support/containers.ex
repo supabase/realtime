@@ -141,8 +141,6 @@ defmodule Containers do
         Postgrex.query!(db_conn, "CREATE SCHEMA IF NOT EXISTS realtime", [])
       end)
 
-      Process.exit(conn, :normal)
-
       RateCounter.stop(tenant.external_id)
 
       # Automatically checkin the container at the end of the test
@@ -202,6 +200,8 @@ defmodule Containers do
         else
           tenant
         end
+
+      GenServer.stop(conn)
 
       tenant
     else

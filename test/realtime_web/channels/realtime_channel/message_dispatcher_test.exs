@@ -4,7 +4,10 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
   import ExUnit.CaptureLog
 
   alias Phoenix.Socket.Broadcast
+  alias Phoenix.Socket.V1
   alias RealtimeWeb.RealtimeChannel.MessageDispatcher
+  alias RealtimeWeb.Socket.UserBroadcast
+  alias RealtimeWeb.Socket.V2Serializer
 
   defmodule TestSerializer do
     def fastlane!(msg) do
@@ -232,6 +235,234 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
 
       # TestSerializer is not called
       assert Agent.get(TestSerializer, & &1) == 0
+    end
+
+    test "dispatches Broadcast to V1 & V2 Serializers" do
+      parent = self()
+
+      subscriber_pid =
+        spawn(fn ->
+          loop = fn loop ->
+            receive do
+              msg ->
+                send(parent, {:subscriber, msg})
+                loop.(loop)
+            end
+          end
+
+          loop.(loop)
+        end)
+
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {subscriber_pid, {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new()}}
+      ]
+
+      msg = %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}
+
+      log =
+        capture_log(fn ->
+          assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+        end)
+
+      assert log =~ "Received message on realtime:topic with payload: #{inspect(msg, pretty: true)}"
+
+      # Receive 2 messages using V1
+      assert_receive {:socket_push, :text, message_v1}
+      assert_receive {:socket_push, :text, ^message_v1}
+
+      assert Jason.decode!(message_v1) == %{
+               "event" => "event",
+               "payload" => %{"data" => "test"},
+               "ref" => nil,
+               "topic" => "realtime:topic"
+             }
+
+      # Receive 2 messages using V2
+      assert_receive {:socket_push, :text, message_v2}
+      assert_receive {:socket_push, :text, ^message_v2}
+
+      # V2 is an array format
+      assert Jason.decode!(message_v2) == [nil, nil, "realtime:topic", "event", %{"data" => "test"}]
+
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+
+      refute_receive _any
+    end
+
+    test "dispatches json UserBroadcast to V1 & V2 Serializers" do
+      parent = self()
+
+      subscriber_pid =
+        spawn(fn ->
+          loop = fn loop ->
+            receive do
+              msg ->
+                send(parent, {:subscriber, msg})
+                loop.(loop)
+            end
+          end
+
+          loop.(loop)
+        end)
+
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {subscriber_pid, {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new()}}
+      ]
+
+      user_payload = Jason.encode!(%{data: "test"})
+
+      msg = %UserBroadcast{
+        topic: "some:other:topic",
+        user_event: "event123",
+        user_payload: user_payload,
+        user_payload_encoding: :json,
+        metadata: %{"id" => "123", "replayed" => true}
+      }
+
+      log =
+        capture_log(fn ->
+          assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+        end)
+
+      assert log =~ "Received message on realtime:topic with payload: #{inspect(msg, pretty: true)}"
+
+      # Receive 2 messages using V1
+      assert_receive {:socket_push, :text, message_v1}
+      assert_receive {:socket_push, :text, ^message_v1}
+
+      assert Jason.decode!(message_v1) == %{
+               "event" => "broadcast",
+               "payload" => %{
+                 "event" => "event123",
+                 "meta" => %{"id" => "123", "replayed" => true},
+                 "payload" => %{"data" => "test"},
+                 "type" => "broadcast"
+               },
+               "ref" => nil,
+               "topic" => "realtime:topic"
+             }
+
+      # Receive 2 messages using V2
+      assert_receive {:socket_push, :binary, message_v2}
+      assert_receive {:socket_push, :binary, ^message_v2}
+
+      encoded_metadata = Jason.encode!(%{"id" => "123", "replayed" => true})
+      metadata_size = byte_size(encoded_metadata)
+
+      # binary payload structure
+      assert message_v2 ==
+               <<
+                 # user broadcast = 4
+                 4::size(8),
+                 # topic_size
+                 14,
+                 # user_event_size
+                 8,
+                 # metadata_size
+                 metadata_size,
+                 # json encoding
+                 1::size(8),
+                 "realtime:topic",
+                 "event123"
+               >> <> encoded_metadata <> user_payload
+
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+
+      refute_receive _any
+    end
+
+    test "dispatches binary UserBroadcast to V1 & V2 Serializers" do
+      parent = self()
+
+      subscriber_pid =
+        spawn(fn ->
+          loop = fn loop ->
+            receive do
+              msg ->
+                send(parent, {:subscriber, msg})
+                loop.(loop)
+            end
+          end
+
+          loop.(loop)
+        end)
+
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      subscribers = [
+        {subscriber_pid, {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), V1.JSONSerializer, "realtime:topic", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), V2Serializer, "realtime:topic", :info, "tenant123", MapSet.new()}}
+      ]
+
+      user_payload = <<123, 456, 789>>
+
+      msg = %UserBroadcast{
+        topic: "some:other:topic",
+        user_event: "event123",
+        user_payload: user_payload,
+        user_payload_encoding: :binary,
+        metadata: %{"id" => "123", "replayed" => true}
+      }
+
+      log =
+        capture_log(fn ->
+          assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+        end)
+
+      assert log =~ "Received message on realtime:topic with payload: #{inspect(msg, pretty: true)}"
+      assert log =~ "User payload encoding is not JSON"
+
+      # No V1 message received as binary payloads are not supported
+      refute_receive {:socket_push, :text, _message_v1}
+
+      # Receive 2 messages using V2
+      assert_receive {:socket_push, :binary, message_v2}
+      assert_receive {:socket_push, :binary, ^message_v2}
+
+      encoded_metadata = Jason.encode!(%{"id" => "123", "replayed" => true})
+      metadata_size = byte_size(encoded_metadata)
+
+      # binary payload structure
+      assert message_v2 ==
+               <<
+                 # user broadcast = 4
+                 4::size(8),
+                 # topic_size
+                 14,
+                 # user_event_size
+                 8,
+                 # metadata_size
+                 metadata_size,
+                 # binary encoding
+                 0::size(8),
+                 "realtime:topic",
+                 "event123"
+               >> <> encoded_metadata <> user_payload
+
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+
+      refute_receive _any
     end
   end
 end

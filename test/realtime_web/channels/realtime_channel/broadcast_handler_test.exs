@@ -1,5 +1,8 @@
 defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
-  use Realtime.DataCase, async: true
+  use Realtime.DataCase,
+    async: true,
+    parameterize: [%{serializer: Phoenix.Socket.V1.JSONSerializer}, %{serializer: RealtimeWeb.Socket.V2Serializer}]
+
   use Mimic
 
   import Generators
@@ -17,21 +20,24 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
   setup [:initiate_tenant]
 
+  @payload %{"a" => "b"}
+
   describe "handle/3" do
-    test "with write true policy, user is able to send message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+    test "with write true policy, user is able to send message",
+         %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true}})
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_receive {:socket_push, :text, data}
-        message = data |> IO.iodata_to_binary() |> Jason.decode!()
-        assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
+
+        assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
 
       Process.sleep(120)
@@ -57,20 +63,20 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
 
     @tag policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
-    test "with nil policy but valid user, is able to send message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+    test "with nil policy but valid user, is able to send message",
+         %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket = socket_fixture(tenant, topic)
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_received {:socket_push, :text, data}
-        message = data |> IO.iodata_to_binary() |> Jason.decode!()
-        assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
+        assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
 
       Process.sleep(120)
@@ -80,7 +86,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
 
     @tag policies: [:authenticated_read_matching_user_sub, :authenticated_write_matching_user_sub], sub: UUID.generate()
-    test "with valid sub, is able to send message", %{topic: topic, tenant: tenant, db_conn: db_conn, sub: sub} do
+    test "with valid sub, is able to send message",
+         %{topic: topic, tenant: tenant, db_conn: db_conn, sub: sub, serializer: serializer} do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{broadcast: %BroadcastPolicies{write: nil, read: true}},
@@ -89,15 +96,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_received {:socket_push, :text, data}
-        message = data |> IO.iodata_to_binary() |> Jason.decode!()
-        assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
+        assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
     end
 
@@ -119,7 +125,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
 
     @tag policies: [:read_matching_user_role, :write_matching_user_role], role: "anon"
-    test "with valid role, is able to send message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+    test "with valid role, is able to send message",
+         %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{broadcast: %BroadcastPolicies{write: nil, read: true}},
@@ -128,15 +135,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_received {:socket_push, :text, data}
-        message = data |> IO.iodata_to_binary() |> Jason.decode!()
-        assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
+        assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
     end
 
@@ -173,7 +179,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     end
 
     @tag policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
-    test "validation only runs once on nil and valid policies", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+    test "validation only runs once on nil and valid policies",
+         %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket = socket_fixture(tenant, topic)
 
       expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context ->
@@ -184,15 +191,14 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_receive {:socket_push, :text, data}
-        message = data |> IO.iodata_to_binary() |> Jason.decode!()
-        assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
+        assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
     end
 
@@ -212,7 +218,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       refute_receive _, 100
     end
 
-    test "no ack still sends message", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+    test "no ack still sends message", %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket =
         socket_fixture(tenant, topic,
           policies: %Policies{broadcast: %BroadcastPolicies{write: true}},
@@ -221,7 +227,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:noreply, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:noreply, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
@@ -230,25 +236,24 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_received {:socket_push, :text, data}
-        message = data |> IO.iodata_to_binary() |> Jason.decode!()
-        assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
+        assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
     end
 
-    test "public channels are able to send messages", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+    test "public channels are able to send messages",
+         %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket = socket_fixture(tenant, topic, private?: false, policies: nil)
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_received {:socket_push, :text, data}
-        message = data |> IO.iodata_to_binary() |> Jason.decode!()
-        assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
+        assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
 
       Process.sleep(120)
@@ -257,20 +262,20 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       assert avg > 0.0
     end
 
-    test "public channels are able to send messages and ack", %{topic: topic, tenant: tenant, db_conn: db_conn} do
+    test "public channels are able to send messages and ack",
+         %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
       socket = socket_fixture(tenant, topic, private?: false, policies: nil)
 
       for _ <- 1..100, reduce: socket do
         socket ->
-          {:reply, :ok, socket} = BroadcastHandler.handle(%{"a" => "b"}, db_conn, socket)
+          {:reply, :ok, socket} = BroadcastHandler.handle(@payload, db_conn, socket)
           socket
       end
 
       for _ <- 1..100 do
         topic = "realtime:#{topic}"
         assert_receive {:socket_push, :text, data}
-        message = data |> IO.iodata_to_binary() |> Jason.decode!()
-        assert message == %{"event" => "broadcast", "payload" => %{"a" => "b"}, "ref" => nil, "topic" => topic}
+        assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
 
       Process.sleep(120)
@@ -278,6 +283,82 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
       assert Enum.sum(buckets) == 100
       assert avg > 0.0
+    end
+
+    test "V2 json UserBroadcastPush", %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
+      socket = socket_fixture(tenant, topic, private?: false, policies: nil)
+
+      user_broadcast_payload = %{"a" => "b"}
+      json_encoded_user_broadcast_payload = Jason.encode!(user_broadcast_payload)
+
+      {:reply, :ok, _socket} =
+        BroadcastHandler.handle({"event123", :json, json_encoded_user_broadcast_payload}, db_conn, socket)
+
+      topic = "realtime:#{topic}"
+      assert_receive {:socket_push, code, data}
+
+      if serializer == RealtimeWeb.Socket.V2Serializer do
+        assert code == :binary
+
+        assert data ==
+                 <<
+                   # user broadcast = 4
+                   4::size(8),
+                   # topic_size
+                   byte_size(topic),
+                   # user_event_size
+                   byte_size("event123"),
+                   # metadata_size
+                   0,
+                   # json encoding
+                   1::size(8),
+                   topic::binary,
+                   "event123"
+                 >> <> json_encoded_user_broadcast_payload
+      else
+        assert code == :text
+
+        assert Jason.decode!(data) ==
+                 message(serializer, topic, %{
+                   "event" => "event123",
+                   "payload" => user_broadcast_payload,
+                   "type" => "broadcast"
+                 })
+      end
+    end
+
+    test "V2 binary UserBroadcastPush", %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
+      socket = socket_fixture(tenant, topic, private?: false, policies: nil)
+
+      user_broadcast_payload = <<123, 456, 789>>
+
+      {:reply, :ok, _socket} =
+        BroadcastHandler.handle({"event123", :binary, user_broadcast_payload}, db_conn, socket)
+
+      topic = "realtime:#{topic}"
+
+      if serializer == RealtimeWeb.Socket.V2Serializer do
+        assert_receive {:socket_push, :binary, data}
+
+        assert data ==
+                 <<
+                   # user broadcast = 4
+                   4::size(8),
+                   # topic_size
+                   byte_size(topic),
+                   # user_event_size
+                   byte_size("event123"),
+                   # metadata_size
+                   0,
+                   # binary encoding
+                   0::size(8),
+                   topic::binary,
+                   "event123"
+                 >> <> user_broadcast_payload
+      else
+        # Can't receive binary payloads on V1 serializer
+        refute_receive {:socket_push, _code, _data}
+      end
     end
 
     @tag policies: [:broken_write_presence]
@@ -384,7 +465,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     fastlane =
       RealtimeWeb.RealtimeChannel.MessageDispatcher.fastlane_metadata(
         self(),
-        Phoenix.Socket.V1.JSONSerializer,
+        context.serializer,
         "realtime:#{topic}",
         :warning,
         "tenant_id"
@@ -441,5 +522,11 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         tenant: tenant.external_id
       }
     }
+  end
+
+  defp message(RealtimeWeb.Socket.V2Serializer, topic, payload), do: [nil, nil, topic, "broadcast", payload]
+
+  defp message(Phoenix.Socket.V1.JSONSerializer, topic, payload) do
+    %{"event" => "broadcast", "payload" => payload, "ref" => nil, "topic" => topic}
   end
 end
