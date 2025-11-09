@@ -128,9 +128,8 @@ defmodule Containers do
     with container when is_pid(container) <- :poolboy.checkout(Containers.Pool, true, 5_000),
          port <- Container.port(container) do
       tenant = Generators.tenant_fixture(%{port: port, migrations_ran: 0})
-      run_migrations? = Keyword.get(opts, :run_migrations, false)
 
-      storage_up!(tenant)
+      run_migrations? = Keyword.get(opts, :run_migrations, false)
 
       settings = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | max_restarts: 0, ssl: false}
@@ -140,6 +139,8 @@ defmodule Containers do
         Postgrex.query!(db_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
         Postgrex.query!(db_conn, "CREATE SCHEMA IF NOT EXISTS realtime", [])
       end)
+
+      storage_up!(tenant)
 
       RateCounter.stop(tenant.external_id)
 
@@ -178,7 +179,39 @@ defmodule Containers do
           "grant all on table public.test to anon;",
           "grant all on table public.test to postgres;",
           "grant all on table public.test to authenticated;",
-          "create publication #{publication} for all tables"
+          "create publication #{publication} for all tables",
+          # Clean up all replication slots
+          """
+          DO $$
+          DECLARE
+          r RECORD;
+          BEGIN
+          FOR r IN
+            SELECT slot_name, active_pid
+            FROM pg_replication_slots
+            WHERE slot_name LIKE 'supabase_realtime%'
+          LOOP
+            IF r.active_pid IS NOT NULL THEN
+              BEGIN
+                -- try to terminate the backend; ignore any error or race
+                SELECT pg_terminate_backend(r.active_pid);
+                PERFORM pg_sleep(0.5);
+              EXCEPTION WHEN OTHERS THEN
+                NULL;
+              END;
+            END IF;
+
+            BEGIN
+              -- check existence then try to drop; ignore any error or race
+              IF EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = r.slot_name) THEN
+                PERFORM pg_drop_replication_slot(r.slot_name);
+              END IF;
+            EXCEPTION WHEN OTHERS THEN
+              NULL;
+            END;
+          END LOOP;
+          END$$;
+          """
         ]
 
         Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
