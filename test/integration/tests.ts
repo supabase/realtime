@@ -1,4 +1,4 @@
-import { RealtimeClient } from "https://esm.sh/pr/supabase/supabase-js/@supabase/realtime-js@eb0c799";
+import { RealtimeClient } from "npm:@supabase/supabase-js@2.80.1-canary.3";
 import { sleep } from "https://deno.land/x/sleep/mod.ts";
 import { describe, it } from "jsr:@std/testing/bdd";
 import { assertEquals } from "jsr:@std/assert";
