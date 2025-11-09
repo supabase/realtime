@@ -73,8 +73,13 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
     :ok
   end
 
-  defp maybe_log(:info, join_topic, msg, tenant_id) do
+  defp maybe_log(:info, join_topic, msg, tenant_id) when is_struct(msg) do
     log = "Received message on #{join_topic} with payload: #{inspect(msg, pretty: true)}"
+    Logger.info(log, external_id: tenant_id, project: tenant_id)
+  end
+
+  defp maybe_log(:info, join_topic, msg, tenant_id) when is_binary(msg) do
+    log = "Received message on #{join_topic}. #{msg}"
     Logger.info(log, external_id: tenant_id, project: tenant_id)
   end
 
