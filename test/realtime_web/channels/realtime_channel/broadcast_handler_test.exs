@@ -40,9 +40,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
 
-      Process.sleep(120)
-
-      {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
+      {:ok, %{avg: avg, bucket: buckets}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
       assert Enum.sum(buckets) == 100
       assert avg > 0
     end
@@ -58,7 +56,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       refute_received _any
 
-      {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
+      {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
       assert avg == 0.0
     end
 
@@ -79,8 +77,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
 
-      Process.sleep(120)
-      {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
+      {:ok, %{avg: avg, bucket: buckets}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
       assert Enum.sum(buckets) == 100
       assert avg > 0.0
     end
@@ -174,7 +171,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       refute_received _any
 
-      {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
+      {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
       assert avg == 0.0
     end
 
@@ -256,8 +253,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
 
-      Process.sleep(120)
-      {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
+      {:ok, %{avg: avg, bucket: buckets}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
       assert Enum.sum(buckets) == 100
       assert avg > 0.0
     end
@@ -278,9 +274,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         assert Jason.decode!(data) == message(serializer, topic, @payload)
       end
 
-      Process.sleep(120)
-
-      {:ok, %{avg: avg, bucket: buckets}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
+      {:ok, %{avg: avg, bucket: buckets}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
       assert Enum.sum(buckets) == 100
       assert avg > 0.0
     end
@@ -375,7 +369,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
 
       assert log =~ "RlsPolicyError"
 
-      {:ok, %{avg: avg}} = RateCounter.get(Tenants.events_per_second_rate(tenant))
+      {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
       assert avg == 0.0
     end
 

@@ -3,7 +3,6 @@ defmodule Containers do
   alias Realtime.Tenants.Connect
   alias Containers.Container
   alias Realtime.Database
-  alias Realtime.RateCounter
   alias Realtime.Tenants.Migrations
 
   use GenServer
@@ -142,7 +141,7 @@ defmodule Containers do
 
       storage_up!(tenant)
 
-      RateCounter.stop(tenant.external_id)
+      RateCounterHelper.stop(tenant.external_id)
 
       # Automatically checkin the container at the end of the test
       ExUnit.Callbacks.on_exit(fn ->

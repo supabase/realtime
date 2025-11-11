@@ -105,8 +105,9 @@ defmodule Realtime.Tenants.AuthorizationTest do
               Authorization.get_read_authorizations(%Policies{}, pid, context.authorization_context)
           end
 
-          # Waiting for RateCounter to limit
-          Process.sleep(1100)
+          # Force RateCounter to tick
+          rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
+          RateCounterHelper.tick!(rate_counter)
           # The next auth requests will not call the database due to being rate limited
           reject(&Database.transaction/4)
 
@@ -134,8 +135,9 @@ defmodule Realtime.Tenants.AuthorizationTest do
               Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
           end
 
-          # Waiting for RateCounter to limit
-          Process.sleep(1100)
+          # Force RateCounter to tick
+          rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
+          RateCounterHelper.tick!(rate_counter)
           # The next auth requests will not call the database due to being rate limited
           reject(&Database.transaction/4)
 
@@ -191,8 +193,9 @@ defmodule Realtime.Tenants.AuthorizationTest do
             end)
 
           Task.await_many([t1, t2], 20_000)
-          # Wait for RateCounter log
-          Process.sleep(1000)
+          # Force RateCounter to tick and log error
+          rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
+          RateCounterHelper.tick!(rate_counter)
         end)
 
       external_id = context.tenant.external_id

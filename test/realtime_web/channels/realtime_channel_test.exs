@@ -484,11 +484,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       tenant_id = tenant.external_id
 
-      # Wait for RateCounter to tick
-      Process.sleep(1100)
-
       assert {:ok, %RateCounter{id: {:channel, :presence_events, ^tenant_id}, bucket: bucket}} =
-               RateCounter.get(socket.assigns.presence_rate_counter)
+               RateCounterHelper.tick!(socket.assigns.presence_rate_counter)
 
       # presence_state
       assert Enum.sum(bucket) == 1
