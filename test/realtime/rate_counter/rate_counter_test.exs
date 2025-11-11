@@ -316,37 +316,5 @@ defmodule Realtime.RateCounterTest do
     end
   end
 
-  describe "stop/1" do
-    test "stops rate counters for a given entity" do
-      entity_id = Ecto.UUID.generate()
-      fake_terms = Enum.map(1..10, fn _ -> {:domain, :"metric_#{random_string()}", Ecto.UUID.generate()} end)
-      terms = Enum.map(1..10, fn _ -> {:domain, :"metric_#{random_string()}", entity_id} end)
-
-      for term <- terms do
-        args = %Args{id: term}
-        {:ok, _} = RateCounter.new(args)
-        assert {:ok, %RateCounter{}} = RateCounter.get(args)
-      end
-
-      for term <- fake_terms do
-        args = %Args{id: term}
-        {:ok, _} = RateCounter.new(args)
-        assert {:ok, %RateCounter{}} = RateCounter.get(args)
-      end
-
-      assert :ok = RateCounter.stop(entity_id)
-      # Wait for processes to shut down and Registry to update
-      Process.sleep(100)
-
-      for term <- terms do
-        assert [] = Registry.lookup(Realtime.Registry.Unique, {RateCounter, :rate_counter, term})
-      end
-
-      for term <- fake_terms do
-        assert [{_pid, _value}] = Registry.lookup(Realtime.Registry.Unique, {RateCounter, :rate_counter, term})
-      end
-    end
-  end
-
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {event, measures, metadata})
 end

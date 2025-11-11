@@ -100,8 +100,9 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
               Authorization.get_read_authorizations(%Policies{}, pid, context.authorization_context)
           end
 
-          # Waiting for RateCounter to limit
-          Process.sleep(1100)
+          # Force RateCounter to tick
+          rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
+          RateCounterHelper.tick!(rate_counter)
 
           for _ <- 1..10 do
             {:error, :increase_connection_pool} =
@@ -127,8 +128,9 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
               Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
           end
 
-          # Waiting for RateCounter to limit
-          Process.sleep(1100)
+          # Force RateCounter to tick
+          rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
+          RateCounterHelper.tick!(rate_counter)
 
           for _ <- 1..10 do
             {:error, :increase_connection_pool} =
@@ -184,8 +186,9 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
             end)
 
           Task.await_many([t1, t2], 20_000)
-          # Wait for RateCounter to log
-          Process.sleep(1000)
+          # Force RateCounter to tick and log error
+          rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
+          RateCounterHelper.tick!(rate_counter)
         end)
 
       external_id = context.tenant.external_id
@@ -241,7 +244,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     Connect.shutdown("dev_tenant")
     # Waiting for :syn to unregister
     Process.sleep(100)
-    Realtime.RateCounter.stop("dev_tenant")
+    RateCounterHelper.stop("dev_tenant")
 
     {:ok, local_db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()

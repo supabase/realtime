@@ -12,7 +12,7 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
   setup do
     tenant = Realtime.Api.get_tenant_by_external_id("dev_tenant")
 
-    Realtime.RateCounter.stop(tenant.external_id)
+    RateCounterHelper.stop(tenant.external_id)
 
     Connect.shutdown(tenant.external_id)
     # Sleeping so that syn can forget about this Connect process

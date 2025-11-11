@@ -14,7 +14,6 @@ defmodule Realtime.Integration.RtChannelTest do
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.Integration.WebsocketClient
-  alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.ReplicationConnection
@@ -1768,7 +1767,7 @@ defmodule Realtime.Integration.RtChannelTest do
     end
 
     test "max_events_per_second limit respected", %{tenant: tenant, serializer: serializer} do
-      RateCounter.stop(tenant.external_id)
+      RateCounterHelper.stop(tenant.external_id)
 
       log =
         capture_log(fn ->
@@ -1842,6 +1841,7 @@ defmodule Realtime.Integration.RtChannelTest do
 
           # Wait for RateCounter tick
           Process.sleep(1000)
+
           # These ones will be blocked
           for _ <- 1..300 do
             WebsocketClient.join(socket, realtime_topic, %{config: config})
@@ -1997,7 +1997,7 @@ defmodule Realtime.Integration.RtChannelTest do
           start: {Agent, :start_link, [fn -> %{} end, [name: name]]}
         })
 
-      RateCounter.stop(tenant.external_id)
+      RateCounterHelper.stop(tenant.external_id)
       on_exit(fn -> :telemetry.detach({__MODULE__, tenant.external_id}) end)
       :telemetry.attach_many({__MODULE__, tenant.external_id}, events, &__MODULE__.handle_telemetry/4, name)
 
@@ -2018,7 +2018,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Wait for RateCounter to run
-      Process.sleep(2000)
+      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
       # Expected billed
       # 1 joins due to two sockets
@@ -2060,7 +2060,7 @@ defmodule Realtime.Integration.RtChannelTest do
       end
 
       # Wait for RateCounter to run
-      Process.sleep(2000)
+      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
       # Expected billed
       # 2 joins due to two sockets
@@ -2112,7 +2112,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "presence_diff", payload: %{"joins" => _, "leaves" => %{}}, topic: ^topic}
 
       # Wait for RateCounter to run
-      Process.sleep(2000)
+      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
       # Expected billed
       # 2 joins due to two sockets
@@ -2161,7 +2161,7 @@ defmodule Realtime.Integration.RtChannelTest do
       end
 
       # Wait for RateCounter to run
-      Process.sleep(2000)
+      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
       # Expected billed
       # 2 joins due to two sockets
@@ -2189,7 +2189,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{topic: ^topic, event: "system"}, 5000
 
       # Wait for RateCounter to run
-      Process.sleep(2000)
+      RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
       # Expected billed
       # 1 joins due to one socket

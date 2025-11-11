@@ -71,9 +71,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                      },
                      500
 
-      # Wait for RateCounter to update
-      Process.sleep(1100)
-
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
 
       assert {:ok,
@@ -84,7 +81,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                   measurement: :avg,
                   triggered: false
                 }
-              }} = RateCounter.get(rate)
+              }} = RateCounterHelper.tick!(rate)
 
       assert sum == 0
     end
@@ -133,11 +130,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                      },
                      500
 
-      # Wait for RateCounter to update
-      Process.sleep(1100)
-
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
-      assert {:ok, %RateCounter{sum: sum}} = RateCounter.get(rate)
+      assert {:ok, %RateCounter{sum: sum}} = RateCounterHelper.tick!(rate)
       assert sum == 2
     end
 
@@ -183,11 +177,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                      },
                      500
 
-      # Wait for RateCounter to update
-      Process.sleep(1100)
-
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
-      assert {:ok, %RateCounter{sum: sum}} = RateCounter.get(rate)
+      assert {:ok, %RateCounter{sum: sum}} = RateCounterHelper.tick!(rate)
       assert sum == 2
     end
 
@@ -236,11 +227,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                      },
                      500
 
-      # Wait for RateCounter to update
-      Process.sleep(1100)
-
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
-      assert {:ok, %RateCounter{sum: sum}} = RateCounter.get(rate)
+      assert {:ok, %RateCounter{sum: sum}} = RateCounterHelper.tick!(rate)
       assert sum == 2
     end
 
@@ -300,11 +288,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       assert {node(), MapSet.new([sub1, sub3])} in node_subs
       assert {:"someothernode@127.0.0.1", MapSet.new([sub2])} in node_subs
 
-      # Wait for RateCounter to update
-      Process.sleep(1100)
-
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
-      assert {:ok, %RateCounter{sum: sum}} = RateCounter.get(rate)
+      assert {:ok, %RateCounter{sum: sum}} = RateCounterHelper.tick!(rate)
       assert sum == 3
     end
   end

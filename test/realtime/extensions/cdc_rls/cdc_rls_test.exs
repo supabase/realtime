@@ -147,12 +147,10 @@ defmodule Realtime.Extensions.CdcRlsTest do
                  PostgresCdcRls.handle_after_connect({:manager_pid, self()}, postgres_extension, %{}, external_id)
       end
 
-      Process.sleep(1200)
-
       rate = Realtime.Tenants.subscription_errors_per_second_rate(external_id, 4)
 
       assert {:ok, %RateCounter{id: {:channel, :subscription_errors, ^external_id}, sum: 6, limit: %{triggered: true}}} =
-               RateCounter.get(rate)
+               RateCounterHelper.tick!(rate)
 
       # It won't even be called now
       reject(&Subscriptions.create/5)
@@ -238,11 +236,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       assert_receive {:socket_push, :text, data}, 5000
 
-      message =
-        data
-        |> IO.iodata_to_binary()
-        |> Jason.decode!()
-
       assert %{
                "event" => "postgres_changes",
                "payload" => %{
@@ -259,14 +252,12 @@ defmodule Realtime.Extensions.CdcRlsTest do
                },
                "ref" => nil,
                "topic" => "realtime:test"
-             } = message
-
-      # Wait for RateCounter to update
-      Process.sleep(2000)
+             } = Jason.decode!(data)
 
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
 
-      assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} = RateCounter.get(rate)
+      assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} =
+               RateCounterHelper.tick!(rate)
 
       assert Enum.sum(bucket) == 1
 
@@ -297,6 +288,8 @@ defmodule Realtime.Extensions.CdcRlsTest do
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
       assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
 
+      rate = Realtime.Tenants.db_events_per_second_rate(tenant)
+
       log =
         capture_log(fn ->
           # increment artifically the counter to  reach the limit
@@ -304,8 +297,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
           |> Realtime.Tenants.db_events_per_second_key()
           |> Realtime.GenCounter.add(100_000_000)
 
-          # Wait for RateCounter to update
-          Process.sleep(1500)
+          RateCounterHelper.tick!(rate)
         end)
 
       assert log =~ "MessagePerSecondRateLimitReached: Too many postgres changes messages per second"
@@ -315,13 +307,8 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       refute_receive {:socket_push, :text, _}, 5000
 
-      # Wait for RateCounter to update
-      Process.sleep(2000)
-
-      rate = Realtime.Tenants.db_events_per_second_rate(tenant)
-
       assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket, limit: %{triggered: true}}} =
-               RateCounter.get(rate)
+               RateCounterHelper.tick!(rate)
 
       # Nothing has changed
       assert Enum.sum(bucket) == 100_000_000
@@ -371,11 +358,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       assert_receive {:socket_push, :text, data}, 5000
 
-      message =
-        data
-        |> IO.iodata_to_binary()
-        |> Jason.decode!()
-
       assert %{
                "event" => "postgres_changes",
                "payload" => %{
@@ -392,7 +374,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
                },
                "ref" => nil,
                "topic" => "realtime:test"
-             } = message
+             } = Jason.decode!(data)
 
       assert_receive {
         :telemetry,
@@ -423,12 +405,10 @@ defmodule Realtime.Extensions.CdcRlsTest do
                  PostgresCdcRls.handle_after_connect({pid, pid}, postgres_extension, pg_change_params, external_id)
       end
 
-      Process.sleep(1200)
-
       rate = Realtime.Tenants.subscription_errors_per_second_rate(external_id, 4)
 
       assert {:ok, %RateCounter{id: {:channel, :subscription_errors, ^external_id}, sum: 6, limit: %{triggered: true}}} =
-               RateCounter.get(rate)
+               RateCounterHelper.tick!(rate)
 
       # It won't even be called now
       reject(&Realtime.GenRpc.call/5)
@@ -464,8 +444,8 @@ defmodule Realtime.Extensions.CdcRlsTest do
       Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
     end)
 
-    RateCounter.stop(tenant.external_id)
-    on_exit(fn -> RateCounter.stop(tenant.external_id) end)
+    RateCounterHelper.stop(tenant.external_id)
+    on_exit(fn -> RateCounterHelper.stop(tenant.external_id) end)
 
     on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
