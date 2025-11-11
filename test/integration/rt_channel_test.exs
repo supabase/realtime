@@ -1148,6 +1148,7 @@ defmodule Realtime.Integration.RtChannelTest do
           WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => token})
 
           assert_receive %Message{event: "system"}, 1000
+          assert_receive %Message{event: "phx_close", topic: ^realtime_topic}
         end)
 
       assert log =~ "ChannelShutdown"
