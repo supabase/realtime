@@ -13,7 +13,7 @@ defmodule Env do
 
   def get_boolean(env, default) do
     value = System.get_env(env)
-    if value, do: String.to_existing_atom(value), else: default
+    if value, do: value |> String.downcase() |> String.to_existing_atom(), else: default
   end
 end
 
