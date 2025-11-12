@@ -66,11 +66,7 @@ describe("broadcast extension", () => {
     while (activeChannel.state == "joining") await sleep(0.2);
 
     // Send from unsubscribed channel
-    supabase.channel(topic, config).send({
-      type: "broadcast",
-      event,
-      payload: expectedPayload,
-    });
+    supabase.channel(topic, config).httpSend(event, expectedPayload);
 
     while (result == null) await sleep(0.2);
 
