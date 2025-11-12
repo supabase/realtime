@@ -23,6 +23,8 @@ defmodule Realtime.GenRpcPubSubTest do
                 def subscribe(subscriber, topic) do
                   spawn(fn ->
                     RealtimeWeb.Endpoint.subscribe(topic)
+                    2 = length(Realtime.Nodes.region_nodes("us-east-1"))
+                    2 = length(Realtime.Nodes.region_nodes("ap-southeast-2"))
                     send(subscriber, {:ready, Application.get_env(:realtime, :region)})
 
                     loop = fn f ->
@@ -91,11 +93,11 @@ defmodule Realtime.GenRpcPubSubTest do
 
         {:ok, _} = Clustered.start(@aux_mod, name: ap2_nodeY, extra_config: ap2_nodeY_extra_config, phoenix_port: 4016)
 
-        RealtimeWeb.Endpoint.subscribe(@topic)
-        :erpc.multicall(Node.list(), Subscriber, :subscribe, [self(), @topic])
-
         # Ensuring that syn had enough time to propagate to all nodes the group information
         Process.sleep(3000)
+
+        RealtimeWeb.Endpoint.subscribe(@topic)
+        :erpc.multicall(Node.list(), Subscriber, :subscribe, [self(), @topic])
 
         assert length(Realtime.Nodes.region_nodes("us-east-1")) == 2
         assert length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2

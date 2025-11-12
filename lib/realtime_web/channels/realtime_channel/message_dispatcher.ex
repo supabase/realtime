@@ -107,6 +107,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
             {:error, reason} ->
               maybe_log(log_level, join_topic, reason, tenant_id)
+              {:error, reason}
           end
 
         Map.put(cache, serializer, result)

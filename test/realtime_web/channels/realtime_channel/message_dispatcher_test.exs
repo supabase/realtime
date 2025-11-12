@@ -430,6 +430,9 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       assert log =~ "Received message on realtime:topic with payload: #{inspect(msg, pretty: true)}"
       assert log =~ "User payload encoding is not JSON"
 
+      # Only prints once
+      assert String.split(log, "User payload encoding is not JSON") |> length() == 2
+
       # No V1 message received as binary payloads are not supported
       refute_receive {:socket_push, :text, _message_v1}
 
