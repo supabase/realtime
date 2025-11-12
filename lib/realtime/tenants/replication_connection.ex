@@ -57,7 +57,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
             publication_name: nil,
             replication_slot_name: nil,
             output_plugin: "pgoutput",
-            proto_version: 3,
+            proto_version: 2,
             relations: %{},
             buffer: [],
             monitored_pid: nil,
