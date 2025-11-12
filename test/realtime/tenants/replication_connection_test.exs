@@ -151,6 +151,88 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       end
     end
 
+    test "starts a handler for the tenant and broadcasts to public channel", %{tenant: tenant, db_conn: db_conn} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, true)
+      subscribe(tenant_topic, topic)
+
+      total_messages = 5
+      # Works with one insert per transaction
+      for _ <- 1..total_messages do
+        value = random_string()
+
+        row =
+          message_fixture(tenant, %{
+            "topic" => topic,
+            "private" => false,
+            "event" => "INSERT",
+            "payload" => %{"value" => value}
+          })
+
+        assert_receive {:socket_push, :text, data}
+        message = data |> IO.iodata_to_binary() |> Jason.decode!()
+
+        payload = %{
+          "event" => "INSERT",
+          "meta" => %{"id" => row.id},
+          "payload" => %{
+            "value" => value
+          },
+          "type" => "broadcast"
+        }
+
+        assert message == %{"event" => "broadcast", "payload" => payload, "ref" => nil, "topic" => topic}
+      end
+
+      Process.sleep(500)
+      # Works with batch inserts
+      messages =
+        for _ <- 1..total_messages do
+          Message.changeset(%Message{}, %{
+            "topic" => topic,
+            "private" => false,
+            "event" => "INSERT",
+            "extension" => "broadcast",
+            "payload" => %{"value" => random_string()}
+          })
+        end
+
+      {:ok, _} = Realtime.Repo.insert_all_entries(db_conn, messages, Message)
+
+      messages_received =
+        for _ <- 1..total_messages, into: [] do
+          assert_receive {:socket_push, :text, data}
+          data |> IO.iodata_to_binary() |> Jason.decode!()
+        end
+
+      for row <- messages do
+        assert Enum.count(messages_received, fn message_received ->
+                 value = row |> Map.from_struct() |> get_in([:changes, :payload, "value"])
+
+                 match?(
+                   %{
+                     "event" => "broadcast",
+                     "payload" => %{
+                       "event" => "INSERT",
+                       "meta" => %{"id" => _id},
+                       "payload" => %{
+                         "value" => ^value
+                       }
+                     },
+                     "ref" => nil,
+                     "topic" => ^topic
+                   },
+                   message_received
+                 )
+               end) == 1
+      end
+    end
+
     test "monitored pid stopping brings down ReplicationConnection ", %{tenant: tenant} do
       monitored_pid =
         spawn(fn ->
@@ -435,7 +517,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         "payload" => %{"value" => random_string()}
       })
 
-      assert_receive {:socket_push, :text, data}
+      assert_receive {:socket_push, :text, data}, 500
       message = data |> IO.iodata_to_binary() |> Jason.decode!()
 
       assert %{"event" => "broadcast", "payload" => _, "ref" => nil, "topic" => ^topic} = message

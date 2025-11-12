@@ -162,7 +162,6 @@ defmodule Realtime.Adapters.Postgres.Decoder do
 
   """
   def decode_message(message) when is_binary(message) do
-    # Logger.debug("Message before conversion " <> message)
     decode_message_impl(message)
   end
 
@@ -218,19 +217,13 @@ defmodule Realtime.Adapters.Postgres.Decoder do
   defp decode_message_impl(<<"I", relation_id::integer-32, "N", number_of_columns::integer-16, tuple_data::binary>>) do
     {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns)
 
-    %Insert{
-      relation_id: relation_id,
-      tuple_data: decoded_tuple_data
-    }
+    %Insert{relation_id: relation_id, tuple_data: decoded_tuple_data}
   end
 
   defp decode_message_impl(<<"U", relation_id::integer-32, "N", number_of_columns::integer-16, tuple_data::binary>>) do
     {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns)
 
-    %Update{
-      relation_id: relation_id,
-      tuple_data: decoded_tuple_data
-    }
+    %Update{relation_id: relation_id, tuple_data: decoded_tuple_data}
   end
 
   defp decode_message_impl(
@@ -242,10 +235,7 @@ defmodule Realtime.Adapters.Postgres.Decoder do
 
     {<<>>, decoded_tuple_data} = decode_tuple_data(new_tuple_binary, new_number_of_columns)
 
-    base_update_msg = %Update{
-      relation_id: relation_id,
-      tuple_data: decoded_tuple_data
-    }
+    base_update_msg = %Update{relation_id: relation_id, tuple_data: decoded_tuple_data}
 
     case key_or_old do
       "K" -> Map.put(base_update_msg, :changed_key_tuple_data, old_decoded_tuple_data)
@@ -259,9 +249,7 @@ defmodule Realtime.Adapters.Postgres.Decoder do
        when key_or_old == "K" or key_or_old == "O" do
     {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns)
 
-    base_delete_msg = %Delete{
-      relation_id: relation_id
-    }
+    base_delete_msg = %Delete{relation_id: relation_id}
 
     case key_or_old do
       "K" -> Map.put(base_delete_msg, :changed_key_tuple_data, decoded_tuple_data)
@@ -313,19 +301,40 @@ defmodule Realtime.Adapters.Postgres.Decoder do
   defp decode_tuple_data(<<"u", rest::binary>>, columns_remaining, accumulator),
     do: decode_tuple_data(rest, columns_remaining - 1, [:unchanged_toast | accumulator])
 
+  @start_date "2000-01-01T00:00:00Z"
   defp decode_tuple_data(
-         <<"t", column_length::integer-32, rest::binary>>,
+         <<"b", column_length::integer-32, rest::binary>>,
          columns_remaining,
          accumulator
-       ),
-       do:
-         decode_tuple_data(
-           :erlang.binary_part(rest, {byte_size(rest), -(byte_size(rest) - column_length)}),
-           columns_remaining - 1,
-           [
-             :erlang.binary_part(rest, {0, column_length}) | accumulator
-           ]
-         )
+       ) do
+    data = :erlang.binary_part(rest, {0, column_length})
+    remainder = :erlang.binary_part(rest, {byte_size(rest), -(byte_size(rest) - column_length)})
+
+    data =
+      case data do
+        <<1>> ->
+          true
+
+        <<0>> ->
+          false
+
+        <<uuid_binary::binary-16>> ->
+          UUID.binary_to_string!(uuid_binary)
+
+        <<microseconds::signed-big-64>> ->
+          @start_date
+          |> NaiveDateTime.from_iso8601!()
+          |> NaiveDateTime.add(microseconds, :microsecond)
+
+        <<1, binary::binary-size(column_length - 1)>> ->
+          binary
+
+        data when is_binary(data) ->
+          data
+      end
+
+    decode_tuple_data(remainder, columns_remaining - 1, [data | accumulator])
+  end
 
   defp decode_columns(binary, accumulator \\ [])
   defp decode_columns(<<>>, accumulator), do: Enum.reverse(accumulator)
@@ -345,7 +354,6 @@ defmodule Realtime.Adapters.Postgres.Decoder do
         name: name,
         flags: decoded_flags,
         type: OidDatabase.name_for_type_id(data_type_id),
-        # type: data_type_id,
         type_modifier: type_modifier
       }
       | accumulator
