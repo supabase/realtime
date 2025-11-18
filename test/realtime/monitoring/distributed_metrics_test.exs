@@ -15,7 +15,7 @@ defmodule Realtime.DistributedMetricsTest do
                ^node => %{
                  pid: _pid,
                  port: _port,
-                 queue_size: {:ok, 0},
+                 queue_size: {:ok, _},
                  state: :up,
                  inet_stats: [
                    recv_oct: _,

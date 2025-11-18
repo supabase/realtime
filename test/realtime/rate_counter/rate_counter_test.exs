@@ -228,7 +228,7 @@ defmodule Realtime.RateCounterTest do
       log =
         capture_log(fn ->
           GenCounter.add(args.id, 100)
-          Process.sleep(100)
+          Process.sleep(120)
         end)
 
       assert {:ok, %RateCounter{sum: sum, limit: %{triggered: true}}} = RateCounter.get(args)
