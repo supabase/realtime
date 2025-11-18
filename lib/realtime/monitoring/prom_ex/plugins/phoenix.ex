@@ -122,14 +122,15 @@ if Code.ensure_loaded?(Phoenix) do
             reporter_options: [
               buckets: [10, 100, 500, 1_000, 5_000, 10_000]
             ],
-            tag_values: fn %{result: result, endpoint: endpoint, transport: transport} ->
+            tag_values: fn %{result: result, endpoint: endpoint, transport: transport, serializer: serializer} ->
               %{
                 transport: transport,
                 result: result,
-                endpoint: normalize_module_name(endpoint)
+                endpoint: normalize_module_name(endpoint),
+                serializer: serializer
               }
             end,
-            tags: [:result, :transport, :endpoint],
+            tags: [:result, :transport, :endpoint, :serializer],
             unit: {:native, :millisecond}
           )
         ]
