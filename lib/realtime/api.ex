@@ -10,6 +10,8 @@ defmodule Realtime.Api do
   alias Realtime.Api.Extensions
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
+  alias Realtime.GenRpc
+  alias Realtime.Nodes
   alias Realtime.RateCounter
   alias Realtime.Repo
   alias Realtime.Repo.Replica
@@ -110,10 +112,11 @@ defmodule Realtime.Api do
   """
   def create_tenant(attrs) do
     Logger.debug("create_tenant #{inspect(attrs, pretty: true)}")
+    tenant_id = Map.get(attrs, :external_id) || Map.get(attrs, "external_id")
 
     %Tenant{}
     |> Tenant.changeset(attrs)
-    |> Repo.insert()
+    |> region_aware_write(:insert, tenant_id)
   end
 
   @doc """
@@ -130,7 +133,7 @@ defmodule Realtime.Api do
   """
   def update_tenant(%Tenant{} = tenant, attrs) do
     changeset = Tenant.changeset(tenant, attrs)
-    updated = Repo.update(changeset)
+    updated = region_aware_write(changeset, :update, tenant.external_id)
 
     case updated do
       {:ok, tenant} ->
@@ -163,13 +166,10 @@ defmodule Realtime.Api do
   @spec delete_tenant_by_external_id(String.t()) :: boolean()
   def delete_tenant_by_external_id(id) do
     from(t in Tenant, where: t.external_id == ^id)
-    |> Repo.delete_all()
+    |> region_aware_write(:delete_all, id)
     |> case do
-      {num, _} when num > 0 ->
-        true
-
-      _ ->
-        false
+      {num, _} when num > 0 -> true
+      _ -> false
     end
   end
 
@@ -243,4 +243,32 @@ defmodule Realtime.Api do
   end
 
   defp maybe_restart_db_connection(_changeset), do: nil
+
+  defp local_call? do
+    region = Application.get_env(:realtime, :region)
+    master_region = Application.get_env(:realtime, :master_region) || region
+    region == master_region
+  end
+
+  defp region_aware_write(changeset, operation, tenant_id) when is_struct(changeset, Changeset) do
+    if local_call?(),
+      do: local_call(operation, [changeset], tenant_id),
+      else: remote_call(operation, [changeset], tenant_id)
+  end
+
+  defp region_aware_write(queryable, operation, tenant_id) when is_struct(queryable, Ecto.Query) do
+    if local_call?(),
+      do: local_call(operation, [queryable], tenant_id),
+      else: remote_call(operation, [queryable], tenant_id)
+  end
+
+  defp local_call(operation, args, _tenant_id) do
+    apply(Realtime.Repo, operation, args)
+  end
+
+  defp remote_call(operation, args, tenant_id) do
+    master_region = Application.get_env(:realtime, :master_region)
+    {:ok, master_node} = Nodes.node_from_region(master_region, tenant_id)
+    GenRpc.call(master_node, Realtime.Repo, operation, args, tenant_id: tenant_id)
+  end
 end

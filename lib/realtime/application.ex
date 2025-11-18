@@ -49,12 +49,13 @@ defmodule Realtime.Application do
     :ok = :syn.add_node_to_scopes([RegionNodes, Realtime.Tenants.Connect | Realtime.UsersCounter.scopes()])
 
     region = Application.get_env(:realtime, :region)
-    :syn.join(RegionNodes, region, self(), node: node())
-
     broadcast_pool_size = Application.get_env(:realtime, :broadcast_pool_size, 10)
     migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
     connect_partition_slots = Application.get_env(:realtime, :connect_partition_slots)
     no_channel_timeout_in_ms = Application.get_env(:realtime, :no_channel_timeout_in_ms)
+    master_region = Application.get_env(:realtime, :master_region) || region
+
+    :syn.join(RegionNodes, region, self(), node: node())
 
     children =
       [
@@ -62,7 +63,6 @@ defmodule Realtime.Application do
         Realtime.GenCounter,
         Realtime.PromEx,
         {Realtime.Telemetry.Logger, handler_id: "telemetry-logger"},
-        Realtime.Repo,
         RealtimeWeb.Telemetry,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         {Phoenix.PubSub,
@@ -99,11 +99,14 @@ defmodule Realtime.Application do
         RealtimeWeb.Presence
       ] ++ extensions_supervisors() ++ janitor_tasks()
 
-    children =
-      case Replica.replica() do
-        Realtime.Repo -> children
-        replica -> List.insert_at(children, 2, replica)
-      end
+    database_connections = if master_region == region, do: [Realtime.Repo], else: []
+
+    case Replica.replica() do
+      Realtime.Repo -> database_connections
+      replica -> [replica | database_connections]
+    end
+
+    children = database_connections ++ children
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
