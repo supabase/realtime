@@ -25,6 +25,8 @@ for repo <- [
     pool: Ecto.Adapters.SQL.Sandbox
 end
 
+config :realtime, Realtime.Repo, master_region: "us-east-1"
+
 # Running server during tests to run integration tests
 config :realtime, RealtimeWeb.Endpoint,
   http: [port: 4002],

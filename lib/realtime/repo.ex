@@ -3,9 +3,10 @@ defmodule Realtime.Repo do
 
   use Ecto.Repo,
     otp_app: :realtime,
-    adapter: Ecto.Adapters.Postgres
+    adapter: Realtime.Repo.RegionAdapter
 
   import Ecto.Query
+  alias Ecto.Adapters.SQL
 
   def with_dynamic_repo(config, callback) do
     default_dynamic_repo = get_dynamic_repo()
@@ -226,16 +227,16 @@ defmodule Realtime.Repo do
     %Ecto.Changeset{data: %{id: id, __struct__: struct}, changes: changes} = changeset
     changes = Keyword.new(changes)
     query = from(c in struct, where: c.id == ^id, select: c, update: [set: ^changes])
-    {:ok, to_sql(:update_all, query)}
+    {:ok, SQL.to_sql(:update_all, __MODULE__, query)}
   end
 
   defp run_all_query(conn, query, opts) do
-    {query, args} = to_sql(:all, query)
+    {query, args} = SQL.to_sql(:all, __MODULE__, query)
     run_query_with_trap(conn, query, args, opts)
   end
 
   defp run_delete_query(conn, query) do
-    {query, args} = to_sql(:delete_all, query)
+    {query, args} = SQL.to_sql(:delete_all, __MODULE__, query)
     run_query_with_trap(conn, query, args)
   end
 
