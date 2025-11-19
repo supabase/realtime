@@ -16,6 +16,7 @@ defmodule Realtime.Api do
   alias Realtime.Repo
   alias Realtime.Repo.Replica
   alias Realtime.Tenants
+  alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.SocketDisconnect
 
@@ -200,8 +201,20 @@ defmodule Realtime.Api do
 
       extension
       |> Changeset.cast(%{settings: new_settings}, [:settings])
-      |> Repo.update!()
+      |> region_aware_write(:update!, extension.external_id)
     end
+  end
+
+  @doc """
+  Updates the migrations_ran field for a tenant.
+  """
+  @spec update_migrations_ran(binary(), integer()) :: {:ok, Tenant.t()} | {:error, term()}
+  def update_migrations_ran(external_id, count) do
+    external_id
+    |> Cache.get_tenant_by_external_id()
+    |> Tenant.changeset(%{migrations_ran: count})
+    |> region_aware_write(:update!, external_id)
+    |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
   end
 
   def preload_counters(nil), do: nil
@@ -250,25 +263,17 @@ defmodule Realtime.Api do
     region == master_region
   end
 
-  defp region_aware_write(changeset, operation, tenant_id) when is_struct(changeset, Changeset) do
+  defp region_aware_write(%struct{} = argument, operation, tenant_id) when struct in [Changeset, Ecto.Query] do
     if local_call?(),
-      do: local_call(operation, [changeset], tenant_id),
-      else: remote_call(operation, [changeset], tenant_id)
+      do: local_call(operation, [argument], tenant_id),
+      else: remote_call(operation, [argument], tenant_id)
   end
 
-  defp region_aware_write(queryable, operation, tenant_id) when is_struct(queryable, Ecto.Query) do
-    if local_call?(),
-      do: local_call(operation, [queryable], tenant_id),
-      else: remote_call(operation, [queryable], tenant_id)
-  end
-
-  defp local_call(operation, args, _tenant_id) do
-    apply(Realtime.Repo, operation, args)
-  end
+  defp local_call(operation, args, _tenant_id), do: apply(Realtime.Repo, operation, args)
 
   defp remote_call(operation, args, tenant_id) do
     master_region = Application.get_env(:realtime, :master_region)
-    {:ok, master_node} = Nodes.node_from_region(master_region, tenant_id)
+    {:ok, master_node} = Nodes.node_from_region(master_region, self())
     GenRpc.call(master_node, Realtime.Repo, operation, args, tenant_id: tenant_id)
   end
 end

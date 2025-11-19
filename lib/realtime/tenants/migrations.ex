@@ -10,6 +10,7 @@ defmodule Realtime.Tenants.Migrations do
   alias Realtime.Registry.Unique
   alias Realtime.Repo
   alias Realtime.Api.Tenant
+  alias Realtime.Api
 
   alias Realtime.Tenants.Migrations.{
     CreateRealtimeSubscriptionTable,
@@ -187,7 +188,7 @@ defmodule Realtime.Tenants.Migrations do
 
     case migrate(settings) do
       :ok ->
-        Task.Supervisor.async_nolink(__MODULE__.TaskSupervisor, Tenants, :update_migrations_ran, [
+        Task.Supervisor.async_nolink(__MODULE__.TaskSupervisor, Api, :update_migrations_ran, [
           tenant_external_id,
           Enum.count(@migrations)
         ])

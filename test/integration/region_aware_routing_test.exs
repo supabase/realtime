@@ -163,4 +163,48 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
 
     refute Realtime.Repo.get(Tenant, tenant.id)
   end
+
+  test "update_migrations_ran automatically routes to master region", %{master_node: master_node} do
+    # Create tenant on master node first
+    tenant_attrs = %{
+      "external_id" => "test_migrations_#{System.unique_integer([:positive])}",
+      "name" => "migrations_test",
+      "jwt_secret" => "secret",
+      "public_key" => "public",
+      "extensions" => [],
+      "postgres_cdc_default" => "postgres_cdc_rls",
+      "max_concurrent_users" => 200,
+      "max_events_per_second" => 100,
+      "migrations_ran" => 0
+    }
+
+    Realtime.GenRpc
+    |> Mimic.expect(:call, fn node, mod, func, args, opts ->
+      assert node == master_node
+      assert mod == Realtime.Repo
+      assert func == :insert
+      assert opts[:tenant_id] == tenant_attrs["external_id"]
+
+      apply(mod, func, args)
+    end)
+    |> Mimic.expect(:call, fn node, mod, func, args, opts ->
+      assert node == master_node
+      assert mod == Realtime.Repo
+      assert func == :update!
+      assert opts[:tenant_id] == tenant_attrs["external_id"]
+
+      apply(mod, func, args)
+    end)
+
+    tenant = tenant_fixture(tenant_attrs)
+
+    new_migrations_ran = 5
+    result = Api.update_migrations_ran(tenant.external_id, new_migrations_ran)
+
+    assert %Tenant{} = updated = result
+    assert updated.migrations_ran == new_migrations_ran
+
+    reloaded = Realtime.Repo.get(Tenant, tenant.id)
+    assert reloaded.migrations_ran == new_migrations_ran
+  end
 end
