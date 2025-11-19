@@ -334,8 +334,9 @@ defmodule RealtimeWeb.TenantControllerTest do
     setup [:with_tenant]
 
     setup do
+      previous_region = Application.get_env(:realtime, :region)
       Application.put_env(:realtime, :region, "us-east-1")
-      on_exit(fn -> Application.put_env(:realtime, :region, nil) end)
+      on_exit(fn -> Application.put_env(:realtime, :region, previous_region) end)
     end
 
     test "health check when tenant does not exist", %{conn: conn} do
