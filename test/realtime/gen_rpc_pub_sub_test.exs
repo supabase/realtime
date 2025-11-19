@@ -48,9 +48,13 @@ defmodule Realtime.GenRpcPubSubTest do
   for regional_broadcasting <- [true, false] do
     describe "regional balancing = #{regional_broadcasting}" do
       setup do
-        value = Application.get_env(:realtime, :regional_broadcasting)
+        previous_region = Application.get_env(:realtime, :region)
+        Application.put_env(:realtime, :region, "us-east-1")
+        on_exit(fn -> Application.put_env(:realtime, :region, previous_region) end)
+
+        previous_regional_broadcast = Application.get_env(:realtime, :regional_broadcasting)
         Application.put_env(:realtime, :regional_broadcasting, unquote(regional_broadcasting))
-        on_exit(fn -> Application.put_env(:realtime, :regional_broadcasting, value) end)
+        on_exit(fn -> Application.put_env(:realtime, :regional_broadcasting, previous_regional_broadcast) end)
 
         :ok
       end

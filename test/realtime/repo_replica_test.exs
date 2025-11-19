@@ -1,5 +1,6 @@
 defmodule Realtime.Repo.ReplicaTest do
-  use ExUnit.Case
+  # application env being changed
+  use ExUnit.Case, async: false
   alias Realtime.Repo.Replica
 
   setup do
