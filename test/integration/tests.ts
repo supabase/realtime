@@ -79,6 +79,41 @@ describe("broadcast extension", { sanitizeOps: false, sanitizeResources: false }
     clientV2 = null;
   }, 5000));
 
+  it("v2 can send/receive binary payload", withDeadline(async () => {
+    clientV2 = new RealtimeClient(url, realtimeV2)
+    let result = null;
+    let event = crypto.randomUUID();
+    let topic = "topic:" + crypto.randomUUID();
+    const expectedPayload = new ArrayBuffer(2);
+    const uint8 = new Uint8Array(expectedPayload); // View the buffer as unsigned 8-bit integers
+    uint8[0] = 125;
+    uint8[1] = 255;
+
+    const config = { config: { broadcast: { ack: true, self: true } } };
+
+    const channelV2 = clientV2
+      .channel(topic, config)
+      .on("broadcast", { event }, ({ payload }) => (result = payload))
+      .subscribe();
+
+    while (channelV2.state != "joined") await sleep(0.2);
+
+    await channelV2.send({
+      type: "broadcast",
+      event,
+      payload: expectedPayload,
+    });
+
+    while (result == null) await sleep(0.2);
+
+    assertEquals(result, expectedPayload);
+
+    await channelV2.unsubscribe();
+
+    await stopClient(clientV2);
+    clientV2 = null;
+  }, 5000));
+
   it("users with different versions can receive broadcasts from endpoint", withDeadline(async () => {
     clientV1 = new RealtimeClient(url, realtimeV1)
     clientV2 = new RealtimeClient(url, realtimeV2)
