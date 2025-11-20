@@ -4,45 +4,27 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
 
   alias Realtime.Api
   alias Realtime.Api.Tenant
+  alias Realtime.GenRpc
 
   setup do
-    Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, {:shared, self()})
-
     # Configure test runner as non-master region (eu-west-1) with master_region = us-east-1
-    original_region = Application.get_env(:realtime, :region)
     original_master_region = Application.get_env(:realtime, :master_region)
 
-    Application.put_env(:realtime, :region, "eu-west-1")
-    Application.put_env(:realtime, :master_region, "us-east-1")
-
-    local_pid =
-      :syn.members(RegionNodes, "us-east-1")
-      |> Enum.find_value(fn {pid, _} -> if node(pid) == node(), do: pid end)
-
-    if local_pid do
-      :syn.leave(RegionNodes, "us-east-1", local_pid)
-      :syn.join(RegionNodes, "eu-west-1", local_pid, node: node())
-    end
+    Application.put_env(:realtime, :master_region, "eu-west-2")
 
     # Start peer node as master region (us-east-1)
     # The master node will automatically register itself in RegionNodes on startup
     {:ok, master_node} =
       Clustered.start(nil,
         extra_config: [
-          {:realtime, :region, "us-east-1"},
-          {:realtime, :master_region, "us-east-1"}
+          {:realtime, :region, "eu-west-2"},
+          {:realtime, :master_region, "eu-west-2"}
         ]
       )
 
     Process.sleep(100)
 
     on_exit(fn ->
-      if local_pid do
-        :syn.leave(RegionNodes, "eu-west-1", local_pid)
-        :syn.join(RegionNodes, "us-east-1", local_pid, node: node())
-      end
-
-      Application.put_env(:realtime, :region, original_region)
       Application.put_env(:realtime, :master_region, original_master_region)
       Clustered.stop()
     end)
@@ -70,7 +52,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
       assert func == :insert
       assert opts[:tenant_id] == external_id
 
-      apply(mod, func, args)
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
     end)
 
     result = Api.create_tenant(attrs)
@@ -101,7 +83,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
       assert func == :insert
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
-      apply(mod, func, args)
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
     end)
     |> Mimic.expect(:call, fn node, mod, func, args, opts ->
       assert node == master_node
@@ -109,7 +91,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
       assert func == :update
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
-      apply(mod, func, args)
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
     end)
 
     tenant = tenant_fixture(tenant_attrs)
@@ -144,7 +126,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
       assert func == :insert
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
-      apply(mod, func, args)
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
     end)
     |> Mimic.expect(:call, fn node, mod, func, args, opts ->
       assert node == master_node
@@ -152,7 +134,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
       assert func == :delete_all
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
-      apply(mod, func, args)
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
     end)
 
     tenant = tenant_fixture(tenant_attrs)
@@ -185,7 +167,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
       assert func == :insert
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
-      apply(mod, func, args)
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
     end)
     |> Mimic.expect(:call, fn node, mod, func, args, opts ->
       assert node == master_node
@@ -193,7 +175,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
       assert func == :update!
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
-      apply(mod, func, args)
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
     end)
 
     tenant = tenant_fixture(tenant_attrs)
