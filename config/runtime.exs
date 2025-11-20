@@ -32,6 +32,7 @@ db_ssl_ca_cert = System.get_env("DB_SSL_CA_CERT")
 queue_target = Env.get_integer("DB_QUEUE_TARGET", 5000)
 queue_interval = Env.get_integer("DB_QUEUE_INTERVAL", 5000)
 pool_size = Env.get_integer("DB_POOL_SIZE", 5)
+master_region = System.get_env("DB_MASTER_REGION")
 
 after_connect_query_args =
   case System.get_env("DB_AFTER_CONNECT_QUERY") do
@@ -128,7 +129,8 @@ config :realtime,
   broadcast_pool_size: broadcast_pool_size,
   users_scope_shards: users_scope_shards,
   postgres_cdc_scope_shards: postgres_cdc_scope_shards,
-  regional_broadcasting: regional_broadcasting
+  regional_broadcasting: regional_broadcasting,
+  master_region: master_region
 
 if config_env() != :test && run_janitor? do
   config :realtime,

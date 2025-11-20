@@ -9,7 +9,6 @@ defmodule Realtime.Tenants do
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.RateCounter
-  alias Realtime.Repo
   alias Realtime.Repo.Replica
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
@@ -481,18 +480,6 @@ defmodule Realtime.Tenants do
   @spec run_migrations?(Tenant.t()) :: boolean()
   def run_migrations?(%Tenant{} = tenant) do
     tenant.migrations_ran < Enum.count(Migrations.migrations())
-  end
-
-  @doc """
-  Updates the migrations_ran field for a tenant.
-  """
-  @spec update_migrations_ran(binary(), integer()) :: {:ok, Tenant.t()} | {:error, term()}
-  def update_migrations_ran(external_id, count) do
-    external_id
-    |> Cache.get_tenant_by_external_id()
-    |> Tenant.changeset(%{migrations_ran: count})
-    |> Repo.update!()
-    |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
   end
 
   @doc """

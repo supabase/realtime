@@ -10,10 +10,13 @@ defmodule Realtime.Api do
   alias Realtime.Api.Extensions
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
+  alias Realtime.GenRpc
+  alias Realtime.Nodes
   alias Realtime.RateCounter
   alias Realtime.Repo
   alias Realtime.Repo.Replica
   alias Realtime.Tenants
+  alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.SocketDisconnect
 
@@ -110,10 +113,11 @@ defmodule Realtime.Api do
   """
   def create_tenant(attrs) do
     Logger.debug("create_tenant #{inspect(attrs, pretty: true)}")
+    tenant_id = Map.get(attrs, :external_id) || Map.get(attrs, "external_id")
 
     %Tenant{}
     |> Tenant.changeset(attrs)
-    |> Repo.insert()
+    |> region_aware_write(:insert, tenant_id)
   end
 
   @doc """
@@ -130,7 +134,7 @@ defmodule Realtime.Api do
   """
   def update_tenant(%Tenant{} = tenant, attrs) do
     changeset = Tenant.changeset(tenant, attrs)
-    updated = Repo.update(changeset)
+    updated = region_aware_write(changeset, :update, tenant.external_id)
 
     case updated do
       {:ok, tenant} ->
@@ -163,13 +167,10 @@ defmodule Realtime.Api do
   @spec delete_tenant_by_external_id(String.t()) :: boolean()
   def delete_tenant_by_external_id(id) do
     from(t in Tenant, where: t.external_id == ^id)
-    |> Repo.delete_all()
+    |> region_aware_write(:delete_all, id)
     |> case do
-      {num, _} when num > 0 ->
-        true
-
-      _ ->
-        false
+      {num, _} when num > 0 -> true
+      _ -> false
     end
   end
 
@@ -200,8 +201,20 @@ defmodule Realtime.Api do
 
       extension
       |> Changeset.cast(%{settings: new_settings}, [:settings])
-      |> Repo.update!()
+      |> region_aware_write(:update!, extension.external_id)
     end
+  end
+
+  @doc """
+  Updates the migrations_ran field for a tenant.
+  """
+  @spec update_migrations_ran(binary(), integer()) :: {:ok, Tenant.t()} | {:error, term()}
+  def update_migrations_ran(external_id, count) do
+    external_id
+    |> Cache.get_tenant_by_external_id()
+    |> Tenant.changeset(%{migrations_ran: count})
+    |> region_aware_write(:update!, external_id)
+    |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
   end
 
   def preload_counters(nil), do: nil
@@ -243,4 +256,35 @@ defmodule Realtime.Api do
   end
 
   defp maybe_restart_db_connection(_changeset), do: nil
+
+  defp local_call? do
+    region = Application.get_env(:realtime, :region)
+    master_region = Application.get_env(:realtime, :master_region) || region
+    region == master_region
+  end
+
+  defp region_aware_write(%struct{} = argument, operation, tenant_id) when struct in [Changeset, Ecto.Query] do
+    if local_call?(),
+      do: local_call(operation, [argument], tenant_id),
+      else: remote_call(operation, [argument], tenant_id)
+  end
+
+  defp local_call(operation, args, _tenant_id), do: apply(Realtime.Repo, operation, args)
+
+  defp remote_call(operation, args, tenant_id) do
+    master_region = Application.get_env(:realtime, :master_region)
+
+    with {:ok, master_node} <- Nodes.node_from_region(master_region, self()),
+         {:ok, result} <- wrapped_call(master_node, operation, args, tenant_id) do
+      result
+    end
+  end
+
+  defp wrapped_call(master_node, operation, args, tenant_id) do
+    case GenRpc.call(master_node, Realtime.Repo, operation, args, tenant_id: tenant_id) do
+      {:error, :rpc_error, reason} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+      result -> {:ok, result}
+    end
+  end
 end
