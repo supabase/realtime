@@ -273,7 +273,18 @@ defmodule Realtime.Api do
 
   defp remote_call(operation, args, tenant_id) do
     master_region = Application.get_env(:realtime, :master_region)
-    {:ok, master_node} = Nodes.node_from_region(master_region, self())
-    GenRpc.call(master_node, Realtime.Repo, operation, args, tenant_id: tenant_id)
+
+    with {:ok, master_node} <- Nodes.node_from_region(master_region, self()),
+         {:ok, result} <- wrapped_call(master_node, operation, args, tenant_id) do
+      result
+    end
+  end
+
+  defp wrapped_call(master_node, operation, args, tenant_id) do
+    case GenRpc.call(master_node, Realtime.Repo, operation, args, tenant_id: tenant_id) do
+      {:error, :rpc_error, reason} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+      result -> {:ok, result}
+    end
   end
 end

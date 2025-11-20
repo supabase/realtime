@@ -5,6 +5,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.GenRpc
+  alias Realtime.Nodes
 
   setup do
     # Configure test runner as non-master region (eu-west-1) with master_region = us-east-1
@@ -188,5 +189,44 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
 
     reloaded = Realtime.Repo.get(Tenant, tenant.id)
     assert reloaded.migrations_ran == new_migrations_ran
+  end
+
+  test "returns error when Nodes.node_from_region returns {:error, :not_available}" do
+    external_id = "test_error_node_unavailable_#{System.unique_integer([:positive])}"
+
+    attrs = %{
+      "external_id" => external_id,
+      "name" => external_id,
+      "jwt_secret" => "secret",
+      "public_key" => "public",
+      "extensions" => [],
+      "postgres_cdc_default" => "postgres_cdc_rls",
+      "max_concurrent_users" => 200,
+      "max_events_per_second" => 100
+    }
+
+    Mimic.expect(Nodes, :node_from_region, fn _region, _key -> {:error, :not_available} end)
+    result = Api.create_tenant(attrs)
+    assert {:error, :not_available} = result
+  end
+
+  test "returns error when GenRpc.call returns {:error, :rpc_error, reason}" do
+    external_id = "test_error_rpc_error_#{System.unique_integer([:positive])}"
+    rpc_error_reason = :timeout
+
+    attrs = %{
+      "external_id" => external_id,
+      "name" => external_id,
+      "jwt_secret" => "secret",
+      "public_key" => "public",
+      "extensions" => [],
+      "postgres_cdc_default" => "postgres_cdc_rls",
+      "max_concurrent_users" => 200,
+      "max_events_per_second" => 100
+    }
+
+    Mimic.expect(GenRpc, :call, fn _node, _mod, _func, _args, _opts -> {:error, :rpc_error, rpc_error_reason} end)
+    result = Api.create_tenant(attrs)
+    assert {:error, ^rpc_error_reason} = result
   end
 end
