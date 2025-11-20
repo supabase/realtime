@@ -4,7 +4,22 @@ defmodule RealtimeWeb.UserSocket do
   @impl true
   def init(state) when is_tuple(state) do
     Process.flag(:max_heap_size, max_heap_size())
-    Phoenix.Socket.__init__(state)
+    ref = Process.send_after(self(), :measure_traffic, measure_traffic_interval_in_ms())
+
+    {channel, socket} = state
+    socket = Phoenix.Socket.assign(socket, :measure_traffic_ref, ref)
+    Phoenix.Socket.__init__({channel, socket})
+  end
+
+  @impl true
+  def handle_info(:measure_traffic, {channels, %{assigns: assigns} = socket}) do
+    ref = Map.get(assigns, :measure_traffic_ref)
+    tenant_external_id = Map.get(assigns, :tenant)
+    Process.cancel_timer(ref)
+    collect_traffic_telemetry(socket.transport_pid, tenant_external_id)
+    ref = Process.send_after(self(), :measure_traffic, measure_traffic_interval_in_ms())
+    socket = Phoenix.Socket.assign(socket, :measure_traffic_ref, ref)
+    {:ok, {channels, socket}}
   end
 
   use Phoenix.Socket
@@ -144,4 +159,21 @@ defmodule RealtimeWeb.UserSocket do
   end
 
   defp max_heap_size(), do: Application.fetch_env!(:realtime, :websocket_max_heap_size)
+  defp measure_traffic_interval_in_ms(), do: Application.fetch_env!(:realtime, :measure_traffic_interval_in_ms)
+
+  defp collect_traffic_telemetry(nil, _tenant_external_id), do: :ok
+
+  defp collect_traffic_telemetry(transport_pid, tenant_external_id) do
+    transport_pid
+    |> Process.info(:links)
+    |> then(fn {:links, links} -> links end)
+    |> Enum.each(fn link ->
+      if is_port(link) do
+        {:ok, [send_oct: send_oct]} = :inet.getstat(link, [:send_oct])
+        {:ok, [recv_oct: recv_oct]} = :inet.getstat(link, [:recv_oct])
+        :telemetry.execute([:realtime, :channel, :output_bytes], %{size: send_oct}, %{tenant: tenant_external_id})
+        :telemetry.execute([:realtime, :channel, :input_bytes], %{size: recv_oct}, %{tenant: tenant_external_id})
+      end
+    end)
+  end
 end

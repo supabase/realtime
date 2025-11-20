@@ -23,6 +23,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
     Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+
+    measure_traffic_interval_in_ms = Application.get_env(:realtime, :measure_traffic_interval_in_ms)
+    Application.put_env(:realtime, :measure_traffic_interval_in_ms, 100)
+    on_exit(fn -> Application.put_env(:realtime, :measure_traffic_interval_in_ms, measure_traffic_interval_in_ms) end)
+
     {:ok, tenant: tenant}
   end
 
@@ -88,6 +93,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                "commit_timestamp" => _
              } = Jason.encode!(data) |> Jason.decode!()
 
+      assert_receive :measure_traffic, 100
       refute_receive _any
     end
 
@@ -138,6 +144,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                "commit_timestamp" => _
              } = Jason.encode!(data) |> Jason.decode!()
 
+      assert_receive :measure_traffic, 100
       refute_receive _any
     end
 
@@ -391,6 +398,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                %{reason: "UnableToReplayMessages: Replay is not allowed for public channels"}
              } = subscribe_and_join(socket, "realtime:test", %{"config" => config})
 
+      assert_receive :measure_traffic, 100
       refute_receive _any
     end
 

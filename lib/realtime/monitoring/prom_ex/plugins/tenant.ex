@@ -219,6 +219,20 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Sum of Realtime Channel joins.",
           tags: [:tenant]
         ),
+        sum(
+          [:realtime, :channel, :input_bytes],
+          event_name: [:realtime, :channel, :input_bytes],
+          description: "Sum of input bytes sent on sockets.",
+          measurement: :size,
+          tags: [:tenant]
+        ),
+        sum(
+          [:realtime, :channel, :output_bytes],
+          event_name: [:realtime, :channel, :output_bytes],
+          description: "Sum of output bytes sent on sockets.",
+          measurement: :size,
+          tags: [:tenant]
+        ),
         last_value(
           [:realtime, :channel, :events, :limit_per_second],
           event_name: [:realtime, :rate_counter, :channel, :events],

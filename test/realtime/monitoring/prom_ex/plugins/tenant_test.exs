@@ -69,6 +69,14 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                     %{tenant: external_id}
                   )
                 end
+
+                def fake_input_bytes(external_id) do
+                  Realtime.Telemetry.execute([:realtime, :channel, :input_bytes], %{size: 10}, %{tenant: external_id})
+                end
+
+                def fake_output_bytes(external_id) do
+                  Realtime.Telemetry.execute([:realtime, :channel, :output_bytes], %{size: 10}, %{tenant: external_id})
+                end
               end
             end)
 
@@ -287,6 +295,32 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(metric, message_type: "broadcast") == metric_value + 1
 
       assert metric_value("realtime_payload_size_bucket", le: "250.0") > 0
+    end
+
+    test "channel input bytes", context do
+      external_id = context.tenant.external_id
+
+      pattern = ~r/realtime_channel_input_bytes{tenant="#{external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+      FakeUserCounter.fake_input_bytes(external_id)
+      FakeUserCounter.fake_input_bytes(external_id)
+
+      Process.sleep(200)
+      assert metric_value(pattern) == metric_value + 20
+    end
+
+    test "channel output bytes", context do
+      external_id = context.tenant.external_id
+
+      pattern = ~r/realtime_channel_output_bytes{tenant="#{external_id}"}\s(?<number>\d+)/
+
+      metric_value = metric_value(pattern)
+      FakeUserCounter.fake_output_bytes(external_id)
+      FakeUserCounter.fake_output_bytes(external_id)
+
+      Process.sleep(200)
+      assert metric_value(pattern) == metric_value + 20
     end
   end
 
