@@ -198,14 +198,14 @@ defmodule Realtime.Extensions.CdcRlsTest do
   describe "integration" do
     setup [:integration]
 
-    test "subscribe inserts", %{tenant: tenant, conn: conn} do
+    test "subscribe inserts only", %{tenant: tenant, conn: conn} do
       on_exit(fn -> PostgresCdcRls.handle_stop(tenant.external_id, 10_000) end)
 
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
       args = %{"id" => external_id, "region" => postgres_extension["region"]}
 
-      pg_change_params = pubsub_subscribe(external_id)
+      pg_change_params = pubsub_subscribe(external_id, "INSERT")
 
       # First time it will return nil
       PostgresCdcRls.handle_connect(args)
@@ -225,14 +225,19 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       # Now subscribe to the Postgres Changes
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
-      assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+
+      assert %Postgrex.Result{num_rows: 1} = Postgrex.query!(conn, "select id from realtime.subscription", [])
 
       Process.sleep(500)
 
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+      # Delete the record
+      %{num_rows: 1} = Postgrex.query!(conn, "delete from test", [])
 
       assert_receive {:socket_push, :text, data}, 5000
+      # No DELETE should be received
+      refute_receive {:socket_push, :text, _data}, 1000
 
       assert %{
                "event" => "postgres_changes",
@@ -341,7 +346,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       %{node: node, response: response}
     end
 
-    test "subscribe inserts distributed mode", %{tenant: tenant, conn: conn, node: node, response: response} do
+    test "subscribe distributed mode", %{tenant: tenant, conn: conn, node: node, response: response} do
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
 
@@ -351,8 +356,13 @@ defmodule Realtime.Extensions.CdcRlsTest do
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
       assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
 
+      # Wait for subscription to be executing
+      Process.sleep(200)
+
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+      # Delete the record
+      %{num_rows: 1} = Postgrex.query!(conn, "delete from test", [])
 
       assert_receive {:socket_push, :text, data}, 5000
 
@@ -367,6 +377,26 @@ defmodule Realtime.Extensions.CdcRlsTest do
                    "schema" => "public",
                    "table" => "test",
                    "type" => "INSERT"
+                 },
+                 "ids" => _
+               },
+               "ref" => nil,
+               "topic" => "realtime:test"
+             } = Jason.decode!(data)
+
+      assert_receive {:socket_push, :text, data}, 5000
+
+      assert %{
+               "event" => "postgres_changes",
+               "payload" => %{
+                 "data" => %{
+                   "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+                   "commit_timestamp" => _,
+                   "errors" => nil,
+                   "type" => "DELETE",
+                   "old_record" => %{"id" => ^id},
+                   "schema" => "public",
+                   "table" => "test"
                  },
                  "ids" => _
                },
@@ -458,11 +488,11 @@ defmodule Realtime.Extensions.CdcRlsTest do
     %{tenant: tenant, conn: conn}
   end
 
-  defp pubsub_subscribe(external_id) do
+  defp pubsub_subscribe(external_id, event \\ "*") do
     pg_change_params = [
       %{
         id: UUID.uuid1(),
-        params: %{"event" => "*", "schema" => "public"},
+        params: %{"event" => event, "schema" => "public"},
         channel_pid: self(),
         claims: %{
           "exp" => System.system_time(:second) + 100_000,

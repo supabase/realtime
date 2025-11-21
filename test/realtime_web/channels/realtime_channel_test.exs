@@ -100,9 +100,9 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert %{
                postgres_changes: [
-                 %{:id => sub_id, "event" => "INSERT", "schema" => "public", "table" => "test"},
+                 %{:id => insert_sub_id, "event" => "INSERT", "schema" => "public", "table" => "test"},
                  %{
-                   :id => 4_845_530,
+                   :id => delete_sub_id,
                    "event" => "DELETE",
                    "schema" => "public",
                    "table" => "test"
@@ -116,9 +116,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                   5000
 
       {:ok, conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      # Insert, update and delete but update should not be received
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+      Postgrex.query!(conn, "update test set details = 'test' where id = $1", [id])
+      Postgrex.query!(conn, "delete from test where id = $1", [id])
 
-      assert_push "postgres_changes", %{data: data, ids: [4_845_530, ^sub_id]}, 500
+      assert_push "postgres_changes", %{data: data, ids: [^insert_sub_id]}, 500
 
       # we encode and decode because the data is a Jason.Fragment
       assert %{
@@ -131,8 +134,20 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                "commit_timestamp" => _
              } = Jason.encode!(data) |> Jason.decode!()
 
-      refute_receive %Socket.Message{}
-      refute_receive %Socket.Reply{}
+      assert_push "postgres_changes", %{data: data, ids: [^delete_sub_id]}, 500
+
+      # we encode and decode because the data is a Jason.Fragment
+      assert %{
+               "table" => "test",
+               "type" => "DELETE",
+               "old_record" => %{"id" => ^id},
+               "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+               "errors" => nil,
+               "schema" => "public",
+               "commit_timestamp" => _
+             } = Jason.encode!(data) |> Jason.decode!()
+
+      refute_receive _any
     end
 
     test "malformed subscription params", %{tenant: tenant} do
@@ -179,7 +194,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert_push "system",
                   %{
                     message:
-                      "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [schema: public, table: doesnotexist, filters: []]",
+                      "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [event: *, schema: public, table: doesnotexist, filters: []]",
                     status: "error",
                     extension: "postgres_changes",
                     channel: "test"
@@ -210,7 +225,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert_push "system",
                   %{
                     message:
-                      "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [schema: public, table: test, filters: [{\"notacolumn\", \"eq\", \"123\"}]]. Exception: ERROR P0001 (raise_exception) invalid column for filter notacolumn",
+                      "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"notacolumn\", \"eq\", \"123\"}]]. Exception: ERROR P0001 (raise_exception) invalid column for filter notacolumn",
                     status: "error",
                     extension: "postgres_changes",
                     channel: "test"

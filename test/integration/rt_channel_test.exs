@@ -34,9 +34,10 @@ defmodule Realtime.Integration.RtChannelTest do
       {:ok, conn} = Database.connect(tenant, "realtime_test")
 
       # Let's drop the publication to cause an error
-      Database.transaction(conn, fn db_conn ->
-        Postgrex.query!(db_conn, "drop publication if exists supabase_realtime_test")
-      end)
+      {:ok, _} =
+        Database.transaction(conn, fn db_conn ->
+          Postgrex.query!(db_conn, "drop publication if exists supabase_realtime_test")
+        end)
 
       {socket, _} = get_connection(tenant, serializer)
       topic = "realtime:any"
@@ -52,7 +53,7 @@ defmodule Realtime.Integration.RtChannelTest do
                              "channel" => "any",
                              "extension" => "postgres_changes",
                              "message" =>
-                               "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [schema: public, table: *, filters: []]",
+                               "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [event: INSERT, schema: public, table: *, filters: []]",
                              "status" => "error"
                            },
                            ref: nil,
@@ -2356,7 +2357,7 @@ defmodule Realtime.Integration.RtChannelTest do
       # Does it recover?
       assert Connect.ready?(tenant.external_id)
       {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.sleep(1000)
+      Process.sleep(5000)
       %{rows: [[new_db_pid]]} = Postgrex.query!(db_conn, active_slot_query, [])
 
       assert new_db_pid != original_db_pid

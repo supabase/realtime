@@ -30,7 +30,19 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       assert {:ok, [%Postgrex.Result{}]} =
                Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
 
-      %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      %Postgrex.Result{rows: [[[], "*"]]} =
+        Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
+    end
+
+    test "create all tables & all events on INSERT", %{conn: conn} do
+      {:ok, subscription_params} = Subscriptions.parse_subscription_params(%{"event" => "INSERT", "schema" => "public"})
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      %Postgrex.Result{rows: [[[], "INSERT"]]} =
+        Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
     end
 
     test "create specific table all events", %{conn: conn} do
@@ -53,7 +65,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
 
       assert {:error,
               {:subscription_insert_failed,
-               "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [schema: public, table: test, filters: []]"}} =
+               "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [event: *, schema: public, table: test, filters: []]"}} =
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -67,7 +79,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
 
       assert {:error,
               {:subscription_insert_failed,
-               "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [schema: public, table: doesnotexist, filters: []]"}} =
+               "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [event: *, schema: public, table: doesnotexist, filters: []]"}} =
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -85,7 +97,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
 
       assert {:error,
               {:subscription_insert_failed,
-               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [schema: public, table: test, filters: [{\"subject\", \"eq\", \"hey\"}]]. Exception: ERROR P0001 (raise_exception) invalid column for filter subject"}} =
+               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"subject\", \"eq\", \"hey\"}]]. Exception: ERROR P0001 (raise_exception) invalid column for filter subject"}} =
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -103,7 +115,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
 
       assert {:error,
               {:subscription_insert_failed,
-               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [schema: public, table: test, filters: [{\"id\", \"eq\", \"hey\"}]]. Exception: ERROR 22P02 (invalid_text_representation) invalid input syntax for type integer: \"hey\""}} =
+               "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"id\", \"eq\", \"hey\"}]]. Exception: ERROR 22P02 (invalid_text_representation) invalid input syntax for type integer: \"hey\""}} =
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
 
       %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
@@ -237,7 +249,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
               "role" => "anon"
             },
             id: UUID.uuid1(),
-            subscription_params: {"public", "*", []}
+            subscription_params: {"*", "public", "*", []}
           }
           | acc
         ]
