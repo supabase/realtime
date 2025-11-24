@@ -101,10 +101,11 @@ defmodule Realtime.Application do
 
     database_connections = if master_region == region, do: [Realtime.Repo], else: []
 
-    case Replica.replica() do
-      Realtime.Repo -> database_connections
-      replica -> [replica | database_connections]
-    end
+    database_connections =
+      case Replica.replica() do
+        Realtime.Repo -> database_connections
+        replica -> [replica | database_connections]
+      end
 
     children = database_connections ++ children
 
