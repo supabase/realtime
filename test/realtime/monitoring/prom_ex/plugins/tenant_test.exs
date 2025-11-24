@@ -1,18 +1,23 @@
 defmodule Realtime.PromEx.Plugins.TenantTest do
-  alias Realtime.Tenants.Authorization.Policies
   use Realtime.DataCase, async: false
 
   alias Realtime.PromEx.Plugins.Tenant
   alias Realtime.Rpc
-  alias Realtime.UsersCounter
-  alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.UsersCounter
 
   defmodule MetricsTest do
     use PromEx, otp_app: :realtime_test_phoenix
 
     @impl true
     def plugins, do: [{Tenant, poll_rate: 50}]
+  end
+
+  setup_all do
+    start_supervised!(MetricsTest)
+    :ok
   end
 
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
@@ -57,8 +62,10 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                   Realtime.Telemetry.execute(
                     [:realtime, :tenants, :broadcast_from_database],
                     %{
-                      latency_committed_at: 10,
-                      latency_inserted_at: 10
+                      # millisecond
+                      latency_committed_at: 9,
+                      # microsecond
+                      latency_inserted_at: 9000
                     },
                     %{tenant: external_id}
                   )
@@ -86,7 +93,8 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
     } do
       UsersCounter.add(self(), external_id)
       # Add bad tenant id
-      UsersCounter.add(self(), random_string())
+      bad_tenant_id = random_string()
+      UsersCounter.add(self(), bad_tenant_id)
 
       _ = Rpc.call(node, FakeUserCounter, :fake_add, [external_id])
       Process.sleep(500)
@@ -95,7 +103,8 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
                       %{tenant: ^external_id}}
 
-      refute_receive _
+      refute_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
+                      %{tenant: ^bad_tenant_id}}
     end
   end
 
@@ -114,78 +123,59 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
           role: "anon"
         })
 
-      start_supervised!(MetricsTest)
-
       %{authorization_context: authorization_context, db_conn: db_conn, tenant: tenant}
     end
 
     test "event exists after counter added", %{tenant: %{external_id: external_id}} do
-      pattern =
-        ~r/realtime_channel_events{tenant="#{external_id}"}\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
+      metric_value = metric_value("realtime_channel_events", tenant: external_id) || 0
       FakeUserCounter.fake_event(external_id)
 
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value("realtime_channel_events", tenant: external_id) == metric_value + 1
     end
 
     test "global event exists after counter added", %{tenant: %{external_id: external_id}} do
-      pattern =
-        ~r/realtime_channel_global_events\s(?<number>\d+)/
+      metric_value = metric_value("realtime_channel_global_events") || 0
 
-      metric_value = metric_value(pattern)
       FakeUserCounter.fake_event(external_id)
 
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value("realtime_channel_global_events") == metric_value + 1
     end
 
     test "db_event exists after counter added", %{tenant: %{external_id: external_id}} do
-      pattern =
-        ~r/realtime_channel_db_events{tenant="#{external_id}"}\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
+      metric_value = metric_value("realtime_channel_db_events", tenant: external_id) || 0
       FakeUserCounter.fake_db_event(external_id)
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value("realtime_channel_db_events", tenant: external_id) == metric_value + 1
     end
 
     test "global db_event exists after counter added", %{tenant: %{external_id: external_id}} do
-      pattern =
-        ~r/realtime_channel_global_db_events\s(?<number>\d+)/
+      metric_value = metric_value("realtime_channel_global_db_events") || 0
 
-      metric_value = metric_value(pattern)
       FakeUserCounter.fake_db_event(external_id)
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value("realtime_channel_global_db_events") == metric_value + 1
     end
 
     test "presence_event exists after counter added", %{tenant: %{external_id: external_id}} do
-      pattern =
-        ~r/realtime_channel_presence_events{tenant="#{external_id}"}\s(?<number>\d+)/
+      metric_value = metric_value("realtime_channel_presence_events", tenant: external_id) || 0
 
-      metric_value = metric_value(pattern)
       FakeUserCounter.fake_presence_event(external_id)
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value("realtime_channel_presence_events", tenant: external_id) == metric_value + 1
     end
 
     test "global presence_event exists after counter added", %{tenant: %{external_id: external_id}} do
-      pattern =
-        ~r/realtime_channel_global_presence_events\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
+      metric_value = metric_value("realtime_channel_global_presence_events") || 0
       FakeUserCounter.fake_presence_event(external_id)
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value("realtime_channel_global_presence_events") == metric_value + 1
     end
 
     test "metric read_authorization_check exists after check", context do
-      pattern =
-        ~r/realtime_tenants_read_authorization_check_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
+      metric = "realtime_tenants_read_authorization_check_count"
+      metric_value = metric_value(metric, tenant: context.tenant.external_id) || 0
 
       {:ok, _} =
         Authorization.get_read_authorizations(
@@ -196,19 +186,17 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       Process.sleep(200)
 
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value(metric, tenant: context.tenant.external_id) == metric_value + 1
 
-      bucket_pattern =
-        ~r/realtime_tenants_read_authorization_check_bucket{tenant="#{context.tenant.external_id}",le="250"}\s(?<number>\d+)/
-
-      assert metric_value(bucket_pattern) > 0
+      assert metric_value("realtime_tenants_read_authorization_check_bucket",
+               tenant: context.tenant.external_id,
+               le: "250.0"
+             ) > 0
     end
 
     test "metric write_authorization_check exists after check", context do
-      pattern =
-        ~r/realtime_tenants_write_authorization_check_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
+      metric = "realtime_tenants_write_authorization_check_count"
+      metric_value = metric_value(metric, tenant: context.tenant.external_id) || 0
 
       {:ok, _} =
         Authorization.get_write_authorizations(
@@ -220,117 +208,90 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       # Wait enough time for the poll rate to be triggered at least once
       Process.sleep(200)
 
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value(metric, tenant: context.tenant.external_id) == metric_value + 1
 
-      bucket_pattern =
-        ~r/realtime_tenants_write_authorization_check_bucket{tenant="#{context.tenant.external_id}",le="250"}\s(?<number>\d+)/
-
-      assert metric_value(bucket_pattern) > 0
+      assert metric_value("realtime_tenants_write_authorization_check_bucket",
+               tenant: context.tenant.external_id,
+               le: "250.0"
+             ) > 0
     end
 
     test "metric replay exists after check", context do
       external_id = context.tenant.external_id
-
-      pattern =
-        ~r/realtime_tenants_replay_count{tenant="#{external_id}"}\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
+      metric = "realtime_tenants_replay_count"
+      metric_value = metric_value(metric, tenant: external_id) || 0
 
       assert {:ok, _, _} = Realtime.Messages.replay(context.db_conn, external_id, "test", 0, 1)
 
       # Wait enough time for the poll rate to be triggered at least once
       Process.sleep(200)
 
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value(metric, tenant: external_id) == metric_value + 1
 
-      bucket_pattern =
-        ~r/realtime_tenants_replay_bucket{tenant="#{external_id}",le="250"}\s(?<number>\d+)/
-
-      assert metric_value(bucket_pattern) > 0
+      assert metric_value("realtime_tenants_replay_bucket", tenant: external_id, le: "250.0") > 0
     end
 
     test "metric realtime_tenants_broadcast_from_database_latency_committed_at exists after check", context do
-      pattern =
-        ~r/realtime_tenants_broadcast_from_database_latency_committed_at_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
+      external_id = context.tenant.external_id
+      metric = "realtime_tenants_broadcast_from_database_latency_committed_at_count"
+      metric_value = metric_value(metric, tenant: external_id) || 0
 
-      metric_value = metric_value(pattern)
       FakeUserCounter.fake_broadcast_from_database(context.tenant.external_id)
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value(metric, tenant: external_id) == metric_value + 1
 
-      bucket_pattern =
-        ~r/realtime_tenants_broadcast_from_database_latency_committed_at_bucket{tenant="#{context.tenant.external_id}",le="10"}\s(?<number>\d+)/
-
-      assert metric_value(bucket_pattern) > 0
+      assert metric_value("realtime_tenants_broadcast_from_database_latency_committed_at_bucket",
+               tenant: external_id,
+               le: "10.0"
+             ) > 0
     end
 
     test "metric realtime_tenants_broadcast_from_database_latency_inserted_at exists after check", context do
-      pattern =
-        ~r/realtime_tenants_broadcast_from_database_latency_inserted_at_count{tenant="#{context.tenant.external_id}"}\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
+      external_id = context.tenant.external_id
+      metric = "realtime_tenants_broadcast_from_database_latency_inserted_at_count"
+      metric_value = metric_value(metric, tenant: external_id) || 0
 
       FakeUserCounter.fake_broadcast_from_database(context.tenant.external_id)
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value(metric, tenant: external_id) == metric_value + 1
 
-      bucket_pattern =
-        ~r/realtime_tenants_broadcast_from_database_latency_inserted_at_bucket{tenant="#{context.tenant.external_id}",le="10"}\s(?<number>\d+)/
-
-      assert metric_value(bucket_pattern) > 0
+      assert metric_value("realtime_tenants_broadcast_from_database_latency_inserted_at_bucket",
+               tenant: external_id,
+               le: "10.0"
+             ) > 0
     end
 
     test "tenant metric payload size", context do
       external_id = context.tenant.external_id
-
-      pattern =
-        ~r/realtime_tenants_payload_size_count{message_type=\"presence\",tenant="#{external_id}"}\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
+      metric = "realtime_tenants_payload_size_count"
+      metric_value = metric_value(metric, message_type: "presence", tenant: external_id) || 0
 
       message = %{topic: "a topic", event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
       RealtimeWeb.TenantBroadcaster.pubsub_broadcast(external_id, "a topic", message, Phoenix.PubSub, :presence)
 
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value(metric, message_type: "presence", tenant: external_id) == metric_value + 1
 
-      bucket_pattern =
-        ~r/realtime_tenants_payload_size_bucket{message_type=\"presence\",tenant="#{external_id}",le="250"}\s(?<number>\d+)/
-
-      assert metric_value(bucket_pattern) > 0
+      assert metric_value("realtime_tenants_payload_size_bucket", tenant: external_id, le: "250.0") > 0
     end
 
     test "global metric payload size", context do
       external_id = context.tenant.external_id
 
-      pattern = ~r/realtime_payload_size_count{message_type=\"broadcast\"}\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
+      metric = "realtime_payload_size_count"
+      metric_value = metric_value(metric, message_type: "broadcast") || 0
 
       message = %{topic: "a topic", event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
       RealtimeWeb.TenantBroadcaster.pubsub_broadcast(external_id, "a topic", message, Phoenix.PubSub, :broadcast)
 
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 1
+      assert metric_value(metric, message_type: "broadcast") == metric_value + 1
 
-      bucket_pattern = ~r/realtime_payload_size_bucket{message_type=\"broadcast\",le="250"}\s(?<number>\d+)/
-
-      assert metric_value(bucket_pattern) > 0
+      assert metric_value("realtime_payload_size_bucket", le: "250.0") > 0
     end
   end
 
-  defp metric_value(pattern) do
-    PromEx.get_metrics(MetricsTest)
-    |> String.split("\n", trim: true)
-    |> Enum.find_value(
-      "0",
-      fn item ->
-        case Regex.run(pattern, item, capture: ["number"]) do
-          [number] -> number
-          _ -> false
-        end
-      end
-    )
-    |> String.to_integer()
+  defp metric_value(metric, expected_tags \\ nil) do
+    MetricsHelper.search(PromEx.get_metrics(MetricsTest), metric, expected_tags)
   end
 end

@@ -71,7 +71,8 @@ defmodule Realtime.PromEx.Plugins.GenRpc do
           measurement: :size,
           tags: [:origin_node, :target_node]
         )
-      ]
+      ],
+      detach_on_error: false
     )
   end
 

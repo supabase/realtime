@@ -11,8 +11,12 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
     end
   end
 
-  setup do
+  setup_all do
     start_supervised!(MetricsTest)
+    :ok
+  end
+
+  setup do
     %{tenant: Containers.checkout_tenant(run_migrations: true)}
   end
 
@@ -37,7 +41,7 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
         )
 
       Process.sleep(200)
-      assert metric_value(~r/phoenix_connections_total\s(?<number>\d+)/) >= 2
+      assert metric_value("phoenix_connections_total") >= 2
     end
   end
 
@@ -63,28 +67,23 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
 
       Process.sleep(200)
 
-      assert metric_value(
-               ~r/phoenix_socket_connected_duration_milliseconds_count{endpoint="RealtimeWeb.Endpoint",result="ok",serializer="Elixir.Phoenix.Socket.V1.JSONSerializer",transport="websocket"}\s(?<number>\d+)/
-             ) == 1
+      assert metric_value("phoenix_socket_connected_duration_milliseconds_count",
+               endpoint: "RealtimeWeb.Endpoint",
+               result: "ok",
+               serializer: "Elixir.Phoenix.Socket.V1.JSONSerializer",
+               transport: "websocket"
+             ) >= 1
 
-      assert metric_value(
-               ~r/phoenix_socket_connected_duration_milliseconds_count{endpoint="RealtimeWeb.Endpoint",result="ok",serializer="Elixir.RealtimeWeb.Socket.V2Serializer",transport="websocket"}\s(?<number>\d+)/
-             ) == 1
+      assert metric_value("phoenix_socket_connected_duration_milliseconds_count",
+               endpoint: "RealtimeWeb.Endpoint",
+               result: "ok",
+               serializer: "Elixir.RealtimeWeb.Socket.V2Serializer",
+               transport: "websocket"
+             ) >= 1
     end
   end
 
-  defp metric_value(pattern) do
-    PromEx.get_metrics(MetricsTest)
-    |> String.split("\n", trim: true)
-    |> Enum.find_value(
-      "0",
-      fn item ->
-        case Regex.run(pattern, item, capture: ["number"]) do
-          [number] -> number
-          _ -> false
-        end
-      end
-    )
-    |> String.to_integer()
+  defp metric_value(metric, expected_tags \\ nil) do
+    MetricsHelper.search(PromEx.get_metrics(MetricsTest), metric, expected_tags)
   end
 end

@@ -6,7 +6,17 @@ defmodule RealtimeWeb.MetricsControllerTest do
   import ExUnit.CaptureLog
 
   setup_all do
-    {:ok, _} = Clustered.start(nil, extra_config: [{:realtime, :region, "ap-southeast-2"}])
+    metrics_tags = %{
+      region: "ap-southeast-2",
+      host: "anothernode@something.com",
+      id: "someid"
+    }
+
+    {:ok, _} =
+      Clustered.start(nil,
+        extra_config: [{:realtime, :region, "ap-southeast-2"}, {:realtime, :metrics_tags, metrics_tags}]
+      )
+
     :ok
   end
 
@@ -30,8 +40,8 @@ defmodule RealtimeWeb.MetricsControllerTest do
       assert response =~
                "# HELP beam_system_schedulers_online_info The number of scheduler threads that are online."
 
-      assert response =~ "region=\"ap-southeast-2"
-      assert response =~ "region=\"us-east-1"
+      assert response =~ "region=\"ap-southeast-2\""
+      assert response =~ "region=\"us-east-1\""
     end
 
     test "returns 200 and log on timeout", %{conn: conn} do

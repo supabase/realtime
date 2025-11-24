@@ -5,7 +5,7 @@ defmodule Realtime.PromExTest do
 
   describe "get_metrics/0" do
     test "builds metrics in prometheus format which includes host region and id" do
-      metrics = PromEx.get_metrics()
+      metrics = PromEx.get_metrics() |> IO.iodata_to_binary()
 
       assert String.contains?(
                metrics,
@@ -16,7 +16,7 @@ defmodule Realtime.PromExTest do
 
       assert String.contains?(
                metrics,
-               "beam_system_schedulers_online_info{host=\"nohost\",region=\"us-east-1\",id=\"nohost\"}"
+               "beam_system_schedulers_online_info{host=\"nohost\",id=\"nohost\",region=\"us-east-1\"}"
              )
     end
   end
@@ -36,7 +36,7 @@ defmodule Realtime.PromExTest do
 
       assert String.contains?(
                metrics,
-               "beam_system_schedulers_online_info{host=\"nohost\",region=\"us-east-1\",id=\"nohost\"}"
+               "beam_system_schedulers_online_info{host=\"nohost\",id=\"nohost\",region=\"us-east-1\"}"
              )
     end
   end

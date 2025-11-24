@@ -15,16 +15,17 @@ defmodule RealtimeWeb.MetricsController do
         end,
         timeout: :infinity
       )
-      |> Enum.reduce(PromEx.get_metrics(), fn {_, {node, response}}, acc ->
+      |> Enum.reduce([PromEx.get_metrics()], fn {_, {node, response}}, acc ->
         case response do
           {:error, :rpc_error, reason} ->
             Logger.error("Cannot fetch metrics from the node #{inspect(node)} because #{inspect(reason)}")
             acc
 
           metrics ->
-            acc <> uncompress(metrics)
+            [uncompress(metrics) | acc]
         end
       end)
+      |> Enum.reverse()
 
     conn
     |> put_resp_content_type("text/plain")

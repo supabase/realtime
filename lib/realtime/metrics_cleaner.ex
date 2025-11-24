@@ -18,7 +18,7 @@ defmodule Realtime.MetricsCleaner do
   def handle_info(:check, %{interval: interval} = state) do
     Process.cancel_timer(state.check_ref)
 
-    {exec_time, _} = :timer.tc(fn -> loop_and_cleanup_metrics_table() end)
+    {exec_time, _} = :timer.tc(fn -> loop_and_cleanup_metrics_table() end, :millisecond)
 
     if exec_time > :timer.seconds(5),
       do: Logger.warning("Metrics check took: #{exec_time} ms")
@@ -31,31 +31,23 @@ defmodule Realtime.MetricsCleaner do
     {:noreply, state}
   end
 
-  defp check(interval) do
-    Process.send_after(self(), :check, interval)
-  end
+  defp check(interval), do: Process.send_after(self(), :check, interval)
 
-  @metrics_table Realtime.PromEx.Metrics
-  @filter_spec [{{{:_, %{tenant: :"$1"}}, :_}, [], [:"$1"]}]
+  @peep_filter_spec [{{{:_, %{tenant: :"$1"}}, :_}, [{:is_binary, :"$1"}], [:"$1"]}]
+
   defp loop_and_cleanup_metrics_table do
-    tenant_ids = Realtime.Tenants.Connect.list_tenants()
+    tenant_ids = Realtime.Tenants.Connect.list_tenants() |> MapSet.new()
 
-    :ets.select(@metrics_table, @filter_spec)
-    |> Enum.uniq()
-    |> Enum.reject(fn tenant_id -> tenant_id in tenant_ids end)
-    |> Enum.each(fn tenant_id -> delete_metric(tenant_id) end)
-  end
+    {_, tids} = Peep.Persistent.storage(Realtime.PromEx.Metrics)
 
-  @doc """
-  Deletes all metrics that contain the given tenant or database_host.
-  """
-  @spec delete_metric(String.t()) :: :ok
-  def delete_metric(tenant) do
-    :ets.select_delete(@metrics_table, [
-      {{{:_, %{tenant: tenant}}, :_}, [], [true]},
-      {{{:_, %{database_host: "db.#{tenant}.supabase.co"}}, :_}, [], [true]}
-    ])
+    tags_to_prune =
+      tids
+      |> Tuple.to_list()
+      |> Stream.flat_map(fn tid -> :ets.select(tid, @peep_filter_spec) end)
+      |> Enum.uniq()
+      |> Stream.reject(fn tenant_id -> MapSet.member?(tenant_ids, tenant_id) end)
+      |> Enum.map(fn tenant_id -> %{tenant: tenant_id} end)
 
-    :ok
+    Peep.prune_tags(Realtime.PromEx.Metrics, tags_to_prune)
   end
 end
