@@ -56,8 +56,7 @@ services:
       retries: 5
       start_period: 5s
 
-  # Deno test runner
-  test-runner:
+  deno-test-runner:
     image: denoland/deno:alpine-2.5.6
     container_name: deno-test-runner
     depends_on:
@@ -66,12 +65,36 @@ services:
       test_db:
         condition: service_healthy
     volumes:
-      - ./test/integration/tests.ts:/app/tests.ts:ro
+      - ./test/integration/deno/tests.ts:/app/tests.ts:ro
     working_dir: /app
     command: >
       sh -c "
       echo 'Running tests...' &&
       deno test tests.ts --allow-import --no-check --allow-read --allow-net --trace-leaks --allow-env=WS_NO_BUFFER_UTIL
+      "
+    networks:
+      - test-network
+    extra_hosts:
+      - "realtime-dev.localhost:host-gateway"
+
+  node-test-runner:
+    image: node:22-alpine
+    container_name: node-test-runner
+    depends_on:
+      test_realtime:
+        condition: service_healthy
+      test_db:
+        condition: service_healthy
+    volumes:
+      - ./test/integration/node/tests.js:/app/tests.js:ro
+      - ./test/integration/node/package.json:/app/package.json:ro
+    working_dir: /app
+    command: >
+      sh -c "
+      echo 'Installing dependencies...' &&
+      npm install &&
+      echo 'Running tests...' &&
+      npm test
       "
     networks:
       - test-network
