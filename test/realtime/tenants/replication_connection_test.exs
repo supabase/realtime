@@ -11,6 +11,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   alias Realtime.Tenants
   alias Realtime.Tenants.ReplicationConnection
   alias RealtimeWeb.Endpoint
+  alias Realtime.Tenants.Repo
 
   setup do
     slot = Application.get_env(:realtime, :slot_name_suffix)
@@ -120,7 +121,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           })
         end
 
-      {:ok, _} = Realtime.Repo.insert_all_entries(db_conn, messages, Message)
+      {:ok, _} = Repo.insert_all_entries(db_conn, messages, Message)
 
       messages_received =
         for _ <- 1..total_messages, into: [] do
@@ -202,7 +203,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           })
         end
 
-      {:ok, _} = Realtime.Repo.insert_all_entries(db_conn, messages, Message)
+      {:ok, _} = Repo.insert_all_entries(db_conn, messages, Message)
 
       messages_received =
         for _ <- 1..total_messages, into: [] do

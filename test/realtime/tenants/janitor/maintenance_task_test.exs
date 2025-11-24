@@ -4,7 +4,7 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
   alias Realtime.Tenants.Janitor.MaintenanceTask
   alias Realtime.Api.Message
   alias Realtime.Database
-  alias Realtime.Repo
+  alias Realtime.Tenants.Repo
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)

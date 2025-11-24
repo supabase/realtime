@@ -1,10 +1,10 @@
-defmodule Realtime.RepoTest do
+defmodule Realtime.Tenants.RepoTest do
   use Realtime.DataCase, async: true
 
   import Ecto.Query
 
   alias Realtime.Api.Message
-  alias Realtime.Repo
+  alias Realtime.Tenants.Repo
   alias Realtime.Database
 
   setup do

@@ -59,7 +59,9 @@ defmodule Realtime.Messages do
         limit: ^limit,
         order_by: [desc: m.inserted_at]
 
-    {latency, value} = :timer.tc(Realtime.Repo, :all, [conn, query, Message, [timeout: @default_timeout]], :millisecond)
+    {latency, value} =
+      :timer.tc(Realtime.Tenants.Repo, :all, [conn, query, Message, [timeout: @default_timeout]], :millisecond)
+
     :telemetry.execute([:realtime, :tenants, :replay], %{latency: latency}, %{tenant: tenant_id})
     value
   end

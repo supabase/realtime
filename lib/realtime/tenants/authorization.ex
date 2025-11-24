@@ -17,7 +17,7 @@ defmodule Realtime.Tenants.Authorization do
   alias Realtime.Database
   alias Realtime.GenCounter
   alias Realtime.GenRpc
-  alias Realtime.Repo
+  alias Realtime.Tenants.Repo
   alias Realtime.Tenants.Authorization.Policies
 
   defstruct [:tenant_id, :topic, :headers, :jwt, :claims, :role, :sub]

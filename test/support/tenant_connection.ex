@@ -4,7 +4,7 @@ defmodule TenantConnection do
   """
   alias Realtime.Api.Message
   alias Realtime.Database
-  alias Realtime.Repo
+  alias Realtime.Tenants.Repo
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.Endpoint
 
