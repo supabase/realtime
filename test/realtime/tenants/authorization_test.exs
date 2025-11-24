@@ -8,7 +8,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
   alias Realtime.Api.Message
   alias Realtime.Database
-  alias Realtime.Repo
+  alias Realtime.Tenants.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies

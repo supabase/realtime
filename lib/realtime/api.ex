@@ -190,8 +190,8 @@ defmodule Realtime.Api do
 
   defp list_extensions(type) do
     query = from(e in Extensions, where: e.type == ^type, select: e)
-
-    Repo.all(query)
+    replica = Replica.replica()
+    replica.all(query)
   end
 
   def rename_settings_field(from, to) do

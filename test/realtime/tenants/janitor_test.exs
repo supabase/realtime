@@ -6,9 +6,9 @@ defmodule Realtime.Tenants.JanitorTest do
 
   alias Realtime.Api.Message
   alias Realtime.Database
-  alias Realtime.Repo
   alias Realtime.Tenants.Janitor
   alias Realtime.Tenants.Connect
+  alias Realtime.Tenants.Repo
 
   setup do
     :ets.delete_all_objects(Connect)
@@ -24,7 +24,7 @@ defmodule Realtime.Tenants.JanitorTest do
       Enum.map(
         [tenant1, tenant2],
         fn tenant ->
-          tenant = Repo.preload(tenant, :extensions)
+          tenant = Realtime.Repo.preload(tenant, :extensions)
           Connect.lookup_or_start_connection(tenant.external_id)
           Process.sleep(500)
           tenant
