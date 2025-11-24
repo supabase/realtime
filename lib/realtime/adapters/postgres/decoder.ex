@@ -318,19 +318,16 @@ defmodule Realtime.Adapters.Postgres.Decoder do
         <<0>> ->
           false
 
-        <<uuid_binary::binary-16>> ->
-          UUID.binary_to_string!(uuid_binary)
+        <<1, binary::binary-size(column_length - 1)>> ->
+          binary
 
         <<microseconds::signed-big-64>> ->
           @start_date
           |> NaiveDateTime.from_iso8601!()
           |> NaiveDateTime.add(microseconds, :microsecond)
 
-        <<1, binary::binary-size(column_length - 1)>> ->
-          binary
-
         data when is_binary(data) ->
-          data
+          if String.valid?(data), do: data, else: UUID.binary_to_string!(data)
       end
 
     decode_tuple_data(remainder, columns_remaining - 1, [data | accumulator])

@@ -234,6 +234,47 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       end
     end
 
+    test "replicates binary with exactly 16 bytes to test UUID conversion error", %{tenant: tenant} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = "db:job_scheduler"
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      subscribe(tenant_topic, topic)
+
+      payload = job_scheduler_payload()
+
+      row =
+        message_fixture(tenant, %{
+          "topic" => topic,
+          "private" => true,
+          "event" => "UPDATE",
+          "extension" => "broadcast",
+          "payload" => payload
+        })
+
+      row_id = row.id
+
+      assert_receive {:socket_push, :text, data}, 2000
+      message = data |> IO.iodata_to_binary() |> Jason.decode!()
+
+      assert %{
+               "event" => "broadcast",
+               "payload" => %{
+                 "event" => "UPDATE",
+                 "meta" => %{"id" => ^row_id},
+                 "payload" => received_payload,
+                 "type" => "broadcast"
+               },
+               "ref" => nil,
+               "topic" => ^topic
+             } = message
+
+      assert received_payload == payload
+    end
+
     test "monitored pid stopping brings down ReplicationConnection ", %{tenant: tenant} do
       monitored_pid =
         spawn(fn ->
@@ -564,5 +605,36 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       |> TenantConnection.create_message(conn)
 
     message
+  end
+
+  defp job_scheduler_payload do
+    %{
+      "id" => "cdf97abd-6dca-480e-ac15-97ddf74ba714",
+      "table" => "JobScheduler",
+      "record" => %{
+        "id" => 1,
+        "status" => "ACTIVE",
+        "jobType" => "OUTBOUND_FWDISPATCH_TO_CARRIER_CHECK_CALL",
+        "timezone" => "America/Los_Angeles",
+        "createdAt" => "2025-08-17T23:04:45.264",
+        "deletedAt" => nil,
+        "updatedAt" => "2025-10-17T04:28:47.844",
+        "cronExpression" => "0 9 * * 1-5",
+        "temporaryRescheduleAt" => nil
+      },
+      "schema" => "public",
+      "operation" => "UPDATE",
+      "old_record" => %{
+        "id" => 1,
+        "status" => "ACTIVE",
+        "jobType" => "OUTBOUND_FWDISPATCH_TO_CARRIER_CHECK_CALL",
+        "timezone" => "America/Los_Angeles",
+        "createdAt" => "2025-08-17T23:04:45.264",
+        "deletedAt" => nil,
+        "updatedAt" => "2025-10-17T04:28:47.843",
+        "cronExpression" => "0 9 * * 1-5",
+        "temporaryRescheduleAt" => nil
+      }
+    }
   end
 end
