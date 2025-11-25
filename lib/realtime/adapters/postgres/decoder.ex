@@ -216,7 +216,7 @@ defmodule Realtime.Adapters.Postgres.Decoder do
          <<"I", relation_id::integer-32, "N", number_of_columns::integer-16, tuple_data::binary>>,
          relations
        ) do
-    relation = relations |> Map.get(relation_id) |> Map.get(:columns) |> Enum.reverse()
+    relation = relations |> Map.get(relation_id) |> Map.get(:columns)
     {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns, relation)
 
     %Insert{relation_id: relation_id, tuple_data: decoded_tuple_data}
@@ -240,22 +240,21 @@ defmodule Realtime.Adapters.Postgres.Decoder do
   defp decode_tuple_data(remaining_binary, 0, _relations, accumulator) when is_binary(remaining_binary),
     do: {remaining_binary, accumulator |> Enum.reverse() |> List.to_tuple()}
 
-  defp decode_tuple_data(<<"n", rest::binary>>, columns_remaining, relations, accumulator),
+  defp decode_tuple_data(<<"n", rest::binary>>, columns_remaining, [_ | relations], accumulator),
     do: decode_tuple_data(rest, columns_remaining - 1, relations, [nil | accumulator])
 
-  defp decode_tuple_data(<<"u", rest::binary>>, columns_remaining, relations, accumulator),
+  defp decode_tuple_data(<<"u", rest::binary>>, columns_remaining, [_ | relations], accumulator),
     do: decode_tuple_data(rest, columns_remaining - 1, relations, [:unchanged_toast | accumulator])
 
   @start_date "2000-01-01T00:00:00Z"
   defp decode_tuple_data(
          <<"b", column_length::integer-32, rest::binary>>,
          columns_remaining,
-         relations,
+         [%Column{type: type} | relations],
          accumulator
        ) do
     data = :erlang.binary_part(rest, {0, column_length})
     remainder = :erlang.binary_part(rest, {byte_size(rest), -(byte_size(rest) - column_length)})
-    %Column{type: type} = Enum.at(relations, columns_remaining - 1)
 
     data =
       case type do
