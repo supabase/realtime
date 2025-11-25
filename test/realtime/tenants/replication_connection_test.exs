@@ -234,6 +234,46 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       end
     end
 
+    test "replicates binary with exactly 16 bytes to test UUID conversion error", %{tenant: tenant} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = "db:job_scheduler"
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      subscribe(tenant_topic, topic)
+      payload = %{"value" => random_string()}
+
+      row =
+        message_fixture(tenant, %{
+          "topic" => topic,
+          "private" => true,
+          "event" => "UPDATE",
+          "extension" => "broadcast",
+          "payload" => payload
+        })
+
+      row_id = row.id
+
+      assert_receive {:socket_push, :text, data}, 2000
+      message = data |> IO.iodata_to_binary() |> Jason.decode!()
+
+      assert %{
+               "event" => "broadcast",
+               "payload" => %{
+                 "event" => "UPDATE",
+                 "meta" => %{"id" => ^row_id},
+                 "payload" => received_payload,
+                 "type" => "broadcast"
+               },
+               "ref" => nil,
+               "topic" => ^topic
+             } = message
+
+      assert received_payload == payload
+    end
+
     test "monitored pid stopping brings down ReplicationConnection ", %{tenant: tenant} do
       monitored_pid =
         spawn(fn ->

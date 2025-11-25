@@ -267,8 +267,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   def handle_data(data, state) when is_write(data) do
     %Write{message: message} = parse(data)
-    message |> decode_message() |> then(&send(self(), &1))
-    {:noreply, [], state}
+    message |> decode_message(state.relations) |> then(&handle_message(&1, state))
   end
 
   def handle_data(e, state) do
@@ -277,12 +276,16 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   @impl true
-  def handle_info(%Decoder.Messages.Begin{commit_timestamp: commit_timestamp}, state) do
+
+  def handle_info({:DOWN, _, :process, _, _}, _), do: {:disconnect, :shutdown}
+  def handle_info(_, state), do: {:noreply, state}
+
+  defp handle_message(%Decoder.Messages.Begin{commit_timestamp: commit_timestamp}, state) do
     latency_committed_at = NaiveDateTime.utc_now() |> NaiveDateTime.diff(commit_timestamp, :millisecond)
     {:noreply, %{state | latency_committed_at: latency_committed_at}}
   end
 
-  def handle_info(%Decoder.Messages.Relation{} = msg, state) do
+  defp handle_message(%Decoder.Messages.Relation{} = msg, state) do
     %Decoder.Messages.Relation{id: id, namespace: namespace, name: name, columns: columns} = msg
     %{relations: relations} = state
     relation = %{name: name, columns: columns, namespace: namespace}
@@ -298,7 +301,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
       {:noreply, state}
   end
 
-  def handle_info(%Decoder.Messages.Insert{} = msg, state) do
+  defp handle_message(%Decoder.Messages.Insert{} = msg, state) do
     %Decoder.Messages.Insert{relation_id: relation_id, tuple_data: tuple_data} = msg
     %{relations: relations, tenant_id: tenant_id, latency_committed_at: latency_committed_at} = state
 
@@ -351,9 +354,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
       {:noreply, state}
   end
 
-  def handle_info({:DOWN, _, :process, _, _}, _), do: {:disconnect, :shutdown}
-  def handle_info(_, state), do: {:noreply, state}
-
+  defp handle_message(_, state), do: {:noreply, state}
   @impl true
   def handle_disconnect(state) do
     Logger.warning("Disconnecting broadcast changes handler in the step : #{inspect(state.step)}")
