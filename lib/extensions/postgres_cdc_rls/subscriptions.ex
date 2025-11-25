@@ -8,7 +8,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   @type conn() :: Postgrex.conn()
   @type filter :: {binary, binary, binary}
-  @type subscription_params :: {binary, binary, [filter]}
+  @type subscription_params :: {binary, binary, binary, [filter]}
   @type subscription_list :: [%{id: binary, claims: map, subscription_params: subscription_params}]
 
   @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
@@ -36,17 +36,19 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         subscription_id,
         entity,
         filters,
-        claims
+        claims,
+        action_filter
       )
       select
         $4::text::uuid,
         sub_tables.entity,
         $6,
-        $5
+        $5,
+        $7
       from
         sub_tables
         on conflict
-        (subscription_id, entity, filters)
+        (subscription_id, entity, filters, action_filter)
         do update set
         claims = excluded.claims,
         created_at = now()
@@ -54,8 +56,12 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
          id"
 
     transaction(conn, fn conn ->
-      Enum.map(subscription_list, fn %{id: id, claims: claims, subscription_params: params = {schema, table, filters}} ->
-        case query(conn, sql, [publication, schema, table, id, claims, filters]) do
+      Enum.map(subscription_list, fn %{
+                                       id: id,
+                                       claims: claims,
+                                       subscription_params: params = {action_filter, schema, table, filters}
+                                     } ->
+        case query(conn, sql, [publication, schema, table, id, claims, filters, action_filter]) do
           {:ok, %{num_rows: num} = result} when num > 0 ->
             send(manager, {:subscribed, {caller, id}})
             result
@@ -80,8 +86,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     :exit, reason -> {:error, {:exit, reason}}
   end
 
-  defp params_to_log({schema, table, filters}) do
-    [schema: schema, table: table, filters: filters]
+  defp params_to_log({action_filter, schema, table, filters}) do
+    [event: action_filter, schema: schema, table: table, filters: filters]
     |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{to_log(v)}" end)
   end
 
@@ -168,27 +174,27 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   ## Examples
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=eq.hey"})
-      {:ok, {"public", "messages", [{"subject", "eq", "hey"}]}}
+      {:ok, {"*", "public", "messages", [{"subject", "eq", "hey"}]}}
 
   `in` filter:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=in.(hidee,ho)"})
-      {:ok, {"public", "messages", [{"subject", "in", "{hidee,ho}"}]}}
+      {:ok, {"*", "public", "messages", [{"subject", "in", "{hidee,ho}"}]}}
 
   no filter:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages"})
-      {:ok, {"public", "messages", []}}
+      {:ok, {"*", "public", "messages", []}}
 
   only schema:
 
       iex> parse_subscription_params(%{"schema" => "public"})
-      {:ok, {"public", "*", []}}
+      {:ok, {"*", "public", "*", []}}
 
   only table:
 
       iex> parse_subscription_params(%{"table" => "messages"})
-      {:ok, {"public", "messages", []}}
+      {:ok, {"*", "public", "messages", []}}
 
   An unsupported filter will respond with an error tuple:
 
@@ -209,13 +215,15 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   @spec parse_subscription_params(map()) :: {:ok, subscription_params} | {:error, binary()}
   def parse_subscription_params(params) do
+    action_filter = action_filter(params)
+
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter} ->
         with [col, rest] <- String.split(filter, "=", parts: 2),
              [filter_type, value] when filter_type in @filter_types <-
                String.split(rest, ".", parts: 2),
              {:ok, formatted_value} <- format_filter_value(filter_type, value) do
-          {:ok, {schema, table, [{col, filter_type, formatted_value}]}}
+          {:ok, {action_filter, schema, table, [{col, filter_type, formatted_value}]}}
         else
           {:error, msg} ->
             {:error, "Error parsing `filter` params: #{msg}"}
@@ -225,13 +233,13 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         end
 
       %{"schema" => schema, "table" => table} ->
-        {:ok, {schema, table, []}}
+        {:ok, {action_filter, schema, table, []}}
 
       %{"schema" => schema} ->
-        {:ok, {schema, "*", []}}
+        {:ok, {action_filter, schema, "*", []}}
 
       %{"table" => table} ->
-        {:ok, {"public", table, []}}
+        {:ok, {action_filter, "public", table, []}}
 
       map when is_map_key(map, "user_token") or is_map_key(map, "auth_token") ->
         {:error,
@@ -242,6 +250,19 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
          "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: #{inspect(error)}"}
     end
   end
+
+  defp action_filter(%{"event" => "*"}), do: "*"
+
+  defp action_filter(%{"event" => event}) when is_binary(event) do
+    case String.upcase(event) do
+      "INSERT" -> "INSERT"
+      "UPDATE" -> "UPDATE"
+      "DELETE" -> "DELETE"
+      _ -> "*"
+    end
+  end
+
+  defp action_filter(_), do: "*"
 
   defp format_filter_value(filter, value) do
     case filter do
