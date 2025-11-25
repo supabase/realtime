@@ -149,12 +149,6 @@ defmodule Realtime.Adapters.Postgres.Decoder do
 
   @doc """
   Parses logical replication messages from Postgres
-
-  ## Examples
-
-      iex> decode_message(<<73, 0, 0, 96, 0, 78, 0, 2, 116, 0, 0, 0, 3, 98, 97, 122, 116, 0, 0, 0, 3, 53, 54, 48>>)
-      %Realtime.Adapters.Postgres.Decoder.Messages.Insert{relation_id: 24576, tuple_data: {"baz", "560"}}
-
   """
   def decode_message(message, relations) when is_binary(message) do
     decode_message_impl(message, relations)
@@ -262,8 +256,8 @@ defmodule Realtime.Adapters.Postgres.Decoder do
           data == <<1>>
 
         "jsonb" ->
-          <<1, binary::binary-size(column_length - 1)>> = data
-          binary
+          <<1, rest::binary>> = data
+          rest
 
         "timestamp" ->
           <<microseconds::signed-big-64>> = data
