@@ -3,6 +3,7 @@ import { sleep } from "https://deno.land/x/sleep/mod.ts";
 import { describe, it } from "jsr:@std/testing/bdd";
 import { assertEquals } from "jsr:@std/assert";
 import { deadline } from "jsr:@std/async/deadline";
+import { Client } from "jsr:@db/postgres@0.19";
 
 const withDeadline = <Fn extends (...args: never[]) => Promise<unknown>>(fn: Fn, ms: number): Fn =>
   ((...args) => deadline(fn(...args), ms)) as Fn;
@@ -17,6 +18,40 @@ const realtimeServiceRole = { vsn: '2.0.0', logger: console.log, params: { apike
 
 let clientV1: RealtimeClient | null;
 let clientV2: RealtimeClient | null;
+let dbClient: Client | null;
+
+async function getDbClient() {
+  const client = new Client({
+    user: "postgres",
+    password: "postgres",
+    database: "postgres",
+    hostname: "localhost",
+    port: 5532,
+  });
+  await client.connect();
+  return client;
+}
+
+async function cleanupTestData(client: Client, ids: number[]) {
+  if (ids.length > 0) {
+    await client.queryArray(
+      `DELETE FROM public.test_tenant WHERE id = ANY($1)`,
+      [ids]
+    );
+  }
+}
+
+dbClient = await getDbClient();
+
+await dbClient.queryArray(
+  `drop publication if exists supabase_realtime;
+   drop table if exists public.test_tenant;
+   create table public.test_tenant ( id SERIAL PRIMARY KEY, details text );
+   grant all on table public.test_tenant to anon;
+   grant all on table public.test_tenant to postgres;
+   grant all on table public.test_tenant to authenticated;
+   create publication supabase_realtime for table public.test_tenant;`,
+);
 
 describe("broadcast extension", { sanitizeOps: false, sanitizeResources: false }, () => {
   it("users with different versions can receive self broadcast", withDeadline(async () => {
@@ -154,48 +189,217 @@ describe("broadcast extension", { sanitizeOps: false, sanitizeResources: false }
   }, 5000));
 });
 
-// describe("presence extension", () => {
-//   it("user is able to receive presence updates", async () => {
-//     let result: any = [];
-//     let error = null;
-//     let topic = "topic:" + crypto.randomUUID();
-//     let keyV1 = "key V1";
-//     let keyV2 = "key V2";
-//
-//     const configV1 = { config: { presence: { keyV1 } } };
-//     const configV2 = { config: { presence: { keyV1 } } };
-//
-//     const channelV1 = clientV1
-//       .channel(topic, configV1)
-//       .on("presence", { event: "join" }, ({ key, newPresences }) =>
-//         result.push({ key, newPresences })
-//       )
-//       .subscribe();
-//
-//     const channelV2 = clientV2
-//       .channel(topic, configV2)
-//       .on("presence", { event: "join" }, ({ key, newPresences }) =>
-//         result.push({ key, newPresences })
-//       )
-//       .subscribe();
-//
-//     while (channelV1.state != "joined" || channelV2.state != "joined") await sleep(0.2);
-//
-//     const resV1 = await channelV1.track({ key: keyV1 });
-//     const resV2 = await channelV2.track({ key: keyV2 });
-//
-//     if (resV1 == "timed out" || resV2 == "timed out") error = resV1 || resV2;
-//
-//     sleep(2.2);
-//
-//     // FIXME write assertions
-//     console.log(result)
-//     let presences = result[0].newPresences[0];
-//     assertEquals(result[0].key, keyV1);
-//     assertEquals(presences.message, message);
-//     assertEquals(error, null);
-//   });
-// });
+describe("postgres_changes extension", { sanitizeOps: false, sanitizeResources: false }, () => {
+  it("users with different versions can receive INSERT events", withDeadline(async () => {
+    clientV1 = new RealtimeClient(url, realtimeV1);
+    clientV2 = new RealtimeClient(url, realtimeV2);
+
+    let resultV1 = null;
+    let resultV2 = null;
+    const testDetails = `test-insert-${crypto.randomUUID()}`;
+    const createdIds: number[] = [];
+
+    const channelV1 = clientV1
+      .channel("test-channel-v1")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "test_tenant" },
+        (payload) => {
+          if (payload.new.details === testDetails) {
+            resultV1 = payload;
+          }
+        }
+      )
+      .subscribe();
+
+    const channelV2 = clientV2
+      .channel("test-channel-v2")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "test_tenant" },
+        (payload) => {
+          if (payload.new.details === testDetails) {
+            resultV2 = payload;
+          }
+        }
+      )
+      .subscribe();
+
+    while (channelV1.state !== "joined" || channelV2.state !== "joined") {
+      await sleep(0.2);
+    }
+
+    // Perform INSERT
+    const result = await dbClient.queryObject<{ id: number }>(
+      `INSERT INTO public.test_tenant (details) VALUES ($1) RETURNING id`,
+      [testDetails]
+    );
+    createdIds.push(result.rows[0].id);
+
+    while (resultV1 == null || resultV2 == null) {
+      await sleep(0.2);
+    }
+
+    assertEquals(resultV1.new.details, testDetails);
+    assertEquals(resultV2.new.details, testDetails);
+    assertEquals(resultV1.eventType, "INSERT");
+    assertEquals(resultV2.eventType, "INSERT");
+
+    await channelV1.unsubscribe();
+    await channelV2.unsubscribe();
+
+    await cleanupTestData(dbClient, createdIds);
+    await stopClient(clientV1);
+    await stopClient(clientV2);
+
+    clientV1 = null;
+    clientV2 = null;
+  }, 10000));
+
+  it("users with different versions can receive UPDATE events", withDeadline(async () => {
+    clientV1 = new RealtimeClient(url, realtimeV1);
+    clientV2 = new RealtimeClient(url, realtimeV2);
+
+    let resultV1 = null;
+    let resultV2 = null;
+    const initialDetails = `test-initial-${crypto.randomUUID()}`;
+    const updatedDetails = `test-updated-${crypto.randomUUID()}`;
+    const createdIds: number[] = [];
+
+    // Create initial record
+    const insertResult = await dbClient.queryObject<{ id: number }>(
+      `INSERT INTO public.test_tenant (details) VALUES ($1) RETURNING id`,
+      [initialDetails]
+    );
+    const recordId = insertResult.rows[0].id;
+    createdIds.push(recordId);
+
+    const channelV1 = clientV1
+      .channel("test-channel-v1")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "test_tenant" },
+        (payload) => {
+          if (payload.new.id === recordId) {
+            resultV1 = payload;
+          }
+        }
+      )
+      .subscribe();
+
+    const channelV2 = clientV2
+      .channel("test-channel-v2")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "test_tenant" },
+        (payload) => {
+          if (payload.new.id === recordId) {
+            resultV2 = payload;
+          }
+        }
+      )
+      .subscribe();
+
+    while (channelV1.state !== "joined" || channelV2.state !== "joined") {
+      await sleep(0.2);
+    }
+
+    // Perform UPDATE
+    await dbClient.queryArray(
+      `UPDATE public.test_tenant SET details = $1 WHERE id = $2`,
+      [updatedDetails, recordId]
+    );
+
+    while (resultV1 == null || resultV2 == null) {
+      await sleep(0.2);
+    }
+
+    assertEquals(resultV1.new.details, updatedDetails);
+    assertEquals(resultV2.new.details, updatedDetails);
+    assertEquals(resultV1.eventType, "UPDATE");
+    assertEquals(resultV2.eventType, "UPDATE");
+
+    await channelV1.unsubscribe();
+    await channelV2.unsubscribe();
+
+    await cleanupTestData(dbClient, createdIds);
+    await stopClient(clientV1);
+    await stopClient(clientV2);
+
+    clientV1 = null;
+    clientV2 = null;
+  }, 10000));
+
+  it("users with different versions can receive DELETE events", withDeadline(async () => {
+    clientV1 = new RealtimeClient(url, realtimeV1);
+    clientV2 = new RealtimeClient(url, realtimeV2);
+
+    let resultV1 = null;
+    let resultV2 = null;
+    const testDetails = `test-delete-${crypto.randomUUID()}`;
+
+    // Create record to delete
+    const insertResult = await dbClient.queryObject<{ id: number }>(
+      `INSERT INTO public.test_tenant (details) VALUES ($1) RETURNING id`,
+      [testDetails]
+    );
+    const recordId = insertResult.rows[0].id;
+
+    const channelV1 = clientV1
+      .channel("test-channel-v1")
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "test_tenant" },
+        (payload) => {
+          if (payload.old.id === recordId) {
+            resultV1 = payload;
+          }
+        }
+      )
+      .subscribe();
+
+    const channelV2 = clientV2
+      .channel("test-channel-v2")
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "test_tenant" },
+        (payload) => {
+          if (payload.old.id === recordId) {
+            resultV2 = payload;
+          }
+        }
+      )
+      .subscribe();
+
+    while (channelV1.state !== "joined" || channelV2.state !== "joined") {
+      await sleep(0.2);
+    }
+
+    // Perform DELETE
+    await dbClient.queryArray(
+      `DELETE FROM public.test_tenant WHERE id = $1`,
+      [recordId]
+    );
+
+    while (resultV1 == null || resultV2 == null) {
+      await sleep(0.2);
+    }
+
+    assertEquals(resultV1.old.id, recordId);
+    assertEquals(resultV2.old.id, recordId);
+    assertEquals(resultV1.eventType, "DELETE");
+    assertEquals(resultV2.eventType, "DELETE");
+
+    await channelV1.unsubscribe();
+    await channelV2.unsubscribe();
+
+    await stopClient(clientV1);
+    await stopClient(clientV2);
+
+    clientV1 = null;
+    clientV2 = null;
+  }, 10000));
+});
 
 async function stopClient(client: RealtimeClient | null) {
   if (client) {
