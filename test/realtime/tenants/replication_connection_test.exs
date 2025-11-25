@@ -243,8 +243,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       topic = "db:job_scheduler"
       tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
       subscribe(tenant_topic, topic)
-
-      payload = job_scheduler_payload()
+      payload = %{"value" => random_string()}
 
       row =
         message_fixture(tenant, %{
@@ -605,36 +604,5 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       |> TenantConnection.create_message(conn)
 
     message
-  end
-
-  defp job_scheduler_payload do
-    %{
-      "id" => "cdf97abd-6dca-480e-ac15-97ddf74ba714",
-      "table" => "JobScheduler",
-      "record" => %{
-        "id" => 1,
-        "status" => "ACTIVE",
-        "jobType" => "OUTBOUND_FWDISPATCH_TO_CARRIER_CHECK_CALL",
-        "timezone" => "America/Los_Angeles",
-        "createdAt" => "2025-08-17T23:04:45.264",
-        "deletedAt" => nil,
-        "updatedAt" => "2025-10-17T04:28:47.844",
-        "cronExpression" => "0 9 * * 1-5",
-        "temporaryRescheduleAt" => nil
-      },
-      "schema" => "public",
-      "operation" => "UPDATE",
-      "old_record" => %{
-        "id" => 1,
-        "status" => "ACTIVE",
-        "jobType" => "OUTBOUND_FWDISPATCH_TO_CARRIER_CHECK_CALL",
-        "timezone" => "America/Los_Angeles",
-        "createdAt" => "2025-08-17T23:04:45.264",
-        "deletedAt" => nil,
-        "updatedAt" => "2025-10-17T04:28:47.843",
-        "cronExpression" => "0 9 * * 1-5",
-        "temporaryRescheduleAt" => nil
-      }
-    }
   end
 end
