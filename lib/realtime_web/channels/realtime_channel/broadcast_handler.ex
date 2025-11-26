@@ -129,7 +129,8 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
   @dialyzer {:nowarn_function, build_broadcast: 2}
 
   # Message payload was built by V2 Serializer which was originally UserBroadcastPush
-  defp build_broadcast(topic, {user_event, user_payload_encoding, user_payload}) do
+  # We are not using the metadata for anything just yet.
+  defp build_broadcast(topic, {user_event, user_payload_encoding, user_payload, _metadata}) do
     %RealtimeWeb.Socket.UserBroadcast{
       topic: topic,
       user_event: user_event,

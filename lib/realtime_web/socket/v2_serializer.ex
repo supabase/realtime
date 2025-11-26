@@ -183,21 +183,30 @@ defmodule RealtimeWeb.Socket.V2Serializer do
          ref_size::size(8),
          topic_size::size(8),
          user_event_size::size(8),
+         metadata_size::size(8),
          user_payload_encoding::size(8),
          join_ref::binary-size(join_ref_size),
          ref::binary-size(ref_size),
          topic::binary-size(topic_size),
          user_event::binary-size(user_event_size),
+         metadata::binary-size(metadata_size),
          user_payload::binary
        >>) do
     user_payload_encoding = if user_payload_encoding == 0, do: :binary, else: :json
 
+    metadata =
+      if metadata_size > 0 do
+        Phoenix.json_library().decode!(metadata)
+      else
+        %{}
+      end
+
     # Encoding as Message because that's how Phoenix Socket and Channel.Server expects things to show up
-    # Here we abuse the payload field to carry a tuple of (user_event, user payload encoding, user payload)
+    # Here we abuse the payload field to carry a tuple of (user_event, user payload encoding, user payload, metadata)
     %Message{
       topic: topic,
       event: "broadcast",
-      payload: {user_event, user_payload_encoding, user_payload},
+      payload: {user_event, user_payload_encoding, user_payload, metadata},
       ref: ref,
       join_ref: join_ref
     }
