@@ -40,6 +40,8 @@ defmodule RealtimeWeb.Socket.V2SerializerTest do
     5,
     # user_event_size
     10,
+    # metadata_size
+    0,
     # binary encoding
     0::size(8),
     "12",
@@ -62,6 +64,8 @@ defmodule RealtimeWeb.Socket.V2SerializerTest do
     5,
     # user_event_size
     10,
+    # metadata_size
+    0,
     # json encoding
     1::size(8),
     "12",
@@ -77,6 +81,31 @@ defmodule RealtimeWeb.Socket.V2SerializerTest do
     98,
     34,
     125
+  >>
+
+  @client_binary_user_broadcast_push_with_metadata <<
+    # user broadcast push
+    3::size(8),
+    # join_ref_size
+    2,
+    # ref_size
+    3,
+    # topic_size
+    5,
+    # user_event_size
+    10,
+    # metadata_size
+    14,
+    # binary encoding
+    0::size(8),
+    "12",
+    "123",
+    "topic",
+    "user_event",
+    ~s<{"store":true}>,
+    101,
+    102,
+    103
   >>
 
   @reply <<
@@ -490,13 +519,24 @@ defmodule RealtimeWeb.Socket.V2SerializerTest do
              }
     end
 
+    test "binary user pushed message with metadata" do
+      assert decode!(@serializer, @client_binary_user_broadcast_push_with_metadata, opcode: :binary) ==
+               %Phoenix.Socket.Message{
+                 join_ref: "12",
+                 ref: "123",
+                 topic: "topic",
+                 event: "broadcast",
+                 payload: {"user_event", :binary, <<101, 102, 103>>, %{"store" => true}}
+               }
+    end
+
     test "binary user pushed message" do
       assert decode!(@serializer, @client_binary_user_broadcast_push, opcode: :binary) == %Phoenix.Socket.Message{
                join_ref: "12",
                ref: "123",
                topic: "topic",
                event: "broadcast",
-               payload: {"user_event", :binary, <<101, 102, 103>>}
+               payload: {"user_event", :binary, <<101, 102, 103>>, %{}}
              }
     end
 
@@ -506,7 +546,7 @@ defmodule RealtimeWeb.Socket.V2SerializerTest do
                ref: "123",
                topic: "topic",
                event: "broadcast",
-               payload: {"user_event", :json, "{\"a\":\"b\"}"}
+               payload: {"user_event", :json, "{\"a\":\"b\"}", %{}}
              }
     end
   end

@@ -286,7 +286,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       json_encoded_user_broadcast_payload = Jason.encode!(user_broadcast_payload)
 
       {:reply, :ok, _socket} =
-        BroadcastHandler.handle({"event123", :json, json_encoded_user_broadcast_payload}, db_conn, socket)
+        BroadcastHandler.handle({"event123", :json, json_encoded_user_broadcast_payload, %{}}, db_conn, socket)
 
       topic = "realtime:#{topic}"
       assert_receive {:socket_push, code, data}
@@ -327,7 +327,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       user_broadcast_payload = <<123, 456, 789>>
 
       {:reply, :ok, _socket} =
-        BroadcastHandler.handle({"event123", :binary, user_broadcast_payload}, db_conn, socket)
+        BroadcastHandler.handle({"event123", :binary, user_broadcast_payload, %{}}, db_conn, socket)
 
       topic = "realtime:#{topic}"
 
