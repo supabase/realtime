@@ -94,7 +94,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
                       %{tenant: ^external_id}}
 
-      refute_receive :_
+      refute_receive _
     end
   end
 
