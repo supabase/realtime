@@ -109,6 +109,20 @@ defmodule Realtime.ApiTest do
   describe "update_tenant/2" do
     setup [:create_tenants]
 
+    test "valid data updates the tenant using external_id", %{tenants: [tenant | _]} do
+      update_attrs = %{
+        external_id: tenant.external_id,
+        jwt_secret: "some updated jwt_secret",
+        name: "some updated name"
+      }
+
+      assert {:ok, %Tenant{} = tenant} = Api.update_tenant(tenant.external_id, update_attrs)
+      assert tenant.external_id == tenant.external_id
+
+      assert tenant.jwt_secret == Crypto.encrypt!("some updated jwt_secret")
+      assert tenant.name == "some updated name"
+    end
+
     test "valid data updates the tenant", %{tenants: [tenant | _]} do
       update_attrs = %{
         external_id: tenant.external_id,
@@ -229,14 +243,6 @@ defmodule Realtime.ApiTest do
     test "valid data and no changes to tenant will not refresh cache", %{tenants: [tenant | _]} do
       reject(&Realtime.Tenants.Cache.distributed_invalidate_tenant_cache/1)
       assert {:ok, %Tenant{}} = Api.update_tenant(tenant, %{name: tenant.name})
-    end
-  end
-
-  describe "delete_tenant/1" do
-    test "deletes the tenant" do
-      tenant = tenant_fixture()
-      assert {:ok, %Tenant{}} = Api.delete_tenant(tenant)
-      assert_raise Ecto.NoResultsError, fn -> Api.get_tenant!(tenant.id) end
     end
   end
 

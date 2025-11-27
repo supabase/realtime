@@ -15,7 +15,7 @@ end
 
 {:ok, _pid} = Containers.start_link(max_cases)
 
-for tenant <- Api.list_tenants(), do: Api.delete_tenant(tenant)
+for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.external_id)
 
 tenant_name = "dev_tenant"
 tenant = Containers.initialize(tenant_name)
@@ -53,6 +53,7 @@ Mimic.copy(Realtime.Database)
 Mimic.copy(Realtime.GenCounter)
 Mimic.copy(Realtime.GenRpc)
 Mimic.copy(Realtime.Nodes)
+Mimic.copy(Realtime.Repo.Replica)
 Mimic.copy(Realtime.RateCounter)
 Mimic.copy(Realtime.Tenants.Authorization)
 Mimic.copy(Realtime.Tenants.Cache)

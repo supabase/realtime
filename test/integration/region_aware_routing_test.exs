@@ -49,8 +49,8 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
 
     Mimic.expect(Realtime.GenRpc, :call, fn node, mod, func, args, opts ->
       assert node == master_node
-      assert mod == Realtime.Repo
-      assert func == :insert
+      assert mod == Realtime.Api
+      assert func == :create_tenant
       assert opts[:tenant_id] == external_id
 
       call_original(GenRpc, :call, [node, mod, func, args, opts])
@@ -80,16 +80,16 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
     Realtime.GenRpc
     |> Mimic.expect(:call, fn node, mod, func, args, opts ->
       assert node == master_node
-      assert mod == Realtime.Repo
-      assert func == :insert
+      assert mod == Realtime.Api
+      assert func == :create_tenant
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
       call_original(GenRpc, :call, [node, mod, func, args, opts])
     end)
     |> Mimic.expect(:call, fn node, mod, func, args, opts ->
       assert node == master_node
-      assert mod == Realtime.Repo
-      assert func == :update
+      assert mod == Realtime.Api
+      assert func == :update_tenant
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
       call_original(GenRpc, :call, [node, mod, func, args, opts])
@@ -123,16 +123,16 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
     Realtime.GenRpc
     |> Mimic.expect(:call, fn node, mod, func, args, opts ->
       assert node == master_node
-      assert mod == Realtime.Repo
-      assert func == :insert
+      assert mod == Realtime.Api
+      assert func == :create_tenant
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
       call_original(GenRpc, :call, [node, mod, func, args, opts])
     end)
     |> Mimic.expect(:call, fn node, mod, func, args, opts ->
       assert node == master_node
-      assert mod == Realtime.Repo
-      assert func == :delete_all
+      assert mod == Realtime.Api
+      assert func == :delete_tenant_by_external_id
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
       call_original(GenRpc, :call, [node, mod, func, args, opts])
@@ -164,16 +164,16 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
     Realtime.GenRpc
     |> Mimic.expect(:call, fn node, mod, func, args, opts ->
       assert node == master_node
-      assert mod == Realtime.Repo
-      assert func == :insert
+      assert mod == Realtime.Api
+      assert func == :create_tenant
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
       call_original(GenRpc, :call, [node, mod, func, args, opts])
     end)
     |> Mimic.expect(:call, fn node, mod, func, args, opts ->
       assert node == master_node
-      assert mod == Realtime.Repo
-      assert func == :update!
+      assert mod == Realtime.Api
+      assert func == :update_migrations_ran
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
       call_original(GenRpc, :call, [node, mod, func, args, opts])
@@ -184,7 +184,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
     new_migrations_ran = 5
     result = Api.update_migrations_ran(tenant.external_id, new_migrations_ran)
 
-    assert %Tenant{} = updated = result
+    assert {:ok, updated} = result
     assert updated.migrations_ran == new_migrations_ran
 
     reloaded = Realtime.Repo.get(Tenant, tenant.id)

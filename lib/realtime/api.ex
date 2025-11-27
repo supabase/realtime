@@ -115,9 +115,13 @@ defmodule Realtime.Api do
     Logger.debug("create_tenant #{inspect(attrs, pretty: true)}")
     tenant_id = Map.get(attrs, :external_id) || Map.get(attrs, "external_id")
 
-    %Tenant{}
-    |> Tenant.changeset(attrs)
-    |> region_aware_write(:insert, tenant_id)
+    if master_region?() do
+      %Tenant{}
+      |> Tenant.changeset(attrs)
+      |> Repo.insert()
+    else
+      call(:create_tenant, [attrs], tenant_id)
+    end
   end
 
   @doc """
@@ -132,9 +136,18 @@ defmodule Realtime.Api do
       {:error, %Ecto.Changeset{}}
 
   """
-  def update_tenant(%Tenant{} = tenant, attrs) do
+  @spec update_tenant(binary() | Tenant.t(), map()) :: {:ok, Tenant.t()} | {:error, term()}
+  def update_tenant(tenant_id, attrs) when is_binary(tenant_id) do
+    replica = Replica.replica()
+    tenant = replica.get_by(Tenant, external_id: tenant_id)
+    update_tenant(tenant, attrs)
+  end
+
+  def update_tenant(%Tenant{external_id: external_id} = tenant, attrs) do
     changeset = Tenant.changeset(tenant, attrs)
-    updated = region_aware_write(changeset, :update, tenant.external_id)
+
+    updated =
+      if master_region?(), do: Repo.update(changeset), else: call(:update_tenant, [external_id, attrs], external_id)
 
     case updated do
       {:ok, tenant} ->
@@ -150,38 +163,23 @@ defmodule Realtime.Api do
     updated
   end
 
-  @doc """
-  Deletes a tenant.
-
-  ## Examples
-
-      iex> delete_tenant(tenant)
-      {:ok, %Tenant{}}
-
-      iex> delete_tenant(tenant)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_tenant(%Tenant{} = tenant), do: Repo.delete(tenant)
-
   @spec delete_tenant_by_external_id(String.t()) :: boolean()
   def delete_tenant_by_external_id(id) do
-    from(t in Tenant, where: t.external_id == ^id)
-    |> region_aware_write(:delete_all, id)
-    |> case do
-      {num, _} when num > 0 -> true
-      _ -> false
+    if master_region?() do
+      from(t in Tenant, where: t.external_id == ^id)
+      |> Repo.delete_all()
+      |> case do
+        {num, _} when num > 0 -> true
+        _ -> false
+      end
+    else
+      call(:delete_tenant_by_external_id, [id], id)
     end
   end
 
-  @spec get_tenant_by_external_id(String.t(), atom()) :: Tenant.t() | nil
-  def get_tenant_by_external_id(external_id, repo \\ :replica)
-      when repo in [:primary, :replica] do
-    repo =
-      case repo do
-        :primary -> Repo
-        :replica -> Replica.replica()
-      end
+  @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
+  def get_tenant_by_external_id(external_id) do
+    repo = Replica.replica()
 
     Tenant
     |> repo.get_by(external_id: external_id)
@@ -195,26 +193,36 @@ defmodule Realtime.Api do
   end
 
   def rename_settings_field(from, to) do
-    for extension <- list_extensions("postgres_cdc_rls") do
-      {value, settings} = Map.pop(extension.settings, from)
-      new_settings = Map.put(settings, to, value)
+    if master_region?() do
+      for extension <- list_extensions("postgres_cdc_rls") do
+        {value, settings} = Map.pop(extension.settings, from)
+        new_settings = Map.put(settings, to, value)
 
-      extension
-      |> Changeset.cast(%{settings: new_settings}, [:settings])
-      |> region_aware_write(:update!, extension.external_id)
+        extension
+        |> Changeset.cast(%{settings: new_settings}, [:settings])
+        |> Repo.update()
+      end
+    else
+      call(:rename_settings_field, [from, to], from)
     end
   end
 
+  @spec preload_counters(nil | Realtime.Api.Tenant.t(), any()) :: nil | Realtime.Api.Tenant.t()
   @doc """
   Updates the migrations_ran field for a tenant.
   """
   @spec update_migrations_ran(binary(), integer()) :: {:ok, Tenant.t()} | {:error, term()}
   def update_migrations_ran(external_id, count) do
-    external_id
-    |> Cache.get_tenant_by_external_id()
-    |> Tenant.changeset(%{migrations_ran: count})
-    |> region_aware_write(:update!, external_id)
-    |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
+    if master_region?() do
+      tenant = Cache.get_tenant_by_external_id(external_id)
+
+      tenant
+      |> Tenant.changeset(%{migrations_ran: count})
+      |> Repo.update()
+      |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
+    else
+      call(:update_migrations_ran, [external_id, count], external_id)
+    end
   end
 
   def preload_counters(nil), do: nil
@@ -257,21 +265,13 @@ defmodule Realtime.Api do
 
   defp maybe_restart_db_connection(_changeset), do: nil
 
-  defp local_call? do
+  defp master_region? do
     region = Application.get_env(:realtime, :region)
     master_region = Application.get_env(:realtime, :master_region) || region
     region == master_region
   end
 
-  defp region_aware_write(%struct{} = argument, operation, tenant_id) when struct in [Changeset, Ecto.Query] do
-    if local_call?(),
-      do: local_call(operation, [argument], tenant_id),
-      else: remote_call(operation, [argument], tenant_id)
-  end
-
-  defp local_call(operation, args, _tenant_id), do: apply(Realtime.Repo, operation, args)
-
-  defp remote_call(operation, args, tenant_id) do
+  defp call(operation, args, tenant_id) do
     master_region = Application.get_env(:realtime, :master_region)
 
     with {:ok, master_node} <- Nodes.node_from_region(master_region, self()),
@@ -281,7 +281,7 @@ defmodule Realtime.Api do
   end
 
   defp wrapped_call(master_node, operation, args, tenant_id) do
-    case GenRpc.call(master_node, Realtime.Repo, operation, args, tenant_id: tenant_id) do
+    case GenRpc.call(master_node, __MODULE__, operation, args, tenant_id: tenant_id) do
       {:error, :rpc_error, reason} -> {:error, reason}
       {:error, reason} -> {:error, reason}
       result -> {:ok, result}

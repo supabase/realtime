@@ -192,7 +192,7 @@ defmodule RealtimeWeb.TenantController do
   def delete(conn, %{"tenant_id" => tenant_id}) do
     stop_all_timeout = Enum.count(PostgresCdc.available_drivers()) * 1_000
 
-    with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id, :primary),
+    with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id),
          _ <- Tenants.suspend_tenant_by_external_id(tenant_id),
          true <- Api.delete_tenant_by_external_id(tenant_id),
          true <- Cache.distributed_invalidate_tenant_cache(tenant_id),
