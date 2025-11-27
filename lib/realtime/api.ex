@@ -126,21 +126,16 @@ defmodule Realtime.Api do
 
   @doc """
   Updates a tenant.
-
-  ## Examples
-
-      iex> update_tenant(tenant, %{field: new_value})
-      {:ok, %Tenant{}}
-
-      iex> update_tenant(tenant, %{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
   """
   @spec update_tenant(binary() | Tenant.t(), map()) :: {:ok, Tenant.t()} | {:error, term()}
   def update_tenant(tenant_id, attrs) when is_binary(tenant_id) do
-    replica = Replica.replica()
-    tenant = replica.get_by(Tenant, external_id: tenant_id)
-    update_tenant(tenant, attrs)
+    if master_region?() do
+      tenant_id
+      |> get_tenant_by_external_id(use_replica?: false)
+      |> update_tenant(attrs)
+    else
+      call(:update_tenant, [tenant_id, attrs], tenant_id)
+    end
   end
 
   def update_tenant(%Tenant{external_id: external_id} = tenant, attrs) do
