@@ -93,12 +93,30 @@ defmodule Realtime.ApiTest do
     end
   end
 
-  describe "get_tenant_by_external_id/1" do
+  describe "get_tenant_by_external_id/2" do
     setup [:create_tenants]
 
     test "fetch by external id", %{tenants: [tenant | _]} do
       %Tenant{extensions: [%Extensions{} = extension]} =
         Api.get_tenant_by_external_id(tenant.external_id)
+
+      assert Map.has_key?(extension.settings, "db_password")
+      password = extension.settings["db_password"]
+      assert ^password = "v1QVng3N+pZd/0AEObABwg=="
+    end
+
+    test "fetch by external id using replica", %{tenants: [tenant | _]} do
+      %Tenant{extensions: [%Extensions{} = extension]} =
+        Api.get_tenant_by_external_id(tenant.external_id, use_replica?: true)
+
+      assert Map.has_key?(extension.settings, "db_password")
+      password = extension.settings["db_password"]
+      assert ^password = "v1QVng3N+pZd/0AEObABwg=="
+    end
+
+    test "fetch by external id using no replica", %{tenants: [tenant | _]} do
+      %Tenant{extensions: [%Extensions{} = extension]} =
+        Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
 
       assert Map.has_key?(extension.settings, "db_password")
       password = extension.settings["db_password"]

@@ -20,7 +20,7 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
 
   def call(%Plug.Conn{host: host} = conn, _opts) do
     with {:ok, external_id} <- Database.get_external_id(host),
-         %Tenant{} = tenant <- Api.get_tenant_by_external_id(external_id) do
+         %Tenant{} = tenant <- Api.get_tenant_by_external_id(external_id, use_replica?: true) do
       Logger.metadata(external_id: external_id, project: external_id)
       OpenTelemetry.Tracer.set_attributes(external_id: external_id)
 

@@ -166,24 +166,28 @@ defmodule Realtime.Api do
   @spec delete_tenant_by_external_id(String.t()) :: boolean()
   def delete_tenant_by_external_id(id) do
     if master_region?() do
-      from(t in Tenant, where: t.external_id == ^id)
-      |> Repo.delete_all()
-      |> case do
-        {num, _} when num > 0 -> true
-        _ -> false
-      end
+      query = from(t in Tenant, where: t.external_id == ^id)
+      {num, _} = Repo.delete_all(query)
+      num > 0
     else
       call(:delete_tenant_by_external_id, [id], id)
     end
   end
 
-  @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
-  def get_tenant_by_external_id(external_id) do
-    repo = Replica.replica()
+  @spec get_tenant_by_external_id(String.t(), Keyword.t()) :: Tenant.t() | nil
+  def get_tenant_by_external_id(external_id, opts \\ []) do
+    use_replica? = Keyword.get(opts, :use_replica?, true)
 
-    Tenant
-    |> repo.get_by(external_id: external_id)
-    |> repo.preload(:extensions)
+    cond do
+      use_replica? ->
+        Replica.replica().get_by(Tenant, external_id: external_id) |> Replica.replica().preload(:extensions)
+
+      !use_replica? and master_region?() ->
+        Repo.get_by(Tenant, external_id: external_id) |> Repo.preload(:extensions)
+
+      true ->
+        call(:get_tenant_by_external_id, [external_id, opts], external_id)
+    end
   end
 
   defp list_extensions(type) do
@@ -214,7 +218,7 @@ defmodule Realtime.Api do
   @spec update_migrations_ran(binary(), integer()) :: {:ok, Tenant.t()} | {:error, term()}
   def update_migrations_ran(external_id, count) do
     if master_region?() do
-      tenant = Cache.get_tenant_by_external_id(external_id)
+      tenant = get_tenant_by_external_id(external_id, use_replica?: false)
 
       tenant
       |> Tenant.changeset(%{migrations_ran: count})
