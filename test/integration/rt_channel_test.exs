@@ -2403,8 +2403,8 @@ defmodule Realtime.Integration.RtChannelTest do
       output_bytes = get_count([:realtime, :channel, :output_bytes], tenant.external_id)
       input_bytes = get_count([:realtime, :channel, :input_bytes], tenant.external_id)
 
-      assert output_bytes > 0, "Expected output_bytes to be greater than 0, got #{output_bytes}"
-      assert input_bytes > 0, "Expected input_bytes to be greater than 0, got #{input_bytes}"
+      assert output_bytes > 0
+      assert input_bytes > 0
     end
 
     test "measure traffic for presence events", %{tenant: tenant, serializer: serializer} do
