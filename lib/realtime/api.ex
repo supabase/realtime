@@ -127,22 +127,20 @@ defmodule Realtime.Api do
   @doc """
   Updates a tenant.
   """
-  @spec update_tenant(binary() | Tenant.t(), map()) :: {:ok, Tenant.t()} | {:error, term()}
-  def update_tenant(tenant_id, attrs) when is_binary(tenant_id) do
+  @spec update_tenant_by_external_id(binary(), map()) :: {:ok, Tenant.t()} | {:error, term()}
+  def update_tenant_by_external_id(tenant_id, attrs) when is_binary(tenant_id) do
     if master_region?() do
       tenant_id
       |> get_tenant_by_external_id(use_replica?: false)
       |> update_tenant(attrs)
     else
-      call(:update_tenant, [tenant_id, attrs], tenant_id)
+      call(:update_tenant_by_external_id, [tenant_id, attrs], tenant_id)
     end
   end
 
-  def update_tenant(%Tenant{external_id: external_id} = tenant, attrs) do
+  defp update_tenant(%Tenant{} = tenant, attrs) do
     changeset = Tenant.changeset(tenant, attrs)
-
-    updated =
-      if master_region?(), do: Repo.update(changeset), else: call(:update_tenant, [external_id, attrs], external_id)
+    updated = Repo.update(changeset)
 
     case updated do
       {:ok, tenant} ->

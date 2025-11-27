@@ -1623,9 +1623,8 @@ defmodule Realtime.Integration.RtChannelTest do
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
-      tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
-      Realtime.Api.update_tenant(tenant, %{jwt_jwks: %{keys: ["potato"]}})
 
+      Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: %{keys: ["potato"]}})
       assert_process_down(socket)
     end
 
@@ -1643,9 +1642,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
-      Realtime.Api.update_tenant(tenant, %{jwt_secret: "potato"})
-
+      Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "potato"})
       assert_process_down(socket)
     end
 
@@ -1663,9 +1660,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
-      Realtime.Api.update_tenant(tenant, %{private_only: true})
-
+      Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{private_only: true})
       assert_process_down(socket)
     end
 
@@ -1683,8 +1678,7 @@ defmodule Realtime.Integration.RtChannelTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
       assert_receive %Message{event: "presence_state"}, 500
 
-      tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
-      Realtime.Api.update_tenant(tenant, %{max_concurrent_users: 100})
+      Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{max_concurrent_users: 100})
 
       refute_receive %Message{
                        topic: ^realtime_topic,

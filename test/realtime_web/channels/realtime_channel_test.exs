@@ -1258,7 +1258,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       put_in(extension, ["settings", "db_port"], db_port)
     ]
 
-    with {:ok, tenant} <- Realtime.Api.update_tenant(tenant, %{extensions: extensions}) do
+    with {:ok, tenant} <- Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions}) do
       Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
       {:ok, tenant}
     end

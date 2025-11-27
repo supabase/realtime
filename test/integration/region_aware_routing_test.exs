@@ -89,7 +89,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
     |> Mimic.expect(:call, fn node, mod, func, args, opts ->
       assert node == master_node
       assert mod == Realtime.Api
-      assert func == :update_tenant
+      assert func == :update_tenant_by_external_id
       assert opts[:tenant_id] == tenant_attrs["external_id"]
 
       call_original(GenRpc, :call, [node, mod, func, args, opts])
@@ -98,7 +98,7 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
     tenant = tenant_fixture(tenant_attrs)
 
     new_name = "updated_via_routing"
-    result = Api.update_tenant(tenant, %{name: new_name})
+    result = Api.update_tenant_by_external_id(tenant.external_id, %{name: new_name})
 
     assert {:ok, %Tenant{} = updated} = result
     assert updated.name == new_name

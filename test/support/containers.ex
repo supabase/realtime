@@ -223,7 +223,7 @@ defmodule Containers do
               # Avoiding to use Tenants.update_migrations_ran/2 because it touches Cachex and it doesn't play well with
               # Ecto Sandbox
               :ok = Migrations.create_partitions(conn)
-              {:ok, tenant} = Realtime.Api.update_tenant(tenant, %{migrations_ran: count})
+              {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{migrations_ran: count})
               tenant
 
             error ->

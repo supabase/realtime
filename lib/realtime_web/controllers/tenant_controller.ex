@@ -160,7 +160,7 @@ defmodule RealtimeWeb.TenantController do
         end
 
       tenant ->
-        with {:ok, %Tenant{} = tenant} <- Api.update_tenant(tenant, tenant_params) do
+        with {:ok, %Tenant{} = tenant} <- Api.update_tenant_by_external_id(tenant.external_id, tenant_params) do
           conn
           |> put_status(:ok)
           |> put_resp_header("location", Routes.tenant_path(conn, :show, tenant))

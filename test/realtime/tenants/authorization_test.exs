@@ -320,7 +320,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
     extensions = [Map.from_struct(%{extension | :settings => settings})]
 
-    {:ok, tenant} = Realtime.Api.update_tenant(tenant, %{extensions: extensions})
+    {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
 
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
     Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
