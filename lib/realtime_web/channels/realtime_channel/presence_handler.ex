@@ -101,7 +101,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   defp handle_presence_event("untrack", _, _, socket) do
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
     :ok = Presence.untrack(self(), tenant_topic, presence_key)
-    {:ok, socket}
+    {:ok, assign(socket, :presence_track_payload, nil)}
   end
 
   defp handle_presence_event(event, _, _, _) do
@@ -113,18 +113,31 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
     payload = Map.get(payload, "payload", %{})
 
-    with tenant <- Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant),
+    with :ok <- check_track_payload(socket.assigns, payload),
+         tenant <- Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant),
          :ok <- validate_payload_size(tenant, payload),
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
          :ok <- limit_presence_event(socket),
          {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload) do
-      socket = assign(socket, :presence_enabled?, true)
+      socket =
+        socket
+        |> assign(:presence_enabled?, true)
+        |> assign(:presence_track_payload, payload)
+
       {:ok, socket}
     else
+      {:error, :no_payload_change} ->
+        # no-op if payload hasn't changed
+        {:ok, socket}
+
       {:error, {:already_tracked, pid, _, _}} ->
         case Presence.update(pid, tenant_topic, presence_key, payload) do
-          {:ok, _} -> {:ok, socket}
-          {:error, _} -> {:error, :unable_to_track_presence}
+          {:ok, _} ->
+            socket = assign(socket, :presence_track_payload, payload)
+            {:ok, socket}
+
+          {:error, _} ->
+            {:error, :unable_to_track_presence}
         end
 
       {:error, :rate_limit_exceeded} ->
@@ -136,6 +149,14 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
       {:error, error} ->
         log_error("UnableToTrackPresence", error)
         {:error, :unable_to_track_presence}
+    end
+  end
+
+  defp check_track_payload(assigns, new_payload) do
+    if assigns[:presence_track_payload] != new_payload do
+      :ok
+    else
+      {:error, :no_payload_change}
     end
   end
 

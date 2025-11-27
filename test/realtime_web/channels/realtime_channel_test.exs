@@ -519,6 +519,40 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                      },
                      500
     end
+
+    test "presence track with same payload does nothing", %{tenant: tenant} do
+      topic = "realtime:test"
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, topic, %{config: %{presence: %{enabled: true, key: "my_key"}}})
+
+      assert_receive %Phoenix.Socket.Message{topic: "realtime:test", event: "presence_state"}, 500
+
+      payload = %{type: "presence", event: "TRACK", payload: %{"hello" => "world"}}
+
+      push(socket, "presence", payload)
+
+      assert_receive %Socket.Reply{payload: %{}, topic: "realtime:test", status: :ok}, 500
+
+      assert_receive %Socket.Message{
+                       payload: %{
+                         joins: %{"my_key" => %{metas: [%{:phx_ref => _, "hello" => "world"}]}},
+                         leaves: %{}
+                       },
+                       topic: "realtime:test",
+                       event: "presence_diff"
+                     },
+                     500
+
+      push(socket, "presence", payload)
+
+      assert_receive %Socket.Reply{payload: %{}, topic: "realtime:test", status: :ok}, 500
+      # no presence_diff this time
+
+      refute_receive _any
+    end
   end
 
   describe "unexpected errors" do

@@ -157,7 +157,64 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert_receive {:telemetry, [:realtime, :tenants, :payload, :size], %{size: 55},
                       %{tenant: ^external_id, message_type: :presence}}
 
-      refute_receive :_
+      refute_receive _
+    end
+
+    test "tracking the same payload does nothing", %{tenant: tenant, topic: topic, db_conn: db_conn} do
+      external_id = tenant.external_id
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies)
+
+      assert {:ok, socket} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, db_conn, socket)
+
+      assert_receive {:telemetry, [:realtime, :tenants, :payload, :size], %{size: 18},
+                      %{tenant: ^external_id, message_type: :presence}}
+
+      topic = socket.assigns.tenant_topic
+      assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
+      assert Map.has_key?(joins, key)
+
+      assert {:ok, _socket} =
+               PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, db_conn, socket)
+
+      refute_receive _
+    end
+
+    test "tracking, untracking and then tracking the same payload emit events", context do
+      %{tenant: tenant, topic: topic, db_conn: db_conn} = context
+      external_id = tenant.external_id
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies)
+
+      assert {:ok, socket} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, db_conn, socket)
+      assert socket.assigns.presence_track_payload == %{"a" => "b"}
+
+      assert_receive {:telemetry, [:realtime, :tenants, :payload, :size], %{size: 18},
+                      %{tenant: ^external_id, message_type: :presence}}
+
+      topic = socket.assigns.tenant_topic
+      assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
+      assert %{^key => %{metas: [%{:phx_ref => _, "a" => "b"}]}} = joins
+
+      assert {:ok, socket} = PresenceHandler.handle(%{"event" => "untrack"}, db_conn, socket)
+      assert socket.assigns.presence_track_payload == nil
+
+      assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: %{}, leaves: leaves}}
+      assert %{^key => %{metas: [%{:phx_ref => _, "a" => "b"}]}} = leaves
+
+      assert {:ok, socket} = PresenceHandler.handle(%{"event" => "track", "payload" => %{"a" => "b"}}, db_conn, socket)
+
+      assert socket.assigns.presence_track_payload == %{"a" => "b"}
+
+      assert_receive %Broadcast{topic: ^topic, event: "presence_diff", payload: %{joins: joins, leaves: %{}}}
+      assert %{^key => %{metas: [%{:phx_ref => _, "a" => "b"}]}} = joins
+
+      assert_receive {:telemetry, [:realtime, :tenants, :payload, :size], %{size: 18},
+                      %{tenant: ^external_id, message_type: :presence}}
+
+      refute_receive _
     end
 
     test "with false policy and is public, user can track their presence and changes", %{tenant: tenant, topic: topic} do
