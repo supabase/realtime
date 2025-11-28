@@ -100,14 +100,14 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
   end
 
   describe "handle/3" do
-    setup do
+    setup %{tenant: tenant} do
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
       :telemetry.attach(
         __MODULE__,
         [:realtime, :tenants, :payload, :size],
         &__MODULE__.handle_telemetry/4,
-        pid: self()
+        %{pid: self(), tenant: tenant}
       )
     end
 
@@ -613,5 +613,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     }
   end
 
-  def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {:telemetry, event, measures, metadata})
+  def handle_telemetry(event, measures, metadata, %{pid: pid, tenant: tenant}) do
+    if metadata[:tenant] == tenant.external_id do
+      send(pid, {:telemetry, event, measures, metadata})
+    end
+  end
 end
