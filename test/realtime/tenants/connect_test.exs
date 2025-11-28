@@ -658,6 +658,6 @@ defmodule Realtime.Tenants.ConnectTest do
       put_in(extension, ["settings", "db_port"], db_port)
     ]
 
-    Realtime.Api.update_tenant(tenant, %{extensions: extensions})
+    Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
   end
 end

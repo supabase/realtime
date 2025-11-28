@@ -137,7 +137,7 @@ defmodule RealtimeWeb.TenantController do
   )
 
   def update(conn, %{"tenant_id" => external_id, "tenant" => tenant_params}) do
-    tenant = Api.get_tenant_by_external_id(external_id)
+    tenant = Api.get_tenant_by_external_id(external_id, use_replica?: false)
 
     case tenant do
       nil ->
@@ -160,7 +160,7 @@ defmodule RealtimeWeb.TenantController do
         end
 
       tenant ->
-        with {:ok, %Tenant{} = tenant} <- Api.update_tenant(tenant, tenant_params) do
+        with {:ok, %Tenant{} = tenant} <- Api.update_tenant_by_external_id(tenant.external_id, tenant_params) do
           conn
           |> put_status(:ok)
           |> put_resp_header("location", Routes.tenant_path(conn, :show, tenant))
@@ -192,7 +192,7 @@ defmodule RealtimeWeb.TenantController do
   def delete(conn, %{"tenant_id" => tenant_id}) do
     stop_all_timeout = Enum.count(PostgresCdc.available_drivers()) * 1_000
 
-    with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id, :primary),
+    with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id, use_replica: false),
          _ <- Tenants.suspend_tenant_by_external_id(tenant_id),
          true <- Api.delete_tenant_by_external_id(tenant_id),
          true <- Cache.distributed_invalidate_tenant_cache(tenant_id),
@@ -231,7 +231,7 @@ defmodule RealtimeWeb.TenantController do
   )
 
   def reload(conn, %{"tenant_id" => tenant_id}) do
-    case Tenants.get_tenant_by_external_id(tenant_id) do
+    case Api.get_tenant_by_external_id(tenant_id, use_replica?: false) do
       nil ->
         log_error("TenantNotFound", "Tenant not found")
 

@@ -458,8 +458,7 @@ defmodule Realtime.Tenants do
   @spec suspend_tenant_by_external_id(String.t()) :: {:ok, Tenant.t()} | {:error, term()}
   def suspend_tenant_by_external_id(external_id) do
     external_id
-    |> Cache.get_tenant_by_external_id()
-    |> Api.update_tenant(%{suspend: true})
+    |> Api.update_tenant_by_external_id(%{suspend: true})
     |> tap(fn _ -> broadcast_operation_event(:suspend_tenant, external_id) end)
   end
 
@@ -469,8 +468,7 @@ defmodule Realtime.Tenants do
   @spec unsuspend_tenant_by_external_id(String.t()) :: {:ok, Tenant.t()} | {:error, term()}
   def unsuspend_tenant_by_external_id(external_id) do
     external_id
-    |> Cache.get_tenant_by_external_id()
-    |> Api.update_tenant(%{suspend: false})
+    |> Api.update_tenant_by_external_id(%{suspend: false})
     |> tap(fn _ -> broadcast_operation_event(:unsuspend_tenant, external_id) end)
   end
 

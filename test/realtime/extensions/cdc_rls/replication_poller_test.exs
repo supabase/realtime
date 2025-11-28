@@ -37,9 +37,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       tenant = Containers.checkout_tenant(run_migrations: true)
 
-      {:ok, tenant} =
-        Realtime.Api.get_tenant_by_external_id(tenant.external_id)
-        |> Realtime.Api.update_tenant(%{"max_events_per_second" => 123})
+      {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{"max_events_per_second" => 123})
 
       subscribers_pids_table = :ets.new(__MODULE__, [:public, :bag])
       subscribers_nodes_table = :ets.new(__MODULE__, [:public, :set])

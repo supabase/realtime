@@ -47,9 +47,7 @@ defmodule RealtimeWeb.Plugs.RateLimiterTest do
   end
 
   test "serve a 200 when rate limit is set to 100", %{conn: conn} do
-    {:ok, _tenant} =
-      Api.get_tenant_by_external_id(@tenant["external_id"])
-      |> Api.update_tenant(%{"max_events_per_second" => 100})
+    {:ok, _tenant} = Api.update_tenant_by_external_id(@tenant["external_id"], %{"max_events_per_second" => 100})
 
     conn =
       conn
