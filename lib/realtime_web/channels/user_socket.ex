@@ -4,29 +4,23 @@ defmodule RealtimeWeb.UserSocket do
   @impl true
   def init(state) when is_tuple(state) do
     Process.flag(:max_heap_size, max_heap_size())
-    ref = Process.send_after(self(), :measure_traffic, measure_traffic_interval_in_ms())
-
-    {channel, socket} = state
-    socket = Phoenix.Socket.assign(socket, :measure_traffic_ref, ref)
-    Phoenix.Socket.__init__({channel, socket})
+    Process.send_after(self(), {:measure_traffic, 0, 0}, measure_traffic_interval_in_ms())
+    Phoenix.Socket.__init__(state)
   end
 
   @impl true
-  def handle_info(:measure_traffic, {channels, %{assigns: assigns} = socket}) do
-    ref = Map.get(assigns, :measure_traffic_ref)
+  def handle_info(
+        {:measure_traffic, previous_recv, previous_send},
+        {_, %{assigns: assigns, transport_pid: transport_pid}} = state
+      ) do
     tenant_external_id = Map.get(assigns, :tenant)
-    prev_bytes = Map.get(assigns, :prev_traffic_bytes, %{send_oct: 0, recv_oct: 0})
-    prev_bytes = collect_traffic_telemetry(socket.transport_pid, tenant_external_id, prev_bytes)
 
-    Process.cancel_timer(ref)
-    ref = Process.send_after(self(), :measure_traffic, measure_traffic_interval_in_ms())
+    %{send_delta: send_delta, recv_delta: recv_delta} =
+      collect_traffic_telemetry(transport_pid, tenant_external_id, previous_recv, previous_send)
 
-    socket =
-      socket
-      |> Phoenix.Socket.assign(:measure_traffic_ref, ref)
-      |> Phoenix.Socket.assign(:prev_traffic_bytes, prev_bytes)
+    Process.send_after(self(), {:measure_traffic, recv_delta, send_delta}, measure_traffic_interval_in_ms())
 
-    {:ok, {channels, socket}}
+    {:ok, state}
   end
 
   use Phoenix.Socket
@@ -168,37 +162,30 @@ defmodule RealtimeWeb.UserSocket do
   defp max_heap_size(), do: Application.fetch_env!(:realtime, :websocket_max_heap_size)
   defp measure_traffic_interval_in_ms(), do: Application.fetch_env!(:realtime, :measure_traffic_interval_in_ms)
 
-  defp collect_traffic_telemetry(nil, _tenant_external_id, prev_bytes), do: prev_bytes
+  defp collect_traffic_telemetry(nil, _tenant_external_id, _previous_recv, _previous_send), do: 0
 
-  defp collect_traffic_telemetry(transport_pid, tenant_external_id, prev_bytes) do
+  defp collect_traffic_telemetry(transport_pid, tenant_external_id, previous_recv, previous_send) do
     transport_pid
     |> Process.info(:links)
     |> then(fn {:links, links} -> links end)
-    |> Enum.reduce(
-      prev_bytes,
-      fn link, acc when is_port(link) ->
-        case :inet.getstat(link, [:send_oct, :recv_oct]) do
-          {:ok, stats} ->
-            send_oct = Keyword.get(stats, :send_oct, 0)
-            recv_oct = Keyword.get(stats, :recv_oct, 0)
+    |> Enum.filter(&is_port/1)
+    |> Enum.reduce(%{send_delta: 0, recv_delta: 0}, fn link, acc ->
+      case :inet.getstat(link, [:send_oct, :recv_oct]) do
+        {:ok, stats} ->
+          send_oct = Keyword.get(stats, :send_oct, 0)
+          recv_oct = Keyword.get(stats, :recv_oct, 0)
 
-            prev_send = Map.get(acc, :send_oct, 0)
-            prev_recv = Map.get(acc, :recv_oct, 0)
+          send_delta = max(0, send_oct - previous_send)
+          recv_delta = max(0, recv_oct - previous_recv)
 
-            send_delta = max(0, send_oct - prev_send)
-            recv_delta = max(0, recv_oct - prev_recv)
+          :telemetry.execute([:realtime, :channel, :output_bytes], %{size: send_delta}, %{tenant: tenant_external_id})
+          :telemetry.execute([:realtime, :channel, :input_bytes], %{size: recv_delta}, %{tenant: tenant_external_id})
 
-            :telemetry.execute([:realtime, :channel, :output_bytes], %{size: send_delta}, %{tenant: tenant_external_id})
-            :telemetry.execute([:realtime, :channel, :input_bytes], %{size: recv_delta}, %{tenant: tenant_external_id})
+          %{send_delta: send_delta, recv_delta: recv_delta}
 
-            %{send_oct: send_oct, recv_oct: recv_oct}
-
-          {:error, _} ->
-            acc
-        end
-
-        fn _, acc -> acc end
+        {:error, _} ->
+          acc
       end
-    )
+    end)
   end
 end
