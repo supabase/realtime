@@ -37,7 +37,7 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
         )
 
       Process.sleep(200)
-      assert metric_value(~r/phoenix_connections_total\s(?<number>\d+)/) >= 2
+      assert metric_value("phoenix_connections_total") >= 2
     end
   end
 
@@ -63,27 +63,34 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
 
       Process.sleep(200)
 
-      assert metric_value(
-               ~r/phoenix_socket_connected_duration_milliseconds_count{endpoint="RealtimeWeb.Endpoint",result="ok",serializer="Elixir.Phoenix.Socket.V1.JSONSerializer",transport="websocket"}\s(?<number>\d+)/
-             ) == 1
+      assert metric_value("phoenix_socket_connected_duration_milliseconds_count",
+               endpoint: "RealtimeWeb.Endpoint",
+               result: "ok",
+               serializer: "Elixir.Phoenix.Socket.V1.JSONSerializer",
+               transport: "websocket"
+             ) ==
+               1
 
-      assert metric_value(
-               ~r/phoenix_socket_connected_duration_milliseconds_count{endpoint="RealtimeWeb.Endpoint",result="ok",serializer="Elixir.RealtimeWeb.Socket.V2Serializer",transport="websocket"}\s(?<number>\d+)/
-             ) == 1
+      assert metric_value("phoenix_socket_connected_duration_milliseconds_count",
+               endpoint: "RealtimeWeb.Endpoint",
+               result: "ok",
+               serializer: "Elixir.RealtimeWeb.Socket.V2Serializer",
+               transport: "websocket"
+             ) ==
+               1
     end
   end
 
-  defp metric_value(pattern) do
+  defp metric_value(metric, expected_tags \\ nil) do
     PromEx.get_metrics(MetricsTest)
     |> IO.iodata_to_binary()
     |> String.split("\n", trim: true)
-    |> IO.inspect()
     |> Enum.find_value(
       "0",
       fn item ->
-        case Regex.run(pattern, item, capture: ["number"]) do
-          [number] -> number
-          _ -> false
+        case MetricParser.parse(item, metric, expected_tags) do
+          {:ok, value} -> value
+          {:error, _reason} -> false
         end
       end
     )
