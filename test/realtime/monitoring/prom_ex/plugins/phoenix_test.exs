@@ -11,8 +11,12 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
     end
   end
 
-  setup do
+  setup_all do
     start_supervised!(MetricsTest)
+    :ok
+  end
+
+  setup do
     %{tenant: Containers.checkout_tenant(run_migrations: true)}
   end
 
@@ -82,18 +86,6 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
   end
 
   defp metric_value(metric, expected_tags \\ nil) do
-    PromEx.get_metrics(MetricsTest)
-    |> IO.iodata_to_binary()
-    |> String.split("\n", trim: true)
-    |> Enum.find_value(
-      "0",
-      fn item ->
-        case MetricParser.parse(item, metric, expected_tags) do
-          {:ok, value} -> value
-          {:error, _reason} -> false
-        end
-      end
-    )
-    |> String.to_integer()
+    MetricsHelper.search(PromEx.get_metrics(MetricsTest), metric, expected_tags)
   end
 end
