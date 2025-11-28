@@ -30,6 +30,9 @@ config :realtime, RealtimeWeb.Endpoint,
   http: [port: 4002],
   server: true
 
+# that's what config/runtime.exs expects to see as region
+System.put_env("REGION", "us-east-1")
+
 config :realtime,
   regional_broadcasting: true,
   region: "us-east-1",

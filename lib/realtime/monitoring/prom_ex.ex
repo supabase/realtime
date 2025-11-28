@@ -1,5 +1,4 @@
 defmodule Realtime.PromEx do
-  alias Realtime.Nodes
   alias Realtime.PromEx.Plugins.Channels
   alias Realtime.PromEx.Plugins.Distributed
   alias Realtime.PromEx.Plugins.GenRpc
@@ -65,6 +64,29 @@ defmodule Realtime.PromEx do
 
   alias PromEx.Plugins
 
+  defmodule Store do
+    @moduledoc false
+    # Custom store to set global tags and striped storage
+
+    @behaviour PromEx.Storage
+
+    @impl true
+    def scrape(name) do
+      Peep.get_all_metrics(name)
+      |> Peep.Prometheus.export()
+    end
+
+    @impl true
+    def child_spec(name, metrics) do
+      Peep.child_spec(
+        name: name,
+        metrics: metrics,
+        global_tags: Application.get_env(:realtime, :metrics_tags, %{}),
+        storage: :striped
+      )
+    end
+  end
+
   @impl true
   def plugins do
     poll_rate = Application.get_env(:realtime, :prom_poll_rate)
@@ -105,28 +127,7 @@ defmodule Realtime.PromEx do
   end
 
   def get_metrics do
-    %{
-      region: region,
-      node_host: node_host,
-      short_alloc_id: short_alloc_id
-    } = get_metrics_tags()
-
-    def_tags = "host=\"#{node_host}\",region=\"#{region}\",id=\"#{short_alloc_id}\""
-
-    metrics =
-      PromEx.get_metrics(Realtime.PromEx)
-      |> String.split("\n")
-      |> Enum.map_join("\n", fn line ->
-        case Regex.run(~r/(?!\#)^(\w+)(?:{(.*?)})?\s*(.+)$/, line) do
-          nil ->
-            line
-
-          [_, key, tags, value] ->
-            tags = if tags == "", do: def_tags, else: tags <> "," <> def_tags
-
-            "#{key}{#{tags}} #{value}"
-        end
-      end)
+    metrics = PromEx.get_metrics(Realtime.PromEx)
 
     Realtime.PromEx.__ets_cron_flusher_name__()
     |> PromEx.ETSCronFlusher.defer_ets_flush()
@@ -139,21 +140,5 @@ defmodule Realtime.PromEx do
   def get_compressed_metrics do
     get_metrics()
     |> :zlib.compress()
-  end
-
-  def set_metrics_tags do
-    [_, node_host] = node() |> Atom.to_string() |> String.split("@")
-
-    metrics_tags = %{
-      region: Application.get_env(:realtime, :region),
-      node_host: node_host,
-      short_alloc_id: Nodes.short_node_id_from_name(node())
-    }
-
-    Application.put_env(:realtime, :metrics_tags, metrics_tags)
-  end
-
-  def get_metrics_tags do
-    Application.get_env(:realtime, :metrics_tags)
   end
 end

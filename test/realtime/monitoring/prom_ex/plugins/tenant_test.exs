@@ -1,18 +1,25 @@
+defmodule Realtime.PromEx.Plugins.TenantTest.MetricsTest do
+  use PromEx, otp_app: :realtime_test_phoenix
+  alias Realtime.PromEx.Plugins.Tenant
+
+  @impl true
+  def plugins, do: [{Tenant, poll_rate: 50}]
+end
+
 defmodule Realtime.PromEx.Plugins.TenantTest do
-  alias Realtime.Tenants.Authorization.Policies
   use Realtime.DataCase, async: false
 
   alias Realtime.PromEx.Plugins.Tenant
+  alias Realtime.PromEx.Plugins.TenantTest.MetricsTest
   alias Realtime.Rpc
-  alias Realtime.UsersCounter
-  alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.UsersCounter
 
-  defmodule MetricsTest do
-    use PromEx, otp_app: :realtime_test_phoenix
-
-    @impl true
-    def plugins, do: [{Tenant, poll_rate: 50}]
+  setup_all do
+    start_supervised!(MetricsTest)
+    :ok
   end
 
   def handle_telemetry(event, metadata, content, pid: pid), do: send(pid, {event, metadata, content})
@@ -57,8 +64,10 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                   Realtime.Telemetry.execute(
                     [:realtime, :tenants, :broadcast_from_database],
                     %{
-                      latency_committed_at: 10,
-                      latency_inserted_at: 10
+                      # millisecond
+                      latency_committed_at: 9,
+                      # microsecond
+                      latency_inserted_at: 9000
                     },
                     %{tenant: external_id}
                   )
@@ -112,8 +121,6 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
           headers: [{"header-1", "value-1"}],
           role: "anon"
         })
-
-      start_supervised!(MetricsTest)
 
       %{authorization_context: authorization_context, db_conn: db_conn, tenant: tenant}
     end
@@ -198,7 +205,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
 
       bucket_pattern =
-        ~r/realtime_tenants_read_authorization_check_bucket{tenant="#{context.tenant.external_id}",le="250"}\s(?<number>\d+)/
+        ~r/realtime_tenants_read_authorization_check_bucket{tenant="#{context.tenant.external_id}",le="250.0"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
@@ -222,7 +229,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
 
       bucket_pattern =
-        ~r/realtime_tenants_write_authorization_check_bucket{tenant="#{context.tenant.external_id}",le="250"}\s(?<number>\d+)/
+        ~r/realtime_tenants_write_authorization_check_bucket{tenant="#{context.tenant.external_id}",le="250.0"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
@@ -243,7 +250,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
 
       bucket_pattern =
-        ~r/realtime_tenants_replay_bucket{tenant="#{external_id}",le="250"}\s(?<number>\d+)/
+        ~r/realtime_tenants_replay_bucket{tenant="#{external_id}",le="250.0"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
@@ -258,7 +265,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
 
       bucket_pattern =
-        ~r/realtime_tenants_broadcast_from_database_latency_committed_at_bucket{tenant="#{context.tenant.external_id}",le="10"}\s(?<number>\d+)/
+        ~r/realtime_tenants_broadcast_from_database_latency_committed_at_bucket{tenant="#{context.tenant.external_id}",le="10.0"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
@@ -274,7 +281,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
 
       bucket_pattern =
-        ~r/realtime_tenants_broadcast_from_database_latency_inserted_at_bucket{tenant="#{context.tenant.external_id}",le="10"}\s(?<number>\d+)/
+        ~r/realtime_tenants_broadcast_from_database_latency_inserted_at_bucket{tenant="#{context.tenant.external_id}",le="10.0"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
@@ -294,7 +301,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       assert metric_value(pattern) == metric_value + 1
 
       bucket_pattern =
-        ~r/realtime_tenants_payload_size_bucket{message_type=\"presence\",tenant="#{external_id}",le="250"}\s(?<number>\d+)/
+        ~r/realtime_tenants_payload_size_bucket{message_type=\"presence\",tenant="#{external_id}",le="250.0"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end
@@ -312,7 +319,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       Process.sleep(200)
       assert metric_value(pattern) == metric_value + 1
 
-      bucket_pattern = ~r/realtime_payload_size_bucket{message_type=\"broadcast\",le="250"}\s(?<number>\d+)/
+      bucket_pattern = ~r/realtime_payload_size_bucket{message_type=\"broadcast\",le="250.0"}\s(?<number>\d+)/
 
       assert metric_value(bucket_pattern) > 0
     end

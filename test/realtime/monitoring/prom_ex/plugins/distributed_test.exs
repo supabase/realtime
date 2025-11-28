@@ -25,6 +25,7 @@ defmodule Realtime.PromEx.Plugins.DistributedTest do
     setup do
       metrics =
         PromEx.get_metrics(MetricsTest)
+        |> IO.iodata_to_binary()
         |> String.split("\n", trim: true)
 
       %{metrics: metrics}

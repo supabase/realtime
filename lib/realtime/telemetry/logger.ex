@@ -29,12 +29,6 @@ defmodule Realtime.Telemetry.Logger do
   Logs billing metrics for a tenant aggregated and emitted by a PromEx metric poller.
   """
 
-  def handle_event(event, measurements, %{tenant: tenant}, _config) do
-    meta = %{project: tenant, measurements: measurements}
-    Logger.info(["Billing metrics: ", inspect(event)], meta)
-    :ok
-  end
-
   def handle_event(_event, _measurements, _metadata, _config) do
     :ok
   end

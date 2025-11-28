@@ -75,7 +75,9 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
 
   defp metric_value(pattern) do
     PromEx.get_metrics(MetricsTest)
+    |> IO.iodata_to_binary()
     |> String.split("\n", trim: true)
+    |> IO.inspect()
     |> Enum.find_value(
       "0",
       fn item ->

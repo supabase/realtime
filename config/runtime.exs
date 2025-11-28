@@ -33,6 +33,7 @@ queue_target = Env.get_integer("DB_QUEUE_TARGET", 5000)
 queue_interval = Env.get_integer("DB_QUEUE_INTERVAL", 5000)
 pool_size = Env.get_integer("DB_POOL_SIZE", 5)
 master_region = System.get_env("DB_MASTER_REGION")
+region = System.get_env("REGION")
 
 after_connect_query_args =
   case System.get_env("DB_AFTER_CONNECT_QUERY") do
@@ -94,6 +95,14 @@ socket_options =
       end
   end
 
+[_, node_host] = node() |> Atom.to_string() |> String.split("@")
+
+metrics_tags = %{
+  region: region,
+  host: node_host,
+  id: Realtime.Nodes.short_node_id_from_name(node())
+}
+
 config :realtime, Realtime.Repo,
   hostname: default_db_host,
   username: username,
@@ -130,7 +139,8 @@ config :realtime,
   users_scope_shards: users_scope_shards,
   postgres_cdc_scope_shards: postgres_cdc_scope_shards,
   regional_broadcasting: regional_broadcasting,
-  master_region: master_region
+  master_region: master_region,
+  metrics_tags: metrics_tags
 
 if config_env() != :test && run_janitor? do
   config :realtime,
@@ -280,7 +290,7 @@ if config_env() != :test do
     metrics_blocklist: System.get_env("METRICS_TOKEN_BLOCKLIST", "") |> String.split(","),
     metrics_jwt_secret: System.get_env("METRICS_JWT_SECRET"),
     db_enc_key: System.get_env("DB_ENC_KEY"),
-    region: System.get_env("REGION"),
+    region: region,
     prom_poll_rate: Env.get_integer("PROM_POLL_RATE", 5000),
     slot_name_suffix: slot_name_suffix
 end

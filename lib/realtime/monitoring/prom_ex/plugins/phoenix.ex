@@ -66,6 +66,11 @@ if Code.ensure_loaded?(Phoenix) do
       :telemetry.execute(@event_all_connections, %{active: active_conn}, %{})
     end
 
+    defmodule Buckets do
+      @moduledoc false
+      use Peep.Buckets.Custom, buckets: [10, 100, 500, 1_000, 5_000, 10_000]
+    end
+
     defp channel_events(metric_prefix) do
       Event.build(
         :phoenix_channel_event_metrics,
@@ -94,9 +99,7 @@ if Code.ensure_loaded?(Phoenix) do
             event_name: [:phoenix, :channel_handled_in],
             measurement: :duration,
             description: "The time it takes for the application to respond to channel messages.",
-            reporter_options: [
-              buckets: [10, 100, 500, 1_000, 5_000, 10_000]
-            ],
+            reporter_options: [peep_bucket_calculator: Buckets],
             tag_values: fn %{socket: %Socket{endpoint: endpoint}} ->
               %{
                 endpoint: normalize_module_name(endpoint)
@@ -119,9 +122,7 @@ if Code.ensure_loaded?(Phoenix) do
             event_name: [:phoenix, :socket_connected],
             measurement: :duration,
             description: "The time it takes for the application to establish a socket connection.",
-            reporter_options: [
-              buckets: [10, 100, 500, 1_000, 5_000, 10_000]
-            ],
+            reporter_options: [peep_bucket_calculator: Buckets],
             tag_values: fn %{result: result, endpoint: endpoint, transport: transport, serializer: serializer} ->
               %{
                 transport: transport,

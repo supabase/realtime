@@ -8,11 +8,9 @@ defmodule Realtime.MetricsCleanerTest do
   setup do
     interval = Application.get_env(:realtime, :metrics_cleaner_schedule_timer_in_ms)
     Application.put_env(:realtime, :metrics_cleaner_schedule_timer_in_ms, 100)
-    tenant = Containers.checkout_tenant(run_migrations: true)
+    on_exit(fn -> Application.put_env(:realtime, :metrics_cleaner_schedule_timer_in_ms, interval) end)
 
-    on_exit(fn ->
-      Application.put_env(:realtime, :metrics_cleaner_schedule_timer_in_ms, interval)
-    end)
+    tenant = Containers.checkout_tenant(run_migrations: true)
 
     %{tenant: tenant}
   end
@@ -24,22 +22,30 @@ defmodule Realtime.MetricsCleanerTest do
       # Wait for promex to collect the metrics
       Process.sleep(6000)
 
-      Realtime.Telemetry.execute(
+      :telemetry.execute(
         [:realtime, :connections],
         %{connected: 10, connected_cluster: 10, limit: 100},
         %{tenant: external_id}
       )
 
-      assert Realtime.PromEx.Metrics
-             |> :ets.select([{{{:_, %{tenant: :"$1"}}, :_}, [], [:"$1"]}])
-             |> Enum.any?(&(&1 == external_id))
+      :telemetry.execute(
+        [:realtime, :connections],
+        %{connected: 20, connected_cluster: 20, limit: 100},
+        %{tenant: "disconnected-tenant"}
+      )
 
-      Connect.shutdown(external_id)
+      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+
+      assert String.contains?(metrics, external_id)
+      assert String.contains?(metrics, "disconnected-tenant")
+
+      # Wait for clenaup to run
       Process.sleep(200)
 
-      refute Realtime.PromEx.Metrics
-             |> :ets.select([{{{:_, %{tenant: :"$1"}}, :_}, [], [:"$1"]}])
-             |> Enum.any?(&(&1 == external_id))
+      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+
+      assert String.contains?(metrics, external_id)
+      refute String.contains?(metrics, "disconnected-tenant")
     end
   end
 end

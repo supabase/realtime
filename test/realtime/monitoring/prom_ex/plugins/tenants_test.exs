@@ -155,6 +155,7 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
 
   defp metric_value(pattern) do
     PromEx.get_metrics(MetricsTest)
+    |> IO.iodata_to_binary()
     |> String.split("\n", trim: true)
     |> Enum.find_value(
       "0",

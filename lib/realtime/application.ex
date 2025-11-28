@@ -43,7 +43,6 @@ defmodule Realtime.Application do
         {Realtime.SignalHandler, %{handler_mod: :erl_signal_handler}}
       )
 
-    Realtime.PromEx.set_metrics_tags()
     :ets.new(Realtime.Tenants.Connect, [:named_table, :set, :public])
     :syn.set_event_handler(Realtime.SynHandler)
     :ok = :syn.add_node_to_scopes([RegionNodes, Realtime.Tenants.Connect | Realtime.UsersCounter.scopes()])
