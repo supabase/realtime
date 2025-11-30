@@ -40,14 +40,12 @@ defmodule Realtime.MetricsCleaner do
 
     {_, tids} = Peep.Persistent.storage(Realtime.PromEx.Metrics)
 
-    tags_to_prune =
-      tids
-      |> Tuple.to_list()
-      |> Stream.flat_map(fn tid -> :ets.select(tid, @peep_filter_spec) end)
-      |> Enum.uniq()
-      |> Stream.reject(fn tenant_id -> MapSet.member?(tenant_ids, tenant_id) end)
-      |> Enum.map(fn tenant_id -> %{tenant: tenant_id} end)
-
-    Peep.prune_tags(Realtime.PromEx.Metrics, tags_to_prune)
+    tids
+    |> Tuple.to_list()
+    |> Stream.flat_map(fn tid -> :ets.select(tid, @peep_filter_spec) end)
+    |> Enum.uniq()
+    |> Stream.reject(fn tenant_id -> MapSet.member?(tenant_ids, tenant_id) end)
+    |> Enum.map(fn tenant_id -> %{tenant: tenant_id} end)
+    |> then(&Peep.prune_tags(Realtime.PromEx.Metrics, &1))
   end
 end
