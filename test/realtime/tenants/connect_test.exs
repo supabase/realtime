@@ -50,6 +50,19 @@ defmodule Realtime.Tenants.ConnectTest do
     end
   end
 
+  describe "list_tenants/0" do
+    test "lists all tenants with active connections", %{tenant: tenant1} do
+      tenant2 = Containers.checkout_tenant(run_migrations: true)
+      assert {:ok, _} = Connect.lookup_or_start_connection(tenant1.external_id)
+      assert {:ok, _} = Connect.lookup_or_start_connection(tenant2.external_id)
+
+      list_tenants = Connect.list_tenants() |> MapSet.new()
+      tenants = MapSet.new([tenant1.external_id, tenant2.external_id])
+
+      assert MapSet.subset?(tenants, list_tenants)
+    end
+  end
+
   describe "handle cold start" do
     test "multiple processes connecting calling Connect.connect", %{tenant: tenant} do
       parent = self()

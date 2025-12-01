@@ -75,6 +75,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
+      {:ok, _} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
       {:ok, node} = Clustered.start(@aux_mod)
       %{tenant: tenant, node: node}
     end

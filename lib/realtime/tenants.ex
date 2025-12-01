@@ -16,15 +16,6 @@ defmodule Realtime.Tenants do
   alias Realtime.UsersCounter
 
   @doc """
-  Gets a list of connected tenant `external_id` strings in the cluster or a node.
-  """
-  @spec list_connected_tenants(atom()) :: [String.t()]
-  def list_connected_tenants(node) do
-    UsersCounter.scopes()
-    |> Enum.flat_map(fn scope -> :syn.group_names(scope, node) end)
-  end
-
-  @doc """
   Gets the database connection pid managed by the Tenants.Connect process.
 
   ## Examples
