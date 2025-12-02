@@ -478,6 +478,17 @@ make dev
 **Run this to verify everything:**
 ```bash
 # One-liner health check (includes migrations)
-mix deps.get && mix ecto.migrate && mix compile && mix test --max-failures 1 && echo "✅ Ready!" || echo "❌ Issues found"
+# Type this manually (don't copy-paste) to avoid shell issues
+mix deps.get && mix ecto.migrate && mix compile && mix test --max-failures 1 && echo Ready || echo Issues
 ```
+
+**Alternative (if copy-paste causes issues):**
+```bash
+mix deps.get
+mix ecto.migrate  
+mix compile
+mix test --max-failures 1
+```
+
+**Note:** If you see `cmdand` or `dquote>` prompts, press `Ctrl+C` to cancel. This usually happens with copy-paste or shell configuration issues. Type the command manually instead.
 
