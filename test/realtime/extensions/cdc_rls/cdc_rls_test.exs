@@ -230,7 +230,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       # Now subscribe to the Postgres Changes
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
 
-      assert %Postgrex.Result{num_rows: 1} = Postgrex.query!(conn, "select * from realtime.subscription", [])
+      assert %Postgrex.Result{num_rows: 1} = Postgrex.query!(conn, "select id from realtime.subscription", [])
 
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
@@ -348,7 +348,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       %{node: node, response: response}
     end
 
-    test "subscribe inserts distributed mode", %{tenant: tenant, conn: conn, node: node, response: response} do
+    test "subscribe distributed mode", %{tenant: tenant, conn: conn, node: node, response: response} do
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
 
@@ -358,8 +358,13 @@ defmodule Realtime.Extensions.CdcRlsTest do
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
       assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
 
+      # Wait for subscription to be executing
+      Process.sleep(200)
+
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+      # Delete the record
+      %{num_rows: 1} = Postgrex.query!(conn, "delete from test", [])
 
       assert_receive {:socket_push, :text, data}, 5000
 
@@ -374,6 +379,26 @@ defmodule Realtime.Extensions.CdcRlsTest do
                    "schema" => "public",
                    "table" => "test",
                    "type" => "INSERT"
+                 },
+                 "ids" => _
+               },
+               "ref" => nil,
+               "topic" => "realtime:test"
+             } = Jason.decode!(data)
+
+      assert_receive {:socket_push, :text, data}, 5000
+
+      assert %{
+               "event" => "postgres_changes",
+               "payload" => %{
+                 "data" => %{
+                   "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+                   "commit_timestamp" => _,
+                   "errors" => nil,
+                   "type" => "DELETE",
+                   "old_record" => %{"id" => ^id},
+                   "schema" => "public",
+                   "table" => "test"
                  },
                  "ids" => _
                },
