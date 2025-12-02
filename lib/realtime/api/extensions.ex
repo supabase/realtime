@@ -10,6 +10,7 @@ defmodule Realtime.Api.Extensions do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
+  @schema_prefix "_realtime"
   @derive {Jason.Encoder, only: [:type, :inserted_at, :updated_at, :settings]}
   schema "extensions" do
     field(:type, :string)
