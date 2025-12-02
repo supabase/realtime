@@ -215,17 +215,18 @@ make dev
 
 **In another terminal:**
 ```bash
-# Check health endpoint
-curl http://localhost:4000/api/ping
+# Option 1: Use /healthcheck endpoint (no tenant required)
+curl http://localhost:4000/healthcheck
+# Should return: ok
 
-# Should return:
-# {"status":"ok"}
+# Option 2: Use /api/ping with dev_tenant host header
+curl -H "Host: dev_tenant" http://localhost:4000/api/ping
+# Should return: {"message":"Success"}
 ```
 
-**Or in browser:**
-```
-http://localhost:4000/api/ping
-```
+**Note:** The `/api/ping` endpoint requires a tenant identified by the Host header. 
+The seed script creates a tenant with `external_id: "dev_tenant"`, so you must 
+use `Host: dev_tenant` header or access via `dev_tenant.localhost` if configured.
 
 ### 12. Check IEx Console
 
