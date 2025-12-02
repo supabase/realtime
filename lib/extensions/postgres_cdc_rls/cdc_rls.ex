@@ -116,7 +116,9 @@ defmodule Extensions.PostgresCdcRls do
 
     case :syn.whereis_name({scope, tenant}) do
       :undefined ->
-        Logger.warning("Database supervisor not found for tenant #{tenant}")
+        # Supervisor not found is expected when tenant doesn't use postgres changes
+        # Log at debug level to avoid noise in test output
+        Logger.debug("Database supervisor not found for tenant #{tenant}")
         :ok
 
       pid ->
