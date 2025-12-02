@@ -54,6 +54,10 @@ defmodule Realtime.Tenants.Janitor do
   @table_name Realtime.Tenants.Connect
   @syn_table :"syn_registry_by_name_Elixir.Realtime.Tenants.Connect"
 
+  # Dialyzer false positives: no_return error and type inference issues with
+  # Task.Supervisor.async_nolink inside Stream.map. The function does return correctly.
+  @dialyzer {:nowarn_function, handle_info: 2}
+
   @impl true
   def handle_info(:delete_old_messages, state) do
     Logger.info("Janitor started")
