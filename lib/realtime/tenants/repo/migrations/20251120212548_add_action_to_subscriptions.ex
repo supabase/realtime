@@ -9,19 +9,25 @@ defmodule Realtime.Tenants.Migrations.AddActionToSubscriptions do
     """)
 
     execute("""
-    DROP INDEX IF EXISTS "realtime"."subscription_subscription_id_entity_filters_key";
-    """)
-
-    execute("""
     CREATE UNIQUE INDEX subscription_subscription_id_entity_filters_action_filter_key on realtime.subscription (subscription_id, entity, filters, action_filter);
     """)
 
-    # FIXME create index
+    execute("""
+    DROP INDEX IF EXISTS "realtime"."subscription_subscription_id_entity_filters_key";
+    """)
   end
 
   def down do
     execute("""
     ALTER TABLE realtime.subscription DROP COLUMN action_filter;
+    """)
+
+    execute("""
+    CREATE UNIQUE INDEX subscription_subscription_id_entity_filters_key on realtime.subscription (subscription_id, entity, filters)
+    """)
+
+    execute("""
+    DROP INDEX IF EXISTS "realtime"."subscription_subscription_id_entity_filters_action_filter_key";
     """)
   end
 end
