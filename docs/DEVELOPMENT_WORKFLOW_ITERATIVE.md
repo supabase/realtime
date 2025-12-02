@@ -17,12 +17,25 @@ This is your **day-to-day workflow** for implementing the music extension: imple
 
 **Frequent** (after code changes, ~10-30s):
 ```bash
-mix compile && mix test test/extensions/music/ --max-failures 1 && mix credo --strict --format=flycheck && echo "✅" || echo "❌"
+# See which tests to run based on changed files
+./scripts/test_tracker.sh
+
+# Then run those specific tests
+mix compile && mix test <suggested-test-files> --max-failures 1 && mix credo --strict --format=flycheck && echo Ready || echo Issues
 ```
 
 **Before commit** (~1-2min):
 ```bash
-mix compile && mix test --max-failures 1 && mix format --check-formatted && mix credo --strict && echo "✅" || echo "❌"
+# Run suggested tests + full lint
+./scripts/test_tracker.sh
+mix compile && mix test <suggested-test-files> --max-failures 1 && mix format --check-formatted && mix credo --strict && echo Ready || echo Issues
+```
+
+**Quick reference - Tests by phase:**
+```bash
+./scripts/test_tracker.sh phase 1  # Phase 1 tests
+./scripts/test_tracker.sh phase 2  # Phase 2 tests
+./scripts/test_tracker.sh list     # All tests by phase
 ```
 
 ---
@@ -92,6 +105,15 @@ mix format --check-formatted
 
 ### 3. Run Smoke Tests
 
+**Quick test suggestion:**
+```bash
+# See which tests to run based on your changes
+./scripts/test_tracker.sh
+
+# Or specify a phase
+./scripts/test_tracker.sh phase 2
+```
+
 **Quick manual verification:**
 
 ```bash
@@ -137,12 +159,20 @@ end
 
 **Run tests:**
 ```bash
+# Quick: See which tests to run based on your changes
+./scripts/test_tracker.sh
+
 # Run your new tests
 mix test test/extensions/music/tempo_server_test.exs
 
 # Run with watch mode (auto-rerun on changes)
 mix test.watch test/extensions/music/tempo_server_test.exs
 ```
+
+**Test tracking:**
+- `./scripts/test_tracker.sh` - Shows tests for changed files
+- `./scripts/test_tracker.sh phase 2` - Shows tests for Phase 2
+- `./scripts/test_tracker.sh list` - Lists all test files by phase
 
 ### 5. Run Linters
 
