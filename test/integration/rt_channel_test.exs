@@ -35,18 +35,18 @@ defmodule Realtime.Integration.RtChannelTest do
     # Run individually with: mix test test/integration/rt_channel_test.exs:33
     @tag :flaky
     test "error subscribing", %{tenant: tenant, serializer: serializer} do
-        {:ok, conn} = Database.connect(tenant, "realtime_test")
+      {:ok, conn} = Database.connect(tenant, "realtime_test")
 
       # Let's drop the publication to cause an error
-        Database.transaction(conn, fn db_conn ->
+      Database.transaction(conn, fn db_conn ->
         Postgrex.query!(db_conn, "drop publication if exists supabase_realtime_test")
-        end)
+      end)
 
-        {socket, _} = get_connection(tenant, serializer)
-        topic = "realtime:any"
-        config = %{postgres_changes: [%{event: "INSERT", schema: "public"}]}
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "INSERT", schema: "public"}]}
 
-        log =
+      log =
         capture_log(fn ->
           WebsocketClient.join(socket, topic, %{config: config})
 
@@ -65,8 +65,8 @@ defmodule Realtime.Integration.RtChannelTest do
                          8000
         end)
 
-        assert log =~ "RealtimeDisabledForConfiguration"
-        assert log =~ "Unable to subscribe to changes with given parameters"
+      assert log =~ "RealtimeDisabledForConfiguration"
+      assert log =~ "Unable to subscribe to changes with given parameters"
     end
 
     test "handle insert", %{tenant: tenant, serializer: serializer} do
@@ -137,70 +137,70 @@ defmodule Realtime.Integration.RtChannelTest do
     # Run individually with: mix test test/integration/rt_channel_test.exs:131
     @tag :flaky
     test "handle update", %{tenant: tenant, serializer: serializer} do
-        {socket, _} = get_connection(tenant, serializer)
-        topic = "realtime:any"
-        config = %{postgres_changes: [%{event: "UPDATE", schema: "public"}]}
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "UPDATE", schema: "public"}]}
 
       WebsocketClient.join(socket, topic, %{config: config})
       sub_id = :erlang.phash2(%{"event" => "UPDATE", "schema" => "public"})
 
-    assert_receive %Message{
-    event: "phx_reply",
-    payload: %{
-    "response" => %{
-    "postgres_changes" => [
-    %{"event" => "UPDATE", "id" => ^sub_id, "schema" => "public"}
-    ]
-    },
-    "status" => "ok"
-    },
-    ref: "1",
-    topic: ^topic
-    },
-    200
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{
+                         "response" => %{
+                           "postgres_changes" => [
+                             %{"event" => "UPDATE", "id" => ^sub_id, "schema" => "public"}
+                           ]
+                         },
+                         "status" => "ok"
+                       },
+                       ref: "1",
+                       topic: ^topic
+                     },
+                     200
 
-    assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
-    assert_receive %Message{
-    event: "system",
-    payload: %{
-    "channel" => "any",
-    "extension" => "postgres_changes",
-    "message" => "Subscribed to PostgreSQL",
-    "status" => "ok"
-    },
-    ref: nil,
-    topic: ^topic
-    },
-    8000
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
 
-    {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
-    %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
 
-    Postgrex.query!(conn, "update test set details = 'test' where id = #{id}", [])
+      Postgrex.query!(conn, "update test set details = 'test' where id = #{id}", [])
 
-    assert_receive %Message{
-    event: "postgres_changes",
-    payload: %{
-    "data" => %{
-    "columns" => [
-    %{"name" => "id", "type" => "int4"},
-    %{"name" => "details", "type" => "text"}
-    ],
-    "commit_timestamp" => _ts,
-    "errors" => nil,
-    "old_record" => %{"id" => ^id},
-    "record" => %{"details" => "test", "id" => ^id},
-    "schema" => "public",
-    "table" => "test",
-    "type" => "UPDATE"
-    },
-    "ids" => [^sub_id]
-    },
-    ref: nil,
-    topic: "realtime:any"
-    },
-    500
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "columns" => [
+                             %{"name" => "id", "type" => "int4"},
+                             %{"name" => "details", "type" => "text"}
+                           ],
+                           "commit_timestamp" => _ts,
+                           "errors" => nil,
+                           "old_record" => %{"id" => ^id},
+                           "record" => %{"details" => "test", "id" => ^id},
+                           "schema" => "public",
+                           "table" => "test",
+                           "type" => "UPDATE"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: "realtime:any"
+                     },
+                     500
     end
 
     test "handle delete", %{tenant: tenant, serializer: serializer} do
@@ -849,16 +849,16 @@ defmodule Realtime.Integration.RtChannelTest do
     # Run individually with: mix test test/integration/rt_channel_test.exs:839
     @tag :flaky
     test "presence disabled if param 'enabled' is set to false in configuration for public channels", %{
-    tenant: tenant,
-    topic: topic,
-    serializer: serializer
+      tenant: tenant,
+      topic: topic,
+      serializer: serializer
     } do
-    {socket, _} = get_connection(tenant, serializer, role: "authenticated")
-    topic = "realtime:#{topic}"
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      topic = "realtime:#{topic}"
 
-    WebsocketClient.join(socket, topic, %{config: %{private: false, presence: %{enabled: false}}})
-    assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-    refute_receive %Message{event: "presence_state"}, 500
+      WebsocketClient.join(socket, topic, %{config: %{private: false, presence: %{enabled: false}}})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      refute_receive %Message{event: "presence_state"}, 500
     end
 
     test "presence automatically enabled when user sends track message for public channel", %{
@@ -1323,43 +1323,43 @@ defmodule Realtime.Integration.RtChannelTest do
     # Run individually with: mix test test/integration/rt_channel_test.exs:1309
     @tag :flaky
     test "on sb prefixed access_token the socket ignores the message and respects JWT expiry time", %{
-    tenant: tenant,
-    topic: topic,
-    serializer: serializer
+      tenant: tenant,
+      topic: topic,
+      serializer: serializer
     } do
-    sub = random_string()
+      sub = random_string()
 
-    {socket, access_token} =
-    get_connection(tenant, serializer,
-    role: "authenticated",
-    claims: %{sub: sub, exp: System.system_time(:second) + 5}
-    )
+      {socket, access_token} =
+        get_connection(tenant, serializer,
+          role: "authenticated",
+          claims: %{sub: sub, exp: System.system_time(:second) + 5}
+        )
 
-    config = %{broadcast: %{self: true}, private: false}
-    realtime_topic = "realtime:#{topic}"
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
 
-    WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
+      WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
-    assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-    assert_receive %Message{event: "presence_state"}, 500
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+      assert_receive %Message{event: "presence_state"}, 500
 
-    WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
-    "access_token" => "sb_publishable_-fake_key"
-    })
+      WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
+        "access_token" => "sb_publishable_-fake_key"
+      })
 
-    # Check if the new token does not trigger a shutdown
-    refute_receive %Message{event: "system", topic: ^realtime_topic}, 100
+      # Check if the new token does not trigger a shutdown
+      refute_receive %Message{event: "system", topic: ^realtime_topic}, 100
 
-    # Await to check if channel respects token expiry time
-    assert_receive %Message{
-    event: "system",
-    payload: %{"extension" => "system", "message" => msg, "status" => "error"},
-    topic: ^realtime_topic
-    },
-    5000
+      # Await to check if channel respects token expiry time
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"extension" => "system", "message" => msg, "status" => "error"},
+                       topic: ^realtime_topic
+                     },
+                     5000
 
-    assert_receive %Message{event: "phx_close", topic: ^realtime_topic}
-    msg =~ "Token has expired"
+      assert_receive %Message{event: "phx_close", topic: ^realtime_topic}
+      msg =~ "Token has expired"
     end
   end
 
@@ -1842,42 +1842,42 @@ defmodule Realtime.Integration.RtChannelTest do
     # Run individually with: mix test test/integration/rt_channel_test.exs:1824
     @tag :flaky
     test "max_joins_per_second limit respected", %{tenant: tenant, serializer: serializer} do
-    {socket, _} = get_connection(tenant, serializer, role: "authenticated")
-    config = %{broadcast: %{self: true}, private: false}
-    realtime_topic = "realtime:#{random_string()}"
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{random_string()}"
 
-    log =
-    capture_log(fn ->
-    # Burst of joins that won't be blocked as RateCounter tick won't run
-    for _ <- 1..300 do
-    WebsocketClient.join(socket, realtime_topic, %{config: config})
-    end
+      log =
+        capture_log(fn ->
+          # Burst of joins that won't be blocked as RateCounter tick won't run
+          for _ <- 1..300 do
+            WebsocketClient.join(socket, realtime_topic, %{config: config})
+          end
 
-    # Wait for RateCounter tick
-    Process.sleep(1000)
+          # Wait for RateCounter tick
+          Process.sleep(1000)
 
-    # These ones will be blocked
-    for _ <- 1..300 do
-    WebsocketClient.join(socket, realtime_topic, %{config: config})
-    end
+          # These ones will be blocked
+          for _ <- 1..300 do
+            WebsocketClient.join(socket, realtime_topic, %{config: config})
+          end
 
-    assert_receive %Message{
-    event: "phx_reply",
-    payload: %{
-    "response" => %{
-    "reason" => "ClientJoinRateLimitReached: Too many joins per second"
-    },
-    "status" => "error"
-    }
-    },
-    2000
-    end)
+          assert_receive %Message{
+                           event: "phx_reply",
+                           payload: %{
+                             "response" => %{
+                               "reason" => "ClientJoinRateLimitReached: Too many joins per second"
+                             },
+                             "status" => "error"
+                           }
+                         },
+                         2000
+        end)
 
-    assert log =~
-    "project=#{tenant.external_id} external_id=#{tenant.external_id} [critical] ClientJoinRateLimitReached: Too many joins per second"
+      assert log =~
+               "project=#{tenant.external_id} external_id=#{tenant.external_id} [critical] ClientJoinRateLimitReached: Too many joins per second"
 
-    # Only one or two log messages should be emitted
-    assert length(String.split(log, "ClientJoinRateLimitReached")) <= 3
+      # Only one or two log messages should be emitted
+      assert length(String.split(log, "ClientJoinRateLimitReached")) <= 3
     end
   end
 

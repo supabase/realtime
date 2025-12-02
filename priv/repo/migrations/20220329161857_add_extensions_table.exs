@@ -9,7 +9,12 @@ defmodule Realtime.Repo.Migrations.AddExtensionsTable do
 
       add(
         :tenant_external_id,
-        references(:tenants, on_delete: :delete_all, type: :string, column: :external_id, prefix: "_realtime")
+        references(:tenants,
+          on_delete: :delete_all,
+          type: :string,
+          column: :external_id,
+          prefix: "_realtime"
+        )
       )
 
       timestamps()
