@@ -294,27 +294,56 @@ mix dialyzer
 
 ### 16. Test WebSocket Connection
 
-**Using curl (if available):**
+**⚠️ Important:** WebSocket connections require:
+1. **Host header** matching the tenant's `external_id` (e.g., `dev_tenant`)
+2. **JWT token** with `role` and `exp` claims, signed with the tenant's `jwt_secret`
+
+**Step 1: Generate a JWT token**
+
+First, stop the server (`Ctrl+C` in the terminal running `make dev`), then run:
 ```bash
-# Test WebSocket endpoint (basic check)
+# The script needs DB_ENC_KEY to decrypt the JWT secret from the database
+# Default dev key is "1234567890123456" (matches Makefile seed command)
+DB_ENC_KEY=1234567890123456 mix run priv/repo/generate_test_jwt.exs dev_tenant
+```
+
+**Note:** The script defaults to `"1234567890123456"` which matches `make seed`. If you used a different key when seeding, set `DB_ENC_KEY` to match.
+
+This will output:
+- The JWT token
+- The correct WebSocket URL
+- Example curl command with all required headers
+
+**Step 2: Test the connection**
+
+**Using curl:**
+```bash
+# Replace YOUR_JWT_TOKEN with the token from step 1
 curl -i -N \
+  -H "Host: dev_tenant" \
+  -H "x-api-key: YOUR_JWT_TOKEN" \
   -H "Connection: Upgrade" \
   -H "Upgrade: websocket" \
   -H "Sec-WebSocket-Version: 13" \
-  -H "Sec-WebSocket-Key: test" \
+  -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
   http://localhost:4000/socket/websocket
 
-# Should return HTTP 101 (Switching Protocols) or 400 (Bad Request)
-# Either means server is responding
+# Should return HTTP 101 (Switching Protocols) for successful connection
+# HTTP 403 means missing/invalid JWT token or wrong Host header
 ```
 
 **Or use browser console:**
 ```javascript
 // In browser console (on localhost:4000)
-const ws = new WebSocket('ws://localhost:4000/socket/websocket?vsn=2.0.0')
+// Note: Browser WebSocket API doesn't support custom Host headers easily
+// You may need to add dev_tenant to /etc/hosts or use a WebSocket client library
+const token = 'YOUR_JWT_TOKEN'; // From step 1
+const ws = new WebSocket(`ws://dev_tenant.localhost:4000/socket/websocket?vsn=2.0.0&apikey=${token}`)
 ws.onopen = () => console.log('✅ WebSocket connected')
 ws.onerror = (e) => console.log('❌ WebSocket error:', e)
 ```
+
+**Why 403?** The WebSocket connection requires authentication. Without a valid JWT token and correct Host header, Phoenix rejects the connection with 403 Forbidden.
 
 ---
 
