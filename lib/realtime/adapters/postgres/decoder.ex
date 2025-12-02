@@ -210,10 +210,15 @@ defmodule Realtime.Adapters.Postgres.Decoder do
          <<"I", relation_id::integer-32, "N", number_of_columns::integer-16, tuple_data::binary>>,
          relations
        ) do
-    relation = relations |> Map.get(relation_id) |> Map.get(:columns)
-    {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns, relation)
+    relation = relations |> get_in([relation_id, :columns])
 
-    %Insert{relation_id: relation_id, tuple_data: decoded_tuple_data}
+    if relation do
+      {<<>>, decoded_tuple_data} = decode_tuple_data(tuple_data, number_of_columns, relation)
+
+      %Insert{relation_id: relation_id, tuple_data: decoded_tuple_data}
+    else
+      %Unsupported{}
+    end
   end
 
   defp decode_message_impl(<<"Y", data_type_id::integer-32, namespace_and_name::binary>>, _relations) do
