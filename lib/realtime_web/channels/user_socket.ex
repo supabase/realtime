@@ -15,10 +15,10 @@ defmodule RealtimeWeb.UserSocket do
       ) do
     tenant_external_id = Map.get(assigns, :tenant)
 
-    %{send_delta: send_delta, recv_delta: recv_delta} =
+    %{latest_recv: latest_recv, latest_send: latest_send} =
       collect_traffic_telemetry(transport_pid, tenant_external_id, previous_recv, previous_send)
 
-    Process.send_after(self(), {:measure_traffic, recv_delta, send_delta}, measure_traffic_interval_in_ms())
+    Process.send_after(self(), {:measure_traffic, latest_recv, latest_send}, measure_traffic_interval_in_ms())
 
     {:ok, state}
   end
@@ -165,27 +165,33 @@ defmodule RealtimeWeb.UserSocket do
   defp collect_traffic_telemetry(nil, _tenant_external_id, _previous_recv, _previous_send), do: 0
 
   defp collect_traffic_telemetry(transport_pid, tenant_external_id, previous_recv, previous_send) do
-    transport_pid
-    |> Process.info(:links)
-    |> then(fn {:links, links} -> links end)
-    |> Enum.filter(&is_port/1)
-    |> Enum.reduce(%{send_delta: 0, recv_delta: 0}, fn link, acc ->
-      case :inet.getstat(link, [:send_oct, :recv_oct]) do
-        {:ok, stats} ->
-          send_oct = Keyword.get(stats, :send_oct, 0)
-          recv_oct = Keyword.get(stats, :recv_oct, 0)
+    %{send_oct: latest_send, recv_oct: latest_recv} =
+      transport_pid
+      |> Process.info(:links)
+      |> then(fn {:links, links} -> links end)
+      |> Enum.filter(&is_port/1)
+      |> Enum.reduce(%{send_oct: 0, recv_oct: 0}, fn link, acc ->
+        case :inet.getstat(link, [:send_oct, :recv_oct]) do
+          {:ok, stats} ->
+            send_oct = Keyword.get(stats, :send_oct, 0)
+            recv_oct = Keyword.get(stats, :recv_oct, 0)
 
-          send_delta = max(0, send_oct - previous_send)
-          recv_delta = max(0, recv_oct - previous_recv)
+            %{
+              send_oct: acc.send_oct + send_oct,
+              recv_oct: acc.recv_oct + recv_oct
+            }
 
-          :telemetry.execute([:realtime, :channel, :output_bytes], %{size: send_delta}, %{tenant: tenant_external_id})
-          :telemetry.execute([:realtime, :channel, :input_bytes], %{size: recv_delta}, %{tenant: tenant_external_id})
+          {:error, _} ->
+            acc
+        end
+      end)
 
-          %{send_delta: send_delta, recv_delta: recv_delta}
+    send_delta = max(0, latest_send - previous_send)
+    recv_delta = max(0, latest_recv - previous_recv)
 
-        {:error, _} ->
-          acc
-      end
-    end)
+    :telemetry.execute([:realtime, :channel, :output_bytes], %{size: send_delta}, %{tenant: tenant_external_id})
+    :telemetry.execute([:realtime, :channel, :input_bytes], %{size: recv_delta}, %{tenant: tenant_external_id})
+
+    %{latest_recv: latest_recv, latest_send: latest_send}
   end
 end
