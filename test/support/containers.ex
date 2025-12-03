@@ -36,7 +36,13 @@ defmodule Containers do
   def handle_continue({:pool, max_cases}, state) do
     {:ok, _pid} =
       :poolboy.start_link(
-        [name: {:local, Containers.Pool}, size: max_cases + 2, max_overflow: 0, worker_module: Containers.Container],
+        [
+          strategy: :fifo,
+          name: {:local, Containers.Pool},
+          size: max_cases + 2,
+          max_overflow: 0,
+          worker_module: Containers.Container
+        ],
         []
       )
 
