@@ -274,6 +274,70 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert received_payload == payload
     end
 
+    test "should not process unsupported relations", %{tenant: tenant, db_conn: db_conn} do
+      # update
+      queries = [
+        "DROP TABLE IF EXISTS public.test",
+        """
+        CREATE TABLE "public"."test" (
+        "id" int4 NOT NULL default nextval('test_id_seq'::regclass),
+        "details" text,
+        PRIMARY KEY ("id"));
+        """,
+        "DROP PUBLICATION IF EXISTS supabase_realtime_messages_publication",
+        "CREATE PUBLICATION supabase_realtime_messages_publication FOR ALL TABLES"
+      ]
+
+      Postgrex.transaction(db_conn, fn conn ->
+        Enum.each(queries, &Postgrex.query!(conn, &1, []))
+      end)
+
+      logs =
+        capture_log(fn ->
+          start_link_supervised!(
+            {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+            restart: :transient
+          )
+
+          %{rows: [[_id]]} = Postgrex.query!(db_conn, "insert into test (details) values ('test') returning id", [])
+
+          topic = "db:job_scheduler"
+          tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+          subscribe(tenant_topic, topic)
+          payload = %{"value" => random_string()}
+
+          row =
+            message_fixture(tenant, %{
+              "topic" => topic,
+              "private" => true,
+              "event" => "UPDATE",
+              "extension" => "broadcast",
+              "payload" => payload
+            })
+
+          row_id = row.id
+
+          assert_receive {:socket_push, :text, data}, 2000
+          message = data |> IO.iodata_to_binary() |> Jason.decode!()
+
+          assert %{
+                   "event" => "broadcast",
+                   "payload" => %{
+                     "event" => "UPDATE",
+                     "meta" => %{"id" => ^row_id},
+                     "payload" => received_payload,
+                     "type" => "broadcast"
+                   },
+                   "ref" => nil,
+                   "topic" => ^topic
+                 } = message
+
+          assert received_payload == payload
+        end)
+
+      assert logs =~ "Unexpected relation on schema 'public' and table 'test'"
+    end
+
     test "monitored pid stopping brings down ReplicationConnection ", %{tenant: tenant} do
       monitored_pid =
         spawn(fn ->

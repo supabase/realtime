@@ -287,10 +287,16 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   defp handle_message(%Decoder.Messages.Relation{} = msg, state) do
     %Decoder.Messages.Relation{id: id, namespace: namespace, name: name, columns: columns} = msg
-    %{relations: relations} = state
-    relation = %{name: name, columns: columns, namespace: namespace}
-    relations = Map.put(relations, id, relation)
-    {:noreply, %{state | relations: relations}}
+    # Only care about relations with namespace=realtime and name starting with messages
+    if namespace == @schema and String.starts_with?(name, @table) do
+      %{relations: relations} = state
+      relation = %{name: name, columns: columns, namespace: namespace}
+      relations = Map.put(relations, id, relation)
+      {:noreply, %{state | relations: relations}}
+    else
+      Logger.warning("Unexpected relation on schema '#{namespace}' and table '#{name}'")
+      {:noreply, state}
+    end
   rescue
     e ->
       log_error("UnableToBroadcastChanges", e)

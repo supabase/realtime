@@ -4,11 +4,12 @@ defmodule Realtime.PostgresDecoderTest do
 
   alias Decoder.Messages.Begin
   alias Decoder.Messages.Commit
+  alias Decoder.Messages.Insert
   alias Decoder.Messages.Origin
   alias Decoder.Messages.Relation
   alias Decoder.Messages.Relation.Column
-  alias Decoder.Messages.Insert
   alias Decoder.Messages.Type
+  alias Decoder.Messages.Unsupported
 
   test "decodes begin messages" do
     {:ok, expected_dt_no_microseconds, 0} = DateTime.from_iso8601("2019-07-18T17:02:35Z")
@@ -86,11 +87,10 @@ defmodule Realtime.PostgresDecoderTest do
 
   describe "data message (TupleData) decoder" do
     setup do
-      relation = %Relation{
+      relation = %{
         id: 24_576,
         namespace: "public",
         name: "foo",
-        replica_identity: :default,
         columns: [
           %Column{name: "id", type: "uuid"},
           %Column{name: "bar", type: "text"}
@@ -123,6 +123,28 @@ defmodule Realtime.PostgresDecoderTest do
                relation_id: relation.id,
                tuple_data: {uuid, string}
              }
+    end
+
+    test "ignores unknown relations", %{relation: relation} do
+      uuid = UUID.uuid4()
+      string = Generators.random_string()
+
+      data =
+        "I" <>
+          <<679::integer-32>> <>
+          "N" <>
+          <<2::integer-16>> <>
+          "b" <>
+          <<16::integer-32>> <>
+          UUID.string_to_binary!(uuid) <>
+          "b" <>
+          <<byte_size(string)::integer-32>> <>
+          string
+
+      assert Decoder.decode_message(
+               data,
+               %{relation.id => relation}
+             ) == %Unsupported{}
     end
 
     test "decodes insert messages with null values", %{relation: relation} do
