@@ -81,6 +81,8 @@ config :gen_rpc,
   # This is used for process sanitation purposes so please make sure to set it in a sufficiently high number
   async_call_inactivity_timeout: 300_000
 
+config :prom_ex, :storage_adapter, Realtime.PromEx.Store
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{Mix.env()}.exs"

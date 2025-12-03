@@ -8,6 +8,11 @@ defmodule Realtime.PromEx.Plugins.Tenants do
 
   require Logger
 
+  defmodule Buckets do
+    @moduledoc false
+    use Peep.Buckets.Custom, buckets: [10, 250, 5000, 15_000]
+  end
+
   @event_connected [:prom_ex, :plugin, :realtime, :tenants, :connected]
 
   @impl true
@@ -20,7 +25,7 @@ defmodule Realtime.PromEx.Plugins.Tenants do
         measurement: :latency,
         unit: {:microsecond, :millisecond},
         tags: [:success, :tenant, :mechanism],
-        reporter_options: [buckets: [10, 250, 5000, 15_000]]
+        reporter_options: [peep_bucket_calculator: Buckets]
       ),
       distribution(
         [:realtime, :global, :rpc],
@@ -29,7 +34,7 @@ defmodule Realtime.PromEx.Plugins.Tenants do
         measurement: :latency,
         unit: {:microsecond, :millisecond},
         tags: [:success, :mechanism],
-        reporter_options: [buckets: [10, 250, 5000, 15_000]]
+        reporter_options: [peep_bucket_calculator: Buckets]
       )
     ])
   end
@@ -50,7 +55,8 @@ defmodule Realtime.PromEx.Plugins.Tenants do
             description: "The total count of connected tenants.",
             measurement: :connected
           )
-        ]
+        ],
+        detach_on_error: false
       )
     ]
   end

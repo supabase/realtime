@@ -57,7 +57,8 @@ defmodule Realtime.PromEx.Plugins.OsMon do
           description: "The average system load in the last 15 minutes.",
           measurement: :avg15
         )
-      ]
+      ],
+      detach_on_error: false
     )
   end
 

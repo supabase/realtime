@@ -27,6 +27,12 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     ]
   end
 
+  defmodule PayloadSize.Buckets do
+    @moduledoc false
+    use Peep.Buckets.Custom,
+      buckets: [250, 500, 1000, 3000, 5000, 10_000, 25_000, 100_000, 500_000, 1_000_000, 3_000_000]
+  end
+
   defp payload_size_metrics do
     Event.build(
       :realtime_tenant_payload_size_metrics,
@@ -38,9 +44,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Tenant payload size",
           tags: [:tenant, :message_type],
           unit: :byte,
-          reporter_options: [
-            buckets: [250, 500, 1000, 3000, 5000, 10_000, 25_000, 100_000, 500_000, 1_000_000, 3_000_000]
-          ]
+          reporter_options: [peep_bucket_calculator: PayloadSize.Buckets]
         ),
         distribution(
           [:realtime, :payload, :size],
@@ -49,9 +53,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Payload size",
           tags: [:message_type],
           unit: :byte,
-          reporter_options: [
-            buckets: [250, 500, 1000, 3000, 5000, 10_000, 25_000, 100_000, 500_000, 1_000_000, 3_000_000]
-          ]
+          reporter_options: [peep_bucket_calculator: PayloadSize.Buckets]
         )
       ]
     )
@@ -84,7 +86,8 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           measurement: :limit,
           tags: [:tenant]
         )
-      ]
+      ],
+      detach_on_error: false
     )
   end
 
@@ -106,6 +109,12 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     end
   end
 
+  defmodule Replication.Buckets do
+    @moduledoc false
+    use Peep.Buckets.Custom,
+      buckets: [250, 500, 1000, 3000, 5000, 10_000, 25_000, 100_000, 500_000, 1_000_000, 3_000_000]
+  end
+
   defp replication_metrics do
     Event.build(
       :realtime_tenant_replication_event_metrics,
@@ -117,9 +126,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "Duration of the logical replication slot polling query for Realtime RLS.",
           tags: [:tenant],
           unit: {:microsecond, :millisecond},
-          reporter_options: [
-            buckets: [125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000]
-          ]
+          reporter_options: [peep_bucket_calculator: Replication.Buckets]
         )
       ]
     )
@@ -145,6 +152,21 @@ defmodule Realtime.PromEx.Plugins.Tenant do
         )
       ]
     )
+  end
+
+  defmodule PolicyAuthorization.Buckets do
+    @moduledoc false
+    use Peep.Buckets.Custom, buckets: [10, 250, 5000, 15_000]
+  end
+
+  defmodule BroadcastFromDatabase.Buckets do
+    @moduledoc false
+    use Peep.Buckets.Custom, buckets: [10, 250, 5000]
+  end
+
+  defmodule Replay.Buckets do
+    @moduledoc false
+    use Peep.Buckets.Custom, buckets: [10, 250, 5000, 15_000]
   end
 
   defp channel_events do
@@ -218,7 +240,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           unit: :millisecond,
           description: "Latency of read authorization checks.",
           tags: [:tenant],
-          reporter_options: [buckets: [10, 250, 5000, 15_000]]
+          reporter_options: [peep_bucket_calculator: PolicyAuthorization.Buckets]
         ),
         distribution(
           [:realtime, :tenants, :write_authorization_check],
@@ -227,7 +249,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           unit: :millisecond,
           description: "Latency of write authorization checks.",
           tags: [:tenant],
-          reporter_options: [buckets: [10, 250, 5000, 15_000]]
+          reporter_options: [peep_bucket_calculator: PolicyAuthorization.Buckets]
         ),
         distribution(
           [:realtime, :tenants, :broadcast_from_database, :latency_committed_at],
@@ -236,7 +258,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           unit: :millisecond,
           description: "Latency of database transaction start until reaches server to be broadcasted",
           tags: [:tenant],
-          reporter_options: [buckets: [10, 250, 5000]]
+          reporter_options: [peep_bucket_calculator: BroadcastFromDatabase.Buckets]
         ),
         distribution(
           [:realtime, :tenants, :broadcast_from_database, :latency_inserted_at],
@@ -245,7 +267,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           unit: {:microsecond, :millisecond},
           description: "Latency of database inserted_at until reaches server to be broadcasted",
           tags: [:tenant],
-          reporter_options: [buckets: [10, 250, 5000]]
+          reporter_options: [peep_bucket_calculator: BroadcastFromDatabase.Buckets]
         ),
         distribution(
           [:realtime, :tenants, :replay],
@@ -254,7 +276,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           unit: :millisecond,
           description: "Latency of broadcast replay",
           tags: [:tenant],
-          reporter_options: [buckets: [10, 250, 5000, 15_000]]
+          reporter_options: [peep_bucket_calculator: Replay.Buckets]
         )
       ]
     )

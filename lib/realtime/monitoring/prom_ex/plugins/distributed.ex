@@ -70,7 +70,8 @@ defmodule Realtime.PromEx.Plugins.Distributed do
           measurement: :size,
           tags: [:origin_node, :target_node]
         )
-      ]
+      ],
+      detach_on_error: false
     )
   end
 

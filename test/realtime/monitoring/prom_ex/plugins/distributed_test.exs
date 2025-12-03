@@ -23,55 +23,41 @@ defmodule Realtime.PromEx.Plugins.DistributedTest do
 
   describe "pooling metrics" do
     setup do
-      metrics =
-        PromEx.get_metrics(MetricsTest)
-        |> String.split("\n", trim: true)
-
-      %{metrics: metrics}
+      %{metrics: PromEx.get_metrics(MetricsTest)}
     end
 
     test "send_pending_bytes", %{metrics: metrics, node: node} do
-      pattern = ~r/dist_send_pending_bytes{origin_node=\"#{node()}\",target_node=\"#{node}\"}\s(?<number>\d+)/
-      assert metric_value(metrics, pattern) == 0
+      assert metric_value(metrics, "dist_send_pending_bytes", origin_node: node(), target_node: node) == 0
     end
 
     test "send_count", %{metrics: metrics, node: node} do
-      pattern = ~r/dist_send_count{origin_node=\"#{node()}\",target_node=\"#{node}\"}\s(?<number>\d+)/
-      assert metric_value(metrics, pattern) > 0
+      value = metric_value(metrics, "dist_send_count", origin_node: node(), target_node: node)
+      assert is_integer(value)
+      assert value > 0
     end
 
     test "send_bytes", %{metrics: metrics, node: node} do
-      pattern = ~r/dist_send_bytes{origin_node=\"#{node()}\",target_node=\"#{node}\"}\s(?<number>\d+)/
-      assert metric_value(metrics, pattern) > 0
+      value = metric_value(metrics, "dist_send_bytes", origin_node: node(), target_node: node)
+      assert is_integer(value)
+      assert value > 0
     end
 
     test "recv_count", %{metrics: metrics, node: node} do
-      pattern = ~r/dist_recv_count{origin_node=\"#{node()}\",target_node=\"#{node}\"}\s(?<number>\d+)/
-      assert metric_value(metrics, pattern) > 0
+      value = metric_value(metrics, "dist_recv_count", origin_node: node(), target_node: node)
+      assert is_integer(value)
+      assert value > 0
     end
 
     test "recv_bytes", %{metrics: metrics, node: node} do
-      pattern = ~r/dist_recv_bytes{origin_node=\"#{node()}\",target_node=\"#{node}\"}\s(?<number>\d+)/
-      assert metric_value(metrics, pattern) > 0
+      value = metric_value(metrics, "dist_recv_bytes", origin_node: node(), target_node: node)
+      assert is_integer(value)
+      assert value > 0
     end
 
     test "queue_size", %{metrics: metrics, node: node} do
-      pattern = ~r/dist_queue_size{origin_node=\"#{node()}\",target_node=\"#{node}\"}\s(?<number>\d+)/
-      assert is_integer(metric_value(metrics, pattern))
+      assert is_integer(metric_value(metrics, "dist_queue_size", origin_node: node(), target_node: node))
     end
   end
 
-  defp metric_value(metrics, pattern) do
-    metrics
-    |> Enum.find_value(
-      "0",
-      fn item ->
-        case Regex.run(pattern, item, capture: ["number"]) do
-          [number] -> number
-          _ -> false
-        end
-      end
-    )
-    |> String.to_integer()
-  end
+  defp metric_value(metrics, metric, expected_tags), do: MetricsHelper.search(metrics, metric, expected_tags)
 end

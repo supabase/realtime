@@ -388,7 +388,6 @@ defmodule Realtime.Tenants.Connect do
   @impl true
   def terminate(reason, %{tenant_id: tenant_id}) do
     Logger.info("Tenant #{tenant_id} has been terminated: #{inspect(reason)}")
-    Realtime.MetricsCleaner.delete_metric(tenant_id)
     :ok
   end
 
