@@ -300,27 +300,21 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
     test "channel input bytes", context do
       external_id = context.tenant.external_id
 
-      pattern = ~r/realtime_channel_input_bytes{tenant="#{external_id}"}\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
       FakeUserCounter.fake_input_bytes(external_id)
       FakeUserCounter.fake_input_bytes(external_id)
 
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 20
+      assert metric_value("realtime_channel_input_bytes", tenant: external_id) == 20
     end
 
     test "channel output bytes", context do
       external_id = context.tenant.external_id
 
-      pattern = ~r/realtime_channel_output_bytes{tenant="#{external_id}"}\s(?<number>\d+)/
-
-      metric_value = metric_value(pattern)
       FakeUserCounter.fake_output_bytes(external_id)
       FakeUserCounter.fake_output_bytes(external_id)
 
       Process.sleep(200)
-      assert metric_value(pattern) == metric_value + 20
+      assert metric_value("realtime_channel_output_bytes", tenant: external_id) == 20
     end
   end
 

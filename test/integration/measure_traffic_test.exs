@@ -1,7 +1,5 @@
 defmodule Realtime.Integration.MeasureTrafficTest do
-  use RealtimeWeb.ConnCase,
-    async: false,
-    parameterize: [%{serializer: Phoenix.Socket.V1.JSONSerializer}, %{serializer: RealtimeWeb.Socket.V2Serializer}]
+  use RealtimeWeb.ConnCase, async: false
 
   alias Phoenix.Socket.Message
   alias Realtime.Integration.WebsocketClient
@@ -71,8 +69,8 @@ defmodule Realtime.Integration.MeasureTrafficTest do
       :ok
     end
 
-    test "measure traffic for broadcast events", %{tenant: tenant, serializer: serializer} do
-      {socket, _} = get_connection(tenant, serializer)
+    test "measure traffic for broadcast events", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}}
       topic = "realtime:any"
 
@@ -108,8 +106,8 @@ defmodule Realtime.Integration.MeasureTrafficTest do
       assert input_bytes > 0
     end
 
-    test "measure traffic for presence events", %{tenant: tenant, serializer: serializer} do
-      {socket, _} = get_connection(tenant, serializer)
+    test "measure traffic for presence events", %{tenant: tenant} do
+      {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, presence: %{enabled: true}}
       topic = "realtime:any"
 
@@ -138,8 +136,8 @@ defmodule Realtime.Integration.MeasureTrafficTest do
       assert input_bytes > 0, "Expected input_bytes to be greater than 0, got #{input_bytes}"
     end
 
-    test "measure traffic for postgres changes events", %{tenant: tenant, serializer: serializer, db_conn: db_conn} do
-      {socket, _} = get_connection(tenant, serializer)
+    test "measure traffic for postgres changes events", %{tenant: tenant, db_conn: db_conn} do
+      {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
 
@@ -185,8 +183,8 @@ defmodule Realtime.Integration.MeasureTrafficTest do
       assert input_bytes > 0, "Expected input_bytes to be greater than 0, got #{input_bytes}"
     end
 
-    test "measure traffic for db events", %{tenant: tenant, serializer: serializer, db_conn: db_conn} do
-      {socket, _} = get_connection(tenant, serializer)
+    test "measure traffic for db events", %{tenant: tenant, db_conn: db_conn} do
+      {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, db: %{enabled: true}}
       topic = "realtime:any"
       channel_name = "any"
