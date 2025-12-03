@@ -98,13 +98,7 @@ defmodule Realtime.Application do
         RealtimeWeb.Presence
       ] ++ extensions_supervisors() ++ janitor_tasks()
 
-    database_connections = if master_region == region, do: [Realtime.Repo], else: []
-
-    database_connections =
-      case Replica.replica() do
-        Realtime.Repo -> database_connections
-        replica -> [replica | database_connections]
-      end
+    database_connections = if master_region == region, do: [Realtime.Repo], else: [Replica.replica()]
 
     children = database_connections ++ children
 
