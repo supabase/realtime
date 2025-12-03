@@ -89,7 +89,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
   end
 
   def execute_tenant_metrics do
-    tenants = Tenants.list_connected_tenants(Node.self())
+    tenants = Tenants.Connect.list_tenants()
 
     for t <- tenants do
       count = UsersCounter.tenant_users(Node.self(), t)

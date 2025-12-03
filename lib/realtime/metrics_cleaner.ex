@@ -35,12 +35,10 @@ defmodule Realtime.MetricsCleaner do
     Process.send_after(self(), :check, interval)
   end
 
-  @table_name :"syn_registry_by_name_Elixir.Realtime.Tenants.Connect"
   @metrics_table Realtime.PromEx.Metrics
   @filter_spec [{{{:_, %{tenant: :"$1"}}, :_}, [], [:"$1"]}]
-  @tenant_id_spec [{{:"$1", :_, :_, :_, :_, :_}, [], [:"$1"]}]
   defp loop_and_cleanup_metrics_table do
-    tenant_ids = :ets.select(@table_name, @tenant_id_spec)
+    tenant_ids = Realtime.Tenants.Connect.list_tenants()
 
     :ets.select(@metrics_table, @filter_spec)
     |> Enum.uniq()
