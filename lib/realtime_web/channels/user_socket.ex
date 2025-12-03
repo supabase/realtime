@@ -4,7 +4,23 @@ defmodule RealtimeWeb.UserSocket do
   @impl true
   def init(state) when is_tuple(state) do
     Process.flag(:max_heap_size, max_heap_size())
+    Process.send_after(self(), {:measure_traffic, 0, 0}, measure_traffic_interval_in_ms())
     Phoenix.Socket.__init__(state)
+  end
+
+  @impl true
+  def handle_info(
+        {:measure_traffic, previous_recv, previous_send},
+        {_, %{assigns: assigns, transport_pid: transport_pid}} = state
+      ) do
+    tenant_external_id = Map.get(assigns, :tenant)
+
+    %{latest_recv: latest_recv, latest_send: latest_send} =
+      collect_traffic_telemetry(transport_pid, tenant_external_id, previous_recv, previous_send)
+
+    Process.send_after(self(), {:measure_traffic, latest_recv, latest_send}, measure_traffic_interval_in_ms())
+
+    {:ok, state}
   end
 
   use Phoenix.Socket
@@ -144,4 +160,38 @@ defmodule RealtimeWeb.UserSocket do
   end
 
   defp max_heap_size(), do: Application.fetch_env!(:realtime, :websocket_max_heap_size)
+  defp measure_traffic_interval_in_ms(), do: Application.fetch_env!(:realtime, :measure_traffic_interval_in_ms)
+
+  defp collect_traffic_telemetry(nil, _tenant_external_id, _previous_recv, _previous_send), do: 0
+
+  defp collect_traffic_telemetry(transport_pid, tenant_external_id, previous_recv, previous_send) do
+    %{send_oct: latest_send, recv_oct: latest_recv} =
+      transport_pid
+      |> Process.info(:links)
+      |> then(fn {:links, links} -> links end)
+      |> Enum.filter(&is_port/1)
+      |> Enum.reduce(%{send_oct: 0, recv_oct: 0}, fn link, acc ->
+        case :inet.getstat(link, [:send_oct, :recv_oct]) do
+          {:ok, stats} ->
+            send_oct = Keyword.get(stats, :send_oct, 0)
+            recv_oct = Keyword.get(stats, :recv_oct, 0)
+
+            %{
+              send_oct: acc.send_oct + send_oct,
+              recv_oct: acc.recv_oct + recv_oct
+            }
+
+          {:error, _} ->
+            acc
+        end
+      end)
+
+    send_delta = max(0, latest_send - previous_send)
+    recv_delta = max(0, latest_recv - previous_recv)
+
+    :telemetry.execute([:realtime, :channel, :output_bytes], %{size: send_delta}, %{tenant: tenant_external_id})
+    :telemetry.execute([:realtime, :channel, :input_bytes], %{size: recv_delta}, %{tenant: tenant_external_id})
+
+    %{latest_recv: latest_recv, latest_send: latest_send}
+  end
 end
