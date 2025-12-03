@@ -7,6 +7,8 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.UsersCounter
+  alias Realtime.RateCounter
+  alias Realtime.GenCounter
 
   defmodule MetricsTest do
     use PromEx, otp_app: :realtime_test_phoenix
@@ -29,33 +31,30 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
                 end
 
                 def fake_db_event(external_id) do
-                  external_id
-                  |> Realtime.Tenants.db_events_per_second_rate(100)
-                  |> Realtime.RateCounter.new()
+                  rate = Realtime.Tenants.db_events_per_second_rate(external_id, 100)
 
-                  external_id
-                  |> Realtime.Tenants.db_events_per_second_key()
-                  |> Realtime.GenCounter.add()
+                  rate
+                  |> tap(&RateCounter.new(&1))
+                  |> tap(&GenCounter.add(&1.id))
+                  |> RateCounterHelper.tick!()
                 end
 
                 def fake_event(external_id) do
-                  external_id
-                  |> Realtime.Tenants.events_per_second_rate(123)
-                  |> Realtime.RateCounter.new()
+                  rate = Realtime.Tenants.events_per_second_rate(external_id, 123)
 
-                  external_id
-                  |> Realtime.Tenants.events_per_second_key()
-                  |> Realtime.GenCounter.add()
+                  rate
+                  |> tap(&RateCounter.new(&1))
+                  |> tap(&GenCounter.add(&1.id))
+                  |> RateCounterHelper.tick!()
                 end
 
                 def fake_presence_event(external_id) do
-                  external_id
-                  |> Realtime.Tenants.presence_events_per_second_rate(123)
-                  |> Realtime.RateCounter.new()
+                  rate = Realtime.Tenants.presence_events_per_second_rate(external_id, 123)
 
-                  external_id
-                  |> Realtime.Tenants.presence_events_per_second_key()
-                  |> Realtime.GenCounter.add()
+                  rate
+                  |> tap(&RateCounter.new(&1))
+                  |> tap(&GenCounter.add(&1.id))
+                  |> RateCounterHelper.tick!()
                 end
 
                 def fake_broadcast_from_database(external_id) do
@@ -130,7 +129,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       metric_value = metric_value("realtime_channel_events", tenant: external_id) || 0
       FakeUserCounter.fake_event(external_id)
 
-      Process.sleep(200)
+      Process.sleep(100)
       assert metric_value("realtime_channel_events", tenant: external_id) == metric_value + 1
     end
 
@@ -139,14 +138,14 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       FakeUserCounter.fake_event(external_id)
 
-      Process.sleep(200)
+      Process.sleep(100)
       assert metric_value("realtime_channel_global_events") == metric_value + 1
     end
 
     test "db_event exists after counter added", %{tenant: %{external_id: external_id}} do
       metric_value = metric_value("realtime_channel_db_events", tenant: external_id) || 0
       FakeUserCounter.fake_db_event(external_id)
-      Process.sleep(200)
+      Process.sleep(100)
       assert metric_value("realtime_channel_db_events", tenant: external_id) == metric_value + 1
     end
 
@@ -154,7 +153,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       metric_value = metric_value("realtime_channel_global_db_events") || 0
 
       FakeUserCounter.fake_db_event(external_id)
-      Process.sleep(200)
+      Process.sleep(100)
       assert metric_value("realtime_channel_global_db_events") == metric_value + 1
     end
 
@@ -162,14 +161,14 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       metric_value = metric_value("realtime_channel_presence_events", tenant: external_id) || 0
 
       FakeUserCounter.fake_presence_event(external_id)
-      Process.sleep(200)
+      Process.sleep(100)
       assert metric_value("realtime_channel_presence_events", tenant: external_id) == metric_value + 1
     end
 
     test "global presence_event exists after counter added", %{tenant: %{external_id: external_id}} do
       metric_value = metric_value("realtime_channel_global_presence_events") || 0
       FakeUserCounter.fake_presence_event(external_id)
-      Process.sleep(200)
+      Process.sleep(100)
       assert metric_value("realtime_channel_global_presence_events") == metric_value + 1
     end
 
@@ -272,7 +271,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       Process.sleep(200)
       assert metric_value(metric, message_type: "presence", tenant: external_id) == metric_value + 1
 
-      assert metric_value("realtime_tenants_payload_size_bucket", tenant: external_id, le: "250.0") > 0
+      assert metric_value("realtime_tenants_payload_size_bucket", tenant: external_id, le: "250") > 0
     end
 
     test "global metric payload size", context do
