@@ -8,7 +8,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   @type conn() :: Postgrex.conn()
   @type filter :: {binary, binary, binary}
-  @type subscription_params :: {binary, binary, binary, [filter]}
+  @type subscription_params :: {action_filter :: binary, schema :: binary, table :: binary, [filter]}
   @type subscription_list :: [%{id: binary, claims: map, subscription_params: subscription_params}]
 
   @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
