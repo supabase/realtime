@@ -78,10 +78,11 @@ defmodule Realtime.Api.Tenant do
       :migrations_ran,
       :broadcast_adapter
     ])
-    |> validate_required([
-      :external_id,
-      :jwt_secret
-    ])
+    |> validate_required([:external_id])
+    |> check_constraint(:jwt_secret,
+      name: :jwt_secret_or_jwt_jwks_required,
+      message: "either jwt_secret or jwt_jwks must be provided"
+    )
     |> unique_constraint([:external_id])
     |> encrypt_jwt_secret()
     |> maybe_set_default(:max_bytes_per_second, :tenant_max_bytes_per_second)
@@ -102,7 +103,8 @@ defmodule Realtime.Api.Tenant do
     end
   end
 
-  def encrypt_jwt_secret(changeset) do
-    update_change(changeset, :jwt_secret, &Crypto.encrypt!/1)
-  end
+  def encrypt_jwt_secret(%Ecto.Changeset{valid?: true} = changeset),
+    do: update_change(changeset, :jwt_secret, &Crypto.encrypt!/1)
+
+  def encrypt_jwt_secret(changeset), do: changeset
 end
