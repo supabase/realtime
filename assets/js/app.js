@@ -8,7 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 // LiveView is managing this page because we have Phoenix running
 // We're using LiveView to handle the Realtime client via LiveView Hooks
 
-let Hooks = {};
+const Hooks = {};
 Hooks.payload = {
   initRealtime(
     channelName,
@@ -24,8 +24,6 @@ Hooks.payload = {
     private_channel
   ) {
     // Instantiate our client with the Realtime server and params to connect with
-    {
-    }
     const opts = {
       realtime: {
         params: {
@@ -36,17 +34,20 @@ Hooks.payload = {
 
     this.realtimeSocket = createClient(host, token, opts);
 
-    if (bearer != "") {
+    if (bearer !== "") {
       this.realtimeSocket.realtime.setAuth(bearer);
     }
 
-    private_channel = private_channel == "true";
+    private_channel = private_channel === "true";
 
     // Join the Channel 'any'
     // Channels can be named anything
     // All clients on the same Channel will get messages sent to that Channel
     this.channel = this.realtimeSocket.channel(channelName, {
-      config: { broadcast: { self: true, private: private_channel } },
+      config: {
+        broadcast: { self: true },
+        private: private_channel,
+      },
     });
 
     // Hack to confirm Postgres is subscribed
@@ -55,13 +56,13 @@ Hooks.payload = {
       if (payload.extension === "postgres_changes" && payload.status === "ok") {
         this.pushEventTo("#conn_info", "postgres_subscribed", {});
       }
-      let ts = new Date();
-      let line = `<tr class="bg-white border-b hover:bg-gray-50">
+      const ts = new Date();
+      const line = `<tr class="bg-white border-b hover:bg-gray-50">
       <td class="py-4 px-6">SYSTEM</td>
       <td class="py-4 px-6">${ts.toISOString()}</td>
       <td class="py-4 px-6">${JSON.stringify(payload)}</td>
     </tr>`;
-      let list = document.querySelector("#plist");
+      const list = document.querySelector("#plist");
       list.innerHTML = line + list.innerHTML;
     });
 
@@ -69,13 +70,13 @@ Hooks.payload = {
     // The event name can by anything
     // Match on specific event names to filter for only those types of events and do something with them
     this.channel.on("broadcast", { event: "*" }, (payload) => {
-      let ts = new Date();
-      let line = `<tr class="bg-white border-b hover:bg-gray-50">
+      const ts = new Date();
+      const line = `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">BROADCAST</td>
         <td class="py-4 px-6">${ts.toISOString()}</td>
         <td class="py-4 px-6">${JSON.stringify(payload)}</td>
       </tr>`;
-      let list = document.querySelector("#plist");
+      const list = document.querySelector("#plist");
       list.innerHTML = line + list.innerHTML;
     });
 
@@ -85,29 +86,33 @@ Hooks.payload = {
 
       this.channel.on("presence", { event: "*" }, (payload) => {
         this.pushEventTo("#conn_info", "presence_subscribed", {});
-        let ts = new Date();
-        let line = `<tr class="bg-white border-b hover:bg-gray-50">
+        const ts = new Date();
+        const line = `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">PRESENCE</td>
         <td class="py-4 px-6">${ts.toISOString()}</td>
         <td class="py-4 px-6">${JSON.stringify(payload)}</td>
       </tr>`;
-        let list = document.querySelector("#plist");
+        const list = document.querySelector("#plist");
         list.innerHTML = line + list.innerHTML;
       });
     }
 
     // Listen for all (`*`) `postgres_changes` events on tables in the `public` schema
     if (enable_db_changes === "true") {
-      let postgres_changes_opts = { event: "*", schema: schema, table: table };
+      const postgres_changes_opts = {
+        event: "*",
+        schema: schema,
+        table: table,
+      };
       if (filter !== "") {
         postgres_changes_opts.filter = filter;
       }
       this.channel.on("postgres_changes", postgres_changes_opts, (payload) => {
-        let ts = performance.now() + performance.timeOrigin;
-        let iso_ts = new Date();
-        let payload_ts = Date.parse(payload.commit_timestamp);
-        let latency = ts - payload_ts;
-        let line = `<tr class="bg-white border-b hover:bg-gray-50">
+        const ts = performance.now() + performance.timeOrigin;
+        const iso_ts = new Date();
+        const payload_ts = Date.parse(payload.commit_timestamp);
+        const latency = ts - payload_ts;
+        const line = `<tr class="bg-white border-b hover:bg-gray-50">
         <td class="py-4 px-6">POSTGRES</td>
         <td class="py-4 px-6">${iso_ts.toISOString()}</td>
         <td class="py-4 px-6">
@@ -117,7 +122,7 @@ Hooks.payload = {
           )} ms</div>
         </td>
       </tr>`;
-        let list = document.querySelector("#plist");
+        const list = document.querySelector("#plist");
         list.innerHTML = line + list.innerHTML;
       });
     }
@@ -178,10 +183,9 @@ Hooks.payload = {
         // }
         if (enable_presence === "true") {
           const name = "user_name_" + Math.floor(Math.random() * 100);
-          this.channel.send({
-            type: "presence",
-            event: "TRACK",
-            payload: { name: name, t: performance.now() },
+          await this.channel.track({
+            name: name,
+            t: performance.now(),
           });
         }
       } else {
@@ -214,7 +218,7 @@ Hooks.payload = {
   },
 
   mounted() {
-    let params = {
+    const params = {
       log_level: localStorage.getItem("log_level"),
       token: localStorage.getItem("token"),
       host: localStorage.getItem("host"),
@@ -250,9 +254,9 @@ Hooks.payload = {
       this.sendRealtime(message.event, message.payload)
     );
 
-    this.handleEvent("disconnect", ({}) => this.disconnectRealtime());
+    this.handleEvent("disconnect", () => this.disconnectRealtime());
 
-    this.handleEvent("clear_local_storage", ({}) => this.clearLocalStorage());
+    this.handleEvent("clear_local_storage", () => this.clearLocalStorage());
   },
 };
 
@@ -266,18 +270,18 @@ Hooks.latency = {
   },
 };
 
-let csrfToken = document
+const csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");
 
-let liveSocket = new LiveSocket("/live", Socket, {
+const liveSocket = new LiveSocket("/live", Socket, {
   hooks: Hooks,
   params: { _csrf_token: csrfToken },
 });
 
 topbar.config({ barColors: { 0: "#29d" }, shadowColor: "rgba(0, 0, 0, .3)" });
-window.addEventListener("phx:page-loading-start", (info) => topbar.show());
-window.addEventListener("phx:page-loading-stop", (info) => topbar.hide());
+window.addEventListener("phx:page-loading-start", () => topbar.show());
+window.addEventListener("phx:page-loading-stop", () => topbar.hide());
 
 liveSocket.connect();
 
