@@ -76,9 +76,9 @@ defmodule Extensions.PostgresCdcRls.Replications do
       SELECT wal->>'type' as type,
              wal->>'schema' as schema,
              wal->>'table' as table,
-             wal->>'columns' as columns,
-             wal->>'record' as record,
-             wal->>'old_record' as old_record,
+             COALESCE(wal->>'columns', '[]') as columns,
+             COALESCE(wal->>'record', '{}') as record,
+             COALESCE(wal->>'old_record', '{}') as old_record,
              wal->>'commit_timestamp' as commit_timestamp,
              subscription_ids,
              errors
