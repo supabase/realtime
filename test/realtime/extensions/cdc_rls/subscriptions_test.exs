@@ -1,4 +1,4 @@
-defmodule Realtime.Extensions.PostgresCdcRls.Subscriptions do
+defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
   use RealtimeWeb.ChannelCase, async: true
 
   doctest Extensions.PostgresCdcRls.Subscriptions, import: true

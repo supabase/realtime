@@ -363,14 +363,13 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
         capture_log(fn ->
           {:noreply, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
 
-          # Enough for the RateCounter to calculate the last bucket
-          refute_receive _, 1200
+          {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
+          assert avg == 0.0
+
+          refute_receive _, 200
         end)
 
       assert log =~ "RlsPolicyError"
-
-      {:ok, %{avg: avg}} = RateCounterHelper.tick!(Tenants.events_per_second_rate(tenant))
-      assert avg == 0.0
     end
 
     test "handle payload size excedding limits in private channels", %{topic: topic, tenant: tenant, db_conn: db_conn} do
