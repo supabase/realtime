@@ -34,6 +34,7 @@ RUN mix local.hex --force && \
 
 # install mix dependencies
 COPY mix.exs mix.lock ./
+COPY beacon beacon
 RUN mix deps.get --only $MIX_ENV
 RUN mkdir config
 
