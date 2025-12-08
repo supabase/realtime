@@ -66,7 +66,7 @@ defmodule Realtime.PromEx do
 
   defmodule Store do
     @moduledoc false
-    # Custom store to set global tags and striped storage
+    # Custom store to set global tags
 
     @behaviour PromEx.Storage
 
@@ -82,7 +82,7 @@ defmodule Realtime.PromEx do
         name: name,
         metrics: metrics,
         global_tags: Application.get_env(:realtime, :metrics_tags, %{}),
-        storage: :striped
+        storage: :default
       )
     end
   end
