@@ -71,7 +71,7 @@ defmodule Realtime.GenRpcPubSubTest do
 
         # Avoid port collision
         client_config_per_node = %{
-          :"main@127.0.0.1" => 5369,
+          :"main@127.0.0.1" => 5969,
           :"#{us_node}@127.0.0.1" => 16970,
           :"#{ap2_nodeX}@127.0.0.1" => 16971,
           :"#{ap2_nodeY}@127.0.0.1" => 16972

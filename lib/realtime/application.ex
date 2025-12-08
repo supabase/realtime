@@ -53,6 +53,8 @@ defmodule Realtime.Application do
     connect_partition_slots = Application.get_env(:realtime, :connect_partition_slots)
     no_channel_timeout_in_ms = Application.get_env(:realtime, :no_channel_timeout_in_ms)
     master_region = Application.get_env(:realtime, :master_region) || region
+    user_scope_shards = Application.fetch_env!(:realtime, :users_scope_shards)
+    user_scope_broadast_interval_in_ms = Application.get_env(:realtime, :users_scope_broadcast_interval_in_ms, 10_000)
 
     :syn.join(RegionNodes, region, self(), node: node())
 
@@ -66,6 +68,15 @@ defmodule Realtime.Application do
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         {Phoenix.PubSub,
          name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},
+        {Beacon,
+         [
+           :users,
+           [
+             partitions: user_scope_shards,
+             broadcast_interval_in_ms: user_scope_broadast_interval_in_ms,
+             message_module: Realtime.BeaconPubSubAdapter
+           ]
+         ]},
         {Cachex, name: Realtime.RateCounter},
         Realtime.Tenants.Cache,
         Realtime.RateCounter.DynamicSupervisor,
