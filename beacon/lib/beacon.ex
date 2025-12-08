@@ -1,5 +1,9 @@
 defmodule Beacon do
+  @moduledoc """
+  FIXME
+  """
 
+  @type group :: term
   @type start_option :: {:partitions, pos_integer()}
 
   @doc """
@@ -22,7 +26,7 @@ defmodule Beacon do
 
   @spec join(atom, term, pid) :: :ok
   def join(scope, group, pid) when is_atom(scope) and is_pid(pid) do
-    Beacon.Partition.join(Beacon.Supervisor.partition(scope), group, pid)
+    Beacon.Partition.join(Beacon.Supervisor.partition(scope, pid), group, pid)
   end
 
   @spec members(atom, term) :: [pid]
@@ -38,6 +42,11 @@ defmodule Beacon do
       Beacon.Partition.member_count(partition_name, group)
     end)
   end
+
+  @spec member?(atom, term, pid) :: boolean
+  def member?(scope, group, pid) when is_atom(scope) and is_pid(pid) do
+    Beacon.Partition.member?(Beacon.Supervisor.partition(scope, pid), group, pid)
+  end
 end
 
 defmodule Beacon.Supervisor do
@@ -49,11 +58,11 @@ defmodule Beacon.Supervisor do
   def partition_name(scope, partition), do: :"#{scope}_beacon_partition_#{partition}"
 
 
-  @spec partition(atom) :: atom
-  def partition(scope) do
+  @spec partition(atom, pid) :: atom
+  def partition(scope, pid) do
     case :persistent_term.get(scope, :unknown) do
       :unknown -> raise "Beacon for scope #{inspect(scope)} is not started"
-      partition_names -> elem(partition_names, :erlang.phash2(self(), tuple_size(partition_names)))
+      partition_names -> elem(partition_names, :erlang.phash2(pid, tuple_size(partition_names)))
     end
   end
 
@@ -90,10 +99,8 @@ defmodule Beacon.Supervisor do
 end
 
 defmodule Beacon.Partition do
-  @moduledoc "Beacon partitions FIXME"
+  @moduledoc false
   use GenServer
-
-  @type group :: term
 
   defmodule State do
     @moduledoc false
@@ -101,10 +108,10 @@ defmodule Beacon.Partition do
     defstruct [:name]
   end
 
-  @spec join(atom, group, pid) :: :ok
+  @spec join(atom, Beacon.group(), pid) :: :ok
   def join(partition_name, group, pid), do: GenServer.call(partition_name, {:join, group, pid})
 
-  @spec members(atom, group) :: [pid]
+  @spec members(atom, Beacon.group()) :: [pid]
   def members(partition_name, group) do
     case :ets.lookup_element(partition_name, group, 2, []) do
       [] -> []
@@ -112,9 +119,17 @@ defmodule Beacon.Partition do
     end
   end
 
-  @spec member_count(atom, group) :: non_neg_integer
+  @spec member_count(atom, Beacon.group()) :: non_neg_integer
   def member_count(partition_name, group) do
     :ets.lookup_element(partition_name, group, 3, 0)
+  end
+
+  @spec member?(atom, Beacon.group(), pid) :: boolean
+  def member?(partition_name, group, pid) do
+    case :ets.lookup_element(partition_name, group, 2, []) do
+      [] -> false
+      pids -> MapSet.member?(pids, pid)
+    end
   end
 
   @spec start_link(atom) :: GenServer.on_start()
@@ -125,7 +140,7 @@ defmodule Beacon.Partition do
   def init(name), do: {:ok, %State{name: name}}
 
   @impl true
-  @spec handle_call({:join, group, pid}, GenServer.from(), State.t()) :: {:reply, :ok, State.t()}
+  @spec handle_call({:join, Beacon.group(), pid}, GenServer.from(), State.t()) :: {:reply, :ok, State.t()}
   def handle_call({:join, group, pid}, _from, state) do
     case :ets.lookup(state.name, group) do
       [{^group, pids, counter}] ->
@@ -141,6 +156,7 @@ defmodule Beacon.Partition do
   end
 
   @impl true
+  @spec handle_info({{:DOWN, Beacon.group()}, reference, :process, pid, term}, State.t()) :: {:noreply, State.t()}
   def handle_info({{:DOWN, group}, _ref, :process, pid, _reason}, state) do
     case :ets.lookup(state.name, group) do
       [{^group, pids, counter}] ->
