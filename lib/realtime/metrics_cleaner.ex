@@ -38,11 +38,10 @@ defmodule Realtime.MetricsCleaner do
   defp loop_and_cleanup_metrics_table do
     tenant_ids = Realtime.Tenants.Connect.list_tenants() |> MapSet.new()
 
-    {_, tids} = Peep.Persistent.storage(Realtime.PromEx.Metrics)
+    {_, tid} = Peep.Persistent.storage(Realtime.PromEx.Metrics)
 
-    tids
-    |> Tuple.to_list()
-    |> Stream.flat_map(fn tid -> :ets.select(tid, @peep_filter_spec) end)
+    tid
+    |> :ets.select(@peep_filter_spec)
     |> Enum.uniq()
     |> Stream.reject(fn tenant_id -> MapSet.member?(tenant_ids, tenant_id) end)
     |> Enum.map(fn tenant_id -> %{tenant: tenant_id} end)
