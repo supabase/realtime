@@ -22,6 +22,54 @@ defmodule Realtime.UsersCounter do
   @spec tenant_users(atom, String.t()) :: non_neg_integer()
   def tenant_users(node_name, tenant_id), do: tenant_id |> scope() |> :syn.member_count(tenant_id, node_name)
 
+  @count_all_nodes_spec [
+    {
+      # Match the tuple structure, capture group_name
+      {{:"$1", :_}, :_, :_, :_, :_},
+      # No guards
+      [],
+      # Return only the group_name
+      [:"$1"]
+    }
+  ]
+
+  @doc """
+  Returns the counts of all connected clients for all tenants for the cluster.
+  """
+  @spec tenant_counts() :: %{String.t() => non_neg_integer()}
+  def tenant_counts() do
+    scopes()
+    |> Stream.flat_map(fn scope ->
+      :syn_backbone.get_table_name(:syn_pg_by_name, scope)
+      |> :ets.select(@count_all_nodes_spec)
+    end)
+    |> Enum.frequencies()
+  end
+
+  @doc """
+  Returns the counts of all connected clients for all tenants for a single node.
+  """
+  @spec tenant_counts(node) :: %{String.t() => non_neg_integer()}
+  def tenant_counts(node) do
+    count_single_node_spec = [
+      {
+        # Match the tuple structure with specific node, capture group_name
+        {{:"$1", :_}, :_, :_, :_, node},
+        # No guards
+        [],
+        # Return only the group_name
+        [:"$1"]
+      }
+    ]
+
+    scopes()
+    |> Stream.flat_map(fn scope ->
+      :syn_backbone.get_table_name(:syn_pg_by_name, scope)
+      |> :ets.select(count_single_node_spec)
+    end)
+    |> Enum.frequencies()
+  end
+
   @doc """
   Returns the scope for a given tenant id.
   """

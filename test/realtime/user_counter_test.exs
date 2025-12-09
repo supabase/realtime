@@ -3,6 +3,12 @@ defmodule Realtime.UsersCounterTest do
   alias Realtime.UsersCounter
   alias Realtime.Rpc
 
+  setup_all do
+    tenant_id = random_string()
+    {nodes, count} = generate_load(tenant_id)
+    %{tenant_id: tenant_id, count: count, nodes: nodes}
+  end
+
   describe "add/1" do
     test "starts counter for tenant" do
       assert UsersCounter.add(self(), random_string()) == :ok
@@ -14,7 +20,7 @@ defmodule Realtime.UsersCounterTest do
                 def ping(),
                   do:
                     spawn(fn ->
-                      Process.sleep(3000)
+                      Process.sleep(15000)
                       :pong
                     end)
               end
@@ -22,19 +28,41 @@ defmodule Realtime.UsersCounterTest do
 
   Code.eval_quoted(@aux_mod)
 
+  describe "tenant_counts/0" do
+    test "map of tenant and number of users", %{tenant_id: tenant_id, count: expected} do
+      assert UsersCounter.add(self(), tenant_id) == :ok
+      Process.sleep(1000)
+      counts = UsersCounter.tenant_counts()
+      assert counts[tenant_id] == expected + 1
+
+      assert map_size(counts) >= 41
+    end
+  end
+
+  describe "tenant_counts/1" do
+    test "map of tenant and number of users for a node only", %{tenant_id: tenant_id, nodes: nodes} do
+      assert UsersCounter.add(self(), tenant_id) == :ok
+      Process.sleep(1000)
+      my_counts = UsersCounter.tenant_counts(Node.self())
+      # Only one connection from this test process on this node
+      assert my_counts == %{tenant_id => 1}
+
+      another_node_counts = UsersCounter.tenant_counts(hd(nodes))
+      assert another_node_counts[tenant_id] == 2
+
+      assert map_size(another_node_counts) == 21
+    end
+  end
+
   describe "tenant_users/1" do
-    test "returns count of connected clients for tenant on cluster node" do
-      tenant_id = random_string()
-      expected = generate_load(tenant_id)
+    test "returns count of connected clients for tenant on cluster node", %{tenant_id: tenant_id, count: expected} do
       Process.sleep(1000)
       assert UsersCounter.tenant_users(tenant_id) == expected
     end
   end
 
   describe "tenant_users/2" do
-    test "returns count of connected clients for tenant on target cluster" do
-      tenant_id = random_string()
-      generate_load(tenant_id)
+    test "returns count of connected clients for tenant on target cluster", %{tenant_id: tenant_id} do
       {:ok, node} = Clustered.start(@aux_mod)
       pid = Rpc.call(node, Aux, :ping, [])
       UsersCounter.add(pid, tenant_id)
@@ -42,33 +70,38 @@ defmodule Realtime.UsersCounterTest do
     end
   end
 
-  defp generate_load(tenant_id, nodes \\ 2, processes \\ 2) do
-    for i <- 1..nodes do
-      # Avoid port collision
-      extra_config = [
-        {:gen_rpc, :tcp_server_port, 15970 + i}
-      ]
+  defp generate_load(tenant_id, n_nodes \\ 2, processes \\ 2) do
+    nodes =
+      for i <- 1..n_nodes do
+        # Avoid port collision
+        extra_config = [
+          {:gen_rpc, :tcp_server_port, 15970 + i}
+        ]
 
-      {:ok, node} = Clustered.start(@aux_mod, extra_config: extra_config, phoenix_port: 4012 + i)
+        {:ok, node} = Clustered.start(@aux_mod, extra_config: extra_config, phoenix_port: 4012 + i)
 
-      for _ <- 1..processes do
-        pid = Rpc.call(node, Aux, :ping, [])
+        for _ <- 1..processes do
+          pid = Rpc.call(node, Aux, :ping, [])
 
-        for _ <- 1..10 do
-          # replicate same pid added multiple times concurrently
-          Task.start(fn ->
-            UsersCounter.add(pid, tenant_id)
-          end)
+          for _ <- 1..10 do
+            # replicate same pid added multiple times concurrently
+            Task.start(fn ->
+              UsersCounter.add(pid, tenant_id)
+              Process.sleep(10000)
+            end)
 
-          # noisy neighbors to test handling of bigger loads on concurrent calls
-          Task.start(fn ->
-            pid = Rpc.call(node, Aux, :ping, [])
-            UsersCounter.add(pid, random_string())
-          end)
+            # noisy neighbors to test handling of bigger loads on concurrent calls
+            Task.start(fn ->
+              pid = Rpc.call(node, Aux, :ping, [])
+              UsersCounter.add(pid, random_string())
+              Process.sleep(10000)
+            end)
+          end
         end
-      end
-    end
 
-    nodes * processes
+        node
+      end
+
+    {nodes, n_nodes * processes}
   end
 end
