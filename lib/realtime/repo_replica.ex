@@ -45,6 +45,7 @@ defmodule Realtime.Repo.Replica do
       end
 
     region = Application.get_env(:realtime, :region)
+    master_region = Application.get_env(:realtime, :master_region) || region
     replica = Map.get(replicas, region)
     replica_conf = Application.get_env(:realtime, replica)
 
@@ -54,6 +55,9 @@ defmodule Realtime.Repo.Replica do
         Realtime.Repo
 
       is_nil(replica_conf) ->
+        Realtime.Repo
+
+      region == master_region ->
         Realtime.Repo
 
       true ->
