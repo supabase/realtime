@@ -93,16 +93,20 @@ defmodule Realtime.PromEx.Plugins.Tenant do
 
   def execute_tenant_metrics do
     tenants = Tenants.Connect.list_tenants()
+    cluster_counts = UsersCounter.tenant_counts()
+    node_counts = UsersCounter.tenant_counts(Node.self())
 
     for t <- tenants do
-      count = UsersCounter.tenant_users(Node.self(), t)
-      cluster_count = UsersCounter.tenant_users(t)
       tenant = Tenants.Cache.get_tenant_by_external_id(t)
 
       if tenant != nil do
         Telemetry.execute(
           [:realtime, :connections],
-          %{connected: count, connected_cluster: cluster_count, limit: tenant.max_concurrent_users},
+          %{
+            connected: Map.get(node_counts, t, 0),
+            connected_cluster: Map.get(cluster_counts, t, 0),
+            limit: tenant.max_concurrent_users
+          },
           %{tenant: t}
         )
       end
