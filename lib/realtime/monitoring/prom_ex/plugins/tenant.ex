@@ -22,7 +22,6 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     [
       channel_events(),
       replication_metrics(),
-      subscription_metrics(),
       payload_size_metrics()
     ]
   end
@@ -136,28 +135,6 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     )
   end
 
-  defp subscription_metrics do
-    Event.build(
-      :realtime_tenant_channel_event_metrics,
-      [
-        sum(
-          [:realtime, :subscriptions_checker, :pid_not_found],
-          event_name: [:realtime, :subscriptions_checker, :pid_not_found],
-          measurement: :sum,
-          description: "Sum of pids not found in Subscription tables.",
-          tags: [:tenant]
-        ),
-        sum(
-          [:realtime, :subscriptions_checker, :phantom_pid_detected],
-          event_name: [:realtime, :subscriptions_checker, :phantom_pid_detected],
-          measurement: :sum,
-          description: "Sum of phantom pids detected in Subscription tables.",
-          tags: [:tenant]
-        )
-      ]
-    )
-  end
-
   defmodule PolicyAuthorization.Buckets do
     @moduledoc false
     use Peep.Buckets.Custom, buckets: [10, 250, 5000, 15_000]
@@ -235,20 +212,6 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           event_name: [:realtime, :channel, :output_bytes],
           description: "Sum of output bytes sent on sockets.",
           measurement: :size,
-          tags: [:tenant]
-        ),
-        last_value(
-          [:realtime, :channel, :events, :limit_per_second],
-          event_name: [:realtime, :rate_counter, :channel, :events],
-          measurement: :limit,
-          description: "Rate limit of messages per second sent on a Realtime Channel.",
-          tags: [:tenant]
-        ),
-        last_value(
-          [:realtime, :channel, :joins, :limit_per_second],
-          event_name: [:realtime, :rate_counter, :channel, :joins],
-          measurement: :limit,
-          description: "Rate limit of joins per second on a Realtime Channel.",
           tags: [:tenant]
         ),
         distribution(
