@@ -76,6 +76,7 @@ defmodule RealtimeWeb.Router do
     pipe_through(:metrics)
 
     get("/", MetricsController, :index)
+    get("/:region", MetricsController, :region)
   end
 
   scope "/api" do
