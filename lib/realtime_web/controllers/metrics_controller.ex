@@ -50,6 +50,7 @@ defmodule RealtimeWeb.MetricsController do
 
         metrics ->
           {:ok, acc_conn} = chunk(acc_conn, metrics)
+          :erlang.garbage_collect()
           acc_conn
       end
     end)
