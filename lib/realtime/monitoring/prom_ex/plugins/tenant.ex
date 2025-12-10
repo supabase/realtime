@@ -77,13 +77,6 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "The cluster total count of connected clients for a tenant.",
           measurement: :connected_cluster,
           tags: [:tenant]
-        ),
-        last_value(
-          [:realtime, :connections, :limit_concurrent],
-          event_name: [:realtime, :connections],
-          description: "The total count of connected clients for a tenant.",
-          measurement: :limit,
-          tags: [:tenant]
         )
       ],
       detach_on_error: false
