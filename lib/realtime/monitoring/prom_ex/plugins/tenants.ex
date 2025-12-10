@@ -19,15 +19,6 @@ defmodule Realtime.PromEx.Plugins.Tenants do
   def event_metrics(_) do
     Event.build(:realtime, [
       distribution(
-        [:realtime, :rpc],
-        event_name: [:realtime, :rpc],
-        description: "Latency of rpc calls triggered by a tenant action",
-        measurement: :latency,
-        unit: {:microsecond, :millisecond},
-        tags: [:success, :tenant, :mechanism],
-        reporter_options: [peep_bucket_calculator: Buckets]
-      ),
-      distribution(
         [:realtime, :global, :rpc],
         event_name: [:realtime, :rpc],
         description: "Global Latency of rpc calls",

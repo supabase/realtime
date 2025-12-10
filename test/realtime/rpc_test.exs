@@ -81,8 +81,7 @@ defmodule Realtime.RpcTest do
                         func: :test_success,
                         origin_node: ^origin_node,
                         target_node: ^node,
-                        success: true,
-                        tenant: "123"
+                        success: true
                       }}
     end
 
@@ -100,8 +99,7 @@ defmodule Realtime.RpcTest do
                         func: :test_raise,
                         origin_node: ^origin_node,
                         target_node: ^node,
-                        success: false,
-                        tenant: "123"
+                        success: false
                       }}
     end
 
