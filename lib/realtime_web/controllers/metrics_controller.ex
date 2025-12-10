@@ -6,7 +6,7 @@ defmodule RealtimeWeb.MetricsController do
 
   # We give more memory and time to collect metrics from all nodes as this is a lot of work
   def index(conn, _) do
-    {time, metrics} = :timer.tc(&cluster_metrics/0, :millisecond)
+    {time, metrics} = :timer.tc(fn -> metrics([Node.self() | Node.list()]) end, :millisecond)
     Logger.info("Collected cluster metrics in #{time} milliseconds")
 
     conn
@@ -14,18 +14,28 @@ defmodule RealtimeWeb.MetricsController do
     |> send_resp(200, metrics)
   end
 
-  defp cluster_metrics() do
+  def region(conn, %{"region" => region}) do
+    nodes = Realtime.Nodes.region_nodes(region)
+    {time, metrics} = :timer.tc(fn -> metrics(nodes) end, :millisecond)
+    Logger.info("Collected metrics for region #{region} in #{time} milliseconds")
+
+    conn
+    |> put_resp_content_type("text/plain")
+    |> send_resp(200, metrics)
+  end
+
+  defp metrics(nodes) do
     bump_max_heap_size()
     timeout = Application.fetch_env!(:realtime, :metrics_rpc_timeout)
 
-    Node.list()
+    nodes
     |> Task.async_stream(
       fn node ->
         {node, GenRpc.call(node, __MODULE__, :get_metrics, [], timeout: timeout)}
       end,
       timeout: :infinity
     )
-    |> Enum.reduce([PromEx.get_metrics()], fn {_, {node, response}}, acc ->
+    |> Enum.reduce([], fn {_, {node, response}}, acc ->
       case response do
         {:error, :rpc_error, reason} ->
           Logger.error("Cannot fetch metrics from the node #{inspect(node)} because #{inspect(reason)}")
