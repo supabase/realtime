@@ -2163,7 +2163,7 @@ defmodule Realtime.Integration.RtChannelTest do
       # Postgres Change events
       for _ <- 1..5, do: Postgrex.query!(conn, "insert into test (details) values ('test')", [])
 
-      for _ <- 1..5 do
+      for _ <- 1..10 do
         assert_receive %Message{
                          topic: ^topic,
                          event: "postgres_changes",

@@ -134,11 +134,4 @@ defmodule Realtime.PromEx do
 
     metrics
   end
-
-  @doc "Compressed metrics using :zlib.compress/1"
-  @spec get_compressed_metrics() :: binary()
-  def get_compressed_metrics do
-    get_metrics()
-    |> :zlib.compress()
-  end
 end

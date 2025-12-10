@@ -22,7 +22,6 @@ defmodule Realtime.PromEx.Plugins.Tenant do
     [
       channel_events(),
       replication_metrics(),
-      subscription_metrics(),
       payload_size_metrics()
     ]
   end
@@ -78,13 +77,6 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           description: "The cluster total count of connected clients for a tenant.",
           measurement: :connected_cluster,
           tags: [:tenant]
-        ),
-        last_value(
-          [:realtime, :connections, :limit_concurrent],
-          event_name: [:realtime, :connections],
-          description: "The total count of connected clients for a tenant.",
-          measurement: :limit,
-          tags: [:tenant]
         )
       ],
       detach_on_error: false
@@ -92,7 +84,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
   end
 
   def execute_tenant_metrics do
-    tenants = Tenants.Connect.list_tenants()
+    tenants = Tenants.list_connected_tenants(Node.self())
     cluster_counts = UsersCounter.tenant_counts()
     node_counts = UsersCounter.tenant_counts(Node.self())
 
@@ -131,28 +123,6 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           tags: [:tenant],
           unit: {:microsecond, :millisecond},
           reporter_options: [peep_bucket_calculator: Replication.Buckets]
-        )
-      ]
-    )
-  end
-
-  defp subscription_metrics do
-    Event.build(
-      :realtime_tenant_channel_event_metrics,
-      [
-        sum(
-          [:realtime, :subscriptions_checker, :pid_not_found],
-          event_name: [:realtime, :subscriptions_checker, :pid_not_found],
-          measurement: :sum,
-          description: "Sum of pids not found in Subscription tables.",
-          tags: [:tenant]
-        ),
-        sum(
-          [:realtime, :subscriptions_checker, :phantom_pid_detected],
-          event_name: [:realtime, :subscriptions_checker, :phantom_pid_detected],
-          measurement: :sum,
-          description: "Sum of phantom pids detected in Subscription tables.",
-          tags: [:tenant]
         )
       ]
     )
@@ -235,20 +205,6 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           event_name: [:realtime, :channel, :output_bytes],
           description: "Sum of output bytes sent on sockets.",
           measurement: :size,
-          tags: [:tenant]
-        ),
-        last_value(
-          [:realtime, :channel, :events, :limit_per_second],
-          event_name: [:realtime, :rate_counter, :channel, :events],
-          measurement: :limit,
-          description: "Rate limit of messages per second sent on a Realtime Channel.",
-          tags: [:tenant]
-        ),
-        last_value(
-          [:realtime, :channel, :joins, :limit_per_second],
-          event_name: [:realtime, :rate_counter, :channel, :joins],
-          measurement: :limit,
-          description: "Rate limit of joins per second on a Realtime Channel.",
           tags: [:tenant]
         ),
         distribution(
