@@ -105,19 +105,11 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       _ = Rpc.call(node, FakeUserCounter, :fake_add, [external_id])
 
-      # fake empty tenant_id
-      empty_tenant = tenant_fixture()
-      empty_tenant_id = empty_tenant.external_id
-      :syn.register(Realtime.Tenants.Connect, empty_tenant_id, self(), %{conn: nil})
-
       Process.sleep(500)
       Tenant.execute_tenant_metrics()
 
       assert_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
                       %{tenant: ^external_id}}
-
-      assert_receive {[:realtime, :connections], %{connected: 0, limit: 200, connected_cluster: 0},
-                      %{tenant: ^empty_tenant_id}}
 
       refute_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
                       %{tenant: ^bad_tenant_id}}
