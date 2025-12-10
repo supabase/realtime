@@ -221,7 +221,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
         [:realtime, :rpc],
         %{latency: _},
         %{
-          tenant: "dev_tenant",
           mechanism: :gen_rpc,
           success: true
         }
@@ -381,7 +380,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
         [:realtime, :rpc],
         %{latency: _},
         %{
-          tenant: "dev_tenant",
           mechanism: :gen_rpc,
           origin_node: _,
           success: true,

@@ -81,7 +81,7 @@ defmodule Realtime.GenRpc do
   Options:
 
   - `:key` - Optional key to consistently select the same gen_rpc clients to guarantee message order between nodes
-  - `:tenant_id` - Tenant ID for telemetry and logging, defaults to nil
+  - `:tenant_id` - Tenant ID for logging, defaults to nil
   - `:timeout` - timeout in milliseconds for the RPC call, defaults to 5000ms
   """
   @spec call(node, module, atom, list(any), keyword()) :: result
@@ -120,16 +120,16 @@ defmodule Realtime.GenRpc do
           external_id: tenant_id
         )
 
-        telemetry_failure(node, latency, tenant_id)
+        telemetry_failure(node, latency)
 
         {:error, :rpc_error, reason}
 
       {:error, _} ->
-        telemetry_failure(node, latency, tenant_id)
+        telemetry_failure(node, latency)
         response
 
       _ ->
-        telemetry_success(node, latency, tenant_id)
+        telemetry_success(node, latency)
         response
     end
   end
@@ -184,32 +184,32 @@ defmodule Realtime.GenRpc do
           external_id: tenant_id
         )
 
-        telemetry_failure(node, latency, tenant_id)
+        telemetry_failure(node, latency)
         {node, result}
 
       {node, latency, {:ok, _} = result} ->
-        telemetry_success(node, latency, tenant_id)
+        telemetry_success(node, latency)
         {node, result}
 
       {node, latency, result} ->
-        telemetry_failure(node, latency, tenant_id)
+        telemetry_failure(node, latency)
         {node, result}
     end)
   end
 
-  defp telemetry_success(node, latency, tenant_id) do
+  defp telemetry_success(node, latency) do
     Telemetry.execute(
       [:realtime, :rpc],
       %{latency: latency},
-      %{origin_node: node(), target_node: node, success: true, tenant: tenant_id, mechanism: :gen_rpc}
+      %{origin_node: node(), target_node: node, success: true, mechanism: :gen_rpc}
     )
   end
 
-  defp telemetry_failure(node, latency, tenant_id) do
+  defp telemetry_failure(node, latency) do
     Telemetry.execute(
       [:realtime, :rpc],
       %{latency: latency},
-      %{origin_node: node(), target_node: node, success: false, tenant: tenant_id, mechanism: :gen_rpc}
+      %{origin_node: node(), target_node: node, success: false, mechanism: :gen_rpc}
     )
   end
 

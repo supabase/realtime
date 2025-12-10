@@ -28,7 +28,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^current_node,
                         success: true,
-                        tenant: "123",
                         mechanism: :gen_rpc
                       }}
     end
@@ -43,7 +42,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^current_node,
                         success: false,
-                        tenant: "123",
                         mechanism: :gen_rpc
                       }}
     end
@@ -57,7 +55,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^node,
                         success: true,
-                        tenant: "123",
                         mechanism: :gen_rpc
                       }}
     end
@@ -72,7 +69,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^node,
                         success: false,
-                        tenant: "123",
                         mechanism: :gen_rpc
                       }}
     end
@@ -94,7 +90,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^current_node,
                         success: false,
-                        tenant: 123,
                         mechanism: :gen_rpc
                       }}
     end
@@ -116,7 +111,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^node,
                         success: false,
-                        tenant: 123,
                         mechanism: :gen_rpc
                       }}
     end
@@ -131,7 +125,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^current_node,
                         success: false,
-                        tenant: "123",
                         mechanism: :gen_rpc
                       }}
     end
@@ -146,7 +139,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^node,
                         success: false,
-                        tenant: "123",
                         mechanism: :gen_rpc
                       }}
     end
@@ -168,7 +160,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^node,
                         success: false,
-                        tenant: 123,
                         mechanism: :gen_rpc
                       }}
     end
@@ -315,7 +306,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^node,
                         success: true,
-                        tenant: "123",
                         mechanism: :gen_rpc
                       }}
 
@@ -324,7 +314,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^current_node,
                         success: true,
-                        tenant: "123",
                         mechanism: :gen_rpc
                       }}
     end
@@ -351,7 +340,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^node,
                         success: false,
-                        tenant: 123,
                         mechanism: :gen_rpc
                       }}
 
@@ -360,7 +348,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^current_node,
                         success: false,
-                        tenant: 123,
                         mechanism: :gen_rpc
                       }}
     end
@@ -385,7 +372,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^node,
                         success: false,
-                        tenant: 123,
                         mechanism: :gen_rpc
                       }}
 
@@ -394,7 +380,6 @@ defmodule Realtime.GenRpcTest do
                         origin_node: ^current_node,
                         target_node: ^current_node,
                         success: true,
-                        tenant: 123,
                         mechanism: :gen_rpc
                       }}
     end
