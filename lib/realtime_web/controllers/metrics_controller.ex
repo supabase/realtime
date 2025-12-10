@@ -6,25 +6,32 @@ defmodule RealtimeWeb.MetricsController do
 
   # We give more memory and time to collect metrics from all nodes as this is a lot of work
   def index(conn, _) do
-    {time, metrics} = :timer.tc(fn -> metrics([Node.self() | Node.list()]) end, :millisecond)
+    conn =
+      conn
+      |> put_resp_content_type("text/plain")
+      |> send_chunked(200)
+
+    {time, conn} = :timer.tc(fn -> metrics([Node.self() | Node.list()], conn) end, :millisecond)
     Logger.info("Collected cluster metrics in #{time} milliseconds")
 
     conn
-    |> put_resp_content_type("text/plain")
-    |> send_resp(200, metrics)
   end
 
   def region(conn, %{"region" => region}) do
+    conn =
+      conn
+      |> put_resp_content_type("text/plain")
+      |> send_chunked(200)
+
     nodes = Realtime.Nodes.region_nodes(region)
-    {time, metrics} = :timer.tc(fn -> metrics(nodes) end, :millisecond)
+
+    {time, conn} = :timer.tc(fn -> metrics(nodes, conn) end, :millisecond)
     Logger.info("Collected metrics for region #{region} in #{time} milliseconds")
 
     conn
-    |> put_resp_content_type("text/plain")
-    |> send_resp(200, metrics)
   end
 
-  defp metrics(nodes) do
+  defp metrics(nodes, conn) do
     bump_max_heap_size()
     timeout = Application.fetch_env!(:realtime, :metrics_rpc_timeout)
 
@@ -35,14 +42,15 @@ defmodule RealtimeWeb.MetricsController do
       end,
       timeout: :infinity
     )
-    |> Enum.reduce([], fn {_, {node, response}}, acc ->
+    |> Enum.reduce(conn, fn {_, {node, response}}, acc_conn ->
       case response do
         {:error, :rpc_error, reason} ->
           Logger.error("Cannot fetch metrics from the node #{inspect(node)} because #{inspect(reason)}")
-          acc
+          acc_conn
 
         metrics ->
-          [metrics | acc]
+          {:ok, acc_conn} = chunk(acc_conn, metrics)
+          acc_conn
       end
     end)
   end
