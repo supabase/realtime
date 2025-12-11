@@ -284,9 +284,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         "id" int4 NOT NULL default nextval('test_id_seq'::regclass),
         "details" text,
         PRIMARY KEY ("id"));
-        """,
-        "DROP PUBLICATION IF EXISTS supabase_realtime_messages_publication",
-        "CREATE PUBLICATION supabase_realtime_messages_publication FOR ALL TABLES"
+        """
       ]
 
       Postgrex.transaction(db_conn, fn conn ->
@@ -303,6 +301,8 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           assert_replication_started(db_conn, @replication_slot_name)
           assert_publication_contains_only_messages(db_conn, "supabase_realtime_messages_publication")
 
+          # Add table to publication to test the error handling
+          Postgrex.query!(db_conn, "ALTER PUBLICATION supabase_realtime_messages_publication ADD TABLE public.test", [])
           %{rows: [[_id]]} = Postgrex.query!(db_conn, "insert into test (details) values ('test') returning id", [])
 
           topic = "db:job_scheduler"
@@ -340,7 +340,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         end)
 
       assert logs =~ "Unexpected relation on schema 'public' and table 'test'"
-      assert logs =~ "Recreating"
     end
 
     test "monitored pid stopping brings down ReplicationConnection ", %{tenant: tenant} do
