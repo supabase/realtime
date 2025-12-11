@@ -39,6 +39,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
             | :check_replication_slot
             | :create_publication
             | :check_publication
+            | :validate_publication
             | :create_slot
             | :start_replication_slot
             | :streaming,
@@ -222,27 +223,61 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   def handle_result([%Postgrex.Result{num_rows: 1}], %__MODULE__{step: :create_publication} = state) do
-    {:query, "SELECT 1", %{state | step: :start_replication_slot}}
+    %__MODULE__{publication_name: publication_name} = state
+
+    Logger.info("Publication #{publication_name} exists, validating contents")
+
+    query = """
+      SELECT schemaname, tablename
+      FROM pg_publication_tables
+      WHERE pubname = '#{publication_name}'
+    """
+
+    {:query, query, %{state | step: :validate_publication}}
   end
 
-  def handle_result([%Postgrex.Result{}], %__MODULE__{step: :start_replication_slot} = state) do
-    %__MODULE__{
-      proto_version: proto_version,
-      replication_slot_name: replication_slot_name,
-      publication_name: publication_name
-    } = state
+  def handle_result([%Postgrex.Result{rows: rows}], %__MODULE__{step: :validate_publication} = state) do
+    %__MODULE__{publication_name: publication_name} = state
 
-    Logger.info(
-      "Starting stream replication for slot #{replication_slot_name} using publication #{publication_name} and protocol version #{proto_version}"
-    )
+    valid_tables =
+      Enum.all?(rows, fn [schema, table] ->
+        schema == @schema and (table == @table or String.starts_with?(table, "#{@table}_"))
+      end)
 
-    query =
-      "START_REPLICATION SLOT #{replication_slot_name} LOGICAL 0/0 (proto_version '#{proto_version}', publication_names '#{publication_name}', binary 'true')"
+    if valid_tables and rows != [] do
+      {:query, "SELECT 1", %{state | step: :start_replication_slot}}
+    else
+      query =
+        "DROP PUBLICATION IF EXISTS #{publication_name}; CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
 
-    {:stream, query, [], %{state | step: :streaming}}
+      Logger.warning("Publication #{publication_name} contains unexpected tables. Recreating...")
+      {:query, query, %{state | step: :start_replication_slot}}
+    end
   end
 
-  # %Postgrex.Error{message: nil, postgres: %{code: :configuration_limit_exceeded, line: "291", message: "all replication slots are in use", file: "slot.c", unknown: "ERROR", severity: "ERROR", hint: "Free one or increase max_replication_slots.", routine: "ReplicationSlotCreate", pg_code: "53400"}, connection_id: 217538, query: nil}
+  def handle_result(results, %__MODULE__{step: :start_replication_slot} = state) do
+    error = Enum.find(results, fn res -> match?(Postgrex.Error, res) end)
+
+    if error do
+      {:disconnect, "Error starting replication: #{error.message}"}
+    else
+      %__MODULE__{
+        proto_version: proto_version,
+        replication_slot_name: replication_slot_name,
+        publication_name: publication_name
+      } = state
+
+      Logger.info(
+        "Starting stream replication for slot #{replication_slot_name} using publication #{publication_name} and protocol version #{proto_version}"
+      )
+
+      query =
+        "START_REPLICATION SLOT #{replication_slot_name} LOGICAL 0/0 (proto_version '#{proto_version}', publication_names '#{publication_name}', binary 'true')"
+
+      {:stream, query, [], %{state | step: :streaming}}
+    end
+  end
+
   def handle_result(%Postgrex.Error{postgres: %{pg_code: pg_code}}, _state) when pg_code in ~w(53300 53400) do
     {:disconnect, :max_wal_senders_reached}
   end

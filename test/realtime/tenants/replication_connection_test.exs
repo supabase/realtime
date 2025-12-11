@@ -13,6 +13,8 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   alias RealtimeWeb.Endpoint
   alias Realtime.Tenants.Repo
 
+  @replication_slot_name "supabase_realtime_messages_replication_slot_test"
+
   setup do
     slot = Application.get_env(:realtime, :slot_name_suffix)
     on_exit(fn -> Application.put_env(:realtime, :slot_name_suffix, slot) end)
@@ -21,8 +23,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     tenant = Containers.checkout_tenant(run_migrations: true)
 
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-    name = "supabase_realtime_messages_replication_slot_test"
-    Postgrex.query(db_conn, "SELECT pg_drop_replication_slot($1)", [name])
+    Postgrex.query(db_conn, "SELECT pg_drop_replication_slot($1)", [@replication_slot_name])
 
     %{tenant: tenant, db_conn: db_conn}
   end
@@ -283,9 +284,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         "id" int4 NOT NULL default nextval('test_id_seq'::regclass),
         "details" text,
         PRIMARY KEY ("id"));
-        """,
-        "DROP PUBLICATION IF EXISTS supabase_realtime_messages_publication",
-        "CREATE PUBLICATION supabase_realtime_messages_publication FOR ALL TABLES"
+        """
       ]
 
       Postgrex.transaction(db_conn, fn conn ->
@@ -299,6 +298,11 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
             restart: :transient
           )
 
+          assert_replication_started(db_conn, @replication_slot_name)
+          assert_publication_contains_only_messages(db_conn, "supabase_realtime_messages_publication")
+
+          # Add table to publication to test the error handling
+          Postgrex.query!(db_conn, "ALTER PUBLICATION supabase_realtime_messages_publication ADD TABLE public.test", [])
           %{rows: [[_id]]} = Postgrex.query!(db_conn, "insert into test (details) values ('test') returning id", [])
 
           topic = "db:job_scheduler"
@@ -496,7 +500,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
     test "fails on existing replication slot", %{tenant: tenant} do
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
-      name = "supabase_realtime_messages_replication_slot_test"
+      name = @replication_slot_name
 
       Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [name])
 
@@ -574,6 +578,98 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       end
 
       assert Process.alive?(replication_pid)
+    end
+  end
+
+  describe "publication validation steps" do
+    test "if proper tables are included, starts replication", %{tenant: tenant, db_conn: db_conn} do
+      publication_name = "supabase_realtime_messages_publication"
+
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+      Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages", [])
+
+      logs =
+        capture_log(fn ->
+          {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+          assert_replication_started(db_conn, @replication_slot_name)
+          assert Process.alive?(pid)
+          assert_publication_contains_only_messages(db_conn, publication_name)
+
+          Process.exit(pid, :shutdown)
+        end)
+
+      refute logs =~ "Recreating"
+    end
+
+    test "if includes unexpected tables, recreates publication", %{tenant: tenant, db_conn: db_conn} do
+      publication_name = "supabase_realtime_messages_publication"
+
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+      Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS public.wrong_table (id int)", [])
+      Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name} FOR TABLE public.wrong_table", [])
+
+      logs =
+        capture_log(fn ->
+          {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+          assert_replication_started(db_conn, @replication_slot_name)
+          assert Process.alive?(pid)
+          assert_publication_contains_only_messages(db_conn, publication_name)
+
+          Process.exit(pid, :shutdown)
+        end)
+
+      assert logs =~ "Recreating"
+    end
+
+    test "recreates publication if it has no tables", %{tenant: tenant, db_conn: db_conn} do
+      publication_name = "supabase_realtime_messages_publication"
+
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+      Postgrex.query!(db_conn, "CREATE PUBLICATION #{publication_name}", [])
+
+      logs =
+        capture_log(fn ->
+          {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+          assert_replication_started(db_conn, @replication_slot_name)
+          assert Process.alive?(pid)
+          assert_publication_contains_only_messages(db_conn, publication_name)
+
+          Process.exit(pid, :shutdown)
+        end)
+
+      assert logs =~ "Recreating"
+    end
+
+    test "recreates publication if it has expected tables and unexpected tables under same publication", %{
+      tenant: tenant,
+      db_conn: db_conn
+    } do
+      publication_name = "supabase_realtime_messages_publication"
+
+      Postgrex.query!(db_conn, "DROP PUBLICATION IF EXISTS #{publication_name}", [])
+      Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS public.extra_table (id int)", [])
+
+      Postgrex.query!(
+        db_conn,
+        "CREATE PUBLICATION #{publication_name} FOR TABLE realtime.messages, public.extra_table",
+        []
+      )
+
+      logs =
+        capture_log(fn ->
+          {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+          assert_replication_started(db_conn, @replication_slot_name)
+          assert Process.alive?(pid)
+          assert_publication_contains_only_messages(db_conn, publication_name)
+
+          Process.exit(pid, :shutdown)
+        end)
+
+      assert logs =~ "Recreating"
     end
   end
 
@@ -668,5 +764,44 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       |> TenantConnection.create_message(conn)
 
     message
+  end
+
+  defp assert_publication_contains_only_messages(db_conn, publication_name) do
+    %{rows: rows} =
+      Postgrex.query!(
+        db_conn,
+        "SELECT schemaname, tablename FROM pg_publication_tables WHERE pubname = $1",
+        [publication_name]
+      )
+
+    valid_tables =
+      Enum.all?(rows, fn [schema, table] ->
+        schema == "realtime" and (table == "messages" or String.starts_with?(table, "messages_"))
+      end)
+
+    assert valid_tables, "Expected only realtime.messages or its partitions, got: #{inspect(rows)}"
+  end
+
+  defp assert_replication_started(db_conn, slot_name, retries \\ 10, interval_ms \\ 10) do
+    case check_replication_status(db_conn, slot_name, retries, interval_ms) do
+      :ok -> :ok
+      :error -> flunk("Replication slot #{slot_name} did not become active")
+    end
+  end
+
+  defp check_replication_status(_db_conn, _slot_name, 0, _interval_ms), do: :error
+
+  defp check_replication_status(db_conn, slot_name, retries_remaining, interval_ms) do
+    %{rows: rows} =
+      Postgrex.query!(db_conn, "SELECT active FROM pg_replication_slots WHERE slot_name = $1", [slot_name])
+
+    case rows do
+      [[true]] ->
+        :ok
+
+      _ ->
+        Process.sleep(interval_ms)
+        check_replication_status(db_conn, slot_name, retries_remaining - 1, interval_ms)
+    end
   end
 end
