@@ -339,6 +339,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           assert received_payload == payload
         end)
 
+      assert logs =~ "Unexpected relation on schema 'public' and table 'test'"
       assert logs =~ "Recreating"
     end
 
