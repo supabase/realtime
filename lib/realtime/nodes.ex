@@ -94,11 +94,6 @@ defmodule Realtime.Nodes do
   @spec launch_node(String.t(), String.t() | nil, atom()) :: atom()
   def launch_node(tenant_id, region, default) do
     case region_nodes(region) do
-      [node] ->
-        Logger.warning("Only one region node (#{inspect(node)}) for #{region} using default #{inspect(default)}")
-
-        default
-
       [] ->
         Logger.warning("Zero region nodes for #{region} using #{inspect(default)}")
         default
