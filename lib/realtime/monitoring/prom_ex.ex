@@ -73,7 +73,7 @@ defmodule Realtime.PromEx do
     @impl true
     def scrape(name) do
       Peep.get_all_metrics(name)
-      |> Peep.Prometheus.export()
+      |> Realtime.Monitoring.Prometheus.export()
     end
 
     @impl true
