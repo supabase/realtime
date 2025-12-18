@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.68.7",
+      version: "2.69.0",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -74,7 +74,7 @@ defmodule Realtime.MixProject do
       {:libcluster_postgres, "~> 0.2"},
       {:uuid, "~> 1.1"},
       {:prom_ex, "~> 1.10"},
-      {:peep, "~> 4.0", override: true},
+      {:peep, git: "https://github.com/supabase/peep.git", branch: "feat/partitions-ets", override: true},
       {:joken, "~> 2.5.0"},
       {:ex_json_schema, "~> 0.7"},
       {:recon, "~> 2.5"},
