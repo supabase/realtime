@@ -38,7 +38,7 @@ defmodule Realtime.MetricsCleaner do
   defp loop_and_cleanup_metrics_table do
     tenant_ids = Realtime.Tenants.Connect.list_tenants() |> MapSet.new()
 
-    {_, tid} = Peep.Persistent.storage(Realtime.PromEx.Metrics)
+    {_, {tid, _}} = Peep.Persistent.storage(Realtime.PromEx.Metrics)
 
     tid
     |> :ets.select(@peep_filter_spec)
