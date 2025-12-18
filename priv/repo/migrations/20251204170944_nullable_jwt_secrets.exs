@@ -3,7 +3,7 @@ defmodule Realtime.Repo.Migrations.NullableJwtSecrets do
 
   def change do
     alter table(:tenants) do
-      modify :jwt_secret, :string, null: true
+      modify :jwt_secret, :text, null: true
     end
 
     create constraint(:tenants, :jwt_secret_or_jwt_jwks_required,
