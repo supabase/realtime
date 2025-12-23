@@ -41,8 +41,6 @@ defmodule Realtime.Integration.RegionAwareMigrationsTest do
 
     Process.sleep(100)
 
-    on_exit(fn -> Clustered.stop() end)
-
     %{tenant: tenant, node: node}
   end
 
