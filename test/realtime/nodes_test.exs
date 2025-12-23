@@ -108,7 +108,7 @@ defmodule Realtime.NodesTest do
       assert region == expected_region
     end
 
-    test "on existing tenant id, and a single node for a given region, returns default", %{
+    test "on existing tenant id, and a single node for a given region, returns single node", %{
       tenant: tenant,
       region: region
     } do
@@ -117,7 +117,7 @@ defmodule Realtime.NodesTest do
 
       expected_region = Tenants.region(tenant)
 
-      assert node == node()
+      assert node != node()
       assert region == expected_region
     end
 

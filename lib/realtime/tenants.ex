@@ -98,13 +98,11 @@ defmodule Realtime.Tenants do
 
       connected_cluster when is_integer(connected_cluster) ->
         tenant = Cache.get_tenant_by_external_id(external_id)
-        {:ok, db_conn} = Database.connect(tenant, "realtime_health_check")
-        Process.alive?(db_conn) && GenServer.stop(db_conn)
-        Migrations.run_migrations(tenant)
+        result? = Migrations.run_migrations(tenant)
 
         {:ok,
          %{
-           healthy: true,
+           healthy: result? == :ok || result? == :noop,
            db_connected: false,
            connected_cluster: connected_cluster,
            region: region,
@@ -475,10 +473,11 @@ defmodule Realtime.Tenants do
   @doc """
   Checks if migrations for a given tenant need to run.
   """
-  @spec run_migrations?(Tenant.t()) :: boolean()
-  def run_migrations?(%Tenant{} = tenant) do
-    tenant.migrations_ran < Enum.count(Migrations.migrations())
-  end
+  @spec run_migrations?(Tenant.t() | integer()) :: boolean()
+  def run_migrations?(%Tenant{} = tenant), do: run_migrations?(tenant.migrations_ran)
+
+  def run_migrations?(migrations_ran) when is_integer(migrations_ran),
+    do: migrations_ran < Enum.count(Migrations.migrations())
 
   @doc """
   Broadcasts an operation event to the tenant's operations channel.

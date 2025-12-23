@@ -419,7 +419,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
       data = json_response(conn, 200)["data"]
-      Process.sleep(2000)
+      Process.sleep(1000)
 
       assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 

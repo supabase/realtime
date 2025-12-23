@@ -11,6 +11,8 @@ defmodule Realtime.Tenants.Migrations do
   alias Realtime.Repo
   alias Realtime.Api.Tenant
   alias Realtime.Api
+  alias Realtime.Nodes
+  alias Realtime.GenRpc
 
   alias Realtime.Tenants.Migrations.{
     CreateRealtimeSubscriptionTable,
@@ -148,7 +150,7 @@ defmodule Realtime.Tenants.Migrations do
     {20_251_103_001_201, BroadcastSendIncludePayloadId}
   ]
 
-  defstruct [:tenant_external_id, :settings]
+  defstruct [:tenant_external_id, :settings, migrations_ran: 0]
 
   @type t :: %__MODULE__{
           tenant_external_id: binary(),
@@ -160,21 +162,36 @@ defmodule Realtime.Tenants.Migrations do
   """
   @spec run_migrations(Tenant.t()) :: :ok | :noop | {:error, any()}
   def run_migrations(%Tenant{} = tenant) do
-    %{extensions: [%{settings: settings} | _]} = tenant
-    attrs = %__MODULE__{tenant_external_id: tenant.external_id, settings: settings}
+    if Tenants.run_migrations?(tenant) do
+      %{extensions: [%{settings: settings} | _]} = tenant
 
+      attrs = %__MODULE__{
+        tenant_external_id: tenant.external_id,
+        settings: settings,
+        migrations_ran: tenant.migrations_ran
+      }
+
+      node =
+        case Nodes.get_node_for_tenant(tenant) do
+          {:ok, node, _} -> node
+          {:error, _} -> node()
+        end
+
+      GenRpc.call(node, __MODULE__, :start_migration, [attrs], tenant_id: tenant.external_id)
+    else
+      :noop
+    end
+  end
+
+  def start_migration(attrs) do
     supervisor =
-      {:via, PartitionSupervisor, {Realtime.Tenants.Migrations.DynamicSupervisor, tenant.external_id}}
+      {:via, PartitionSupervisor, {Realtime.Tenants.Migrations.DynamicSupervisor, attrs.tenant_external_id}}
 
     spec = {__MODULE__, attrs}
 
-    if Tenants.run_migrations?(tenant) do
-      case DynamicSupervisor.start_child(supervisor, spec) do
-        :ignore -> :ok
-        error -> error
-      end
-    else
-      :noop
+    case DynamicSupervisor.start_child(supervisor, spec) do
+      :ignore -> :ok
+      error -> error
     end
   end
 
