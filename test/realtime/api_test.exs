@@ -55,6 +55,10 @@ defmodule Realtime.ApiTest do
 
       external_id = random_string()
 
+      expect(Realtime.Tenants.Cache, :global_cache_update, fn tenant ->
+        assert tenant.external_id == external_id
+      end)
+
       valid_attrs = %{
         external_id: external_id,
         name: external_id,
@@ -89,6 +93,7 @@ defmodule Realtime.ApiTest do
     end
 
     test "invalid data returns error changeset" do
+      reject(&Realtime.Tenants.Cache.global_cache_update/1)
       assert {:error, %Ecto.Changeset{}} = Api.create_tenant(%{external_id: nil, jwt_secret: nil, name: nil})
     end
   end
@@ -197,10 +202,14 @@ defmodule Realtime.ApiTest do
 
     test "valid data and tenant data change will not restart the database connection" do
       tenant = Containers.checkout_tenant(run_migrations: true)
-      expect(Realtime.Tenants.Cache, :distributed_invalidate_tenant_cache, fn _ -> :ok end)
+
+      expect(Realtime.Tenants.Cache, :global_cache_update, fn tenant ->
+        assert tenant.max_concurrent_users == 101
+      end)
+
       {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
 
-      assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_concurrent_users: 100})
+      assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_concurrent_users: 101})
       refute_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
       assert Process.alive?(old_pid)
       assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
@@ -241,12 +250,15 @@ defmodule Realtime.ApiTest do
     end
 
     test "valid data and change to tenant data will refresh cache", %{tenants: [tenant | _]} do
+      expect(Realtime.Tenants.Cache, :global_cache_update, fn tenant ->
+        assert tenant.name == "new_name"
+      end)
+
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{name: "new_name"})
-      assert %Tenant{name: "new_name"} = Realtime.Tenants.Cache.get_tenant_by_external_id(tenant.external_id)
     end
 
     test "valid data and no changes to tenant will not refresh cache", %{tenants: [tenant | _]} do
-      reject(&Realtime.Tenants.Cache.distributed_invalidate_tenant_cache/1)
+      reject(&Realtime.Tenants.Cache.global_cache_update/1)
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{name: tenant.name})
     end
   end
@@ -367,8 +379,13 @@ defmodule Realtime.ApiTest do
   describe "update_migrations_ran/1" do
     test "updates migrations_ran to the count of all migrations" do
       tenant = tenant_fixture(%{migrations_ran: 0})
-      Api.update_migrations_ran(tenant.external_id, 1)
-      tenant = Repo.reload!(tenant)
+
+      expect(Realtime.Tenants.Cache, :global_cache_update, fn tenant ->
+        assert tenant.migrations_ran == 1
+        :ok
+      end)
+
+      assert {:ok, tenant} = Api.update_migrations_ran(tenant.external_id, 1)
       assert tenant.migrations_ran == 1
     end
   end

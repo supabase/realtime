@@ -9,7 +9,7 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
-    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+    Realtime.Tenants.Cache.update_cache(tenant)
 
     %{tenant: tenant}
   end
@@ -68,7 +68,7 @@ defmodule Realtime.Tenants.Janitor.MaintenanceTaskTest do
 
     tenant = tenant_fixture(%{extensions: extensions})
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
-    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+    Realtime.Tenants.Cache.update_cache(tenant)
 
     Process.flag(:trap_exit, true)
 

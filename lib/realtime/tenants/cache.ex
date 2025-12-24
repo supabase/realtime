@@ -5,6 +5,7 @@ defmodule Realtime.Tenants.Cache do
   require Cachex.Spec
   require Logger
 
+  alias Realtime.GenRpc
   alias Realtime.Tenants
 
   def child_spec(_) do
@@ -16,32 +17,42 @@ defmodule Realtime.Tenants.Cache do
     }
   end
 
-  def get_tenant_by_external_id(keyword), do: apply_repo_fun(__ENV__.function, [keyword])
+  def get_tenant_by_external_id(tenant_id) do
+    case Cachex.fetch(__MODULE__, cache_key(tenant_id), fn _key ->
+           case Tenants.get_tenant_by_external_id(tenant_id) do
+             nil -> {:ignore, nil}
+             tenant -> {:commit, tenant}
+           end
+         end) do
+      {:commit, value} -> value
+      {:ok, value} -> value
+      {:ignore, value} -> value
+    end
+  end
+
+  defp cache_key(tenant_id), do: {:get_tenant_by_external_id, tenant_id}
 
   @doc """
   Invalidates the cache for a tenant in the local node
   """
-  def invalidate_tenant_cache(tenant_id), do: Cachex.del(__MODULE__, {{:get_tenant_by_external_id, 1}, [tenant_id]})
+  def invalidate_tenant_cache(tenant_id), do: Cachex.del(__MODULE__, cache_key(tenant_id))
 
-  @doc """
-  Broadcasts a message to invalidate the tenant cache to all connected nodes
-  """
-  @spec distributed_invalidate_tenant_cache(String.t()) :: boolean()
   def distributed_invalidate_tenant_cache(tenant_id) when is_binary(tenant_id) do
-    nodes = [Node.self() | Node.list()]
-    results = :erpc.multicall(nodes, __MODULE__, :invalidate_tenant_cache, [tenant_id], 1000)
-
-    results
-    |> Enum.map(fn
-      {res, _} ->
-        res
-
-      exception ->
-        Logger.error("Failed to invalidate tenant cache: #{inspect(exception)}")
-        :error
-    end)
-    |> Enum.all?(&(&1 == :ok))
+    GenRpc.multicast(__MODULE__, :invalidate_tenant_cache, [tenant_id])
   end
 
-  defp apply_repo_fun(arg1, arg2), do: Realtime.ContextCache.apply_fun(Tenants, arg1, arg2)
+  @doc """
+  Update the cache for a tenant
+  """
+  def update_cache(tenant) do
+    Cachex.put(__MODULE__, cache_key(tenant.external_id), tenant)
+  end
+
+  @doc """
+  Update the cache for a tenant in all nodes
+  """
+  @spec global_cache_update(Realtime.Api.Tenant.t()) :: :ok
+  def global_cache_update(tenant) do
+    GenRpc.multicast(__MODULE__, :update_cache, [tenant])
+  end
 end
