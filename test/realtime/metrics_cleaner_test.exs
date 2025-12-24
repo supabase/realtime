@@ -2,7 +2,6 @@ defmodule Realtime.MetricsCleanerTest do
   use Realtime.DataCase, async: true
 
   alias Realtime.MetricsCleaner
-  alias Realtime.Tenants.Connect
 
   describe "metrics cleanup" do
     test "cleans up metrics for users that have been disconnected" do
@@ -43,8 +42,8 @@ defmodule Realtime.MetricsCleanerTest do
       )
 
       # Now let's disconnect vacant tenants
-      Beacon.leave(:users, "vacant-tenant1", pid1)
-      Beacon.leave(:users, "vacant-tenant2", pid2)
+      Beacon.leave(:users, "vacant-tenant1", pid2)
+      Beacon.leave(:users, "vacant-tenant2", pid3)
 
       # Wait for clean up to run
       Process.sleep(200)
@@ -57,7 +56,7 @@ defmodule Realtime.MetricsCleanerTest do
       assert String.contains?(metrics, "tenant=\"vacant-tenant2\"")
 
       # Wait for clean up to run again
-      Process.sleep(1100)
+      Process.sleep(2100)
 
       # Nothing changes
       metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
