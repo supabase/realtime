@@ -167,7 +167,7 @@ defmodule Beacon.Scope do
   def handle_info({:nodeup, node}, state) when node == node(), do: {:noreply, state}
 
   def handle_info({:nodeup, node}, state) do
-    :telemetry.execute([:beacon, :node, :up], %{}, %{node: node})
+    :telemetry.execute([:beacon, state.scope, :node, :up], %{}, %{node: node})
 
     Logger.info(
       "Beacon[#{node()}|#{state.scope}] Node #{node} has joined the cluster, sending discover message"
@@ -191,7 +191,7 @@ defmodule Beacon.Scope do
 
       {^ref, new_peers} ->
         :ets.delete(state.peer_counts_table, node(peer))
-        :telemetry.execute([:beacon, :node, :down], %{}, %{node: node(peer)})
+        :telemetry.execute([:beacon, state.scope, :node, :down], %{}, %{node: node(peer)})
         {:noreply, %State{state | peers: new_peers}}
     end
   end
