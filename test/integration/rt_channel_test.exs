@@ -419,11 +419,7 @@ defmodule Realtime.Integration.RtChannelTest do
     test "broadcast to another tenant does not get mixed up", %{tenant: tenant, serializer: serializer} do
       other_tenant = Containers.checkout_tenant(run_migrations: true)
 
-      Cachex.put!(
-        Realtime.Tenants.Cache,
-        {{:get_tenant_by_external_id, 1}, [other_tenant.external_id]},
-        {:cached, other_tenant}
-      )
+      Realtime.Tenants.Cache.update_cache(other_tenant)
 
       {socket, _} = get_connection(tenant, serializer)
       config = %{broadcast: %{self: false}, private: false}
@@ -2406,7 +2402,7 @@ defmodule Realtime.Integration.RtChannelTest do
       |> Realtime.Api.Tenant.changeset(%{limit => value})
       |> Realtime.Repo.update!()
 
-    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+    Realtime.Tenants.Cache.update_cache(tenant)
   end
 
   defp assert_process_down(pid, timeout \\ 1000) do

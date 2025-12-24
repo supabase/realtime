@@ -445,7 +445,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
     tenant = Containers.checkout_tenant(run_migrations: true)
 
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
-    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+    Realtime.Tenants.Cache.update_cache(tenant)
 
     rate = Tenants.events_per_second_rate(tenant)
     RateCounter.new(rate, tick: 100)
