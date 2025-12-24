@@ -369,8 +369,8 @@ defmodule BeaconTest do
 
       ref =
         :telemetry_test.attach_event_handlers(self(), [
-          [:beacon, :node, :up],
-          [:beacon, :node, :down]
+          [:beacon, scope, :node, :up],
+          [:beacon, scope, :node, :down]
         ])
 
       %{scope: scope, supervisor_pid: supervisor_pid, peer: peer, node: node, telemetry_ref: ref}
@@ -386,7 +386,7 @@ defmodule BeaconTest do
       true = Node.connect(node)
       :peer.call(peer, PeerAux, :start, [scope])
 
-      assert_receive {[:beacon, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
+      assert_receive {[:beacon, ^scope, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
 
       # Wait for at least one broadcast interval
       Process.sleep(150)
@@ -413,13 +413,13 @@ defmodule BeaconTest do
 
       true = Node.connect(node)
       :peer.call(peer, PeerAux, :start, [scope])
-      assert_receive {[:beacon, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
+      assert_receive {[:beacon, ^scope, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
       # Wait for remote scope to communicate with local
       Process.sleep(150)
 
       true = Node.disconnect(node)
 
-      assert_receive {[:beacon, :node, :down], ^telemetry_ref, %{}, %{node: ^node}}
+      assert_receive {[:beacon, ^scope, :node, :down], ^telemetry_ref, %{}, %{node: ^node}}
 
       assert Beacon.member_counts(scope) == %{group1: 2, group2: 1}
       assert Beacon.member_count(scope, :group1) == 2
@@ -440,7 +440,7 @@ defmodule BeaconTest do
 
       true = Node.connect(node)
       :peer.call(peer, PeerAux, :start, [scope])
-      assert_receive {[:beacon, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
+      assert_receive {[:beacon, ^scope, :node, :up], ^telemetry_ref, %{}, %{node: ^node}}
 
       # Wait for remote scope to communicate with local
       Process.sleep(150)
