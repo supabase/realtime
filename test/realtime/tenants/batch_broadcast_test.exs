@@ -16,7 +16,7 @@ defmodule Realtime.Tenants.BatchBroadcastTest do
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
-    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+    Realtime.Tenants.Cache.update_cache(tenant)
     {:ok, tenant: tenant}
   end
 
