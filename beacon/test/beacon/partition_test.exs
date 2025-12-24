@@ -2,16 +2,17 @@ defmodule Beacon.PartitionTest do
   use ExUnit.Case, async: true
   alias Beacon.Partition
 
+  @scope __MODULE__
+
   setup do
-    scope = __MODULE__
-    partition_name = Beacon.Supervisor.partition_name(scope, System.unique_integer([:positive]))
+    partition_name = Beacon.Supervisor.partition_name(@scope, System.unique_integer([:positive]))
 
     ^partition_name =
       :ets.new(partition_name, [:set, :public, :named_table, read_concurrency: true])
 
     spec = %{
       id: partition_name,
-      start: {Partition, :start_link, [scope, partition_name]},
+      start: {Partition, :start_link, [@scope, partition_name]},
       type: :supervisor,
       restart: :temporary
     }
@@ -20,8 +21,8 @@ defmodule Beacon.PartitionTest do
 
     ref =
       :telemetry_test.attach_event_handlers(self(), [
-        [:beacon, :group, :occupied],
-        [:beacon, :group, :vacant]
+        [:beacon, @scope, :group, :occupied],
+        [:beacon, @scope, :group, :vacant]
       ])
 
     {:ok, partition_name: partition_name, partition_pid: pid, ref: ref}
@@ -48,7 +49,7 @@ defmodule Beacon.PartitionTest do
     assert Partition.member_count(partition, :group1) == 1
     assert pid in Partition.members(partition, :group1)
 
-    assert_receive {[:beacon, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
     refute_receive {_, ^ref, _, _}
   end
 
@@ -63,7 +64,7 @@ defmodule Beacon.PartitionTest do
     assert Partition.member_count(partition, :group1) == 1
     assert pid in Partition.members(partition, :group1)
 
-    assert_receive {[:beacon, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
     refute_receive {_, ^ref, _, _}
   end
 
@@ -73,7 +74,7 @@ defmodule Beacon.PartitionTest do
 
     Partition.join(partition, :group1, pid1)
     Partition.join(partition, :group1, pid2)
-    assert_receive {[:beacon, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
     refute_receive {_, ^ref, _, _}
   end
 
@@ -86,8 +87,8 @@ defmodule Beacon.PartitionTest do
     Partition.leave(partition, :group1, pid)
     refute Partition.member?(partition, :group1, pid)
 
-    assert_receive {[:beacon, :group, :occupied], ^ref, %{}, %{group: :group1}}
-    assert_receive {[:beacon, :group, :vacant], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:beacon, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
     refute_receive {_, ^ref, _, _}
   end
 
@@ -97,14 +98,14 @@ defmodule Beacon.PartitionTest do
 
     Partition.join(partition, :group1, pid1)
     Partition.join(partition, :group1, pid2)
-    assert_receive {[:beacon, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
     refute_receive {_, ^ref, _, _}
 
     Partition.leave(partition, :group1, pid1)
     refute_receive {_, ^ref, _, _}
     Partition.leave(partition, :group1, pid2)
 
-    assert_receive {[:beacon, :group, :vacant], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:beacon, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
     refute_receive {_, ^ref, _, _}
   end
 
@@ -119,8 +120,8 @@ defmodule Beacon.PartitionTest do
     Partition.leave(partition, :group1, pid)
     refute Partition.member?(partition, :group1, pid)
 
-    assert_receive {[:beacon, :group, :occupied], ^ref, %{}, %{group: :group1}}
-    assert_receive {[:beacon, :group, :vacant], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    assert_receive {[:beacon, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
     refute_receive {_, ^ref, _, _}
   end
 
@@ -202,7 +203,7 @@ defmodule Beacon.PartitionTest do
 
     spec = %{
       id: :recover,
-      start: {Partition, :start_link, [__MODULE__, partition]},
+      start: {Partition, :start_link, [@scope, partition]},
       type: :supervisor
     }
 

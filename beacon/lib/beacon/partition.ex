@@ -93,7 +93,7 @@ defmodule Beacon.Partition do
 
       [] ->
         :ets.insert(state.name, {group, MapSet.new([pid]), 1})
-        :telemetry.execute([:beacon, :group, :occupied], %{}, %{group: group})
+        :telemetry.execute([:beacon, state.scope, :group, :occupied], %{}, %{group: group})
         ref = Process.monitor(pid, tag: {:DOWN, group})
         monitors = Map.put(state.monitors, {group, pid}, ref)
         {:reply, :ok, %{state | monitors: monitors}}
@@ -124,7 +124,7 @@ defmodule Beacon.Partition do
 
           if new_counter == 0 do
             :ets.delete(state.name, group)
-            :telemetry.execute([:beacon, :group, :vacant], %{}, %{group: group})
+            :telemetry.execute([:beacon, state.scope, :group, :vacant], %{}, %{group: group})
           else
             :ets.insert(state.name, {group, new_pids, new_counter})
           end
