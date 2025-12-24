@@ -6,16 +6,17 @@ defmodule Realtime.MetricsCleaner do
 
   defstruct [:check_ref, :interval]
 
-  def handle_event([:beacon, :group, :vacant], _measurements, %{group: tenant_id}, cleaner_table) do
+  def handle_event([:beacon, :users, :group, :vacant], _measurements, %{group: tenant_id}, cleaner_table) do
     :ets.insert(cleaner_table, {tenant_id, DateTime.to_unix(DateTime.utc_now(), :second)})
   end
 
-  def handle_event([:beacon, :group, :occupied], _measurements, %{group: tenant_id}, cleaner_table) do
+  def handle_event([:beacon, :users, :group, :occupied], _measurements, %{group: tenant_id}, cleaner_table) do
     :ets.delete(cleaner_table, tenant_id)
   end
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
+  # 5 minutes
   @default_vacant_metric_threshold_in_seconds 300
 
   @impl true
@@ -32,7 +33,12 @@ defmodule Realtime.MetricsCleaner do
     tid = :ets.new(:metrics_cleaner, [:set, :public, read_concurrency: false, write_concurrency: :auto])
 
     :ok =
-      :telemetry.attach_many(self(), [[:beacon, :group, :occupied], [:beacon, :group, :vacant]], &handle_event/4, tid)
+      :telemetry.attach_many(
+        self(),
+        [[:beacon, :users, :group, :occupied], [:beacon, :users, :group, :vacant]],
+        &__MODULE__.handle_event/4,
+        tid
+      )
 
     {:ok,
      %{
@@ -67,29 +73,28 @@ defmodule Realtime.MetricsCleaner do
   defp check(interval), do: Process.send_after(self(), :check, interval)
 
   defp loop_and_cleanup_metrics_table(cleaner_table, vacant_metric_cleanup_threshold_in_seconds) do
-    five_minutes_ago =
+    threshold =
       DateTime.utc_now()
       |> DateTime.add(-vacant_metric_cleanup_threshold_in_seconds, :second)
       |> DateTime.to_unix(:second)
-
-    :ets.tab2list(cleaner_table) |> dbg()
 
     # We do this to have a consistent view of the table while we read and delete
     :ets.safe_fixtable(cleaner_table, true)
 
     try do
+      # Look for tenant_ids that have been vacant for more than threshold
       vacant_tenant_ids =
         :ets.select(cleaner_table, [
-          {{:"$1", :"$2"}, [{:<, :"$2", five_minutes_ago}], [:"$1"]}
+          {{:"$1", :"$2"}, [{:<, :"$2", threshold}], [:"$1"]}
         ])
 
       vacant_tenant_ids
-      |> dbg()
       |> Enum.map(fn tenant_id -> %{tenant: tenant_id} end)
       |> then(&Peep.prune_tags(Realtime.PromEx.Metrics, &1))
 
+      # Delete them from the table
       :ets.select_delete(cleaner_table, [
-        {{:"$1", :"$2"}, [{:<, :"$2", five_minutes_ago}], [true]}
+        {{:"$1", :"$2"}, [{:<, :"$2", threshold}], [true]}
       ])
     after
       :ets.safe_fixtable(cleaner_table, false)
