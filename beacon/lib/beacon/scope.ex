@@ -1,5 +1,6 @@
 defmodule Beacon.Scope do
   @moduledoc false
+  # Responsible to discover and keep track of all Beacon peers in the cluster
 
   use GenServer
   require Logger
@@ -113,6 +114,7 @@ defmodule Beacon.Scope do
           | {:DOWN, reference, :process, pid, term},
           State.t()
         ) :: {:noreply, State.t()}
+  # A remote peer is discovering us
   def handle_info({:discover, peer}, state) do
     Logger.info(
       "Beacon[#{node()}|#{state.scope}] Received DISCOVER request from node #{node(peer)}"
@@ -143,11 +145,13 @@ defmodule Beacon.Scope do
     end
   end
 
+  # A remote peer has sent us its local member counts
   def handle_info({:sync, peer, member_counts}, state) do
     :ets.insert(state.peer_counts_table, {node(peer), member_counts})
     {:noreply, state}
   end
 
+  # Periodic broadcast of our local member counts to all known peers
   def handle_info(:broadcast_counts, state) do
     nodes =
       state.peers
@@ -164,8 +168,10 @@ defmodule Beacon.Scope do
     {:noreply, state}
   end
 
+  # Do nothing if the node that came up is our own node
   def handle_info({:nodeup, node}, state) when node == node(), do: {:noreply, state}
 
+  # Send a discover message to the node that just connected
   def handle_info({:nodeup, node}, state) do
     :telemetry.execute([:beacon, state.scope, :node, :up], %{}, %{node: node})
 
@@ -180,6 +186,8 @@ defmodule Beacon.Scope do
   # Do nothing and wait for the DOWN message from monitor
   def handle_info({:nodedown, _node}, state), do: {:noreply, state}
 
+  # A remote peer has disconnected/crashed
+  # We forget about it and remove its member counts
   def handle_info({:DOWN, ref, :process, peer, reason}, state) do
     Logger.info(
       "Beacon[#{node()}|#{state.scope}] Scope process is DOWN on node #{node(peer)}: #{inspect(reason)}"

@@ -5,13 +5,17 @@ defmodule Beacon.PartitionTest do
   setup do
     scope = __MODULE__
     partition_name = Beacon.Supervisor.partition_name(scope, System.unique_integer([:positive]))
+    entries_table = Beacon.Supervisor.partition_entries_table(partition_name)
 
     ^partition_name =
       :ets.new(partition_name, [:set, :public, :named_table, read_concurrency: true])
 
+    ^entries_table =
+      :ets.new(entries_table, [:set, :public, :named_table, read_concurrency: true])
+
     spec = %{
       id: partition_name,
-      start: {Partition, :start_link, [scope, partition_name]},
+      start: {Partition, :start_link, [scope, partition_name, entries_table]},
       type: :supervisor,
       restart: :temporary
     }
@@ -38,6 +42,7 @@ defmodule Beacon.PartitionTest do
     pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
     assert :ok = Partition.join(partition, :group1, pid)
+
     assert Partition.member?(partition, :group1, pid)
     assert Partition.member_count(partition, :group1) == 1
     assert pid in Partition.members(partition, :group1)
@@ -155,7 +160,9 @@ defmodule Beacon.PartitionTest do
 
     spec = %{
       id: :recover,
-      start: {Partition, :start_link, [__MODULE__, partition]},
+      start:
+        {Partition, :start_link,
+         [__MODULE__, partition, Beacon.Supervisor.partition_entries_table(partition)]},
       type: :supervisor
     }
 
@@ -168,5 +175,11 @@ defmodule Beacon.PartitionTest do
     assert length(monitors)
     assert monitors |> Enum.member?(pid1)
     assert monitors |> Enum.member?(pid2)
+
+    assert Partition.member_count(partition, :group1) == 1
+    assert Partition.member_count(partition, :group2) == 1
+
+    assert Partition.member?(partition, :group1, pid1)
+    assert Partition.member?(partition, :group2, pid2)
   end
 end

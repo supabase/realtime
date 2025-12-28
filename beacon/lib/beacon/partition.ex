@@ -9,9 +9,10 @@ defmodule Beacon.Partition do
     @type t :: %__MODULE__{
             name: atom,
             scope: atom,
+            entries_table: atom,
             monitors: %{{Beacon.group(), pid} => reference}
           }
-    defstruct [:name, :scope, monitors: %{}]
+    defstruct [:name, :scope, :entries_table, monitors: %{}]
   end
 
   @spec join(atom, Beacon.group(), pid) :: :ok
@@ -22,54 +23,68 @@ defmodule Beacon.Partition do
 
   @spec members(atom, Beacon.group()) :: [pid]
   def members(partition_name, group) do
-    case :ets.lookup_element(partition_name, group, 2, []) do
-      [] -> []
-      pids -> MapSet.to_list(pids)
-    end
+    partition_name
+    |> Beacon.Supervisor.partition_entries_table()
+    |> :ets.select([{{{group, :"$1"}}, [], [:"$1"]}])
   end
 
   @spec member_count(atom, Beacon.group()) :: non_neg_integer
-  def member_count(partition_name, group), do: :ets.lookup_element(partition_name, group, 3, 0)
+  def member_count(partition_name, group), do: :ets.lookup_element(partition_name, group, 2, 0)
 
   @spec member_counts(atom) :: %{Beacon.group() => non_neg_integer}
   def member_counts(partition_name) do
     partition_name
-    |> :ets.select([{{:"$1", :_, :"$2"}, [], [{{:"$1", :"$2"}}]}])
+    |> :ets.select([{{:"$1", :"$2"}, [], [{{:"$1", :"$2"}}]}])
     |> Map.new()
   end
 
   @spec member?(atom, Beacon.group(), pid) :: boolean
   def member?(partition_name, group, pid) do
-    case :ets.lookup_element(partition_name, group, 2, []) do
+    partition_name
+    |> Beacon.Supervisor.partition_entries_table()
+    |> :ets.lookup({group, pid})
+    |> case do
+      [{{^group, ^pid}}] -> true
       [] -> false
-      pids -> MapSet.member?(pids, pid)
     end
   end
 
   @spec groups(atom) :: [Beacon.group()]
-  def groups(partition_name), do: :ets.select(partition_name, [{{:"$1", :_, :_}, [], [:"$1"]}])
+  def groups(partition_name), do: :ets.select(partition_name, [{{:"$1", :_}, [], [:"$1"]}])
 
   @spec group_count(atom) :: non_neg_integer
   def group_count(partition_name), do: :ets.info(partition_name, :size)
 
-  @spec start_link(atom, atom) :: GenServer.on_start()
-  def start_link(scope, partition_name),
-    do: GenServer.start_link(__MODULE__, [scope, partition_name], name: partition_name)
+  @spec start_link(atom, atom, atom) :: GenServer.on_start()
+  def start_link(scope, partition_name, partition_entries_table),
+    do:
+      GenServer.start_link(__MODULE__, [scope, partition_name, partition_entries_table],
+        name: partition_name
+      )
 
   @impl true
   @spec init(any) :: {:ok, State.t()}
-  def init([scope, name]) do
-    {:ok, %State{scope: scope, name: name}, {:continue, :rebuild_monitors}}
+  def init([scope, name, entries_table]) do
+    {:ok, %State{scope: scope, name: name, entries_table: entries_table},
+     {:continue, :rebuild_monitors}}
   end
 
   @impl true
   @spec handle_continue(:rebuild_monitors, State.t()) :: {:noreply, State.t()}
   def handle_continue(:rebuild_monitors, state) do
-    monitors =
-      for {group, pids, _counter} <- :ets.tab2list(state.name), pid <- pids, into: %{} do
+    # Here we delete all counters and rebuild them based on entries table
+    :ets.delete_all_objects(state.name)
+
+    {monitors, counts} =
+      :ets.tab2list(state.entries_table)
+      |> Enum.reduce({%{}, %{}}, fn {{group, pid}}, {monitors_acc, counts_acc} ->
         ref = Process.monitor(pid, tag: {:DOWN, group})
-        {{group, pid}, ref}
-      end
+        monitors_acc = Map.put(monitors_acc, {group, pid}, ref)
+        counts_acc = Map.update(counts_acc, group, 1, &(&1 + 1))
+        {monitors_acc, counts_acc}
+      end)
+
+    :ets.insert(state.name, Enum.to_list(counts))
 
     {:noreply, %{state | monitors: monitors}}
   end
@@ -78,21 +93,15 @@ defmodule Beacon.Partition do
   @spec handle_call({:join, Beacon.group(), pid}, GenServer.from(), State.t()) ::
           {:reply, :ok, State.t()}
   def handle_call({:join, group, pid}, _from, state) do
-    case :ets.lookup(state.name, group) do
-      [{^group, pids, counter}] ->
-        if MapSet.member?(pids, pid) do
-          # Already being tracked
-          {:reply, :ok, state}
-        else
-          new_pids = MapSet.put(pids, pid)
-          :ets.insert(state.name, {group, new_pids, counter + 1})
-          ref = Process.monitor(pid, tag: {:DOWN, group})
-          monitors = Map.put(state.monitors, {group, pid}, ref)
-          {:reply, :ok, %{state | monitors: monitors}}
-        end
+    case :ets.lookup(state.entries_table, {group, pid}) do
+      [{{^group, ^pid}}] ->
+        # Already a member we do nothing
+        {:reply, :ok, state}
 
       [] ->
-        :ets.insert(state.name, {group, MapSet.new([pid]), 1})
+        :ets.insert(state.entries_table, {{group, pid}})
+        # Increment existing or create
+        :ets.update_counter(state.name, group, {2, 1}, {group, 0})
         ref = Process.monitor(pid, tag: {:DOWN, group})
         monitors = Map.put(state.monitors, {group, pid}, ref)
         {:reply, :ok, %{state | monitors: monitors}}
@@ -115,24 +124,21 @@ defmodule Beacon.Partition do
   def handle_info(_, state), do: {:noreply, state}
 
   defp remove(group, pid, state) do
-    case :ets.lookup(state.name, group) do
-      [{^group, pids, counter}] ->
-        if MapSet.member?(pids, pid) do
-          new_pids = MapSet.delete(pids, pid)
-          new_counter = counter - 1
+    case :ets.lookup(state.entries_table, {group, pid}) do
+      [{{^group, ^pid}}] ->
+        :ets.delete(state.entries_table, {group, pid})
 
-          if new_counter == 0 do
-            :ets.delete(state.name, group)
-          else
-            :ets.insert(state.name, {group, new_pids, new_counter})
-          end
-        else
-          Logger.warning(
-            "Beacon[#{node()}|#{state.scope}] Trying to remove an unknown process #{inspect(pid)}"
-          )
+        # Delete or decrement counter
+        case :ets.lookup_element(state.name, group, 2, 0) do
+          1 -> :ets.delete(state.name, group)
+          count when count > 1 -> :ets.update_counter(state.name, group, {2, -1})
         end
 
       [] ->
+        Logger.warning(
+          "Beacon[#{node()}|#{state.scope}] Trying to remove an unknown process #{inspect(pid)}"
+        )
+
         :ok
     end
 
