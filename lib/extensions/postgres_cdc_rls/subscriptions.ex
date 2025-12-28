@@ -18,6 +18,34 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
           | {:error, Exception.t() | {:exit, term} | {:subscription_insert_failed, String.t()}}
 
   def create(conn, publication, subscription_list, manager, caller) do
+    transaction(conn, fn conn ->
+      Enum.map(subscription_list, fn %{id: id, claims: claims, subscription_params: params} ->
+        case query(conn, publication, id, claims, params) do
+          {:ok, %{num_rows: num} = result} when num > 0 ->
+            send(manager, {:subscribed, {caller, id}})
+            result
+
+          {:ok, _} ->
+            msg =
+              "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [#{params_to_log(params)}]"
+
+            rollback(conn, {:subscription_insert_failed, msg})
+
+          {:error, exception} ->
+            msg =
+              "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
+
+            rollback(conn, {:subscription_insert_failed, msg})
+        end
+      end)
+    end)
+  rescue
+    e in DBConnection.ConnectionError -> {:error, e}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  defp query(conn, publication, id, claims, subscription_params) do
     sql = "with sub_tables as (
         select
         rr.entity
@@ -54,36 +82,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         created_at = now()
       returning
          id"
-
-    transaction(conn, fn conn ->
-      Enum.map(subscription_list, fn %{
-                                       id: id,
-                                       claims: claims,
-                                       subscription_params: params = {action_filter, schema, table, filters}
-                                     } ->
-        case query(conn, sql, [publication, schema, table, id, claims, filters, action_filter]) do
-          {:ok, %{num_rows: num} = result} when num > 0 ->
-            send(manager, {:subscribed, {caller, id}})
-            result
-
-          {:ok, _} ->
-            msg =
-              "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [#{params_to_log(params)}]"
-
-            rollback(conn, {:subscription_insert_failed, msg})
-
-          {:error, exception} ->
-            msg =
-              "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
-
-            rollback(conn, {:subscription_insert_failed, msg})
-        end
-      end)
-    end)
-  rescue
-    e in DBConnection.ConnectionError -> {:error, e}
-  catch
-    :exit, reason -> {:error, {:exit, reason}}
+    {action_filter, schema, table, filters} = subscription_params
+    query(conn, sql, [publication, schema, table, id, claims, filters, action_filter])
   end
 
   defp params_to_log({action_filter, schema, table, filters}) do
