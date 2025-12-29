@@ -100,8 +100,16 @@ defmodule Beacon.Partition do
 
       [] ->
         :ets.insert(state.entries_table, {{group, pid}})
-        # Increment existing or create
-        :ets.update_counter(state.name, group, {2, 1}, {group, 0})
+
+        case :ets.lookup_element(state.name, group, 2, 0) do
+          0 ->
+            :ets.insert(state.name, {group, 1})
+            :telemetry.execute([:beacon, state.scope, :group, :occupied], %{}, %{group: group})
+
+          count when count > 0 ->
+            :ets.insert(state.name, {group, count + 1})
+        end
+
         ref = Process.monitor(pid, tag: {:DOWN, group})
         monitors = Map.put(state.monitors, {group, pid}, ref)
         {:reply, :ok, %{state | monitors: monitors}}
@@ -130,8 +138,12 @@ defmodule Beacon.Partition do
 
         # Delete or decrement counter
         case :ets.lookup_element(state.name, group, 2, 0) do
-          1 -> :ets.delete(state.name, group)
-          count when count > 1 -> :ets.update_counter(state.name, group, {2, -1})
+          1 ->
+            :ets.delete(state.name, group)
+            :telemetry.execute([:beacon, state.scope, :group, :vacant], %{}, %{group: group})
+
+          count when count > 1 ->
+            :ets.update_counter(state.name, group, {2, -1})
         end
 
       [] ->
