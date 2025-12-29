@@ -22,7 +22,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
-    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+    Realtime.Tenants.Cache.update_cache(tenant)
     {:ok, tenant: tenant}
   end
 
@@ -1263,7 +1263,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     ]
 
     with {:ok, tenant} <- Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions}) do
-      Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+      Realtime.Tenants.Cache.update_cache(tenant)
       {:ok, tenant}
     end
   end
