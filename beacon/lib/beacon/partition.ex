@@ -34,7 +34,7 @@ defmodule Beacon.Partition do
   @spec member_counts(atom) :: %{Beacon.group() => non_neg_integer}
   def member_counts(partition_name) do
     partition_name
-    |> :ets.select([{{:"$1", :"$2"}, [], [{{:"$1", :"$2"}}]}])
+    |> :ets.tab2list()
     |> Map.new()
   end
 
