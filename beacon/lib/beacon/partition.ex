@@ -66,25 +66,22 @@ defmodule Beacon.Partition do
   @spec init(any) :: {:ok, State.t()}
   def init([scope, name, entries_table]) do
     {:ok, %State{scope: scope, name: name, entries_table: entries_table},
-     {:continue, :rebuild_monitors}}
+     {:continue, :rebuild_monitors_and_counters}}
   end
 
   @impl true
-  @spec handle_continue(:rebuild_monitors, State.t()) :: {:noreply, State.t()}
-  def handle_continue(:rebuild_monitors, state) do
+  @spec handle_continue(:rebuild_monitors_and_counters, State.t()) :: {:noreply, State.t()}
+  def handle_continue(:rebuild_monitors_and_counters, state) do
     # Here we delete all counters and rebuild them based on entries table
     :ets.delete_all_objects(state.name)
 
-    {monitors, counts} =
+    monitors =
       :ets.tab2list(state.entries_table)
-      |> Enum.reduce({%{}, %{}}, fn {{group, pid}}, {monitors_acc, counts_acc} ->
+      |> Enum.reduce(%{}, fn {{group, pid}}, monitors_acc ->
         ref = Process.monitor(pid, tag: {:DOWN, group})
-        monitors_acc = Map.put(monitors_acc, {group, pid}, ref)
-        counts_acc = Map.update(counts_acc, group, 1, &(&1 + 1))
-        {monitors_acc, counts_acc}
+        :ets.update_counter(state.name, group, {2, 1}, {group, 0})
+        Map.put(monitors_acc, {group, pid}, ref)
       end)
-
-    :ets.insert(state.name, Enum.to_list(counts))
 
     {:noreply, %{state | monitors: monitors}}
   end
