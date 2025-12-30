@@ -93,18 +93,14 @@ defmodule Beacon.Partition do
   @spec handle_call({:join, Beacon.group(), pid}, GenServer.from(), State.t()) ::
           {:reply, :ok, State.t()}
   def handle_call({:join, group, pid}, _from, state) do
-    case :ets.lookup(state.entries_table, {group, pid}) do
-      [{{^group, ^pid}}] ->
-        # Already a member we do nothing
-        {:reply, :ok, state}
-
-      [] ->
-        :ets.insert(state.entries_table, {{group, pid}})
-        # Increment existing or create
-        :ets.update_counter(state.name, group, {2, 1}, {group, 0})
-        ref = Process.monitor(pid, tag: {:DOWN, group})
-        monitors = Map.put(state.monitors, {group, pid}, ref)
-        {:reply, :ok, %{state | monitors: monitors}}
+    if :ets.insert_new(state.entries_table, {{group, pid}}) do
+      # Increment existing or create
+      :ets.update_counter(state.name, group, {2, 1}, {group, 0})
+      ref = Process.monitor(pid, tag: {:DOWN, group})
+      monitors = Map.put(state.monitors, {group, pid}, ref)
+      {:reply, :ok, %{state | monitors: monitors}}
+    else
+      {:reply, :ok, state}
     end
   end
 
