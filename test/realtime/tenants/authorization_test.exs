@@ -282,7 +282,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
   def rls_context(context) do
     tenant = Containers.checkout_tenant(run_migrations: true)
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
-    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+    Realtime.Tenants.Cache.update_cache(tenant)
 
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = context[:topic] || random_string()
@@ -323,6 +323,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
     {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
 
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
-    Cachex.put!(Realtime.Tenants.Cache, {{:get_tenant_by_external_id, 1}, [tenant.external_id]}, {:cached, tenant})
+    Realtime.Tenants.Cache.update_cache(tenant)
   end
 end

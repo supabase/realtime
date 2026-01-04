@@ -119,6 +119,14 @@ defmodule Realtime.Api do
       %Tenant{}
       |> Tenant.changeset(attrs)
       |> Repo.insert()
+      |> case do
+        {:ok, tenant} ->
+          Cache.global_cache_update(tenant)
+          {:ok, tenant}
+
+        error ->
+          error
+      end
     else
       call(:create_tenant, [attrs], tenant_id)
     end
@@ -144,7 +152,7 @@ defmodule Realtime.Api do
 
     case updated do
       {:ok, tenant} ->
-        maybe_invalidate_cache(changeset)
+        maybe_update_cache(tenant, changeset)
         maybe_trigger_disconnect(changeset)
         maybe_restart_db_connection(changeset)
         Logger.debug("Tenant updated: #{inspect(tenant, pretty: true)}")
@@ -216,7 +224,12 @@ defmodule Realtime.Api do
       tenant
       |> Tenant.changeset(%{migrations_ran: count})
       |> Repo.update()
-      |> tap(fn _ -> Cache.distributed_invalidate_tenant_cache(external_id) end)
+      |> tap(fn result ->
+        case result do
+          {:ok, tenant} -> Cache.global_cache_update(tenant)
+          _ -> :ok
+        end
+      end)
     else
       call(:update_migrations_ran, [external_id, count], external_id)
     end
@@ -241,12 +254,11 @@ defmodule Realtime.Api do
     |> Map.put(:events_per_second_now, current)
   end
 
-  defp maybe_invalidate_cache(%Changeset{changes: changes, valid?: true, data: %{external_id: external_id}})
-       when changes != %{} do
-    Tenants.Cache.distributed_invalidate_tenant_cache(external_id)
+  defp maybe_update_cache(tenant, %Changeset{changes: changes, valid?: true}) when changes != %{} do
+    Tenants.Cache.global_cache_update(tenant)
   end
 
-  defp maybe_invalidate_cache(_changeset), do: nil
+  defp maybe_update_cache(_tenant, _changeset), do: :ok
 
   defp maybe_trigger_disconnect(%Changeset{data: %{external_id: external_id}} = changeset)
        when requires_disconnect(changeset) do
