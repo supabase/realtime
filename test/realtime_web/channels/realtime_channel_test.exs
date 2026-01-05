@@ -597,7 +597,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       Realtime.Tenants.Cache.update_cache(%{tenant | max_concurrent_users: 1})
 
-      Realtime.UsersCounter.add(self(), tenant.external_id)
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      Realtime.UsersCounter.add(pid, tenant.external_id)
 
       assert {:error, %{reason: "ConnectionRateLimitReached: Too many connected users"}} =
                subscribe_and_join(socket, "realtime:test", %{})
