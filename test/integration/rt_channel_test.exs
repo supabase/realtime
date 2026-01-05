@@ -1770,6 +1770,18 @@ defmodule Realtime.Integration.RtChannelTest do
                        }
                      },
                      500
+
+      # Limit is updated now joining should succeed
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_concurrent_users: 2})
+
+      WebsocketClient.join(socket2, topic3, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       topic: ^topic3,
+                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"}
+                     },
+                     500
     end
 
     test "max_events_per_second limit respected", %{tenant: tenant, serializer: serializer} do
@@ -1836,6 +1848,18 @@ defmodule Realtime.Integration.RtChannelTest do
 
       refute_receive %Message{event: "phx_reply", topic: ^realtime_topic_2}, 500
       refute_receive %Message{event: "presence_state", topic: ^realtime_topic_2}, 500
+
+      # Limit is updated now joining should succeed
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_channels_per_client: 2})
+
+      WebsocketClient.join(socket, realtime_topic_2, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"},
+                       topic: ^realtime_topic_2
+                     },
+                     500
     end
 
     test "max_joins_per_second limit respected", %{tenant: tenant, serializer: serializer} do
