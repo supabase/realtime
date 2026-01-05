@@ -8,7 +8,16 @@ defmodule Realtime.UsersCounter do
   Adds a RealtimeChannel pid to the `:users` scope for a tenant so we can keep track of all connected clients for a tenant.
   """
   @spec add(pid(), String.t()) :: :ok
-  def add(pid, tenant_id), do: tenant_id |> scope() |> :syn.join(tenant_id, pid)
+  def add(pid, tenant_id) when is_pid(pid) and is_binary(tenant_id) do
+    beacon_join(pid, tenant_id)
+    tenant_id |> scope() |> :syn.join(tenant_id, pid)
+  end
+
+  defp beacon_join(pid, tenant_id) do
+    :ok = Beacon.join(:users, tenant_id, pid)
+  rescue
+    _ -> Logger.error("Failed to join Beacon users scope for tenant #{tenant_id}")
+  end
 
   @doc """
   Returns the count of all connected clients for a tenant for the cluster.
@@ -75,13 +84,13 @@ defmodule Realtime.UsersCounter do
   """
   @spec scope(String.t()) :: atom()
   def scope(tenant_id) do
-    shards = Application.get_env(:realtime, :users_scope_shards)
+    shards = Application.fetch_env!(:realtime, :users_scope_shards)
     shard = :erlang.phash2(tenant_id, shards)
     :"users_#{shard}"
   end
 
   def scopes() do
-    shards = Application.get_env(:realtime, :users_scope_shards)
+    shards = Application.fetch_env!(:realtime, :users_scope_shards)
     Enum.map(0..(shards - 1), fn shard -> :"users_#{shard}" end)
   end
 end
