@@ -1762,7 +1762,7 @@ defmodule Realtime.Integration.RtChannelTest do
       log =
         capture_log(fn ->
           {socket, _} = get_connection(tenant, serializer, role: "authenticated")
-          config = %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
+          config = %{broadcast: %{self: true, ack: false}, private: false, presence: %{enabled: false}}
           realtime_topic = "realtime:#{random_string()}"
 
           WebsocketClient.join(socket, realtime_topic, %{config: config})
@@ -1770,12 +1770,17 @@ defmodule Realtime.Integration.RtChannelTest do
 
           for _ <- 1..1000, Process.alive?(socket) do
             WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
-            Process.sleep(10)
+            assert_receive %Message{event: "broadcast", topic: ^realtime_topic}, 500
           end
 
           # Wait for the rate counter to run logger function
-          Process.sleep(1500)
-          assert_receive %Message{event: "phx_close"}
+          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
+
+          # One more to cause the WebSocket to close
+
+          WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
+
+          assert_receive %Message{event: "phx_close"}, 1000
         end)
 
       assert log =~ "MessagePerSecondRateLimitReached"
@@ -1827,10 +1832,11 @@ defmodule Realtime.Integration.RtChannelTest do
           # Burst of joins that won't be blocked as RateCounter tick won't run
           for _ <- 1..300 do
             WebsocketClient.join(socket, realtime_topic, %{config: config})
+            assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
           end
 
           # Wait for RateCounter tick
-          Process.sleep(1000)
+          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
           # These ones will be blocked
           for _ <- 1..300 do
