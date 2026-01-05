@@ -1731,17 +1731,37 @@ defmodule Realtime.Integration.RtChannelTest do
     setup [:rls_context]
 
     test "max_concurrent_users limit respected", %{tenant: tenant, serializer: serializer} do
-      %{max_concurrent_users: max_concurrent_users} = Tenants.get_tenant_by_external_id(tenant.external_id)
+      Tenants.get_tenant_by_external_id(tenant.external_id)
       change_tenant_configuration(tenant, :max_concurrent_users, 1)
 
-      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      {socket1, _} = get_connection(tenant, serializer, role: "authenticated")
+      {socket2, _} = get_connection(tenant, serializer, role: "authenticated")
       config = %{broadcast: %{self: true}, private: false}
-      realtime_topic = "realtime:#{random_string()}"
-      WebsocketClient.join(socket, realtime_topic, %{config: config})
-      WebsocketClient.join(socket, realtime_topic, %{config: config})
+      topic1 = "realtime:#{random_string()}"
+      topic2 = "realtime:#{random_string()}"
+      WebsocketClient.join(socket1, topic1, %{config: config})
+      WebsocketClient.join(socket1, topic2, %{config: config})
 
       assert_receive %Message{
                        event: "phx_reply",
+                       topic: ^topic1,
+                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"}
+                     },
+                     500
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       topic: ^topic2,
+                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"}
+                     },
+                     500
+
+      topic3 = "realtime:#{random_string()}"
+      WebsocketClient.join(socket2, topic3, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       topic: ^topic3,
                        payload: %{
                          "response" => %{
                            "reason" => "ConnectionRateLimitReached: Too many connected users"
@@ -1750,10 +1770,6 @@ defmodule Realtime.Integration.RtChannelTest do
                        }
                      },
                      500
-
-      assert_receive %Message{event: "phx_close"}
-
-      change_tenant_configuration(tenant, :max_concurrent_users, max_concurrent_users)
     end
 
     test "max_events_per_second limit respected", %{tenant: tenant, serializer: serializer} do

@@ -20,6 +20,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Connect
+  alias Realtime.UsersCounter
 
   alias RealtimeWeb.Channels.Payloads.Join
   alias RealtimeWeb.ChannelsAuthorization
@@ -68,9 +69,9 @@ defmodule RealtimeWeb.RealtimeChannel do
     with :ok <- SignalHandler.shutdown_in_progress?(),
          %Tenant{} = tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
          :ok <- only_private?(tenant, socket),
+         :ok <- limit_max_users(tenant, transport_pid),
          :ok <- limit_joins(tenant, socket),
          :ok <- limit_channels(tenant, socket),
-         :ok <- limit_max_users(tenant),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket),
          socket = assign_authorization_context(socket, sub_topic, claims),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
@@ -139,7 +140,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       # Start presence and add user if presence is enabled
       if presence_enabled?, do: send(self(), :sync_presence)
 
-      Realtime.UsersCounter.add(transport_pid, tenant_id)
+      UsersCounter.add(transport_pid, tenant_id)
       SocketDisconnect.add(tenant_id, socket)
 
       {:ok, state, assign(socket, assigns)}
@@ -550,13 +551,12 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp limit_max_users(tenant) do
-    conns = Realtime.UsersCounter.tenant_users(tenant.external_id)
-
-    if conns < tenant.max_concurrent_users do
-      :ok
-    else
+  defp limit_max_users(tenant, transport_pid) do
+    if !UsersCounter.already_counted?(transport_pid, tenant.external_id) and
+         UsersCounter.tenant_users(tenant.external_id) >= tenant.max_concurrent_users do
       {:error, :too_many_connections}
+    else
+      :ok
     end
   end
 
