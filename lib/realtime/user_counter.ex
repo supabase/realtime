@@ -10,6 +10,11 @@ defmodule Realtime.UsersCounter do
   @spec add(pid(), String.t()) :: :ok
   def add(pid, tenant_id), do: tenant_id |> scope() |> :syn.join(tenant_id, pid)
 
+  @spec already_counted?(pid(), String.t()) :: boolean()
+  def already_counted?(pid, tenant_id) do
+    tenant_id |> scope() |> :syn.is_local_member(tenant_id, pid)
+  end
+
   @doc """
   Returns the count of all connected clients for a tenant for the cluster.
   """

@@ -8,6 +8,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias RealtimeWeb.SocketDisconnect
   alias DBConnection.Backoff
 
+  alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.Helpers
@@ -19,6 +20,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Connect
+  alias Realtime.UsersCounter
 
   alias RealtimeWeb.Channels.Payloads.Join
   alias RealtimeWeb.ChannelsAuthorization
@@ -52,8 +54,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     socket =
       socket
       |> assign_access_token(params)
-      |> assign_counter()
-      |> assign_presence_counter()
       |> assign(:private?, !!params["config"]["private"])
       |> assign(:policies, nil)
 
@@ -67,10 +67,11 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
 
     with :ok <- SignalHandler.shutdown_in_progress?(),
-         :ok <- only_private?(tenant_id, socket),
-         :ok <- limit_joins(socket),
-         :ok <- limit_channels(socket),
-         :ok <- limit_max_users(socket),
+         %Tenant{} = tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
+         :ok <- only_private?(tenant, socket),
+         :ok <- limit_max_users(tenant, transport_pid),
+         :ok <- limit_joins(tenant, socket),
+         :ok <- limit_channels(tenant, socket),
          {:ok, claims, confirm_token_ref} <- confirm_token(socket),
          socket = assign_authorization_context(socket, sub_topic, claims),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
@@ -131,10 +132,15 @@ defmodule RealtimeWeb.RealtimeChannel do
         presence_enabled?: presence_enabled?
       }
 
+      socket =
+        socket
+        |> assign_counter(tenant)
+        |> assign_presence_counter(tenant)
+
       # Start presence and add user if presence is enabled
       if presence_enabled?, do: send(self(), :sync_presence)
 
-      Realtime.UsersCounter.add(transport_pid, tenant_id)
+      UsersCounter.add(transport_pid, tenant_id)
       SocketDisconnect.add(tenant_id, socket)
 
       {:ok, state, assign(socket, assigns)}
@@ -515,8 +521,8 @@ defmodule RealtimeWeb.RealtimeChannel do
     wait
   end
 
-  def limit_joins(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
-    rate_args = Tenants.joins_per_second_rate(tenant, limits.max_joins_per_second)
+  def limit_joins(tenant, socket) do
+    rate_args = Tenants.joins_per_second_rate(tenant)
 
     RateCounter.new(rate_args)
 
@@ -534,10 +540,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def limit_channels(%{assigns: %{tenant: tenant, limits: limits}, transport_pid: pid}) do
+  def limit_channels(tenant, %{transport_pid: pid}) do
     key = Tenants.channels_per_client_key(tenant)
 
-    if Registry.count_match(Realtime.Registry, key, pid) + 1 > limits.max_channels_per_client do
+    if Registry.count_match(Realtime.Registry, key, pid) + 1 > tenant.max_channels_per_client do
       {:error, :too_many_channels}
     else
       Registry.register(Realtime.Registry, Tenants.channels_per_client_key(tenant), pid)
@@ -545,25 +551,24 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp limit_max_users(%{assigns: %{limits: %{max_concurrent_users: max_conn_users}, tenant: tenant}}) do
-    conns = Realtime.UsersCounter.tenant_users(tenant)
-
-    if conns < max_conn_users,
-      do: :ok,
-      else: {:error, :too_many_connections}
+  defp limit_max_users(tenant, transport_pid) do
+    if !UsersCounter.already_counted?(transport_pid, tenant.external_id) and
+         UsersCounter.tenant_users(tenant.external_id) >= tenant.max_concurrent_users do
+      {:error, :too_many_connections}
+    else
+      :ok
+    end
   end
 
-  defp assign_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
-    rate_args = Tenants.events_per_second_rate(tenant, limits.max_events_per_second)
+  defp assign_counter(socket, tenant) do
+    rate_args = Tenants.events_per_second_rate(tenant)
 
     RateCounter.new(rate_args)
     assign(socket, :rate_counter, rate_args)
   end
 
-  defp assign_counter(socket), do: socket
-
-  defp assign_presence_counter(%{assigns: %{tenant: tenant, limits: limits}} = socket) do
-    rate_args = Tenants.presence_events_per_second_rate(tenant, limits.max_events_per_second)
+  defp assign_presence_counter(socket, tenant) do
+    rate_args = Tenants.presence_events_per_second_rate(tenant)
 
     RateCounter.new(rate_args)
 
@@ -786,12 +791,12 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   defp maybe_assign_policies(_, _, socket), do: {:ok, assign(socket, policies: nil)}
 
-  defp only_private?(tenant_id, %{assigns: %{private?: private?}}) do
-    tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
-
-    if tenant.private_only and !private?,
-      do: {:error, :private_only},
-      else: :ok
+  defp only_private?(tenant, %{assigns: %{private?: private?}}) do
+    if tenant.private_only and !private? do
+      {:error, :private_only}
+    else
+      :ok
+    end
   end
 
   defp maybe_replay_messages(%{"broadcast" => %{"replay" => _}}, _sub_topic, _db_conn, _tenant_id, false = _private?) do
