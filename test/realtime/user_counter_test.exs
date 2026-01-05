@@ -10,6 +10,18 @@ defmodule Realtime.UsersCounterTest do
     %{tenant_id: tenant_id, count: count, nodes: Node.list()}
   end
 
+  describe "already_counted?/2" do
+    test "returns true if pid already counted for tenant", %{tenant_id: tenant_id} do
+      pid = self()
+      assert UsersCounter.add(pid, tenant_id) == :ok
+      assert UsersCounter.already_counted?(pid, tenant_id) == true
+    end
+
+    test "returns false if pid not counted for tenant" do
+      assert UsersCounter.already_counted?(self(), random_string()) == false
+    end
+  end
+
   describe "add/1" do
     test "starts counter for tenant" do
       assert UsersCounter.add(self(), random_string()) == :ok

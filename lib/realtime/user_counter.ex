@@ -19,6 +19,11 @@ defmodule Realtime.UsersCounter do
     _ -> Logger.error("Failed to join Beacon users scope for tenant #{tenant_id}")
   end
 
+  @spec already_counted?(pid(), String.t()) :: boolean()
+  def already_counted?(pid, tenant_id) do
+    tenant_id |> scope() |> :syn.is_local_member(tenant_id, pid)
+  end
+
   @doc """
   Returns the count of all connected clients for a tenant for the cluster.
   """
