@@ -75,27 +75,12 @@ defmodule RealtimeWeb.UserSocket do
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
          :ok <- TenantRateLimiters.check_tenant(tenant),
          {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
-      %Tenant{
-        extensions: extensions,
-        max_concurrent_users: max_conn_users,
-        max_events_per_second: max_events_per_second,
-        max_bytes_per_second: max_bytes_per_second,
-        max_joins_per_second: max_joins_per_second,
-        max_channels_per_client: max_channels_per_client,
-        postgres_cdc_default: postgres_cdc_default
-      } = tenant
+      %Tenant{extensions: extensions, postgres_cdc_default: postgres_cdc_default} = tenant
 
       assigns = %RealtimeChannel.Assigns{
         claims: claims,
         jwt_secret: jwt_secret,
         jwt_jwks: jwt_jwks,
-        limits: %{
-          max_concurrent_users: max_conn_users,
-          max_events_per_second: max_events_per_second,
-          max_bytes_per_second: max_bytes_per_second,
-          max_joins_per_second: max_joins_per_second,
-          max_channels_per_client: max_channels_per_client
-        },
         postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
         postgres_cdc_module: postgres_cdc_module,
         tenant: external_id,
