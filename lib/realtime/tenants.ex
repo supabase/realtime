@@ -337,8 +337,10 @@ defmodule Realtime.Tenants do
       ]
     ]
 
-    %RateCounter.Args{id: {:channel, :authorization_errors, external_id}, opts: opts}
+    %RateCounter.Args{id: authorization_errors_per_second_key(external_id), opts: opts}
   end
+
+  def authorization_errors_per_second_key(tenant_id), do: {:channel, :authorization_errors, tenant_id}
 
   @spec subscription_errors_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
   def subscription_errors_per_second_rate(tenant_id, pool_size) do
@@ -356,8 +358,10 @@ defmodule Realtime.Tenants do
       ]
     ]
 
-    %RateCounter.Args{id: {:channel, :subscription_errors, tenant_id}, opts: opts}
+    %RateCounter.Args{id: subscription_errors_per_second_key(tenant_id), opts: opts}
   end
+
+  def subscription_errors_per_second_key(tenant_id), do: {:channel, :subscription_errors, tenant_id}
 
   @connect_errors_per_second_default 10
   @doc "RateCounter arguments for counting connect per second."
@@ -382,8 +386,10 @@ defmodule Realtime.Tenants do
       ]
     ]
 
-    %RateCounter.Args{id: {:database, :connect, tenant_id}, opts: opts}
+    %RateCounter.Args{id: connect_errors_per_second_key(tenant_id), opts: opts}
   end
+
+  def connect_errors_per_second_key(tenant_id), do: {:database, :connect, tenant_id}
 
   defp authorization_pool_size(%{extensions: [%{settings: settings} | _]}) do
     Database.pool_size_by_application_name("realtime_connect", settings)
