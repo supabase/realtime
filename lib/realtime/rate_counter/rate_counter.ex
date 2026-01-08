@@ -77,22 +77,6 @@ defmodule Realtime.RateCounter do
     )
   end
 
-  @spec stop(term()) :: :ok
-  def stop(tenant_id) do
-    keys =
-      Registry.select(Realtime.Registry.Unique, [
-        {{{:"$1", :_, {:_, :_, :"$2"}}, :"$3", :_}, [{:==, :"$1", __MODULE__}, {:==, :"$2", tenant_id}], [:"$_"]}
-      ])
-
-    Enum.each(keys, fn {{_, _, key}, {pid, _}} ->
-      if Process.alive?(pid), do: GenServer.stop(pid)
-      GenCounter.delete(key)
-      Cachex.del!(@cache, key)
-    end)
-
-    :ok
-  end
-
   @doc """
   Starts a new RateCounter under a DynamicSupervisor
   """
@@ -107,6 +91,10 @@ defmodule Realtime.RateCounter do
       restart: :transient
     })
   end
+
+  @doc "Publish an update to the RateCounter with the given id"
+  @spec publish_update(term()) :: :ok
+  def publish_update(id), do: Phoenix.PubSub.broadcast(Realtime.PubSub, update_topic(id), :update)
 
   @doc """
   Gets the state of the RateCounter.
@@ -136,6 +124,8 @@ defmodule Realtime.RateCounter do
     end
   end
 
+  defp update_topic(id), do: "rate_counter:#{inspect(id)}"
+
   @impl true
   def init(args) do
     id = Keyword.fetch!(args, :id)
@@ -150,6 +140,8 @@ defmodule Realtime.RateCounter do
     # Always reset the counter in case the counter had already accumulated without
     # a RateCounter running to calculate avg and buckets
     GenCounter.reset(id)
+
+    :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, update_topic(id))
 
     telemetry =
       if telem_opts do
@@ -228,28 +220,39 @@ defmodule Realtime.RateCounter do
     {:noreply, state}
   end
 
-  @impl true
   def handle_info(:idle_shutdown, state) do
     if Enum.all?(state.bucket, &(&1 == 0)) do
       # All the buckets are empty, so we can assume this RateCounter has not been useful recently
       Logger.warning("#{__MODULE__} idle_shutdown reached for: #{inspect(state.id)}")
-      GenCounter.delete(state.id)
-      # We are expiring in the near future instead of deleting so that
-      # The process dies before the cache information disappears
-      # If we were using Cachex.delete instead then the following rare scenario would be possible:
-      # * RateCounter.get/2 is called;
-      # * Cache was deleted but the process has not stopped yet;
-      # * RateCounter.get/2 will then try to start a new RateCounter but the supervisor will return :already_started;
-      # * Process finally stops;
-      # * The cache is still empty because no new process was started causing an error
-
-      Cachex.expire(@cache, state.id, :timer.seconds(1))
-      {:stop, :normal, state}
+      shutdown(state)
     else
       Process.cancel_timer(state.idle_shutdown_ref)
       idle_shutdown_ref = shutdown_after(state.idle_shutdown)
       {:noreply, %{state | idle_shutdown_ref: idle_shutdown_ref}}
     end
+  end
+
+  def handle_info(:update, state) do
+    # When we get an update message we shutdown so that this RateCounter
+    # can be restarted with new parameters
+    shutdown(state)
+  end
+
+  def handle_info(_, state), do: {:noreply, state}
+
+  defp shutdown(state) do
+    GenCounter.delete(state.id)
+    # We are expiring in the near future instead of deleting so that
+    # The process dies before the cache information disappears
+    # If we were using Cachex.delete instead then the following rare scenario would be possible:
+    # * RateCounter.get/2 is called;
+    # * Cache was deleted but the process has not stopped yet;
+    # * RateCounter.get/2 will then try to start a new RateCounter but the supervisor will return :already_started;
+    # * Process finally stops;
+    # * The cache is still empty because no new process was started causing an error
+
+    Cachex.expire(@cache, state.id, :timer.seconds(1))
+    {:stop, :normal, state}
   end
 
   defp maybe_trigger_limit(%{limit: %{log: false}} = state), do: state
