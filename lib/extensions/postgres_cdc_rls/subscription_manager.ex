@@ -76,10 +76,11 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       "subscribers_nodes_table" => subscribers_nodes_table
     } = args
 
-    subscription_manager_settings = Database.from_settings(args, "realtime_subscription_manager")
+    %Realtime.Api.Tenant{} = tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(id)
+    subscription_manager_settings = Database.from_tenant(tenant, "realtime_subscription_manager")
 
     subscription_manager_pub_settings =
-      Database.from_settings(args, "realtime_subscription_manager_pub")
+      Database.from_tenant(tenant, "realtime_subscription_manager_pub")
 
     {:ok, conn} = Database.connect_db(subscription_manager_settings)
     {:ok, conn_pub} = Database.connect_db(subscription_manager_pub_settings)

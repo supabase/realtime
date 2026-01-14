@@ -38,11 +38,6 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
     state = %{
       backoff: Backoff.new(backoff_min: 100, backoff_max: 5_000, backoff_type: :rand_exp),
-      db_host: args["db_host"],
-      db_port: args["db_port"],
-      db_name: args["db_name"],
-      db_user: args["db_user"],
-      db_pass: args["db_password"],
       max_changes: args["poll_max_changes"],
       max_record_bytes: args["poll_max_record_bytes"],
       poll_interval_ms: args["poll_interval_ms"],
@@ -57,12 +52,13 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     }
 
     {:ok, _} = Registry.register(__MODULE__.Registry, tenant_id, %{})
-    {:ok, state, {:continue, {:connect, args}}}
+    {:ok, state, {:continue, :connect}}
   end
 
   @impl true
-  def handle_continue({:connect, args}, state) do
-    realtime_rls_settings = Database.from_settings(args, "realtime_rls")
+  def handle_continue(:connect, state) do
+    %Realtime.Api.Tenant{} = tenant = Tenants.Cache.get_tenant_by_external_id(state.tenant_id)
+    realtime_rls_settings = Database.from_tenant(tenant, "realtime_rls")
     {:ok, conn} = Database.connect_db(realtime_rls_settings)
     state = Map.put(state, :conn, conn)
     {:noreply, state, {:continue, :prepare}}
