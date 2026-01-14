@@ -7,36 +7,39 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
+    Realtime.Tenants.Cache.update_cache(tenant)
 
     subscribers_pids_table = :ets.new(__MODULE__, [:public, :bag])
     subscribers_nodes_table = :ets.new(__MODULE__, [:public, :set])
 
-    args =
-      hd(tenant.extensions).settings
-      |> Map.put("id", tenant.external_id)
-      |> Map.put("subscribers_pids_table", subscribers_pids_table)
-      |> Map.put("subscribers_nodes_table", subscribers_nodes_table)
+    args = %{
+      "id" => tenant.external_id,
+      "subscribers_nodes_table" => subscribers_nodes_table,
+      "subscribers_pids_table" => subscribers_pids_table
+    }
+
+    publication = "supabase_realtime_test"
 
     # register this process with syn as if this was the WorkersSupervisor
 
     scope = Realtime.Syn.PostgresCdc.scope(tenant.external_id)
     :syn.register(scope, tenant.external_id, self(), %{region: "us-east-1", manager: nil, subs_pool: nil})
 
-    {:ok, pid} = SubscriptionManager.start_link(Map.put(args, "id", tenant.external_id))
+    {:ok, pid} = SubscriptionManager.start_link(args)
     # This serves so that we know that handle_continue has finished
     :sys.get_state(pid)
-    %{args: args, pid: pid}
+    %{args: args, pid: pid, publication: publication}
   end
 
   describe "subscription" do
-    test "subscription", %{pid: pid, args: args} do
+    test "subscription", %{pid: pid, args: args, publication: publication} do
       {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
       {uuid, bin_uuid, pg_change_params} = pg_change_params()
 
       subscriber = self()
 
       assert {:ok, [%Postgrex.Result{command: :insert, columns: ["id"], rows: [[1]], num_rows: 1}]} =
-               Subscriptions.create(conn, args["publication"], [pg_change_params], pid, subscriber)
+               Subscriptions.create(conn, publication, [pg_change_params], pid, subscriber)
 
       # Wait for subscription manager to process the :subscribed message
       :sys.get_state(pid)
@@ -48,7 +51,7 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       assert :ets.tab2list(args["subscribers_nodes_table"]) == [{bin_uuid, node}]
     end
 
-    test "subscriber died", %{pid: pid, args: args} do
+    test "subscriber died", %{pid: pid, args: args, publication: publication} do
       {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
       self = self()
 
@@ -64,9 +67,9 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       {uuid3, bin_uuid3, pg_change_params3} = pg_change_params()
 
       assert {:ok, _} =
-               Subscriptions.create(conn, args["publication"], [pg_change_params1, pg_change_params2], pid, subscriber)
+               Subscriptions.create(conn, publication, [pg_change_params1, pg_change_params2], pid, subscriber)
 
-      assert {:ok, _} = Subscriptions.create(conn, args["publication"], [pg_change_params3], pid, self())
+      assert {:ok, _} = Subscriptions.create(conn, publication, [pg_change_params3], pid, self())
 
       # Wait for subscription manager to process the :subscribed message
       :sys.get_state(pid)
@@ -97,7 +100,7 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
   end
 
   describe "subscription deletion" do
-    test "subscription is deleted when process goes away", %{pid: pid, args: args} do
+    test "subscription is deleted when process goes away", %{pid: pid, args: args, publication: publication} do
       {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
       {_uuid, _bin_uuid, pg_change_params} = pg_change_params()
 
@@ -109,7 +112,7 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
         end)
 
       assert {:ok, [%Postgrex.Result{command: :insert, columns: ["id"], rows: [[1]], num_rows: 1}]} =
-               Subscriptions.create(conn, args["publication"], [pg_change_params], pid, subscriber)
+               Subscriptions.create(conn, publication, [pg_change_params], pid, subscriber)
 
       # Wait for subscription manager to process the :subscribed message
       :sys.get_state(pid)

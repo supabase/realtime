@@ -154,8 +154,6 @@ defmodule Extensions.PostgresCdcRls do
 
   @spec start(map()) :: {:ok, pid} | {:error, :already_started | :reserved}
   def start(%{"id" => tenant} = args) when is_binary(tenant) do
-    args = Map.merge(args, %{"subs_pool_size" => Map.get(args, "subcriber_pool_size", 4)})
-
     Logger.debug("Starting #{__MODULE__} extension with args: #{inspect(args, pretty: true)}")
 
     DynamicSupervisor.start_child(

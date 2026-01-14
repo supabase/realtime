@@ -19,6 +19,7 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
+  alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
 
@@ -39,7 +40,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def join("realtime:" <> sub_topic = topic, params, socket) do
     %{
-      assigns: %{tenant: tenant_id, log_level: log_level, postgres_cdc_module: module},
+      assigns: %{tenant: tenant_id, log_level: log_level},
       channel_pid: channel_pid,
       serializer: serializer,
       transport_pid: transport_pid
@@ -67,7 +68,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
 
     with :ok <- SignalHandler.shutdown_in_progress?(),
-         %Tenant{} = tenant <- Tenants.Cache.get_tenant_by_external_id(tenant_id),
+         %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id),
          :ok <- only_private?(tenant, socket),
          :ok <- limit_max_users(tenant, transport_pid),
          :ok <- limit_joins(tenant, socket),
@@ -111,11 +112,10 @@ defmodule RealtimeWeb.RealtimeChannel do
         transport_pid: transport_pid,
         serializer: serializer,
         topic: topic,
-        tenant: tenant_id,
-        module: module
+        tenant: tenant_id
       }
 
-      postgres_cdc_subscribe(opts)
+      postgres_cdc_subscribe(tenant, opts)
 
       state = %{postgres_changes: add_id_to_postgres_changes(pg_change_params)}
 
@@ -282,21 +282,23 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_info(:postgres_subscribe, %{assigns: %{channel_name: channel_name}} = socket) do
     %{
       assigns: %{
-        tenant: tenant,
+        tenant: tenant_id,
         pg_sub_ref: pg_sub_ref,
-        pg_change_params: pg_change_params,
-        postgres_extension: postgres_extension,
-        postgres_cdc_module: module
+        pg_change_params: pg_change_params
       }
     } = socket
 
     Helpers.cancel_timer(pg_sub_ref)
 
-    args = Map.put(postgres_extension, "id", tenant)
+    %Tenant{} = tenant = Cache.get_tenant_by_external_id(tenant_id)
+    {:ok, module} = PostgresCdc.driver(tenant.postgres_cdc_default)
+    postgres_extension = PostgresCdc.filter_settings(tenant.postgres_cdc_default, tenant.extensions)
+
+    args = %{"region" => postgres_extension["region"], "id" => tenant_id}
 
     case PostgresCdc.connect(module, args) do
       {:ok, response} ->
-        case PostgresCdc.after_connect(module, response, postgres_extension, pg_change_params, tenant) do
+        case PostgresCdc.after_connect(module, response, postgres_extension, pg_change_params, tenant_id) do
           {:ok, _response} ->
             message = "Subscribed to PostgreSQL"
             maybe_log_info(socket, message)
@@ -713,17 +715,15 @@ defmodule RealtimeWeb.RealtimeChannel do
     ]
   end
 
-  defp postgres_cdc_subscribe(%{pg_change_params: []}), do: []
+  defp postgres_cdc_subscribe(_tenant, %{pg_change_params: []}), do: []
 
-  defp postgres_cdc_subscribe(opts) do
+  defp postgres_cdc_subscribe(tenant, opts) do
     %{
       is_new_api: is_new_api,
       pg_change_params: pg_change_params,
       transport_pid: transport_pid,
       serializer: serializer,
-      topic: topic,
-      tenant: tenant,
-      module: module
+      topic: topic
     } = opts
 
     ids =
@@ -736,7 +736,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     metadata = [metadata: subscription_metadata]
 
-    PostgresCdc.subscribe(module, pg_change_params, tenant, metadata)
+    {:ok, module} = PostgresCdc.driver(tenant.postgres_cdc_default)
+    PostgresCdc.subscribe(module, pg_change_params, tenant.external_id, metadata)
 
     send(self(), :postgres_subscribe)
 

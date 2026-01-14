@@ -29,7 +29,6 @@ defmodule RealtimeWeb.UserSocket do
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.Database
-  alias Realtime.PostgresCdc
   alias Realtime.Tenants
 
   alias RealtimeWeb.TenantRateLimiters
@@ -67,22 +66,16 @@ defmodule RealtimeWeb.UserSocket do
     with %Tenant{
            jwt_secret: jwt_secret,
            jwt_jwks: jwt_jwks,
-           postgres_cdc_default: postgres_cdc_default,
            suspend: false
          } = tenant <- Tenants.Cache.get_tenant_by_external_id(external_id),
          token when is_binary(token) <- token,
          jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
-         :ok <- TenantRateLimiters.check_tenant(tenant),
-         {:ok, postgres_cdc_module} <- PostgresCdc.driver(postgres_cdc_default) do
-      %Tenant{extensions: extensions, postgres_cdc_default: postgres_cdc_default} = tenant
-
+         :ok <- TenantRateLimiters.check_tenant(tenant) do
       assigns = %RealtimeChannel.Assigns{
         claims: claims,
         jwt_secret: jwt_secret,
         jwt_jwks: jwt_jwks,
-        postgres_extension: PostgresCdc.filter_settings(postgres_cdc_default, extensions),
-        postgres_cdc_module: postgres_cdc_module,
         tenant: external_id,
         log_level: log_level,
         tenant_token: token,

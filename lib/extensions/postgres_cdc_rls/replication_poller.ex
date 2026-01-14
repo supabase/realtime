@@ -33,36 +33,32 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
     %Realtime.Api.Tenant{} = tenant = Tenants.Cache.get_tenant_by_external_id(tenant_id)
     rate_counter_args = Tenants.db_events_per_second_rate(tenant)
+    extension = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
 
     RateCounter.new(rate_counter_args)
 
     state = %{
       backoff: Backoff.new(backoff_min: 100, backoff_max: 5_000, backoff_type: :rand_exp),
-      db_host: args["db_host"],
-      db_port: args["db_port"],
-      db_name: args["db_name"],
-      db_user: args["db_user"],
-      db_pass: args["db_password"],
-      max_changes: args["poll_max_changes"],
-      max_record_bytes: args["poll_max_record_bytes"],
-      poll_interval_ms: args["poll_interval_ms"],
+      max_changes: extension["poll_max_changes"],
+      max_record_bytes: extension["poll_max_record_bytes"],
+      poll_interval_ms: extension["poll_interval_ms"],
       poll_ref: nil,
-      publication: args["publication"],
+      publication: extension["publication"],
       retry_ref: nil,
       retry_count: 0,
-      slot_name: args["slot_name"] <> slot_name_suffix(),
+      slot_name: extension["slot_name"] <> slot_name_suffix(),
       tenant_id: tenant_id,
       rate_counter_args: rate_counter_args,
       subscribers_nodes_table: args["subscribers_nodes_table"]
     }
 
     {:ok, _} = Registry.register(__MODULE__.Registry, tenant_id, %{})
-    {:ok, state, {:continue, {:connect, args}}}
+    {:ok, state, {:continue, {:connect, tenant}}}
   end
 
   @impl true
-  def handle_continue({:connect, args}, state) do
-    realtime_rls_settings = Database.from_settings(args, "realtime_rls")
+  def handle_continue({:connect, tenant}, state) do
+    realtime_rls_settings = Database.from_tenant(tenant, "realtime_rls")
     {:ok, conn} = Database.connect_db(realtime_rls_settings)
     state = Map.put(state, :conn, conn)
     {:noreply, state, {:continue, :prepare}}
