@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.69.2",
+      version: "2.70.0",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -81,6 +81,7 @@ defmodule Realtime.MixProject do
       {:mint, "~> 1.4"},
       {:logflare_logger_backend, "~> 0.11"},
       {:syn, "~> 3.3"},
+      {:beacon, path: "./beacon"},
       {:cachex, "~> 4.0"},
       {:open_api_spex, "~> 3.16"},
       {:corsica, "~> 2.0"},
