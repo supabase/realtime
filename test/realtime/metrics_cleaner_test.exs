@@ -1,51 +1,69 @@
 defmodule Realtime.MetricsCleanerTest do
-  # async: false due to potentially polluting metrics with other tenant metrics from other tests
-  use Realtime.DataCase, async: false
+  use Realtime.DataCase, async: true
 
   alias Realtime.MetricsCleaner
-  alias Realtime.Tenants.Connect
-
-  setup do
-    interval = Application.get_env(:realtime, :metrics_cleaner_schedule_timer_in_ms)
-    Application.put_env(:realtime, :metrics_cleaner_schedule_timer_in_ms, 100)
-    on_exit(fn -> Application.put_env(:realtime, :metrics_cleaner_schedule_timer_in_ms, interval) end)
-
-    tenant = Containers.checkout_tenant(run_migrations: true)
-
-    %{tenant: tenant}
-  end
 
   describe "metrics cleanup" do
-    test "cleans up metrics for users that have been disconnected", %{tenant: %{external_id: external_id}} do
-      start_supervised!(MetricsCleaner)
-      {:ok, _} = Connect.lookup_or_start_connection(external_id)
-      # Wait for promex to collect the metrics
-      Process.sleep(6000)
-
+    test "cleans up metrics for users that have been disconnected" do
       :telemetry.execute(
         [:realtime, :connections],
-        %{connected: 10, connected_cluster: 10, limit: 100},
-        %{tenant: external_id}
+        %{connected: 1, connected_cluster: 10, limit: 100},
+        %{tenant: "occupied-tenant"}
       )
 
       :telemetry.execute(
         [:realtime, :connections],
-        %{connected: 20, connected_cluster: 20, limit: 100},
-        %{tenant: "disconnected-tenant"}
+        %{connected: 0, connected_cluster: 20, limit: 100},
+        %{tenant: "vacant-tenant1"}
       )
+
+      :telemetry.execute(
+        [:realtime, :connections],
+        %{connected: 0, connected_cluster: 20, limit: 100},
+        %{tenant: "vacant-tenant2"}
+      )
+
+      pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
+      pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
+      pid3 = spawn_link(fn -> Process.sleep(:infinity) end)
+
+      Beacon.join(:users, "occupied-tenant", pid1)
+      Beacon.join(:users, "vacant-tenant1", pid2)
+      Beacon.join(:users, "vacant-tenant2", pid3)
 
       metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
 
-      assert String.contains?(metrics, external_id)
-      assert String.contains?(metrics, "disconnected-tenant")
+      assert String.contains?(metrics, "tenant=\"occupied-tenant\"")
+      assert String.contains?(metrics, "tenant=\"vacant-tenant1\"")
+      assert String.contains?(metrics, "tenant=\"vacant-tenant2\"")
 
-      # Wait for clenaup to run
+      start_supervised!(
+        {MetricsCleaner, [metrics_cleaner_schedule_timer_in_ms: 100, vacant_metric_threshold_in_seconds: 1]}
+      )
+
+      # Now let's disconnect vacant tenants
+      Beacon.leave(:users, "vacant-tenant1", pid2)
+      Beacon.leave(:users, "vacant-tenant2", pid3)
+
+      # Wait for clean up to run
       Process.sleep(200)
 
+      # Nothing changes
       metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
 
-      assert String.contains?(metrics, external_id)
-      refute String.contains?(metrics, "disconnected-tenant")
+      assert String.contains?(metrics, "tenant=\"occupied-tenant\"")
+      assert String.contains?(metrics, "tenant=\"vacant-tenant1\"")
+      assert String.contains?(metrics, "tenant=\"vacant-tenant2\"")
+
+      # Wait for clean up to run again
+      Process.sleep(2100)
+
+      # vacant tenant metrics are now gone
+      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+
+      assert String.contains?(metrics, "tenant=\"occupied-tenant\"")
+      refute String.contains?(metrics, "tenant=\"vacant-tenant1\"")
+      refute String.contains?(metrics, "tenant=\"vacant-tenant2\"")
     end
   end
 end
