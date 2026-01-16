@@ -2,9 +2,10 @@ defmodule Beacon.PartitionTest do
   use ExUnit.Case, async: true
   alias Beacon.Partition
 
+  @scope __MODULE__
+
   setup do
-    scope = __MODULE__
-    partition_name = Beacon.Supervisor.partition_name(scope, System.unique_integer([:positive]))
+    partition_name = Beacon.Supervisor.partition_name(@scope, System.unique_integer([:positive]))
     entries_table = Beacon.Supervisor.partition_entries_table(partition_name)
 
     ^partition_name =
@@ -15,14 +16,20 @@ defmodule Beacon.PartitionTest do
 
     spec = %{
       id: partition_name,
-      start: {Partition, :start_link, [scope, partition_name, entries_table]},
+      start: {Partition, :start_link, [@scope, partition_name, entries_table]},
       type: :supervisor,
       restart: :temporary
     }
 
     pid = start_supervised!(spec)
 
-    {:ok, partition_name: partition_name, partition_pid: pid}
+    ref =
+      :telemetry_test.attach_event_handlers(self(), [
+        [:beacon, @scope, :group, :occupied],
+        [:beacon, @scope, :group, :vacant]
+      ])
+
+    {:ok, partition_name: partition_name, partition_pid: pid, ref: ref}
   end
 
   test "members/2 returns empty list for non-existent group", %{partition_name: partition} do
@@ -38,29 +45,47 @@ defmodule Beacon.PartitionTest do
     refute Partition.member?(partition, :group1, pid)
   end
 
-  test "join and query member", %{partition_name: partition} do
+  test "join and query member", %{partition_name: partition, ref: ref} do
     pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
+    assert :ok = Partition.join(partition, :group9, pid)
+
+    assert Partition.member?(partition, :group9, pid)
+    assert Partition.member_count(partition, :group9) == 1
+    assert pid in Partition.members(partition, :group9)
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group9}}
+
+    refute_receive {_, ^ref, _, _}
+  end
+
+  test "join multiple times and query member", %{partition_name: partition, ref: ref} do
+    pid = spawn_link(fn -> Process.sleep(:infinity) end)
+
+    assert :ok = Partition.join(partition, :group1, pid)
+    assert :ok = Partition.join(partition, :group1, pid)
     assert :ok = Partition.join(partition, :group1, pid)
 
     assert Partition.member?(partition, :group1, pid)
     assert Partition.member_count(partition, :group1) == 1
     assert pid in Partition.members(partition, :group1)
+
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    refute_receive {_, ^ref, _, _}
   end
 
-  test "join multiple times and query member", %{partition_name: partition} do
-    pid = spawn_link(fn -> Process.sleep(:infinity) end)
+  test "occupied event only when first member joins", %{partition_name: partition, ref: ref} do
+    pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
+    pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
 
-    assert :ok = Partition.join(partition, :group1, pid)
-    assert :ok = Partition.join(partition, :group1, pid)
-    assert :ok = Partition.join(partition, :group1, pid)
+    Partition.join(partition, :group1, pid1)
+    Partition.join(partition, :group1, pid2)
 
-    assert Partition.member?(partition, :group1, pid)
-    assert Partition.member_count(partition, :group1) == 1
-    assert pid in Partition.members(partition, :group1)
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+
+    refute_receive {_, ^ref, _, _}
   end
 
-  test "leave removes member", %{partition_name: partition} do
+  test "leave removes member", %{partition_name: partition, ref: ref} do
     pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
     Partition.join(partition, :group1, pid)
@@ -68,9 +93,34 @@ defmodule Beacon.PartitionTest do
 
     Partition.leave(partition, :group1, pid)
     refute Partition.member?(partition, :group1, pid)
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+
+    assert_receive {[:beacon, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
+
+    refute_receive {_, ^ref, _, _}
   end
 
-  test "leave multiple times removes member", %{partition_name: partition} do
+  test "vacant event only when no members left", %{partition_name: partition, ref: ref} do
+    pid1 = spawn_link(fn -> Process.sleep(:infinity) end)
+    pid2 = spawn_link(fn -> Process.sleep(:infinity) end)
+
+    Partition.join(partition, :group1, pid1)
+    Partition.join(partition, :group1, pid2)
+
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+    refute_receive {_, ^ref, _, _}
+
+    Partition.leave(partition, :group1, pid1)
+
+    refute_receive {_, ^ref, _, _}
+
+    Partition.leave(partition, :group1, pid2)
+
+    assert_receive {[:beacon, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
+    refute_receive {_, ^ref, _, _}
+  end
+
+  test "leave multiple times removes member", %{partition_name: partition, ref: ref} do
     pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
     Partition.join(partition, :group1, pid)
@@ -80,6 +130,11 @@ defmodule Beacon.PartitionTest do
     Partition.leave(partition, :group1, pid)
     Partition.leave(partition, :group1, pid)
     refute Partition.member?(partition, :group1, pid)
+    assert_receive {[:beacon, @scope, :group, :occupied], ^ref, %{}, %{group: :group1}}
+
+    assert_receive {[:beacon, @scope, :group, :vacant], ^ref, %{}, %{group: :group1}}
+
+    refute_receive {_, ^ref, _, _}
   end
 
   test "member_counts returns counts for all groups", %{partition_name: partition} do
@@ -162,7 +217,7 @@ defmodule Beacon.PartitionTest do
       id: :recover,
       start:
         {Partition, :start_link,
-         [__MODULE__, partition, Beacon.Supervisor.partition_entries_table(partition)]},
+         [@scope, partition, Beacon.Supervisor.partition_entries_table(partition)]},
       type: :supervisor
     }
 
