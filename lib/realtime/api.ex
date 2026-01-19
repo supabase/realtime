@@ -155,6 +155,7 @@ defmodule Realtime.Api do
         maybe_update_cache(tenant, changeset)
         maybe_trigger_disconnect(changeset)
         maybe_restart_db_connection(changeset)
+        maybe_restart_rate_counters(changeset)
         Logger.debug("Tenant updated: #{inspect(tenant, pretty: true)}")
 
       {:error, error} ->
@@ -252,6 +253,38 @@ defmodule Realtime.Api do
     tenant
     |> Map.put(:events_per_second_rolling, avg)
     |> Map.put(:events_per_second_now, current)
+  end
+
+  @field_to_rate_counter_key %{
+    max_events_per_second: [
+      &Tenants.events_per_second_key/1,
+      &Tenants.db_events_per_second_key/1
+    ],
+    max_joins_per_second: [
+      &Tenants.joins_per_second_key/1
+    ],
+    max_presence_events_per_second: [
+      &Tenants.presence_events_per_second_key/1
+    ],
+    extensions: [
+      &Tenants.connect_errors_per_second_key/1,
+      &Tenants.subscription_errors_per_second_key/1,
+      &Tenants.authorization_errors_per_second_key/1
+    ]
+  }
+
+  defp maybe_restart_rate_counters(changeset) do
+    tenant_id = Changeset.fetch_field!(changeset, :external_id)
+
+    Enum.each(@field_to_rate_counter_key, fn {field, key_fns} ->
+      if Changeset.changed?(changeset, field) do
+        Enum.each(key_fns, fn key_fn ->
+          tenant_id
+          |> key_fn.()
+          |> RateCounter.publish_update()
+        end)
+      end
+    end)
   end
 
   defp maybe_update_cache(tenant, %Changeset{changes: changes, valid?: true}) when changes != %{} do

@@ -301,6 +301,18 @@ defmodule Realtime.RateCounterTest do
     end
   end
 
+  describe "publish_update/1" do
+    test "cause shutdown with update message from update topic" do
+      args = %Args{id: {:domain, :metric, Ecto.UUID.generate()}}
+      {:ok, pid} = RateCounter.new(args)
+
+      Process.monitor(pid)
+      RateCounter.publish_update(args.id)
+
+      assert_receive {:DOWN, _ref, :process, ^pid, :normal}
+    end
+  end
+
   describe "get/1" do
     test "gets the state of a rate counter" do
       args = %Args{id: {:domain, :metric, Ecto.UUID.generate()}}
