@@ -1731,17 +1731,37 @@ defmodule Realtime.Integration.RtChannelTest do
     setup [:rls_context]
 
     test "max_concurrent_users limit respected", %{tenant: tenant, serializer: serializer} do
-      %{max_concurrent_users: max_concurrent_users} = Tenants.get_tenant_by_external_id(tenant.external_id)
+      Tenants.get_tenant_by_external_id(tenant.external_id)
       change_tenant_configuration(tenant, :max_concurrent_users, 1)
 
-      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      {socket1, _} = get_connection(tenant, serializer, role: "authenticated")
+      {socket2, _} = get_connection(tenant, serializer, role: "authenticated")
       config = %{broadcast: %{self: true}, private: false}
-      realtime_topic = "realtime:#{random_string()}"
-      WebsocketClient.join(socket, realtime_topic, %{config: config})
-      WebsocketClient.join(socket, realtime_topic, %{config: config})
+      topic1 = "realtime:#{random_string()}"
+      topic2 = "realtime:#{random_string()}"
+      WebsocketClient.join(socket1, topic1, %{config: config})
+      WebsocketClient.join(socket1, topic2, %{config: config})
 
       assert_receive %Message{
                        event: "phx_reply",
+                       topic: ^topic1,
+                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"}
+                     },
+                     500
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       topic: ^topic2,
+                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"}
+                     },
+                     500
+
+      topic3 = "realtime:#{random_string()}"
+      WebsocketClient.join(socket2, topic3, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       topic: ^topic3,
                        payload: %{
                          "response" => %{
                            "reason" => "ConnectionRateLimitReached: Too many connected users"
@@ -1751,9 +1771,17 @@ defmodule Realtime.Integration.RtChannelTest do
                      },
                      500
 
-      assert_receive %Message{event: "phx_close"}
+      # Limit is updated now joining should succeed
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_concurrent_users: 2})
 
-      change_tenant_configuration(tenant, :max_concurrent_users, max_concurrent_users)
+      WebsocketClient.join(socket2, topic3, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       topic: ^topic3,
+                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"}
+                     },
+                     500
     end
 
     test "max_events_per_second limit respected", %{tenant: tenant, serializer: serializer} do
@@ -1762,7 +1790,7 @@ defmodule Realtime.Integration.RtChannelTest do
       log =
         capture_log(fn ->
           {socket, _} = get_connection(tenant, serializer, role: "authenticated")
-          config = %{broadcast: %{self: true}, private: false, presence: %{enabled: false}}
+          config = %{broadcast: %{self: true, ack: false}, private: false, presence: %{enabled: false}}
           realtime_topic = "realtime:#{random_string()}"
 
           WebsocketClient.join(socket, realtime_topic, %{config: config})
@@ -1770,12 +1798,17 @@ defmodule Realtime.Integration.RtChannelTest do
 
           for _ <- 1..1000, Process.alive?(socket) do
             WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
-            Process.sleep(10)
+            assert_receive %Message{event: "broadcast", topic: ^realtime_topic}, 500
           end
 
           # Wait for the rate counter to run logger function
-          Process.sleep(1500)
-          assert_receive %Message{event: "phx_close"}
+          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
+
+          # One more to cause the WebSocket to close
+
+          WebsocketClient.send_event(socket, realtime_topic, "broadcast", %{})
+
+          assert_receive %Message{event: "phx_close"}, 1000
         end)
 
       assert log =~ "MessagePerSecondRateLimitReached"
@@ -1815,6 +1848,18 @@ defmodule Realtime.Integration.RtChannelTest do
 
       refute_receive %Message{event: "phx_reply", topic: ^realtime_topic_2}, 500
       refute_receive %Message{event: "presence_state", topic: ^realtime_topic_2}, 500
+
+      # Limit is updated now joining should succeed
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_channels_per_client: 2})
+
+      WebsocketClient.join(socket, realtime_topic_2, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"response" => %{"postgres_changes" => []}, "status" => "ok"},
+                       topic: ^realtime_topic_2
+                     },
+                     500
     end
 
     test "max_joins_per_second limit respected", %{tenant: tenant, serializer: serializer} do
@@ -1827,10 +1872,11 @@ defmodule Realtime.Integration.RtChannelTest do
           # Burst of joins that won't be blocked as RateCounter tick won't run
           for _ <- 1..300 do
             WebsocketClient.join(socket, realtime_topic, %{config: config})
+            assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
           end
 
           # Wait for RateCounter tick
-          Process.sleep(1000)
+          RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
           # These ones will be blocked
           for _ <- 1..300 do

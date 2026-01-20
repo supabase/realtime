@@ -12,14 +12,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   alias Realtime.RateCounter
   alias RealtimeWeb.UserSocket
 
-  @default_limits %{
-    max_concurrent_users: 200,
-    max_events_per_second: 100,
-    max_joins_per_second: 100,
-    max_channels_per_client: 100,
-    max_bytes_per_second: 100_000
-  }
-
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
     Realtime.Tenants.Cache.update_cache(tenant)
@@ -594,25 +586,38 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      socket = Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 1}})
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_concurrent_users: 1})
+
       assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{})
     end
 
-    test "reached", %{tenant: tenant} do
+    test "reached after connecting", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      socket_at_capacity =
-        Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: 0}})
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_concurrent_users: 1})
 
-      socket_over_capacity =
-        Socket.assign(socket, %{limits: %{@default_limits | max_concurrent_users: -1}})
-
-      assert {:error, %{reason: "ConnectionRateLimitReached: Too many connected users"}} =
-               subscribe_and_join(socket_at_capacity, "realtime:test", %{})
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      Realtime.UsersCounter.add(pid, tenant.external_id)
 
       assert {:error, %{reason: "ConnectionRateLimitReached: Too many connected users"}} =
-               subscribe_and_join(socket_over_capacity, "realtime:test", %{})
+               subscribe_and_join(socket, "realtime:test", %{})
+
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      Realtime.UsersCounter.add(pid, tenant.external_id)
+
+      assert {:error, %{reason: "ConnectionRateLimitReached: Too many connected users"}} =
+               subscribe_and_join(socket, "realtime:test", %{})
+    end
+
+    test "reached before connecting", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_concurrent_users: 1})
+
+      Realtime.UsersCounter.add(self(), tenant.external_id)
+
+      {:error, :too_many_connections} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
     end
   end
 
