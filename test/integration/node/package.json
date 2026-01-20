@@ -1,0 +1,14 @@
+{
+  "name": "realtime-integration-tests",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "mocha tests.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "mocha": "^10.2.0"
+  }
+}
