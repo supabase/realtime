@@ -309,9 +309,7 @@ defmodule Realtime.Api do
       PostgresCdcRls.handle_stop(external_id, 5_000)
     catch
       kind, reason ->
-        Logger.warning(
-          "Failed to stop CDC processes for tenant #{external_id}: #{inspect(kind)} #{inspect(reason)}"
-        )
+        Logger.warning("Failed to stop CDC processes for tenant #{external_id}: #{inspect(kind)} #{inspect(reason)}")
 
         :ok
     end

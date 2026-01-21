@@ -266,7 +266,9 @@ defmodule Realtime.ApiTest do
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: %{keys: ["test"]}})
     end
 
-    test "valid data and jwt_secret change will restart DB connection even if handle_stop times out", %{tenants: [tenant | _]} do
+    test "valid data and jwt_secret change will restart DB connection even if handle_stop times out", %{
+      tenants: [tenant | _]
+    } do
       expect(Connect, :shutdown, fn external_id ->
         assert external_id == tenant.external_id
         :ok
