@@ -6,7 +6,6 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
   alias Realtime.Tenants.Authorization.Policies
-  alias Realtime.UsersCounter
   alias Realtime.RateCounter
   alias Realtime.GenCounter
 
@@ -27,7 +26,8 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
   @aux_mod (quote do
               defmodule FakeUserCounter do
                 def fake_add(external_id) do
-                  :ok = UsersCounter.add(spawn(fn -> Process.sleep(2000) end), external_id)
+                  pid = spawn(fn -> Process.sleep(2000) end)
+                  :ok = Beacon.join(:users, external_id, pid)
                 end
 
                 def fake_db_event(external_id) do
@@ -98,10 +98,10 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       tenant: %{external_id: external_id},
       node: node
     } do
-      UsersCounter.add(self(), external_id)
+      :ok = Beacon.join(:users, external_id, self())
       # Add bad tenant id
       bad_tenant_id = random_string()
-      UsersCounter.add(self(), bad_tenant_id)
+      :ok = Beacon.join(:users, bad_tenant_id, self())
 
       _ = Rpc.call(node, FakeUserCounter, :fake_add, [external_id])
 
