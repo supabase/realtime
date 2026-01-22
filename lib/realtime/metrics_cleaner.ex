@@ -6,18 +6,26 @@ defmodule Realtime.MetricsCleaner do
 
   defstruct [:check_ref, :interval]
 
-  def handle_event([:beacon, :users, :group, :vacant], _measurements, %{group: tenant_id}, cleaner_table) do
-    :ets.insert(cleaner_table, {tenant_id, DateTime.to_unix(DateTime.utc_now(), :second)})
+  def handle_beacon_event([:beacon, :users, :group, :vacant], _, %{group: tenant_id}, vacant_websockets) do
+    :ets.insert(vacant_websockets, {tenant_id, DateTime.to_unix(DateTime.utc_now(), :second)})
   end
 
-  def handle_event([:beacon, :users, :group, :occupied], _measurements, %{group: tenant_id}, cleaner_table) do
-    :ets.delete(cleaner_table, tenant_id)
+  def handle_beacon_event([:beacon, :users, :group, :occupied], _, %{group: tenant_id}, vacant_websockets) do
+    :ets.delete(vacant_websockets, tenant_id)
+  end
+
+  def handle_syn_event([:syn, Realtime.Tenants.Connect, :unregistered], _, %{name: tenant_id}, disconnected_tenants) do
+    :ets.insert(disconnected_tenants, {tenant_id, DateTime.to_unix(DateTime.utc_now(), :second)})
+  end
+
+  def handle_syn_event([:syn, Realtime.Tenants.Connect, :registered], _, %{name: tenant_id}, disconnected_tenants) do
+    :ets.delete(disconnected_tenants, tenant_id)
   end
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
-  # 5 minutes
-  @default_vacant_metric_threshold_in_seconds 300
+  # 10 minutes
+  @default_vacant_metric_threshold_in_seconds 600
 
   @impl true
   def init(opts) do
@@ -30,14 +38,25 @@ defmodule Realtime.MetricsCleaner do
 
     Logger.info("Starting MetricsCleaner")
 
-    tid = :ets.new(:metrics_cleaner, [:set, :public, read_concurrency: false, write_concurrency: :auto])
+    vacant_websockets = :ets.new(:vacant_websockets, [:set, :public, read_concurrency: false, write_concurrency: :auto])
+
+    disconnected_tenants =
+      :ets.new(:disconnected_tenants, [:set, :public, read_concurrency: false, write_concurrency: :auto])
 
     :ok =
       :telemetry.attach_many(
-        self(),
+        [self(), :vacant_websockets],
         [[:beacon, :users, :group, :occupied], [:beacon, :users, :group, :vacant]],
-        &__MODULE__.handle_event/4,
-        tid
+        &__MODULE__.handle_beacon_event/4,
+        vacant_websockets
+      )
+
+    :ok =
+      :telemetry.attach_many(
+        [self(), :disconnected_tenants],
+        [[:syn, Realtime.Tenants.Connect, :registered], [:syn, Realtime.Tenants.Connect, :unregistered]],
+        &__MODULE__.handle_syn_event/4,
+        disconnected_tenants
       )
 
     {:ok,
@@ -45,8 +64,16 @@ defmodule Realtime.MetricsCleaner do
        check_ref: check(interval),
        interval: interval,
        vacant_metric_threshold_in_seconds: vacant_metric_threshold_in_seconds,
-       tid: tid
+       vacant_websockets: vacant_websockets,
+       disconnected_tenants: disconnected_tenants
      }}
+  end
+
+  @impl true
+  def terminate(_reason, _state) do
+    :telemetry.detach([self(), :vacant_websockets])
+    :telemetry.detach([self(), :disconnected_tenants])
+    :ok
   end
 
   @impl true
@@ -55,7 +82,10 @@ defmodule Realtime.MetricsCleaner do
 
     {exec_time, _} =
       :timer.tc(
-        fn -> loop_and_cleanup_metrics_table(state.tid, state.vacant_metric_threshold_in_seconds) end,
+        fn ->
+          loop_and_cleanup_metrics_table(state.vacant_websockets, state.vacant_metric_threshold_in_seconds)
+          loop_and_cleanup_metrics_table(state.disconnected_tenants, state.vacant_metric_threshold_in_seconds)
+        end,
         :millisecond
       )
 

@@ -29,6 +29,11 @@ defmodule Realtime.SynHandler do
     end
   end
 
+  @impl true
+  def on_process_registered(scope, name, _pid, _meta, _reason) do
+    :telemetry.execute([:syn, scope, :registered], %{}, %{name: name})
+  end
+
   @doc """
   When processes registered with :syn are unregistered, either manually or by stopping, this
   callback is invoked.
@@ -40,6 +45,8 @@ defmodule Realtime.SynHandler do
   """
   @impl true
   def on_process_unregistered(scope, name, pid, _meta, reason) do
+    :telemetry.execute([:syn, scope, :unregistered], %{}, %{name: name})
+
     case Atom.to_string(scope) do
       @postgres_cdc_scope_prefix <> _ = scope ->
         Endpoint.local_broadcast(PostgresCdc.syn_topic(name), scope <> "_down", %{pid: pid, reason: reason})
