@@ -339,10 +339,31 @@ if config_env() == :prod do
     Realtime.Repo.Replica.Local => default_db_host
   }
 
+  # Legacy repos
   # username, password, database, and port must match primary credentials
   for {replica_repo, hostname} <- replica_repos do
     config :realtime, replica_repo,
       hostname: hostname,
+      username: username,
+      password: password,
+      database: database,
+      port: port,
+      pool_size: System.get_env("DB_REPLICA_POOL_SIZE", "5") |> String.to_integer(),
+      queue_target: queue_target,
+      queue_interval: queue_interval,
+      parameters: [
+        application_name: "supabase_mt_realtime_ro"
+      ],
+      socket_options: socket_options,
+      ssl: ssl_opts
+  end
+
+  # New main replica repo
+  replica_host = System.get_env("DB_REPLICA_HOST")
+
+  if replica_host do
+    config :realtime, Realtime.Repo.Replica,
+      hostname: replica_host,
       username: username,
       password: password,
       database: database,
