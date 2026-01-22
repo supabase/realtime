@@ -103,19 +103,25 @@ defmodule Realtime.Nodes do
   the `default` node given.
   """
   @spec launch_node(String.t(), String.t() | nil, atom()) :: atom()
-  def launch_node(tenant_id, region, default) do
+  def launch_node(_tenant_id, region, default) do
     case region_nodes(region) do
       [] ->
         Logger.warning("Zero region nodes for #{region} using #{inspect(default)}")
         default
 
       regions_nodes ->
-        member_count = Enum.count(regions_nodes)
-        index = :erlang.phash2(tenant_id, member_count)
-
-        Enum.fetch!(regions_nodes, index)
+        load_aware_node_picker(regions_nodes)
     end
   end
+
+  defp load_aware_node_picker(regions_nodes) do
+    regions_nodes
+    |> Enum.take_random(2)
+    |> Enum.min_by(&node_load(&1))
+  end
+
+  def node_load(node) when node() == node, do: :cpu_sup.avg15()
+  def node_load(node) when node() != node, do: Realtime.GenRpc.call(node, __MODULE__, :node_load, [node], [])
 
   @doc """
   Gets a short node name from a node name when a node name looks like `realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2`
