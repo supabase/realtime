@@ -7,6 +7,7 @@ defmodule Realtime.Api do
   import Ecto.Query
 
   alias Ecto.Changeset
+  alias Extensions.PostgresCdcRls
   alias Realtime.Api.Extensions
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
@@ -303,6 +304,15 @@ defmodule Realtime.Api do
   defp maybe_restart_db_connection(%Changeset{data: %{external_id: external_id}} = changeset)
        when requires_restarting_db_connection(changeset) do
     Connect.shutdown(external_id)
+
+    try do
+      PostgresCdcRls.handle_stop(external_id, 5_000)
+    catch
+      kind, reason ->
+        Logger.warning("Failed to stop CDC processes for tenant #{external_id}: #{inspect(kind)} #{inspect(reason)}")
+
+        :ok
+    end
   end
 
   defp maybe_restart_db_connection(_changeset), do: nil

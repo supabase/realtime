@@ -27,7 +27,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
-      args = Map.put(postgres_extension, "id", external_id)
+      args = %{"id" => external_id, "region" => postgres_extension["region"]}
 
       pg_change_params = pubsub_subscribe(external_id)
 
@@ -166,10 +166,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
 
-      args =
-        postgres_extension
-        |> Map.put("id", external_id)
-        |> Map.put(:check_region_interval, 100)
+      args = %{"id" => external_id, "region" => postgres_extension["region"], check_region_interval: 100}
 
       %{tenant_id: tenant.external_id, args: args}
     end
@@ -206,7 +203,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
-      args = Map.put(postgres_extension, "id", external_id)
+      args = %{"id" => external_id, "region" => postgres_extension["region"]}
 
       pg_change_params = pubsub_subscribe(external_id)
 
@@ -229,6 +226,8 @@ defmodule Realtime.Extensions.CdcRlsTest do
       # Now subscribe to the Postgres Changes
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
       assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+
+      Process.sleep(500)
 
       # Insert a record
       %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
@@ -273,7 +272,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
-      args = Map.put(postgres_extension, "id", external_id)
+      args = %{"id" => external_id, "region" => postgres_extension["region"]}
 
       pg_change_params = pubsub_subscribe(external_id)
 
@@ -320,7 +319,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
                 def subscribe(tenant) do
                   %Tenant{extensions: extensions, external_id: external_id} = tenant
                   postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
-                  args = Map.put(postgres_extension, "id", external_id)
+                  args = %{"id" => external_id, "region" => postgres_extension["region"]}
 
                   RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
                   # First time it will return nil

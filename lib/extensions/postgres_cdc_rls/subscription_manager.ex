@@ -71,15 +71,16 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   def handle_continue({:connect, args}, _) do
     %{
       "id" => id,
-      "publication" => publication,
       "subscribers_pids_table" => subscribers_pids_table,
       "subscribers_nodes_table" => subscribers_nodes_table
     } = args
 
-    subscription_manager_settings = Database.from_settings(args, "realtime_subscription_manager")
+    %Realtime.Api.Tenant{} = tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(id)
+    extension = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
+    extension = Map.merge(extension, %{"subs_pool_size" => Map.get(extension, "subcriber_pool_size", 4)})
 
-    subscription_manager_pub_settings =
-      Database.from_settings(args, "realtime_subscription_manager_pub")
+    subscription_manager_settings = Database.from_settings(extension, "realtime_subscription_manager")
+    subscription_manager_pub_settings = Database.from_settings(extension, "realtime_subscription_manager_pub")
 
     {:ok, conn} = Database.connect_db(subscription_manager_settings)
     {:ok, conn_pub} = Database.connect_db(subscription_manager_pub_settings)
@@ -87,6 +88,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
     Rls.update_meta(id, self(), conn_pub)
 
+    publication = extension["publication"]
     oids = Subscriptions.fetch_publication_tables(conn, publication)
 
     check_region_interval = Map.get(args, :check_region_interval, rebalance_check_interval_in_ms())

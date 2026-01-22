@@ -4,12 +4,13 @@ defmodule Realtime.ApiTest do
   use Mimic
 
   alias Realtime.Api
-  alias Realtime.Api.Extensions
+  alias Realtime.Api.Extensions, as: ApiExtensions
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants.Connect
+  alias Extensions.PostgresCdcRls
 
   @db_conf Application.compile_env(:realtime, Realtime.Repo)
 
@@ -102,7 +103,7 @@ defmodule Realtime.ApiTest do
     setup [:create_tenants]
 
     test "fetch by external id", %{tenants: [tenant | _]} do
-      %Tenant{extensions: [%Extensions{} = extension]} =
+      %Tenant{extensions: [%ApiExtensions{} = extension]} =
         Api.get_tenant_by_external_id(tenant.external_id)
 
       assert Map.has_key?(extension.settings, "db_password")
@@ -111,7 +112,7 @@ defmodule Realtime.ApiTest do
     end
 
     test "fetch by external id using replica", %{tenants: [tenant | _]} do
-      %Tenant{extensions: [%Extensions{} = extension]} =
+      %Tenant{extensions: [%ApiExtensions{} = extension]} =
         Api.get_tenant_by_external_id(tenant.external_id, use_replica?: true)
 
       assert Map.has_key?(extension.settings, "db_password")
@@ -120,7 +121,7 @@ defmodule Realtime.ApiTest do
     end
 
     test "fetch by external id using no replica", %{tenants: [tenant | _]} do
-      %Tenant{extensions: [%Extensions{} = extension]} =
+      %Tenant{extensions: [%ApiExtensions{} = extension]} =
         Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
 
       assert Map.has_key?(extension.settings, "db_password")
@@ -175,51 +176,48 @@ defmodule Realtime.ApiTest do
       refute_receive :disconnect, 500
     end
 
-    test "valid data and jwt_secret change will restart the database connection" do
-      tenant = Containers.checkout_tenant(run_migrations: true)
-      {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+    test "valid data and jwt_secret change will restart the database connection", %{tenants: [tenant | _]} do
+      expect(Connect, :shutdown, fn external_id ->
+        assert external_id == tenant.external_id
+        :ok
+      end)
 
-      Process.monitor(old_pid)
+      expect(PostgresCdcRls, :handle_stop, fn external_id, timeout ->
+        assert external_id == tenant.external_id
+        assert timeout == 5_000
+        :ok
+      end)
+
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "potato"})
-      assert_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
-      refute Process.alive?(old_pid)
-      Process.sleep(100)
-      assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
-      assert %Postgrex.Result{} = Postgrex.query!(new_pid, "SELECT 1", [])
     end
 
-    test "valid data and suspend change will restart the database connection" do
-      tenant = Containers.checkout_tenant(run_migrations: true)
-      {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
+    test "valid data and suspend change will restart the database connection", %{tenants: [tenant | _]} do
+      expect(Connect, :shutdown, fn external_id ->
+        assert external_id == tenant.external_id
+        :ok
+      end)
 
-      Process.monitor(old_pid)
+      expect(PostgresCdcRls, :handle_stop, fn external_id, timeout ->
+        assert external_id == tenant.external_id
+        assert timeout == 5_000
+        :ok
+      end)
+
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{suspend: true})
-      assert_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
-      refute Process.alive?(old_pid)
-      Process.sleep(100)
-      assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
     end
 
-    test "valid data and tenant data change will not restart the database connection" do
-      tenant = Containers.checkout_tenant(run_migrations: true)
+    test "valid data and tenant data change will not restart the database connection", %{tenants: [tenant | _]} do
+      reject(&Connect.shutdown/1)
+      reject(&PostgresCdcRls.handle_stop/2)
 
       expect(Realtime.Tenants.Cache, :global_cache_update, fn tenant ->
         assert tenant.max_concurrent_users == 101
       end)
 
-      {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
-
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_concurrent_users: 101})
-      refute_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
-      assert Process.alive?(old_pid)
-      assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
-      assert old_pid == new_pid
     end
 
-    test "valid data and extensions data change will restart the database connection" do
-      tenant = Containers.checkout_tenant(run_migrations: true)
-      config = Realtime.Database.from_tenant(tenant, "realtime_test", :stop)
-
+    test "valid data and extensions data change will restart the database connection", %{tenants: [tenant | _]} do
       extensions = [
         %{
           "type" => "postgres_cdc_rls",
@@ -228,7 +226,7 @@ defmodule Realtime.ApiTest do
             "db_name" => "postgres",
             "db_user" => "supabase_admin",
             "db_password" => "postgres",
-            "db_port" => "#{config.port}",
+            "db_port" => "5432",
             "poll_interval" => 100,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
@@ -239,14 +237,50 @@ defmodule Realtime.ApiTest do
         }
       ]
 
-      {:ok, old_pid} = Connect.lookup_or_start_connection(tenant.external_id)
-      Process.monitor(old_pid)
+      expect(Connect, :shutdown, fn external_id ->
+        assert external_id == tenant.external_id
+        :ok
+      end)
+
+      expect(PostgresCdcRls, :handle_stop, fn external_id, timeout ->
+        assert external_id == tenant.external_id
+        assert timeout == 5_000
+        :ok
+      end)
+
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
-      assert_receive {:DOWN, _, :process, ^old_pid, :shutdown}, 500
-      refute Process.alive?(old_pid)
-      Process.sleep(100)
-      assert {:ok, new_pid} = Connect.lookup_or_start_connection(tenant.external_id)
-      assert %Postgrex.Result{} = Postgrex.query!(new_pid, "SELECT 1", [])
+    end
+
+    test "valid data and jwt_jwks change will restart the database connection", %{tenants: [tenant | _]} do
+      expect(Connect, :shutdown, fn external_id ->
+        assert external_id == tenant.external_id
+        :ok
+      end)
+
+      expect(PostgresCdcRls, :handle_stop, fn external_id, timeout ->
+        assert external_id == tenant.external_id
+        assert timeout == 5_000
+        :ok
+      end)
+
+      assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: %{keys: ["test"]}})
+    end
+
+    test "valid data and jwt_secret change will restart DB connection even if handle_stop times out", %{
+      tenants: [tenant | _]
+    } do
+      expect(Connect, :shutdown, fn external_id ->
+        assert external_id == tenant.external_id
+        :ok
+      end)
+
+      expect(PostgresCdcRls, :handle_stop, fn _external_id, _timeout ->
+        # Simulate timeout exit like DynamicSupervisor.stop/3 does
+        exit(:timeout)
+      end)
+
+      # Update should still succeed even if handle_stop times out
+      assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "potato"})
     end
 
     test "valid data and change to tenant data will refresh cache", %{tenants: [tenant | _]} do

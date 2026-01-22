@@ -47,6 +47,7 @@ end)
 Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
 
 Mimic.copy(:syn)
+Mimic.copy(Extensions.PostgresCdcRls)
 Mimic.copy(Extensions.PostgresCdcRls.Replications)
 Mimic.copy(Extensions.PostgresCdcRls.Subscriptions)
 Mimic.copy(Realtime.Database)
