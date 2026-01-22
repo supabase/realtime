@@ -227,9 +227,66 @@ defmodule Realtime.SynHandlerTest do
     end
   end
 
+  describe "on_process_registered/5" do
+    test "emits telemetry event for process registration" do
+      pid = self()
+      meta = %{some: :meta}
+      reason = :normal
+
+      # Attach a test handler to capture the telemetry event
+      test_pid = self()
+      handler_id = [:test, :syn_handler, :registered]
+
+      :telemetry.attach(
+        handler_id,
+        [:syn, @mod, :registered],
+        fn event, measurements, metadata, _config ->
+          send(test_pid, {:telemetry_event, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      assert SynHandler.on_process_registered(@mod, @name, pid, meta, reason) == :ok
+
+      assert_receive {:telemetry_event, [:syn, @mod, :registered], %{}, %{name: @name}}
+    end
+  end
+
   describe "on_process_unregistered/5" do
     setup do
       RealtimeWeb.Endpoint.subscribe("#{@topic}:#{@name}")
+    end
+
+    test "emits telemetry event for process unregistration" do
+      reason = :normal
+      pid = self()
+
+      # Attach a test handler to capture the telemetry event
+      test_pid = self()
+      handler_id = [:test, :syn_handler, :unregistered]
+
+      :telemetry.attach(
+        handler_id,
+        [:syn, @mod, :unregistered],
+        fn event, measurements, metadata, _config ->
+          send(test_pid, {:telemetry_event, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      capture_log(fn ->
+        assert SynHandler.on_process_unregistered(@mod, @name, pid, %{}, reason) == :ok
+      end)
+
+      assert_receive {:telemetry_event, [:syn, @mod, :unregistered], %{}, %{name: @name}}
+
+      topic = "#{@topic}:#{@name}"
+      event = "#{@topic}_down"
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: ^event, payload: %{reason: ^reason, pid: ^pid}}
     end
 
     test "it handles :syn_conflict_resolution reason" do
