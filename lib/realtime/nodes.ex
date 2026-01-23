@@ -104,13 +104,16 @@ defmodule Realtime.Nodes do
   """
   @spec launch_node(String.t(), String.t() | nil, atom()) :: atom()
   def launch_node(_tenant_id, region, default) do
-    case region_nodes(region) do
-      [] ->
+    cond do
+      region_nodes(region) == [] ->
         Logger.warning("Zero region nodes for #{region} using #{inspect(default)}")
         default
 
-      regions_nodes ->
-        load_aware_node_picker(regions_nodes)
+      uptime_ms() < Application.fetch_env!(:realtime, :node_balance_uptime_threshold_in_ms) ->
+        Enum.random(region_nodes(region))
+
+      true ->
+        load_aware_node_picker(region_nodes(region))
     end
   end
 
@@ -120,7 +123,7 @@ defmodule Realtime.Nodes do
     |> Enum.min_by(&node_load(&1))
   end
 
-  def node_load(node) when node() == node, do: :cpu_sup.avg15()
+  def node_load(node) when node() == node, do: :cpu_sup.avg5()
   def node_load(node) when node() != node, do: Realtime.GenRpc.call(node, __MODULE__, :node_load, [node], [])
 
   @doc """
@@ -168,4 +171,10 @@ defmodule Realtime.Nodes do
   @spec all_node_regions() :: [String.t()]
   @doc "List all the regions where nodes can be launched"
   def all_node_regions(), do: :syn.group_names(RegionNodes)
+
+  defp uptime_ms do
+    start_time = :erlang.system_info(:start_time)
+    now = :erlang.monotonic_time()
+    :erlang.convert_time_unit(now - start_time, :native, :millisecond)
+  end
 end
