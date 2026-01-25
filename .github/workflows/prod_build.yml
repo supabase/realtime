@@ -20,7 +20,7 @@ jobs:
       published: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - id: semantic
         uses: cycjimmy/semantic-release-action@v3
         with:
@@ -72,7 +72,7 @@ jobs:
     outputs:
       image_digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
       - id: meta
         uses: docker/metadata-action@v4
@@ -159,7 +159,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout branch
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
         with:
           ref: refs/heads/main
 
