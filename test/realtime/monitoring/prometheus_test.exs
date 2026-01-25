@@ -28,7 +28,7 @@ defmodule Realtime.Monitoring.PrometheusTest do
     :ok
   end
 
-  @impls [:default, {:default, 4}, :striped]
+  @impls [:default, {Realtime.Monitoring.Peep.Partitioned, 4}, :striped]
 
   for impl <- @impls do
     test "#{inspect(impl)} - counter formatting" do

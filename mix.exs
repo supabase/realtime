@@ -4,7 +4,7 @@ defmodule Realtime.MixProject do
   def project do
     [
       app: :realtime,
-      version: "2.73.2",
+      version: "2.73.3",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -74,7 +74,9 @@ defmodule Realtime.MixProject do
       {:libcluster_postgres, "~> 0.2"},
       {:uuid, "~> 1.1"},
       {:prom_ex, "~> 1.10"},
-      {:peep, git: "https://github.com/supabase/peep.git", branch: "feat/partitions-ets", override: true},
+      # prom_ex depends on peep ~> 3.0 but there is no issue using peep ~> 4.0
+      # https://github.com/akoutmos/prom_ex/pull/270
+      {:peep, "~> 4.3", override: true},
       {:joken, "~> 2.5.0"},
       {:ex_json_schema, "~> 0.7"},
       {:recon, "~> 2.5"},

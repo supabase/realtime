@@ -82,7 +82,7 @@ defmodule Realtime.PromEx do
         name: name,
         metrics: metrics,
         global_tags: Application.get_env(:realtime, :metrics_tags, %{}),
-        storage: {:default, 4}
+        storage: {Realtime.Monitoring.Peep.Partitioned, 4}
       )
     end
   end
