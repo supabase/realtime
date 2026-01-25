@@ -55,6 +55,51 @@ defmodule Realtime.NodesTest do
     end
   end
 
+  describe "platform_region_translator/1" do
+    test "returns nil when given nil" do
+      assert Nodes.platform_region_translator(nil) == nil
+    end
+
+    test "returns nil for unknown regions" do
+      assert Nodes.platform_region_translator("unknown-region") == nil
+      assert Nodes.platform_region_translator("us-south-1") == nil
+      assert Nodes.platform_region_translator("invalid") == nil
+    end
+
+    test "translates Asia-Pacific regions to closest Supabase region" do
+      assert Nodes.platform_region_translator("ap-east-1") == "ap-southeast-1"
+      assert Nodes.platform_region_translator("ap-northeast-1") == "ap-southeast-1"
+      assert Nodes.platform_region_translator("ap-northeast-2") == "ap-southeast-1"
+      assert Nodes.platform_region_translator("ap-south-1") == "ap-southeast-1"
+      assert Nodes.platform_region_translator("ap-southeast-1") == "ap-southeast-1"
+      assert Nodes.platform_region_translator("ap-southeast-2") == "ap-southeast-2"
+    end
+
+    test "translates Canada regions to us-east-1" do
+      assert Nodes.platform_region_translator("ca-central-1") == "us-east-1"
+    end
+
+    test "translates Europe regions to closest Supabase region" do
+      assert Nodes.platform_region_translator("eu-central-1") == "eu-west-2"
+      assert Nodes.platform_region_translator("eu-central-2") == "eu-west-2"
+      assert Nodes.platform_region_translator("eu-north-1") == "eu-west-1"
+      assert Nodes.platform_region_translator("eu-west-1") == "eu-west-1"
+      assert Nodes.platform_region_translator("eu-west-2") == "eu-west-2"
+      assert Nodes.platform_region_translator("eu-west-3") == "eu-west-2"
+    end
+
+    test "translates South America regions to us-east-1" do
+      assert Nodes.platform_region_translator("sa-east-1") == "us-east-1"
+    end
+
+    test "translates US regions to closest Supabase region" do
+      assert Nodes.platform_region_translator("us-east-1") == "us-east-1"
+      assert Nodes.platform_region_translator("us-east-2") == "us-east-1"
+      assert Nodes.platform_region_translator("us-west-1") == "us-west-1"
+      assert Nodes.platform_region_translator("us-west-2") == "us-west-1"
+    end
+  end
+
   describe "node_from_region/2" do
     test "nil region returns error" do
       assert {:error, :not_available} = Nodes.node_from_region(nil, :any_key)
