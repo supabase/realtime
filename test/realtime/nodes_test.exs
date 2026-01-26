@@ -170,11 +170,20 @@ defmodule Realtime.NodesTest do
   end
 
   describe "node_load/1" do
-    test "returns cpu load for local node" do
+    test "returns cpu load for local node with sufficient uptime" do
       load = Nodes.node_load(node())
 
       assert is_integer(load)
       assert load >= 0
+    end
+
+    test "returns {:error, :not_enough_data} for local node with insufficient uptime" do
+      original = Application.get_env(:realtime, :node_balance_uptime_threshold_in_ms)
+      Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 999_999_999_999)
+
+      on_exit(fn -> Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, original) end)
+
+      assert {:error, :not_enough_data} = Nodes.node_load(node())
     end
 
     test "returns cpu load for remote node" do
@@ -230,6 +239,21 @@ defmodule Realtime.NodesTest do
 
       assert Enum.all?(results, &(&1 in [node(), remote_node]))
       assert length(Enum.uniq(results)) <= 2
+    end
+
+    test "picks random node when one node has insufficient data" do
+      region = "uptime-test-region"
+      spawn_fake_node(region, :node_a)
+      spawn_fake_node(region, :node_b)
+
+      stub(Nodes, :node_load, fn
+        :node_a -> {:error, :not_enough_data}
+        :node_b -> 100
+      end)
+
+      results = for _ <- 1..10, do: Nodes.launch_node("tenant", region, node())
+
+      assert Enum.all?(results, &(&1 in [:node_a, :node_b]))
     end
   end
 end

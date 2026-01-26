@@ -104,26 +104,40 @@ defmodule Realtime.Nodes do
   """
   @spec launch_node(String.t(), String.t() | nil, atom()) :: atom()
   def launch_node(_tenant_id, region, default) do
-    cond do
-      region_nodes(region) == [] ->
+    case region_nodes(region) do
+      [] ->
         Logger.warning("Zero region nodes for #{region} using #{inspect(default)}")
         default
 
-      uptime_ms() < Application.fetch_env!(:realtime, :node_balance_uptime_threshold_in_ms) ->
-        Enum.random(region_nodes(region))
-
-      true ->
-        load_aware_node_picker(region_nodes(region))
+      nodes ->
+        load_aware_node_picker(nodes)
     end
   end
 
   defp load_aware_node_picker(regions_nodes) do
-    regions_nodes
-    |> Enum.take_random(2)
-    |> Enum.min_by(&node_load(&1))
+    sampled_nodes = Enum.take_random(regions_nodes, 2)
+    nodes_with_loads = Enum.map(sampled_nodes, &{&1, node_load(&1)})
+
+    cond do
+      length(sampled_nodes) == 2 and Enum.all?(nodes_with_loads, fn {_, load} -> is_number(load) end) ->
+        {node, _load} = Enum.min_by(nodes_with_loads, fn {_, load} -> load end)
+        node
+
+      true ->
+        Enum.random(regions_nodes)
+    end
   end
 
-  def node_load(node) when node() == node, do: :cpu_sup.avg5()
+  @doc """
+  Gets the node load for a node either locally or remotely. Returns {:error, :not_enough_data} if the node has not been running for long enough to get reliable metrics.
+  """
+  @spec node_load(atom()) :: integer() | {:error, :not_enough_data}
+  def node_load(node) when node() == node do
+    if uptime_ms() < Application.fetch_env!(:realtime, :node_balance_uptime_threshold_in_ms),
+      do: {:error, :not_enough_data},
+      else: :cpu_sup.avg5()
+  end
+
   def node_load(node) when node() != node, do: Realtime.GenRpc.call(node, __MODULE__, :node_load, [node], [])
 
   @doc """
