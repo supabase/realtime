@@ -11,6 +11,7 @@ on:
       - "mix.exs"
       - "Dockerfile"
       - "run.sh"
+      - ".github/workflows/version_updated.yml"
 
 permissions:
   contents: read

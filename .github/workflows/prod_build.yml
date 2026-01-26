@@ -12,6 +12,7 @@ on:
       - "mix.exs"
       - "Dockerfile"
       - "run.sh"
+      - ".github/workflows/prod_build.yml"
 
 jobs:
   release:

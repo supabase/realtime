@@ -12,6 +12,7 @@ on:
       - "Dockerfile"
       - "run.sh"
       - "docker-compose.test.yml"
+      - ".github/workflows/integration_tests.yml"
 
   push:
     branches:
