@@ -27,7 +27,6 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
 
     on_exit(fn ->
       Application.put_env(:realtime, :master_region, original_master_region)
-      Clustered.stop()
     end)
 
     %{master_node: master_node}
