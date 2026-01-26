@@ -4,6 +4,11 @@ defmodule Realtime.Repo.Replica do
   """
   require Logger
 
+  use Ecto.Repo,
+    otp_app: :realtime,
+    adapter: Ecto.Adapters.Postgres,
+    read_only: true
+
   @replicas_fly %{
     "sea" => Realtime.Repo.Replica.SJC,
     "sjc" => Realtime.Repo.Replica.SJC,
@@ -37,16 +42,9 @@ defmodule Realtime.Repo.Replica do
   """
   @spec replica() :: module()
   def replica do
-    replicas =
-      case Application.get_env(:realtime, :platform) do
-        :aws -> @replicas_aws
-        :fly -> @replicas_fly
-        _ -> %{}
-      end
-
     region = Application.get_env(:realtime, :region)
     master_region = Application.get_env(:realtime, :master_region) || region
-    replica = Map.get(replicas, region)
+    replica = configured_replica_module(region)
     replica_conf = Application.get_env(:realtime, replica)
 
     # Do not create module if replica isn't set or configuration is not present
@@ -68,6 +66,24 @@ defmodule Realtime.Repo.Replica do
         end
 
         replica
+    end
+  end
+
+  defp configured_replica_module(region) do
+    main_replica_config = Application.get_env(:realtime, __MODULE__)
+
+    # If the main replica module is configured we don't bother with specific replica modules
+    if main_replica_config do
+      __MODULE__
+    else
+      replicas =
+        case Application.get_env(:realtime, :platform) do
+          :aws -> @replicas_aws
+          :fly -> @replicas_fly
+          _ -> %{}
+        end
+
+      Map.get(replicas, region)
     end
   end
 
