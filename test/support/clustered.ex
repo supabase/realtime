@@ -120,8 +120,4 @@ defmodule Clustered do
 
     {:ok, pid, node}
   end
-
-  def stop() do
-    Node.stop()
-  end
 end
