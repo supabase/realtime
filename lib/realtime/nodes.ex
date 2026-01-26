@@ -118,13 +118,11 @@ defmodule Realtime.Nodes do
     sampled_nodes = Enum.take_random(regions_nodes, 2)
     nodes_with_loads = Enum.map(sampled_nodes, &{&1, node_load(&1)})
 
-    cond do
-      length(sampled_nodes) == 2 and Enum.all?(nodes_with_loads, fn {_, load} -> is_number(load) end) ->
-        {node, _load} = Enum.min_by(nodes_with_loads, fn {_, load} -> load end)
-        node
-
-      true ->
-        Enum.random(regions_nodes)
+    if length(sampled_nodes) == 2 and Enum.all?(nodes_with_loads, fn {_, load} -> is_number(load) end) do
+      {node, _load} = Enum.min_by(nodes_with_loads, fn {_, load} -> load end)
+      node
+    else
+      Enum.random(regions_nodes)
     end
   end
 
