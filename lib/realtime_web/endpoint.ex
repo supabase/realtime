@@ -67,7 +67,21 @@ defmodule RealtimeWeb.Endpoint do
     cookie_key: "request_logger"
 
   plug BaggageRequestId, baggage_key: BaggageRequestId.baggage_key()
-  plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+
+  plug Plug.Telemetry,
+    event_prefix: [:phoenix, :endpoint],
+    log: {__MODULE__, :log_level, []}
+
+  # Disables logging for routes /healthcheck and /api/tenants/:tenant_id/health when DISABLE_HEALTHCHECK_LOGGING=true
+  def log_level(%{path_info: ["healthcheck"]}) do
+    if Application.get_env(:realtime, :disable_healthcheck_logging, false), do: false, else: :info
+  end
+
+  def log_level(%{path_info: ["api", "tenants", _, "health"]}) do
+    if Application.get_env(:realtime, :disable_healthcheck_logging, false), do: false, else: :info
+  end
+
+  def log_level(_), do: :info
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],

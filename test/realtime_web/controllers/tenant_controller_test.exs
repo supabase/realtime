@@ -3,6 +3,7 @@ defmodule RealtimeWeb.TenantControllerTest do
   # Also using global otel_simple_processor
   use RealtimeWeb.ConnCase, async: false
 
+  import ExUnit.CaptureLog
   require OpenTelemetry.Tracer, as: Tracer
 
   alias Realtime.Api.Tenant
@@ -442,6 +443,51 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert_receive {:span, span(name: "GET /api/tenants/:tenant_id/health", attributes: attributes)}
 
       assert attributes(map: %{external_id: ^external_id}) = attributes
+    end
+
+    test "logs request when DISABLE_HEALTHCHECK_LOGGING is false", %{conn: conn, tenant: tenant} do
+      original_value = Application.get_env(:realtime, :disable_healthcheck_logging, false)
+      Application.put_env(:realtime, :disable_healthcheck_logging, false)
+      on_exit(fn -> Application.put_env(:realtime, :disable_healthcheck_logging, original_value) end)
+
+      log =
+        capture_log(fn ->
+          conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+          assert json_response(conn, 200)
+        end)
+
+      assert log =~ "GET /api/tenants"
+      assert log =~ "/health"
+    end
+
+    test "does not log request when DISABLE_HEALTHCHECK_LOGGING is true", %{conn: conn, tenant: tenant} do
+      original_value = Application.get_env(:realtime, :disable_healthcheck_logging, false)
+      Application.put_env(:realtime, :disable_healthcheck_logging, true)
+      on_exit(fn -> Application.put_env(:realtime, :disable_healthcheck_logging, original_value) end)
+
+      log =
+        capture_log(fn ->
+          conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+          assert json_response(conn, 200)
+        end)
+
+      refute log =~ "GET /api/tenants"
+      refute log =~ "/health"
+    end
+
+    test "logs request when DISABLE_HEALTHCHECK_LOGGING is not set (default)", %{conn: conn, tenant: tenant} do
+      original_value = Application.get_env(:realtime, :disable_healthcheck_logging, false)
+      Application.delete_env(:realtime, :disable_healthcheck_logging)
+      on_exit(fn -> Application.put_env(:realtime, :disable_healthcheck_logging, original_value) end)
+
+      log =
+        capture_log(fn ->
+          conn = get(conn, ~p"/api/tenants/#{tenant.external_id}/health")
+          assert json_response(conn, 200)
+        end)
+
+      assert log =~ "GET /api/tenants"
+      assert log =~ "/health"
     end
   end
 

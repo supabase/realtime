@@ -62,6 +62,7 @@ tenant_max_joins_per_second = Env.get_integer("TENANT_MAX_JOINS_PER_SECOND", 100
 rpc_timeout = Env.get_integer("RPC_TIMEOUT", :timer.seconds(30))
 max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
 run_janitor? = Env.get_boolean("RUN_JANITOR", false)
+disable_healthcheck_logging = Env.get_boolean("DISABLE_HEALTHCHECK_LOGGING", false)
 janitor_schedule_randomize = Env.get_boolean("JANITOR_SCHEDULE_RANDOMIZE", true)
 janitor_max_children = Env.get_integer("JANITOR_MAX_CHILDREN", 5)
 janitor_chunk_size = Env.get_integer("JANITOR_CHUNK_SIZE", 10)
@@ -142,7 +143,8 @@ config :realtime,
   regional_broadcasting: regional_broadcasting,
   master_region: master_region,
   metrics_tags: metrics_tags,
-  measure_traffic_interval_in_ms: measure_traffic_interval_in_ms
+  measure_traffic_interval_in_ms: measure_traffic_interval_in_ms,
+  disable_healthcheck_logging: disable_healthcheck_logging
 
 if config_env() != :test && run_janitor? do
   config :realtime,
