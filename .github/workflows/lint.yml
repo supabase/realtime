@@ -11,6 +11,7 @@ on:
       - "mix.exs"
       - "Dockerfile"
       - "run.sh"
+      - ".github/workflows/lint.yml"
 
   push:
     branches:
@@ -26,7 +27,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
       - name: Setup elixir
         id: beam
         uses: erlef/setup-beam@v1
@@ -34,7 +35,7 @@ jobs:
           otp-version: 27.x # Define the OTP version [required]
           elixir-version: 1.18.x # Define the elixir version [required]
       - name: Cache Mix
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             deps
@@ -64,7 +65,7 @@ jobs:
       - name: Run sobelow
         run: mix sobelow --config .sobelow-conf
       - name: Retrieve PLT Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: plt-cache
         with:
           path: priv/plts

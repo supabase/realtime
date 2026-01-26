@@ -12,6 +12,7 @@ on:
       - "Dockerfile"
       - "run.sh"
       - "docker-compose.test.yml"
+      - ".github/workflows/integration_tests.yml"
 
   push:
     branches:
@@ -27,7 +28,7 @@ jobs:
     runs-on: blacksmith-8vcpu-ubuntu-2404
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
       - name: Run integration test
         run: docker compose -f docker-compose.tests.yml up --abort-on-container-exit --exit-code-from test-runner
 

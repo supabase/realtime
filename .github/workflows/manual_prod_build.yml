@@ -48,7 +48,7 @@ jobs:
     outputs:
       image_digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
       - id: meta
         uses: docker/metadata-action@v4
