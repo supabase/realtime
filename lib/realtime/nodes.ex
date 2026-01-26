@@ -21,12 +21,23 @@ defmodule Realtime.Nodes do
   end
 
   @doc """
-  Translates a region from a platform to the closest Supabase tenant region
+  Translates a region from a platform to the closest Supabase tenant region.
+
+  Region mapping can be customized via the REGION_MAPPING environment variable.
+  If not provided, uses the default hardcoded mapping.
   """
   @spec platform_region_translator(String.t() | nil) :: nil | binary()
   def platform_region_translator(nil), do: nil
 
   def platform_region_translator(tenant_region) when is_binary(tenant_region) do
+    case Application.get_env(:realtime, :region_mapping) do
+      nil -> default_region_mapping(tenant_region)
+      mapping when is_map(mapping) -> Map.get(mapping, tenant_region)
+    end
+  end
+
+  # Private function with hardcoded defaults
+  defp default_region_mapping(tenant_region) do
     case tenant_region do
       "ap-east-1" -> "ap-southeast-1"
       "ap-northeast-1" -> "ap-southeast-1"

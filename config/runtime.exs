@@ -34,6 +34,7 @@ queue_interval = Env.get_integer("DB_QUEUE_INTERVAL", 5000)
 pool_size = Env.get_integer("DB_POOL_SIZE", 5)
 master_region = System.get_env("DB_MASTER_REGION")
 region = System.get_env("REGION")
+region_mapping = System.get_env("REGION_MAPPING")
 
 after_connect_query_args =
   case System.get_env("DB_AFTER_CONNECT_QUERY") do
@@ -142,6 +143,7 @@ config :realtime,
   postgres_cdc_scope_shards: postgres_cdc_scope_shards,
   regional_broadcasting: regional_broadcasting,
   master_region: master_region,
+  region_mapping: region_mapping,
   metrics_tags: metrics_tags,
   measure_traffic_interval_in_ms: measure_traffic_interval_in_ms,
   disable_healthcheck_logging: disable_healthcheck_logging

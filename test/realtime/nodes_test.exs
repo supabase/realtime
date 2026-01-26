@@ -131,4 +131,40 @@ defmodule Realtime.NodesTest do
       assert region == expected_region
     end
   end
+
+  describe "platform_region_translator/1" do
+    test "returns nil for nil input" do
+      assert Nodes.platform_region_translator(nil) == nil
+    end
+
+    test "uses default mapping when no custom mapping configured" do
+      original = Application.get_env(:realtime, :region_mapping)
+      on_exit(fn -> Application.put_env(:realtime, :region_mapping, original) end)
+
+      Application.put_env(:realtime, :region_mapping, nil)
+
+      assert Nodes.platform_region_translator("eu-north-1") == "eu-west-2"
+      assert Nodes.platform_region_translator("us-west-2") == "us-west-1"
+      assert Nodes.platform_region_translator("unknown-region") == nil
+    end
+
+    test "uses custom mapping when configured without falling back to defaults" do
+      original = Application.get_env(:realtime, :region_mapping)
+      on_exit(fn -> Application.put_env(:realtime, :region_mapping, original) end)
+
+      custom_mapping = %{
+        "custom-region-1" => "us-east-1",
+        "eu-north-1" => "custom-target"
+      }
+
+      Application.put_env(:realtime, :region_mapping, custom_mapping)
+
+      # Custom mappings work
+      assert Nodes.platform_region_translator("custom-region-1") == "us-east-1"
+      assert Nodes.platform_region_translator("eu-north-1") == "custom-target"
+
+      # Unmapped regions return nil (no fallback to defaults)
+      assert Nodes.platform_region_translator("us-west-2") == nil
+    end
+  end
 end
