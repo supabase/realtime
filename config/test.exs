@@ -42,7 +42,7 @@ config :realtime,
   metrics_jwt_secret: "test",
   prom_poll_rate: 5_000,
   request_id_baggage_key: "sb-request-id",
-  node_balance_uptime_threshold_in_ms: 100,
+  node_balance_uptime_threshold_in_ms: 999_999_999_999,
   max_gen_rpc_clients: 5
 
 # Print nothing during tests unless captured or a test failure happens

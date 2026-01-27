@@ -16,7 +16,7 @@ defmodule Realtime.Operations do
           platform_region = Realtime.Nodes.platform_region_translator(region)
           current_node = node(pid)
 
-          case Realtime.Nodes.launch_node(tenant, platform_region, false) do
+          case Realtime.Nodes.launch_node(platform_region, false) do
             ^current_node -> acc
             _ -> stop_user_tenant_process(tenant, platform_region, acc)
           end

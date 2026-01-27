@@ -128,7 +128,7 @@ defmodule Extensions.PostgresCdcRls do
 
   def start_distributed(%{"region" => region, "id" => tenant} = args) do
     platform_region = Realtime.Nodes.platform_region_translator(region)
-    launch_node = Realtime.Nodes.launch_node(tenant, platform_region, node())
+    launch_node = Realtime.Nodes.launch_node(platform_region, node())
 
     Logger.warning(
       "Starting distributed postgres extension #{inspect(lauch_node: launch_node, region: region, platform_region: platform_region)}"

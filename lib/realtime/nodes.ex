@@ -12,10 +12,10 @@ defmodule Realtime.Nodes do
   @spec get_node_for_tenant(Tenant.t()) :: {:ok, node(), binary()} | {:error, term()}
   def get_node_for_tenant(nil), do: {:error, :tenant_not_found}
 
-  def get_node_for_tenant(%Tenant{external_id: tenant_id} = tenant) do
+  def get_node_for_tenant(%Tenant{} = tenant) do
     with region <- Tenants.region(tenant),
          tenant_region <- platform_region_translator(region),
-         node <- launch_node(tenant_id, tenant_region, node()) do
+         node <- launch_node(tenant_region, node()) do
       {:ok, node, tenant_region}
     end
   end
@@ -102,8 +102,8 @@ defmodule Realtime.Nodes do
   If there are not two nodes in a region the connection is established from
   the `default` node given.
   """
-  @spec launch_node(String.t(), String.t() | nil, atom()) :: atom()
-  def launch_node(_tenant_id, region, default) do
+  @spec launch_node(String.t() | nil, atom()) :: atom()
+  def launch_node(region, default) do
     case region_nodes(region) do
       [] ->
         Logger.warning("Zero region nodes for #{region} using #{inspect(default)}")

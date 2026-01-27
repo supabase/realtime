@@ -170,20 +170,25 @@ defmodule Realtime.NodesTest do
   end
 
   describe "node_load/1" do
-    test "returns cpu load for local node with sufficient uptime" do
+    test "returns {:error, :not_enough_data} for local node with insufficient uptime" do
+      assert {:error, :not_enough_data} = Nodes.node_load(node())
+    end
+  end
+
+  describe "node_load/1 with sufficient uptime" do
+    setup do
+      Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 0)
+
+      on_exit(fn ->
+        Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 999_999_999_999)
+      end)
+    end
+
+    test "returns cpu load for local node" do
       load = Nodes.node_load(node())
 
       assert is_integer(load)
       assert load >= 0
-    end
-
-    test "returns {:error, :not_enough_data} for local node with insufficient uptime" do
-      original = Application.get_env(:realtime, :node_balance_uptime_threshold_in_ms)
-      Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 999_999_999_999)
-
-      on_exit(fn -> Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, original) end)
-
-      assert {:error, :not_enough_data} = Nodes.node_load(node())
     end
 
     test "returns cpu load for remote node" do
@@ -205,40 +210,21 @@ defmodule Realtime.NodesTest do
     end
   end
 
-  describe "launch_node/3 with load-aware picking" do
+  describe "launch_node/2 with load-aware picking" do
     test "returns a node from the region when nodes are available" do
       {:ok, remote_node} = Clustered.start()
       region = "clustered-test-region"
       spawn_fake_node(region, remote_node)
 
-      result = Nodes.launch_node("tenant", region, node())
+      result = Nodes.launch_node(region, node())
 
       assert result == remote_node
     end
 
     test "returns default node when no region nodes available" do
-      result = Nodes.launch_node("tenant", "empty-region", node())
+      result = Nodes.launch_node("empty-region", node())
 
       assert result == node()
-    end
-
-    test "compares load between nodes and picks one" do
-      {:ok, remote_node} = Clustered.start()
-
-      region = "load-test-region"
-      spawn_fake_node(region, node())
-      spawn_fake_node(region, remote_node)
-
-      local_load = Nodes.node_load(node())
-      remote_load = Nodes.node_load(remote_node)
-
-      assert is_integer(local_load) and local_load >= 0
-      assert is_integer(remote_load) and remote_load >= 0
-
-      results = for _ <- 1..10, do: Nodes.launch_node("tenant", region, node())
-
-      assert Enum.all?(results, &(&1 in [node(), remote_node]))
-      assert length(Enum.uniq(results)) <= 2
     end
 
     test "picks random node when one node has insufficient data" do
@@ -251,9 +237,38 @@ defmodule Realtime.NodesTest do
         :node_b -> 100
       end)
 
-      results = for _ <- 1..10, do: Nodes.launch_node("tenant", region, node())
+      results = for _ <- 1..10, do: Nodes.launch_node(region, node())
 
       assert Enum.all?(results, &(&1 in [:node_a, :node_b]))
+    end
+  end
+
+  describe "launch_node/2 with load-aware node picking enabled" do
+    setup do
+      Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 0)
+
+      on_exit(fn ->
+        Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 999_999_999_999)
+      end)
+    end
+
+    test "compares load between nodes and picks the least loaded" do
+      {:ok, remote_node} = Clustered.start()
+
+      region = "load-test-region"
+      spawn_fake_node(region, node())
+      spawn_fake_node(region, remote_node)
+
+      local_load = Nodes.node_load(node())
+      remote_load = Nodes.node_load(remote_node)
+
+      assert is_integer(local_load) and local_load >= 0
+      assert is_integer(remote_load) and remote_load >= 0
+
+      results = for _ <- 1..10, do: Nodes.launch_node(region, node())
+
+      assert Enum.all?(results, &(&1 in [node(), remote_node]))
+      assert length(Enum.uniq(results)) <= 2
     end
   end
 end
