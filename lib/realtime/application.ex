@@ -13,6 +13,7 @@ defmodule Realtime.Application do
 
   defmodule JwtSecretError, do: defexception([:message])
   defmodule JwtClaimValidatorsError, do: defexception([:message])
+  defmodule RegionMappingError, do: defexception([:message])
 
   def start(_type, _args) do
     opentelemetry_setup()
@@ -35,6 +36,8 @@ defmodule Realtime.Application do
         raise JwtClaimValidatorsError,
           message: "JWT claim validators is not a valid JSON object"
     end
+
+    setup_region_mapping()
 
     :ok =
       :gen_event.swap_sup_handler(
@@ -167,6 +170,32 @@ defmodule Realtime.Application do
       Realtime.GenRpcPubSub
     else
       Phoenix.PubSub.PG2
+    end
+  end
+
+  defp setup_region_mapping do
+    case Application.get_env(:realtime, :region_mapping) do
+      nil ->
+        :ok
+
+      mapping_json when is_binary(mapping_json) ->
+        case Jason.decode(mapping_json) do
+          {:ok, mapping} when is_map(mapping) ->
+            if Enum.all?(mapping, fn {k, v} -> is_binary(k) and is_binary(v) end) do
+              Application.put_env(:realtime, :region_mapping, mapping)
+            else
+              raise RegionMappingError,
+                message: "REGION_MAPPING must contain only string keys and values"
+            end
+
+          {:ok, _} ->
+            raise RegionMappingError,
+              message: "REGION_MAPPING must be a JSON object"
+
+          {:error, %Jason.DecodeError{} = error} ->
+            raise RegionMappingError,
+              message: "Failed to parse REGION_MAPPING: #{Exception.message(error)}"
+        end
     end
   end
 end
