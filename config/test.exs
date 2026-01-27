@@ -62,4 +62,6 @@ config :opentelemetry,
 # See Clustered module
 config :gen_rpc,
   tcp_server_port: 5969,
-  tcp_client_port: 5970
+  tcp_client_port: 5970,
+  connect_timeout: 500,
+  max_client_processes: 1
