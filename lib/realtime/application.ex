@@ -116,7 +116,7 @@ defmodule Realtime.Application do
          pool_size: presence_pool_size,
          broadcast_period: presence_broadcast_period,
          permdown_period: presence_permdown_period}
-      ] ++ extensions_supervisors() ++ janitor_tasks()
+      ] ++ extensions_supervisors() ++ janitor_tasks() ++ metrics_pusher_children()
 
     database_connections = if master_region == region, do: [Realtime.Repo], else: [Replica.replica()]
 
@@ -160,6 +160,14 @@ defmodule Realtime.Application do
         Realtime.Tenants.Janitor,
         Realtime.MetricsCleaner
       ]
+    else
+      []
+    end
+  end
+
+  defp metrics_pusher_children do
+    if Application.get_env(:realtime, :metrics_pusher_enabled) do
+      [Realtime.MetricsPusher]
     else
       []
     end
