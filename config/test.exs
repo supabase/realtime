@@ -41,7 +41,10 @@ config :realtime,
   api_jwt_secret: System.get_env("API_JWT_SECRET", "secret"),
   metrics_jwt_secret: "test",
   prom_poll_rate: 5_000,
-  request_id_baggage_key: "sb-request-id"
+  request_id_baggage_key: "sb-request-id",
+  metrics_pusher_req_options: [
+    plug: {Req.Test, Realtime.MetricsPusher}
+  ]
 
 # Print nothing during tests unless captured or a test failure happens
 config :logger,

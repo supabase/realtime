@@ -107,7 +107,7 @@ defmodule Realtime.Application do
         {RealtimeWeb.RealtimeChannel.Tracker, check_interval_in_ms: no_channel_timeout_in_ms},
         RealtimeWeb.Endpoint,
         RealtimeWeb.Presence
-      ] ++ extensions_supervisors() ++ janitor_tasks()
+      ] ++ extensions_supervisors() ++ janitor_tasks() ++ metrics_pusher_children()
 
     database_connections = if master_region == region, do: [Realtime.Repo], else: [Replica.replica()]
 
@@ -151,6 +151,14 @@ defmodule Realtime.Application do
         Realtime.Tenants.Janitor,
         Realtime.MetricsCleaner
       ]
+    else
+      []
+    end
+  end
+
+  defp metrics_pusher_children do
+    if Application.get_env(:realtime, :metrics_pusher_enabled) do
+      [Realtime.MetricsPusher]
     else
       []
     end
