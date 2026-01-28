@@ -59,6 +59,8 @@ defmodule Realtime.Integration.RegionAwareMigrationsTest do
       assert arg.migrations_ran == tenant.migrations_ran
       assert arg.settings == hd(tenant.extensions).settings
 
+      assert opts[:timeout] == 50_000
+
       call_original(Realtime.GenRpc, :call, [node, mod, func, args, opts])
     end)
 
