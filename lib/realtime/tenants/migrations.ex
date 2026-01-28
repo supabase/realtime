@@ -177,7 +177,7 @@ defmodule Realtime.Tenants.Migrations do
           {:error, _} -> node()
         end
 
-      GenRpc.call(node, __MODULE__, :start_migration, [attrs], tenant_id: tenant.external_id)
+      GenRpc.call(node, __MODULE__, :start_migration, [attrs], tenant_id: tenant.external_id, timeout: 50_000)
     else
       :noop
     end
