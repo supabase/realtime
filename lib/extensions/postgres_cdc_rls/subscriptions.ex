@@ -210,7 +210,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @spec parse_subscription_params(map()) :: {:ok, subscription_params} | {:error, binary()}
   def parse_subscription_params(params) do
     case params do
-      %{"schema" => schema, "table" => table, "filter" => filter} ->
+      %{"schema" => schema, "table" => table, "filter" => filter}
+      when is_binary(schema) and is_binary(table) and is_binary(filter) ->
         with [col, rest] <- String.split(filter, "=", parts: 2),
              [filter_type, value] when filter_type in @filter_types <-
                String.split(rest, ".", parts: 2),
@@ -224,13 +225,16 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
             {:error, "Error parsing `filter` params: #{inspect(e)}"}
         end
 
-      %{"schema" => schema, "table" => table} ->
+      %{"schema" => schema, "table" => table}
+      when is_binary(schema) and is_binary(table) and not is_map_key(params, "filter") ->
         {:ok, {schema, table, []}}
 
-      %{"schema" => schema} ->
+      %{"schema" => schema}
+      when is_binary(schema) and not is_map_key(params, "table") and not is_map_key(params, "filter") ->
         {:ok, {schema, "*", []}}
 
-      %{"table" => table} ->
+      %{"table" => table}
+      when is_binary(table) and not is_map_key(params, "schema") and not is_map_key(params, "filter") ->
         {:ok, {"public", table, []}}
 
       map when is_map_key(map, "user_token") or is_map_key(map, "auth_token") ->

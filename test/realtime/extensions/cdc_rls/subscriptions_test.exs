@@ -130,6 +130,24 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       assert {:error, %DBConnection.ConnectionError{reason: :queue_timeout}} =
                Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
     end
+
+    test "invalid table" do
+      {:error,
+       "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: %{\"schema\" => \"public\", \"table\" => %{\"actually a\" => \"map\"}}"} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => %{"actually a" => "map"}})
+    end
+
+    test "invalid schema" do
+      {:error,
+       "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: %{\"schema\" => %{\"actually a\" => \"map\"}, \"table\" => \"images\"}"} =
+        Subscriptions.parse_subscription_params(%{"table" => "images", "schema" => %{"actually a" => "map"}})
+    end
+
+    test "invalid filter" do
+      {:error,
+       "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: %{\"filter\" => ~c\"{\", \"schema\" => \"public\", \"table\" => \"images\"}"} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "images", "filter" => [123]})
+    end
   end
 
   describe "delete_all/1" do
