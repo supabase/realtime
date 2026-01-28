@@ -104,7 +104,7 @@ defmodule Realtime.GenRpcTest do
         end)
 
       assert log =~
-               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s*error: :timeout,\s+mod: Process,\s+func: :sleep,\s+target:\s+:"#{node}"/
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :timeout,\s+mod: Process,\s+func: :sleep,\s+target:\s+:"#{node}"/
 
       assert_receive {[:realtime, :rpc], %{latency: _},
                       %{
@@ -153,7 +153,7 @@ defmodule Realtime.GenRpcTest do
         end)
 
       assert log =~
-               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s*error: :econnrefused,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :econnrefused,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/
 
       assert_receive {[:realtime, :rpc], %{latency: _},
                       %{
@@ -333,7 +333,7 @@ defmodule Realtime.GenRpcTest do
                "project=123 external_id=123 [error] ErrorOnRpcCall: %{error: :timeout, mod: Process, func: :sleep, target: :\"main@127.0.0.1\"}"
 
       assert log =~
-               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s*error: :timeout,\s+mod: Process,\s+func: :sleep,\s+target:\s+:"#{node}"/
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :timeout,\s+mod: Process,\s+func: :sleep,\s+target:\s+:"#{node}"/
 
       assert_receive {[:realtime, :rpc], %{latency: _},
                       %{
@@ -365,7 +365,7 @@ defmodule Realtime.GenRpcTest do
         end)
 
       assert log =~
-               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s*error: :econnrefused,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/
+               ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :econnrefused,\s+mod: Map,\s+func: :fetch,\s+target:\s+:"#{node}"/
 
       assert_receive {[:realtime, :rpc], %{latency: _},
                       %{

@@ -155,8 +155,7 @@ if config_env() != :test && run_janitor? do
     janitor_chunk_size: janitor_chunk_size,
     janitor_run_after_in_ms: janitor_run_after_in_ms,
     janitor_children_timeout: janitor_children_timeout,
-    janitor_schedule_timer: janitor_schedule_timer,
-    max_gen_rpc_clients: max_gen_rpc_clients
+    janitor_schedule_timer: janitor_schedule_timer
 end
 
 default_cluster_strategy =
@@ -298,7 +297,8 @@ if config_env() != :test do
     db_enc_key: System.get_env("DB_ENC_KEY"),
     region: region,
     prom_poll_rate: Env.get_integer("PROM_POLL_RATE", 5000),
-    slot_name_suffix: slot_name_suffix
+    slot_name_suffix: slot_name_suffix,
+    max_gen_rpc_clients: max_gen_rpc_clients
 end
 
 # Setup Production

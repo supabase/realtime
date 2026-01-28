@@ -23,21 +23,6 @@ defmodule Containers do
   def start_container(), do: GenServer.call(__MODULE__, :start_container, 10_000)
   def port(), do: GenServer.call(__MODULE__, :port, 10_000)
 
-  def await_ready(max_cases, timeout \\ 120_000) do
-    wait_for_pool(timeout)
-    pool_size = max_cases + 2
-
-    Enum.each(1..pool_size, fn _ ->
-      :poolboy.transaction(
-        Containers.Pool,
-        fn container -> container |> Container.port() |> check_container_ready() end,
-        timeout
-      )
-    end)
-
-    :ok
-  end
-
   def start_link(max_cases), do: GenServer.start_link(__MODULE__, max_cases, name: __MODULE__)
 
   def init(max_cases) do
@@ -46,22 +31,6 @@ defmodule Containers do
     available_ports = Enum.shuffle(5501..9000) -- ports
 
     {:ok, %{existing_containers: existing_containers, ports: available_ports}, {:continue, {:pool, max_cases}}}
-  end
-
-  defp wait_for_pool(timeout, started_at \\ System.monotonic_time(:millisecond)) do
-    elapsed = System.monotonic_time(:millisecond) - started_at
-
-    cond do
-      Process.whereis(Containers.Pool) ->
-        :ok
-
-      elapsed >= timeout ->
-        raise "Pool did not start within #{timeout}ms"
-
-      true ->
-        Process.sleep(100)
-        wait_for_pool(timeout, started_at)
-    end
   end
 
   def handle_continue({:pool, max_cases}, state) do
@@ -120,7 +89,7 @@ defmodule Containers do
           port
       end
 
-    check_container_ready(port)
+    check_container_ready(name)
 
     opts = %{external_id: external_id, name: external_id, port: port, jwt_secret: "secure_jwt_secret"}
     tenant = Generators.tenant_fixture(opts)
@@ -311,36 +280,17 @@ defmodule Containers do
     end)
   end
 
-  defp check_container_ready(port, attempts \\ 50)
+  defp check_container_ready(name, attempts \\ 50)
+  defp check_container_ready(name, 0), do: raise("Container #{name} is not ready")
 
-  defp check_container_ready(port, attempts) when attempts <= 0,
-    do: raise("Container on port #{port} is not ready")
+  defp check_container_ready(name, attempts) do
+    case System.cmd("docker", ["exec", name, "pg_isready", "-p", "5432", "-h", "localhost"]) do
+      {_, 0} ->
+        :ok
 
-  defp check_container_ready(port, attempts) do
-    {_, status} =
-      System.cmd(
-        "psql",
-        [
-          "-h",
-          "localhost",
-          "-p",
-          to_string(port),
-          "-U",
-          "postgres",
-          "-d",
-          "postgres",
-          "-c",
-          "select 1"
-        ],
-        env: [{"PGPASSWORD", "postgres"}],
-        stderr_to_stdout: true
-      )
-
-    if status == 0 do
-      :ok
-    else
-      Process.sleep(500)
-      check_container_ready(port, attempts - 1)
+      {_, _} ->
+        Process.sleep(500)
+        check_container_ready(name, attempts - 1)
     end
   end
 

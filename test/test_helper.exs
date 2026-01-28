@@ -14,7 +14,6 @@ if System.get_env("REUSE_CONTAINERS") != "true" do
 end
 
 {:ok, _pid} = Containers.start_link(max_cases)
-Containers.await_ready(max_cases)
 
 for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.external_id)
 

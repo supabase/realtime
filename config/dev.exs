@@ -11,9 +11,7 @@ import Config
 # are secured by default in production.
 presence = System.get_env("PRESENCE", "false") == "false"
 
-config :realtime,
-  presence: presence,
-  max_gen_rpc_clients: 5
+config :realtime, presence: presence
 
 config :realtime, RealtimeWeb.Endpoint,
   http: [port: System.get_env("PORT", "4000"), compress: true],

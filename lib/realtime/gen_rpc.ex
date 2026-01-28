@@ -136,6 +136,7 @@ defmodule Realtime.GenRpc do
     end
   end
 
+  # Not using :gen_rpc.multicall here because we can't see the actual results on errors
   @doc """
   Evaluates apply(mod, func, args) on all nodes
 
@@ -152,7 +153,12 @@ defmodule Realtime.GenRpc do
     key = Keyword.get(opts, :key, nil)
 
     nodes = rpc_nodes([node() | Node.list()], key)
-
+    # Latency here is the amount of time that it takes for this node to gather the result.
+    # If one node takes a while to reply the remaining calls will have at least the latency reported by this node
+    # Example:
+    # Node A, B and C receive the calls in this order
+    # Node A takes 500ms to return on nb_yield
+    # Node B and C will report at least 500ms to return regardless how long it took for them to actually reply back
     results =
       nodes
       |> Enum.map(&{&1, :erlang.monotonic_time(), async_call(&1, mod, func, args)})
@@ -225,6 +231,9 @@ defmodule Realtime.GenRpc do
 
   defp default_rpc_timeout, do: Application.get_env(:realtime, :rpc_timeout, 5_000)
 
+  # Here we run the async_call on all nodes using gen_rpc except the local node
+  # This is because gen_rpc does not have a bypass for local node on multicall
+  # For the local node we use rpc instead
   defp async_call({node, _}, mod, func, args) when node == node(), do: :rpc.async_call(node, mod, func, args)
   defp async_call(node, mod, func, args), do: :gen_rpc.async_call(node, mod, func, args)
 
