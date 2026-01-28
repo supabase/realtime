@@ -134,7 +134,6 @@ config :realtime,
   metrics_rpc_timeout: metrics_rpc_timeout_in_ms,
   tenant_cache_expiration: tenant_cache_expiration,
   rpc_timeout: rpc_timeout,
-  max_gen_rpc_clients: max_gen_rpc_clients,
   no_channel_timeout_in_ms: no_channel_timeout_in_ms,
   platform: platform,
   pubsub_adapter: pubsub_adapter,
@@ -156,7 +155,8 @@ if config_env() != :test && run_janitor? do
     janitor_chunk_size: janitor_chunk_size,
     janitor_run_after_in_ms: janitor_run_after_in_ms,
     janitor_children_timeout: janitor_children_timeout,
-    janitor_schedule_timer: janitor_schedule_timer
+    janitor_schedule_timer: janitor_schedule_timer,
+    max_gen_rpc_clients: max_gen_rpc_clients
 end
 
 default_cluster_strategy =

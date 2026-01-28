@@ -31,6 +31,12 @@ defmodule Clustered do
 
     true = Node.connect(node)
 
+    max_clients = Application.get_env(:realtime, :max_gen_rpc_clients, 5)
+
+    for key <- 1..max_clients do
+      _ = :gen_rpc.call({node, key}, :erlang, :node, [], 5_000)
+    end
+
     {:ok, node}
   end
 
