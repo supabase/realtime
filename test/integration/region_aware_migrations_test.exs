@@ -48,20 +48,23 @@ defmodule Realtime.Integration.RegionAwareMigrationsTest do
     assert tenant.migrations_ran == 0
 
     Realtime.GenRpc
-    |> Mimic.expect(:call, fn called_node, mod, func, args, opts ->
-      assert called_node == node
-      assert mod == Migrations
-      assert func == :start_migration
-      assert opts[:tenant_id] == tenant.external_id
+    |> Mimic.expect(:call, fn
+      called_node, Realtime.Nodes, func, args, opts ->
+        call_original(Realtime.GenRpc, :call, [called_node, Realtime.Nodes, func, args, opts])
 
-      arg = hd(args)
-      assert arg.tenant_external_id == tenant.external_id
-      assert arg.migrations_ran == tenant.migrations_ran
-      assert arg.settings == hd(tenant.extensions).settings
+      called_node, Migrations, func, args, opts ->
+        assert called_node == node
+        assert func == :start_migration
+        assert opts[:tenant_id] == tenant.external_id
 
-      assert opts[:timeout] == 50_000
+        arg = hd(args)
+        assert arg.tenant_external_id == tenant.external_id
+        assert arg.migrations_ran == tenant.migrations_ran
+        assert arg.settings == hd(tenant.extensions).settings
 
-      call_original(Realtime.GenRpc, :call, [node, mod, func, args, opts])
+        assert opts[:timeout] == 50_000
+
+        call_original(Realtime.GenRpc, :call, [node, Migrations, func, args, opts])
     end)
 
     assert :ok = Migrations.run_migrations(tenant)
