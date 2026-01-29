@@ -41,7 +41,8 @@ config :realtime,
   api_jwt_secret: System.get_env("API_JWT_SECRET", "secret"),
   metrics_jwt_secret: "test",
   prom_poll_rate: 5_000,
-  request_id_baggage_key: "sb-request-id"
+  request_id_baggage_key: "sb-request-id",
+  max_gen_rpc_clients: 5
 
 # Print nothing during tests unless captured or a test failure happens
 config :logger,
@@ -62,4 +63,5 @@ config :opentelemetry,
 # See Clustered module
 config :gen_rpc,
   tcp_server_port: 5969,
-  tcp_client_port: 5970
+  tcp_client_port: 5970,
+  connect_timeout: 500

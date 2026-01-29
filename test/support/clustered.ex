@@ -23,11 +23,19 @@ defmodule Clustered do
   end
   ```
   """
-  @spec start(any()) :: {:ok, node}
+  @spec start(any(), keyword()) :: {:ok, node}
   def start(aux_mod \\ nil, opts \\ []) do
-    {:ok, _pid, node} = start_disconnected(aux_mod, opts)
+    {:ok, pid, node} = start_disconnected(aux_mod, opts)
+
+    :ok = wait_for_gen_rpc(pid)
 
     true = Node.connect(node)
+
+    max_clients = Application.get_env(:realtime, :max_gen_rpc_clients, 5)
+
+    for key <- 1..max_clients do
+      _ = :gen_rpc.call({node, key}, :erlang, :node, [], 5_000)
+    end
 
     {:ok, node}
   end
@@ -35,7 +43,7 @@ defmodule Clustered do
   @doc """
   Similar to `start/2` but the node is not connected automatically
   """
-  @spec start_disconnected(any()) :: {:ok, :peer.server_ref(), node}
+  @spec start_disconnected(any(), keyword()) :: {:ok, :peer.server_ref(), node}
   def start_disconnected(aux_mod \\ nil, opts \\ []) do
     extra_config = Keyword.get(opts, :extra_config, [])
     phoenix_port = Keyword.get(opts, :phoenix_port, 4012)
@@ -106,10 +114,11 @@ defmodule Clustered do
       :ok = :peer.call(pid, Application, :put_env, [app_name, key, value])
     end
 
+    {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:gen_rpc])
     {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:mix])
     :ok = :peer.call(pid, Mix, :env, [Mix.env()])
 
-    Enum.map(
+    Enum.each(
       [:logger, :runtime_tools, :prom_ex, :mix, :os_mon, :realtime],
       fn app -> {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [app]) end
     )
@@ -119,5 +128,28 @@ defmodule Clustered do
     end
 
     {:ok, pid, node}
+  end
+
+  defp wait_for_gen_rpc(pid) do
+    port = :peer.call(pid, Application, :get_env, [:gen_rpc, :tcp_server_port])
+
+    case port do
+      port when is_integer(port) and port > 0 -> wait_for_port({127, 0, 0, 1}, port, 50, 100)
+      _ -> raise "gen_rpc tcp_server_port is not configured: #{inspect(port)}"
+    end
+  end
+
+  defp wait_for_port(_host, _port, 0, _delay_ms), do: raise("gen_rpc tcp server did not start in time")
+
+  defp wait_for_port(host, port, attempts, delay_ms) do
+    case :gen_tcp.connect(host, port, [:binary, active: false], 200) do
+      {:ok, socket} ->
+        :ok = :gen_tcp.close(socket)
+        :ok
+
+      {:error, _reason} ->
+        Process.sleep(delay_ms)
+        wait_for_port(host, port, attempts - 1, delay_ms)
+    end
   end
 end

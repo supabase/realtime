@@ -113,6 +113,8 @@ defmodule Realtime.GenRpc do
 
     case response do
       {:badrpc, reason} ->
+        reason = unwrap_reason(reason)
+
         log_error(
           "ErrorOnRpcCall",
           %{target: node, mod: mod, func: func, error: reason},
@@ -135,7 +137,6 @@ defmodule Realtime.GenRpc do
   end
 
   # Not using :gen_rpc.multicall here because we can't see the actual results on errors
-
   @doc """
   Evaluates apply(mod, func, args) on all nodes
 
@@ -152,7 +153,6 @@ defmodule Realtime.GenRpc do
     key = Keyword.get(opts, :key, nil)
 
     nodes = rpc_nodes([node() | Node.list()], key)
-
     # Latency here is the amount of time that it takes for this node to gather the result.
     # If one node takes a while to reply the remaining calls will have at least the latency reported by this node
     # Example:
@@ -166,7 +166,7 @@ defmodule Realtime.GenRpc do
         result =
           case nb_yield(node, ref, timeout) do
             :timeout -> {:error, :rpc_error, :timeout}
-            {:value, {:badrpc, reason}} -> {:error, :rpc_error, reason}
+            {:value, {:badrpc, reason}} -> {:error, :rpc_error, unwrap_reason(reason)}
             {:value, result} -> result
           end
 
@@ -225,6 +225,9 @@ defmodule Realtime.GenRpc do
   # Tag the node with a random number from 1 to max_clients
   # Using phash2 to ensure the same key and the same client per node
   defp rpc_node(node, key), do: {node, :erlang.phash2(key, max_clients()) + 1}
+
+  defp unwrap_reason({:unknown_error, {{:badrpc, reason}, _}}), do: reason
+  defp unwrap_reason(reason), do: reason
 
   defp default_rpc_timeout, do: Application.get_env(:realtime, :rpc_timeout, 5_000)
 

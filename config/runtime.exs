@@ -134,7 +134,6 @@ config :realtime,
   metrics_rpc_timeout: metrics_rpc_timeout_in_ms,
   tenant_cache_expiration: tenant_cache_expiration,
   rpc_timeout: rpc_timeout,
-  max_gen_rpc_clients: max_gen_rpc_clients,
   no_channel_timeout_in_ms: no_channel_timeout_in_ms,
   platform: platform,
   pubsub_adapter: pubsub_adapter,
@@ -298,7 +297,8 @@ if config_env() != :test do
     db_enc_key: System.get_env("DB_ENC_KEY"),
     region: region,
     prom_poll_rate: Env.get_integer("PROM_POLL_RATE", 5000),
-    slot_name_suffix: slot_name_suffix
+    slot_name_suffix: slot_name_suffix,
+    max_gen_rpc_clients: max_gen_rpc_clients
 end
 
 # Setup Production
