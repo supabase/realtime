@@ -12,10 +12,10 @@ defmodule Realtime.Nodes do
   @spec get_node_for_tenant(Tenant.t()) :: {:ok, node(), binary()} | {:error, term()}
   def get_node_for_tenant(nil), do: {:error, :tenant_not_found}
 
-  def get_node_for_tenant(%Tenant{external_id: tenant_id} = tenant) do
+  def get_node_for_tenant(%Tenant{} = tenant) do
     with region <- Tenants.region(tenant),
          tenant_region <- platform_region_translator(region),
-         node <- launch_node(tenant_id, tenant_region, node()) do
+         node <- launch_node(tenant_region, node()) do
       {:ok, node, tenant_region}
     end
   end
@@ -102,20 +102,41 @@ defmodule Realtime.Nodes do
   If there are not two nodes in a region the connection is established from
   the `default` node given.
   """
-  @spec launch_node(String.t(), String.t() | nil, atom()) :: atom()
-  def launch_node(tenant_id, region, default) do
+  @spec launch_node(String.t() | nil, atom()) :: atom()
+  def launch_node(region, default) do
     case region_nodes(region) do
       [] ->
         Logger.warning("Zero region nodes for #{region} using #{inspect(default)}")
         default
 
-      regions_nodes ->
-        member_count = Enum.count(regions_nodes)
-        index = :erlang.phash2(tenant_id, member_count)
-
-        Enum.fetch!(regions_nodes, index)
+      nodes ->
+        load_aware_node_picker(nodes)
     end
   end
+
+  defp load_aware_node_picker(regions_nodes) do
+    sampled_nodes = Enum.take_random(regions_nodes, 2)
+    nodes_with_loads = Enum.map(sampled_nodes, &{&1, node_load(&1)})
+
+    if length(sampled_nodes) == 2 and Enum.all?(nodes_with_loads, fn {_, load} -> is_number(load) end) do
+      {node, _load} = Enum.min_by(nodes_with_loads, fn {_, load} -> load end)
+      node
+    else
+      Enum.random(regions_nodes)
+    end
+  end
+
+  @doc """
+  Gets the node load for a node either locally or remotely. Returns {:error, :not_enough_data} if the node has not been running for long enough to get reliable metrics.
+  """
+  @spec node_load(atom()) :: integer() | {:error, :not_enough_data}
+  def node_load(node) when node() == node do
+    if uptime_ms() < Application.fetch_env!(:realtime, :node_balance_uptime_threshold_in_ms),
+      do: {:error, :not_enough_data},
+      else: :cpu_sup.avg5()
+  end
+
+  def node_load(node) when node() != node, do: Realtime.GenRpc.call(node, __MODULE__, :node_load, [node], [])
 
   @doc """
   Gets a short node name from a node name when a node name looks like `realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2`
@@ -162,4 +183,10 @@ defmodule Realtime.Nodes do
   @spec all_node_regions() :: [String.t()]
   @doc "List all the regions where nodes can be launched"
   def all_node_regions(), do: :syn.group_names(RegionNodes)
+
+  defp uptime_ms do
+    start_time = :erlang.system_info(:start_time)
+    now = :erlang.monotonic_time()
+    :erlang.convert_time_unit(now - start_time, :native, :millisecond)
+  end
 end
