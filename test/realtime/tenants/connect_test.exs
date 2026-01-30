@@ -340,10 +340,9 @@ defmodule Realtime.Tenants.ConnectTest do
       {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, check_connected_user_interval: 10)
       region = Tenants.region(tenant)
       assert {_pid, %{conn: ^db_conn, region: ^region}} = :syn.lookup(Connect, external_id)
+      Beacon.leave(:users, external_id, self())
       Process.sleep(1000)
-      external_id |> UsersCounter.scope() |> :syn.leave(external_id, self())
-      Process.sleep(1000)
-      assert :undefined = external_id |> UsersCounter.scope() |> :syn.lookup(external_id)
+      refute Beacon.local_member?(:users, external_id, self())
       refute Process.alive?(db_conn)
       Connect.shutdown(external_id)
     end

@@ -5,6 +5,7 @@ defmodule Realtime.PromEx.Plugins.Tenant do
   require Logger
   alias Realtime.Telemetry
   alias Realtime.Tenants
+  alias Realtime.UsersCounter
 
   @impl true
   def polling_metrics(opts) do
@@ -83,18 +84,17 @@ defmodule Realtime.PromEx.Plugins.Tenant do
   end
 
   def execute_tenant_metrics do
-    tenants = Beacon.groups(:users)
-    cluster_counts = Beacon.member_counts(:users)
-    node_counts = Beacon.local_member_counts(:users)
+    cluster_counts = UsersCounter.tenant_counts()
+    local_tenant_counts = UsersCounter.local_tenant_counts()
 
-    for t <- tenants do
+    for {t, count} <- local_tenant_counts do
       tenant = Tenants.Cache.get_tenant_by_external_id(t)
 
       if tenant != nil do
         Telemetry.execute(
           [:realtime, :connections],
           %{
-            connected: Map.get(node_counts, t, 0),
+            connected: count,
             connected_cluster: Map.get(cluster_counts, t, 0),
             limit: tenant.max_concurrent_users
           },

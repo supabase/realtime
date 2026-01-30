@@ -90,7 +90,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
       {:ok, _} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
-      {:ok, node} = Clustered.start(@aux_mod)
+      {:ok, node} = Clustered.start(@aux_mod, extra_config: [{:realtime, :users_scope_broadcast_interval_in_ms, 50}])
       %{tenant: tenant, node: node}
     end
 
@@ -109,7 +109,8 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
       Tenant.execute_tenant_metrics()
 
       assert_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
-                      %{tenant: ^external_id}}
+                      %{tenant: ^external_id}},
+                     500
 
       refute_receive {[:realtime, :connections], %{connected: 1, limit: 200, connected_cluster: 2},
                       %{tenant: ^bad_tenant_id}}
