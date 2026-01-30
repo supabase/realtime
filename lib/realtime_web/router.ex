@@ -36,6 +36,14 @@ defmodule RealtimeWeb.Router do
     plug(:set_span_request_id)
   end
 
+  pipeline :broadcast_single do
+    plug(:accepts, ["json", "octet-stream"])
+    plug(RealtimeWeb.Plugs.ValidateBroadcastContentType)
+    plug(RealtimeWeb.Plugs.AssignTenant)
+    plug(RealtimeWeb.Plugs.RateLimiter)
+    plug(:set_span_request_id)
+  end
+
   pipeline :dashboard_admin do
     plug(:dashboard_auth)
   end
@@ -104,6 +112,12 @@ defmodule RealtimeWeb.Router do
     pipe_through([:open_cors, :tenant_api, :secure_tenant_api])
 
     post("/broadcast", BroadcastController, :broadcast)
+  end
+
+  scope "/api", RealtimeWeb do
+    pipe_through([:open_cors, :broadcast_single, :secure_tenant_api])
+
+    post("/broadcast/:topic/events/:event", BroadcastSingleController, :broadcast)
   end
 
   # Enables LiveDashboard only for development
