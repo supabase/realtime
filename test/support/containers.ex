@@ -7,7 +7,7 @@ defmodule Containers do
 
   use GenServer
 
-  @image "supabase/postgres:15.8.1.040"
+  @image "supabase/postgres:17.6.1.074"
   # Pull image if not available
   def pull do
     case System.cmd("docker", ["image", "inspect", @image]) do
@@ -182,7 +182,7 @@ defmodule Containers do
           primary key ("id"));
           """,
           "grant all on table public.test to anon;",
-          "grant all on table public.test to postgres;",
+          "grant all on table public.test to supabase_admin;",
           "grant all on table public.test to authenticated;",
           "create publication #{publication} for all tables",
           # Clean up all replication slots

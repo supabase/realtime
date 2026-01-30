@@ -21,7 +21,7 @@ app_name = System.get_env("APP_NAME", "")
 
 # Setup Database
 default_db_host = System.get_env("DB_HOST", "127.0.0.1")
-username = System.get_env("DB_USER", "postgres")
+username = System.get_env("DB_USER", "supabase_admin")
 password = System.get_env("DB_PASSWORD", "postgres")
 database = System.get_env("DB_NAME", "postgres")
 port = System.get_env("DB_PORT", "5432")
