@@ -22,10 +22,16 @@ jobs:
       version: ${{ steps.semantic.outputs.new_release_version }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
       - id: semantic
         uses: cycjimmy/semantic-release-action@v6
         with:
-          semantic_version: 18
+          semantic_version: 24
+          extra_plugins: |
+            @semantic-release/exec
+            @semantic-release/git
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PROJECT_ACTION }}
 
