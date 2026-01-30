@@ -119,5 +119,100 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
 
       assert {:ok, %Join{config: %Config{postgres_changes: []}}} = Join.validate(config)
     end
+
+    test "accepts string 'true' for boolean fields" do
+      config = %{
+        "config" => %{
+          "private" => "true",
+          "broadcast" => %{"ack" => "true", "self" => "true"},
+          "presence" => %{"enabled" => "true"}
+        }
+      }
+
+      assert {:ok, %Join{config: config_result}} = Join.validate(config)
+
+      assert %Config{
+               private: true,
+               broadcast: %Broadcast{ack: true, self: true},
+               presence: %Presence{enabled: true}
+             } = config_result
+    end
+
+    test "accepts string 'True' for boolean fields" do
+      config = %{
+        "config" => %{
+          "private" => "True",
+          "broadcast" => %{"ack" => "True", "self" => "True"},
+          "presence" => %{"enabled" => "True"}
+        }
+      }
+
+      assert {:ok, %Join{config: config_result}} = Join.validate(config)
+
+      assert %Config{
+               private: true,
+               broadcast: %Broadcast{ack: true, self: true},
+               presence: %Presence{enabled: true}
+             } = config_result
+    end
+
+    test "accepts string 'false' for boolean fields" do
+      config = %{
+        "config" => %{
+          "private" => "false",
+          "broadcast" => %{"ack" => "false", "self" => "false"},
+          "presence" => %{"enabled" => "false"}
+        }
+      }
+
+      assert {:ok, %Join{config: config_result}} = Join.validate(config)
+
+      assert %Config{
+               private: false,
+               broadcast: %Broadcast{ack: false, self: false},
+               presence: %Presence{enabled: false}
+             } = config_result
+    end
+
+    test "accepts string 'False' for boolean fields" do
+      config = %{
+        "config" => %{
+          "private" => "False",
+          "broadcast" => %{"ack" => "False", "self" => "False"},
+          "presence" => %{"enabled" => "False"}
+        }
+      }
+
+      assert {:ok, %Join{config: config_result}} = Join.validate(config)
+
+      assert %Config{
+               private: false,
+               broadcast: %Broadcast{ack: false, self: false},
+               presence: %Presence{enabled: false}
+             } = config_result
+    end
+
+    test "rejects invalid boolean strings" do
+      config = %{
+        "config" => %{
+          "private" => "yes",
+          "broadcast" => %{"ack" => "a", "self" => "b"},
+          "presence" => %{"enabled" => "no"}
+        }
+      }
+
+      assert {:error, :invalid_join_payload, errors} = Join.validate(config)
+
+      assert errors == %{
+               config: %{
+                 private: ["unable to parse, expected boolean"],
+                 broadcast: %{
+                   ack: ["unable to parse, expected boolean"],
+                   self: ["unable to parse, expected boolean"]
+                 },
+                 presence: %{enabled: ["unable to parse, expected boolean"]}
+               }
+             }
+    end
   end
 end

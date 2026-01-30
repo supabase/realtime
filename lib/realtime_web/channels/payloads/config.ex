@@ -8,6 +8,7 @@ defmodule RealtimeWeb.Channels.Payloads.Config do
   alias RealtimeWeb.Channels.Payloads.Broadcast
   alias RealtimeWeb.Channels.Payloads.Presence
   alias RealtimeWeb.Channels.Payloads.PostgresChange
+  alias RealtimeWeb.Channels.Payloads.ChangesetNormalizer
 
   embedded_schema do
     embeds_one :broadcast, Broadcast
@@ -24,6 +25,7 @@ defmodule RealtimeWeb.Channels.Payloads.Config do
         {k, v} -> {k, v}
       end)
       |> Map.new()
+      |> ChangesetNormalizer.normalize_boolean_fields([:private])
 
     config
     |> cast(attrs, [:private], message: &Join.error_message/2)
