@@ -1,17 +1,17 @@
 services:
   db:
-    image: supabase/postgres:14.1.0.105
+    image: supabase/postgres:17.6.1.074
     container_name: realtime-db
     ports:
       - "5432:5432"
     volumes:
-      - ./dev/postgres:/docker-entrypoint-initdb.d/
+      - ./dev/postgres/00-supabase-schema.sql:/docker-entrypoint-initdb.d/00-supabase-schema.sql
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_HOST: /var/run/postgresql
       POSTGRES_PASSWORD: postgres
   tenant_db:
-    image: supabase/postgres:14.1.0.105
+    image: supabase/postgres:17.6.1.074
     container_name: tenant-db
     ports:
       - "5433:5432"
@@ -32,7 +32,7 @@ services:
       PORT: 4000
       DB_HOST: host.docker.internal
       DB_PORT: 5432
-      DB_USER: postgres
+      DB_USER: supabase_admin
       DB_PASSWORD: postgres
       DB_NAME: postgres
       DB_ENC_KEY: supabaserealtime

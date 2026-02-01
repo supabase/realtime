@@ -57,7 +57,7 @@ Postgrex.transaction(tenant_conn, fn db_conn ->
     "drop table if exists public.test_tenant;",
     "create table public.test_tenant ( id SERIAL PRIMARY KEY, details text );",
     "grant all on table public.test_tenant to anon;",
-    "grant all on table public.test_tenant to postgres;",
+    "grant all on table public.test_tenant to supabase_admin;",
     "grant all on table public.test_tenant to authenticated;",
     "create publication #{publication} for table public.test_tenant"
   ]
