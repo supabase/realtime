@@ -63,20 +63,13 @@ defmodule Realtime.UsersCounterTest do
     end
   end
 
-  describe "tenant_counts/1" do
-    test "map of tenant and number of users for a node only", %{tenant_id: tenant_id, nodes: nodes} do
+  describe "local_tenant_counts/0" do
+    test "map of tenant and number of users for local node only", %{tenant_id: tenant_id} do
       assert UsersCounter.add(self(), tenant_id) == :ok
-      Process.sleep(1000)
-      my_counts = UsersCounter.tenant_counts(Node.self())
+
+      my_counts = UsersCounter.local_tenant_counts()
       # Only one connection from this test process on this node
       assert my_counts == %{tenant_id => 1}
-
-      another_node_counts = UsersCounter.tenant_counts(hd(nodes))
-      assert another_node_counts[tenant_id] == 2
-
-      assert map_size(another_node_counts) == 21
-
-      assert Beacon.local_member_counts(:users) == %{tenant_id => 1}
     end
   end
 
@@ -84,15 +77,6 @@ defmodule Realtime.UsersCounterTest do
     test "returns count of connected clients for tenant on cluster node", %{tenant_id: tenant_id, count: expected} do
       Process.sleep(1000)
       assert UsersCounter.tenant_users(tenant_id) == expected
-    end
-  end
-
-  describe "tenant_users/2" do
-    test "returns count of connected clients for tenant on target cluster", %{tenant_id: tenant_id, nodes: nodes} do
-      node = hd(nodes)
-      assert UsersCounter.tenant_users(node, tenant_id) == 2
-
-      assert Beacon.member_count(:users, tenant_id, node) == 2
     end
   end
 

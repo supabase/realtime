@@ -3,7 +3,7 @@ set -euo pipefail
 set -x
 ulimit -n
 
-if [ ! -z "$RLIMIT_NOFILE" ]; then
+if [ ! -z "${RLIMIT_NOFILE:-}" ]; then
     echo "Setting RLIMIT_NOFILE to ${RLIMIT_NOFILE}"
     ulimit -Sn "$RLIMIT_NOFILE"
 fi
