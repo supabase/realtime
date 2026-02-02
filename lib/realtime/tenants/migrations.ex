@@ -79,7 +79,9 @@ defmodule Realtime.Tenants.Migrations do
     RunSubscriptionIndexBridgingDisabled,
     BroadcastSendErrorLogging,
     CreateMessagesReplayIndex,
-    BroadcastSendIncludePayloadId
+    BroadcastSendIncludePayloadId,
+    AddActionToSubscriptions,
+    FilterActionPostgresChanges
   }
 
   @migrations [
@@ -147,7 +149,9 @@ defmodule Realtime.Tenants.Migrations do
     {20_250_523_164_012, RunSubscriptionIndexBridgingDisabled},
     {20_250_714_121_412, BroadcastSendErrorLogging},
     {20_250_905_041_441, CreateMessagesReplayIndex},
-    {20_251_103_001_201, BroadcastSendIncludePayloadId}
+    {20_251_103_001_201, BroadcastSendIncludePayloadId},
+    {20_251_120_212_548, AddActionToSubscriptions},
+    {20_251_120_215_549, FilterActionPostgresChanges}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
