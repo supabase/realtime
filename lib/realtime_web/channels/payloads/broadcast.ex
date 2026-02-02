@@ -5,17 +5,15 @@ defmodule RealtimeWeb.Channels.Payloads.Broadcast do
   use Ecto.Schema
   import Ecto.Changeset
   alias RealtimeWeb.Channels.Payloads.Join
-  alias RealtimeWeb.Channels.Payloads.ChangesetNormalizer
+  alias RealtimeWeb.Channels.Payloads.FlexibleBoolean
 
   embedded_schema do
-    field :ack, :boolean, default: false
-    field :self, :boolean, default: false
+    field :ack, FlexibleBoolean, default: false
+    field :self, FlexibleBoolean, default: false
     embeds_one :replay, RealtimeWeb.Channels.Payloads.Broadcast.Replay
   end
 
   def changeset(broadcast, attrs) do
-    attrs = ChangesetNormalizer.normalize_boolean_fields(attrs, [:ack, :self])
-
     broadcast
     |> cast(attrs, [:ack, :self], message: &Join.error_message/2)
     |> cast_embed(:replay, invalid_message: "unable to parse, expected a map")

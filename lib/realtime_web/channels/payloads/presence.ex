@@ -5,16 +5,14 @@ defmodule RealtimeWeb.Channels.Payloads.Presence do
   use Ecto.Schema
   import Ecto.Changeset
   alias RealtimeWeb.Channels.Payloads.Join
-  alias RealtimeWeb.Channels.Payloads.ChangesetNormalizer
+  alias RealtimeWeb.Channels.Payloads.FlexibleBoolean
 
   embedded_schema do
-    field :enabled, :boolean, default: true
+    field :enabled, FlexibleBoolean, default: true
     field :key, :any, default: UUID.uuid1(), virtual: true
   end
 
   def changeset(presence, attrs) do
-    attrs = ChangesetNormalizer.normalize_boolean_fields(attrs, [:enabled])
-
     cast(presence, attrs, [:enabled, :key], message: &Join.error_message/2)
   end
 end
