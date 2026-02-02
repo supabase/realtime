@@ -165,6 +165,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, :too_many_joins} ->
         msg = "ClientJoinRateLimitReached: Too many joins per second"
+        send(transport_pid, %Phoenix.Socket.Broadcast{event: "disconnect"})
         {:error, %{reason: msg}}
 
       {:error, :increase_connection_pool} ->

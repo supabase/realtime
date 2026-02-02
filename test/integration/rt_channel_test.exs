@@ -1878,21 +1878,9 @@ defmodule Realtime.Integration.RtChannelTest do
           # Wait for RateCounter tick
           RateCounterHelper.tick_tenant_rate_counters!(tenant.external_id)
 
-          # These ones will be blocked
-          for _ <- 1..300 do
-            WebsocketClient.join(socket, realtime_topic, %{config: config})
-          end
-
-          assert_receive %Message{
-                           event: "phx_reply",
-                           payload: %{
-                             "response" => %{
-                               "reason" => "ClientJoinRateLimitReached: Too many joins per second"
-                             },
-                             "status" => "error"
-                           }
-                         },
-                         2000
+          # The next one will disconnect the socket
+          WebsocketClient.join(socket, realtime_topic, %{config: config})
+          assert_process_down(socket)
         end)
 
       assert log =~
