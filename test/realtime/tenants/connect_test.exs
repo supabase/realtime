@@ -511,6 +511,21 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Process.alive?(pid)
     end
 
+    test "handles replication connection timeout by logging and shutting down", %{tenant: tenant} do
+      expect(ReplicationConnection, :start, fn _tenant, _pid ->
+        {:error, :replication_connection_timeout}
+      end)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+          assert_process_down(db_conn)
+        end)
+
+      assert log =~ "ReplicationConnectionTimeout"
+      assert log =~ "Replication connection timed out during initialization"
+    end
+
     test "handles max_wal_senders by logging the correct operational code", %{tenant: tenant} do
       opts = tenant |> Database.from_tenant("realtime_test", :stop) |> Database.opts()
 

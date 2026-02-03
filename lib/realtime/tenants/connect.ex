@@ -34,6 +34,7 @@ defmodule Realtime.Tenants.Connect do
             db_conn_pid: nil,
             replication_connection_pid: nil,
             replication_connection_reference: nil,
+            replication_recovery_attempts: 0,
             check_connected_user_interval: nil,
             connected_users_bucket: [1],
             check_connect_region_interval: nil
@@ -350,7 +351,7 @@ defmodule Realtime.Tenants.Connect do
     {:stop, :shutdown, state}
   end
 
-  @replication_recovery_backoff 1000
+  @replication_recovery_backoff_min :timer.seconds(1)
 
   # Handle replication connection termination
   def handle_info(
@@ -358,7 +359,8 @@ defmodule Realtime.Tenants.Connect do
         %{replication_connection_reference: replication_connection_reference} = state
       ) do
     log_warning("ReplicationConnectionDown", "Replication connection has been terminated")
-    Process.send_after(self(), :recover_replication_connection, @replication_recovery_backoff)
+    backoff = calculate_recovery_backoff(state.replication_recovery_attempts)
+    Process.send_after(self(), :recover_replication_connection, backoff)
     state = %{state | replication_connection_pid: nil, replication_connection_reference: nil}
     {:noreply, state}
   end
@@ -367,12 +369,22 @@ defmodule Realtime.Tenants.Connect do
   def handle_info(:recover_replication_connection, state) do
     with %{num_rows: 0} <- Postgrex.query!(state.db_conn_pid, @replication_connection_query, []),
          {:ok, state} <- start_replication_connection(state) do
-      {:noreply, state}
+      {:noreply, %{state | replication_recovery_attempts: 0}}
     else
-      _ ->
-        log_error("ReplicationConnectionRecoveryFailed", "Replication connection recovery failed")
-        Process.send_after(self(), :recover_replication_connection, @replication_recovery_backoff)
-        {:noreply, state}
+      %{num_rows: 0} ->
+        {:noreply, %{state | replication_recovery_attempts: 0}}
+
+      {:error, error} ->
+        attempts = state.replication_recovery_attempts + 1
+        backoff = calculate_recovery_backoff(attempts)
+
+        log_error(
+          "ReplicationConnectionRecoveryFailed",
+          "Replication connection recovery failed, attempt #{attempts}, next retry in #{backoff}ms : #{inspect(error)}"
+        )
+
+        Process.send_after(self(), :recover_replication_connection, backoff)
+        {:noreply, %{state | replication_recovery_attempts: attempts}}
     end
   end
 
@@ -451,6 +463,10 @@ defmodule Realtime.Tenants.Connect do
         log_error("ReplicationMaxWalSendersReached", "Tenant database has reached the maximum number of WAL senders")
         {:error, state}
 
+      {:error, :replication_connection_timeout} ->
+        log_error("ReplicationConnectionTimeout", "Replication connection timed out during initialization")
+        {:error, state}
+
       {:error, error} ->
         log_error("StartReplicationFailed", error)
         {:error, state}
@@ -459,5 +475,11 @@ defmodule Realtime.Tenants.Connect do
     error ->
       log_error("StartReplicationFailed", error)
       {:error, state}
+  end
+
+  defp calculate_recovery_backoff(attempts) do
+    max_backoff = @replication_recovery_backoff_min * Integer.pow(2, attempts)
+    half = div(max_backoff, 2)
+    half + Enum.random(0..half)
   end
 end
