@@ -16,7 +16,7 @@ defmodule RealtimeWeb.FallbackController do
     conn
     |> put_status(:not_found)
     |> put_view(RealtimeWeb.ErrorView)
-    |> render("error.json", message: "Not found")
+    |> render("error.json", message: "not found")
   end
 
   def call(conn, {:error, %Ecto.Changeset{} = changeset}) do

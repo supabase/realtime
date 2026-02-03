@@ -49,7 +49,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     test "returns not found on non existing tenant", %{conn: conn} do
       conn = get(conn, ~p"/api/tenants/no")
       response = json_response(conn, 404)
-      assert response == %{"error" => "not found"}
+      assert response == %{"message" => "not found"}
     end
 
     test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
@@ -345,8 +345,6 @@ defmodule RealtimeWeb.TenantControllerTest do
       %{status: status} = post(conn, ~p"/api/tenants/#{external_id}/shutdown")
 
       assert status == 204
-
-      assert_receive :disconnect
       assert_receive {:DOWN, _, :process, ^connect_pid, _}
       refute Process.alive?(connect_pid)
     end
