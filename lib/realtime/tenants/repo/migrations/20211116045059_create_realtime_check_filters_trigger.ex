@@ -4,7 +4,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeCheckFiltersTrigger do
   use Ecto.Migration
 
   def change do
-    execute("create function realtime.subscription_check_filters()
+    execute("create or replace function realtime.subscription_check_filters()
       returns trigger
       language plpgsql
     as $$
