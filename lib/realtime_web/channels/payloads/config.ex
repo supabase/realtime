@@ -8,12 +8,13 @@ defmodule RealtimeWeb.Channels.Payloads.Config do
   alias RealtimeWeb.Channels.Payloads.Broadcast
   alias RealtimeWeb.Channels.Payloads.Presence
   alias RealtimeWeb.Channels.Payloads.PostgresChange
+  alias RealtimeWeb.Channels.Payloads.FlexibleBoolean
 
   embedded_schema do
     embeds_one :broadcast, Broadcast
     embeds_one :presence, Presence
     embeds_many :postgres_changes, PostgresChange
-    field :private, :boolean, default: false
+    field :private, FlexibleBoolean, default: false
   end
 
   def changeset(config, attrs) do

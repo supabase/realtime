@@ -52,7 +52,10 @@ defmodule RealtimeWeb.Channels.Payloads.Join do
     type = Keyword.get(meta, :type)
 
     if type,
-      do: "unable to parse, expected #{type}",
+      do: "unable to parse, expected #{format_type(type)}",
       else: "unable to parse"
   end
+
+  defp format_type(RealtimeWeb.Channels.Payloads.FlexibleBoolean), do: :boolean
+  defp format_type(type), do: type
 end

@@ -5,9 +5,10 @@ defmodule RealtimeWeb.Channels.Payloads.Presence do
   use Ecto.Schema
   import Ecto.Changeset
   alias RealtimeWeb.Channels.Payloads.Join
+  alias RealtimeWeb.Channels.Payloads.FlexibleBoolean
 
   embedded_schema do
-    field :enabled, :boolean, default: true
+    field :enabled, FlexibleBoolean, default: true
     field :key, :any, default: UUID.uuid1(), virtual: true
   end
 
