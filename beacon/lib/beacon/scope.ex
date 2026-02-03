@@ -21,8 +21,8 @@ defmodule Beacon.Scope do
   def member_count(scope, group) do
     scope
     |> table_name()
-    |> :ets.select([{{:_, :"$1"}, [], [:"$1"]}])
-    |> Enum.sum_by(fn member_counts -> Map.get(member_counts, group, 0) end)
+    |> :ets.select([{{:_, %{group => :"$1"}}, [], [:"$1"]}])
+    |> Enum.sum()
   end
 
   @spec member_count(atom, Beacon.group(), node) :: non_neg_integer
