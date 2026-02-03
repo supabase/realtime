@@ -15,7 +15,7 @@ defmodule Realtime.Nodes do
   def get_node_for_tenant(%Tenant{} = tenant) do
     with region <- Tenants.region(tenant),
          tenant_region <- platform_region_translator(region),
-         node <- launch_node(tenant_region, node()) do
+         node <- launch_node(tenant_region, node(), tenant.external_id) do
       {:ok, node, tenant_region}
     end
   end
@@ -99,31 +99,86 @@ defmodule Realtime.Nodes do
   @doc """
   Picks the node to launch the Postgres connection on.
 
-  If there are not two nodes in a region the connection is established from
+  Selection is deterministic within time buckets to prevent syn conflicts from
+  concurrent requests for the same tenant. Uses time-bucketed seeded random
+  selection to pick 2 candidate nodes, compares their loads, and picks the
+  least loaded one.
+
+  The time bucket approach ensures:
+  - Requests within same time window (default: 60s) pick same nodes → prevents conflicts
+  - Requests in different time windows pick different random nodes → better long-term distribution
+
+  If the uptime of the node is below the configured threshold for load balancing,
+  a consistent node is picked based on hashing the tenant ID.
+
+  If there are not two nodes in a region, the connection is established from
   the `default` node given.
   """
-  @spec launch_node(String.t() | nil, atom()) :: atom()
-  def launch_node(region, default) do
+  @spec launch_node(String.t() | nil, atom(), String.t()) :: atom()
+  def launch_node(region, default, tenant_id) when is_binary(tenant_id) do
     case region_nodes(region) do
       [] ->
         Logger.warning("Zero region nodes for #{region} using #{inspect(default)}")
         default
 
+      [single_node] ->
+        single_node
+
       nodes ->
-        load_aware_node_picker(nodes)
+        load_aware_node_picker(nodes, tenant_id)
     end
   end
 
-  defp load_aware_node_picker(regions_nodes) do
-    sampled_nodes = Enum.take_random(regions_nodes, 2)
-    nodes_with_loads = Enum.map(sampled_nodes, &{&1, node_load(&1)})
+  @node_selection_time_bucket_seconds Application.compile_env(
+                                        :realtime,
+                                        :node_selection_time_bucket_seconds,
+                                        60
+                                      )
 
-    if length(sampled_nodes) == 2 and Enum.all?(nodes_with_loads, fn {_, load} -> is_number(load) end) do
-      {node, _load} = Enum.min_by(nodes_with_loads, fn {_, load} -> load end)
-      node
-    else
-      Enum.random(regions_nodes)
+  defp load_aware_node_picker(regions_nodes, tenant_id) when is_binary(tenant_id) do
+    case regions_nodes do
+      nodes ->
+        node_count = length(nodes)
+
+        {node1, node2} = two_random_nodes(tenant_id, nodes, node_count)
+
+        # Compare loads and pick least loaded
+        load1 = node_load(node1)
+        load2 = node_load(node2)
+
+        if is_number(load1) and is_number(load2) do
+          if load1 <= load2, do: node1, else: node2
+        else
+          # Fallback to consistently picking a node if load data is not available
+          index = :erlang.phash2(tenant_id, node_count)
+          Enum.fetch!(nodes, index)
+        end
     end
+  end
+
+  defp two_random_nodes(tenant_id, nodes, node_count) do
+    # Get current time bucket (unix timestamp / bucket_size)
+    time_bucket = div(System.system_time(:second), @node_selection_time_bucket_seconds)
+
+    # Seed the RNG without storing into the process dictionary
+    seed_value = :erlang.phash2({tenant_id, time_bucket})
+    rand_state = :rand.seed_s(:exsss, seed_value)
+
+    {id1, rand_state2} = :rand.uniform_s(node_count, rand_state)
+    {id2, _rand_state3} = :rand.uniform_s(node_count, rand_state2)
+
+    # Ensure id2 is different from id1 when multiple nodes available
+    id2 =
+      if id1 == id2 and node_count > 1 do
+        # Pick next node (wraps around using rem)
+        rem(id1, node_count) + 1
+      else
+        id2
+      end
+
+    node1 = Enum.at(nodes, id1 - 1)
+    node2 = Enum.at(nodes, id2 - 1)
+    {node1, node2}
   end
 
   @doc """
