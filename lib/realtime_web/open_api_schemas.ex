@@ -313,18 +313,25 @@ defmodule RealtimeWeb.OpenApiSchemas do
           type: :boolean,
           description: "Indicates if Realtime has an active connection to the tenant database"
         },
+        replication_connected: %Schema{
+          type: :boolean,
+          description: "Indicates if Realtime has an active replication connection for broadcast changes"
+        },
         connected_cluster: %Schema{
           type: :integer,
           description: "The count of currently connected clients for a tenant on the Realtime cluster"
         }
       },
       required: [
-        :external_id,
-        :jwt_secret
+        :healthy,
+        :db_connected,
+        :replication_connected,
+        :connected_cluster
       ],
       example: %{
         healthy: true,
         db_connected: true,
+        replication_connected: true,
         connected_cluster: 10
       }
     })
