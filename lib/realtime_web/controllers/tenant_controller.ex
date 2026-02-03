@@ -77,13 +77,8 @@ defmodule RealtimeWeb.TenantController do
     tenant = Api.get_tenant_by_external_id(id)
 
     case tenant do
-      %Tenant{} = tenant ->
-        render(conn, "show.json", tenant: tenant)
-
-      nil ->
-        conn
-        |> put_status(404)
-        |> render("not_found.json", tenant: nil)
+      %Tenant{} = tenant -> render(conn, "show.json", tenant: tenant)
+      nil -> {:error, :not_found}
     end
   end
 
@@ -201,7 +196,6 @@ defmodule RealtimeWeb.TenantController do
       send_resp(conn, 204, "")
     else
       nil ->
-        log_error("TenantNotFound", "Tenant not found")
         send_resp(conn, 204, "")
 
       err ->
@@ -234,10 +228,7 @@ defmodule RealtimeWeb.TenantController do
     case Api.get_tenant_by_external_id(tenant_id, use_replica?: false) do
       nil ->
         log_error("TenantNotFound", "Tenant not found")
-
-        conn
-        |> put_status(404)
-        |> render("not_found.json", tenant: nil)
+        {:error, :not_found}
 
       tenant ->
         PostgresCdc.stop_all(tenant, @stop_timeout)
@@ -271,14 +262,10 @@ defmodule RealtimeWeb.TenantController do
     case Api.get_tenant_by_external_id(tenant_id, use_replica?: false) do
       nil ->
         log_error("TenantNotFound", "Tenant not found")
-
-        conn
-        |> put_status(404)
-        |> render("not_found.json", tenant: nil)
+        {:error, :not_found}
 
       tenant ->
         Connect.shutdown(tenant.external_id)
-        SocketDisconnect.distributed_disconnect(tenant.external_id)
         send_resp(conn, 204, "")
     end
   end
@@ -313,10 +300,7 @@ defmodule RealtimeWeb.TenantController do
 
       {:error, :tenant_not_found} ->
         log_error("TenantNotFound", "Tenant not found")
-
-        conn
-        |> put_status(404)
-        |> render("not_found.json", tenant: nil)
+        {:error, :not_found}
     end
   end
 

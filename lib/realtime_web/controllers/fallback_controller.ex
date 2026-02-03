@@ -11,6 +11,8 @@ defmodule RealtimeWeb.FallbackController do
   import RealtimeWeb.ErrorHelpers
 
   def call(conn, {:error, :not_found}) do
+    log_error("TenantNotFound", "Tenant not found")
+
     conn
     |> put_status(:not_found)
     |> put_view(RealtimeWeb.ErrorView)
