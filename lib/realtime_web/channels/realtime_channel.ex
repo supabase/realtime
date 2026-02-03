@@ -509,7 +509,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def terminate(reason, %{transport_pid: transport_pid}) do
-    Logger.debug("Channel terminated with reason: #{reason}")
+    Logger.debug("Channel terminated with reason: #{inspect(reason)}")
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
     Tracker.untrack(transport_pid)
     :ok
