@@ -13,6 +13,7 @@ defmodule Realtime.Tenants.Connect do
 
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
+  alias Realtime.GenRpc
   alias Realtime.RateCounter
   alias Realtime.Rpc
   alias Realtime.Tenants
@@ -197,6 +198,14 @@ defmodule Realtime.Tenants.Connect do
   def whereis(tenant_id) do
     case :syn.lookup(__MODULE__, tenant_id) do
       {pid, _} when is_pid(pid) -> pid
+      _ -> nil
+    end
+  end
+
+  @spec whereis_replication_connection(binary()) :: pid() | nil
+  def whereis_replication_connection(tenant_id) do
+    case :syn.lookup(__MODULE__, tenant_id) do
+      {pid, _} when is_pid(pid) -> GenRpc.call(node(pid), ReplicationConnection, :whereis, [tenant_id], [])
       _ -> nil
     end
   end

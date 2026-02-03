@@ -13,7 +13,6 @@ defmodule Realtime.Tenants do
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.Migrations
-  alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
 
   @doc """
@@ -112,8 +111,8 @@ defmodule Realtime.Tenants do
   end
 
   defp replication_connected?(external_id) do
-    case ReplicationConnection.whereis(external_id) do
-      pid when is_pid(pid) -> Process.alive?(pid)
+    case Connect.whereis_replication_connection(external_id) do
+      pid when is_pid(pid) -> true
       _ -> false
     end
   end
