@@ -12,6 +12,7 @@ on:
       - "Dockerfile"
       - "run.sh"
       - ".github/workflows/tests.yml"
+      - "beacon/**"
 
   push:
     branches:
