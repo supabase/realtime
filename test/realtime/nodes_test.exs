@@ -210,24 +210,65 @@ defmodule Realtime.NodesTest do
     end
   end
 
-  describe "launch_node/2 with load-aware picking" do
-    test "returns a node from the region when nodes are available" do
-      {:ok, remote_node} = Clustered.start()
+  describe "launch_node/3 load-aware but not enough uptime" do
+    test "returns the one node from the region when one node is available" do
       region = "clustered-test-region"
-      spawn_fake_node(region, remote_node)
+      spawn_fake_node(region, :remote_node)
 
-      result = Nodes.launch_node(region, node())
+      result = Nodes.launch_node(region, node(), "test-tenant-123")
 
-      assert result == remote_node
+      assert result == :remote_node
     end
 
     test "returns default node when no region nodes available" do
-      result = Nodes.launch_node("empty-region", node())
+      result = Nodes.launch_node("empty-region", node(), "test-tenant-123")
 
       assert result == node()
     end
 
-    test "picks random node when one node has insufficient data" do
+    test "same tenant_id picks same nodes" do
+      region = "deterministic-region"
+      spawn_fake_node(region, :node_a)
+      spawn_fake_node(region, :node_b)
+      spawn_fake_node(region, :node_c)
+
+      tenant_id = "test-tenant-456"
+
+      # Call 10 times, should always return same node with hashed tenant ID
+      results = for _ <- 1..10, do: Nodes.launch_node(region, node(), tenant_id)
+
+      assert length(Enum.uniq(results)) == 1
+    end
+
+    test "different tenant_ids distribute across nodes" do
+      region = "distribution-region"
+      spawn_fake_node(region, :node_a)
+      spawn_fake_node(region, :node_b)
+      spawn_fake_node(region, :node_c)
+
+      # Generate 30 different tenant IDs
+      tenant_ids = for i <- 1..30, do: "tenant-#{i}"
+
+      results =
+        Enum.map(tenant_ids, fn id ->
+          Nodes.launch_node(region, node(), id)
+        end)
+
+      # Should distribute across multiple nodes (at least 2) using the hashed tenant IDs
+      assert length(Enum.uniq(results)) >= 2
+    end
+  end
+
+  describe "launch_node/3 with load-aware node picking enabled" do
+    setup do
+      Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 0)
+
+      on_exit(fn ->
+        Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 999_999_999_999)
+      end)
+    end
+
+    test "picks deterministic node when one node has insufficient data" do
       region = "uptime-test-region"
       spawn_fake_node(region, :node_a)
       spawn_fake_node(region, :node_b)
@@ -237,23 +278,15 @@ defmodule Realtime.NodesTest do
         :node_b -> 100
       end)
 
-      results = for _ <- 1..10, do: Nodes.launch_node(region, node())
+      results = for _ <- 1..10, do: Nodes.launch_node(region, node(), "test-tenant-123")
 
-      assert Enum.all?(results, &(&1 in [:node_a, :node_b]))
-    end
-  end
-
-  describe "launch_node/2 with load-aware node picking enabled" do
-    setup do
-      Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 0)
-
-      on_exit(fn ->
-        Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 999_999_999_999)
-      end)
+      # Deterministic with hashed tenant ID
+      assert length(Enum.uniq(results)) == 1
+      assert Enum.uniq(results) == [:node_b]
     end
 
-    test "compares load between nodes and picks the least loaded" do
-      {:ok, remote_node} = Clustered.start()
+    test "compares load between nodes and picks the least loaded deterministically" do
+      {:ok, remote_node} = Clustered.start(nil, [{:realtime, :node_balance_uptime_threshold_in_ms, 0}])
 
       region = "load-test-region"
       spawn_fake_node(region, node())
@@ -265,10 +298,11 @@ defmodule Realtime.NodesTest do
       assert is_integer(local_load) and local_load >= 0
       assert is_integer(remote_load) and remote_load >= 0
 
-      results = for _ <- 1..10, do: Nodes.launch_node(region, node())
+      results = for _ <- 1..10, do: Nodes.launch_node(region, node(), "test-tenant-789")
 
+      # Should be deterministic - all same node within time bucket
+      assert length(Enum.uniq(results)) == 1
       assert Enum.all?(results, &(&1 in [node(), remote_node]))
-      assert length(Enum.uniq(results)) <= 2
     end
   end
 end
