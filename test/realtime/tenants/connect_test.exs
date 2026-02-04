@@ -484,8 +484,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
 
-      Process.sleep(1500)
-      new_replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+      new_replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
 
       assert replication_connection_pid != new_replication_connection_pid
       assert Process.alive?(new_replication_connection_pid)
@@ -503,8 +502,7 @@ defmodule Realtime.Tenants.ConnectTest do
       Process.exit(replication_connection_pid, :kill)
       assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
 
-      Process.sleep(1500)
-      new_replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
+      new_replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
 
       assert replication_connection_pid != new_replication_connection_pid
       assert Process.alive?(new_replication_connection_pid)
@@ -686,5 +684,19 @@ defmodule Realtime.Tenants.ConnectTest do
     ]
 
     Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
+  end
+  defp assert_pid(call, attempts \\ 10)
+
+  defp assert_pid(_call, 0) do
+    raise "Timeout waiting for pid"
+  end
+
+  defp assert_pid(call, attempts) do
+    case call.() do
+      pid when is_pid(pid) -> pid
+      _ ->
+        Process.sleep(500)
+        assert_pid(call, attempts - 1)
+    end
   end
 end
