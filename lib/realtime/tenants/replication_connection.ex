@@ -83,6 +83,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     end
   end
 
+  @query_opts [timeout: 30_000]
   @default_init_timeout 30_000
   @table "messages"
   @schema "realtime"
@@ -182,7 +183,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     query = "SELECT * FROM pg_replication_slots WHERE slot_name = '#{replication_slot_name}'"
 
-    {:query, query, %{state | step: :check_replication_slot}}
+    {:query, query, @query_opts, %{state | step: :check_replication_slot}}
   end
 
   @impl true
@@ -201,7 +202,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     query = "CREATE_REPLICATION_SLOT #{replication_slot_name} TEMPORARY LOGICAL #{output_plugin} NOEXPORT_SNAPSHOT"
 
-    {:query, query, %{state | step: :check_publication}}
+    {:query, query, @query_opts, %{state | step: :check_publication}}
   end
 
   def handle_result([%Postgrex.Result{}], %__MODULE__{step: :check_publication} = state) do
@@ -210,7 +211,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     Logger.info("Check publication #{publication_name} for table #{@schema}.#{@table} exists")
     query = "SELECT * FROM pg_publication WHERE pubname = '#{publication_name}'"
 
-    {:query, query, %{state | step: :create_publication}}
+    {:query, query, @query_opts, %{state | step: :create_publication}}
   end
 
   def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :create_publication} = state) do
@@ -219,7 +220,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     Logger.info("Create publication #{publication_name} for table #{@schema}.#{@table}")
     query = "CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
 
-    {:query, query, %{state | step: :start_replication_slot}}
+    {:query, query, @query_opts, %{state | step: :start_replication_slot}}
   end
 
   def handle_result([%Postgrex.Result{num_rows: 1}], %__MODULE__{step: :create_publication} = state) do
@@ -233,7 +234,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
       WHERE pubname = '#{publication_name}'
     """
 
-    {:query, query, %{state | step: :validate_publication}}
+    {:query, query, @query_opts, %{state | step: :validate_publication}}
   end
 
   def handle_result([%Postgrex.Result{rows: rows}], %__MODULE__{step: :validate_publication} = state) do
@@ -245,13 +246,13 @@ defmodule Realtime.Tenants.ReplicationConnection do
       end)
 
     if valid_tables and rows != [] do
-      {:query, "SELECT 1", %{state | step: :start_replication_slot}}
+      {:query, "SELECT 1", @query_opts, %{state | step: :start_replication_slot}}
     else
       query =
         "DROP PUBLICATION IF EXISTS #{publication_name}; CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
 
       Logger.warning("Publication #{publication_name} contains unexpected tables. Recreating...")
-      {:query, query, %{state | step: :start_replication_slot}}
+      {:query, query, @query_opts, %{state | step: :start_replication_slot}}
     end
   end
 
