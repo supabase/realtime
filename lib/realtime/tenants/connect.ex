@@ -36,6 +36,7 @@ defmodule Realtime.Tenants.Connect do
           replication_connection_pid: pid(),
           replication_connection_reference: reference(),
           backoff: Backoff.t(),
+          replication_connection_attempts: non_neg_integer(),
           check_connected_user_interval: non_neg_integer(),
           connected_users_bucket: list(non_neg_integer()),
           check_connect_region_interval: non_neg_integer()
@@ -47,6 +48,7 @@ defmodule Realtime.Tenants.Connect do
             replication_connection_pid: nil,
             replication_connection_reference: nil,
             backoff: nil,
+            replication_connection_attempts: 0,
             check_connected_user_interval: nil,
             connected_users_bucket: [1],
             check_connect_region_interval: nil
@@ -378,16 +380,23 @@ defmodule Realtime.Tenants.Connect do
   end
 
   @replication_connection_query "SELECT 1 from pg_stat_activity where application_name='realtime_replication_connection'"
+  @max_replication_connection_attempts 60
+  def handle_info(
+        :recover_replication_connection,
+        %{replication_connection_attempts: @max_replication_connection_attempts} = state
+      ) do
+    Logger.warning("Max replication connection attempts reached, terminating connection")
+    {:stop, :shutdown, state}
+  end
+
   def handle_info(:recover_replication_connection, state) do
-    %{backoff: backoff, db_conn_pid: db_conn_pid} = state
+    %{backoff: backoff, db_conn_pid: db_conn_pid, replication_connection_attempts: replication_connection_attempts} =
+      state
 
     with %{num_rows: 0} <- Postgrex.query!(db_conn_pid, @replication_connection_query, []),
          {:ok, state} <- start_replication_connection(state) do
-      {:noreply, %{state | backoff: Backoff.reset(backoff)}}
+      {:noreply, %{state | backoff: Backoff.reset(backoff), replication_connection_attempts: 0}}
     else
-      %{num_rows: _} ->
-        {:noreply, %{state | backoff: Backoff.reset(backoff)}}
-
       {:error, error} ->
         {timeout, backoff} = Backoff.backoff(backoff)
 
@@ -397,7 +406,7 @@ defmodule Realtime.Tenants.Connect do
         )
 
         Process.send_after(self(), :recover_replication_connection, timeout)
-        {:noreply, %{state | backoff: backoff}}
+        {:noreply, %{state | backoff: backoff, replication_connection_attempts: replication_connection_attempts + 1}}
     end
   end
 

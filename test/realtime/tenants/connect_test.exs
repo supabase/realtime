@@ -685,6 +685,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
     Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
   end
+
   defp assert_pid(call, attempts \\ 10)
 
   defp assert_pid(_call, 0) do
@@ -693,7 +694,9 @@ defmodule Realtime.Tenants.ConnectTest do
 
   defp assert_pid(call, attempts) do
     case call.() do
-      pid when is_pid(pid) -> pid
+      pid when is_pid(pid) ->
+        pid
+
       _ ->
         Process.sleep(500)
         assert_pid(call, attempts - 1)
