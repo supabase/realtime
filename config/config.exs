@@ -82,6 +82,7 @@ config :gen_rpc,
   async_call_inactivity_timeout: 300_000
 
 config :prom_ex, :storage_adapter, Realtime.PromEx.Store
+config :realtime, Realtime.PromEx, ets_flush_interval: 90_000
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
