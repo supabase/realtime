@@ -131,6 +131,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
     end
   end
 
+  @spec health_check(pid(), timeout()) :: :ok | no_return()
+  def health_check(pid, timeout), do: Postgrex.ReplicationConnection.call(pid, :health_check, timeout)
+
   def start_link(%__MODULE__{tenant_id: tenant_id} = attrs) do
     tenant = Cache.get_tenant_by_external_id(tenant_id)
     connection_opts = Database.from_tenant(tenant, "realtime_broadcast_changes", :stop)
@@ -163,6 +166,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
     Process.flag(:fullsweep_after, 20)
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Process.monitor(monitored_pid)
+
+    {:ok, _watchdog_pid} =
+      Realtime.Tenants.ReplicationConnection.Watchdog.start_link(parent_pid: self(), tenant_id: tenant_id)
 
     state = %{
       state
@@ -308,6 +314,12 @@ defmodule Realtime.Tenants.ReplicationConnection do
   def handle_data(e, state) do
     log_error("UnexpectedMessageReceived", e)
     {:noreply, [], state}
+  end
+
+  @impl true
+  def handle_call(:health_check, from, state) do
+    Postgrex.ReplicationConnection.reply(from, :ok)
+    {:noreply, state}
   end
 
   @impl true

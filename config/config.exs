@@ -10,7 +10,9 @@ import Config
 config :realtime,
   websocket_fullsweep_after: 20,
   ecto_repos: [Realtime.Repo],
-  version: Mix.Project.config()[:version]
+  version: Mix.Project.config()[:version],
+  replication_watchdog_interval: :timer.minutes(5),
+  replication_watchdog_timeout: :timer.minutes(1)
 
 # Configures the endpoint
 config :realtime, RealtimeWeb.Endpoint,
