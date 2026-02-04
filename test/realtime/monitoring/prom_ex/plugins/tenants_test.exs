@@ -10,7 +10,7 @@ defmodule Realtime.PromEx.Plugins.TenantsTest do
     use PromEx, otp_app: :realtime_test_tenants
     @impl true
     def plugins do
-      [{Tenants, poll_rate: 100}]
+      [{Tenants, poll_rate: 50}]
     end
   end
 
