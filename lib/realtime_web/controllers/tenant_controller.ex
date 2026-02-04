@@ -227,7 +227,6 @@ defmodule RealtimeWeb.TenantController do
   def reload(conn, %{"tenant_id" => tenant_id}) do
     case Api.get_tenant_by_external_id(tenant_id, use_replica?: false) do
       nil ->
-        log_error("TenantNotFound", "Tenant not found")
         {:error, :not_found}
 
       tenant ->
@@ -261,7 +260,6 @@ defmodule RealtimeWeb.TenantController do
   def shutdown(conn, %{"tenant_id" => tenant_id}) do
     case Api.get_tenant_by_external_id(tenant_id, use_replica?: false) do
       nil ->
-        log_error("TenantNotFound", "Tenant not found")
         {:error, :not_found}
 
       tenant ->
@@ -292,15 +290,9 @@ defmodule RealtimeWeb.TenantController do
 
   def health(conn, %{"tenant_id" => tenant_id}) do
     case Tenants.health_check(tenant_id) do
-      {:ok, response} ->
-        json(conn, %{data: response})
-
-      {:error, %{healthy: false} = response} ->
-        json(conn, %{data: response})
-
-      {:error, :tenant_not_found} ->
-        log_error("TenantNotFound", "Tenant not found")
-        {:error, :not_found}
+      {:ok, response} -> json(conn, %{data: response})
+      {:error, %{healthy: false} = response} -> json(conn, %{data: response})
+      {:error, :tenant_not_found} -> {:error, :not_found}
     end
   end
 
