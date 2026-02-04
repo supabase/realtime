@@ -28,7 +28,7 @@ defmodule RealtimeWeb.TenantController do
 
   action_fallback(RealtimeWeb.FallbackController)
 
-  plug :set_observability_attributes when action in [:show, :edit, :update, :delete, :reload, :health]
+  plug :set_observability_attributes when action in [:show, :edit, :update, :delete, :reload, :shutdown, :health]
 
   operation(:index,
     summary: "List tenants",
@@ -77,13 +77,8 @@ defmodule RealtimeWeb.TenantController do
     tenant = Api.get_tenant_by_external_id(id)
 
     case tenant do
-      %Tenant{} = tenant ->
-        render(conn, "show.json", tenant: tenant)
-
-      nil ->
-        conn
-        |> put_status(404)
-        |> render("not_found.json", tenant: nil)
+      %Tenant{} = tenant -> render(conn, "show.json", tenant: tenant)
+      nil -> {:error, :not_found}
     end
   end
 
@@ -201,7 +196,6 @@ defmodule RealtimeWeb.TenantController do
       send_resp(conn, 204, "")
     else
       nil ->
-        log_error("TenantNotFound", "Tenant not found")
         send_resp(conn, 204, "")
 
       err ->
@@ -233,16 +227,43 @@ defmodule RealtimeWeb.TenantController do
   def reload(conn, %{"tenant_id" => tenant_id}) do
     case Api.get_tenant_by_external_id(tenant_id, use_replica?: false) do
       nil ->
-        log_error("TenantNotFound", "Tenant not found")
-
-        conn
-        |> put_status(404)
-        |> render("not_found.json", tenant: nil)
+        {:error, :not_found}
 
       tenant ->
         PostgresCdc.stop_all(tenant, @stop_timeout)
         Connect.shutdown(tenant.external_id)
         SocketDisconnect.disconnect(tenant.external_id)
+        send_resp(conn, 204, "")
+    end
+  end
+
+  operation(:shutdown,
+    summary: "Shutdowns the Connect module for a tenant",
+    parameters: [
+      token: [
+        in: :header,
+        name: "Authorization",
+        schema: %OpenApiSpex.Schema{type: :string},
+        required: true,
+        example:
+          "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE2ODAxNjIxNTR9.U9orU6YYqXAtpF8uAiw6MS553tm4XxRzxOhz2IwDhpY"
+      ],
+      tenant_id: [in: :path, description: "Tenant ID", type: :string]
+    ],
+    responses: %{
+      204 => EmptyResponse.response(),
+      403 => EmptyResponse.response(),
+      404 => NotFoundResponse.response()
+    }
+  )
+
+  def shutdown(conn, %{"tenant_id" => tenant_id}) do
+    case Api.get_tenant_by_external_id(tenant_id, use_replica?: false) do
+      nil ->
+        {:error, :not_found}
+
+      tenant ->
+        Connect.shutdown(tenant.external_id)
         send_resp(conn, 204, "")
     end
   end
@@ -269,18 +290,9 @@ defmodule RealtimeWeb.TenantController do
 
   def health(conn, %{"tenant_id" => tenant_id}) do
     case Tenants.health_check(tenant_id) do
-      {:ok, response} ->
-        json(conn, %{data: response})
-
-      {:error, %{healthy: false} = response} ->
-        json(conn, %{data: response})
-
-      {:error, :tenant_not_found} ->
-        log_error("TenantNotFound", "Tenant not found")
-
-        conn
-        |> put_status(404)
-        |> render("not_found.json", tenant: nil)
+      {:ok, response} -> json(conn, %{data: response})
+      {:error, %{healthy: false} = response} -> json(conn, %{data: response})
+      {:error, :tenant_not_found} -> {:error, :not_found}
     end
   end
 

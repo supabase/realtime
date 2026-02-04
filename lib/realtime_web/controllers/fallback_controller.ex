@@ -11,10 +11,12 @@ defmodule RealtimeWeb.FallbackController do
   import RealtimeWeb.ErrorHelpers
 
   def call(conn, {:error, :not_found}) do
+    log_error("TenantNotFound", "Tenant not found")
+
     conn
     |> put_status(:not_found)
     |> put_view(RealtimeWeb.ErrorView)
-    |> render("error.json", message: "Not found")
+    |> render("error.json", message: "not found")
   end
 
   def call(conn, {:error, %Ecto.Changeset{} = changeset}) do

@@ -49,7 +49,7 @@ defmodule RealtimeWeb.TenantControllerTest do
     test "returns not found on non existing tenant", %{conn: conn} do
       conn = get(conn, ~p"/api/tenants/no")
       response = json_response(conn, 404)
-      assert response == %{"error" => "not found"}
+      assert response == %{"message" => "not found"}
     end
 
     test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
@@ -326,6 +326,59 @@ defmodule RealtimeWeb.TenantControllerTest do
       end
 
       assert_receive {:span, span(name: "POST /api/tenants/:tenant_id/reload", attributes: attributes)}
+
+      assert attributes(map: %{external_id: ^external_id}) = attributes
+    end
+  end
+
+  describe "shutdown Connect module for tenant" do
+    setup [:with_tenant]
+
+    test "shuts down Connect process when tenant exists", %{conn: conn, tenant: %{external_id: external_id}} do
+      Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> external_id)
+
+      {:ok, connect_pid} = Connect.lookup_or_start_connection(external_id)
+      Process.monitor(connect_pid)
+
+      assert Process.alive?(connect_pid)
+
+      %{status: status} = post(conn, ~p"/api/tenants/#{external_id}/shutdown")
+
+      assert status == 204
+      assert_receive {:DOWN, _, :process, ^connect_pid, _}
+      refute Process.alive?(connect_pid)
+    end
+
+    test "returns 204 when tenant exists but Connect is not running", %{conn: conn, tenant: %{external_id: external_id}} do
+      %{status: status} = post(conn, ~p"/api/tenants/#{external_id}/shutdown")
+      assert status == 204
+    end
+
+    test "returns 404 when tenant does not exist", %{conn: conn} do
+      %{status: status} = post(conn, ~p"/api/tenants/nope/shutdown")
+      assert status == 404
+    end
+
+    test "returns 403 when jwt is invalid", %{conn: conn, tenant: tenant} do
+      conn = put_req_header(conn, "authorization", "Bearer potato")
+      conn = post(conn, ~p"/api/tenants/#{tenant.external_id}/shutdown")
+      assert response(conn, 403) == ""
+    end
+
+    test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+
+      Tracer.with_span "test" do
+        Task.async(fn ->
+          post(conn, ~p"/api/tenants/#{tenant.external_id}/shutdown")
+
+          assert Logger.metadata()[:external_id] == external_id
+          assert Logger.metadata()[:project] == external_id
+        end)
+        |> Task.await()
+      end
+
+      assert_receive {:span, span(name: "POST /api/tenants/:tenant_id/shutdown", attributes: attributes)}
 
       assert attributes(map: %{external_id: ^external_id}) = attributes
     end
