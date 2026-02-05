@@ -111,9 +111,9 @@ defmodule Realtime.Tenants do
   end
 
   defp replication_connected?(external_id) do
-    case Connect.whereis_replication_connection(external_id) do
-      pid when is_pid(pid) -> true
-      _ -> false
+    case Connect.replication_status(external_id) do
+      {:ok, _pid} -> true
+      {:error, :not_connected} -> false
     end
   end
 

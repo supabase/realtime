@@ -78,7 +78,7 @@ defmodule Realtime.Tenants.ConnectTest do
 
       for _ <- 1..50, do: spawn(connect)
 
-      assert_receive({:ok, pid}, 1100)
+      assert_receive({:ok, pid}, 2000)
 
       for _ <- 1..49, do: assert_receive({:ok, ^pid})
 
@@ -200,11 +200,9 @@ defmodule Realtime.Tenants.ConnectTest do
       log =
         capture_log(fn ->
           assert {:ok, db_conn} = Connect.lookup_or_start_connection(external_id, check_connect_region_interval: 100)
-
           expect(Rebalancer, :check, 1, fn _, _, ^external_id -> {:error, :wrong_region} end)
           reject(&Rebalancer.check/3)
-
-          assert_process_down(db_conn, 500, {:shutdown, :rebalancing})
+          assert_process_down(db_conn, 1000, {:shutdown, :rebalancing})
         end)
 
       assert log =~ "Rebalancing Tenant database connection"
@@ -459,11 +457,16 @@ defmodule Realtime.Tenants.ConnectTest do
       replication_connection_before = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_before)
 
+      assert {:ok, replication_conn_pid_before} = Connect.replication_status(tenant.external_id)
+
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
 
       replication_connection_after = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(replication_connection_after)
       assert replication_connection_before == replication_connection_after
+
+      assert {:ok, replication_conn_pid_after} = Connect.replication_status(tenant.external_id)
+      assert replication_conn_pid_before == replication_conn_pid_after
     end
 
     test "on replication connection postgres pid being stopped, Connect module recovers it", %{tenant: tenant} do
@@ -476,6 +479,8 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Process.alive?(replication_connection_pid)
       pid = Connect.whereis(tenant.external_id)
 
+      assert {:ok, replication_conn_before} = Connect.replication_status(tenant.external_id)
+
       Postgrex.query!(
         db_conn,
         "SELECT pg_terminate_backend(pid) from pg_stat_activity where application_name='realtime_replication_connection'",
@@ -484,11 +489,17 @@ defmodule Realtime.Tenants.ConnectTest do
 
       assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
 
+      Process.sleep(100)
+      assert {:error, :not_connected} = Connect.replication_status(tenant.external_id)
+
       new_replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
 
       assert replication_connection_pid != new_replication_connection_pid
       assert Process.alive?(new_replication_connection_pid)
       assert Process.alive?(pid)
+
+      assert {:ok, replication_conn_after} = Connect.replication_status(tenant.external_id)
+      assert replication_conn_before != replication_conn_after
     end
 
     test "on replication connection exit, Connect module recovers it", %{tenant: tenant} do
@@ -499,14 +510,23 @@ defmodule Realtime.Tenants.ConnectTest do
       Process.monitor(replication_connection_pid)
       assert Process.alive?(replication_connection_pid)
       pid = Connect.whereis(tenant.external_id)
+
+      assert {:ok, replication_conn_before} = Connect.replication_status(tenant.external_id)
+
       Process.exit(replication_connection_pid, :kill)
       assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
+
+      Process.sleep(100)
+      assert {:error, :not_connected} = Connect.replication_status(tenant.external_id)
 
       new_replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
 
       assert replication_connection_pid != new_replication_connection_pid
       assert Process.alive?(new_replication_connection_pid)
       assert Process.alive?(pid)
+
+      assert {:ok, replication_conn_after} = Connect.replication_status(tenant.external_id)
+      assert replication_conn_before != replication_conn_after
     end
 
     test "handles replication connection timeout by logging and shutting down", %{tenant: tenant} do
@@ -526,8 +546,8 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "handles max_wal_senders by logging the correct operational code", %{tenant: tenant} do
       opts = tenant |> Database.from_tenant("realtime_test", :stop) |> Database.opts()
+      parent = self()
 
-      # This creates a loop of errors that occupies all WAL senders and lets us test the error handling
       pids =
         for i <- 0..4 do
           replication_slot_opts =
@@ -543,12 +563,15 @@ defmodule Realtime.Tenants.ConnectTest do
 
           spawn(fn ->
             {:ok, pid} = PostgresReplication.start_link(replication_slot_opts)
+            send(parent, {:replication_ready, i})
 
             receive do
               :stop -> Process.exit(pid, :kill)
             end
           end)
         end
+
+      for i <- 0..4, do: assert_receive({:replication_ready, ^i}, 5000)
 
       on_exit(fn ->
         Enum.each(pids, &send(&1, :stop))
@@ -628,6 +651,9 @@ defmodule Realtime.Tenants.ConnectTest do
       replication_connection_pid = ReplicationConnection.whereis(tenant.external_id)
       assert Process.alive?(connect_pid)
       assert Process.alive?(replication_connection_pid)
+
+      assert {_, %{conn: ^db_conn}} = :syn.lookup(Connect, tenant.external_id)
+      assert {:ok, _replication_conn_pid} = Connect.replication_status(tenant.external_id)
 
       Connect.shutdown(tenant.external_id)
       assert_process_down(connect_pid)

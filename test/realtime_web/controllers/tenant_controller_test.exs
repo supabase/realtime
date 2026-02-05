@@ -13,7 +13,6 @@ defmodule RealtimeWeb.TenantControllerTest do
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
-  alias Realtime.Tenants.ReplicationConnection
   alias Realtime.UsersCounter
 
   @invalid_attrs %{external_id: nil, jwt_secret: nil, extensions: [], name: nil}
@@ -446,8 +445,8 @@ defmodule RealtimeWeb.TenantControllerTest do
       # Fake adding a connected client here
       UsersCounter.add(self(), ext_id)
 
-      # Fake a db connection without replication
-      :syn.register(Realtime.Tenants.Connect, ext_id, self(), %{conn: nil})
+      # Fake a db connection without replication (replication_conn: nil)
+      :syn.register(Realtime.Tenants.Connect, ext_id, self(), %{conn: nil, region: "us-east-1", replication_conn: nil})
 
       :syn.update_registry(Realtime.Tenants.Connect, ext_id, fn _pid, meta ->
         %{meta | conn: db_conn}
@@ -471,15 +470,12 @@ defmodule RealtimeWeb.TenantControllerTest do
       # Fake adding a connected client here
       UsersCounter.add(self(), ext_id)
 
-      # Fake a db connection
-      :syn.register(Realtime.Tenants.Connect, ext_id, self(), %{conn: nil})
+      # Fake a db connection with replication_conn in syn metadata
+      :syn.register(Realtime.Tenants.Connect, ext_id, self(), %{conn: nil, region: "us-east-1", replication_conn: nil})
 
       :syn.update_registry(Realtime.Tenants.Connect, ext_id, fn _pid, meta ->
-        %{meta | conn: db_conn}
+        %{meta | conn: db_conn, replication_conn: self()}
       end)
-
-      # Fake a replication connection by registering a process
-      Registry.register(Realtime.Registry.Unique, {ReplicationConnection, ext_id}, nil)
 
       conn = get(conn, ~p"/api/tenants/#{ext_id}/health")
       data = json_response(conn, 200)["data"]
