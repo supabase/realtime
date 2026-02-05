@@ -516,7 +516,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         call_original(ReplicationConnection, :init, [arg])
       end)
 
-      {:error, :timeout} = ReplicationConnection.start(tenant, self(), 100)
+      assert {:error, :replication_connection_timeout} = ReplicationConnection.start(tenant, self(), 100)
     end
 
     test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do

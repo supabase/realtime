@@ -115,6 +115,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
       {:error, %Postgrex.Error{postgres: %{pg_code: pg_code}}} when pg_code in ~w(53300 53400) ->
         {:error, :max_wal_senders_reached}
 
+      {:error, :timeout} ->
+        {:error, :replication_connection_timeout}
+
       error ->
         error
     end
