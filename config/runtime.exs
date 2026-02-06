@@ -73,6 +73,9 @@ janitor_children_timeout = Env.get_integer("JANITOR_CHILDREN_TIMEOUT", :timer.se
 janitor_schedule_timer = Env.get_integer("JANITOR_SCHEDULE_TIMER_IN_MS", :timer.hours(4))
 platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws, else: :fly
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
+presence_pool_size = Env.get_integer("PRESENCE_POOL_SIZE", 10)
+presence_broadcast_period = Env.get_integer("PRESENCE_BROADCAST_PERIOD_IN_MS", 1_500)
+presence_permdown_period = Env.get_integer("PRESENCE_PERMDOWN_PERIOD_IN_MS", 1_200_000)
 pubsub_adapter = System.get_env("PUBSUB_ADAPTER", "gen_rpc") |> String.to_atom()
 websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_000), :erlang.system_info(:wordsize))
 users_scope_shards = Env.get_integer("USERS_SCOPE_SHARDS", 5)
@@ -139,6 +142,9 @@ config :realtime,
   platform: platform,
   pubsub_adapter: pubsub_adapter,
   broadcast_pool_size: broadcast_pool_size,
+  presence_pool_size: presence_pool_size,
+  presence_broadcast_period: presence_broadcast_period,
+  presence_permdown_period: presence_permdown_period,
   users_scope_shards: users_scope_shards,
   postgres_cdc_scope_shards: postgres_cdc_scope_shards,
   regional_broadcasting: regional_broadcasting,
