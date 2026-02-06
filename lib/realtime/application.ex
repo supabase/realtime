@@ -52,6 +52,7 @@ defmodule Realtime.Application do
 
     region = Application.get_env(:realtime, :region)
     broadcast_pool_size = Application.get_env(:realtime, :broadcast_pool_size, 10)
+    presence_pool_size = Application.get_env(:realtime, :presence_pool_size, 10)
     migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
     connect_partition_slots = Application.get_env(:realtime, :connect_partition_slots)
     no_channel_timeout_in_ms = Application.get_env(:realtime, :no_channel_timeout_in_ms)
@@ -109,7 +110,7 @@ defmodule Realtime.Application do
          partitions: connect_partition_slots},
         {RealtimeWeb.RealtimeChannel.Tracker, check_interval_in_ms: no_channel_timeout_in_ms},
         RealtimeWeb.Endpoint,
-        RealtimeWeb.Presence
+        {RealtimeWeb.Presence, pool_size: presence_pool_size}
       ] ++ extensions_supervisors() ++ janitor_tasks()
 
     database_connections = if master_region == region, do: [Realtime.Repo], else: [Replica.replica()]
