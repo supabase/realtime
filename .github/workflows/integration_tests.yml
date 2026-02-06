@@ -30,5 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Run integration test
-        run: docker compose -f docker-compose.tests.yml up --abort-on-container-exit --exit-code-from test-runner
+        run: |
+          docker compose -f docker-compose.tests.yml up --abort-on-container-exit --exit-code-from deno-test-runner deno-test-runner
+          docker compose -f docker-compose.tests.yml up --abort-on-container-exit --exit-code-from node-test-runner node-test-runner
 
