@@ -53,6 +53,7 @@ defmodule Realtime.Application do
     region = Application.get_env(:realtime, :region)
     broadcast_pool_size = Application.get_env(:realtime, :broadcast_pool_size, 10)
     presence_pool_size = Application.get_env(:realtime, :presence_pool_size, 10)
+    pubsub_registry_size = Application.get_env(:realtime, :pubsub_registry_size, 10)
     presence_broadcast_period = Application.get_env(:realtime, :presence_broadcast_period, 1_500)
     presence_permdown_period = Application.get_env(:realtime, :presence_permdown_period, 1_200_000)
     migration_partition_slots = Application.get_env(:realtime, :migration_partition_slots)
@@ -73,7 +74,11 @@ defmodule Realtime.Application do
         RealtimeWeb.Telemetry,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         {Phoenix.PubSub,
-         name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},
+         name: Realtime.PubSub,
+         registry_size: pubsub_registry_size,
+         pool_size: 10,
+         adapter: pubsub_adapter(),
+         broadcast_pool_size: broadcast_pool_size},
         {Beacon,
          [
            :users,
