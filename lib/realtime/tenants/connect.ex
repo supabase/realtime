@@ -293,7 +293,7 @@ defmodule Realtime.Tenants.Connect do
   def handle_continue(:start_replication, state) do
     case start_replication_connection(state) do
       {:ok, state} -> {:noreply, state, {:continue, :setup_connected_user_events}}
-      {:error, state} -> {:stop, :shutdown, state}
+      {:error, _error} -> {:stop, :shutdown, state}
     end
   end
 
@@ -397,11 +397,6 @@ defmodule Realtime.Tenants.Connect do
          {:ok, state} <- start_replication_connection(state) do
       {:noreply, %{state | backoff: Backoff.reset(backoff), replication_connection_attempts: 0}}
     else
-      {:error, %__MODULE__{}} ->
-        {timeout, backoff} = Backoff.backoff(backoff)
-        Process.send_after(self(), :recover_replication_connection, timeout)
-        {:noreply, %{state | backoff: backoff, replication_connection_attempts: replication_connection_attempts + 1}}
-
       {:error, error} ->
         {timeout, backoff} = Backoff.backoff(backoff)
 
@@ -493,19 +488,19 @@ defmodule Realtime.Tenants.Connect do
     else
       {:error, :max_wal_senders_reached} ->
         log_error("ReplicationMaxWalSendersReached", "Tenant database has reached the maximum number of WAL senders")
-        {:error, state}
+        {:error, :max_wal_senders_reached}
 
       {:error, :replication_connection_timeout} ->
         log_error("ReplicationConnectionTimeout", "Replication connection timed out during initialization")
-        {:error, state}
+        {:error, :replication_connection_timeout}
 
       {:error, error} ->
         log_error("StartReplicationFailed", error)
-        {:error, state}
+        {:error, error}
     end
   rescue
     error ->
       log_error("StartReplicationFailed", error)
-      {:error, state}
+      {:error, error}
   end
 end
