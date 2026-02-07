@@ -397,6 +397,11 @@ defmodule Realtime.Tenants.Connect do
          {:ok, state} <- start_replication_connection(state) do
       {:noreply, %{state | backoff: Backoff.reset(backoff), replication_connection_attempts: 0}}
     else
+      {:error, %__MODULE__{}} ->
+        {timeout, backoff} = Backoff.backoff(backoff)
+        Process.send_after(self(), :recover_replication_connection, timeout)
+        {:noreply, %{state | backoff: backoff, replication_connection_attempts: replication_connection_attempts + 1}}
+
       {:error, error} ->
         {timeout, backoff} = Backoff.backoff(backoff)
 
