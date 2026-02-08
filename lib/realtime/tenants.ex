@@ -30,10 +30,13 @@ defmodule Realtime.Tenants do
 
   @doc """
   Checks if a tenant is healthy. A tenant is healthy if:
-  - Tenant has no db connection and zero client connetions
+  - Tenant has no db connection and zero client connections
   - Tenant has a db connection and >0 client connections
 
   A tenant is not healthy if a tenant has client connections and no database connection.
+
+  The response includes `replication_connected` to indicate if the replication connection
+  for broadcast changes is active. This is informational and does not affect the healthy status.
   """
 
   @spec health_check(binary) ::
@@ -42,7 +45,8 @@ defmodule Realtime.Tenants do
            | String.t()
            | %{
                connected_cluster: pos_integer,
-               db_connected: false,
+               db_connected: boolean,
+               replication_connected: boolean,
                healthy: false,
                region: String.t(),
                node: String.t()
@@ -50,7 +54,8 @@ defmodule Realtime.Tenants do
           | {:ok,
              %{
                connected_cluster: non_neg_integer,
-               db_connected: true,
+               db_connected: boolean,
+               replication_connected: boolean,
                healthy: true,
                region: String.t(),
                node: String.t()
@@ -66,6 +71,7 @@ defmodule Realtime.Tenants do
        %{
          healthy: false,
          db_connected: false,
+         replication_connected: false,
          connected_cluster: connected_cluster,
          region: region,
          node: node
@@ -76,11 +82,13 @@ defmodule Realtime.Tenants do
 
       {:ok, _health_conn} ->
         connected_cluster = UsersCounter.tenant_users(external_id)
+        replication_connected = replication_connected?(external_id)
 
         {:ok,
          %{
            healthy: true,
            db_connected: true,
+           replication_connected: replication_connected,
            connected_cluster: connected_cluster,
            region: region,
            node: node
@@ -94,10 +102,18 @@ defmodule Realtime.Tenants do
          %{
            healthy: result? == :ok || result? == :noop,
            db_connected: false,
+           replication_connected: false,
            connected_cluster: connected_cluster,
            region: region,
            node: node
          }}
+    end
+  end
+
+  defp replication_connected?(external_id) do
+    case Connect.replication_status(external_id) do
+      {:ok, _pid} -> true
+      {:error, :not_connected} -> false
     end
   end
 

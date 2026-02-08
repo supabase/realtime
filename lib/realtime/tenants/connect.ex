@@ -202,6 +202,17 @@ defmodule Realtime.Tenants.Connect do
   end
 
   @doc """
+  Returns the replication connection status from :syn metadata without RPC calls.
+  """
+  @spec replication_status(binary()) :: {:ok, pid()} | {:error, :not_connected}
+  def replication_status(tenant_id) do
+    case :syn.lookup(__MODULE__, tenant_id) do
+      {_, %{replication_conn: pid}} when is_pid(pid) -> {:ok, pid}
+      _ -> {:error, :not_connected}
+    end
+  end
+
+  @doc """
   Shutdown the tenant Connection and linked processes
   """
   @spec shutdown(binary()) :: :ok | nil
@@ -225,7 +236,7 @@ defmodule Realtime.Tenants.Connect do
 
     check_connect_region_interval = Keyword.get(opts, :check_connect_region_interval, rebalance_check_interval_in_ms())
 
-    name = {__MODULE__, tenant_id, %{conn: nil, region: region}}
+    name = {__MODULE__, tenant_id, %{conn: nil, region: region, replication_conn: nil}}
 
     state = %__MODULE__{
       tenant_id: tenant_id,
@@ -369,10 +380,11 @@ defmodule Realtime.Tenants.Connect do
   # Handle replication connection termination
   def handle_info(
         {:DOWN, replication_connection_reference, _, _, _},
-        %{replication_connection_reference: replication_connection_reference} = state
+        %{replication_connection_reference: replication_connection_reference, tenant_id: tenant_id} = state
       ) do
     %{backoff: backoff} = state
     log_warning("ReplicationConnectionDown", "Replication connection has been terminated")
+    update_syn_replication_conn(tenant_id, nil)
     {timeout, backoff} = Backoff.backoff(backoff)
     Process.send_after(self(), :recover_replication_connection, timeout)
     state = %{state | replication_connection_pid: nil, replication_connection_reference: nil, backoff: backoff}
@@ -467,10 +479,15 @@ defmodule Realtime.Tenants.Connect do
 
   defp rebalance_check_interval_in_ms(), do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
 
-  defp start_replication_connection(state) do
-    %{tenant: tenant} = state
+  defp update_syn_replication_conn(tenant_id, pid) do
+    :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | replication_conn: pid} end)
+  end
 
-    with {:ok, replication_connection_pid} <- ReplicationConnection.start(tenant, self()) do
+  defp start_replication_connection(state) do
+    %{tenant: tenant, tenant_id: tenant_id} = state
+
+    with {:ok, replication_connection_pid} <- ReplicationConnection.start(tenant, self()),
+         {:ok, _} <- update_syn_replication_conn(tenant_id, replication_connection_pid) do
       replication_connection_reference = Process.monitor(replication_connection_pid)
 
       state = %{

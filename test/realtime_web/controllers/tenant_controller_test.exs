@@ -409,13 +409,14 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{
                "healthy" => true,
                "db_connected" => false,
+               "replication_connected" => false,
                "connected_cluster" => 0,
                "region" => "us-east-1",
                "node" => "#{node()}"
              } == data
     end
 
-    test "unhealthy tenant with 1 client connections", %{
+    test "unhealthy tenant with 1 client connections and no db connection", %{
       conn: conn,
       tenant: %Tenant{external_id: ext_id}
     } do
@@ -429,19 +430,23 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{
                "healthy" => false,
                "db_connected" => false,
+               "replication_connected" => false,
                "connected_cluster" => 1,
                "region" => "us-east-1",
                "node" => "#{node()}"
              } == data
     end
 
-    test "healthy tenant with 1 client connection", %{conn: conn, tenant: %Tenant{external_id: ext_id}} do
+    test "healthy tenant with db connection but no replication connection", %{
+      conn: conn,
+      tenant: %Tenant{external_id: ext_id}
+    } do
       {:ok, db_conn} = Connect.lookup_or_start_connection(ext_id)
       # Fake adding a connected client here
       UsersCounter.add(self(), ext_id)
 
-      # Fake a db connection
-      :syn.register(Realtime.Tenants.Connect, ext_id, self(), %{conn: nil})
+      # Fake a db connection without replication (replication_conn: nil)
+      :syn.register(Realtime.Tenants.Connect, ext_id, self(), %{conn: nil, region: "us-east-1", replication_conn: nil})
 
       :syn.update_registry(Realtime.Tenants.Connect, ext_id, fn _pid, meta ->
         %{meta | conn: db_conn}
@@ -453,6 +458,32 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{
                "healthy" => true,
                "db_connected" => true,
+               "replication_connected" => false,
+               "connected_cluster" => 1,
+               "region" => "us-east-1",
+               "node" => "#{node()}"
+             } == data
+    end
+
+    test "healthy tenant with db and replication connection", %{conn: conn, tenant: %Tenant{external_id: ext_id}} do
+      {:ok, db_conn} = Connect.lookup_or_start_connection(ext_id)
+      # Fake adding a connected client here
+      UsersCounter.add(self(), ext_id)
+
+      # Fake a db connection with replication_conn in syn metadata
+      :syn.register(Realtime.Tenants.Connect, ext_id, self(), %{conn: nil, region: "us-east-1", replication_conn: nil})
+
+      :syn.update_registry(Realtime.Tenants.Connect, ext_id, fn _pid, meta ->
+        %{meta | conn: db_conn, replication_conn: self()}
+      end)
+
+      conn = get(conn, ~p"/api/tenants/#{ext_id}/health")
+      data = json_response(conn, 200)["data"]
+
+      assert %{
+               "healthy" => true,
+               "db_connected" => true,
+               "replication_connected" => true,
                "connected_cluster" => 1,
                "region" => "us-east-1",
                "node" => "#{node()}"
@@ -477,7 +508,8 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
 
-      assert %{"healthy" => true, "db_connected" => false, "connected_cluster" => 0} = data
+      assert %{"healthy" => true, "db_connected" => false, "replication_connected" => false, "connected_cluster" => 0} =
+               data
     end
 
     test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
