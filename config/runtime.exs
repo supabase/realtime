@@ -61,6 +61,8 @@ tenant_max_channels_per_client = Env.get_integer("TENANT_MAX_CHANNELS_PER_CLIENT
 tenant_max_concurrent_users = Env.get_integer("TENANT_MAX_CONCURRENT_USERS", 200)
 tenant_max_events_per_second = Env.get_integer("TENANT_MAX_EVENTS_PER_SECOND", 100)
 tenant_max_joins_per_second = Env.get_integer("TENANT_MAX_JOINS_PER_SECOND", 100)
+client_presence_max_calls = Env.get_integer("CLIENT_PRESENCE_MAX_CALLS", 5)
+client_presence_window_ms = Env.get_integer("CLIENT_PRESENCE_WINDOW_MS", 30_000)
 rpc_timeout = Env.get_integer("RPC_TIMEOUT", :timer.seconds(30))
 max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
 run_janitor? = Env.get_boolean("RUN_JANITOR", false)
@@ -152,7 +154,11 @@ config :realtime,
   region_mapping: region_mapping,
   metrics_tags: metrics_tags,
   measure_traffic_interval_in_ms: measure_traffic_interval_in_ms,
-  disable_healthcheck_logging: disable_healthcheck_logging
+  disable_healthcheck_logging: disable_healthcheck_logging,
+  client_presence_rate_limit: [
+    max_calls: client_presence_max_calls,
+    window_ms: client_presence_window_ms
+  ]
 
 if config_env() != :test && run_janitor? do
   config :realtime,

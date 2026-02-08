@@ -58,11 +58,17 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
              :rls_policy_error
              | :unable_to_set_policies
              | :rate_limit_exceeded
+             | :client_rate_limit_exceeded
              | :unable_to_track_presence
              | :payload_size_exceeded}
   def handle(%{"event" => event} = payload, db_conn, socket) do
     event = String.downcase(event, :ascii)
-    handle_presence_event(event, payload, db_conn, socket)
+
+    with {:ok, socket} <- limit_client_presence_event(socket) do
+      handle_presence_event(event, payload, db_conn, socket)
+    else
+      {:error, :client_rate_limit_exceeded} = error -> error
+    end
   end
 
   def handle(_, _, socket), do: {:ok, socket}
@@ -179,6 +185,30 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     else
       GenCounter.add(presence_counter.id)
       :ok
+    end
+  end
+
+  defp limit_client_presence_event(socket) do
+    %{assigns: %{presence_client_rate_limit: limit_config}} = socket
+
+    current_time = System.monotonic_time(:millisecond)
+
+    # Check if we need to reset the window
+    cond do
+      is_nil(limit_config.reset_at) or current_time > limit_config.reset_at ->
+        # Start new window or reset expired window
+        updated_limit_config = %{limit_config | counter: 1, reset_at: current_time + limit_config.window_ms}
+        updated_socket = assign(socket, :presence_client_rate_limit, updated_limit_config)
+        {:ok, updated_socket}
+
+      limit_config.counter >= limit_config.max_calls ->
+        {:error, :client_rate_limit_exceeded}
+
+      true ->
+        # Increment counter
+        updated_limit_config = %{limit_config | counter: limit_config.counter + 1}
+        updated_socket = assign(socket, :presence_client_rate_limit, updated_limit_config)
+        {:ok, updated_socket}
     end
   end
 
