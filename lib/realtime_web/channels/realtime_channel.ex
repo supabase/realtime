@@ -136,6 +136,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         socket
         |> assign_counter(tenant)
         |> assign_presence_counter(tenant)
+        |> assign_client_presence_rate_limit(tenant)
 
       # Start presence and add user if presence is enabled
       if presence_enabled?, do: send(self(), :sync_presence)
@@ -400,6 +401,10 @@ defmodule RealtimeWeb.RealtimeChannel do
          {:ok, socket} <- PresenceHandler.handle(payload, db_conn, socket) do
       {:reply, :ok, socket}
     else
+      {:error, :client_rate_limit_exceeded} ->
+        log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
+        shutdown_response(socket, "Client presence rate limit exceeded")
+
       {:error, :rate_limit_exceeded} ->
         shutdown_response(socket, "Too many presence messages per second")
 
@@ -416,6 +421,10 @@ defmodule RealtimeWeb.RealtimeChannel do
     with {:ok, socket} <- PresenceHandler.handle(payload, nil, socket) do
       {:reply, :ok, socket}
     else
+      {:error, :client_rate_limit_exceeded} ->
+        log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
+        shutdown_response(socket, "Client presence rate limit exceeded")
+
       {:error, :rate_limit_exceeded} ->
         shutdown_response(socket, "Too many presence messages per second")
 
@@ -576,6 +585,19 @@ defmodule RealtimeWeb.RealtimeChannel do
     RateCounter.new(rate_args)
 
     assign(socket, :presence_rate_counter, rate_args)
+  end
+
+  defp assign_client_presence_rate_limit(socket, _tenant) do
+    config = Application.get_env(:realtime, :client_presence_rate_limit, max_calls: 5, window_ms: 30_000)
+
+    client_rate_limit = %{
+      max_calls: config[:max_calls],
+      window_ms: config[:window_ms],
+      counter: 0,
+      reset_at: nil
+    }
+
+    assign(socket, :presence_client_rate_limit, client_rate_limit)
   end
 
   defp count(%{assigns: %{rate_counter: counter}}), do: GenCounter.add(counter.id)

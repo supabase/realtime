@@ -501,6 +501,86 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert Enum.sum(bucket) == 1
     end
 
+    test "client rate limit blocks calls over the limit and shuts down channel", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{"config" => %{"presence" => %{"key" => "user_id"}}}
+      assert {:ok, _, %Socket{channel_pid: channel_pid} = socket} = subscribe_and_join(socket, "realtime:test", config)
+
+      assert_receive %Socket.Message{topic: "realtime:test", event: "presence_state", payload: %{}}
+
+      # Make 5 presence calls (at the default limit)
+      for i <- 1..5 do
+        ref = push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"call" => i}})
+        assert_receive %Socket.Reply{ref: ^ref, status: :ok}, 500
+      end
+
+      assert capture_log(fn ->
+               # 6th call should cause channel shutdown
+               push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"call" => 6}})
+
+               assert_receive %Socket.Message{
+                                topic: "realtime:test",
+                                event: "system",
+                                payload: %{
+                                  message: "Client presence rate limit exceeded",
+                                  status: "error",
+                                  extension: "system",
+                                  channel: "test"
+                                }
+                              },
+                              500
+             end) =~ "ClientPresenceRateLimitReached"
+
+      assert_process_down(channel_pid)
+    end
+
+    test "client rate limits are independent per connection", %{tenant: tenant} do
+      jwt1 = Generators.generate_jwt_token(tenant)
+      jwt2 = Generators.generate_jwt_token(tenant)
+
+      {:ok, %Socket{} = socket1} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt1))
+      {:ok, %Socket{} = socket2} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt2))
+
+      config = %{"config" => %{"presence" => %{"key" => "user_id"}}}
+
+      assert {:ok, _, %Socket{channel_pid: channel_pid1} = socket1} =
+               subscribe_and_join(socket1, "realtime:test1", config)
+
+      assert {:ok, _, %Socket{} = socket2} = subscribe_and_join(socket2, "realtime:test2", config)
+
+      assert_receive %Socket.Message{topic: "realtime:test1", event: "presence_state", payload: %{}}
+      assert_receive %Socket.Message{topic: "realtime:test2", event: "presence_state", payload: %{}}
+
+      # Exhaust rate limit for socket1
+      for i <- 1..5 do
+        ref = push(socket1, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"call" => i}})
+        assert_receive %Socket.Reply{ref: ^ref, status: :ok}, 500
+      end
+
+      # socket1's 6th call should cause shutdown
+      push(socket1, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"call" => 6}})
+
+      assert_receive %Socket.Message{
+                       topic: "realtime:test1",
+                       event: "system",
+                       payload: %{
+                         message: "Client presence rate limit exceeded",
+                         status: "error",
+                         extension: "system",
+                         channel: "test1"
+                       }
+                     },
+                     500
+
+      assert_process_down(channel_pid1)
+
+      # socket2 should still work (independent rate limit)
+      ref = push(socket2, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"call" => 1}})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok}, 500
+    end
+
     test "presence track closes on high payload size", %{tenant: tenant} do
       topic = "realtime:test"
       jwt = Generators.generate_jwt_token(tenant)
