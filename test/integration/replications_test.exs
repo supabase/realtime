@@ -41,13 +41,13 @@ defmodule Realtime.Integration.ReplicationsTest do
 
   describe "replication polling lifecycle" do
     test "prepare, poll, consume full cycle", %{conn: conn, slot_name: slot_name} do
-      # Empty slot short-circuits via peek
       {time, result} =
         :timer.tc(fn ->
           Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
         end)
 
-      assert {:ok, %Postgrex.Result{num_rows: 0}} = result
+      assert {:ok, %Postgrex.Result{num_rows: 1, rows: [sentinel]}} = result
+      assert Enum.at(sentinel, 8) == ["peek_empty"]
       assert time < 50_000, "Expected peek short-circuit under 50ms, took #{div(time, 1000)}ms"
 
       Process.sleep(@poll_interval)
@@ -68,15 +68,18 @@ defmodule Realtime.Integration.ReplicationsTest do
 
       Process.sleep(@poll_interval)
 
-      {:ok, %Postgrex.Result{num_rows: 0}} =
+      {:ok, %Postgrex.Result{num_rows: 1, rows: [sentinel]}} =
         Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      assert Enum.at(sentinel, 8) == ["peek_empty"]
     end
 
     test "polls empty multiple times then captures a change when it arrives", %{conn: conn, slot_name: slot_name} do
       for _ <- 1..5 do
-        {:ok, %Postgrex.Result{num_rows: 0}} =
+        {:ok, %Postgrex.Result{num_rows: 1, rows: [sentinel]}} =
           Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
 
+        assert Enum.at(sentinel, 8) == ["peek_empty"]
         Process.sleep(@poll_interval)
       end
 
@@ -92,8 +95,10 @@ defmodule Realtime.Integration.ReplicationsTest do
 
       Process.sleep(@poll_interval)
 
-      {:ok, %Postgrex.Result{num_rows: 0}} =
+      {:ok, %Postgrex.Result{num_rows: 1, rows: [sentinel]}} =
         Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      assert Enum.at(sentinel, 8) == ["peek_empty"]
     end
 
     test "prepare_replication is idempotent", %{conn: conn, slot_name: slot_name} do
@@ -114,6 +119,72 @@ defmodule Realtime.Integration.ReplicationsTest do
 
       assert {:ok, diff} = Replications.get_pg_stat_activity_diff(conn, pid)
       assert is_integer(diff)
+    end
+  end
+
+  describe "peek vs RLS distinction" do
+    setup do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+
+      {:ok, conn} =
+        tenant
+        |> Database.from_tenant("realtime_rls")
+        |> Map.from_struct()
+        |> Keyword.new()
+        |> Postgrex.start_link()
+
+      slot_name = "supabase_realtime_rls_slot_#{System.unique_integer([:positive])}"
+
+      on_exit(fn ->
+        try do
+          Postgrex.query(conn, "select pg_drop_replication_slot($1)", [slot_name])
+        catch
+          _, _ -> :ok
+        end
+      end)
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "event" => "*",
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=eq.no_match"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+      {:ok, _} = Subscriptions.create(conn, @publication, params_list, self(), self())
+      {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+      Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      %{conn: conn, slot_name: slot_name}
+    end
+
+    test "returns 0 rows when WAL changes exist but are filtered by subscription", %{
+      conn: conn,
+      slot_name: slot_name
+    } do
+      # Peek is empty - sentinel row
+      {:ok, %Postgrex.Result{num_rows: 1, rows: [sentinel]}} =
+        Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      assert Enum.at(sentinel, 8) == ["peek_empty"]
+
+      # Insert a row that doesn't match the filter (details != "no_match")
+      Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('rls_filtered')", [])
+      Process.sleep(@poll_interval)
+
+      # WAL changes consumed but subscription filter doesn't match - 0 rows, no sentinel
+      {:ok, %Postgrex.Result{num_rows: 0}} =
+        Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      Process.sleep(@poll_interval)
+
+      # After consumption, peek is empty again - sentinel returned
+      {:ok, %Postgrex.Result{num_rows: 1, rows: [sentinel]}} =
+        Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      assert Enum.at(sentinel, 8) == ["peek_empty"]
     end
   end
 end

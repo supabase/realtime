@@ -77,6 +77,16 @@ defmodule Realtime.Tenants.Migrations.CreatePeekAndListChangesFunction do
       where
         w2j.w2j_add_tables <> ''
         and xyz.subscription_ids[1] is not null
+
+      union all
+
+      select
+        null::jsonb,
+        null::boolean,
+        '{}'::uuid[],
+        '{peek_empty}'::text[]
+      where
+        not exists (select 1 from peek)
     $$;
     """)
   end
