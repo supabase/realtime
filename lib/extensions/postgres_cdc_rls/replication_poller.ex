@@ -95,6 +95,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     record_list_changes_telemetry(time, tenant_id)
 
     case handle_list_changes_result(list_changes, subscribers_nodes_table, tenant_id, rate_counter_args) do
+      {:ok, :peek_empty} ->
+        Backoff.reset(backoff)
+        poll_ref = Process.send_after(self(), :poll, poll_interval_ms)
+        {:noreply, %{state | backoff: backoff, poll_ref: poll_ref}}
+
       {:ok, row_count} ->
         Backoff.reset(backoff)
 
@@ -179,6 +184,14 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       %{tenant: tenant_id}
     )
   end
+
+  defp handle_list_changes_result(
+         {:ok, %Postgrex.Result{num_rows: 1, rows: [[nil, nil, nil, _, _, _, nil, [], ["peek_empty"]]]}},
+         _subscribers_nodes_table,
+         _tenant_id,
+         _rate_counter_args
+       ),
+       do: {:ok, :peek_empty}
 
   defp handle_list_changes_result(
          {:ok,
