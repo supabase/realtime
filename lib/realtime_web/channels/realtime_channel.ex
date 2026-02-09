@@ -402,6 +402,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:reply, :ok, socket}
     else
       {:error, :client_rate_limit_exceeded} ->
+        log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
         shutdown_response(socket, "Client presence rate limit exceeded")
 
       {:error, :rate_limit_exceeded} ->
@@ -421,6 +422,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:reply, :ok, socket}
     else
       {:error, :client_rate_limit_exceeded} ->
+        log_error(socket, "ClientPresenceRateLimitReached", :client_rate_limit_exceeded)
         shutdown_response(socket, "Client presence rate limit exceeded")
 
       {:error, :rate_limit_exceeded} ->

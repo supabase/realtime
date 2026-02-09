@@ -516,20 +516,22 @@ defmodule RealtimeWeb.RealtimeChannelTest do
         assert_receive %Socket.Reply{ref: ^ref, status: :ok}, 500
       end
 
-      # 6th call should cause channel shutdown
-      push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"call" => 6}})
+      assert capture_log(fn ->
+               # 6th call should cause channel shutdown
+               push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"call" => 6}})
 
-      assert_receive %Socket.Message{
-                       topic: "realtime:test",
-                       event: "system",
-                       payload: %{
-                         message: "Client presence rate limit exceeded",
-                         status: "error",
-                         extension: "system",
-                         channel: "test"
-                       }
-                     },
-                     500
+               assert_receive %Socket.Message{
+                                topic: "realtime:test",
+                                event: "system",
+                                payload: %{
+                                  message: "Client presence rate limit exceeded",
+                                  status: "error",
+                                  extension: "system",
+                                  channel: "test"
+                                }
+                              },
+                              500
+             end) =~ "ClientPresenceRateLimitReached"
 
       assert_process_down(channel_pid)
     end

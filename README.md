@@ -302,6 +302,7 @@ This is the list of operational codes that can help you understand your deployme
 | UnknownErrorOnController           | An error we are not handling correctly was triggered on a controller                                                                                                                                  |
 | UnknownErrorOnChannel              | An error we are not handling correctly was triggered on a channel                                                                                                                                     |
 | PresenceRateLimitReached           | Limit of presence events reached                                                                                                                                                                      |
+| ClientPresenceRateLimitReached     | Limit of presence events reached on socket                                                                                                                                                            |
 | UnableToReplayMessages             | An error while replaying messages                                                                                                                                                                     |
 
 ## License
