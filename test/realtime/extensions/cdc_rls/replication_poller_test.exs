@@ -575,6 +575,144 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     end
   end
 
+  describe "poll adaptive interval" do
+    setup do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+
+      subscribers_pids_table = :ets.new(:"#{__MODULE__}.adaptive_pids", [:public, :bag])
+      subscribers_nodes_table = :ets.new(:"#{__MODULE__}.adaptive_nodes", [:public, :set])
+
+      args =
+        hd(tenant.extensions).settings
+        |> Map.put("id", tenant.external_id)
+        |> Map.put("subscribers_pids_table", subscribers_pids_table)
+        |> Map.put("subscribers_nodes_table", subscribers_nodes_table)
+
+      %{args: args}
+    end
+
+    test "peek_empty polls slow down over time", %{args: args} do
+      test_pid = self()
+
+      peek_empty_result =
+        {:ok, %Postgrex.Result{num_rows: 1, rows: [[nil, nil, nil, nil, nil, nil, nil, [], ["peek_empty"]]]}}
+
+      stub(Replications, :list_changes, fn _, _, _, _, _ ->
+        send(test_pid, {:polled_at, System.monotonic_time(:millisecond)})
+        peek_empty_result
+      end)
+
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
+      reject(&TenantBroadcaster.pubsub_broadcast/5)
+
+      start_link_supervised!({Poller, args})
+
+      # Collect enough polls to cross the 10-poll threshold where interval increases
+      timestamps =
+        for _ <- 1..15 do
+          assert_receive {:polled_at, ts}, 2_000
+          ts
+        end
+
+      early_gaps =
+        timestamps
+        |> Enum.take(5)
+        |> Enum.chunk_every(2, 1, :discard)
+        |> Enum.map(fn [a, b] -> b - a end)
+
+      late_gaps =
+        timestamps
+        |> Enum.drop(10)
+        |> Enum.chunk_every(2, 1, :discard)
+        |> Enum.map(fn [a, b] -> b - a end)
+
+      avg_early = Enum.sum(early_gaps) / length(early_gaps)
+      avg_late = Enum.sum(late_gaps) / length(late_gaps)
+
+      # After 10+ peek_empty polls, interval should have increased by at least 100ms
+      assert avg_late > avg_early,
+             "Expected later polls to be slower (#{avg_late}ms) than early polls (#{avg_early}ms)"
+    end
+
+    test "empty results (RLS filtered) poll at base interval without slowing down", %{args: args} do
+      test_pid = self()
+      empty_result = {:ok, %Postgrex.Result{rows: [], num_rows: 0}}
+
+      stub(Replications, :list_changes, fn _, _, _, _, _ ->
+        send(test_pid, {:polled_at, System.monotonic_time(:millisecond)})
+        empty_result
+      end)
+
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
+      reject(&TenantBroadcaster.pubsub_broadcast/5)
+
+      start_link_supervised!({Poller, args})
+
+      timestamps =
+        for _ <- 1..4 do
+          assert_receive {:polled_at, ts}, 1_000
+          ts
+        end
+
+      gaps = timestamps |> Enum.chunk_every(2, 1, :discard) |> Enum.map(fn [a, b] -> b - a end)
+
+      # All gaps should be roughly the base interval (100ms), none growing
+      for gap <- gaps do
+        assert gap < 200, "Expected base interval polling (~100ms), got #{gap}ms"
+      end
+    end
+
+    test "rows with changes trigger immediate re-poll without delay", %{args: args} do
+      test_pid = self()
+
+      results_with_changes =
+        build_result([
+          <<71, 36, 83, 212, 168, 9, 17, 240, 165, 186, 118, 202, 193, 157, 232, 187>>
+        ])
+
+      stub(Replications, :list_changes, fn _, _, _, _, _ ->
+        send(test_pid, {:polled_at, System.monotonic_time(:millisecond)})
+        results_with_changes
+      end)
+
+      stub(TenantBroadcaster, :pubsub_broadcast, fn _, _, _, _, _ -> :ok end)
+
+      start_link_supervised!({Poller, args})
+
+      timestamps =
+        for _ <- 1..3 do
+          assert_receive {:polled_at, ts}, 1_000
+          ts
+        end
+
+      gaps = timestamps |> Enum.chunk_every(2, 1, :discard) |> Enum.map(fn [a, b] -> b - a end)
+
+      # With changes, send(self(), :poll) means near-immediate re-poll
+      for gap <- gaps do
+        assert gap < 50, "Expected immediate re-poll, got #{gap}ms delay"
+      end
+    end
+  end
+
+  describe "adaptive_interval/2" do
+    test "returns base interval when empty_count is below threshold" do
+      assert Poller.adaptive_interval(100, 0) == 100
+      assert Poller.adaptive_interval(100, 9) == 100
+    end
+
+    test "increases by 100ms for every 10 empty polls" do
+      assert Poller.adaptive_interval(100, 10) == 200
+      assert Poller.adaptive_interval(100, 20) == 300
+      assert Poller.adaptive_interval(100, 30) == 400
+    end
+
+    test "caps at base + 500ms" do
+      assert Poller.adaptive_interval(100, 50) == 600
+      assert Poller.adaptive_interval(100, 100) == 600
+      assert Poller.adaptive_interval(100, 1000) == 600
+    end
+  end
+
   describe "slot_name_suffix/0" do
     setup do
       slot_name_suffix = Application.get_env(:realtime, :slot_name_suffix)
