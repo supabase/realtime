@@ -369,8 +369,10 @@ defmodule Realtime.Tenants do
 
   def subscription_errors_per_second_key(tenant_id), do: {:channel, :subscription_errors, tenant_id}
 
-  @connect_errors_per_second_default 10
-  @doc "RateCounter arguments for counting connect per second."
+  @connect_errors_limit 3
+  @connect_errors_tick 200
+  @connect_errors_bucket_len 25
+  @doc "RateCounter arguments for counting connect errors. Uses a 200ms tick with a 25-bucket window (5s) and triggers after 3 errors."
   @spec connect_errors_per_second_rate(Tenant.t() | String.t()) :: RateCounter.Args.t()
   def connect_errors_per_second_rate(%Tenant{external_id: external_id}) do
     connect_errors_per_second_rate(external_id)
@@ -378,9 +380,10 @@ defmodule Realtime.Tenants do
 
   def connect_errors_per_second_rate(tenant_id) do
     opts = [
-      max_bucket_len: 30,
+      tick: @connect_errors_tick,
+      max_bucket_len: @connect_errors_bucket_len,
       limit: [
-        value: @connect_errors_per_second_default,
+        value: @connect_errors_limit,
         measurement: :sum,
         log_fn: fn ->
           Logger.critical(

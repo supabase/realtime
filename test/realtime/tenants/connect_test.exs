@@ -615,8 +615,8 @@ defmodule Realtime.Tenants.ConnectTest do
       log =
         capture_log(fn ->
           res =
-            for _ <- 1..50 do
-              Process.sleep(200)
+            for _ <- 1..10 do
+              Process.sleep(250)
               Connect.lookup_or_start_connection(tenant.external_id)
             end
 
