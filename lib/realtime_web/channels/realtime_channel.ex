@@ -591,7 +591,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     config = Application.get_env(:realtime, :client_presence_rate_limit, max_calls: 5, window_ms: 30_000)
 
     max_calls =
-      case tenant.max_client_presence_events_per_second do
+      case tenant.max_client_presence_events_per_window do
         value when is_integer(value) and value > 0 -> value
         _ -> config[:max_calls]
       end

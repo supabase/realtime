@@ -3,7 +3,7 @@ defmodule Realtime.Repo.Migrations.AddMaxClientPresenceEventsPerSecond do
 
   def change do
     alter table(:tenants) do
-      add :max_client_presence_events_per_second, :integer, null: true
+      add :max_client_presence_events_per_window, :integer, null: true
       add :client_presence_window_ms, :integer, null: true
     end
   end

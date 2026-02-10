@@ -627,9 +627,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
                PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, nil, socket2)
     end
 
-    test "tenant override for max_client_presence_events_per_second is applied", %{tenant: tenant, topic: topic} do
+    test "tenant override for max_client_presence_events_per_window is applied", %{tenant: tenant, topic: topic} do
       {:ok, updated_tenant} =
-        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{max_client_presence_events_per_second: 3})
+        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{max_client_presence_events_per_window: 3})
 
       Realtime.Tenants.Cache.update_cache(updated_tenant)
 
@@ -650,7 +650,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "falls back to env config when tenant override is nil", %{tenant: tenant, topic: topic} do
-      assert is_nil(tenant.max_client_presence_events_per_second)
+      assert is_nil(tenant.max_client_presence_events_per_window)
       assert is_nil(tenant.client_presence_window_ms)
 
       config = Application.get_env(:realtime, :client_presence_rate_limit)
@@ -676,7 +676,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     test "tenant override for client_presence_window_ms respects the window", %{tenant: tenant, topic: topic} do
       {:ok, updated_tenant} =
         Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{
-          max_client_presence_events_per_second: 3,
+          max_client_presence_events_per_window: 3,
           client_presence_window_ms: 100
         })
 
@@ -794,7 +794,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
         config = Application.get_env(:realtime, :client_presence_rate_limit, max_calls: 10, window_ms: 60_000)
 
         max_calls =
-          case tenant.max_client_presence_events_per_second do
+          case tenant.max_client_presence_events_per_window do
             value when is_integer(value) and value > 0 -> value
             _ -> config[:max_calls]
           end
