@@ -370,7 +370,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       }
 
       Authorization
-      |> expect(:get_read_authorizations, fn _, _, _ ->
+      |> expect(:get_read_authorizations, fn _, _, _, _ ->
         {:ok,
          %Authorization.Policies{
            broadcast: %Authorization.Policies.BroadcastPolicies{read: true, write: nil}
@@ -665,7 +665,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
-      expect(Authorization, :get_read_authorizations, fn _, _, _ ->
+      expect(Authorization, :get_read_authorizations, fn _, _, _, _ ->
         {:error, "Realtime was unable to connect to the project database"}
       end)
 

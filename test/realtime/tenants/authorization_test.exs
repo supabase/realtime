@@ -64,6 +64,25 @@ defmodule Realtime.Tenants.AuthorizationTest do
                Authorization.get_read_authorizations(%Policies{}, context.db_conn, authorization_context)
     end
 
+    @tag role: "authenticated",
+         policies: [:authenticated_read_broadcast, :authenticated_write_broadcast]
+    test "skips presence RLS check when presence is disabled", context do
+      {:ok, policies} =
+        Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context,
+          presence_enabled?: false
+        )
+
+      {:ok, policies} =
+        Authorization.get_write_authorizations(policies, context.db_conn, context.authorization_context,
+          presence_enabled?: false
+        )
+
+      assert %Policies{
+               broadcast: %BroadcastPolicies{read: true, write: true},
+               presence: %PresencePolicies{read: false, write: false}
+             } == policies
+    end
+
     @tag role: "anon",
          policies: [
            :authenticated_read_broadcast_and_presence,
