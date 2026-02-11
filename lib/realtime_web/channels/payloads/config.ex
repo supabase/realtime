@@ -22,6 +22,7 @@ defmodule RealtimeWeb.Channels.Payloads.Config do
       attrs
       |> Enum.map(fn
         {k, v} when is_list(v) -> {k, Enum.filter(v, fn v -> v != nil end)}
+        {"postgres_changes", nil} -> {"postgres_changes", []}
         {k, v} -> {k, v}
       end)
       |> Map.new()
