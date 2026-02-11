@@ -120,6 +120,12 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
       assert {:ok, %Join{config: %Config{postgres_changes: []}}} = Join.validate(config)
     end
 
+    test "handles postgres changes as nil as empty array" do
+      config = %{"config" => %{"postgres_changes" => nil}}
+
+      assert {:ok, %Join{config: %Config{postgres_changes: []}}} = Join.validate(config)
+    end
+
     test "accepts string 'true' for boolean fields" do
       config = %{
         "config" => %{
