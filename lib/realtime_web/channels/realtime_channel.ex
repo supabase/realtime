@@ -52,11 +52,18 @@ defmodule RealtimeWeb.RealtimeChannel do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Logger.put_process_level(self(), log_level)
 
+    presence_enabled? =
+      case get_in(params, ["config", "presence", "enabled"]) do
+        enabled when is_boolean(enabled) -> enabled
+        _ -> true
+      end
+
     socket =
       socket
       |> assign_access_token(params)
       |> assign(:private?, !!params["config"]["private"])
       |> assign(:policies, nil)
+      |> assign(:presence_enabled?, presence_enabled?)
 
     case Join.validate(params) do
       {:ok, _join} ->
@@ -97,12 +104,7 @@ defmodule RealtimeWeb.RealtimeChannel do
       Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
 
       is_new_api = new_api?(params)
-      # TODO: Default will be moved to false in the future
-      presence_enabled? =
-        case get_in(params, ["config", "presence", "enabled"]) do
-          enabled when is_boolean(enabled) -> enabled
-          _ -> true
-        end
+      presence_enabled? = socket.assigns.presence_enabled?
 
       pg_change_params = pg_change_params(is_new_api, params, channel_pid, claims, sub_topic)
 
@@ -792,8 +794,12 @@ defmodule RealtimeWeb.RealtimeChannel do
        when not is_nil(topic) do
     authorization_context = socket.assigns.authorization_context
     policies = socket.assigns.policies || %Policies{}
+    presence_enabled? = socket.assigns.presence_enabled?
 
-    with {:ok, policies} <- Authorization.get_read_authorizations(policies, db_conn, authorization_context) do
+    with {:ok, policies} <-
+           Authorization.get_read_authorizations(policies, db_conn, authorization_context,
+             presence_enabled?: presence_enabled?
+           ) do
       socket = assign(socket, :policies, policies)
 
       if match?(%Policies{broadcast: %BroadcastPolicies{read: false}}, socket.assigns.policies),
