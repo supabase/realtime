@@ -113,7 +113,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
             },
             max_client_presence_events_per_window: %Schema{
               type: :number,
-              description: "Maximum client presence events per second (overrides environment default when set)",
+              description: "Maximum client presence events (overrides environment default when set)",
               nullable: true
             },
             client_presence_window_ms: %Schema{
@@ -226,7 +226,7 @@ defmodule RealtimeWeb.OpenApiSchemas do
         },
         max_client_presence_events_per_window: %Schema{
           type: :number,
-          description: "Maximum client presence events per second (overrides environment default when set)",
+          description: "Maximum client presence events (overrides environment default when set)",
           nullable: true
         },
         client_presence_window_ms: %Schema{
