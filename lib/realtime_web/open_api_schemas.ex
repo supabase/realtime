@@ -111,6 +111,16 @@ defmodule RealtimeWeb.OpenApiSchemas do
               type: :number,
               description: "Maximum payload size in KB"
             },
+            max_client_presence_events_per_window: %Schema{
+              type: :number,
+              description: "Maximum client presence events (overrides environment default when set)",
+              nullable: true
+            },
+            client_presence_window_ms: %Schema{
+              type: :number,
+              description: "Client presence rate limit window in milliseconds (overrides environment default when set)",
+              nullable: true
+            },
             extensions: %Schema{
               type: :array,
               items: %Schema{
@@ -213,6 +223,16 @@ defmodule RealtimeWeb.OpenApiSchemas do
               }
             }
           }
+        },
+        max_client_presence_events_per_window: %Schema{
+          type: :number,
+          description: "Maximum client presence events (overrides environment default when set)",
+          nullable: true
+        },
+        client_presence_window_ms: %Schema{
+          type: :number,
+          description: "Client presence rate limit window in milliseconds (overrides environment default when set)",
+          nullable: true
         },
         inserted_at: %Schema{type: :string, format: "date-time", description: "Insert timestamp"},
         extensions: %Schema{

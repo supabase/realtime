@@ -30,7 +30,9 @@ defmodule RealtimeWeb.TenantView do
             Map.drop(settings, ["db_password"])
           end)
         end),
-      private_only: tenant.private_only
+      private_only: tenant.private_only,
+      max_client_presence_events_per_window: tenant.max_client_presence_events_per_window,
+      client_presence_window_ms: tenant.client_presence_window_ms
     }
   end
 end

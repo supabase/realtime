@@ -589,12 +589,24 @@ defmodule RealtimeWeb.RealtimeChannel do
     assign(socket, :presence_rate_counter, rate_args)
   end
 
-  defp assign_client_presence_rate_limit(socket, _tenant) do
+  defp assign_client_presence_rate_limit(socket, tenant) do
     config = Application.get_env(:realtime, :client_presence_rate_limit, max_calls: 5, window_ms: 30_000)
 
+    max_calls =
+      case tenant.max_client_presence_events_per_window do
+        value when is_integer(value) and value > 0 -> value
+        _ -> config[:max_calls]
+      end
+
+    window_ms =
+      case tenant.client_presence_window_ms do
+        value when is_integer(value) and value > 0 -> value
+        _ -> config[:window_ms]
+      end
+
     client_rate_limit = %{
-      max_calls: config[:max_calls],
-      window_ms: config[:window_ms],
+      max_calls: max_calls,
+      window_ms: window_ms,
       counter: 0,
       reset_at: nil
     }

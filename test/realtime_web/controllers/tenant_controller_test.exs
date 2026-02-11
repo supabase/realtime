@@ -148,6 +148,46 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert 100 = json_response(conn, 200)["data"]["max_joins_per_second"]
     end
 
+    test "can set max_client_presence_events_per_window", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      attrs = default_tenant_attrs(port) |> Map.put("max_client_presence_events_per_window", 42)
+      attrs = Map.put(attrs, "external_id", external_id)
+
+      conn = post(conn, ~p"/api/tenants", tenant: attrs)
+      assert %{"max_client_presence_events_per_window" => 42} = json_response(conn, 200)["data"]
+
+      conn = get(conn, Routes.tenant_path(conn, :show, external_id))
+      assert 42 = json_response(conn, 200)["data"]["max_client_presence_events_per_window"]
+    end
+
+    test "max_client_presence_events_per_window defaults to nil", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+
+      conn = get(conn, Routes.tenant_path(conn, :show, external_id))
+      assert is_nil(json_response(conn, 200)["data"]["max_client_presence_events_per_window"])
+    end
+
+    test "can set client_presence_window_ms", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      attrs = default_tenant_attrs(port) |> Map.put("client_presence_window_ms", 5_000)
+      attrs = Map.put(attrs, "external_id", external_id)
+
+      conn = post(conn, ~p"/api/tenants", tenant: attrs)
+      assert %{"client_presence_window_ms" => 5_000} = json_response(conn, 200)["data"]
+
+      conn = get(conn, Routes.tenant_path(conn, :show, external_id))
+      assert 5_000 = json_response(conn, 200)["data"]["client_presence_window_ms"]
+    end
+
+    test "client_presence_window_ms defaults to nil", %{conn: conn, tenant: tenant} do
+      external_id = tenant.external_id
+
+      conn = get(conn, Routes.tenant_path(conn, :show, external_id))
+      assert is_nil(json_response(conn, 200)["data"]["client_presence_window_ms"])
+    end
+
     test "renders errors when data is invalid", %{conn: conn} do
       conn = post(conn, ~p"/api/tenants", tenant: @invalid_attrs)
       assert json_response(conn, 422)["errors"] != %{}
@@ -177,6 +217,24 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert 100 = json_response(conn, 200)["data"]["max_channels_per_client"]
       assert 100 = json_response(conn, 200)["data"]["max_events_per_second"]
       assert 100 = json_response(conn, 200)["data"]["max_joins_per_second"]
+    end
+
+    test "can update max_client_presence_events_per_window", %{tenant: tenant, conn: conn} do
+      external_id = tenant.external_id
+      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      attrs = default_tenant_attrs(port) |> Map.put("max_client_presence_events_per_window", 99)
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+      assert %{"max_client_presence_events_per_window" => 99} = json_response(conn, 200)["data"]
+    end
+
+    test "can update client_presence_window_ms", %{tenant: tenant, conn: conn} do
+      external_id = tenant.external_id
+      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      attrs = default_tenant_attrs(port) |> Map.put("client_presence_window_ms", 10_000)
+
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+      assert %{"client_presence_window_ms" => 10_000} = json_response(conn, 200)["data"]
     end
 
     test "renders errors when data is invalid", %{conn: conn} do

@@ -565,7 +565,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
   describe "per-client rate limiting" do
     test "allows calls under the limit", %{tenant: tenant, topic: topic} do
-      socket = socket_fixture(tenant, topic, random_string(), private?: false)
+      client_rate_limit = %{max_calls: 10, window_ms: 60_000, counter: 0, reset_at: nil}
+      socket = socket_fixture(tenant, topic, random_string(), private?: false, client_rate_limit: client_rate_limit)
 
       # Make 9 calls (under limit of 10)
       socket =
@@ -586,7 +587,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "blocks calls over the limit", %{tenant: tenant, topic: topic} do
-      socket = socket_fixture(tenant, topic, random_string(), private?: false)
+      client_rate_limit = %{max_calls: 10, window_ms: 60_000, counter: 0, reset_at: nil}
+      socket = socket_fixture(tenant, topic, random_string(), private?: false, client_rate_limit: client_rate_limit)
 
       # Make 10 calls (at limit)
       socket =
@@ -605,8 +607,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
     end
 
     test "rate limits work independently per socket", %{tenant: tenant, topic: topic} do
-      socket1 = socket_fixture(tenant, topic, random_string(), private?: false)
-      socket2 = socket_fixture(tenant, topic, random_string(), private?: false)
+      client_rate_limit = %{max_calls: 10, window_ms: 60_000, counter: 0, reset_at: nil}
+      socket1 = socket_fixture(tenant, topic, random_string(), private?: false, client_rate_limit: client_rate_limit)
+      socket2 = socket_fixture(tenant, topic, random_string(), private?: false, client_rate_limit: client_rate_limit)
 
       socket1 =
         Enum.reduce(1..10, socket1, fn _, acc_socket ->
@@ -622,6 +625,82 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       # socket2 should still work (independent limit)
       assert {:ok, _socket} =
                PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, nil, socket2)
+    end
+
+    test "tenant override for max_client_presence_events_per_window is applied", %{tenant: tenant, topic: topic} do
+      {:ok, updated_tenant} =
+        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{max_client_presence_events_per_window: 3})
+
+      Realtime.Tenants.Cache.update_cache(updated_tenant)
+
+      socket = socket_fixture(updated_tenant, topic, random_string(), private?: false)
+
+      assert %{max_calls: 3} = socket.assigns.presence_client_rate_limit
+
+      socket =
+        Enum.reduce(1..3, socket, fn _, acc_socket ->
+          {:ok, updated_socket} =
+            PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, nil, acc_socket)
+
+          updated_socket
+        end)
+
+      assert {:error, :client_rate_limit_exceeded} =
+               PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, nil, socket)
+    end
+
+    test "falls back to env config when tenant override is nil", %{tenant: tenant, topic: topic} do
+      assert is_nil(tenant.max_client_presence_events_per_window)
+      assert is_nil(tenant.client_presence_window_ms)
+
+      config = Application.get_env(:realtime, :client_presence_rate_limit)
+      expected_max_calls = config[:max_calls]
+      expected_window_ms = config[:window_ms]
+      socket = socket_fixture(tenant, topic, random_string(), private?: false)
+
+      assert %{max_calls: ^expected_max_calls, window_ms: ^expected_window_ms} =
+               socket.assigns.presence_client_rate_limit
+    end
+
+    test "tenant override for client_presence_window_ms is applied", %{tenant: tenant, topic: topic} do
+      {:ok, updated_tenant} =
+        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{client_presence_window_ms: 5_000})
+
+      Realtime.Tenants.Cache.update_cache(updated_tenant)
+
+      socket = socket_fixture(updated_tenant, topic, random_string(), private?: false)
+
+      assert %{window_ms: 5_000} = socket.assigns.presence_client_rate_limit
+    end
+
+    test "tenant override for client_presence_window_ms respects the window", %{tenant: tenant, topic: topic} do
+      {:ok, updated_tenant} =
+        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{
+          max_client_presence_events_per_window: 3,
+          client_presence_window_ms: 100
+        })
+
+      Realtime.Tenants.Cache.update_cache(updated_tenant)
+
+      socket = socket_fixture(updated_tenant, topic, random_string(), private?: false)
+
+      assert %{max_calls: 3, window_ms: 100} = socket.assigns.presence_client_rate_limit
+
+      socket =
+        Enum.reduce(1..3, socket, fn _, acc_socket ->
+          {:ok, updated_socket} =
+            PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, nil, acc_socket)
+
+          updated_socket
+        end)
+
+      assert {:error, :client_rate_limit_exceeded} =
+               PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, nil, socket)
+
+      Process.sleep(101)
+
+      assert {:ok, _socket} =
+               PresenceHandler.handle(%{"event" => "track", "payload" => %{"call" => random_string()}}, nil, socket)
     end
 
     test "rate limit resets after window expires", %{tenant: tenant, topic: topic} do
@@ -706,17 +785,33 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
     RateCounter.new(rate)
 
-    # Allow tests to override client rate limit config (e.g., for tests that do many calls)
     client_rate_limit_override = Keyword.get(opts, :client_rate_limit)
 
     client_rate_limit =
-      client_rate_limit_override ||
+      if client_rate_limit_override do
+        client_rate_limit_override
+      else
+        config = Application.get_env(:realtime, :client_presence_rate_limit, max_calls: 10, window_ms: 60_000)
+
+        max_calls =
+          case tenant.max_client_presence_events_per_window do
+            value when is_integer(value) and value > 0 -> value
+            _ -> config[:max_calls]
+          end
+
+        window_ms =
+          case tenant.client_presence_window_ms do
+            value when is_integer(value) and value > 0 -> value
+            _ -> config[:window_ms]
+          end
+
         %{
-          max_calls: 10,
-          window_ms: 60_000,
+          max_calls: max_calls,
+          window_ms: window_ms,
           counter: 0,
           reset_at: nil
         }
+      end
 
     %Phoenix.Socket{
       joined: true,
