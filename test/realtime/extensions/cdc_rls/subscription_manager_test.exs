@@ -7,6 +7,9 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
+    {:ok, db_conn} = Realtime.Database.connect(tenant, "realtime_test", :stop)
+    Integrations.setup_postgres_changes(db_conn)
+    GenServer.stop(db_conn)
     Realtime.Tenants.Cache.update_cache(tenant)
 
     subscribers_pids_table = :ets.new(__MODULE__, [:public, :bag])

@@ -16,12 +16,12 @@ defmodule RealtimeWeb.ConnCase do
   """
 
   use ExUnit.CaseTemplate
-  alias Ecto.Adapters.SQL.Sandbox
 
   using do
     quote do
       # Import conveniences for testing with connections
       import Generators
+      import Integrations
       import TenantConnection
       import Phoenix.ConnTest
       import Plug.Conn
@@ -38,9 +38,7 @@ defmodule RealtimeWeb.ConnCase do
   end
 
   setup tags do
-    pid = Sandbox.start_owner!(Realtime.Repo, shared: not tags[:async])
-    on_exit(fn -> Sandbox.stop_owner(pid) end)
-
+    Realtime.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

@@ -49,8 +49,11 @@ defmodule Clustered do
     phoenix_port = Keyword.get(opts, :phoenix_port, 4012)
     name = Keyword.get(opts, :name, :peer.random_name())
 
+    partition = System.get_env("MIX_TEST_PARTITION")
+    node_name = if partition, do: :"main#{partition}@127.0.0.1", else: :"main@127.0.0.1"
+
     :ok =
-      case :net_kernel.start([:"main@127.0.0.1"]) do
+      case :net_kernel.start([node_name]) do
         {:ok, _} ->
           :ok
 
@@ -114,6 +117,7 @@ defmodule Clustered do
       :ok = :peer.call(pid, Application, :put_env, [app_name, key, value])
     end
 
+    wait_for_port_free(gen_rpc_tcp_client_port)
     {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:gen_rpc])
     {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [:mix])
     :ok = :peer.call(pid, Mix, :env, [Mix.env()])
@@ -136,6 +140,21 @@ defmodule Clustered do
     case port do
       port when is_integer(port) and port > 0 -> wait_for_port({127, 0, 0, 1}, port, 50, 100)
       _ -> raise "gen_rpc tcp_server_port is not configured: #{inspect(port)}"
+    end
+  end
+
+  defp wait_for_port_free(port, attempts \\ 50, delay_ms \\ 100)
+  defp wait_for_port_free(_port, 0, _delay_ms), do: :ok
+
+  defp wait_for_port_free(port, attempts, delay_ms) do
+    case :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 100) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        Process.sleep(delay_ms)
+        wait_for_port_free(port, attempts - 1, delay_ms)
+
+      {:error, _} ->
+        :ok
     end
   end
 

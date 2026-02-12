@@ -93,9 +93,4 @@ defmodule Integration.TrackerTest do
     assert [{_pid, count}] = Tracker.list_pids()
     assert count == 2
   end
-
-  defp assert_process_down(pid, timeout) do
-    ref = Process.monitor(pid)
-    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
-  end
 end

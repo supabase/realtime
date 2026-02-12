@@ -1,10 +1,7 @@
 import Config
 
-# Configure your database
-#
-# The MIX_TEST_PARTITION environment variable can be used
-# to provide built-in test partitioning in CI environment.
-# Run `mix help test` for more information.
+partition = System.get_env("MIX_TEST_PARTITION")
+
 for repo <- [
       Realtime.Repo,
       Realtime.Repo.Replica.FRA,
@@ -20,14 +17,15 @@ for repo <- [
   config :realtime, repo,
     username: "supabase_admin",
     password: "postgres",
-    database: "realtime_test",
+    database: "realtime_test#{partition}",
     hostname: "127.0.0.1",
     pool: Ecto.Adapters.SQL.Sandbox
 end
 
-# Running server during tests to run integration tests
+http_port = if partition, do: 4002 + String.to_integer(partition), else: 4002
+
 config :realtime, RealtimeWeb.Endpoint,
-  http: [port: 4002],
+  http: [port: http_port],
   server: true
 
 # that's what config/runtime.exs expects to see as region
@@ -62,7 +60,9 @@ config :opentelemetry,
 
 # Using different ports so that a remote node during test can connect using the same local network
 # See Clustered module
+gen_rpc_offset = if partition, do: String.to_integer(partition) * 10, else: 0
+
 config :gen_rpc,
-  tcp_server_port: 5969,
-  tcp_client_port: 5970,
+  tcp_server_port: 5969 + gen_rpc_offset,
+  tcp_client_port: 5970 + gen_rpc_offset,
   connect_timeout: 500

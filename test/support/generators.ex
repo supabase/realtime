@@ -283,8 +283,11 @@ defmodule Generators do
     jwt
   end
 
-  # default test port
-  @port 4002
+  defp test_port do
+    :realtime
+    |> Application.get_env(RealtimeWeb.Endpoint, %{})
+    |> get_in([:http, :port]) || 4002
+  end
 
   def get_connection(tenant, serializer \\ Phoenix.Socket.V1.JSONSerializer, opts \\ []) do
     params = Keyword.get(opts, :params, %{log_level: :warning})
@@ -300,8 +303,8 @@ defmodule Generators do
     end
   end
 
-  def uri(tenant, serializer, port \\ @port),
-    do: "ws://#{tenant.external_id}.localhost:#{port}/socket/websocket?vsn=#{vsn(serializer)}"
+  def uri(tenant, serializer, port \\ nil),
+    do: "ws://#{tenant.external_id}.localhost:#{port || test_port()}/socket/websocket?vsn=#{vsn(serializer)}"
 
   defp vsn(Phoenix.Socket.V1.JSONSerializer), do: "1.0.0"
   defp vsn(RealtimeWeb.Socket.V2Serializer), do: "2.0.0"

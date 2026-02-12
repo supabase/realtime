@@ -231,23 +231,25 @@ defmodule RealtimeWeb.BroadcastControllerTest do
   end
 
   describe "unauthorized" do
-    test "invalid token returns 401", %{conn: conn} do
+    test "invalid token returns 401", %{conn: conn, tenant: tenant} do
       conn =
         conn
+        |> delete_req_header("authorization")
         |> put_req_header("accept", "application/json")
         |> put_req_header("x-api-key", "potato")
-        |> then(&%{&1 | host: "dev_tenant.supabase.com"})
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{})
       assert conn.status == 401
     end
 
-    test "expired token returns 401", %{conn: conn} do
+    test "expired token returns 401", %{conn: conn, tenant: tenant} do
       conn =
         conn
+        |> delete_req_header("authorization")
         |> put_req_header("accept", "application/json")
         |> put_req_header("x-api-key", @expired_token)
-        |> then(&%{&1 | host: "dev_tenant.supabase.com"})
+        |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
 
       conn = post(conn, Routes.broadcast_path(conn, :broadcast), %{})
       assert conn.status == 401

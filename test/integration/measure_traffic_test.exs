@@ -3,14 +3,9 @@ defmodule Realtime.Integration.MeasureTrafficTest do
 
   alias Phoenix.Socket.Message
   alias Realtime.Integration.WebsocketClient
+  alias Realtime.Tenants.ReplicationConnection
 
-  setup do
-    tenant = Containers.checkout_tenant(run_migrations: true)
-
-    {:ok, db_conn} = Realtime.Tenants.Connect.lookup_or_start_connection(tenant.external_id)
-    assert Realtime.Tenants.Connect.ready?(tenant.external_id)
-    %{db_conn: db_conn, tenant: tenant}
-  end
+  setup [:checkout_tenant_and_connect]
 
   def handle_telemetry(event, measurements, metadata, name) do
     tenant = metadata[:tenant]
@@ -137,6 +132,7 @@ defmodule Realtime.Integration.MeasureTrafficTest do
     end
 
     test "measure traffic for postgres changes events", %{tenant: tenant, db_conn: db_conn} do
+      Integrations.setup_postgres_changes(db_conn)
       {socket, _} = get_connection(tenant)
       config = %{broadcast: %{self: true}, postgres_changes: [%{event: "*", schema: "public"}]}
       topic = "realtime:any"
@@ -195,6 +191,16 @@ defmodule Realtime.Integration.MeasureTrafficTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 1000
       assert_receive %Message{topic: ^topic, event: "presence_state"}, 1000
 
+      Enum.reduce_while(1..30, nil, fn _, _ ->
+        if ReplicationConnection.whereis(tenant.external_id),
+          do: {:halt, :ok},
+          else:
+            (
+              Process.sleep(500)
+              {:cont, nil}
+            )
+      end)
+
       for _ <- 1..5 do
         event = random_string()
         value = random_string()
@@ -216,7 +222,7 @@ defmodule Realtime.Integration.MeasureTrafficTest do
                          join_ref: nil,
                          ref: nil
                        },
-                       1000
+                       2000
       end
 
       # Wait for RateCounter to run

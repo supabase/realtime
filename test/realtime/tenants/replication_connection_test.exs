@@ -23,6 +23,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     tenant = Containers.checkout_tenant(run_migrations: true)
 
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+    Integrations.setup_postgres_changes(db_conn)
     Postgrex.query(db_conn, "SELECT pg_drop_replication_slot($1)", [@replication_slot_name])
 
     %{tenant: tenant, db_conn: db_conn}

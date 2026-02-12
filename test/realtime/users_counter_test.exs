@@ -28,6 +28,17 @@ defmodule Realtime.UsersCounterTest do
     end
   end
 
+  describe "local_tenants/0" do
+    test "returns list of tenant ids with local connections" do
+      tenant_id = random_string()
+      assert UsersCounter.add(self(), tenant_id) == :ok
+
+      tenants = UsersCounter.local_tenants()
+      assert is_list(tenants)
+      assert tenant_id in tenants
+    end
+  end
+
   @aux_mod (quote do
               defmodule Aux do
                 def ping() do
@@ -83,8 +94,10 @@ defmodule Realtime.UsersCounterTest do
   defp generate_load(tenant_id) do
     processes = 2
 
+    gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
+
     nodes = %{
-      :"main@127.0.0.1" => 5969,
+      node() => gen_rpc_port,
       :"us_node@127.0.0.1" => 16980,
       :"ap2_nodeX@127.0.0.1" => 16981,
       :"ap2_nodeY@127.0.0.1" => 16982

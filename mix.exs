@@ -128,6 +128,12 @@ defmodule Realtime.MixProject do
         "ecto.migrate --migrations-path=priv/repo/migrations",
         "test"
       ],
+      "test.partitioned": [
+        "cmd epmd -daemon",
+        "ecto.create --quiet",
+        "ecto.migrate --migrations-path=priv/repo/migrations",
+        "test --partitions 4"
+      ],
       "assets.deploy": ["esbuild default --minify", "tailwind default --minify", "phx.digest"]
     ]
   end

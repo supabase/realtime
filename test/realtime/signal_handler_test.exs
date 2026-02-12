@@ -4,7 +4,7 @@ defmodule Realtime.SignalHandlerTest do
   alias Realtime.SignalHandler
 
   defmodule FakeHandler do
-    def handle_event(:sigterm, _state), do: send(self(), :ok)
+    def handle_event(signal, _state), do: send(self(), signal)
   end
 
   setup do
@@ -20,7 +20,24 @@ defmodule Realtime.SignalHandlerTest do
       assert capture_log(fn -> SignalHandler.handle_event(:sigterm, state) end) =~
                "SignalHandler: :sigterm received"
 
-      assert_receive :ok
+      assert_receive :sigterm
+    end
+
+    test "sets shutdown_in_progress on sigterm" do
+      {:ok, state} = SignalHandler.init({%{handler_mod: FakeHandler}, :ok})
+
+      capture_log(fn -> SignalHandler.handle_event(:sigterm, state) end)
+
+      assert Application.get_env(:realtime, :shutdown_in_progress) == true
+    end
+
+    test "does not set shutdown_in_progress on non-sigterm signals" do
+      Application.put_env(:realtime, :shutdown_in_progress, false)
+      {:ok, state} = SignalHandler.init({%{handler_mod: FakeHandler}, :ok})
+
+      capture_log(fn -> SignalHandler.handle_event(:sigusr1, state) end)
+
+      refute Application.get_env(:realtime, :shutdown_in_progress)
     end
   end
 

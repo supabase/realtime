@@ -25,5 +25,33 @@ defmodule Realtime.Monitoring.ErlSysMonTest do
       assert log =~ "message_queue_len: "
       assert log =~ "total_heap_size: "
     end
+
+    test "logs non-pid monitor messages" do
+      {:ok, pid} = ErlSysMon.start_link(config: [])
+
+      log =
+        capture_log(fn ->
+          send(pid, {:unexpected, "message"})
+          Process.sleep(100)
+        end)
+
+      assert log =~ "Realtime.ErlSysMon message:"
+      assert log =~ "unexpected"
+    end
+
+    test "handles monitor event for dead process without crashing" do
+      {:ok, pid} = ErlSysMon.start_link(config: [])
+
+      dead_pid = spawn(fn -> :ok end)
+      Process.sleep(50)
+
+      log =
+        capture_log(fn ->
+          send(pid, {:monitor, dead_pid, :long_gc, %{timeout: 500}})
+          Process.sleep(100)
+        end)
+
+      assert log =~ "Realtime.ErlSysMon message:"
+    end
   end
 end

@@ -16,7 +16,6 @@ defmodule RealtimeWeb.ChannelCase do
   """
 
   use ExUnit.CaseTemplate
-  alias Ecto.Adapters.SQL.Sandbox
 
   using do
     quote do
@@ -30,8 +29,6 @@ defmodule RealtimeWeb.ChannelCase do
   end
 
   setup tags do
-    pid = Sandbox.start_owner!(Realtime.Repo, shared: not tags[:async])
-    on_exit(fn -> Sandbox.stop_owner(pid) end)
-    :ok
+    Realtime.DataCase.setup_sandbox(tags)
   end
 end

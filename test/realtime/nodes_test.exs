@@ -305,4 +305,27 @@ defmodule Realtime.NodesTest do
       assert Enum.all?(results, &(&1 in [node(), remote_node]))
     end
   end
+
+  describe "short_node_id_from_name/1" do
+    test "extracts short ID from fly.io-style IPv6 node name" do
+      assert Nodes.short_node_id_from_name(:"realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2") ==
+               "83c3cfe3"
+    end
+
+    test "returns full name for localhost node" do
+      assert Nodes.short_node_id_from_name(:"pink@127.0.0.1") == "pink@127.0.0.1"
+    end
+
+    test "returns host for standard domain-style node names" do
+      assert Nodes.short_node_id_from_name(:"realtime@host.name.internal") == "host.name.internal"
+    end
+
+    test "returns host for simple IP node" do
+      assert Nodes.short_node_id_from_name(:"pink@10.0.1.1") == "10.0.1.1"
+    end
+
+    test "returns host for nonode@nohost" do
+      assert Nodes.short_node_id_from_name(:nonode@nohost) == "nohost"
+    end
+  end
 end

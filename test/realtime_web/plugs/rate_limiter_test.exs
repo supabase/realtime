@@ -56,4 +56,23 @@ defmodule RealtimeWeb.Plugs.RateLimiterTest do
 
     assert conn.status == 200
   end
+
+  test "passes through when tenant is not in assigns", %{conn: conn} do
+    alias RealtimeWeb.Plugs.RateLimiter
+
+    result = RateLimiter.call(conn, [])
+
+    refute result.halted
+  end
+
+  test "sets rate limit headers on 429 response", %{conn: conn} do
+    conn =
+      conn
+      |> Map.put(:host, "localhost.localhost.com")
+      |> get(Routes.ping_path(conn, :ping))
+
+    assert conn.status == 429
+    assert get_resp_header(conn, "x-rate-limit") == ["0"]
+    assert get_resp_header(conn, "x-rate-rolling") != []
+  end
 end

@@ -376,5 +376,62 @@ defmodule RealtimeWeb.JwtVerificationTest do
 
       assert {:error, :error_generating_signer} = JwtVerification.verify(token, jwt_secret, jwks)
     end
+
+    test "using Ed25519 JWK" do
+      # Generate Ed25519 key pair
+      {pub, priv} = :crypto.generate_key(:eddsa, :ed25519)
+
+      jwk = %{
+        "kty" => "OKP",
+        "crv" => "Ed25519",
+        "x" => Base.url_encode64(pub, padding: false),
+        "d" => Base.url_encode64(priv, padding: false),
+        "kid" => "ed-key-1"
+      }
+
+      jwks = %{"keys" => [jwk]}
+
+      signer = Joken.Signer.create("Ed25519", jwk, %{"kid" => "ed-key-1"})
+
+      Mock.freeze()
+      current_time = Mock.current_time()
+
+      token =
+        Joken.generate_and_sign!(
+          %{"exp" => %Joken.Claim{generate: fn -> current_time + 100 end}},
+          %{},
+          signer
+        )
+
+      assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
+    end
+
+    test "returns error for unsupported algorithm with kid and jwks" do
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "PS256", "kid" => "key-1"}), padding: false)
+      claims = Base.url_encode64(Jason.encode!(%{"exp" => 9_999_999_999}), padding: false)
+      token = "#{header}.#{claims}.signature"
+
+      jwks = %{"keys" => [%{"kty" => "RSA", "kid" => "key-1"}]}
+
+      assert {:error, _} = JwtVerification.verify(token, @jwt_secret, jwks)
+    end
+
+    test "falls back to jwt_secret when HS256 kid has no matching JWK" do
+      Mock.freeze()
+      current_time = Mock.current_time()
+
+      signer = Joken.Signer.create("HS256", @jwt_secret)
+
+      token =
+        Joken.generate_and_sign!(
+          %{"exp" => %Joken.Claim{generate: fn -> current_time + 100 end}},
+          %{},
+          signer
+        )
+
+      jwks = %{"keys" => [%{"kty" => "oct", "kid" => "wrong-kid"}]}
+
+      assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
+    end
   end
 end

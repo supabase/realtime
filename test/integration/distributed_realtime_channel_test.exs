@@ -10,24 +10,11 @@ defmodule Realtime.Integration.DistributedRealtimeChannelTest do
   alias Realtime.Integration.WebsocketClient
 
   setup do
-    tenant = Realtime.Api.get_tenant_by_external_id("dev_tenant")
+    tenant = Containers.checkout_tenant_unboxed(run_migrations: true)
 
-    RateCounterHelper.stop(tenant.external_id)
-
-    Connect.shutdown(tenant.external_id)
-    # Sleeping so that syn can forget about this Connect process
-    Process.sleep(100)
-
-    on_exit(fn ->
-      Connect.shutdown(tenant.external_id)
-      # Sleeping so that syn can forget about this Connect process
-      Process.sleep(100)
-    end)
-
-    on_exit(fn -> Connect.shutdown(tenant.external_id) end)
     {:ok, node} = Clustered.start()
     region = Realtime.Tenants.region(tenant)
-    {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant", region])
+    {:ok, db_conn} = :erpc.call(node, Connect, :connect, [tenant.external_id, region])
     assert Connect.ready?(tenant.external_id)
 
     assert node(db_conn) == node

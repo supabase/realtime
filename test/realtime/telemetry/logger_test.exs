@@ -26,4 +26,10 @@ defmodule Realtime.Telemetry.LoggerTest do
              end) =~ "Billing metrics: [:realtime, :connections]"
     end
   end
+
+  describe "handle_info/2" do
+    test "ignores unexpected messages" do
+      assert {:noreply, []} = TelemetryLogger.handle_info(:unexpected, [])
+    end
+  end
 end

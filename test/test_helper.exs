@@ -1,8 +1,8 @@
 start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
-alias Realtime.Database
-ExUnit.start(exclude: [:failing], max_cases: 4, capture_log: true)
+max_cases = String.to_integer(System.get_env("MAX_CASES", "4"))
+ExUnit.start(exclude: [:failing], max_cases: max_cases, capture_log: true)
 
 max_cases = ExUnit.configuration()[:max_cases]
 
@@ -10,39 +10,11 @@ Containers.pull()
 
 if System.get_env("REUSE_CONTAINERS") != "true" do
   Containers.stop_containers()
-  Containers.stop_container("dev_tenant")
 end
 
 {:ok, _pid} = Containers.start_link(max_cases)
 
 for tenant <- Api.list_tenants(), do: Api.delete_tenant_by_external_id(tenant.external_id)
-
-tenant_name = "dev_tenant"
-tenant = Containers.initialize(tenant_name)
-publication = "supabase_realtime_test"
-
-# Start dev_realtime container to be used in integration tests
-{:ok, conn} = Database.connect(tenant, "realtime_seed", :stop)
-
-Database.transaction(conn, fn db_conn ->
-  queries = [
-    "DROP TABLE IF EXISTS public.test",
-    "DROP PUBLICATION IF EXISTS #{publication}",
-    "create sequence if not exists test_id_seq;",
-    """
-    create table "public"."test" (
-    "id" int4 not null default nextval('test_id_seq'::regclass),
-    "details" text,
-    primary key ("id"));
-    """,
-    "grant all on table public.test to anon;",
-    "grant all on table public.test to postgres;",
-    "grant all on table public.test to authenticated;",
-    "create publication #{publication} for all tables"
-  ]
-
-  Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
-end)
 
 Ecto.Adapters.SQL.Sandbox.mode(Realtime.Repo, :manual)
 
@@ -67,9 +39,9 @@ Mimic.copy(RealtimeWeb.Endpoint)
 Mimic.copy(RealtimeWeb.JwtVerification)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
 
-# Set the node as the name we use on Clustered.start
-# Also update syn metadata to reflect the new name
-:net_kernel.start([:"main@127.0.0.1"])
+partition = System.get_env("MIX_TEST_PARTITION")
+node_name = if partition, do: :"main#{partition}@127.0.0.1", else: :"main@127.0.0.1"
+:net_kernel.start([node_name])
 region = Application.get_env(:realtime, :region)
 [{pid, _}] = :syn.members(RegionNodes, region)
 :syn.update_member(RegionNodes, region, pid, fn _ -> [node: node()] end)

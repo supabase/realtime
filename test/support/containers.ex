@@ -128,11 +128,13 @@ defmodule Containers do
     end
   end
 
-  # Might be worth changing this to {:ok, tenant}
-  def checkout_tenant(opts \\ []) do
+  def checkout_tenant(opts \\ []), do: do_checkout_tenant(opts, :sandbox)
+  def checkout_tenant_unboxed(opts \\ []), do: do_checkout_tenant(opts, :unboxed)
+
+  defp do_checkout_tenant(opts, mode) do
     with container when is_pid(container) <- :poolboy.checkout(Containers.Pool, true, 5_000),
          port <- Container.port(container) do
-      tenant = Generators.tenant_fixture(%{port: port, migrations_ran: 0})
+      tenant = repo_run(mode, fn -> Generators.tenant_fixture(%{port: port, migrations_ran: 0}) end)
 
       run_migrations? = Keyword.get(opts, :run_migrations, false)
 
@@ -140,96 +142,48 @@ defmodule Containers do
       settings = %{settings | max_restarts: 0, ssl: false}
       {:ok, conn} = Database.connect_db(settings)
 
-      Postgrex.transaction(conn, fn db_conn ->
-        Postgrex.query!(db_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
-        Postgrex.query!(db_conn, "CREATE SCHEMA IF NOT EXISTS realtime", [])
-      end)
+      try do
+        Postgrex.transaction(conn, fn db_conn ->
+          Postgrex.query!(db_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
+          Postgrex.query!(db_conn, "CREATE SCHEMA IF NOT EXISTS realtime", [])
+        end)
 
-      storage_up!(tenant)
+        storage_up!(tenant)
 
-      RateCounterHelper.stop(tenant.external_id)
+        RateCounterHelper.stop(tenant.external_id)
 
-      # Automatically checkin the container at the end of the test
-      ExUnit.Callbacks.on_exit(fn ->
-        # Clean up database connections if they are set-up
+        ExUnit.Callbacks.on_exit(fn ->
+          if connect_pid = Connect.whereis(tenant.external_id) do
+            supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, tenant.external_id}}
 
-        if connect_pid = Connect.whereis(tenant.external_id) do
-          supervisor = {:via, PartitionSupervisor, {Realtime.Tenants.Connect.DynamicSupervisor, tenant.external_id}}
+            DynamicSupervisor.terminate_child(supervisor, connect_pid)
+          end
 
-          DynamicSupervisor.terminate_child(supervisor, connect_pid)
-        end
+          try do
+            PostgresCdcRls.handle_stop(tenant.external_id, 5_000)
+          catch
+            _, _ -> :ok
+          end
 
-        try do
-          PostgresCdcRls.handle_stop(tenant.external_id, 5_000)
-        catch
-          _, _ -> :ok
-        end
+          if mode == :unboxed do
+            repo_run(:unboxed, fn -> Realtime.Api.delete_tenant_by_external_id(tenant.external_id) end)
+          end
 
-        :poolboy.checkin(Containers.Pool, container)
-      end)
+          :poolboy.checkin(Containers.Pool, container)
+        end)
 
-      publication = "supabase_realtime_test"
-
-      Postgrex.transaction(conn, fn db_conn ->
-        queries = [
-          "DROP TABLE IF EXISTS public.test",
-          "DROP PUBLICATION IF EXISTS #{publication}",
-          "create sequence if not exists test_id_seq;",
-          """
-          create table "public"."test" (
-          "id" int4 not null default nextval('test_id_seq'::regclass),
-          "details" text,
-          primary key ("id"));
-          """,
-          "grant all on table public.test to anon;",
-          "grant all on table public.test to supabase_admin;",
-          "grant all on table public.test to authenticated;",
-          "create publication #{publication} for all tables",
-          # Clean up all replication slots
-          """
-          DO $$
-          DECLARE
-          r RECORD;
-          BEGIN
-          FOR r IN
-            SELECT slot_name, active_pid
-            FROM pg_replication_slots
-            WHERE slot_name LIKE 'supabase_realtime%'
-          LOOP
-            IF r.active_pid IS NOT NULL THEN
-              BEGIN
-                -- try to terminate the backend; ignore any error or race
-                SELECT pg_terminate_backend(r.active_pid);
-                PERFORM pg_sleep(0.5);
-              EXCEPTION WHEN OTHERS THEN
-                NULL;
-              END;
-            END IF;
-
-            BEGIN
-              -- check existence then try to drop; ignore any error or race
-              IF EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = r.slot_name) THEN
-                PERFORM pg_drop_replication_slot(r.slot_name);
-              END IF;
-            EXCEPTION WHEN OTHERS THEN
-              NULL;
-            END;
-          END LOOP;
-          END$$;
-          """
-        ]
-
-        Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
-      end)
-
-      tenant =
         if run_migrations? do
           case run_migrations(tenant) do
             {:ok, count} ->
-              # Avoiding to use Tenants.update_migrations_ran/2 because it touches Cachex and it doesn't play well with
-              # Ecto Sandbox
               :ok = Migrations.create_partitions(conn)
-              {:ok, tenant} = Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{migrations_ran: count})
+
+              {:ok, tenant} =
+                repo_run(mode, fn ->
+                  Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{migrations_ran: count})
+                end)
+
+              if mode == :sandbox, do: Realtime.Tenants.Cache.invalidate_tenant_cache(tenant.external_id)
+
               tenant
 
             error ->
@@ -238,14 +192,16 @@ defmodule Containers do
         else
           tenant
         end
-
-      GenServer.stop(conn)
-
-      tenant
+      after
+        GenServer.stop(conn)
+      end
     else
       _ -> {:error, "failed to checkout a container"}
     end
   end
+
+  defp repo_run(:unboxed, fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Realtime.Repo, fun)
+  defp repo_run(:sandbox, fun), do: fun.()
 
   def stop_containers() do
     {list, 0} = System.cmd("docker", ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=realtime-test-*"])
