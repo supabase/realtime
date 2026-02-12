@@ -19,6 +19,7 @@ defmodule Realtime.Tenants.Connect do
   alias Realtime.Tenants.Connect.CheckConnection
   alias Realtime.Tenants.Connect.GetTenant
   alias Realtime.Tenants.Connect.Piper
+  alias Realtime.Tenants.Connect.ReconcileMigrations
   alias Realtime.Tenants.Connect.RegisterProcess
   alias Realtime.Tenants.Migrations
   alias Realtime.Tenants.Rebalancer
@@ -39,7 +40,8 @@ defmodule Realtime.Tenants.Connect do
           replication_connection_attempts: non_neg_integer(),
           check_connected_user_interval: non_neg_integer(),
           connected_users_bucket: list(non_neg_integer()),
-          check_connect_region_interval: non_neg_integer()
+          check_connect_region_interval: non_neg_integer(),
+          migrations_ran_on_database: non_neg_integer()
         }
 
   defstruct tenant_id: nil,
@@ -51,7 +53,8 @@ defmodule Realtime.Tenants.Connect do
             replication_connection_attempts: 0,
             check_connected_user_interval: nil,
             connected_users_bucket: [1],
-            check_connect_region_interval: nil
+            check_connect_region_interval: nil,
+            migrations_ran_on_database: 0
 
   @tenant_id_spec [{{:"$1", :_, :_, :_, :_, :_}, [], [:"$1"]}]
   @spec list_tenants() :: [binary]
@@ -265,6 +268,7 @@ defmodule Realtime.Tenants.Connect do
     pipes = [
       GetTenant,
       CheckConnection,
+      ReconcileMigrations,
       RegisterProcess
     ]
 

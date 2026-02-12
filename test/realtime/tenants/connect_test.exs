@@ -450,6 +450,30 @@ defmodule Realtime.Tenants.ConnectTest do
       refute Process.alive?(pid)
     end
 
+    test "reconciles migrations_ran when database count differs from cached value", %{tenant: tenant} do
+      total_migrations = Enum.count(Realtime.Tenants.Migrations.migrations())
+      stale_count = tenant.migrations_ran - 5
+      parent = self()
+
+      expect(Database, :check_tenant_connection, fn t ->
+        {:ok, conn, _actual_count} = call_original(Database, :check_tenant_connection, [t])
+        {:ok, conn, stale_count}
+      end)
+
+      expect(Realtime.Tenants.Migrations, :run_migrations, fn tenant ->
+        send(parent, {:migrations_ran_at_run, tenant.migrations_ran})
+        call_original(Realtime.Tenants.Migrations, :run_migrations, [tenant])
+      end)
+
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+
+      assert_receive {:migrations_ran_at_run, ^stale_count}
+
+      updated_tenant = Tenants.get_tenant_by_external_id(tenant.external_id)
+      assert updated_tenant.migrations_ran == total_migrations
+    end
+
     test "starts broadcast handler and does not fail on existing connection", %{tenant: tenant} do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       assert Connect.ready?(tenant.external_id)
