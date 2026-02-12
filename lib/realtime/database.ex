@@ -107,11 +107,9 @@ defmodule Realtime.Database do
         if requirement < available_connections do
           {:ok, conn, migrations_ran}
         else
-          log_error(
-            "DatabaseLackOfConnections",
-            "Only #{available_connections} available connections. At least #{requirement} connections are required."
-          )
-
+          msg = "Only #{available_connections} available connections. At least #{requirement} connections are required."
+          log_error("DatabaseLackOfConnections", msg)
+          GenServer.stop(conn)
           {:error, :tenant_db_too_many_connections}
         end
       else
@@ -138,16 +136,18 @@ defmodule Realtime.Database do
 
   defp query_connection_info(conn) do
     Postgrex.transaction(conn, fn conn ->
-      {:ok, %{rows: [[available_connections]]}} = Postgrex.query(conn, @connections_query, [])
-      {:ok, %{rows: [[table_exists]]}} = Postgrex.query(conn, @migrations_table_exists_query, [])
+      %{rows: [[available_connections]]} = Postgrex.query!(conn, @connections_query, [])
+      %{rows: [[table_exists]]} = Postgrex.query!(conn, @migrations_table_exists_query, [])
 
-      {:ok, %{rows: [[migrations_ran]]}} =
-        if table_exists,
-          do: Postgrex.query(conn, @migrations_count_query, []),
-          else: {:ok, %{rows: [[0]]}}
+      %{rows: [[migrations_ran]]} =
+        if table_exists, do: Postgrex.query!(conn, @migrations_count_query, []), else: %{rows: [[0]]}
 
       [available_connections, migrations_ran]
     end)
+  rescue
+    e ->
+      GenServer.stop(conn)
+      {:error, e}
   end
 
   @doc """

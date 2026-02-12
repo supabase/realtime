@@ -56,8 +56,8 @@ defmodule Realtime.DatabaseTest do
       Postgrex.query!(conn, "CREATE TABLE IF NOT EXISTS realtime.schema_migrations (version bigint PRIMARY KEY)", [])
       Postgrex.query!(conn, "INSERT INTO realtime.schema_migrations VALUES (1), (2), (3)", [])
 
-      assert {:ok, _conn, 3} = Database.check_tenant_connection(tenant)
-
+      assert {:ok, check_conn, 3} = Database.check_tenant_connection(tenant)
+      GenServer.stop(check_conn)
       GenServer.stop(conn)
     end
 
