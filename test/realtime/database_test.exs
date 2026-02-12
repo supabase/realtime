@@ -40,7 +40,25 @@ defmodule Realtime.DatabaseTest do
     end
 
     test "connects to a tenant database", %{tenant: tenant} do
-      assert {:ok, _} = Database.check_tenant_connection(tenant)
+      assert {:ok, _conn, migrations_ran} = Database.check_tenant_connection(tenant)
+      assert is_integer(migrations_ran)
+      assert migrations_ran >= 0
+    end
+
+    test "returns 0 migrations when realtime.schema_migrations does not exist", %{tenant: tenant} do
+      # by default new containers do not have the schema_migrations table
+      assert {:ok, _conn, 0} = Database.check_tenant_connection(tenant)
+    end
+
+    test "returns migration count when realtime.schema_migrations exists", %{tenant: tenant} do
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(conn, "CREATE TABLE IF NOT EXISTS realtime.schema_migrations (version bigint PRIMARY KEY)", [])
+      Postgrex.query!(conn, "INSERT INTO realtime.schema_migrations VALUES (1), (2), (3)", [])
+
+      assert {:ok, check_conn, 3} = Database.check_tenant_connection(tenant)
+      GenServer.stop(check_conn)
+      GenServer.stop(conn)
     end
 
     # Connection limit for docker tenant db is 100

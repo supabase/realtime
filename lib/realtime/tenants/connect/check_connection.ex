@@ -9,9 +9,16 @@ defmodule Realtime.Tenants.Connect.CheckConnection do
     %{tenant: tenant} = acc
 
     case Realtime.Database.check_tenant_connection(tenant) do
-      {:ok, conn} ->
+      {:ok, conn, migrations_ran} ->
         db_conn_reference = Process.monitor(conn)
-        {:ok, %{acc | db_conn_pid: conn, db_conn_reference: db_conn_reference}}
+
+        {:ok,
+         %{
+           acc
+           | db_conn_pid: conn,
+             db_conn_reference: db_conn_reference,
+             migrations_ran_on_database: migrations_ran
+         }}
 
       {:error, error} ->
         {:error, error}

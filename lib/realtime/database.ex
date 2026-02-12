@@ -89,7 +89,7 @@ defmodule Realtime.Database do
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
   """
 
-  @spec check_tenant_connection(Tenant.t() | nil) :: {:error, atom()} | {:ok, pid()}
+  @spec check_tenant_connection(Tenant.t() | nil) :: {:error, atom()} | {:ok, pid(), non_neg_integer()}
   def check_tenant_connection(nil), do: {:error, :tenant_not_found}
 
   def check_tenant_connection(tenant) do
@@ -100,32 +100,54 @@ defmodule Realtime.Database do
       check_settings = from_settings(settings, "realtime_connect", :stop)
       check_settings = Map.put(check_settings, :max_restarts, 0)
 
-      with {:ok, conn} <- connect_db(check_settings) do
-        query =
-          "select (current_setting('max_connections')::int - count(*))::int from pg_stat_activity where application_name != 'realtime_connect'"
+      with {:ok, conn} <- connect_db(check_settings),
+           {:ok, [available_connections, migrations_ran]} <- query_connection_info(conn) do
+        requirement = ceil(required_pool * @available_connection_factor)
 
-        case Postgrex.query(conn, query, []) do
-          {:ok, %{rows: [[available_connections]]}} ->
-            requirement = ceil(required_pool * @available_connection_factor)
-
-            if requirement < available_connections do
-              {:ok, conn}
-            else
-              log_error(
-                "DatabaseLackOfConnections",
-                "Only #{available_connections} available connections. At least #{requirement} connections are required."
-              )
-
-              {:error, :tenant_db_too_many_connections}
-            end
-
-          {:error, e} ->
-            Process.exit(conn, :kill)
-            log_error("UnableToConnectToTenantDatabase", e)
-            {:error, e}
+        if requirement < available_connections do
+          {:ok, conn, migrations_ran}
+        else
+          msg = "Only #{available_connections} available connections. At least #{requirement} connections are required."
+          log_error("DatabaseLackOfConnections", msg)
+          GenServer.stop(conn)
+          {:error, :tenant_db_too_many_connections}
         end
+      else
+        {:error, e} ->
+          log_error("UnableToConnectToTenantDatabase", e)
+          {:error, e}
       end
     end)
+  end
+
+  @migrations_table_exists_query """
+  SELECT to_regclass('realtime.schema_migrations') IS NOT NULL
+  """
+
+  @migrations_count_query """
+  SELECT count(*)::int FROM realtime.schema_migrations
+  """
+
+  @connections_query """
+  SELECT (current_setting('max_connections')::int - count(*))::int
+  FROM pg_stat_activity
+  WHERE application_name != 'realtime_connect'
+  """
+
+  defp query_connection_info(conn) do
+    Postgrex.transaction(conn, fn conn ->
+      %{rows: [[available_connections]]} = Postgrex.query!(conn, @connections_query, [])
+      %{rows: [[table_exists]]} = Postgrex.query!(conn, @migrations_table_exists_query, [])
+
+      %{rows: [[migrations_ran]]} =
+        if table_exists, do: Postgrex.query!(conn, @migrations_count_query, []), else: %{rows: [[0]]}
+
+      [available_connections, migrations_ran]
+    end)
+  rescue
+    e ->
+      GenServer.stop(conn)
+      {:error, e}
   end
 
   @doc """
