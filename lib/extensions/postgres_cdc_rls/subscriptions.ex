@@ -220,17 +220,22 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter}
       when is_binary(schema) and is_binary(table) and is_binary(filter) ->
-        with [col, rest] <- String.split(filter, "=", parts: 2),
-             [filter_type, value] when filter_type in @filter_types <-
-               String.split(rest, ".", parts: 2),
-             {:ok, formatted_value} <- format_filter_value(filter_type, value) do
-          {:ok, {action_filter, schema, table, [{col, filter_type, formatted_value}]}}
-        else
-          {:error, msg} ->
-            {:error, "Error parsing `filter` params: #{msg}"}
-
-          e ->
-            {:error, "Error parsing `filter` params: #{inspect(e)}"}
+        try do
+          {:ok,
+           {action_filter, schema, table,
+            Enum.map(String.split(filter, ","), fn part ->
+              with [col, rest] <- String.split(part, "=", parts: 2),
+                   [filter_type, value] when filter_type in @filter_types <-
+                     String.split(rest, ".", parts: 2),
+                   {:ok, formatted_value} <- format_filter_value(filter_type, value) do
+                {col, filter_type, formatted_value}
+              else
+                {:error, msg} -> throw("Error parsing `filter` params: #{msg}")
+                e -> throw("Error parsing `filter` params: #{inspect(e)}")
+              end
+            end)}}
+        catch
+          msg -> {:error, msg}
         end
 
       %{"schema" => schema, "table" => table}
