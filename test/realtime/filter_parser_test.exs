@@ -10,7 +10,7 @@ defmodule RealtimeFilterParserTest do
     assert {:ok,
             [
               {"date", "eq", "2026-02-03"},
-              {"published_at", "nnull", nil},
+              {"published_at", "notnull", nil},
               {"area", "eq", "Oslo, Norway"},
               {"id", "in", "{1,2,3}"}
             ]} = RealtimeFilterParser.parse_filter(input)

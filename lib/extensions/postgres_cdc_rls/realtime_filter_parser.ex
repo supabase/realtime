@@ -7,8 +7,8 @@ defmodule RealtimeFilterParser do
   Returns `{:ok, filters}` where filters is a list of `{column, operator, value}` tuples.
 
   Special-cases:
-    - "is.null"     -> {"<col>", "null", nil}
-    - "not.is.null" -> {"<col>", "nnull", nil}
+    - "is.null"     -> {"<col>", "isnull", nil}
+    - "not.is.null" -> {"<col>", "notnull", nil}
     - "in.(a,b)"    -> {"<col>", "in", "{a,b}"}
   """
 
@@ -105,10 +105,10 @@ defmodule RealtimeFilterParser do
 
           cond do
             rest == "is.null" ->
-              {:cont, {:ok, [{col, "null", nil} | acc]}}
+              {:cont, {:ok, [{col, "isnull", nil} | acc]}}
 
             rest == "not.is.null" ->
-              {:cont, {:ok, [{col, "nnull", nil} | acc]}}
+              {:cont, {:ok, [{col, "notnull", nil} | acc]}}
 
             true ->
               case String.split(rest, ".", parts: 2) do
@@ -190,10 +190,10 @@ defmodule RealtimeFilterParser do
             {:ok, "{#{new_value}}"}
         end
 
-      "null" ->
+      "isnull" ->
         {:ok, nil}
 
-      "nnull" ->
+      "notnull" ->
         {:ok, nil}
 
       _ ->
