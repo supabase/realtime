@@ -76,13 +76,11 @@ jobs:
         run: epmd -daemon
       - name: Run tests
         run: MIX_TEST_PARTITION=${{ matrix.partition }} mix coveralls.lcov --partitions 4
-      - name: Upload coverage
-        uses: coverallsapp/github-action@v2
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          flag-name: partition-${{ matrix.partition }}
-          parallel: true
-          file: cover/lcov.info
+          name: coverage-partition-${{ matrix.partition }}
+          path: cover/lcov.info
 
   coverage:
     name: Merge Coverage
@@ -90,8 +88,14 @@ jobs:
     if: ${{ needs.tests.result == 'success' }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
-      - uses: coverallsapp/github-action@v2
+      - uses: actions/checkout@v6
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
         with:
-          parallel-finished: true
+          pattern: coverage-partition-*
+          path: coverage
+      - name: Upload merged coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          carryforward: "partition-1,partition-2,partition-3,partition-4"
+          files: coverage/coverage-partition-1/lcov.info coverage/coverage-partition-2/lcov.info coverage/coverage-partition-3/lcov.info coverage/coverage-partition-4/lcov.info
