@@ -221,4 +221,94 @@ defmodule RealtimeWeb.Channels.Payloads.JoinTest do
              }
     end
   end
+
+  describe "presence_enabled?/1" do
+    test "returns enabled value from config" do
+      join = %Join{config: %Config{presence: %Presence{enabled: false}}}
+      refute Join.presence_enabled?(join)
+
+      join = %Join{config: %Config{presence: %Presence{enabled: true}}}
+      assert Join.presence_enabled?(join)
+    end
+
+    test "defaults to true when config is nil" do
+      assert Join.presence_enabled?(%Join{config: nil})
+    end
+
+    test "defaults to true for non-Join struct" do
+      assert Join.presence_enabled?(nil)
+    end
+  end
+
+  describe "presence_key/1" do
+    test "returns UUID when key is empty string" do
+      join = %Join{config: %Config{presence: %Presence{key: ""}}}
+      key = Join.presence_key(join)
+      assert is_binary(key)
+      assert key != ""
+    end
+
+    test "returns the configured key" do
+      join = %Join{config: %Config{presence: %Presence{key: "my_key"}}}
+      assert Join.presence_key(join) == "my_key"
+    end
+
+    test "returns UUID for non-matching struct" do
+      key = Join.presence_key(%Join{config: nil})
+      assert is_binary(key)
+      assert key != ""
+    end
+  end
+
+  describe "ack_broadcast?/1" do
+    test "returns ack value from config" do
+      join = %Join{config: %Config{broadcast: %Broadcast{ack: true}}}
+      assert Join.ack_broadcast?(join)
+
+      join = %Join{config: %Config{broadcast: %Broadcast{ack: false}}}
+      refute Join.ack_broadcast?(join)
+    end
+
+    test "defaults to false when config is nil" do
+      refute Join.ack_broadcast?(%Join{config: nil})
+    end
+  end
+
+  describe "self_broadcast?/1" do
+    test "returns self value from config" do
+      join = %Join{config: %Config{broadcast: %Broadcast{self: true}}}
+      assert Join.self_broadcast?(join)
+
+      join = %Join{config: %Config{broadcast: %Broadcast{self: false}}}
+      refute Join.self_broadcast?(join)
+    end
+
+    test "defaults to false when config is nil" do
+      refute Join.self_broadcast?(%Join{config: nil})
+    end
+  end
+
+  describe "private?/1" do
+    test "returns private value from config" do
+      join = %Join{config: %Config{private: true}}
+      assert Join.private?(join)
+
+      join = %Join{config: %Config{private: false}}
+      refute Join.private?(join)
+    end
+
+    test "defaults to false when config is nil" do
+      refute Join.private?(%Join{config: nil})
+    end
+  end
+
+  describe "error_message/2" do
+    test "returns message with type when type is present" do
+      assert Join.error_message(:field, type: :string) == "unable to parse, expected string"
+    end
+
+    test "returns generic message when type is not present" do
+      assert Join.error_message(:field, []) == "unable to parse"
+    end
+  end
 end

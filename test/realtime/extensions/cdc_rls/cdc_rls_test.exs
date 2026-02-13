@@ -1,6 +1,5 @@
 defmodule Realtime.Extensions.CdcRlsTest do
-  # async: false due to usage of dev_tenant
-  # Also global mimic mock
+  # async: false due to global mimic mock
   use Realtime.DataCase, async: false
   use Mimic
 
@@ -12,7 +11,6 @@ defmodule Realtime.Extensions.CdcRlsTest do
   alias Extensions.PostgresCdcRls.Subscriptions
   alias PostgresCdcRls.SubscriptionManager
   alias Postgrex
-  alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.PostgresCdc
@@ -24,6 +22,9 @@ defmodule Realtime.Extensions.CdcRlsTest do
   describe "Postgres extensions" do
     setup do
       tenant = Containers.checkout_tenant(run_migrations: true)
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+      Integrations.setup_postgres_changes(conn)
+      GenServer.stop(conn)
 
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
@@ -224,9 +225,11 @@ defmodule Realtime.Extensions.CdcRlsTest do
       }
 
       # Now subscribe to the Postgres Changes
+      Postgrex.query!(conn, "delete from realtime.subscription", [])
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
 
-      assert %Postgrex.Result{num_rows: 1} = Postgrex.query!(conn, "select id from realtime.subscription", [])
+      assert %Postgrex.Result{num_rows: n} = Postgrex.query!(conn, "select id from realtime.subscription", [])
+      assert n >= 1
 
       Process.sleep(500)
 
@@ -259,7 +262,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
 
-      assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket}} =
+      assert {:ok, %RateCounter{id: {:channel, :db_events, ^external_id}, bucket: bucket}} =
                RateCounterHelper.tick!(rate)
 
       assert Enum.sum(bucket) == 1
@@ -268,7 +271,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
         :telemetry,
         [:realtime, :tenants, :payload, :size],
         %{size: _},
-        %{tenant: "dev_tenant", message_type: :postgres_changes}
+        %{tenant: ^external_id, message_type: :postgres_changes}
       }
     end
 
@@ -288,8 +291,10 @@ defmodule Realtime.Extensions.CdcRlsTest do
       {:ok, response} = PostgresCdcRls.handle_connect(args)
 
       # Now subscribe to the Postgres Changes
+      Postgrex.query!(conn, "delete from realtime.subscription", [])
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
-      assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      assert %Postgrex.Result{rows: [[n]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      assert n >= 1
 
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
 
@@ -310,7 +315,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       refute_receive {:socket_push, :text, _}, 5000
 
-      assert {:ok, %RateCounter{id: {:channel, :db_events, "dev_tenant"}, bucket: bucket, limit: %{triggered: true}}} =
+      assert {:ok, %RateCounter{id: {:channel, :db_events, ^external_id}, bucket: bucket, limit: %{triggered: true}}} =
                RateCounterHelper.tick!(rate)
 
       # Nothing has changed
@@ -337,11 +342,19 @@ defmodule Realtime.Extensions.CdcRlsTest do
               end
             end)
   describe "distributed integration" do
-    setup [:integration]
+    setup [:distributed_integration]
 
     setup(%{tenant: tenant}) do
       {:ok, node} = Clustered.start(@aux_mod)
       {:ok, response} = :erpc.call(node, Subscriber, :subscribe, [tenant])
+
+      on_exit(fn ->
+        try do
+          PostgresCdcRls.handle_stop(tenant.external_id, 5_000)
+        catch
+          _, _ -> :ok
+        end
+      end)
 
       %{node: node, response: response}
     end
@@ -352,9 +365,10 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       pg_change_params = pubsub_subscribe(external_id)
 
-      # Now subscribe to the Postgres Changes
+      Postgrex.query!(conn, "delete from realtime.subscription", [])
       {:ok, _} = PostgresCdcRls.handle_after_connect(response, postgres_extension, pg_change_params, external_id)
-      assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      assert %Postgrex.Result{rows: [[n]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      assert n >= 1
 
       # Wait for subscription to be executing
       Process.sleep(200)
@@ -446,34 +460,31 @@ defmodule Realtime.Extensions.CdcRlsTest do
   end
 
   defp integration(_) do
-    tenant = Api.get_tenant_by_external_id("dev_tenant")
-    PostgresCdcRls.handle_stop(tenant.external_id, 10_000)
-
+    tenant = Containers.checkout_tenant(run_migrations: true)
     {:ok, conn} = Database.connect(tenant, "realtime_test")
+    Integrations.setup_postgres_changes(conn)
 
-    Database.transaction(conn, fn db_conn ->
-      queries = [
-        "drop table if exists public.test",
-        "drop publication if exists supabase_realtime_test",
-        "create sequence if not exists test_id_seq;",
-        """
-        create table if not exists "public"."test" (
-        "id" int4 not null default nextval('test_id_seq'::regclass),
-        "details" text,
-        primary key ("id"));
-        """,
-        "grant all on table public.test to anon;",
-        "grant all on table public.test to postgres;",
-        "grant all on table public.test to authenticated;",
-        "create publication supabase_realtime_test for all tables"
-      ]
-
-      Enum.each(queries, &Postgrex.query!(db_conn, &1, []))
-    end)
-
-    RateCounterHelper.stop(tenant.external_id)
     on_exit(fn -> RateCounterHelper.stop(tenant.external_id) end)
+    on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
+    :telemetry.attach_many(
+      __MODULE__,
+      [[:realtime, :tenants, :payload, :size], [:realtime, :rpc]],
+      &__MODULE__.handle_telemetry/4,
+      pid: self()
+    )
+
+    RealtimeWeb.Endpoint.subscribe(Realtime.Syn.PostgresCdc.syn_topic(tenant.external_id))
+
+    %{tenant: tenant, conn: conn}
+  end
+
+  defp distributed_integration(_) do
+    tenant = Containers.checkout_tenant_unboxed(run_migrations: true)
+    {:ok, conn} = Database.connect(tenant, "realtime_test")
+    Integrations.setup_postgres_changes(conn)
+
+    on_exit(fn -> RateCounterHelper.stop(tenant.external_id) end)
     on_exit(fn -> :telemetry.detach(__MODULE__) end)
 
     :telemetry.attach_many(

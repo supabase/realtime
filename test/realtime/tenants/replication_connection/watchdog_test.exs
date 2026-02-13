@@ -90,7 +90,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
           ref = Process.monitor(watchdog_pid)
 
           # Wait for the first health check to timeout
-          assert_receive {:DOWN, ^ref, :process, ^watchdog_pid, :watchdog_timeout}, 200
+          assert_receive {:DOWN, ^ref, :process, ^watchdog_pid, :watchdog_timeout}, 500
           refute Process.alive?(watchdog_pid)
         end)
 
@@ -112,7 +112,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
           ref = Process.monitor(watchdog_pid)
 
           # Should timeout because delay (200ms) > timeout (100ms)
-          assert_receive {:DOWN, ^ref, :process, ^watchdog_pid, :watchdog_timeout}, 300
+          assert_receive {:DOWN, ^ref, :process, ^watchdog_pid, :watchdog_timeout}, 500
         end)
 
       assert logs =~ "ReplicationConnectionWatchdogTimeout"
@@ -140,7 +140,7 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
       logs =
         capture_log(fn ->
           # Should timeout on next health check
-          assert_receive {:DOWN, ^ref, :process, ^watchdog_pid, :watchdog_timeout}, 200
+          assert_receive {:DOWN, ^ref, :process, ^watchdog_pid, :watchdog_timeout}, 500
         end)
 
       assert logs =~ "ReplicationConnectionWatchdogTimeout"

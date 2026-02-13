@@ -39,6 +39,10 @@ defmodule Realtime.DatabaseTest do
       %{tenant: tenant}
     end
 
+    test "returns error when tenant is nil" do
+      assert {:error, :tenant_not_found} = Database.check_tenant_connection(nil)
+    end
+
     test "connects to a tenant database", %{tenant: tenant} do
       assert {:ok, _conn, migrations_ran} = Database.check_tenant_connection(tenant)
       assert is_integer(migrations_ran)
@@ -178,6 +182,13 @@ defmodule Realtime.DatabaseTest do
       assert log =~ "project=123 external_id=123 [error] ErrorExecutingTransaction"
     end
 
+    test "handles exit signals in transactions", %{db_conn: db_conn} do
+      assert capture_log(fn ->
+               assert {:error, {:exit, _}} =
+                        Database.transaction(db_conn, fn _conn -> exit(:test_exit) end)
+             end) =~ "ErrorExecutingTransaction"
+    end
+
     test "run call using RPC", %{db_conn: db_conn} do
       assert {:ok, %{rows: [[1]]}} =
                Realtime.Rpc.enhanced_call(
@@ -296,7 +307,20 @@ defmodule Realtime.DatabaseTest do
     end
   end
 
+  describe "from_tenant/3" do
+    test "uses default backoff when not provided", %{tenant: tenant} do
+      settings = Database.from_tenant(tenant, "realtime_test")
+      assert settings.backoff_type == :rand_exp
+    end
+  end
+
   describe "from_settings/3" do
+    test "uses default backoff when not provided", %{tenant: tenant} do
+      settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
+      result = Database.from_settings(settings, "realtime_connect")
+      assert result.backoff_type == :rand_exp
+    end
+
     test "returns struct with correct setup", %{tenant: tenant} do
       application_name = "realtime_connect"
       backoff = :stop
@@ -320,6 +344,11 @@ defmodule Realtime.DatabaseTest do
                max_restarts: nil,
                ssl: false
              } = settings
+    end
+
+    test "defaults ssl to true when ssl_enforced is not set" do
+      assert Database.default_ssl_param(%{}) == true
+      assert Database.default_ssl_param(%{"other" => "value"}) == true
     end
 
     test "handles SSL properties", %{tenant: tenant} do

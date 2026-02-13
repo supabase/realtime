@@ -8,13 +8,14 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
   alias Realtime.Nodes
 
   setup do
-    # Configure test runner as non-master region (eu-west-1) with master_region = us-east-1
     original_master_region = Application.get_env(:realtime, :master_region)
+
+    on_exit(fn ->
+      Application.put_env(:realtime, :master_region, original_master_region)
+    end)
 
     Application.put_env(:realtime, :master_region, "eu-west-2")
 
-    # Start peer node as master region (us-east-1)
-    # The master node will automatically register itself in RegionNodes on startup
     {:ok, master_node} =
       Clustered.start(nil,
         extra_config: [
@@ -24,10 +25,6 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
       )
 
     Process.sleep(100)
-
-    on_exit(fn ->
-      Application.put_env(:realtime, :master_region, original_master_region)
-    end)
 
     %{master_node: master_node}
   end

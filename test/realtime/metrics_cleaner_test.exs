@@ -189,4 +189,72 @@ defmodule Realtime.MetricsCleanerTest do
       assert String.contains?(metrics, "tenant=\"reconnect-tenant\"")
     end
   end
+
+  describe "handle_info/2 unexpected message" do
+    test "logs error for unexpected messages" do
+      import ExUnit.CaptureLog
+
+      pid =
+        start_supervised!(
+          {MetricsCleaner, [metrics_cleaner_schedule_timer_in_ms: 60_000, vacant_metric_threshold_in_seconds: 600]}
+        )
+
+      log =
+        capture_log(fn ->
+          send(pid, :something_unexpected)
+          Process.sleep(100)
+        end)
+
+      assert log =~ "Unexpected message"
+      assert log =~ "something_unexpected"
+    end
+  end
+
+  describe "handle_beacon_event/4" do
+    test "inserts and deletes from ETS table" do
+      table = :ets.new(:test_beacon, [:set, :public])
+
+      MetricsCleaner.handle_beacon_event(
+        [:beacon, :users, :group, :vacant],
+        %{},
+        %{group: "test-tenant"},
+        table
+      )
+
+      assert [{"test-tenant", _timestamp}] = :ets.lookup(table, "test-tenant")
+
+      MetricsCleaner.handle_beacon_event(
+        [:beacon, :users, :group, :occupied],
+        %{},
+        %{group: "test-tenant"},
+        table
+      )
+
+      assert [] = :ets.lookup(table, "test-tenant")
+    end
+  end
+
+  describe "handle_syn_event/4" do
+    test "inserts and deletes from ETS table" do
+      table = :ets.new(:test_syn, [:set, :public])
+
+      MetricsCleaner.handle_syn_event(
+        [:syn, Connect, :unregistered],
+        %{},
+        %{name: "test-tenant"},
+        table
+      )
+
+      assert [{"test-tenant", _timestamp}] = :ets.lookup(table, "test-tenant")
+
+      MetricsCleaner.handle_syn_event(
+        [:syn, Connect, :registered],
+        %{},
+        %{name: "test-tenant"},
+        table
+      )
+
+      assert [] = :ets.lookup(table, "test-tenant")
+    end
+  end
 end

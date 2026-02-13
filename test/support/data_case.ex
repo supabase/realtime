@@ -28,10 +28,14 @@ defmodule Realtime.DataCase do
     end
   end
 
-  setup tags do
+  def setup_sandbox(tags) do
     pid = Sandbox.start_owner!(Realtime.Repo, shared: not tags[:async])
     on_exit(fn -> Sandbox.stop_owner(pid) end)
+    :ok
+  end
 
+  setup tags do
+    setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 

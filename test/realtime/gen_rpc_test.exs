@@ -83,7 +83,7 @@ defmodule Realtime.GenRpcTest do
         end)
 
       assert log =~
-               "project=123 external_id=123 [error] ErrorOnRpcCall: %{error: :timeout, mod: Process, func: :sleep, target: :\"main@127.0.0.1\"}"
+               "project=123 external_id=123 [error] ErrorOnRpcCall: %{error: :timeout, mod: Process, func: :sleep, target: :\"#{current_node}\"}"
 
       assert_receive {[:realtime, :rpc], %{latency: _},
                       %{
@@ -297,7 +297,7 @@ defmodule Realtime.GenRpcTest do
       current_node = node()
 
       assert GenRpc.multicall(Map, :fetch, [%{a: 1}, :a], tenant_id: "123") == [
-               {:"main@127.0.0.1", {:ok, 1}},
+               {current_node, {:ok, 1}},
                {node, {:ok, 1}}
              ]
 
@@ -324,13 +324,13 @@ defmodule Realtime.GenRpcTest do
       log =
         capture_log(fn ->
           assert GenRpc.multicall(Process, :sleep, [500], timeout: 100, tenant_id: 123) == [
-                   {:"main@127.0.0.1", {:error, :rpc_error, :timeout}},
+                   {current_node, {:error, :rpc_error, :timeout}},
                    {node, {:error, :rpc_error, :timeout}}
                  ]
         end)
 
       assert log =~
-               "project=123 external_id=123 [error] ErrorOnRpcCall: %{error: :timeout, mod: Process, func: :sleep, target: :\"main@127.0.0.1\"}"
+               "project=123 external_id=123 [error] ErrorOnRpcCall: %{error: :timeout, mod: Process, func: :sleep, target: :\"#{current_node}\"}"
 
       assert log =~
                ~r/project=123 external_id=123 \[error\] ErrorOnRpcCall: %{\s+error: :timeout,\s+mod: Process,\s+func: :sleep,\s+target:\s+:"#{node}"/
@@ -359,7 +359,7 @@ defmodule Realtime.GenRpcTest do
       log =
         capture_log(fn ->
           assert GenRpc.multicall(Map, :fetch, [%{a: 1}, :a], tenant_id: 123) == [
-                   {:"main@127.0.0.1", {:ok, 1}},
+                   {node(), {:ok, 1}},
                    {node, {:error, :rpc_error, :econnrefused}}
                  ]
         end)

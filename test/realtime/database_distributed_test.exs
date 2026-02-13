@@ -1,5 +1,5 @@
 defmodule Realtime.DatabaseDistributedTest do
-  # async: false due to usage of Clustered + dev_tenant
+  # async: false due to usage of Clustered
   use Realtime.DataCase, async: false
 
   import ExUnit.CaptureLog
@@ -40,23 +40,21 @@ defmodule Realtime.DatabaseDistributedTest do
 
   describe "transaction/1 in clustered mode" do
     setup do
-      Connect.shutdown("dev_tenant")
-      # Waiting for :syn to "unregister" if the Connect process was up
-      Process.sleep(100)
-      :ok
+      tenant = Containers.checkout_tenant_unboxed(run_migrations: true)
+      %{distributed_tenant: tenant}
     end
 
-    test "success call returns output" do
+    test "success call returns output", %{distributed_tenant: tenant} do
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
+      {:ok, db_conn} = Rpc.call(node, Connect, :connect, [tenant.external_id, "us-east-1"])
       assert node(db_conn) == node
       assert {:ok, %Postgrex.Result{rows: [[1]]}} = Database.transaction(db_conn, &DatabaseAux.checker/1)
     end
 
-    test "handles database errors" do
+    test "handles database errors", %{distributed_tenant: tenant} do
       metadata = [external_id: "123", project: "123"]
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
+      {:ok, db_conn} = Rpc.call(node, Connect, :connect, [tenant.external_id, "us-east-1"])
       assert node(db_conn) == node
 
       assert capture_log(fn ->
@@ -66,10 +64,10 @@ defmodule Realtime.DatabaseDistributedTest do
              end) =~ "project=123 external_id=123 [error] ErrorExecutingTransaction:"
     end
 
-    test "handles exception" do
+    test "handles exception", %{distributed_tenant: tenant} do
       metadata = [external_id: "123", project: "123"]
       {:ok, node} = Clustered.start(@aux_mod)
-      {:ok, db_conn} = Rpc.call(node, Connect, :connect, ["dev_tenant", "us-east-1"])
+      {:ok, db_conn} = Rpc.call(node, Connect, :connect, [tenant.external_id, "us-east-1"])
       assert node(db_conn) == node
 
       assert capture_log(fn ->
@@ -82,8 +80,6 @@ defmodule Realtime.DatabaseDistributedTest do
     test "db process is not alive anymore" do
       metadata = [external_id: "123", project: "123", tenant_id: "123"]
       {:ok, node} = Clustered.start(@aux_mod)
-      # Grab a remote pid that will not exist. :erpc uses a new process to perform the call.
-      # Once it has returned the process is not alive anymore
 
       pid = Rpc.call(node, :erlang, :self, [])
       assert node(pid) == node

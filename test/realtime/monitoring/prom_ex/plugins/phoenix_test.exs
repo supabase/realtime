@@ -27,7 +27,7 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
       {:ok, _} =
         WebsocketClient.connect(
           self(),
-          uri(tenant, Phoenix.Socket.V1.JSONSerializer, 4002),
+          uri(tenant, Phoenix.Socket.V1.JSONSerializer),
           Phoenix.Socket.V1.JSONSerializer,
           [{"x-api-key", token}]
         )
@@ -35,7 +35,7 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
       {:ok, _} =
         WebsocketClient.connect(
           self(),
-          uri(tenant, Phoenix.Socket.V1.JSONSerializer, 4002),
+          uri(tenant, Phoenix.Socket.V1.JSONSerializer),
           Phoenix.Socket.V1.JSONSerializer,
           [{"x-api-key", token}]
         )
@@ -52,7 +52,7 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
       {:ok, _} =
         WebsocketClient.connect(
           self(),
-          uri(tenant, Phoenix.Socket.V1.JSONSerializer, 4002),
+          uri(tenant, Phoenix.Socket.V1.JSONSerializer),
           Phoenix.Socket.V1.JSONSerializer,
           [{"x-api-key", token}]
         )
@@ -60,7 +60,7 @@ defmodule Realtime.PromEx.Plugins.PhoenixTest do
       {:ok, _} =
         WebsocketClient.connect(
           self(),
-          uri(tenant, RealtimeWeb.Socket.V2Serializer, 4002),
+          uri(tenant, RealtimeWeb.Socket.V2Serializer),
           RealtimeWeb.Socket.V2Serializer,
           [{"x-api-key", token}]
         )

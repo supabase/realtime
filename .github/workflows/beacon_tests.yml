@@ -23,7 +23,7 @@ env:
 jobs:
   tests:
     name: Tests & Lint
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
       - uses: actions/checkout@v6
@@ -33,6 +33,15 @@ jobs:
         with:
           otp-version: 27.x # Define the OTP version [required]
           elixir-version: 1.18.x # Define the elixir version [required]
+      - name: Cache Mix
+        uses: actions/cache@v5
+        with:
+          path: |
+            beacon/deps
+            beacon/_build
+          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ hashFiles('beacon/mix.lock') }}
+          restore-keys: |
+            ${{ github.workflow }}-${{ runner.os }}-mix-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-
       - name: Install dependencies
         run: mix deps.get
       - name: Start epmd

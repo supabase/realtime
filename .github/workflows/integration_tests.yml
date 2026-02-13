@@ -22,6 +22,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  POSTGRES_IMAGE: supabase/postgres:17.6.1.074
+  DENO_IMAGE: denoland/deno:alpine-2.5.6
+
 jobs:
   tests:
     name: Tests
@@ -29,6 +33,32 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+      - name: Cache Docker images
+        uses: actions/cache@v5
+        id: docker-cache
+        with:
+          path: /tmp/docker-images
+          key: docker-images-integration-zstd-${{ env.POSTGRES_IMAGE }}-${{ env.DENO_IMAGE }}
+      - name: Load Docker images from cache
+        if: steps.docker-cache.outputs.cache-hit == 'true'
+        run: |
+          zstd -d --stdout /tmp/docker-images/postgres.tar.zst | docker image load &
+          PID1=$!
+          zstd -d --stdout /tmp/docker-images/deno.tar.zst | docker image load &
+          PID2=$!
+          wait $PID1 || exit $?
+          wait $PID2 || exit $?
+      - name: Pull and save Docker images
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: |
+          docker pull ${{ env.POSTGRES_IMAGE }} &
+          PID1=$!
+          docker pull ${{ env.DENO_IMAGE }} &
+          PID2=$!
+          wait $PID1 || exit $?
+          wait $PID2 || exit $?
+          mkdir -p /tmp/docker-images
+          docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
+          docker image save ${{ env.DENO_IMAGE }} | zstd -T0 -o /tmp/docker-images/deno.tar.zst
       - name: Run integration test
         run: docker compose -f docker-compose.tests.yml up --abort-on-container-exit --exit-code-from test-runner
-

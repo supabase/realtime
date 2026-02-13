@@ -16,6 +16,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       |> Keyword.new()
       |> Postgrex.start_link()
 
+    Integrations.setup_postgres_changes(conn)
     Subscriptions.delete_all(conn)
     assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
 

@@ -70,8 +70,10 @@ defmodule Realtime.GenRpcPubSubTest do
         ap2_nodeY = :ap2_nodeY
 
         # Avoid port collision
+        gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
+
         client_config_per_node = %{
-          :"main@127.0.0.1" => 5969,
+          node() => gen_rpc_port,
           :"#{us_node}@127.0.0.1" => 16970,
           :"#{ap2_nodeX}@127.0.0.1" => 16971,
           :"#{ap2_nodeY}@127.0.0.1" => 16972

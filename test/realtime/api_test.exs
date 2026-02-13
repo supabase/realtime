@@ -17,8 +17,8 @@ defmodule Realtime.ApiTest do
   defp create_tenants(_) do
     tenant1 = tenant_fixture(%{max_concurrent_users: 10_000_000})
     tenant2 = tenant_fixture(%{max_concurrent_users: 20_000_000})
-    dev_tenant = Realtime.Api.get_tenant_by_external_id("dev_tenant")
-    %{tenants: [tenant1, tenant2, dev_tenant]}
+    tenant3 = tenant_fixture(%{max_concurrent_users: 30_000_000})
+    %{tenants: [tenant1, tenant2, tenant3]}
   end
 
   describe "list_tenants/0" do

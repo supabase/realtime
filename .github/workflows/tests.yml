@@ -23,11 +23,16 @@ concurrency:
 
 env:
   MIX_ENV: test
+  POSTGRES_IMAGE: supabase/postgres:17.6.1.074
 
 jobs:
   tests:
-    name: Tests
+    name: Tests (Partition ${{ matrix.partition }})
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2, 3, 4]
 
     steps:
       - uses: actions/checkout@v6
@@ -47,8 +52,22 @@ jobs:
           restore-keys: |
             ${{ github.workflow }}-${{ runner.os }}-mix-${{ env.elixir }}-${{ env.otp }}-
 
-      - name: Pull postgres image quietly in background (used by test/support/containers.ex)
-        run: docker pull supabase/postgres:17.6.1.041 > /dev/null 2>&1 &
+      - name: Cache Docker images
+        uses: actions/cache@v5
+        id: docker-cache
+        with:
+          path: /tmp/docker-images
+          key: docker-images-zstd-${{ env.POSTGRES_IMAGE }}
+      - name: Load Docker images from cache
+        if: steps.docker-cache.outputs.cache-hit == 'true'
+        run: zstd -d --stdout /tmp/docker-images/postgres.tar.zst | docker image load
+      - name: Pull and save Docker images
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: |
+          docker pull ${{ env.POSTGRES_IMAGE }}
+          mkdir -p /tmp/docker-images
+          docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
+
       - name: Install dependencies
         run: mix deps.get
       - name: Set up Postgres
@@ -56,6 +75,18 @@ jobs:
       - name: Start epmd
         run: epmd -daemon
       - name: Run tests
-        run: MIX_ENV=test MAX_CASES=3 mix coveralls.github
+        run: MIX_TEST_PARTITION=${{ matrix.partition }} MAX_CASES=3 mix coveralls.github --partitions 4 --parallel --flagname partition-${{ matrix.partition }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  coverage:
+    name: Merge Coverage
+    needs: tests
+    if: always()
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: coverallsapp/github-action@v2
+        with:
+          parallel-finished: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          carryforward: "partition-1,partition-2,partition-3,partition-4"

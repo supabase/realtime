@@ -1,6 +1,5 @@
 defmodule Realtime.Tenants.AuthorizationRemoteTest do
   # async: false due to usage of Clustered
-  # Also using dev_tenant due to distributed test
   use RealtimeWeb.ConnCase, async: false
   use Mimic
 
@@ -16,7 +15,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
   alias Realtime.Tenants.Connect
 
-  setup [:rls_context]
+  setup [:remote_rls_context]
 
   describe "get_authorizations" do
     @tag role: "authenticated",
@@ -78,8 +77,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     @tag role: "anon",
          policies: []
     test "db process is down", context do
-      # Grab a remote pid that will not exist in the near future. erpc uses a new process to perform the call.
-      # Once it has returned the process is not alive anymore
       db_conn = :erpc.call(context.node, :erlang, :self, [])
 
       {:error, :increase_connection_pool} =
@@ -100,7 +97,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
               Authorization.get_read_authorizations(%Policies{}, pid, context.authorization_context)
           end
 
-          # Force RateCounter to tick
           rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
           RateCounterHelper.tick!(rate_counter)
 
@@ -111,9 +107,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         end)
 
       assert log =~ "IncreaseConnectionPool: Too many database timeouts"
-
-      # Only one log message should be emitted
-      # Splitting by the error message returns the error message and the rest of the log only
       assert length(String.split(log, "IncreaseConnectionPool: Too many database timeouts")) == 2
     end
 
@@ -128,7 +121,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
               Authorization.get_write_authorizations(%Policies{}, pid, context.authorization_context)
           end
 
-          # Force RateCounter to tick
           rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
           RateCounterHelper.tick!(rate_counter)
 
@@ -139,9 +131,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
         end)
 
       assert log =~ "IncreaseConnectionPool: Too many database timeouts"
-
-      # Only one log message should be emitted
-      # Splitting by the error message returns the error message and the rest of the log only
       assert length(String.split(log, "IncreaseConnectionPool: Too many database timeouts")) == 2
     end
   end
@@ -186,7 +175,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
             end)
 
           Task.await_many([t1, t2], 20_000)
-          # Force RateCounter to tick and log error
           rate_counter = Realtime.Tenants.authorization_errors_per_second_rate(context.tenant)
           RateCounterHelper.tick!(rate_counter)
         end)
@@ -239,12 +227,8 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     end
   end
 
-  defp rls_context(context) do
-    tenant = Realtime.Tenants.get_tenant_by_external_id("dev_tenant")
-    Connect.shutdown("dev_tenant")
-    # Waiting for :syn to unregister
-    Process.sleep(100)
-    RateCounterHelper.stop("dev_tenant")
+  defp remote_rls_context(context) do
+    tenant = Containers.checkout_tenant_unboxed(run_migrations: true)
 
     {:ok, local_db_conn} = Database.connect(tenant, "realtime_test", :stop)
     topic = random_string()
@@ -252,15 +236,11 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
     clean_table(local_db_conn, "realtime", "messages")
 
     claims = %{sub: random_string(), role: context.role, exp: Joken.current_time() + 1_000}
-    signer = Joken.Signer.create("HS256", "secret")
-
-    jwt = Joken.generate_and_sign!(%{}, claims, signer)
 
     authorization_context =
       Authorization.build_authorization_params(%{
         tenant_id: tenant.external_id,
         topic: topic,
-        jwt: jwt,
         claims: claims,
         headers: [{"header-1", "value-1"}],
         role: claims.role
@@ -271,7 +251,7 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
     {:ok, node} = Clustered.start()
     region = Tenants.region(tenant)
-    {:ok, db_conn} = :erpc.call(node, Connect, :connect, ["dev_tenant", region])
+    {:ok, db_conn} = :erpc.call(node, Connect, :connect, [tenant.external_id, region])
 
     assert node(db_conn) == node
 
