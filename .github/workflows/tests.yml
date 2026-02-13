@@ -75,14 +75,19 @@ jobs:
       - name: Start epmd
         run: epmd -daemon
       - name: Run tests
-        run: MIX_TEST_PARTITION=${{ matrix.partition }} MAX_CASES=3 mix coveralls.github --partitions 4 --parallel --flagname partition-${{ matrix.partition }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: MIX_TEST_PARTITION=${{ matrix.partition }} mix coveralls.lcov --partitions 4
+      - name: Upload coverage
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          flag-name: partition-${{ matrix.partition }}
+          parallel: true
+          file: cover/lcov.info
 
   coverage:
     name: Merge Coverage
     needs: tests
-    if: always()
+    if: ${{ needs.tests.result == 'success' }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
       - uses: coverallsapp/github-action@v2
