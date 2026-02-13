@@ -26,7 +26,8 @@ AS $function$
                   when op = 'gt' then '>'
                   when op = 'gte' then '>='
                   when op = 'in' then '= any'
-                  when op in ('isnull', 'notnull') then op
+                  when op = 'isnull' then 'isnull'
+                  when op = 'notnull' then 'notnull'
                   else 'UNKNOWN OP'
               end
           );
