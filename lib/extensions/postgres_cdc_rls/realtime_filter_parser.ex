@@ -1,18 +1,38 @@
 defmodule RealtimeFilterParser do
   @moduledoc """
-  Parse Supabase realtime filter strings like:
+  Parses Supabase realtime filter strings such as:
 
-    "date=eq.2026-02-03,published_at=not.is.null,area=eq.\"Oslo, Norway\",id=in.(1,2,3)"
+      "date=eq.2026-02-03,published_at=not.is.null,area=eq.Oslo\\, Norway,id=in.(1,2,3)"
 
-  Returns `{:ok, filters}` where filters is a list of `{column, operator, value}` tuples.
+  Splitting rules:
 
-  Special-cases:
-    - "is.null"     -> {"<col>", "isnull", nil}
-    - "not.is.null" -> {"<col>", "notnull", nil}
-    - "in.(a,b)"    -> {"<col>", "in", "{a,b}"}
+    • The filter string is split on commas.
+    • A comma can be escaped using '\\,' and will then be treated as part of the value.
+      Example:
+          area=eq.Oslo\\, Norway
+      becomes:
+          {"area", "eq", "Oslo, Norway"}
+
+    • Commas inside parentheses are NOT treated as separators.
+      Example:
+          id=in.(1,2,3)
+
+  Supported operators:
+
+      eq, neq, lt, lte, gt, gte, in, isnull, notnull
+
+  Special cases:
+
+      is.null      → {"column", "isnull", nil}
+      not.is.null  → {"column", "notnull", nil}
+
+  Returns:
+
+      {:ok, [{column, operator, value}, ...]}
+      {:error, reason}
   """
 
-  @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
+  @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in", "isnull", "notnull"]
 
   @spec parse_filter(String.t() | nil) ::
           {:ok, list({String.t(), String.t(), any()})} | {:error, String.t()}
@@ -20,7 +40,7 @@ defmodule RealtimeFilterParser do
   def parse_filter(""), do: {:ok, []}
 
   def parse_filter(filter) when is_binary(filter) do
-    with parts when is_list(parts) <- split_on_unquoted_commas(filter),
+    with parts when is_list(parts) <- split_filter(filter),
          {:ok, filters} <- parse_parts(parts) do
       {:ok, filters}
     else
@@ -30,70 +50,55 @@ defmodule RealtimeFilterParser do
   end
 
   # ------------------------------------------------------------
-  # Splitting logic (comma, but not inside quoted strings or parentheses)
+  # Splitting logic:
+  # - split on commas unless escaped: '\,'
+  # - do not split on commas inside parentheses (for in.(...))
+  # - unescape '\,' -> ',' in each resulting part
   # ------------------------------------------------------------
-  @spec split_on_unquoted_commas(String.t()) :: [String.t()]
-  defp split_on_unquoted_commas(s) do
-    s
+
+  @spec split_filter(String.t()) :: [String.t()]
+  defp split_filter(filter) do
+    filter
     |> String.graphemes()
-    |> do_split([], "", nil, 0, false)
+    |> do_split([], "", 0, false)
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&String.replace(&1, "\\,", ","))
   end
 
-  # acc        - completed parts (reversed)
-  # buf        - current buffer
-  # quote      - current quote char (" or ') or nil
-  # paren_depth- nesting level of parentheses (0 = outside)
-  # escape     - whether previous char was backslash inside quotes
-  defp do_split([], acc, buf, _quote, _paren_depth, _escape),
+  # acc: list of completed parts (reversed)
+  # buf: current part buffer
+  # paren_depth: nesting depth of parentheses
+  # escaped: whether previous char was '\'
+  defp do_split([], acc, buf, _paren_depth, _escaped),
     do: Enum.reverse([buf | acc])
 
-  # Split only when we see a comma that is outside quotes and with no open parentheses.
-  defp do_split(["," | rest], acc, buf, nil, 0, false) do
-    do_split(rest, [buf | acc], "", nil, 0, false)
+  # split only when comma is outside parentheses and not escaped
+  defp do_split(["," | rest], acc, buf, 0, false) do
+    do_split(rest, [buf | acc], "", 0, false)
   end
 
-  defp do_split([c | rest], acc, buf, quote, paren_depth, escape) do
-    cond do
-      # inside quotes and previous char was escape -> append char literally
-      quote in ["\"", "'"] and escape ->
-        do_split(rest, acc, buf <> c, quote, paren_depth, false)
+  # backslash means next char is "escaped" for splitting purposes (we keep the backslash)
+  defp do_split(["\\" | rest], acc, buf, paren_depth, _escaped) do
+    do_split(rest, acc, buf <> "\\", paren_depth, true)
+  end
 
-      # inside quotes and see backslash -> mark escape
-      quote in ["\"", "'"] and c == "\\" ->
-        do_split(rest, acc, buf <> c, quote, paren_depth, true)
+  defp do_split(["(" | rest], acc, buf, paren_depth, _escaped) do
+    do_split(rest, acc, buf <> "(", paren_depth + 1, false)
+  end
 
-      # closing quote (matches current) -> append and leave quote context
-      quote in ["\"", "'"] and c == quote ->
-        do_split(rest, acc, buf <> c, nil, paren_depth, false)
+  defp do_split([")" | rest], acc, buf, paren_depth, _escaped) do
+    do_split(rest, acc, buf <> ")", max(paren_depth - 1, 0), false)
+  end
 
-      # inside quotes, normal char
-      quote in ["\"", "'"] ->
-        do_split(rest, acc, buf <> c, quote, paren_depth, false)
-
-      # not in quotes, see an opening quote -> enter quote context
-      c in ["\"", "'"] ->
-        do_split(rest, acc, buf <> c, c, paren_depth, false)
-
-      # not in quotes, opening parenthesis increments depth
-      c == "(" ->
-        do_split(rest, acc, buf <> c, quote, paren_depth + 1, false)
-
-      # not in quotes, closing parenthesis decrements depth (but never below 0)
-      c == ")" ->
-        new_depth = max(paren_depth - 1, 0)
-        do_split(rest, acc, buf <> c, quote, new_depth, false)
-
-      # any other char outside quotes/parentheses -> append
-      true ->
-        do_split(rest, acc, buf <> c, quote, paren_depth, false)
-    end
+  defp do_split([c | rest], acc, buf, paren_depth, _escaped) do
+    do_split(rest, acc, buf <> c, paren_depth, false)
   end
 
   # ------------------------------------------------------------
   # Parsing logic
   # ------------------------------------------------------------
+
   @spec parse_parts([String.t()]) ::
           {:ok, list({String.t(), String.t(), any()})} | {:error, String.t()}
   defp parse_parts(parts) do
@@ -103,33 +108,23 @@ defmodule RealtimeFilterParser do
         [col, rest] ->
           col = String.trim(col)
 
-          cond do
-            rest == "is.null" ->
-              {:cont, {:ok, [{col, "isnull", nil} | acc]}}
-
-            rest == "not.is.null" ->
-              {:cont, {:ok, [{col, "notnull", nil} | acc]}}
-
-            true ->
-              case String.split(rest, ".", parts: 2) do
-                [filter_type, raw_value] ->
-                  if filter_type in @filter_types do
-                    with {:ok, extracted} <- extract_value(raw_value),
-                         {:ok, formatted} <- format_filter_value(filter_type, extracted) do
-                      {:cont, {:ok, [{col, filter_type, formatted} | acc]}}
-                    else
-                      {:error, reason} ->
-                        {:halt, {:error, "failed to parse filter '#{part}': #{reason}"}}
-                    end
-                  else
-                    {:halt,
-                     {:error,
-                      "unsupported filter type '#{filter_type}' for part: '#{part}'. supported: #{inspect(@filter_types)}"}}
-                  end
-
-                _ ->
-                  {:halt, {:error, "invalid filter format for '#{part}', expected '<op>.<value>'"}}
+          case parse_op_and_value(rest) do
+            {:ok, filter_type, raw_value} ->
+              if filter_type in @filter_types do
+                with {:ok, formatted} <- format_filter_value(filter_type, raw_value) do
+                  {:cont, {:ok, [{col, filter_type, formatted} | acc]}}
+                else
+                  {:error, reason} ->
+                    {:halt, {:error, "failed to parse filter '#{part}': #{reason}"}}
+                end
+              else
+                {:halt,
+                 {:error,
+                  "unsupported filter type '#{filter_type}' for part: '#{part}'. supported: #{inspect(@filter_types)}"}}
               end
+
+            {:error, reason} ->
+              {:halt, {:error, "failed to parse filter '#{part}': #{reason}"}}
           end
 
         _ ->
@@ -142,43 +137,33 @@ defmodule RealtimeFilterParser do
     end
   end
 
-  # ------------------------------------------------------------
-  # Value extraction + formatting
-  # ------------------------------------------------------------
-  @spec extract_value(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp extract_value(value) when is_binary(value) do
-    value = String.trim(value)
+  # "is.null"     => {"isnull", nil}
+  # "not.is.null" => {"notnull", nil}
+  # "<op>.<value>" => {op, value}   (value left untouched; quotes untouched)
+  @spec parse_op_and_value(String.t()) :: {:ok, String.t(), any()} | {:error, String.t()}
+  defp parse_op_and_value(rest) when is_binary(rest) do
+    rest = String.trim(rest)
 
-    cond do
-      quoted?(value, "\"") ->
-        inside = String.slice(value, 1..-2)
-        {:ok, unescape_inside(inside)}
+    case String.split(rest, ".", parts: 3) do
+      ["is", "null"] ->
+        {:ok, "isnull", nil}
 
-      quoted?(value, "'") ->
-        inside = String.slice(value, 1..-2)
-        {:ok, unescape_inside(inside)}
+      ["not", "is", "null"] ->
+        {:ok, "notnull", nil}
 
-      true ->
-        {:ok, value}
+      [filter_type, raw_value] ->
+        {:ok, filter_type, raw_value}
+
+      _ ->
+        {:error, "invalid filter format, expected 'is.null', 'not.is.null', or '<op>.<value>'"}
     end
   end
 
-  defp quoted?(value, q) do
-    String.starts_with?(value, q) and String.ends_with?(value, q)
-  end
-
-  defp unescape_inside(s) do
-    s
-    |> String.replace(~S(\\\"), "\"")
-    |> String.replace(~S(\\'), "'")
-    |> String.replace(~S(\\\\), "\\")
-  end
-
   # ------------------------------------------------------------
-  # format_filter_value/2 (incorporated)
+  # Value formatting
   # ------------------------------------------------------------
-  @spec format_filter_value(String.t(), any()) ::
-          {:ok, any()} | {:error, String.t()}
+
+  @spec format_filter_value(String.t(), any()) :: {:ok, any()} | {:error, String.t()}
   defp format_filter_value(filter, value) do
     case filter do
       "in" ->

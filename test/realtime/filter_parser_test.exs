@@ -5,7 +5,7 @@ defmodule RealtimeFilterParserTest do
 
   test "parses complex filter string" do
     input =
-      ~s/date=eq.2026-02-03,published_at=not.is.null,area=eq."Oslo, Norway",id=in.(1,2,3)/
+      ~s/date=eq.2026-02-03,published_at=not.is.null,area=eq.Oslo\\, Norway,id=in.(1,2,3)/
 
     assert {:ok,
             [
@@ -23,11 +23,6 @@ defmodule RealtimeFilterParserTest do
   test "returns error for in without parentheses" do
     # malformed: value not wrapped in parentheses -> should error
     assert {:error, _} = RealtimeFilterParser.parse_filter("id=in.1,2,3")
-  end
-
-  test "handles quoted values containing commas" do
-    input = ~s/area=eq."Bergen, NO"/
-    assert {:ok, [{"area", "eq", "Bergen, NO"}]} = RealtimeFilterParser.parse_filter(input)
   end
 
   test "empty or nil filter returns ok with empty list" do
