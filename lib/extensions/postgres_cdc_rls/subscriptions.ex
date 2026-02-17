@@ -197,12 +197,12 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   An unsupported filter will respond with an error tuple:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=like.hey"})
-      {:error, ~s(Error parsing `filter` params: ["like", "hey"])}
+      {:error, ~s(Error parsing `filter` params: unsupported filter type 'like' for part: 'subject=like.hey'. supported: ["eq", "neq", "lt", "lte", "gt", "gte", "in", "isnull", "notnull"])}
 
   Catch `undefined` filters:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "undefined"})
-      {:error, ~s(Error parsing `filter` params: ["undefined"])}
+      {:error, ~s(Error parsing `filter` params: missing '=' in filter part: 'undefined')}
 
   Catch `missing params`:
 
@@ -218,15 +218,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter}
       when is_binary(schema) and is_binary(table) and is_binary(filter) ->
-        try do
-          {:ok,
-           {action_filter, schema, table,
-            case RealtimeFilterParser.parse_filter(filter) do
-              {:ok, filters} -> filters
-              {:error, error} -> throw(error)
-            end}}
-        catch
-          error -> {:error, error}
+        case RealtimeFilterParser.parse_filter(filter) do
+          {:ok, filters} -> {:ok, {action_filter, schema, table, filters}}
+          {:error, msg} -> {:error, "Error parsing `filter` params: #{msg}"}
         end
 
       %{"schema" => schema, "table" => table}
