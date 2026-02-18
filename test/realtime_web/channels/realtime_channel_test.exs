@@ -76,8 +76,12 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert %{
                "table" => "test",
                "type" => "INSERT",
-               "record" => %{"details" => "test", "id" => ^id},
-               "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+               "record" => %{"details" => "test", "id" => ^id, "binary_data" => nil},
+               "columns" => [
+                 %{"name" => "id", "type" => "int4"},
+                 %{"name" => "details", "type" => "text"},
+                 %{"name" => "binary_data", "type" => "bytea"}
+               ],
                "errors" => nil,
                "schema" => "public",
                "commit_timestamp" => _
@@ -131,7 +135,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                "table" => "test",
                "type" => "INSERT",
                "record" => %{"details" => "test", "id" => ^id},
-               "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+               "columns" => [
+                 %{"name" => "id", "type" => "int4"},
+                 %{"name" => "details", "type" => "text"},
+                 %{"name" => "binary_data", "type" => "bytea"}
+               ],
                "errors" => nil,
                "schema" => "public",
                "commit_timestamp" => _
@@ -144,7 +152,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                "table" => "test",
                "type" => "DELETE",
                "old_record" => %{"id" => ^id},
-               "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+               "columns" => [
+                 %{"name" => "id", "type" => "int4"},
+                 %{"name" => "details", "type" => "text"},
+                 %{"name" => "binary_data", "type" => "bytea"}
+               ],
                "errors" => nil,
                "schema" => "public",
                "commit_timestamp" => _
