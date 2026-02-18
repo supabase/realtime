@@ -66,7 +66,8 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                          "data" => %{
                            "columns" => [
                              %{"name" => "id", "type" => "int4"},
-                             %{"name" => "details", "type" => "text"}
+                             %{"name" => "details", "type" => "text"},
+                             %{"name" => "binary_data", "type" => "bytea"}
                            ],
                            "commit_timestamp" => _ts,
                            "errors" => nil,
@@ -81,6 +82,63 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                        topic: "realtime:any"
                      },
                      500
+    end
+  end
+
+  describe "bytea column" do
+    test "handle insert with bytea data without double-encoding", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      config = %{postgres_changes: [%{event: "INSERT", schema: "public"}]}
+
+      WebsocketClient.join(socket, topic, %{config: config})
+      sub_id = :erlang.phash2(%{"event" => "INSERT", "schema" => "public"})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok"},
+                       topic: ^topic
+                     },
+                     200
+
+      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      binary_value = <<1, 2, 3, 4, 5>>
+
+      %{rows: [[_id]]} =
+        Postgrex.query!(conn, "insert into test (details, binary_data) values ('test', $1) returning id", [binary_value])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "record" => record,
+                           "type" => "INSERT"
+                         },
+                         "ids" => [^sub_id]
+                       },
+                       ref: nil,
+                       topic: "realtime:any"
+                     },
+                     500
+
+      # The bytea value should be the hex string as provided by wal2json
+      assert record["binary_data"] == "0102030405"
     end
   end
 
@@ -134,7 +192,8 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                          "data" => %{
                            "columns" => [
                              %{"name" => "id", "type" => "int4"},
-                             %{"name" => "details", "type" => "text"}
+                             %{"name" => "details", "type" => "text"},
+                             %{"name" => "binary_data", "type" => "bytea"}
                            ],
                            "commit_timestamp" => _ts,
                            "errors" => nil,
@@ -202,7 +261,8 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                          "data" => %{
                            "columns" => [
                              %{"name" => "id", "type" => "int4"},
-                             %{"name" => "details", "type" => "text"}
+                             %{"name" => "details", "type" => "text"},
+                             %{"name" => "binary_data", "type" => "bytea"}
                            ],
                            "commit_timestamp" => _ts,
                            "errors" => nil,
@@ -268,7 +328,8 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                          "data" => %{
                            "columns" => [
                              %{"name" => "id", "type" => "int4"},
-                             %{"name" => "details", "type" => "text"}
+                             %{"name" => "details", "type" => "text"},
+                             %{"name" => "binary_data", "type" => "bytea"}
                            ],
                            "commit_timestamp" => _ts,
                            "errors" => nil,
@@ -292,7 +353,8 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                          "data" => %{
                            "columns" => [
                              %{"name" => "id", "type" => "int4"},
-                             %{"name" => "details", "type" => "text"}
+                             %{"name" => "details", "type" => "text"},
+                             %{"name" => "binary_data", "type" => "bytea"}
                            ],
                            "commit_timestamp" => _ts,
                            "errors" => nil,
@@ -317,7 +379,8 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                          "data" => %{
                            "columns" => [
                              %{"name" => "id", "type" => "int4"},
-                             %{"name" => "details", "type" => "text"}
+                             %{"name" => "details", "type" => "text"},
+                             %{"name" => "binary_data", "type" => "bytea"}
                            ],
                            "commit_timestamp" => _ts,
                            "errors" => nil,

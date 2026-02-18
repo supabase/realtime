@@ -246,10 +246,14 @@ defmodule Realtime.Extensions.CdcRlsTest do
                "event" => "postgres_changes",
                "payload" => %{
                  "data" => %{
-                   "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+                   "columns" => [
+                     %{"name" => "id", "type" => "int4"},
+                     %{"name" => "details", "type" => "text"},
+                     %{"name" => "binary_data", "type" => "bytea"}
+                   ],
                    "commit_timestamp" => _,
                    "errors" => nil,
-                   "record" => %{"details" => "test", "id" => ^id},
+                   "record" => %{"details" => "test", "id" => ^id, "binary_data" => nil},
                    "schema" => "public",
                    "table" => "test",
                    "type" => "INSERT"
@@ -384,10 +388,14 @@ defmodule Realtime.Extensions.CdcRlsTest do
                "event" => "postgres_changes",
                "payload" => %{
                  "data" => %{
-                   "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+                   "columns" => [
+                     %{"name" => "id", "type" => "int4"},
+                     %{"name" => "details", "type" => "text"},
+                     %{"name" => "binary_data", "type" => "bytea"}
+                   ],
                    "commit_timestamp" => _,
                    "errors" => nil,
-                   "record" => %{"details" => "test", "id" => ^id},
+                   "record" => %{"details" => "test", "id" => ^id, "binary_data" => nil},
                    "schema" => "public",
                    "table" => "test",
                    "type" => "INSERT"
@@ -404,7 +412,11 @@ defmodule Realtime.Extensions.CdcRlsTest do
                "event" => "postgres_changes",
                "payload" => %{
                  "data" => %{
-                   "columns" => [%{"name" => "id", "type" => "int4"}, %{"name" => "details", "type" => "text"}],
+                   "columns" => [
+                     %{"name" => "id", "type" => "int4"},
+                     %{"name" => "details", "type" => "text"},
+                     %{"name" => "binary_data", "type" => "bytea"}
+                   ],
                    "commit_timestamp" => _,
                    "errors" => nil,
                    "type" => "DELETE",
