@@ -4,7 +4,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeCastFunction do
   use Ecto.Migration
 
   def change do
-    execute("create function realtime.cast(val text, type_ regtype)
+    execute("create or replace function realtime.cast(val text, type_ regtype)
       returns jsonb
       immutable
       language plpgsql

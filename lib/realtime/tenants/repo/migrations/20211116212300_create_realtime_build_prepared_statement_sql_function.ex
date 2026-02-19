@@ -19,7 +19,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeBuildPreparedStatementSqlFun
     END$$;
     """)
 
-    execute("create function realtime.build_prepared_statement_sql(
+    execute("create or replace function realtime.build_prepared_statement_sql(
       prepared_statement_name text,
       entity regclass,
       columns realtime.wal_column[]

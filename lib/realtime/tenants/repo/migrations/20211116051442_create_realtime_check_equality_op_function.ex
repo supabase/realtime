@@ -4,7 +4,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeCheckEqualityOpFunction do
   use Ecto.Migration
 
   def change do
-    execute("create function realtime.check_equality_op(
+    execute("create or replace function realtime.check_equality_op(
       op realtime.equality_op,
       type_ regtype,
       val_1 text,

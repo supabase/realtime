@@ -29,7 +29,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeApplyRlsFunction do
     END$$;
     """)
 
-    execute("create function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
+    execute("create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
       returns realtime.wal_rls
       language plpgsql
       volatile

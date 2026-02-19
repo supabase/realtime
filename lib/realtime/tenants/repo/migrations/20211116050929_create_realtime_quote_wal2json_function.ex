@@ -4,7 +4,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeQuoteWal2jsonFunction do
   use Ecto.Migration
 
   def change do
-    execute("create function realtime.quote_wal2json(entity regclass)
+    execute("create or replace function realtime.quote_wal2json(entity regclass)
       returns text
       language sql
       immutable
