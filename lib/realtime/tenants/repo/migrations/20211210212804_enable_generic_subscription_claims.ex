@@ -13,7 +13,7 @@ defmodule Realtime.Tenants.Migrations.EnableGenericSubscriptionClaims do
 
     execute("alter table realtime.subscription rename user_id to subscription_id")
 
-    execute("create function realtime.to_regrole(role_name text)
+    execute("create or replace function realtime.to_regrole(role_name text)
       returns regrole
       immutable
       language sql
@@ -88,7 +88,7 @@ defmodule Realtime.Tenants.Migrations.EnableGenericSubscriptionClaims do
     execute("alter type realtime.wal_rls rename attribute users to subscription_ids cascade;")
 
     execute("drop function realtime.apply_rls(jsonb, integer);")
-    execute("create function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
+    execute("create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
       returns setof realtime.wal_rls
       language plpgsql
       volatile

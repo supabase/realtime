@@ -5,7 +5,7 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeIsVisibleThroughFiltersFunct
 
   def change do
     execute(
-      "create function realtime.is_visible_through_filters(columns realtime.wal_column[], filters realtime.user_defined_filter[])
+      "create or replace function realtime.is_visible_through_filters(columns realtime.wal_column[], filters realtime.user_defined_filter[])
       returns bool
       language sql
       immutable
