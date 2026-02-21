@@ -11,8 +11,6 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @type subscription_params :: {action_filter :: binary, schema :: binary, table :: binary, [filter]}
   @type subscription_list :: [%{id: binary, claims: map, subscription_params: subscription_params}]
 
-  @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
-
   @spec create(conn(), String.t(), subscription_list, pid(), pid()) ::
           {:ok, Postgrex.Result.t()}
           | {:error, Exception.t() | {:exit, term} | {:subscription_insert_failed, String.t()}}
@@ -199,12 +197,12 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   An unsupported filter will respond with an error tuple:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=like.hey"})
-      {:error, ~s(Error parsing `filter` params: ["like", "hey"])}
+      {:error, ~s(Error parsing `filter` params: unsupported filter type 'like' for part: 'subject=like.hey'. supported: ["eq", "neq", "lt", "lte", "gt", "gte", "in", "isnull", "notnull"])}
 
   Catch `undefined` filters:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "undefined"})
-      {:error, ~s(Error parsing `filter` params: ["undefined"])}
+      {:error, ~s(Error parsing `filter` params: missing '=' in filter part: 'undefined')}
 
   Catch `missing params`:
 
@@ -220,17 +218,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter}
       when is_binary(schema) and is_binary(table) and is_binary(filter) ->
-        with [col, rest] <- String.split(filter, "=", parts: 2),
-             [filter_type, value] when filter_type in @filter_types <-
-               String.split(rest, ".", parts: 2),
-             {:ok, formatted_value} <- format_filter_value(filter_type, value) do
-          {:ok, {action_filter, schema, table, [{col, filter_type, formatted_value}]}}
-        else
-          {:error, msg} ->
-            {:error, "Error parsing `filter` params: #{msg}"}
-
-          e ->
-            {:error, "Error parsing `filter` params: #{inspect(e)}"}
+        case RealtimeFilterParser.parse_filter(filter) do
+          {:ok, filters} -> {:ok, {action_filter, schema, table, filters}}
+          {:error, msg} -> {:error, "Error parsing `filter` params: #{msg}"}
         end
 
       %{"schema" => schema, "table" => table}
@@ -267,20 +257,4 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   end
 
   defp action_filter(_), do: "*"
-
-  defp format_filter_value(filter, value) do
-    case filter do
-      "in" ->
-        case Regex.run(~r/^\((.*)\)$/, value) do
-          nil ->
-            {:error, "`in` filter value must be wrapped by parentheses"}
-
-          [_, new_value] ->
-            {:ok, "{#{new_value}}"}
-        end
-
-      _ ->
-        {:ok, value}
-    end
-  end
 end
