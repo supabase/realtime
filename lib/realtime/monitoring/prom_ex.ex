@@ -1,13 +1,19 @@
 defmodule Realtime.PromEx do
-  alias Realtime.PromEx.Plugins.Channels
   alias Realtime.PromEx.Plugins.Distributed
   alias Realtime.PromEx.Plugins.GenRpc
   alias Realtime.PromEx.Plugins.OsMon
   alias Realtime.PromEx.Plugins.Phoenix
-  alias Realtime.PromEx.Plugins.Tenant
+  alias Realtime.PromEx.Plugins.TenantGlobal
   alias Realtime.PromEx.Plugins.Tenants
 
   @moduledoc """
+  PromEx configuration for global metrics (BEAM, OS, Phoenix, distributed infrastructure).
+
+  These are higher-priority metrics. Configure your Victoria Metrics scrape interval
+  lower compared to the tenant metrics endpoint.
+
+  Exposes metrics via `/metrics` and `/metrics/:region`.
+
   Be sure to add the following to finish setting up PromEx:
 
   1. Update your configuration (config.exs, dev.exs, prod.exs, releases.exs, etc) to
@@ -96,8 +102,7 @@ defmodule Realtime.PromEx do
       {Phoenix, router: RealtimeWeb.Router, poll_rate: poll_rate, metric_prefix: [:phoenix]},
       {OsMon, poll_rate: poll_rate},
       {Tenants, poll_rate: poll_rate},
-      {Tenant, poll_rate: poll_rate},
-      {Channels, poll_rate: poll_rate},
+      {TenantGlobal, poll_rate: poll_rate},
       {Distributed, poll_rate: poll_rate},
       {GenRpc, poll_rate: poll_rate}
     ]
@@ -126,7 +131,7 @@ defmodule Realtime.PromEx do
     ]
   end
 
-  def get_metrics do
+  def get_global_metrics do
     metrics = PromEx.get_metrics(Realtime.PromEx)
 
     Realtime.PromEx.__ets_cron_flusher_name__()
@@ -134,4 +139,7 @@ defmodule Realtime.PromEx do
 
     metrics
   end
+
+  @doc deprecated: "Use get_global_metrics/0 instead"
+  def get_metrics, do: get_global_metrics()
 end

@@ -2,43 +2,45 @@ defmodule RealtimeWeb.MetricsController do
   use RealtimeWeb, :controller
   require Logger
   alias Realtime.PromEx
+  alias Realtime.TenantPromEx
   alias Realtime.GenRpc
 
-  # We give more memory and time to collect metrics from all nodes as this is a lot of work
   def index(conn, _) do
-    conn =
-      conn
-      |> put_resp_content_type("text/plain")
-      |> send_chunked(200)
+    serve_metrics(conn, [Node.self() | Node.list()], :get_global_metrics, "global cluster")
+  end
 
-    {time, conn} = :timer.tc(fn -> metrics([Node.self() | Node.list()], conn) end, :millisecond)
-    Logger.info("Collected cluster metrics in #{time} milliseconds")
-
-    conn
+  def tenant(conn, _) do
+    serve_metrics(conn, [Node.self() | Node.list()], :get_tenant_metrics, "tenant cluster")
   end
 
   def region(conn, %{"region" => region}) do
+    serve_metrics(conn, Realtime.Nodes.region_nodes(region), :get_global_metrics, "global region=#{region}")
+  end
+
+  def region_tenant(conn, %{"region" => region}) do
+    serve_metrics(conn, Realtime.Nodes.region_nodes(region), :get_tenant_metrics, "tenant region=#{region}")
+  end
+
+  defp serve_metrics(conn, nodes, metrics_fun, label) do
     conn =
       conn
       |> put_resp_content_type("text/plain")
       |> send_chunked(200)
 
-    nodes = Realtime.Nodes.region_nodes(region)
-
-    {time, conn} = :timer.tc(fn -> metrics(nodes, conn) end, :millisecond)
-    Logger.info("Collected metrics for region #{region} in #{time} milliseconds")
+    {time, conn} = :timer.tc(fn -> collect_metrics(nodes, metrics_fun, conn) end, :millisecond)
+    Logger.info("Collected #{label} metrics in #{time} milliseconds")
 
     conn
   end
 
-  defp metrics(nodes, conn) do
+  defp collect_metrics(nodes, metrics_fun, conn) do
     bump_max_heap_size()
     timeout = Application.fetch_env!(:realtime, :metrics_rpc_timeout)
 
     nodes
     |> Task.async_stream(
       fn node ->
-        {node, GenRpc.call(node, __MODULE__, :get_metrics, [], timeout: timeout)}
+        {node, GenRpc.call(node, __MODULE__, metrics_fun, [], timeout: timeout)}
       end,
       timeout: :infinity
     )
@@ -56,15 +58,22 @@ defmodule RealtimeWeb.MetricsController do
     end)
   end
 
-  def get_metrics() do
+  def get_global_metrics do
     bump_max_heap_size()
-    PromEx.get_metrics()
+    PromEx.get_global_metrics()
   end
 
-  defp bump_max_heap_size() do
+  def get_tenant_metrics do
+    bump_max_heap_size()
+    TenantPromEx.get_metrics()
+  end
+
+  @doc deprecated: "Use get_global_metrics/0 instead"
+  def get_metrics, do: get_global_metrics()
+
+  defp bump_max_heap_size do
     system_max_heap_size = :erlang.system_info(:max_heap_size)[:size]
 
-    # it's 0 when there is no limit
     if is_integer(system_max_heap_size) and system_max_heap_size > 0 do
       Process.flag(:max_heap_size, system_max_heap_size * 3)
     end

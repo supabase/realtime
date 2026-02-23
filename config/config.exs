@@ -85,6 +85,7 @@ config :gen_rpc,
 
 config :prom_ex, :storage_adapter, Realtime.PromEx.Store
 config :realtime, Realtime.PromEx, ets_flush_interval: 90_000
+config :realtime, Realtime.TenantPromEx, ets_flush_interval: 90_000
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

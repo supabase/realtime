@@ -120,7 +120,7 @@ defmodule Realtime.MetricsCleaner do
 
       vacant_tenant_ids
       |> Enum.map(fn tenant_id -> %{tenant: tenant_id} end)
-      |> then(&Peep.prune_tags(Realtime.PromEx.Metrics, &1))
+      |> then(&Peep.prune_tags(Realtime.TenantPromEx.Metrics, &1))
 
       # Delete them from the table
       :ets.select_delete(cleaner_table, [

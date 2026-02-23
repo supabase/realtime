@@ -138,7 +138,7 @@ defmodule Realtime.MetricsPusherTest do
 
       log =
         capture_log(fn ->
-          Req.Test.expect(MetricsPusher, fn conn ->
+          Req.Test.expect(MetricsPusher, fn _conn ->
             send(parent, :req_called)
             raise RuntimeError, "unexpected error"
           end)
