@@ -49,7 +49,19 @@ if Code.ensure_loaded?(Phoenix) do
             metric_prefix ++ [:connections, :total],
             event_name: @event_all_connections,
             description: "The total open connections to ranch.",
+            measurement: :total
+          ),
+          last_value(
+            metric_prefix ++ [:connections, :active],
+            event_name: @event_all_connections,
+            description: "Connections actively processing a request or WebSocket frame.",
             measurement: :active
+          ),
+          last_value(
+            metric_prefix ++ [:connections, :max],
+            event_name: @event_all_connections,
+            description: "The configured maximum connections limit for the ranch listener.",
+            measurement: :max
           )
         ],
         detach_on_error: false
@@ -57,14 +69,17 @@ if Code.ensure_loaded?(Phoenix) do
     end
 
     def execute_metrics do
-      active_conn =
-        if :ranch.info()[HTTP] do
-          :ranch.info(HTTP)[:all_connections]
-        else
-          -1
-        end
+      info = if :ranch.info()[HTTP], do: :ranch.info(HTTP), else: %{}
 
-      :telemetry.execute(@event_all_connections, %{active: active_conn}, %{})
+      :telemetry.execute(
+        @event_all_connections,
+        %{
+          total: Map.get(info, :all_connections, -1),
+          active: Map.get(info, :active_connections, -1),
+          max: Map.get(info, :max_connections, -1)
+        },
+        %{}
+      )
     end
 
     defmodule Buckets do

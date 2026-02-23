@@ -69,6 +69,7 @@ defmodule Realtime.Application do
         Realtime.ErlSysMon,
         Realtime.GenCounter,
         Realtime.PromEx,
+        Realtime.TenantPromEx,
         {Realtime.Telemetry.Logger, handler_id: "telemetry-logger"},
         RealtimeWeb.Telemetry,
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},

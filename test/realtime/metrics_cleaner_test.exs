@@ -32,7 +32,7 @@ defmodule Realtime.MetricsCleanerTest do
       Beacon.join(:users, "vacant-tenant1", pid2)
       Beacon.join(:users, "vacant-tenant2", pid3)
 
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
 
       assert String.contains?(metrics, "tenant=\"occupied-tenant\"")
       assert String.contains?(metrics, "tenant=\"vacant-tenant1\"")
@@ -50,7 +50,7 @@ defmodule Realtime.MetricsCleanerTest do
       Process.sleep(200)
 
       # Nothing changes yet (threshold not reached)
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
 
       assert String.contains?(metrics, "tenant=\"occupied-tenant\"")
       assert String.contains?(metrics, "tenant=\"vacant-tenant1\"")
@@ -60,7 +60,7 @@ defmodule Realtime.MetricsCleanerTest do
       Process.sleep(2200)
 
       # vacant tenant metrics are now gone
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
 
       assert String.contains?(metrics, "tenant=\"occupied-tenant\"")
       refute String.contains?(metrics, "tenant=\"vacant-tenant1\"")
@@ -78,7 +78,7 @@ defmodule Realtime.MetricsCleanerTest do
 
       Beacon.join(:users, "reconnect-tenant", pid)
 
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
       assert String.contains?(metrics, "tenant=\"reconnect-tenant\"")
 
       start_supervised!(
@@ -97,7 +97,7 @@ defmodule Realtime.MetricsCleanerTest do
       Process.sleep(2200)
 
       # Metrics should still be present
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
       assert String.contains?(metrics, "tenant=\"reconnect-tenant\"")
     end
   end
@@ -122,7 +122,7 @@ defmodule Realtime.MetricsCleanerTest do
         %{tenant: "disconnected-tenant2"}
       )
 
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
 
       assert String.contains?(metrics, "tenant=\"connected-tenant\"")
       assert String.contains?(metrics, "tenant=\"disconnected-tenant1\"")
@@ -143,7 +143,7 @@ defmodule Realtime.MetricsCleanerTest do
       Process.sleep(200)
 
       # Nothing changes yet (threshold not reached)
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
 
       assert String.contains?(metrics, "tenant=\"connected-tenant\"")
       assert String.contains?(metrics, "tenant=\"disconnected-tenant1\"")
@@ -153,7 +153,7 @@ defmodule Realtime.MetricsCleanerTest do
       Process.sleep(2200)
 
       # disconnected tenant metrics are now gone
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
 
       assert String.contains?(metrics, "tenant=\"connected-tenant\"")
       refute String.contains?(metrics, "tenant=\"disconnected-tenant1\"")
@@ -167,7 +167,7 @@ defmodule Realtime.MetricsCleanerTest do
         %{tenant: "reconnect-tenant"}
       )
 
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
       assert String.contains?(metrics, "tenant=\"reconnect-tenant\"")
 
       start_supervised!(
@@ -185,7 +185,7 @@ defmodule Realtime.MetricsCleanerTest do
       Process.sleep(2200)
 
       # Metrics should still be present
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+      metrics = Realtime.TenantPromEx.get_metrics() |> IO.iodata_to_binary()
       assert String.contains?(metrics, "tenant=\"reconnect-tenant\"")
     end
   end

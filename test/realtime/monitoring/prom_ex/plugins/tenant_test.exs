@@ -2,6 +2,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
   use Realtime.DataCase, async: false
 
   alias Realtime.PromEx.Plugins.Tenant
+  alias Realtime.PromEx.Plugins.TenantGlobal
   alias Realtime.Rpc
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
@@ -13,7 +14,7 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
     use PromEx, otp_app: :realtime_test_phoenix
 
     @impl true
-    def plugins, do: [{Tenant, poll_rate: 50}]
+    def plugins, do: [{Tenant, poll_rate: 50}, {TenantGlobal, poll_rate: 50}]
   end
 
   setup_all do
@@ -317,6 +318,20 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
 
       Process.sleep(200)
       assert metric_value("realtime_channel_output_bytes", tenant: external_id) == 20
+    end
+  end
+
+  describe "execute_global_connection_metrics/0" do
+    test "emits global connection counts without a tenant tag" do
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      :ok = Beacon.join(:users, "global-test-tenant", pid)
+
+      TenantGlobal.execute_global_connection_metrics()
+
+      Process.sleep(100)
+
+      assert metric_value("realtime_connections_global_connected") >= 0
+      assert metric_value("realtime_connections_global_connected_cluster") >= 0
     end
   end
 
