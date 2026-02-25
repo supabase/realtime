@@ -322,9 +322,9 @@ Metrics are split across two endpoints with different priorities, allowing you t
 | Endpoint | Priority | Recommended Scrape Interval | Contents |
 |----------|----------|------------------------------|----------|
 | `GET /metrics` | **High** | 30s | BEAM/VM, OS, Phoenix, distributed infra, and global aggregated tenant totals (no `tenant` label) |
-| `GET /metrics/tenant` | **Low** | 60s | Per-tenant labeled metrics (connection counts, channel events, replication, authorization) |
+| `GET /tenant-metrics` | **Low** | 60s | Per-tenant labeled metrics (connection counts, channel events, replication, authorization) |
 | `GET /metrics/:region` | **High** | 30s | Same as `/metrics` scoped to a specific region |
-| `GET /metrics/:region/tenant` | **Low** | 60s | Same as `/metrics/tenant` scoped to a specific region |
+| `GET /tenant-metrics/:region` | **Low** | 60s | Same as `/tenant-metrics` scoped to a specific region |
 
 All endpoints require a `Bearer` JWT token in the `Authorization` header signed with `METRICS_JWT_SECRET`.
 
@@ -344,14 +344,14 @@ scrape_configs:
     bearer_token: <METRICS_JWT_SECRET_TOKEN>
     static_configs:
       - targets: ["<host>:4000"]
-    metrics_path: /metrics/tenant
+    metrics_path: /tenant-metrics
 ```
 
 ### Metric Scopes
 
 Metrics are classified by their scope to help you understand what they measure:
 
-- **Per-Tenant**: Metrics tagged with a `tenant` label measure activity scoped to individual tenants. Exposed on `/metrics/tenant`.
+- **Per-Tenant**: Metrics tagged with a `tenant` label measure activity scoped to individual tenants. Exposed on `/tenant-metrics`.
 - **Global Aggregate**: Metrics prefixed with `realtime_channel_global_*` or `realtime_connections_global_*` aggregate tenant data without the `tenant` label, suitable for cluster-wide dashboards. Exposed on `/metrics`.
 - **Per-Node**: Metrics measure activity on the current Realtime node. Without explicit per-node indication, assume metrics apply to the local node.
 - **BEAM/Erlang VM**: Metrics prefixed with `beam_*` and `phoenix_*` expose Erlang runtime internals. Exposed on `/metrics`.
@@ -366,12 +366,12 @@ These metrics track WebSocket connections and tenant activity across the Realtim
 | `realtime_tenants_connected` | Gauge | Number of connected tenants per Realtime node. Use this to understand tenant distribution across your cluster and identify load imbalances. | Per-Node | `/metrics` |
 | `realtime_connections_global_connected` | Gauge | Node total of active WebSocket connections across all tenants. Aggregated without a `tenant` label for cluster-wide dashboards. | Global Aggregate | `/metrics` |
 | `realtime_connections_global_connected_cluster` | Gauge | Cluster-wide total of active WebSocket connections across all tenants. | Global Aggregate | `/metrics` |
-| `realtime_connections_connected` | Gauge | Active WebSocket connections that have at least one subscribed channel. Indicates active client engagement with Realtime features. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_connections_connected_cluster` | Gauge | Cluster-wide active WebSocket connections for each individual tenant. | **Per-Tenant** | `/metrics/tenant` |
+| `realtime_connections_connected` | Gauge | Active WebSocket connections that have at least one subscribed channel. Indicates active client engagement with Realtime features. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_connections_connected_cluster` | Gauge | Cluster-wide active WebSocket connections for each individual tenant. | **Per-Tenant** | `/tenant-metrics` |
 | `phoenix_connections_total` | Gauge | Total open connections to the Ranch listener (includes idle connections waiting for data). | Per-Node | `/metrics` |
 | `phoenix_connections_active` | Gauge | Connections actively processing a WebSocket frame or HTTP request. Divide by `phoenix_connections_max` to get a saturation ratio. | Per-Node | `/metrics` |
 | `phoenix_connections_max` | Gauge | The configured Ranch connection limit. When `phoenix_connections_total` approaches this the node is saturated and new connections will be queued. | Per-Node | `/metrics` |
-| `realtime_channel_joins` | Counter | Rate of channel join attempts per second per tenant. | **Per-Tenant** | `/metrics/tenant` |
+| `realtime_channel_joins` | Counter | Rate of channel join attempts per second per tenant. | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_channel_global_joins` | Counter | Global rate of channel join attempts per second across all tenants. | Global Aggregate | `/metrics` |
 
 ### Event Metrics
@@ -380,9 +380,9 @@ These metrics measure the volume and types of events flowing through your Realti
 
 | Metric | Type | Description | Scope | Endpoint |
 |--------|------|-------------|-------|----------|
-| `realtime_channel_events` | Counter | Broadcast events per second per tenant. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_channel_presence_events` | Counter | Presence events per second per tenant. Includes online/offline status updates and custom presence metadata synchronization. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_channel_db_events` | Counter | Postgres Changes events per second per tenant. | **Per-Tenant** | `/metrics/tenant` |
+| `realtime_channel_events` | Counter | Broadcast events per second per tenant. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_channel_presence_events` | Counter | Presence events per second per tenant. Includes online/offline status updates and custom presence metadata synchronization. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_channel_db_events` | Counter | Postgres Changes events per second per tenant. | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_channel_global_events` | Counter | Global broadcast events per second across all tenants. Compare against per-tenant values for outlier detection. | Global Aggregate | `/metrics` |
 | `realtime_channel_global_presence_events` | Counter | Global presence events per second across all tenants. | Global Aggregate | `/metrics` |
 | `realtime_channel_global_db_events` | Counter | Global Postgres Changes events per second across all tenants. | Global Aggregate | `/metrics` |
@@ -394,9 +394,9 @@ These metrics provide insight into data volume, message sizes, and network I/O c
 | Metric | Type | Description | Scope | Endpoint |
 |--------|------|-------------|-------|----------|
 | `realtime_payload_size_bucket` | Histogram | Global payload size distribution across all tenants, tagged by message type. Use for cluster-wide sizing and capacity planning. | Global Aggregate | `/metrics` |
-| `realtime_tenants_payload_size_bucket` | Histogram | Per-tenant payload size distribution. Use this to identify tenants generating unusually large messages. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_channel_input_bytes` | Counter | Total ingress bytes per tenant. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_channel_output_bytes` | Counter | Total egress bytes per tenant. | **Per-Tenant** | `/metrics/tenant` |
+| `realtime_tenants_payload_size_bucket` | Histogram | Per-tenant payload size distribution. Use this to identify tenants generating unusually large messages. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_channel_input_bytes` | Counter | Total ingress bytes per tenant. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_channel_output_bytes` | Counter | Total egress bytes per tenant. | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_channel_global_input_bytes` | Counter | Global total ingress bytes across all tenants. | Global Aggregate | `/metrics` |
 | `realtime_channel_global_output_bytes` | Counter | Global total egress bytes across all tenants. | Global Aggregate | `/metrics` |
 
@@ -406,16 +406,16 @@ These metrics measure end-to-end latency and processing performance across diffe
 
 | Metric | Type | Description | Scope | Endpoint |
 |--------|------|-------------|-------|----------|
-| `realtime_replication_poller_query_duration_bucket` | Histogram | Postgres Changes query latency in milliseconds per tenant. High values may indicate database performance issues. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_replication_poller_query_duration_count` | Counter | Number of database polling queries executed per tenant. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_tenants_broadcast_from_database_latency_committed_at_bucket` | Histogram | Time from database commit to client broadcast per tenant. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_tenants_broadcast_from_database_latency_inserted_at_bucket` | Histogram | Alternative latency using insert timestamp per tenant. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_tenants_replay_bucket` | Histogram | Broadcast replay latency per tenant. | **Per-Tenant** | `/metrics/tenant` |
+| `realtime_replication_poller_query_duration_bucket` | Histogram | Postgres Changes query latency in milliseconds per tenant. High values may indicate database performance issues. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_replication_poller_query_duration_count` | Counter | Number of database polling queries executed per tenant. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_tenants_broadcast_from_database_latency_committed_at_bucket` | Histogram | Time from database commit to client broadcast per tenant. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_tenants_broadcast_from_database_latency_inserted_at_bucket` | Histogram | Alternative latency using insert timestamp per tenant. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_tenants_replay_bucket` | Histogram | Broadcast replay latency per tenant. | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_global_rpc_bucket` | Histogram | Inter-node RPC call latency distribution, tagged by `success` and `mechanism`. | Global Aggregate | `/metrics` |
 | `realtime_global_rpc_count` | Counter | Total inter-node RPC calls. Divide failed by total to get error rate. | Global Aggregate | `/metrics` |
-| `realtime_tenants_read_authorization_check_bucket` | Histogram | RLS policy evaluation time for read operations per tenant. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_tenants_read_authorization_check_count` | Counter | Number of read authorization checks per tenant. | **Per-Tenant** | `/metrics/tenant` |
-| `realtime_tenants_write_authorization_check_bucket` | Histogram | RLS policy evaluation time for write operations per tenant. | **Per-Tenant** | `/metrics/tenant` |
+| `realtime_tenants_read_authorization_check_bucket` | Histogram | RLS policy evaluation time for read operations per tenant. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_tenants_read_authorization_check_count` | Counter | Number of read authorization checks per tenant. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_tenants_write_authorization_check_bucket` | Histogram | RLS policy evaluation time for write operations per tenant. | **Per-Tenant** | `/tenant-metrics` |
 | `phoenix_channel_handled_in_duration_milliseconds_bucket` | Histogram | Time for the application to respond to a channel message. High p99 values indicate slow message handlers. | Per-Node | `/metrics` |
 | `phoenix_socket_connected_duration_milliseconds_bucket` | Histogram | Time to establish a WebSocket socket connection, tagged by `result`/`transport`/`serializer`. | Per-Node | `/metrics` |
 
@@ -425,7 +425,7 @@ These metrics track security policy enforcement and error rates.
 
 | Metric | Type | Description | Scope | Endpoint |
 |--------|------|-------------|-------|----------|
-| `realtime_channel_error` | Counter | Unhandled channel errors per tenant. Any non-zero value warrants investigation. | **Per-Tenant** | `/metrics/tenant` |
+| `realtime_channel_error` | Counter | Unhandled channel errors per tenant. Any non-zero value warrants investigation. | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_channel_global_error` | Counter | Global unhandled channel error count across all tenants, tagged by error code. | Global Aggregate | `/metrics` |
 | `phoenix_channel_joined_total` | Counter | WebSocket channel join attempts tagged by `result` (`ok`/`error`) and `transport`. Use `result="error"` rate to detect client or policy issues. | Per-Node | `/metrics` |
 
