@@ -31,7 +31,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
     "realtime_payload_size"
   ]
 
-  # Metrics that must appear on GET /metrics/tenant (tenant endpoint)
+  # Metrics that must appear on GET /tenant-metrics (tenant endpoint)
   @tenant_metrics [
     # Per-tenant channel events
     "realtime_channel_events",
@@ -198,13 +198,13 @@ defmodule RealtimeWeb.MetricsControllerTest do
     end
   end
 
-  describe "GET /metrics/tenant" do
+  describe "GET /tenant-metrics" do
     test "contains all expected tenant metrics", %{conn: conn} do
       fire_all_tenant_events()
 
       response =
         conn
-        |> get(~p"/metrics/tenant")
+        |> get(~p"/tenant-metrics")
         |> text_response(200)
 
       for metric <- @tenant_metrics do
@@ -217,7 +217,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
 
       response =
         conn
-        |> get(~p"/metrics/tenant")
+        |> get(~p"/tenant-metrics")
         |> text_response(200)
 
       for metric <- @global_metrics do
@@ -232,7 +232,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
 
       log =
         capture_log(fn ->
-          assert conn |> get(~p"/metrics/tenant") |> text_response(200) == ""
+          assert conn |> get(~p"/tenant-metrics") |> text_response(200) == ""
         end)
 
       assert log =~ "Cannot fetch metrics from the node"
@@ -241,14 +241,14 @@ defmodule RealtimeWeb.MetricsControllerTest do
     test "returns 403 when authorization header is missing", %{conn: conn} do
       conn
       |> delete_req_header("authorization")
-      |> get(~p"/metrics/tenant")
+      |> get(~p"/tenant-metrics")
       |> response(403)
     end
 
     test "returns 403 when authorization header is wrong", %{conn: conn} do
       conn
       |> put_req_header("authorization", "Bearer #{generate_jwt_token("bad_secret", %{})}")
-      |> get(~p"/metrics/tenant")
+      |> get(~p"/tenant-metrics")
       |> response(403)
     end
   end
@@ -307,13 +307,13 @@ defmodule RealtimeWeb.MetricsControllerTest do
     end
   end
 
-  describe "GET /metrics/:region/tenant" do
+  describe "GET /tenant-metrics/:region" do
     test "returns tenant metrics scoped to the given region", %{conn: conn} do
       fire_all_tenant_events()
 
       response =
         conn
-        |> get(~p"/metrics/us-east-1/tenant")
+        |> get(~p"/tenant-metrics/us-east-1")
         |> text_response(200)
 
       for metric <- @tenant_metrics do
@@ -326,7 +326,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
 
       response =
         conn
-        |> get(~p"/metrics/ap-southeast-2/tenant")
+        |> get(~p"/tenant-metrics/ap-southeast-2")
         |> text_response(200)
 
       for metric <- @global_metrics do
@@ -342,7 +342,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
 
       log =
         capture_log(fn ->
-          assert conn |> get(~p"/metrics/ap-southeast-2/tenant") |> text_response(200) == ""
+          assert conn |> get(~p"/tenant-metrics/ap-southeast-2") |> text_response(200) == ""
         end)
 
       assert log =~ "Cannot fetch metrics from the node"
@@ -351,14 +351,14 @@ defmodule RealtimeWeb.MetricsControllerTest do
     test "returns 403 when authorization header is missing", %{conn: conn} do
       conn
       |> delete_req_header("authorization")
-      |> get(~p"/metrics/ap-southeast-2/tenant")
+      |> get(~p"/tenant-metrics/ap-southeast-2")
       |> response(403)
     end
 
     test "returns 403 when authorization header is wrong", %{conn: conn} do
       conn
       |> put_req_header("authorization", "Bearer #{generate_jwt_token("bad_secret", %{})}")
-      |> get(~p"/metrics/ap-southeast-2/tenant")
+      |> get(~p"/tenant-metrics/ap-southeast-2")
       |> response(403)
     end
   end
