@@ -27,6 +27,7 @@ defmodule Realtime.MetricsPusher do
   @impl true
   def init(opts) do
     url = opts[:url] || Application.get_env(:realtime, :metrics_pusher_url)
+    user = opts[:user] || Application.get_env(:realtime, :metrics_pusher_user, "realtime")
     auth = opts[:auth] || Application.get_env(:realtime, :metrics_pusher_auth)
 
     interval =
@@ -54,7 +55,8 @@ defmodule Realtime.MetricsPusher do
 
     headers =
       if auth do
-        [{"authorization", auth}, {"content-type", "text/plain"}]
+        encoded = Base.encode64("#{user}:#{auth}")
+        [{"authorization", "Basic #{encoded}"}, {"content-type", "text/plain"}]
       else
         [{"content-type", "text/plain"}]
       end
