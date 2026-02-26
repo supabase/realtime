@@ -53,21 +53,19 @@ defmodule Realtime.MetricsPusher do
 
     Logger.info("Starting MetricsPusher (url: #{url}, interval: #{interval}ms, compress: #{compress})")
 
-    headers =
-      if auth do
-        encoded = Base.encode64("#{user}:#{auth}")
-        [{"authorization", "Basic #{encoded}"}, {"content-type", "text/plain"}]
-      else
-        [{"content-type", "text/plain"}]
-      end
+    headers = [{"content-type", "text/plain"}]
 
-    req_options = [
-      method: :post,
-      url: url,
-      headers: headers,
-      compress_body: compress,
-      receive_timeout: timeout
-    ]
+    req_options =
+      [
+        method: :post,
+        url: url,
+        headers: headers,
+        compress_body: compress,
+        receive_timeout: timeout
+      ]
+      |> then(fn opts ->
+        if auth, do: Keyword.put(opts, :auth, {:basic, "#{user}:#{auth}"}), else: opts
+      end)
 
     req_options = Keyword.merge(req_options, Application.get_env(:realtime, :metrics_pusher_req_options, []))
 
