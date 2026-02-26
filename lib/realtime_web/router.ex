@@ -43,6 +43,7 @@ defmodule RealtimeWeb.Router do
 
   pipeline :metrics do
     plug(:check_auth, [:metrics_jwt_secret, :metrics_blocklist])
+    plug(RealtimeWeb.Plugs.MetricsMode)
   end
 
   pipeline :openapi do
