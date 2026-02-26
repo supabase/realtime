@@ -23,7 +23,8 @@ defmodule Realtime.MetricsPusherTest do
     test "sends request successfully" do
       opts = [
         url: "https://example.com:8428/api/v1/import/prometheus",
-        auth: "Bearer token",
+        user: "realtime",
+        auth: "secret",
         compress: true,
         interval: 10,
         timeout: 5000
@@ -39,7 +40,7 @@ defmodule Realtime.MetricsPusherTest do
         assert conn.host == "example.com"
         assert conn.port == 8428
         assert conn.request_path == "/api/v1/import/prometheus"
-        assert Conn.get_req_header(conn, "authorization") == ["Bearer token"]
+        assert Conn.get_req_header(conn, "authorization") == ["Basic #{Base.encode64("realtime:secret")}"]
         assert Conn.get_req_header(conn, "content-encoding") == ["gzip"]
         assert Conn.get_req_header(conn, "content-type") == ["text/plain"]
 
@@ -77,7 +78,8 @@ defmodule Realtime.MetricsPusherTest do
     test "sends request body untouched when compress=false" do
       opts = [
         url: "http://localhost:8428/api/v1/import/prometheus",
-        auth: "Bearer token",
+        user: "realtime",
+        auth: "secret",
         compress: false,
         interval: 10,
         timeout: 5000
@@ -102,7 +104,8 @@ defmodule Realtime.MetricsPusherTest do
     test "when request receives non 2XX response" do
       opts = [
         url: "https://example.com:8428/api/v1/import/prometheus",
-        auth: "Bearer token",
+        user: "realtime",
+        auth: "secret",
         compress: true,
         interval: 10,
         timeout: 5000
