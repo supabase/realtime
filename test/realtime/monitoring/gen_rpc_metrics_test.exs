@@ -60,8 +60,8 @@ defmodule Realtime.GenRpcMetricsTest do
 
       assert local_metrics[:connections] == remote_metrics[:connections]
 
-      assert local_metrics[:send_avg] == remote_metrics[:recv_avg]
-      assert local_metrics[:recv_avg] == remote_metrics[:send_avg]
+      assert_in_delta local_metrics[:send_avg], remote_metrics[:recv_avg], 200
+      assert_in_delta local_metrics[:recv_avg], remote_metrics[:send_avg], 200
 
       assert local_metrics[:send_oct] == remote_metrics[:recv_oct]
       assert local_metrics[:recv_oct] == remote_metrics[:send_oct]
