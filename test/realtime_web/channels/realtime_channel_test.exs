@@ -180,7 +180,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert_push "system",
                   %{
-                    message: "Error parsing `filter` params: [\"wrong\"]",
+                    message: "Error parsing `filter` params: missing '=' in filter part: 'wrong'",
                     status: "error",
                     extension: "postgres_changes",
                     channel: "test"
