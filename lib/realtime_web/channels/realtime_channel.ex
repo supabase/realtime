@@ -232,6 +232,13 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :invalid_replay_channel} ->
         log_error(socket, "UnableToReplayMessages", "Replay is not allowed for public channels")
 
+      {:error, :error_generating_signer} ->
+        log_error(
+          socket,
+          "JwtSignerError",
+          "Failed to generate JWT signer, check your JWT secret or JWKS configuration"
+        )
+
       {:error, error} ->
         log_error(socket, "UnknownErrorOnChannel", error)
         {:error, %{reason: "Unknown Error on Channel"}}

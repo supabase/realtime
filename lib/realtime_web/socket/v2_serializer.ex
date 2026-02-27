@@ -145,15 +145,23 @@ defmodule RealtimeWeb.Socket.V2Serializer do
   end
 
   defp decode_text(raw_message) do
-    [join_ref, ref, topic, event, payload | _] = Phoenix.json_library().decode!(raw_message)
+    case Phoenix.json_library().decode!(raw_message) do
+      [join_ref, ref, topic, event, payload | _] ->
+        %Message{topic: topic, event: event, payload: payload, ref: ref, join_ref: join_ref}
 
-    %Message{
-      topic: topic,
-      event: event,
-      payload: payload,
-      ref: ref,
-      join_ref: join_ref
-    }
+      %{"topic" => topic, "event" => event, "payload" => payload, "ref" => ref} = msg ->
+        %Message{
+          topic: topic,
+          event: event,
+          payload: payload,
+          ref: ref,
+          join_ref: Map.get(msg, "join_ref")
+        }
+
+      other ->
+        raise Phoenix.Socket.InvalidMessageError,
+              "expected V2 array or V1 map, got: #{inspect(other, limit: 200, printable_limit: 200)}"
+    end
   end
 
   defp decode_binary(<<

@@ -311,6 +311,8 @@ This is the list of operational codes that can help you understand your deployme
 | PresenceRateLimitReached           | Limit of presence events reached                                                                                                                                                                      |
 | ClientPresenceRateLimitReached     | Limit of presence events reached on socket                                                                                                                                                            |
 | UnableToReplayMessages             | An error while replaying messages                                                                                                                                                                     |
+| JwtSignerError                     | Failed to generate a JWT signer — check your JWT secret or JWKS configuration                                                                                                                        |
+| MalformedWebSocketMessage          | Received a WebSocket message missing required fields (`ref`, `topic`, or `event`). The connection is kept alive but the message is dropped                                                           |
 
 ## Observability and Metrics
 
