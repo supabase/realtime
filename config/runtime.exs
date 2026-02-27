@@ -322,7 +322,7 @@ if config_env() != :test do
     api_jwt_secret: System.get_env("API_JWT_SECRET"),
     api_blocklist: System.get_env("API_TOKEN_BLOCKLIST", "") |> String.split(","),
     metrics_blocklist: System.get_env("METRICS_TOKEN_BLOCKLIST", "") |> String.split(","),
-    metrics_jwt_secret: System.get_env("METRICS_JWT_SECRET"),
+    metrics_jwt_secret: System.fetch_env!("METRICS_JWT_SECRET"),
     db_enc_key: System.get_env("DB_ENC_KEY"),
     region: region,
     prom_poll_rate: Env.get_integer("PROM_POLL_RATE", 5000),
