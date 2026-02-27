@@ -1,6 +1,15 @@
 defmodule RealtimeWeb.UserSocket do
   # This is defined up here before `use Phoenix.Socket` is called so that we can define `Phoenix.Socket.init/1`
   # It has to be overridden because we need to set the `max_heap_size` flag from the transport process context
+  @impl Phoenix.Socket.Transport
+  def handle_in({payload, opts}, {_state, socket} = full_state) do
+    Phoenix.Socket.__in__({payload, opts}, full_state)
+  rescue
+    e in Phoenix.Socket.InvalidMessageError ->
+      RealtimeWeb.RealtimeChannel.Logging.log_error(socket, "MalformedWebSocketMessage", e.message)
+      {:ok, full_state}
+  end
+
   @impl true
   def init(state) when is_tuple(state) do
     Process.flag(:max_heap_size, max_heap_size())
@@ -119,7 +128,7 @@ defmodule RealtimeWeb.UserSocket do
 
       error ->
         log_error("ErrorConnectingToWebsocket", error)
-        error
+        {:error, error}
     end
   end
 
@@ -140,7 +149,8 @@ defmodule RealtimeWeb.UserSocket do
   defp max_heap_size(), do: Application.fetch_env!(:realtime, :websocket_max_heap_size)
   defp measure_traffic_interval_in_ms(), do: Application.fetch_env!(:realtime, :measure_traffic_interval_in_ms)
 
-  defp collect_traffic_telemetry(nil, _tenant_external_id, _previous_recv, _previous_send), do: 0
+  defp collect_traffic_telemetry(nil, _tenant_external_id, previous_recv, previous_send),
+    do: %{latest_recv: previous_recv, latest_send: previous_send}
 
   defp collect_traffic_telemetry(transport_pid, tenant_external_id, previous_recv, previous_send) do
     %{send_oct: latest_send, recv_oct: latest_recv} =

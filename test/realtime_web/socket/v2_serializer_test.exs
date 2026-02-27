@@ -508,6 +508,50 @@ defmodule RealtimeWeb.Socket.V2SerializerTest do
     end
   end
 
+  describe "decode!/2 text with V1 map format" do
+    test "decodes a message sent as a JSON object with all fields" do
+      raw = Jason.encode!(%{"topic" => "t", "event" => "e", "payload" => %{"m" => 1}, "ref" => "1", "join_ref" => "11"})
+
+      assert decode!(@serializer, raw, opcode: :text) == %Message{
+               topic: "t",
+               event: "e",
+               payload: %{"m" => 1},
+               ref: "1",
+               join_ref: "11"
+             }
+    end
+
+    test "decodes a message sent as a JSON object without join_ref" do
+      raw = Jason.encode!(%{"topic" => "t", "event" => "e", "payload" => %{"m" => 1}, "ref" => "1"})
+
+      assert decode!(@serializer, raw, opcode: :text) == %Message{
+               topic: "t",
+               event: "e",
+               payload: %{"m" => 1},
+               ref: "1",
+               join_ref: nil
+             }
+    end
+  end
+
+  describe "decode!/2 invalid text formats" do
+    test "raises on a bare JSON string" do
+      raw = Jason.encode!("just a string")
+
+      assert_raise Phoenix.Socket.InvalidMessageError, fn ->
+        decode!(@serializer, raw, opcode: :text)
+      end
+    end
+
+    test "raises on a V1 map missing required fields" do
+      raw = Jason.encode!(%{"topic" => "t", "event" => "e"})
+
+      assert_raise Phoenix.Socket.InvalidMessageError, fn ->
+        decode!(@serializer, raw, opcode: :text)
+      end
+    end
+  end
+
   describe "binary decode" do
     test "pushed message" do
       assert decode!(@serializer, @client_push, opcode: :binary) == %Phoenix.Socket.Message{

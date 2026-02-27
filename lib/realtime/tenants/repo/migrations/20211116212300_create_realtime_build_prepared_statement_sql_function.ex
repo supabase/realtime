@@ -6,8 +6,22 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeBuildPreparedStatementSqlFun
   def change do
     execute("""
     DO $$
+    DECLARE
+        type_oid oid;
     BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'wal_column') THEN
+        SELECT oid INTO type_oid
+        FROM pg_type
+        WHERE typname = 'wal_column' AND typnamespace = 'realtime'::regnamespace;
+
+        -- Drop if it exists without the legacy 'type' column (e.g. pre-initialized by supabase-postgres)
+        IF type_oid IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM pg_attribute WHERE attrelid = (SELECT typrelid FROM pg_type WHERE oid = type_oid) AND attname = 'type'
+        ) THEN
+            DROP TYPE realtime.wal_column CASCADE;
+            type_oid := NULL;
+        END IF;
+
+        IF type_oid IS NULL THEN
             CREATE TYPE realtime.wal_column AS (
               name text,
               type text,
