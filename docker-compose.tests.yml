@@ -35,6 +35,7 @@ services:
       DB_ENC_KEY: 1234567890123456
       DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
       API_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+      METRICS_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
       SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
       ERL_AFLAGS: -proto_dist inet_tcp
       DNS_NODES: "''"
