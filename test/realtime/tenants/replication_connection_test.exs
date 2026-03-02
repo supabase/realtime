@@ -674,6 +674,38 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     end
   end
 
+  describe "handle_result/2 for step :start_replication_slot" do
+    test "returns disconnect when error has postgres map with message" do
+      error = %Postgrex.Error{
+        postgres: %{
+          code: :undefined_table,
+          message: "relation \"realtime.messages\" does not exist"
+        }
+      }
+
+      state = %ReplicationConnection{step: :start_replication_slot}
+
+      assert {:disconnect, "Error starting replication: relation \"realtime.messages\" does not exist"} =
+               ReplicationConnection.handle_result(error, state)
+    end
+
+    test "returns disconnect when error has top-level message and no postgres map" do
+      error = %Postgrex.Error{message: "connection closed"}
+      state = %ReplicationConnection{step: :start_replication_slot}
+
+      assert {:disconnect, "Error starting replication: connection closed"} =
+               ReplicationConnection.handle_result(error, state)
+    end
+
+    test "returns disconnect when results list contains a Postgrex.Error" do
+      error = %Postgrex.Error{message: "something went wrong"}
+      state = %ReplicationConnection{step: :start_replication_slot}
+
+      assert {:disconnect, "Error starting replication: something went wrong"} =
+               ReplicationConnection.handle_result([error], state)
+    end
+  end
+
   describe "whereis/1" do
     @tag skip:
            "We are using a GenServer wrapper so the pid returned is not the same as the ReplicationConnection for now"

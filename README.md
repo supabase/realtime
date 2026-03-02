@@ -202,14 +202,14 @@ If you're using the default tenant, the URL is `ws://realtime-dev.localhost:4000
 | BROADCAST_POOL_SIZE                             | number  | Number of processes to relay Phoenix.PubSub messages across the cluster                                                                                                                                                                                                                                                         |
 | PRESENCE_POOL_SIZE                              | number  | Number of tracker processes for Presence feature. Defaults to 10. Higher values improve concurrency for presence tracking across many channels.                                                                                                                                                                                 |
 | PRESENCE_BROADCAST_PERIOD_IN_MS                 | number  | Interval in milliseconds to send presence delta broadcasts across the cluster. Defaults to 1500 (1.5 seconds). Lower values increase network traffic but reduce presence sync latency.                                                                                                                                          |
-| PRESENCE_PERMDOWN_PERIOD_IN_MS                  | number  | Interval in milliseconds to flag a replica as permanently down and discard its state. Defaults to 1200000 (20 minutes). Must be greater than down_period. Higher values are more forgiving of temporary network issues but slower to clean up truly dead replicas.                                                               |
+| PRESENCE_PERMDOWN_PERIOD_IN_MS                  | number  | Interval in milliseconds to flag a replica as permanently down and discard its state. Defaults to 1200000 (20 minutes). Must be greater than down_period. Higher values are more forgiving of temporary network issues but slower to clean up truly dead replicas.                                                              |
 | POSTGRES_CDC_SCOPE_SHARDS                       | number  | Number of dynamic supervisor partitions used by the Postgres CDC extension. Defaults to 5.                                                                                                                                                                                                                                      |
 | USERS_SCOPE_SHARDS                              | number  | Number of dynamic supervisor partitions used by the Users extension. Defaults to 5.                                                                                                                                                                                                                                             |
-| REGION_MAPPING                                  | string  | Custom mapping of platform regions to tenant regions. Must be a valid JSON object with string keys and values (e.g., `{"custom-region-1": "us-east-1", "eu-north-1": "eu-west-2"}`). If not provided, uses the default hardcoded region mapping. When set, only the specified mappings are used (no fallback to defaults). |
+| REGION_MAPPING                                  | string  | Custom mapping of platform regions to tenant regions. Must be a valid JSON object with string keys and values (e.g., `{"custom-region-1": "us-east-1", "eu-north-1": "eu-west-2"}`). If not provided, uses the default hardcoded region mapping. When set, only the specified mappings are used (no fallback to defaults).      |
 | METRICS_PUSHER_ENABLED                          | boolean | Enable periodic push of Prometheus metrics. Defaults to 'false'. Requires METRICS_PUSHER_URL to be set.                                                                                                                                                                                                                         |
 | METRICS_PUSHER_URL                              | string  | Full URL endpoint to push metrics to (e.g., 'https://example.com/api/v1/import/prometheus'). Required when METRICS_PUSHER_ENABLED is 'true'.                                                                                                                                                                                    |
-| METRICS_PUSHER_USER                             | string  | Username for Basic auth (RFC 7617) on metrics pushes. Defaults to 'realtime'. Used together with METRICS_PUSHER_AUTH to form the Authorization header as `Basic Base64("user:password")`.                                                                                                                                        |
-| METRICS_PUSHER_AUTH                             | string  | Password for Basic auth (RFC 7617) on metrics pushes. Used together with METRICS_PUSHER_USER to form the Authorization header as `Basic Base64("user:password")`. If not set, requests will be sent without authorization. Keep this secret if used.                                                                             |
+| METRICS_PUSHER_USER                             | string  | Username for Basic auth (RFC 7617) on metrics pushes. Defaults to 'realtime'. Used together with METRICS_PUSHER_AUTH to form the Authorization header as `Basic Base64("user:password")`.                                                                                                                                       |
+| METRICS_PUSHER_AUTH                             | string  | Password for Basic auth (RFC 7617) on metrics pushes. Used together with METRICS_PUSHER_USER to form the Authorization header as `Basic Base64("user:password")`. If not set, requests will be sent without authorization. Keep this secret if used.                                                                            |
 | METRICS_PUSHER_INTERVAL_MS                      | number  | Interval in milliseconds between metrics pushes. Defaults to '30000' (30 seconds).                                                                                                                                                                                                                                              |
 | METRICS_PUSHER_TIMEOUT_MS                       | number  | HTTP request timeout in milliseconds for metrics push operations. Defaults to '15000' (15 seconds).                                                                                                                                                                                                                             |
 | METRICS_PUSHER_COMPRESS                         | boolean | Enable gzip compression for metrics payloads. Defaults to 'true'.                                                                                                                                                                                                                                                               |
@@ -311,8 +311,9 @@ This is the list of operational codes that can help you understand your deployme
 | PresenceRateLimitReached           | Limit of presence events reached                                                                                                                                                                      |
 | ClientPresenceRateLimitReached     | Limit of presence events reached on socket                                                                                                                                                            |
 | UnableToReplayMessages             | An error while replaying messages                                                                                                                                                                     |
-| JwtSignerError                     | Failed to generate a JWT signer — check your JWT secret or JWKS configuration                                                                                                                        |
-| MalformedWebSocketMessage          | Received a WebSocket message missing required fields (`ref`, `topic`, or `event`). The connection is kept alive but the message is dropped                                                           |
+| JwtSignerError                     | Failed to generate a JWT signer — check your JWT secret or JWKS configuration                                                                                                                         |
+| MalformedWebSocketMessage          | Received a WebSocket message that is empty, invalid JSON, or missing required fields (`ref`, `topic`, or `event`). The connection is kept alive but the message is dropped                            |
+| UnknownErrorOnWebSocketMessage     | An unexpected error occurred while processing an incoming WebSocket message. The connection is kept alive but the message is dropped                                                                  |
 
 ## Observability and Metrics
 
@@ -322,12 +323,12 @@ Supabase Realtime exposes comprehensive metrics for monitoring performance, reso
 
 Metrics are split across two endpoints with different priorities, allowing you to configure different scrape intervals in your monitoring system:
 
-| Endpoint | Priority | Recommended Scrape Interval | Contents |
-|----------|----------|------------------------------|----------|
-| `GET /metrics` | **High** | 30s | BEAM/VM, OS, Phoenix, distributed infra, and global aggregated tenant totals (no `tenant` label) |
-| `GET /tenant-metrics` | **Low** | 60s | Per-tenant labeled metrics (connection counts, channel events, replication, authorization) |
-| `GET /metrics/:region` | **High** | 30s | Same as `/metrics` scoped to a specific region |
-| `GET /tenant-metrics/:region` | **Low** | 60s | Same as `/tenant-metrics` scoped to a specific region |
+| Endpoint                      | Priority | Recommended Scrape Interval | Contents                                                                                         |
+| ----------------------------- | -------- | --------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GET /metrics`                | **High** | 30s                         | BEAM/VM, OS, Phoenix, distributed infra, and global aggregated tenant totals (no `tenant` label) |
+| `GET /tenant-metrics`         | **Low**  | 60s                         | Per-tenant labeled metrics (connection counts, channel events, replication, authorization)       |
+| `GET /metrics/:region`        | **High** | 30s                         | Same as `/metrics` scoped to a specific region                                                   |
+| `GET /tenant-metrics/:region` | **Low**  | 60s                         | Same as `/tenant-metrics` scoped to a specific region                                            |
 
 All endpoints require a `Bearer` JWT token in the `Authorization` header signed with `METRICS_JWT_SECRET`.
 
@@ -364,73 +365,73 @@ Metrics are classified by their scope to help you understand what they measure:
 
 These metrics track WebSocket connections and tenant activity across the Realtime cluster.
 
-| Metric | Type | Description | Scope | Endpoint |
-|--------|------|-------------|-------|----------|
-| `realtime_tenants_connected` | Gauge | Number of connected tenants per Realtime node. Use this to understand tenant distribution across your cluster and identify load imbalances. | Per-Node | `/metrics` |
-| `realtime_connections_global_connected` | Gauge | Node total of active WebSocket connections across all tenants. Aggregated without a `tenant` label for cluster-wide dashboards. | Global Aggregate | `/metrics` |
-| `realtime_connections_global_connected_cluster` | Gauge | Cluster-wide total of active WebSocket connections across all tenants. | Global Aggregate | `/metrics` |
-| `realtime_connections_connected` | Gauge | Active WebSocket connections that have at least one subscribed channel. Indicates active client engagement with Realtime features. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_connections_connected_cluster` | Gauge | Cluster-wide active WebSocket connections for each individual tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `phoenix_connections_total` | Gauge | Total open connections to the Ranch listener (includes idle connections waiting for data). | Per-Node | `/metrics` |
-| `phoenix_connections_active` | Gauge | Connections actively processing a WebSocket frame or HTTP request. Divide by `phoenix_connections_max` to get a saturation ratio. | Per-Node | `/metrics` |
-| `phoenix_connections_max` | Gauge | The configured Ranch connection limit. When `phoenix_connections_total` approaches this the node is saturated and new connections will be queued. | Per-Node | `/metrics` |
-| `realtime_channel_joins` | Counter | Rate of channel join attempts per second per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_channel_global_joins` | Counter | Global rate of channel join attempts per second across all tenants. | Global Aggregate | `/metrics` |
+| Metric                                          | Type    | Description                                                                                                                                       | Scope            | Endpoint          |
+| ----------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| `realtime_tenants_connected`                    | Gauge   | Number of connected tenants per Realtime node. Use this to understand tenant distribution across your cluster and identify load imbalances.       | Per-Node         | `/metrics`        |
+| `realtime_connections_global_connected`         | Gauge   | Node total of active WebSocket connections across all tenants. Aggregated without a `tenant` label for cluster-wide dashboards.                   | Global Aggregate | `/metrics`        |
+| `realtime_connections_global_connected_cluster` | Gauge   | Cluster-wide total of active WebSocket connections across all tenants.                                                                            | Global Aggregate | `/metrics`        |
+| `realtime_connections_connected`                | Gauge   | Active WebSocket connections that have at least one subscribed channel. Indicates active client engagement with Realtime features.                | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_connections_connected_cluster`        | Gauge   | Cluster-wide active WebSocket connections for each individual tenant.                                                                             | **Per-Tenant**   | `/tenant-metrics` |
+| `phoenix_connections_total`                     | Gauge   | Total open connections to the Ranch listener (includes idle connections waiting for data).                                                        | Per-Node         | `/metrics`        |
+| `phoenix_connections_active`                    | Gauge   | Connections actively processing a WebSocket frame or HTTP request. Divide by `phoenix_connections_max` to get a saturation ratio.                 | Per-Node         | `/metrics`        |
+| `phoenix_connections_max`                       | Gauge   | The configured Ranch connection limit. When `phoenix_connections_total` approaches this the node is saturated and new connections will be queued. | Per-Node         | `/metrics`        |
+| `realtime_channel_joins`                        | Counter | Rate of channel join attempts per second per tenant.                                                                                              | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_channel_global_joins`                 | Counter | Global rate of channel join attempts per second across all tenants.                                                                               | Global Aggregate | `/metrics`        |
 
 ### Event Metrics
 
 These metrics measure the volume and types of events flowing through your Realtime system, segmented by feature type.
 
-| Metric | Type | Description | Scope | Endpoint |
-|--------|------|-------------|-------|----------|
-| `realtime_channel_events` | Counter | Broadcast events per second per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_channel_presence_events` | Counter | Presence events per second per tenant. Includes online/offline status updates and custom presence metadata synchronization. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_channel_db_events` | Counter | Postgres Changes events per second per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_channel_global_events` | Counter | Global broadcast events per second across all tenants. Compare against per-tenant values for outlier detection. | Global Aggregate | `/metrics` |
-| `realtime_channel_global_presence_events` | Counter | Global presence events per second across all tenants. | Global Aggregate | `/metrics` |
-| `realtime_channel_global_db_events` | Counter | Global Postgres Changes events per second across all tenants. | Global Aggregate | `/metrics` |
+| Metric                                    | Type    | Description                                                                                                                 | Scope            | Endpoint          |
+| ----------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| `realtime_channel_events`                 | Counter | Broadcast events per second per tenant.                                                                                     | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_channel_presence_events`        | Counter | Presence events per second per tenant. Includes online/offline status updates and custom presence metadata synchronization. | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_channel_db_events`              | Counter | Postgres Changes events per second per tenant.                                                                              | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_channel_global_events`          | Counter | Global broadcast events per second across all tenants. Compare against per-tenant values for outlier detection.             | Global Aggregate | `/metrics`        |
+| `realtime_channel_global_presence_events` | Counter | Global presence events per second across all tenants.                                                                       | Global Aggregate | `/metrics`        |
+| `realtime_channel_global_db_events`       | Counter | Global Postgres Changes events per second across all tenants.                                                               | Global Aggregate | `/metrics`        |
 
 ### Payload & Traffic Metrics
 
 These metrics provide insight into data volume, message sizes, and network I/O characteristics.
 
-| Metric | Type | Description | Scope | Endpoint |
-|--------|------|-------------|-------|----------|
-| `realtime_payload_size_bucket` | Histogram | Global payload size distribution across all tenants, tagged by message type. Use for cluster-wide sizing and capacity planning. | Global Aggregate | `/metrics` |
-| `realtime_tenants_payload_size_bucket` | Histogram | Per-tenant payload size distribution. Use this to identify tenants generating unusually large messages. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_channel_input_bytes` | Counter | Total ingress bytes per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_channel_output_bytes` | Counter | Total egress bytes per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_channel_global_input_bytes` | Counter | Global total ingress bytes across all tenants. | Global Aggregate | `/metrics` |
-| `realtime_channel_global_output_bytes` | Counter | Global total egress bytes across all tenants. | Global Aggregate | `/metrics` |
+| Metric                                 | Type      | Description                                                                                                                     | Scope            | Endpoint          |
+| -------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| `realtime_payload_size_bucket`         | Histogram | Global payload size distribution across all tenants, tagged by message type. Use for cluster-wide sizing and capacity planning. | Global Aggregate | `/metrics`        |
+| `realtime_tenants_payload_size_bucket` | Histogram | Per-tenant payload size distribution. Use this to identify tenants generating unusually large messages.                         | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_channel_input_bytes`         | Counter   | Total ingress bytes per tenant.                                                                                                 | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_channel_output_bytes`        | Counter   | Total egress bytes per tenant.                                                                                                  | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_channel_global_input_bytes`  | Counter   | Global total ingress bytes across all tenants.                                                                                  | Global Aggregate | `/metrics`        |
+| `realtime_channel_global_output_bytes` | Counter   | Global total egress bytes across all tenants.                                                                                   | Global Aggregate | `/metrics`        |
 
 ### Latency & Performance Metrics
 
 These metrics measure end-to-end latency and processing performance across different Realtime operations.
 
-| Metric | Type | Description | Scope | Endpoint |
-|--------|------|-------------|-------|----------|
-| `realtime_replication_poller_query_duration_bucket` | Histogram | Postgres Changes query latency in milliseconds per tenant. High values may indicate database performance issues. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_replication_poller_query_duration_count` | Counter | Number of database polling queries executed per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_tenants_broadcast_from_database_latency_committed_at_bucket` | Histogram | Time from database commit to client broadcast per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_tenants_broadcast_from_database_latency_inserted_at_bucket` | Histogram | Alternative latency using insert timestamp per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_tenants_replay_bucket` | Histogram | Broadcast replay latency per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_global_rpc_bucket` | Histogram | Inter-node RPC call latency distribution, tagged by `success` and `mechanism`. | Global Aggregate | `/metrics` |
-| `realtime_global_rpc_count` | Counter | Total inter-node RPC calls. Divide failed by total to get error rate. | Global Aggregate | `/metrics` |
-| `realtime_tenants_read_authorization_check_bucket` | Histogram | RLS policy evaluation time for read operations per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_tenants_read_authorization_check_count` | Counter | Number of read authorization checks per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_tenants_write_authorization_check_bucket` | Histogram | RLS policy evaluation time for write operations per tenant. | **Per-Tenant** | `/tenant-metrics` |
-| `phoenix_channel_handled_in_duration_milliseconds_bucket` | Histogram | Time for the application to respond to a channel message. High p99 values indicate slow message handlers. | Per-Node | `/metrics` |
-| `phoenix_socket_connected_duration_milliseconds_bucket` | Histogram | Time to establish a WebSocket socket connection, tagged by `result`/`transport`/`serializer`. | Per-Node | `/metrics` |
+| Metric                                                                 | Type      | Description                                                                                                      | Scope            | Endpoint          |
+| ---------------------------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| `realtime_replication_poller_query_duration_bucket`                    | Histogram | Postgres Changes query latency in milliseconds per tenant. High values may indicate database performance issues. | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_replication_poller_query_duration_count`                     | Counter   | Number of database polling queries executed per tenant.                                                          | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_tenants_broadcast_from_database_latency_committed_at_bucket` | Histogram | Time from database commit to client broadcast per tenant.                                                        | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_tenants_broadcast_from_database_latency_inserted_at_bucket`  | Histogram | Alternative latency using insert timestamp per tenant.                                                           | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_tenants_replay_bucket`                                       | Histogram | Broadcast replay latency per tenant.                                                                             | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_global_rpc_bucket`                                           | Histogram | Inter-node RPC call latency distribution, tagged by `success` and `mechanism`.                                   | Global Aggregate | `/metrics`        |
+| `realtime_global_rpc_count`                                            | Counter   | Total inter-node RPC calls. Divide failed by total to get error rate.                                            | Global Aggregate | `/metrics`        |
+| `realtime_tenants_read_authorization_check_bucket`                     | Histogram | RLS policy evaluation time for read operations per tenant.                                                       | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_tenants_read_authorization_check_count`                      | Counter   | Number of read authorization checks per tenant.                                                                  | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_tenants_write_authorization_check_bucket`                    | Histogram | RLS policy evaluation time for write operations per tenant.                                                      | **Per-Tenant**   | `/tenant-metrics` |
+| `phoenix_channel_handled_in_duration_milliseconds_bucket`              | Histogram | Time for the application to respond to a channel message. High p99 values indicate slow message handlers.        | Per-Node         | `/metrics`        |
+| `phoenix_socket_connected_duration_milliseconds_bucket`                | Histogram | Time to establish a WebSocket socket connection, tagged by `result`/`transport`/`serializer`.                    | Per-Node         | `/metrics`        |
 
 ### Authorization & Error Metrics
 
 These metrics track security policy enforcement and error rates.
 
-| Metric | Type | Description | Scope | Endpoint |
-|--------|------|-------------|-------|----------|
-| `realtime_channel_error` | Counter | Unhandled channel errors per tenant. Any non-zero value warrants investigation. | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_channel_global_error` | Counter | Global unhandled channel error count across all tenants, tagged by error code. | Global Aggregate | `/metrics` |
-| `phoenix_channel_joined_total` | Counter | WebSocket channel join attempts tagged by `result` (`ok`/`error`) and `transport`. Use `result="error"` rate to detect client or policy issues. | Per-Node | `/metrics` |
+| Metric                          | Type    | Description                                                                                                                                     | Scope            | Endpoint          |
+| ------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------- |
+| `realtime_channel_error`        | Counter | Unhandled channel errors per tenant. Any non-zero value warrants investigation.                                                                 | **Per-Tenant**   | `/tenant-metrics` |
+| `realtime_channel_global_error` | Counter | Global unhandled channel error count across all tenants, tagged by error code.                                                                  | Global Aggregate | `/metrics`        |
+| `phoenix_channel_joined_total`  | Counter | WebSocket channel join attempts tagged by `result` (`ok`/`error`) and `transport`. Use `result="error"` rate to detect client or policy issues. | Per-Node         | `/metrics`        |
 
 ### BEAM/Erlang VM Metrics
 
@@ -440,37 +441,37 @@ All BEAM/Erlang VM metrics are served from `GET /metrics`.
 
 #### Memory Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `beam_memory_allocated_bytes` | Gauge | Total memory allocated by the Erlang VM. Compare this to the container memory limit to ensure you have headroom. Steady increase may indicate a memory leak. |
-| `beam_memory_atom_total_bytes` | Gauge | Memory used by the atom table. Atoms in Erlang are never garbage collected, so this should remain relatively stable. Unbounded growth indicates a bug creating new atoms. |
-| `beam_memory_binary_total_bytes` | Gauge | Memory used by binary data (WebSocket payloads, database results). This metric closely correlates with active connection volume and message sizes. |
-| `beam_memory_code_total_bytes` | Gauge | Memory used by compiled Erlang bytecode. Changes only during code reloads and should remain stable in production. |
-| `beam_memory_ets_total_bytes` | Gauge | Memory used by ETS (in-memory tables) including channel subscriptions and presence state. Monitor this to understand session storage overhead. |
-| `beam_memory_processes_total_bytes` | Gauge | Memory used by Erlang processes themselves. Each channel connection and background task consumes memory; this scales with concurrency. |
-| `beam_memory_persistent_term_total_bytes` | Gauge | Memory used by persistent terms (immutable shared state). Should be minimal and stable in typical Realtime deployments. |
+| Metric                                    | Type  | Description                                                                                                                                                               |
+| ----------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `beam_memory_allocated_bytes`             | Gauge | Total memory allocated by the Erlang VM. Compare this to the container memory limit to ensure you have headroom. Steady increase may indicate a memory leak.              |
+| `beam_memory_atom_total_bytes`            | Gauge | Memory used by the atom table. Atoms in Erlang are never garbage collected, so this should remain relatively stable. Unbounded growth indicates a bug creating new atoms. |
+| `beam_memory_binary_total_bytes`          | Gauge | Memory used by binary data (WebSocket payloads, database results). This metric closely correlates with active connection volume and message sizes.                        |
+| `beam_memory_code_total_bytes`            | Gauge | Memory used by compiled Erlang bytecode. Changes only during code reloads and should remain stable in production.                                                         |
+| `beam_memory_ets_total_bytes`             | Gauge | Memory used by ETS (in-memory tables) including channel subscriptions and presence state. Monitor this to understand session storage overhead.                            |
+| `beam_memory_processes_total_bytes`       | Gauge | Memory used by Erlang processes themselves. Each channel connection and background task consumes memory; this scales with concurrency.                                    |
+| `beam_memory_persistent_term_total_bytes` | Gauge | Memory used by persistent terms (immutable shared state). Should be minimal and stable in typical Realtime deployments.                                                   |
 
 #### Process & Resource Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
+| Metric                     | Type  | Description                                                                                                                                                           |
+| -------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `beam_stats_process_count` | Gauge | Number of active Erlang processes. Each WebSocket connection spawns processes; high values correlate with connection count. Sudden spikes may indicate process leaks. |
-| `beam_stats_port_count` | Gauge | Number of open port connections (network sockets, pipes). Should correlate roughly with connection count plus internal cluster communications. |
-| `beam_stats_ets_count` | Gauge | Number of active ETS tables used for caching and state. Changes reflect dynamic supervisor activity and feature usage patterns. |
-| `beam_stats_atom_count` | Gauge | Total atoms in the atom table. Should remain relatively stable; unbounded growth indicates code bugs. |
+| `beam_stats_port_count`    | Gauge | Number of open port connections (network sockets, pipes). Should correlate roughly with connection count plus internal cluster communications.                        |
+| `beam_stats_ets_count`     | Gauge | Number of active ETS tables used for caching and state. Changes reflect dynamic supervisor activity and feature usage patterns.                                       |
+| `beam_stats_atom_count`    | Gauge | Total atoms in the atom table. Should remain relatively stable; unbounded growth indicates code bugs.                                                                 |
 
 #### Performance Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `beam_stats_uptime_milliseconds_count` | Counter | Node uptime in milliseconds. Use this to track restarts and validate deployment stability. Unexpected resets indicate crashes. |
-| `beam_stats_port_io_byte_count` | Counter | Total bytes transferred through network ports. Compare ingress and egress to identify asymmetric traffic patterns. |
-| `beam_stats_gc_count` | Counter | Garbage collection events executed by the Erlang VM. Frequent GC indicates high memory churn; infrequent GC suggests stable state. |
-| `beam_stats_gc_reclaimed_bytes` | Counter | Bytes reclaimed by garbage collection. Divide by GC count to understand average cleanup size. Low reclaim per GC may indicate inefficient memory allocation patterns. |
-| `beam_stats_reduction_count` | Counter | Total reductions (work units) executed by the VM. Correlates with CPU usage; high reduction rates under stable load indicate inefficient algorithms. |
-| `beam_stats_context_switch_count` | Counter | Process context switches by the Erlang scheduler. High values indicate contention between many processes; compare with process count to gauge congestion. |
-| `beam_stats_active_task_count` | Gauge | Tasks currently executing on dirty schedulers (non-Erlang operations). High values indicate CPU-bound work or blocking I/O. |
-| `beam_stats_run_queue_count` | Gauge | Processes waiting to be scheduled. High values indicate CPU saturation; the node cannot keep up with work demand. |
+| Metric                                 | Type    | Description                                                                                                                                                           |
+| -------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `beam_stats_uptime_milliseconds_count` | Counter | Node uptime in milliseconds. Use this to track restarts and validate deployment stability. Unexpected resets indicate crashes.                                        |
+| `beam_stats_port_io_byte_count`        | Counter | Total bytes transferred through network ports. Compare ingress and egress to identify asymmetric traffic patterns.                                                    |
+| `beam_stats_gc_count`                  | Counter | Garbage collection events executed by the Erlang VM. Frequent GC indicates high memory churn; infrequent GC suggests stable state.                                    |
+| `beam_stats_gc_reclaimed_bytes`        | Counter | Bytes reclaimed by garbage collection. Divide by GC count to understand average cleanup size. Low reclaim per GC may indicate inefficient memory allocation patterns. |
+| `beam_stats_reduction_count`           | Counter | Total reductions (work units) executed by the VM. Correlates with CPU usage; high reduction rates under stable load indicate inefficient algorithms.                  |
+| `beam_stats_context_switch_count`      | Counter | Process context switches by the Erlang scheduler. High values indicate contention between many processes; compare with process count to gauge congestion.             |
+| `beam_stats_active_task_count`         | Gauge   | Tasks currently executing on dirty schedulers (non-Erlang operations). High values indicate CPU-bound work or blocking I/O.                                           |
+| `beam_stats_run_queue_count`           | Gauge   | Processes waiting to be scheduled. High values indicate CPU saturation; the node cannot keep up with work demand.                                                     |
 
 ### Infrastructure Metrics
 
@@ -478,26 +479,26 @@ These metrics expose system-level resource usage and inter-node cluster communic
 
 #### Node Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `osmon_cpu_util` | Gauge | Current CPU utilization percentage (0-100). Monitor this to trigger horizontal scaling and identify CPU-bound bottlenecks. |
-| `osmon_cpu_avg1` | Gauge | 1-minute CPU load average. Sharp increases indicate sudden load spikes; values > CPU count indicate sustained overload. |
-| `osmon_cpu_avg5` | Gauge | 5-minute CPU load average. Smooths short-term spikes; use this to detect sustained load increases. |
-| `osmon_cpu_avg15` | Gauge | 15-minute CPU load average. Indicates long-term trends; use for capacity planning and detecting gradual load growth. |
+| Metric            | Type  | Description                                                                                                                                             |
+| ----------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `osmon_cpu_util`  | Gauge | Current CPU utilization percentage (0-100). Monitor this to trigger horizontal scaling and identify CPU-bound bottlenecks.                              |
+| `osmon_cpu_avg1`  | Gauge | 1-minute CPU load average. Sharp increases indicate sudden load spikes; values > CPU count indicate sustained overload.                                 |
+| `osmon_cpu_avg5`  | Gauge | 5-minute CPU load average. Smooths short-term spikes; use this to detect sustained load increases.                                                      |
+| `osmon_cpu_avg15` | Gauge | 15-minute CPU load average. Indicates long-term trends; use for capacity planning and detecting gradual load growth.                                    |
 | `osmon_ram_usage` | Gauge | RAM utilization percentage (0-100). Combined with `beam_memory_allocated_bytes`, this indicates kernel memory overhead and other processes on the node. |
 
 #### Distributed System Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `gen_rpc_queue_size_bytes` | Gauge | Outbound queue size for gen_rpc inter-node communication in bytes. Large values indicate a receiving node cannot keep up with message rate. |
-| `gen_rpc_send_pending_bytes` | Gauge | Bytes pending transmission in gen_rpc queues. Combined with queue size, helps identify network saturation or slow receivers. |
-| `gen_rpc_send_bytes` | Counter | Total bytes sent via gen_rpc across the cluster. Monitor this to understand inter-node traffic and plan network capacity. |
-| `gen_rpc_recv_bytes` | Counter | Total bytes received via gen_rpc from other nodes. Compare with send bytes to identify asymmetric communication patterns. |
-| `dist_queue_size` | Gauge | Erlang distribution queue size for cluster communication. High values indicate network congestion or unbalanced load across nodes. |
-| `dist_send_pending_bytes` | Gauge | Bytes pending in Erlang distribution queues. Works with queue size to diagnose cluster communication issues. |
-| `dist_send_bytes` | Counter | Total bytes sent via Erlang distribution protocol. Includes all cluster metadata and RPC traffic. |
-| `dist_recv_bytes` | Counter | Total bytes received via Erlang distribution protocol. Compare with send to validate symmetric communication. |
+| Metric                       | Type    | Description                                                                                                                                 |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gen_rpc_queue_size_bytes`   | Gauge   | Outbound queue size for gen_rpc inter-node communication in bytes. Large values indicate a receiving node cannot keep up with message rate. |
+| `gen_rpc_send_pending_bytes` | Gauge   | Bytes pending transmission in gen_rpc queues. Combined with queue size, helps identify network saturation or slow receivers.                |
+| `gen_rpc_send_bytes`         | Counter | Total bytes sent via gen_rpc across the cluster. Monitor this to understand inter-node traffic and plan network capacity.                   |
+| `gen_rpc_recv_bytes`         | Counter | Total bytes received via gen_rpc from other nodes. Compare with send bytes to identify asymmetric communication patterns.                   |
+| `dist_queue_size`            | Gauge   | Erlang distribution queue size for cluster communication. High values indicate network congestion or unbalanced load across nodes.          |
+| `dist_send_pending_bytes`    | Gauge   | Bytes pending in Erlang distribution queues. Works with queue size to diagnose cluster communication issues.                                |
+| `dist_send_bytes`            | Counter | Total bytes sent via Erlang distribution protocol. Includes all cluster metadata and RPC traffic.                                           |
+| `dist_recv_bytes`            | Counter | Total bytes received via Erlang distribution protocol. Compare with send to validate symmetric communication.                               |
 
 ## License
 

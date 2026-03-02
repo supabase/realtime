@@ -44,5 +44,32 @@ defmodule RealtimeWeb.UserSocketTest do
 
       assert log =~ "MalformedWebSocketMessage"
     end
+
+    test "does not crash and logs when message is empty string" do
+      log =
+        capture_log(fn ->
+          assert {:ok, @state} = UserSocket.handle_in({"", [opcode: :text]}, @state)
+        end)
+
+      assert log =~ "MalformedWebSocketMessage"
+    end
+
+    test "does not crash and logs when message is invalid JSON" do
+      log =
+        capture_log(fn ->
+          assert {:ok, @state} = UserSocket.handle_in({"not json", [opcode: :text]}, @state)
+        end)
+
+      assert log =~ "MalformedWebSocketMessage"
+    end
+
+    test "does not crash and logs on unexpected errors" do
+      log =
+        capture_log(fn ->
+          assert {:ok, @state} = UserSocket.handle_in({:not_a_binary, [opcode: :text]}, @state)
+        end)
+
+      assert log =~ "UnknownErrorOnWebSocketMessage"
+    end
   end
 end
