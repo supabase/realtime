@@ -264,8 +264,16 @@ defmodule Realtime.Tenants.ReplicationConnection do
     end
   end
 
+  def handle_result(%Postgrex.Error{postgres: %{message: message}}, %__MODULE__{step: :start_replication_slot} = _state) do
+    {:disconnect, "Error starting replication: #{message}"}
+  end
+
+  def handle_result(%Postgrex.Error{message: message}, %__MODULE__{step: :start_replication_slot} = _state) do
+    {:disconnect, "Error starting replication: #{message}"}
+  end
+
   def handle_result(results, %__MODULE__{step: :start_replication_slot} = state) do
-    error = Enum.find(results, fn res -> match?(Postgrex.Error, res) end)
+    error = Enum.find(results, fn res -> match?(%Postgrex.Error{}, res) end)
 
     if error do
       {:disconnect, "Error starting replication: #{error.message}"}

@@ -8,6 +8,14 @@ defmodule RealtimeWeb.UserSocket do
     e in Phoenix.Socket.InvalidMessageError ->
       RealtimeWeb.RealtimeChannel.Logging.log_error(socket, "MalformedWebSocketMessage", e.message)
       {:ok, full_state}
+
+    e in Jason.DecodeError ->
+      RealtimeWeb.RealtimeChannel.Logging.log_error(socket, "MalformedWebSocketMessage", Jason.DecodeError.message(e))
+      {:ok, full_state}
+
+    e ->
+      RealtimeWeb.RealtimeChannel.Logging.log_error(socket, "UnknownErrorOnWebSocketMessage", Exception.message(e))
+      {:ok, full_state}
   end
 
   @impl true
