@@ -22,6 +22,7 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
     msg = build_msg(code, msg)
     emit_system_error(:error, code)
     log(socket, :error, code, msg)
+    maybe_capture_sentry_error(socket, code, msg)
     {:error, %{reason: msg}}
   end
 
@@ -69,6 +70,7 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
     msg = build_msg(code, msg)
     emit_system_error(level, code)
     if Logger.compare_levels(log_level, level) != :gt, do: log(socket, level, code, msg)
+    if level == :error, do: maybe_capture_sentry_error(socket, code, msg)
     if level in [:error, :warning], do: {:error, %{reason: msg}}, else: :ok
   end
 
@@ -103,4 +105,30 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
         nil
     end
   end
+
+  @sentry_capture_codes MapSet.new([
+                         "MalformedWebSocketMessage",
+                         "UnknownErrorOnChannel",
+                         "InitializingProjectConnection",
+                         "DatabaseConnectionIssue",
+                         "UnableToSetPolicies"
+                       ])
+
+  defp maybe_capture_sentry_error(socket, code, msg) do
+    if MapSet.member?(@sentry_capture_codes, code) and
+         sampled?(Application.get_env(:realtime, :sentry_channel_error_sample_rate, 0.1)) do
+      tenant = get_in(socket, [:assigns, :tenant])
+      topic = Map.get(socket, :topic)
+
+      Sentry.capture_message(msg,
+        level: :error,
+        tags: %{error_code: code, source: "channel"},
+        extra: %{tenant: tenant, topic: topic}
+      )
+    end
+  end
+
+  defp sampled?(rate) when is_float(rate), do: rate >= 1.0 or :rand.uniform() <= rate
+  defp sampled?(rate) when is_integer(rate), do: sampled?(rate / 1)
+  defp sampled?(_), do: false
 end
