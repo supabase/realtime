@@ -4,7 +4,7 @@ ARG DEBIAN_VERSION=bookworm-20250929-slim
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
 
-FROM ${BUILDER_IMAGE} as builder
+FROM ${BUILDER_IMAGE} AS builder
 
 ENV MIX_ENV="prod"
 
@@ -12,6 +12,9 @@ RUN apt-get update -y \
     && apt-get install curl -y \
     && apt-get install -y build-essential git \
     && apt-get clean
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN set -uex; \
     apt-get update; \
@@ -45,6 +48,7 @@ COPY config/config.exs config/${MIX_ENV}.exs config/
 RUN mix deps.compile
 COPY priv priv
 COPY lib lib
+COPY native native
 COPY assets assets
 
 # compile assets with esbuild and npm
@@ -66,13 +70,13 @@ RUN mix release
 FROM ${RUNNER_IMAGE}
 ARG SLOT_NAME_SUFFIX
 
-ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}"
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US:en
-ENV LC_ALL en_US.UTF-8
-ENV MIX_ENV="prod"
-ENV ECTO_IPV6 true
-ENV ERL_AFLAGS "-proto_dist inet6_tcp"
+ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}" \
+    LANG="en_US.UTF-8" \
+    LANGUAGE="en_US:en" \
+    LC_ALL="en_US.UTF-8" \
+    MIX_ENV="prod" \
+    ECTO_IPV6="true" \
+    ERL_AFLAGS="-proto_dist inet6_tcp"
 
 RUN apt-get update -y && \
     apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini curl awscli jq && \

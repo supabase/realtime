@@ -1,0 +1,15 @@
+[package]
+name = "prometheus_remote_write"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "prometheus_remote_write"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.37"
+chrono = "0.4"
+prometheus-parse = "0.2"
+prost = { version = "0.13", features = ["derive"] }
+snap = "1.1"
