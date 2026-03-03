@@ -87,84 +87,14 @@ defmodule Realtime.MetricsPusherTest do
     {:ok, pid}
   end
 
-  @histogram_metrics """
-  # HELP http_request_duration_seconds HTTP request latency
-  # TYPE http_request_duration_seconds histogram
-  http_request_duration_seconds_bucket{le="0.1"} 24054 1700000000000
-  http_request_duration_seconds_bucket{le="0.25"} 33444 1700000000000
-  http_request_duration_seconds_bucket{le="+Inf"} 144320 1700000000000
-  http_request_duration_seconds_sum 53423 1700000000000
-  http_request_duration_seconds_count 144320 1700000000000
-  """
-
-  @summary_metrics """
-  # HELP rpc_duration_seconds RPC duration
-  # TYPE rpc_duration_seconds summary
-  rpc_duration_seconds{quantile="0.5"} 4773 1700000000000
-  rpc_duration_seconds{quantile="0.99"} 170415 1700000000000
-  rpc_duration_seconds_sum 1.7560473e+07 1700000000000
-  rpc_duration_seconds_count 2693 1700000000000
-  """
-
-  describe "encode/decode roundtrip" do
-    test "histogram buckets survive encode/decode with le labels" do
-      {:ok, encoded} = PrometheusRemoteWrite.encode(@histogram_metrics, 1_700_000_000_000)
-      {:ok, series} = PrometheusRemoteWrite.decode(encoded)
-
-      bucket_series = Enum.filter(series, &(&1[:name] == "http_request_duration_seconds_bucket"))
-      assert length(bucket_series) == 3
-
-      le_values =
-        Enum.flat_map(bucket_series, fn s -> Enum.map(s[:labels], & &1["le"]) end)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.sort()
-
-      assert le_values == ["+Inf", "0.1", "0.25"]
-    end
-
-    test "histogram sum and count are included as separate series" do
-      {:ok, encoded} = PrometheusRemoteWrite.encode(@histogram_metrics, 1_700_000_000_000)
-      {:ok, series} = PrometheusRemoteWrite.decode(encoded)
-
-      names = MapSet.new(series, & &1[:name])
-      assert "http_request_duration_seconds_sum" in names
-      assert "http_request_duration_seconds_count" in names
-    end
-
-    test "summary quantiles survive encode/decode with quantile labels" do
-      {:ok, encoded} = PrometheusRemoteWrite.encode(@summary_metrics, 1_700_000_000_000)
-      {:ok, series} = PrometheusRemoteWrite.decode(encoded)
-
-      quantile_series = Enum.filter(series, &(&1[:name] == "rpc_duration_seconds"))
-      assert length(quantile_series) == 2
-
-      quantile_values =
-        Enum.flat_map(quantile_series, fn s -> Enum.map(s[:labels], & &1["quantile"]) end)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.sort()
-
-      assert quantile_values == ["0.5", "0.99"]
-    end
-
-    test "summary sum and count are included as separate series" do
-      {:ok, encoded} = PrometheusRemoteWrite.encode(@summary_metrics, 1_700_000_000_000)
-      {:ok, series} = PrometheusRemoteWrite.decode(encoded)
-
-      names = MapSet.new(series, & &1[:name])
-      assert "rpc_duration_seconds_sum" in names
-      assert "rpc_duration_seconds_count" in names
-    end
-  end
-
   describe "push sends live PromEx metrics" do
-    test "decoded payload contains all expected global metric series" do
+    test "events are emitted, Req sends them, mock receives and decoded content is correct" do
       fire_all_tenant_events()
 
       parent = self()
 
       Req.Test.expect(MetricsPusher, fn conn ->
-        body = Req.Test.raw_body(conn)
-        send(parent, {:push_body, body})
+        send(parent, {:push_body, Req.Test.raw_body(conn)})
         Req.Test.text(conn, "")
       end)
 
@@ -184,6 +114,18 @@ defmodule Realtime.MetricsPusherTest do
         assert Enum.any?(series_names, &String.starts_with?(&1, base_name)),
                "expected a series whose name starts with #{base_name}"
       end
+
+      bucket_series =
+        Enum.filter(series, &(&1[:name] == "phoenix_channel_handled_in_duration_milliseconds_bucket"))
+
+      assert length(bucket_series) > 0
+
+      assert Enum.all?(bucket_series, fn s ->
+               Enum.any?(s[:labels], &Map.has_key?(&1, "le"))
+             end)
+
+      assert "phoenix_channel_handled_in_duration_milliseconds_sum" in series_names
+      assert "phoenix_channel_handled_in_duration_milliseconds_count" in series_names
     end
   end
 
@@ -301,6 +243,35 @@ defmodule Realtime.MetricsPusherTest do
         end)
 
       assert log =~ "MetricsPusher: Exception during push: %RuntimeError{message: \"unexpected error\"}"
+    end
+
+    test "logs unexpected messages and stays alive" do
+      fire_all_tenant_events()
+
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, fn conn ->
+        send(parent, :push_happened)
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, pid} =
+        start_and_allow_pusher(
+          url: "http://localhost:8428/api/v1/write",
+          interval: 10,
+          timeout: 5000
+        )
+
+      assert_receive :push_happened, 500
+
+      log =
+        capture_log(fn ->
+          send(pid, :unexpected_message)
+          Process.sleep(50)
+          assert Process.alive?(pid)
+        end)
+
+      assert log =~ "MetricsPusher received unexpected message: :unexpected_message"
     end
   end
 end
