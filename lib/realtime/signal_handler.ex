@@ -3,28 +3,36 @@ defmodule Realtime.SignalHandler do
   @behaviour :gen_event
   require Logger
 
-  @spec shutdown_in_progress? :: :ok | {:error, :shutdown_in_progress}
+  @spec shutdown_in_progress?() :: :ok | {:error, :shutdown_in_progress}
   def shutdown_in_progress? do
-    case !!Application.get_env(:realtime, :shutdown_in_progress) do
-      true -> {:error, :shutdown_in_progress}
-      false -> :ok
-    end
+    if Application.get_env(:realtime, :shutdown_in_progress),
+      do: {:error, :shutdown_in_progress},
+      else: :ok
   end
 
   @impl true
   def init({%{handler_mod: _} = args, :ok}) do
-    {:ok, args}
+    {:ok, Map.put_new(args, :shutdown_fn, fn -> System.stop(0) end)}
   end
 
   @impl true
   def handle_event(signal, %{handler_mod: handler_mod} = state) do
-    Logger.error("#{__MODULE__}: #{inspect(signal)} received")
+    case signal do
+      :sigterm ->
+        Logger.warning("#{__MODULE__}: :sigterm received")
+        Application.put_env(:realtime, :shutdown_in_progress, true)
+        handler_mod.handle_event(signal, state)
 
-    if signal == :sigterm do
-      Application.put_env(:realtime, :shutdown_in_progress, true)
+      :sigint ->
+        Application.put_env(:realtime, :shutdown_in_progress, true)
+        Logger.notice("#{__MODULE__}: SIGINT received - shutting down")
+        Task.start(state.shutdown_fn)
+        {:ok, state}
+
+      _ ->
+        Logger.error("#{__MODULE__}: unexpected signal #{inspect(signal)} received")
+        handler_mod.handle_event(signal, state)
     end
-
-    handler_mod.handle_event(signal, state)
   end
 
   @impl true

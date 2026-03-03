@@ -30,8 +30,9 @@ defmodule RealtimeWeb.PingLive do
     {:noreply, assign(socket, :ping, pong <> " ms")}
   end
 
+  @ping_timer if Application.compile_env(:realtime, :dev_mode, false), do: 60_000, else: 1_000
+
   defp ping do
-    timer = if Mix.env() == :dev, do: 60_000, else: 1_000
-    Process.send_after(self(), :ping, timer)
+    Process.send_after(self(), :ping, @ping_timer)
   end
 end

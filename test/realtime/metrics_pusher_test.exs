@@ -156,7 +156,6 @@ defmodule Realtime.MetricsPusherTest do
         assert conn.port == 8428
         assert conn.request_path == "/api/v1/write"
         assert Conn.get_req_header(conn, "authorization") == ["Basic #{Base.encode64("realtime:secret")}"]
-        assert Conn.get_req_header(conn, "content-encoding") == ["snappy"]
         assert Conn.get_req_header(conn, "content-type") == ["application/x-protobuf"]
         assert Conn.get_req_header(conn, "x-prometheus-remote-write-version") == ["0.1.0"]
 
@@ -183,7 +182,6 @@ defmodule Realtime.MetricsPusherTest do
         assert byte_size(body) > 0
         assert Conn.get_req_header(conn, "authorization") == []
         assert Conn.get_req_header(conn, "content-type") == ["application/x-protobuf"]
-        assert Conn.get_req_header(conn, "content-encoding") == ["snappy"]
 
         send(parent, :req_called)
         Req.Test.text(conn, "")

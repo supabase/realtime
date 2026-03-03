@@ -15,8 +15,10 @@ defmodule RealtimeWeb.TimeLive do
     {:noreply, assign_time(socket)}
   end
 
+  @time_timer if Application.compile_env(:realtime, :dev_mode, false), do: 60_000, else: 100
+
   defp assign_time(socket) do
-    timer = if Mix.env() == :dev, do: 60_000, else: 100
+    timer = @time_timer
     Process.send_after(self(), :time, timer)
     now = DateTime.utc_now() |> DateTime.to_string()
 

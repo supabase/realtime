@@ -13,13 +13,11 @@ defmodule RealtimeWeb.ApiSpec do
 
   @behaviour OpenApi
 
+  @api_url Application.compile_env(:realtime, :api_url, "https://{tenant}.supabase.co/realtime/v1")
+
   @impl OpenApi
   def spec do
-    url =
-      case Mix.env() do
-        :prod -> "https://{tenant}.supabase.co/realtime/v1"
-        _ -> "http://{tenant}.localhost:4000/"
-      end
+    url = @api_url
 
     %OpenApi{
       servers: [

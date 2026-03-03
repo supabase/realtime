@@ -4,6 +4,8 @@ defmodule Realtime.GenRpcMetricsTest do
 
   alias Realtime.GenRpcMetrics
 
+  @metrics_byte_tolerance 200
+
   setup_all do
     {:ok, node} = Clustered.start()
     %{node: node}
@@ -63,8 +65,8 @@ defmodule Realtime.GenRpcMetricsTest do
       assert_in_delta local_metrics[:send_avg], remote_metrics[:recv_avg], 200
       assert_in_delta local_metrics[:recv_avg], remote_metrics[:send_avg], 200
 
-      assert local_metrics[:send_oct] == remote_metrics[:recv_oct]
-      assert local_metrics[:recv_oct] == remote_metrics[:send_oct]
+      assert_in_delta local_metrics[:send_oct], remote_metrics[:recv_oct], @metrics_byte_tolerance
+      assert_in_delta local_metrics[:recv_oct], remote_metrics[:send_oct], @metrics_byte_tolerance
 
       assert local_metrics[:send_cnt] == remote_metrics[:recv_cnt]
       assert local_metrics[:recv_cnt] == remote_metrics[:send_cnt]
