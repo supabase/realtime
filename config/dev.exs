@@ -1,5 +1,8 @@
 import Config
 
+config :realtime, :dev_mode, true
+config :realtime, :api_url, "http://{tenant}.localhost:4000/"
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #
