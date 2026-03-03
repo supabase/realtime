@@ -1,16 +1,190 @@
 defmodule Realtime.MetricsPusherTest do
-  use Realtime.DataCase, async: true
+  # async: false because tests interact with shared PromEx ETS state
+  use Realtime.DataCase, async: false
   import ExUnit.CaptureLog
 
   alias Realtime.MetricsPusher
+  alias Realtime.PrometheusRemoteWrite
   alias Plug.Conn
 
   setup {Req.Test, :verify_on_exit!}
+
+  # Mirrors the global metrics list from MetricsControllerTest.
+  # These are the series the pusher sends (Realtime.PromEx.get_metrics/0, global only).
+  # Histograms will appear as "<name>_bucket" series after encoding, so we use
+  # String.starts_with?/2 when checking decoded series names.
+  @global_metrics [
+    "beam_system_schedulers_online_info",
+    "osmon_ram_usage",
+    "phoenix_channel_joined_total",
+    "phoenix_channel_handled_in_duration_milliseconds",
+    "phoenix_socket_connected_duration_milliseconds",
+    "phoenix_connections_active",
+    "phoenix_connections_max",
+    "realtime_global_rpc",
+    "realtime_channel_global_events",
+    "realtime_channel_global_presence_events",
+    "realtime_channel_global_db_events",
+    "realtime_channel_global_joins",
+    "realtime_channel_global_input_bytes",
+    "realtime_channel_global_output_bytes",
+    "realtime_channel_global_error",
+    "realtime_payload_size"
+  ]
+
+  # Fires every telemetry event needed to populate all event-based global metrics.
+  # Mirrors fire_all_tenant_events/0 in MetricsControllerTest.
+  defp fire_all_tenant_events do
+    tenant_meta = %{tenant: "test_tenant"}
+
+    :telemetry.execute([:realtime, :channel, :error], %{code: 1}, %{code: 404})
+    :telemetry.execute([:realtime, :rate_counter, :channel, :events], %{sum: 5}, tenant_meta)
+    :telemetry.execute([:realtime, :rate_counter, :channel, :presence_events], %{sum: 3}, tenant_meta)
+    :telemetry.execute([:realtime, :rate_counter, :channel, :db_events], %{sum: 2}, tenant_meta)
+    :telemetry.execute([:realtime, :rate_counter, :channel, :joins], %{sum: 1}, tenant_meta)
+    :telemetry.execute([:realtime, :channel, :input_bytes], %{size: 1024}, tenant_meta)
+    :telemetry.execute([:realtime, :channel, :output_bytes], %{size: 2048}, tenant_meta)
+
+    :telemetry.execute(
+      [:realtime, :tenants, :payload, :size],
+      %{size: 512},
+      Map.put(tenant_meta, :message_type, "broadcast")
+    )
+
+    :telemetry.execute([:realtime, :replication, :poller, :query, :stop], %{duration: 100}, tenant_meta)
+    :telemetry.execute([:realtime, :tenants, :read_authorization_check], %{latency: 10}, tenant_meta)
+    :telemetry.execute([:realtime, :tenants, :write_authorization_check], %{latency: 15}, tenant_meta)
+
+    :telemetry.execute(
+      [:realtime, :tenants, :broadcast_from_database],
+      %{latency_committed_at: 50, latency_inserted_at: 40},
+      tenant_meta
+    )
+
+    :telemetry.execute([:realtime, :tenants, :replay], %{latency: 20}, tenant_meta)
+    :telemetry.execute([:realtime, :rpc], %{latency: 5}, %{success: true, mechanism: :erpc})
+
+    :telemetry.execute([:phoenix, :channel_joined], %{}, %{
+      result: :ok,
+      socket: %Phoenix.Socket{transport: :websocket, endpoint: RealtimeWeb.Endpoint}
+    })
+
+    :telemetry.execute([:phoenix, :channel_handled_in], %{duration: 500_000}, %{
+      socket: %Phoenix.Socket{endpoint: RealtimeWeb.Endpoint}
+    })
+
+    :telemetry.execute([:phoenix, :socket_connected], %{duration: 200_000}, %{
+      result: :ok,
+      endpoint: RealtimeWeb.Endpoint,
+      transport: :websocket,
+      serializer: Phoenix.Socket.V2.JSONSerializer
+    })
+  end
 
   defp start_and_allow_pusher(opts) do
     pid = start_supervised!({MetricsPusher, opts})
     Req.Test.allow(MetricsPusher, self(), pid)
     {:ok, pid}
+  end
+
+  @histogram_metrics """
+  # HELP http_request_duration_seconds HTTP request latency
+  # TYPE http_request_duration_seconds histogram
+  http_request_duration_seconds_bucket{le="0.1"} 24054 1700000000000
+  http_request_duration_seconds_bucket{le="0.25"} 33444 1700000000000
+  http_request_duration_seconds_bucket{le="+Inf"} 144320 1700000000000
+  http_request_duration_seconds_sum 53423 1700000000000
+  http_request_duration_seconds_count 144320 1700000000000
+  """
+
+  @summary_metrics """
+  # HELP rpc_duration_seconds RPC duration
+  # TYPE rpc_duration_seconds summary
+  rpc_duration_seconds{quantile="0.5"} 4773 1700000000000
+  rpc_duration_seconds{quantile="0.99"} 170415 1700000000000
+  rpc_duration_seconds_sum 1.7560473e+07 1700000000000
+  rpc_duration_seconds_count 2693 1700000000000
+  """
+
+  describe "encode/decode roundtrip" do
+    test "histogram buckets survive encode/decode with le labels" do
+      {:ok, encoded} = PrometheusRemoteWrite.encode(@histogram_metrics, 1_700_000_000_000)
+      {:ok, series} = PrometheusRemoteWrite.decode(encoded)
+
+      bucket_series = Enum.filter(series, &(&1[:name] == "http_request_duration_seconds_bucket"))
+      assert length(bucket_series) == 3
+
+      le_values =
+        Enum.flat_map(bucket_series, fn s -> Enum.map(s[:labels], & &1["le"]) end)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.sort()
+
+      assert le_values == ["+Inf", "0.1", "0.25"]
+    end
+
+    test "histogram sum and count are included as separate series" do
+      {:ok, encoded} = PrometheusRemoteWrite.encode(@histogram_metrics, 1_700_000_000_000)
+      {:ok, series} = PrometheusRemoteWrite.decode(encoded)
+
+      names = MapSet.new(series, & &1[:name])
+      assert "http_request_duration_seconds_sum" in names
+      assert "http_request_duration_seconds_count" in names
+    end
+
+    test "summary quantiles survive encode/decode with quantile labels" do
+      {:ok, encoded} = PrometheusRemoteWrite.encode(@summary_metrics, 1_700_000_000_000)
+      {:ok, series} = PrometheusRemoteWrite.decode(encoded)
+
+      quantile_series = Enum.filter(series, &(&1[:name] == "rpc_duration_seconds"))
+      assert length(quantile_series) == 2
+
+      quantile_values =
+        Enum.flat_map(quantile_series, fn s -> Enum.map(s[:labels], & &1["quantile"]) end)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.sort()
+
+      assert quantile_values == ["0.5", "0.99"]
+    end
+
+    test "summary sum and count are included as separate series" do
+      {:ok, encoded} = PrometheusRemoteWrite.encode(@summary_metrics, 1_700_000_000_000)
+      {:ok, series} = PrometheusRemoteWrite.decode(encoded)
+
+      names = MapSet.new(series, & &1[:name])
+      assert "rpc_duration_seconds_sum" in names
+      assert "rpc_duration_seconds_count" in names
+    end
+  end
+
+  describe "push sends live PromEx metrics" do
+    test "decoded payload contains all expected global metric series" do
+      fire_all_tenant_events()
+
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, fn conn ->
+        body = Req.Test.raw_body(conn)
+        send(parent, {:push_body, body})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _pid} =
+        start_and_allow_pusher(
+          url: "http://localhost:8428/api/v1/write",
+          interval: 10,
+          timeout: 5000
+        )
+
+      assert_receive {:push_body, body}, 500
+
+      {:ok, series} = PrometheusRemoteWrite.decode(body)
+      series_names = MapSet.new(series, & &1[:name])
+
+      for base_name <- @global_metrics do
+        assert Enum.any?(series_names, &String.starts_with?(&1, base_name)),
+               "expected a series whose name starts with #{base_name}"
+      end
+    end
   end
 
   describe "start_link/1" do
