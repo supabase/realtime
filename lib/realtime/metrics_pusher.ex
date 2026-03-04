@@ -44,6 +44,8 @@ defmodule Realtime.MetricsPusher do
         Application.get_env(:realtime, :metrics_pusher_timeout_ms, :timer.seconds(15))
       )
 
+    url = append_extra_labels(url, opts)
+
     Logger.info("Starting MetricsPusher (url: #{url}, interval: #{interval}ms)")
 
     headers = [
@@ -79,6 +81,7 @@ defmodule Realtime.MetricsPusher do
     {:noreply, %{state | push_ref: schedule_push(state.interval)}}
   end
 
+  @impl true
   def handle_info(msg, state) do
     Logger.error("MetricsPusher received unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -86,31 +89,35 @@ defmodule Realtime.MetricsPusher do
 
   defp schedule_push(delay), do: Process.send_after(self(), :push, delay)
 
+  @service "realtime"
+  defp append_extra_labels(url, opts) do
+    extra_labels = [service: @service] ++ Keyword.get(opts, :extra_labels, [])
+    extra_query = Enum.map_join(extra_labels, "&", fn {k, v} -> ~s(extra_label="#{k}=#{v}") end)
+    uri = URI.parse(url)
+    new_query = if uri.query, do: "#{uri.query}&#{extra_query}", else: extra_query
+    URI.to_string(%{uri | query: new_query})
+  end
+
   defp push(req_options, auth) do
-    try do
-      metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
-      timestamp_ms = System.system_time(:millisecond)
+    metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
+    timestamp_ms = System.system_time(:millisecond)
 
-      case Realtime.PrometheusRemoteWrite.encode(metrics, timestamp_ms) do
-        {:ok, body} ->
-          case send_metrics(req_options, auth, body) do
-            :ok ->
-              :ok
+    with {:ok, body} <- Realtime.PrometheusRemoteWrite.encode(metrics, timestamp_ms),
+         :ok <- send_metrics(req_options, auth, body) do
+      :ok
+    else
+      {:error, {:http_error, _, _} = reason} ->
+        Logger.error("MetricsPusher: Failed to push metrics to #{req_options[:url]}: #{inspect(reason)}")
+        :ok
 
-            {:error, reason} ->
-              Logger.error("MetricsPusher: Failed to push metrics to #{req_options[:url]}: #{inspect(reason)}")
-              :ok
-          end
-
-        {:error, reason} ->
-          Logger.error("MetricsPusher: Failed to encode metrics: #{inspect(reason)}")
-          :ok
-      end
-    rescue
-      error ->
-        Logger.error("MetricsPusher: Exception during push: #{inspect(error)}")
+      {:error, reason} ->
+        Logger.error("MetricsPusher: Failed to encode metrics: #{inspect(reason)}")
         :ok
     end
+  rescue
+    error ->
+      Logger.error("MetricsPusher: Exception during push: #{inspect(error)}")
+      :ok
   end
 
   defp send_metrics(req_options, auth, body) do
