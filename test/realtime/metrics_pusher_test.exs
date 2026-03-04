@@ -129,6 +129,47 @@ defmodule Realtime.MetricsPusherTest do
     end
   end
 
+  describe "extra_label query parameters" do
+    test "appends default service=realtime extra_label to URL" do
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, fn conn ->
+        send(parent, {:query_string, conn.query_string})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _pid} =
+        start_and_allow_pusher(
+          url: "http://localhost:8428/api/v1/write",
+          interval: 10,
+          timeout: 5000
+        )
+
+      assert_receive {:query_string, query_string}, 500
+      assert query_string == "extra_label=\"service=realtime\""
+    end
+
+    test "appends custom extra_labels to URL" do
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, fn conn ->
+        send(parent, {:query_string, conn.query_string})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _pid} =
+        start_and_allow_pusher(
+          url: "http://localhost:8428/api/v1/write",
+          interval: 10,
+          timeout: 5000,
+          extra_labels: [env: "prod"]
+        )
+
+      assert_receive {:query_string, query_string}, 500
+      assert query_string == "extra_label=\"service=realtime\"&extra_label=\"env=prod\""
+    end
+  end
+
   describe "start_link/1" do
     test "does not start when URL is missing" do
       opts = [enabled: true]
