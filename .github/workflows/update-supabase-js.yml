@@ -1,0 +1,65 @@
+name: Update @supabase/supabase-js
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to update to"
+        required: true
+        type: string
+      source:
+        description: "Source of the update"
+        required: false
+        type: string
+        default: "manual"
+
+permissions:
+  pull-requests: read
+  contents: read
+
+jobs:
+  update-supabase-js:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-supabase-update-${{ inputs.version }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: assets/package-lock.json
+
+      - name: Update @supabase/supabase-js
+        working-directory: assets
+        run: |
+          npm pkg set 'dependencies["@supabase/supabase-js"]'="${{ inputs.version }}"
+          npm install --package-lock-only --ignore-scripts
+
+      - name: Generate token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.GH_AUTOFIX_APP_ID }}
+          private-key: ${{ secrets.GH_AUTOFIX_PRIVATE_KEY }}
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6.1.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          commit-message: "chore: update @supabase/supabase-js to v${{ inputs.version }}"
+          title: "chore: update @supabase/supabase-js to v${{ inputs.version }}"
+          body: |
+            This PR updates `@supabase/supabase-js` to v${{ inputs.version }}.
+
+            **Source**: ${{ inputs.source }}
+
+            This PR was created automatically.
+          branch: "gha/auto-update-supabase-js-v${{ inputs.version }}"
+          base: ${{ github.event.repository.default_branch }}
