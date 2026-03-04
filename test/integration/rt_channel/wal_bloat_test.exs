@@ -79,7 +79,6 @@ defmodule Realtime.Integration.RtChannel.WalBloatTest do
 
       WebsocketClient.join(socket, full_topic, %{config: %{broadcast: %{self: true}, private: false}})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
       assert Connect.ready?(tenant.external_id)
 
       {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)

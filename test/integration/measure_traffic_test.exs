@@ -73,7 +73,6 @@ defmodule Realtime.Integration.MeasureTrafficTest do
 
       # Wait for join to complete
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 1000
-      assert_receive %Message{topic: ^topic, event: "presence_state"}, 1000
 
       for _ <- 1..5 do
         WebsocketClient.send_event(socket, topic, "broadcast", %{
@@ -110,7 +109,6 @@ defmodule Realtime.Integration.MeasureTrafficTest do
 
       # Wait for join to complete
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 1000
-      assert_receive %Message{topic: ^topic, event: "presence_state"}, 1000
 
       for _ <- 1..5 do
         WebsocketClient.send_event(socket, topic, "presence", %{
@@ -141,7 +139,6 @@ defmodule Realtime.Integration.MeasureTrafficTest do
 
       # Wait for join to complete
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 1000
-      assert_receive %Message{topic: ^topic, event: "presence_state"}, 1000
 
       # Wait for postgres_changes subscription to be ready
       assert_receive %Message{
@@ -189,7 +186,6 @@ defmodule Realtime.Integration.MeasureTrafficTest do
 
       # Wait for join to complete
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 1000
-      assert_receive %Message{topic: ^topic, event: "presence_state"}, 1000
 
       Enum.reduce_while(1..30, nil, fn _, _ ->
         if ReplicationConnection.whereis(tenant.external_id),

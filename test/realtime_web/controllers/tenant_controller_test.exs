@@ -237,6 +237,20 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert %{"client_presence_window_ms" => 10_000} = json_response(conn, 200)["data"]
     end
 
+    test "can update presence_enabled", %{tenant: tenant, conn: conn} do
+      external_id = tenant.external_id
+      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+
+      assert tenant.presence_enabled == false
+
+      attrs = default_tenant_attrs(port) |> Map.put("presence_enabled", true)
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
+      assert %{"presence_enabled" => true} = json_response(conn, 200)["data"]
+
+      updated_tenant = Realtime.Api.get_tenant_by_external_id(external_id, use_replica?: false)
+      assert updated_tenant.presence_enabled == true
+    end
+
     test "renders errors when data is invalid", %{conn: conn} do
       conn = put(conn, ~p"/api/tenants/#{random_string()}", tenant: @invalid_attrs)
       assert json_response(conn, 422)["errors"] != %{}
