@@ -32,6 +32,7 @@ defmodule Realtime.Api.Tenant do
     field(:broadcast_adapter, Ecto.Enum, values: [:phoenix, :gen_rpc], default: :gen_rpc)
     field(:max_client_presence_events_per_window, :integer)
     field(:client_presence_window_ms, :integer)
+    field(:presence_enabled, :boolean, default: false)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -80,7 +81,8 @@ defmodule Realtime.Api.Tenant do
       :migrations_ran,
       :broadcast_adapter,
       :max_client_presence_events_per_window,
-      :client_presence_window_ms
+      :client_presence_window_ms,
+      :presence_enabled
     ])
     |> validate_required([:external_id])
     |> check_constraint(:jwt_secret,

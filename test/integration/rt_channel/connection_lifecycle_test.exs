@@ -44,7 +44,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: %{keys: ["potato"]}})
       assert_process_down(socket)
@@ -62,7 +61,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "potato"})
       assert_process_down(socket)
@@ -80,7 +78,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{private_only: true})
       assert_process_down(socket)
@@ -98,7 +95,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{max_concurrent_users: 100})
 
@@ -150,7 +146,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
         WebsocketClient.join(socket, topic, %{config: config})
 
         assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
-        assert_receive %Message{event: "presence_state", topic: ^topic}, 500
       end
 
       assert :ok = WebsocketClient.send_heartbeat(socket)
@@ -270,8 +265,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
                      },
                      500
 
-      assert_receive %Message{event: "presence_state", topic: ^realtime_topic_1}, 500
-
       assert_receive %Message{
                        event: "phx_reply",
                        payload: %{
@@ -285,7 +278,6 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
                      500
 
       refute_receive %Message{event: "phx_reply", topic: ^realtime_topic_2}, 500
-      refute_receive %Message{event: "presence_state", topic: ^realtime_topic_2}, 500
 
       Realtime.Tenants.Cache.update_cache(%{tenant | max_channels_per_client: 2})
 

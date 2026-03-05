@@ -32,7 +32,8 @@ defmodule RealtimeWeb.TenantView do
         end),
       private_only: tenant.private_only,
       max_client_presence_events_per_window: tenant.max_client_presence_events_per_window,
-      client_presence_window_ms: tenant.client_presence_window_ms
+      client_presence_window_ms: tenant.client_presence_window_ms,
+      presence_enabled: tenant.presence_enabled
     }
   end
 end

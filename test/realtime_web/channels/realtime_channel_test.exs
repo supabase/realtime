@@ -54,7 +54,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
       config = %{
-        "presence" => %{"enabled" => false},
         "postgres_changes" => [%{"event" => "INSERT", "schema" => "public", "table" => "test"}]
       }
 
@@ -96,7 +95,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
       config = %{
-        "presence" => %{"enabled" => false},
         "postgres_changes" => [
           %{"event" => "INSERT", "schema" => "public", "table" => "test"},
           %{"event" => "DELETE", "schema" => "public", "table" => "test"}
@@ -170,7 +168,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
       config = %{
-        "presence" => %{"enabled" => false},
         "postgres_changes" => [%{"event" => "*", "schema" => "public", "table" => "test", "filter" => "wrong"}]
       }
 
@@ -198,7 +195,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
       config = %{
-        "presence" => %{"enabled" => false},
         "postgres_changes" => [%{"event" => "*", "schema" => "public", "table" => "doesnotexist"}]
       }
 
@@ -227,7 +223,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
       config = %{
-        "presence" => %{"enabled" => false},
         "postgres_changes" => [
           %{"event" => "*", "schema" => "public", "table" => "test", "filter" => "notacolumn=eq.123"}
         ]
@@ -258,7 +253,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
       config = %{
-        "presence" => %{"enabled" => false},
         "postgres_changes" => [%{"event" => "*", "schema" => "public", "table" => "test"}]
       }
 
@@ -303,7 +297,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
       config = %{
-        "presence" => %{"enabled" => false},
         "broadcast" => %{"self" => true}
       }
 
@@ -323,7 +316,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
       config = %{
-        "presence" => %{"enabled" => false},
         "broadcast" => %{"self" => true}
       }
 
@@ -406,7 +398,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
       config = %{
-        "presence" => %{"enabled" => false},
         "broadcast" => %{"replay" => %{"limit" => 2, "since" => :erlang.system_time(:millisecond) - 5 * 60000}}
       }
 
@@ -466,7 +457,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       config = %{
         "private" => true,
-        "presence" => %{"enabled" => false},
         "broadcast" => %{"replay" => %{"limit" => 2, "since" => :erlang.system_time(:millisecond) - 5 * 60000}}
       }
 
@@ -503,7 +493,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{})
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, "realtime:test", %{"config" => %{"presence" => %{"enabled" => true}}})
 
       assert_receive %Socket.Message{topic: "realtime:test", event: "presence_state", payload: %{}}
 
@@ -520,7 +511,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      config = %{"config" => %{"presence" => %{"key" => "user_id"}}}
+      config = %{"config" => %{"presence" => %{"enabled" => true, "key" => "user_id"}}}
       assert {:ok, _, %Socket{channel_pid: channel_pid} = socket} = subscribe_and_join(socket, "realtime:test", config)
 
       assert_receive %Socket.Message{topic: "realtime:test", event: "presence_state", payload: %{}}
@@ -565,9 +556,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       assert {:ok, _, %Socket{} = socket2} = subscribe_and_join(socket2, "realtime:test2", config)
 
-      assert_receive %Socket.Message{topic: "realtime:test1", event: "presence_state", payload: %{}}
-      assert_receive %Socket.Message{topic: "realtime:test2", event: "presence_state", payload: %{}}
-
       # Exhaust rate limit for socket1
       for i <- 1..5 do
         ref = push(socket1, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"call" => i}})
@@ -601,7 +589,8 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, topic, %{})
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, topic, %{"config" => %{"presence" => %{"enabled" => true}}})
 
       assert_receive %Phoenix.Socket.Message{topic: "realtime:test", event: "presence_state"}, 500
 
@@ -658,6 +647,43 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       refute_receive %Socket.Message{}
       refute_receive %Socket.Reply{}
+    end
+
+    test "presence is disabled when tenant has presence_enabled false and client does not override", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{})
+
+      refute_receive %Socket.Message{event: "presence_state"}, 200
+      assert socket.assigns.presence_enabled? == false
+    end
+
+    test "presence is enabled when client explicitly enables it even if tenant flag is false", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      config = %{"config" => %{"presence" => %{"enabled" => true}}}
+
+      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", config)
+
+      assert_receive %Socket.Message{event: "presence_state"}, 500
+      assert socket.assigns.presence_enabled? == true
+    end
+
+    test "presence defaults to tenant flag when client does not specify", %{tenant: tenant} do
+      {:ok, tenant} =
+        Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{"presence_enabled" => true})
+
+      Realtime.Tenants.Cache.update_cache(tenant)
+
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} = subscribe_and_join(socket, "realtime:test", %{})
+
+      assert_receive %Socket.Message{event: "presence_state"}, 500
+      assert socket.assigns.presence_enabled? == true
     end
   end
 
@@ -737,7 +763,11 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      assert socket = subscribe_and_join!(socket, "realtime:test", %{"config" => %{"private" => true}})
+      assert socket =
+               subscribe_and_join!(socket, "realtime:test", %{
+                 "config" => %{"private" => true, "presence" => %{"enabled" => true}}
+               })
+
       old_confirm_ref = socket.assigns.confirm_token_ref
 
       assert socket.assigns.policies == %Realtime.Tenants.Authorization.Policies{
@@ -767,7 +797,10 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
 
-      assert socket = subscribe_and_join!(socket, "realtime:test", %{"config" => %{"private" => true}})
+      assert socket =
+               subscribe_and_join!(socket, "realtime:test", %{
+                 "config" => %{"private" => true, "presence" => %{"enabled" => true}}
+               })
 
       assert socket.assigns.policies == %Realtime.Tenants.Authorization.Policies{
                broadcast: %Realtime.Tenants.Authorization.Policies.BroadcastPolicies{read: true, write: nil},

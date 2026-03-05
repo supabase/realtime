@@ -29,7 +29,6 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
@@ -53,8 +52,6 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       # Both sockets joined
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
-      assert_receive %Message{event: "presence_state"}
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
@@ -73,12 +70,10 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: true}, private: false}})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
 
       {service_role_socket, _} = get_connection(tenant, serializer, role: "service_role")
       WebsocketClient.join(service_role_socket, topic, %{config: %{broadcast: %{self: false}, private: false}})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
 
       log =
         capture_log(fn ->
@@ -107,7 +102,6 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, topic, "broadcast", payload)
@@ -126,11 +120,9 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       WebsocketClient.join(socket, valid_topic, %{config: %{broadcast: %{self: true}, private: true}})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^valid_topic}, 300
-      assert_receive %Message{event: "presence_state"}
 
       WebsocketClient.join(anon_socket, malicious_topic, %{config: %{broadcast: %{self: true}, private: false}})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^malicious_topic}, 300
-      assert_receive %Message{event: "presence_state"}
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
       WebsocketClient.send_event(socket, valid_topic, "broadcast", payload)
@@ -151,12 +143,10 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       {service_role_socket, _} = get_connection(tenant, serializer, role: "service_role")
       WebsocketClient.join(service_role_socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
 
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       WebsocketClient.join(socket, topic, %{config: config})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
 
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
 
@@ -197,7 +187,6 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
                          300
 
           refute_receive %Message{event: "phx_reply", topic: ^topic}, 300
-          refute_receive %Message{event: "presence_state"}, 300
         end)
 
       assert log =~ expected
@@ -213,12 +202,10 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       WebsocketClient.join(socket, topic, %{config: %{broadcast: %{self: true}, private: true}})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
 
       {service_role_socket, _} = get_connection(tenant, serializer, role: "service_role")
       WebsocketClient.join(service_role_socket, topic, %{config: %{broadcast: %{self: false}, private: true}})
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 300
-      assert_receive %Message{event: "presence_state"}
 
       log =
         capture_log(fn ->
@@ -251,7 +238,6 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       value = random_string()
       Postgrex.query!(db_conn, "INSERT INTO #{table_name} (details) VALUES ($1)", [value])
@@ -293,7 +279,6 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       new_value = random_string()
 
@@ -336,7 +321,6 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       value = random_string()
 
@@ -377,7 +361,6 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       WebsocketClient.join(socket, full_topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       value = random_string()
       event = random_string()
@@ -415,7 +398,6 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
       WebsocketClient.join(socket, full_topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       value = random_string()
       event = random_string()

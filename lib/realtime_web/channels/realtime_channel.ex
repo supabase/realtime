@@ -55,7 +55,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     presence_enabled? =
       case get_in(params, ["config", "presence", "enabled"]) do
         enabled when is_boolean(enabled) -> enabled
-        _ -> true
+        _ -> false
       end
 
     socket =
@@ -76,6 +76,8 @@ defmodule RealtimeWeb.RealtimeChannel do
 
     with :ok <- SignalHandler.shutdown_in_progress?(),
          %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id),
+         socket =
+           assign(socket, :presence_enabled?, presence_enabled?(socket.assigns.presence_enabled?, tenant)),
          :ok <- only_private?(tenant, socket),
          :ok <- limit_max_users(tenant, transport_pid),
          :ok <- limit_joins(tenant, socket),
@@ -875,6 +877,10 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp maybe_replay_messages(_, _, _, _, _), do: {:ok, MapSet.new()}
+
+  defp presence_enabled?(client_enabled?, %Tenant{presence_enabled: tenant_enabled}) do
+    client_enabled? || tenant_enabled
+  end
 
   defp max_heap_size(), do: Application.fetch_env!(:realtime, :websocket_max_heap_size)
 end

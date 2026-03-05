@@ -121,6 +121,10 @@ defmodule RealtimeWeb.OpenApiSchemas do
               description: "Client presence rate limit window in milliseconds (overrides environment default when set)",
               nullable: true
             },
+            presence_enabled: %Schema{
+              type: :boolean,
+              description: "When true, presence is enabled for clients that do not explicitly opt in"
+            },
             extensions: %Schema{
               type: :array,
               items: %Schema{

@@ -17,10 +17,7 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
   describe "token validation" do
     setup [:rls_context]
 
-    @tag policies: [
-           :authenticated_read_broadcast_and_presence,
-           :authenticated_write_broadcast_and_presence
-         ]
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
     test "badly formatted jwt token", %{tenant: tenant, serializer: serializer} do
       log =
         capture_log(fn ->
@@ -74,7 +71,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
           })
 
           assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-          assert_receive %Message{event: "presence_state"}, 500
         end)
 
       refute log =~ "MalformedJWT: The token provided is not a valid JWT"
@@ -89,7 +85,7 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
+
       {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) + 2000})
 
       # Update token to be a near expiring token
@@ -125,7 +121,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       })
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, new_token} = token_valid(tenant, "anon")
 
@@ -154,7 +149,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       # Checks first send which will set write policy to true
       payload = %{"event" => "TEST", "payload" => %{"msg" => 1}, "type" => "broadcast"}
@@ -198,7 +192,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => new_token})
 
@@ -217,7 +210,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{"access_token" => ""})
 
@@ -250,7 +242,7 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
+
       {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) - 1000, sub: sub})
 
       log =
@@ -285,7 +277,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
-      assert_receive %Message{event: "presence_state", topic: ^realtime_topic}, 500
 
       {:ok, token} = generate_token(tenant, %{:exp => System.system_time(:second) - 1000, sub: sub})
 
@@ -320,7 +311,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       WebsocketClient.send_event(socket, realtime_topic, "access_token", %{
         "access_token" => "sb_publishable_-fake_key"
@@ -354,7 +344,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, token} =
         generate_token(tenant, %{:exp => System.system_time(:second) + 2, role: "authenticated"})
@@ -382,7 +371,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, access_token} =
         generate_token(tenant, %{:exp => System.system_time(:second) + 1, role: "authenticated"})
@@ -420,7 +408,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       {:ok, access_token} = generate_token(tenant, %{:exp => System.system_time(:second) + 10})
 
@@ -451,7 +438,6 @@ defmodule Realtime.Integration.RtChannel.TokenHandlingTest do
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: access_token})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
-      assert_receive %Message{event: "presence_state"}, 500
 
       # token becomes a string in between joins so it needs to be handled by the channel and not the socket
       WebsocketClient.join(socket, realtime_topic, %{config: config, access_token: "potato"})

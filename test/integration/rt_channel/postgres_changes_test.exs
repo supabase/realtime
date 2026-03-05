@@ -42,8 +42,6 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                      },
                      200
 
-      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
-
       assert_receive %Message{
                        event: "system",
                        payload: %{
@@ -100,8 +98,6 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                        topic: ^topic
                      },
                      200
-
-      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
       assert_receive %Message{
                        event: "system",
@@ -165,8 +161,6 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                        topic: ^topic
                      },
                      200
-
-      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
       assert_receive %Message{
                        event: "system",
@@ -236,8 +230,6 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                      },
                      200
 
-      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
-
       assert_receive %Message{
                        event: "system",
                        payload: %{
@@ -303,8 +295,6 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                        topic: ^topic
                      },
                      200
-
-      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
       assert_receive %Message{
                        event: "system",
@@ -442,7 +432,6 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
       WebsocketClient.join(socket, topic, %{config: config})
 
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
-      assert_receive %Phoenix.Socket.Message{event: "presence_state", payload: %{}, topic: ^topic}, 500
 
       refute_receive %Message{
                        event: "system",
