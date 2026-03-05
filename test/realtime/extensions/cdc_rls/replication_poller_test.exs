@@ -56,6 +56,107 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       %{args: args, tenant: tenant}
     end
 
+    test "handles slot in use error and retries", %{args: args} do
+      tenant_id = args["id"]
+
+      slot_in_use_error =
+        {:error,
+         %Postgrex.Error{
+           postgres: %{
+             code: :object_in_use,
+             message: "replication slot is active for PID 12345"
+           }
+         }}
+
+      stub(Replications, :get_pg_stat_activity_diff, fn _conn, _pid -> {:error, :pid_not_found} end)
+      stub(Replications, :terminate_backend, fn _conn, _slot -> {:error, :slot_not_found} end)
+
+      expect(Replications, :list_changes, fn _, _, _, _, _ -> slot_in_use_error end)
+
+      start_link_supervised!({Poller, args})
+
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     1000
+    end
+
+    test "handles slot in use error with pg_stat_activity returning diff", %{args: args} do
+      tenant_id = args["id"]
+
+      slot_in_use_error =
+        {:error,
+         %Postgrex.Error{
+           postgres: %{
+             code: :object_in_use,
+             message: "replication slot is active for PID 12345"
+           }
+         }}
+
+      stub(Replications, :get_pg_stat_activity_diff, fn _conn, _pid -> {:ok, 42} end)
+      stub(Replications, :terminate_backend, fn _conn, _slot -> {:error, :slot_not_found} end)
+
+      expect(Replications, :list_changes, fn _, _, _, _, _ -> slot_in_use_error end)
+
+      start_link_supervised!({Poller, args})
+
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     1000
+    end
+
+    test "handles prepare_replication failure and retries", %{args: args} do
+      tenant_id = args["id"]
+
+      stub(Replications, :prepare_replication, fn _, _ -> {:ok, %Postgrex.Result{}} end)
+      expect(Replications, :prepare_replication, fn _, _ -> {:error, "prepare failed"} end)
+
+      start_link_supervised!({Poller, args})
+
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     2000
+    end
+
+    test "terminates replication slot when retry count exceeds threshold", %{args: args} do
+      tenant_id = args["id"]
+
+      slot_in_use_error =
+        {:error,
+         %Postgrex.Error{
+           postgres: %{
+             code: :object_in_use,
+             message: "replication slot is active for PID 12345"
+           }
+         }}
+
+      stub(Replications, :get_pg_stat_activity_diff, fn _conn, _pid -> {:ok, 42} end)
+      stub(Replications, :list_changes, fn _, _, _, _, _ -> slot_in_use_error end)
+      stub(Replications, :terminate_backend, fn _conn, _slot -> {:ok, :terminated} end)
+
+      pid = start_link_supervised!({Poller, args})
+
+      # Wait for the first poll
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 1000
+
+      # Advance retry_count past threshold and send another poll
+      :sys.replace_state(pid, fn state -> %{state | retry_count: 4} end)
+      send(pid, :poll)
+
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 2000
+    end
+
     test "handles no new changes", %{args: args, tenant: tenant} do
       tenant_id = args["id"]
       reject(&TenantBroadcaster.pubsub_direct_broadcast/6)

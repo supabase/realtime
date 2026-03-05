@@ -3,6 +3,35 @@ defmodule Realtime.LatencyTest do
   use Realtime.DataCase, async: false
   alias Realtime.Latency
 
+  describe "pong/0" do
+    test "returns pong with region" do
+      assert {:ok, {:pong, region}} = Latency.pong()
+      assert is_binary(region)
+    end
+  end
+
+  describe "pong/1" do
+    test "returns pong after sleeping for the given latency" do
+      assert {:ok, {:pong, _region}} = Latency.pong(0)
+    end
+  end
+
+  describe "handle_info/2" do
+    test "unexpected message does not crash the server" do
+      pid = Process.whereis(Latency)
+      send(pid, :unexpected_message)
+      assert Process.alive?(pid)
+    end
+  end
+
+  describe "handle_cast/2" do
+    test "ping cast triggers a ping and does not crash" do
+      pid = Process.whereis(Latency)
+      GenServer.cast(pid, {:ping, 0, 5_000, 5_000})
+      assert Process.alive?(pid)
+    end
+  end
+
   describe "ping/3" do
     setup do
       Node.stop()

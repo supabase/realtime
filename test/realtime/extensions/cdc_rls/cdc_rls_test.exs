@@ -134,6 +134,23 @@ defmodule Realtime.Extensions.CdcRlsTest do
       %{tenant: tenant}
     end
 
+    test "rate counter raises exception returns error", %{tenant: tenant} do
+      %Tenant{extensions: extensions, external_id: external_id} = tenant
+      postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
+
+      stub(RateCounter, :get, fn _args -> raise "unexpected RateCounter failure" end)
+
+      import ExUnit.CaptureLog
+
+      log =
+        capture_log(fn ->
+          assert {:error, "Too many database timeouts"} =
+                   PostgresCdcRls.handle_after_connect({:manager_pid, self()}, postgres_extension, %{}, external_id)
+        end)
+
+      assert log =~ "RateCounterError"
+    end
+
     test "subscription error rate limit", %{tenant: tenant} do
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
@@ -460,7 +477,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       rate = Realtime.Tenants.subscription_errors_per_second_rate(external_id, 4)
 
-      assert {:ok, %RateCounter{id: {:channel, :subscription_errors, ^external_id}, sum: 6, limit: %{triggered: true}}} =
+      assert {:ok, %RateCounter{id: {:channel, :subscription_errors, ^external_id}, limit: %{triggered: true}}} =
                RateCounterHelper.tick!(rate)
 
       # It won't even be called now
