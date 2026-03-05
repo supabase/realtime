@@ -91,18 +91,35 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{to_log(v)}" end)
   end
 
-  @spec delete(conn(), String.t()) :: any()
+  @spec delete(conn(), String.t()) :: {:ok, Postgrex.Result.t()} | {:error, any()}
   def delete(conn, id) do
     Logger.debug("Delete subscription")
     sql = "delete from realtime.subscription where subscription_id = $1"
-    # TODO: connection can be not available
-    {:ok, _} = query(conn, sql, [id])
+
+    case query(conn, sql, [id]) do
+      {:error, reason} ->
+        log_error("SubscriptionDeletionFailed", reason)
+        {:error, reason}
+
+      result ->
+        result
+    end
+  catch
+    :exit, reason ->
+      log_error("SubscriptionDeletionFailed", {:exit, reason})
+      {:error, {:exit, reason}}
   end
 
-  @spec delete_all(conn()) :: {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
+  @spec delete_all(conn()) :: :ok
   def delete_all(conn) do
     Logger.debug("Delete all subscriptions")
-    query(conn, "delete from realtime.subscription;", [])
+
+    case query(conn, "delete from realtime.subscription;", []) do
+      {:ok, _} -> :ok
+      {:error, reason} -> log_error("SubscriptionDeletionFailed", reason)
+    end
+  catch
+    :exit, reason -> log_error("SubscriptionDeletionFailed", {:exit, reason})
   end
 
   @spec delete_multi(conn(), [Ecto.UUID.t()]) ::
@@ -113,11 +130,11 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     query(conn, sql, [ids])
   end
 
-  @spec maybe_delete_all(conn()) :: {:ok, Postgrex.Result.t()} | {:error, Exception.t()}
-  def maybe_delete_all(conn) do
-    query(
-      conn,
-      "do $$
+  @spec delete_all_if_table_exists(conn()) :: :ok
+  def delete_all_if_table_exists(conn) do
+    case query(
+           conn,
+           "do $$
         begin
           if exists (
             select 1
@@ -129,8 +146,13 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
             delete from realtime.subscription;
           end if;
       end $$",
-      []
-    )
+           []
+         ) do
+      {:ok, _} -> :ok
+      {:error, reason} -> log_error("SubscriptionCleanupFailed", reason)
+    end
+  catch
+    :exit, reason -> log_error("SubscriptionCleanupFailed", {:exit, reason})
   end
 
   @spec fetch_publication_tables(conn(), String.t()) ::

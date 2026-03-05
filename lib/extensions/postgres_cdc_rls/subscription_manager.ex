@@ -82,36 +82,41 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     subscription_manager_settings = Database.from_settings(extension, "realtime_subscription_manager")
     subscription_manager_pub_settings = Database.from_settings(extension, "realtime_subscription_manager_pub")
 
-    {:ok, conn} = Database.connect_db(subscription_manager_settings)
-    {:ok, conn_pub} = Database.connect_db(subscription_manager_pub_settings)
-    {:ok, _} = Subscriptions.maybe_delete_all(conn)
+    with {:ok, conn} <- Database.connect_db(subscription_manager_settings),
+         {:ok, conn_pub} <- Database.connect_db(subscription_manager_pub_settings) do
+      Subscriptions.delete_all_if_table_exists(conn)
 
-    Rls.update_meta(id, self(), conn_pub)
+      Rls.update_meta(id, self(), conn_pub)
 
-    publication = extension["publication"]
-    oids = Subscriptions.fetch_publication_tables(conn, publication)
+      publication = extension["publication"]
+      oids = Subscriptions.fetch_publication_tables(conn, publication)
 
-    check_region_interval = Map.get(args, :check_region_interval, rebalance_check_interval_in_ms())
-    send_region_check_message(check_region_interval)
+      check_region_interval = Map.get(args, :check_region_interval, rebalance_check_interval_in_ms())
+      send_region_check_message(check_region_interval)
 
-    state =
-      %State{
-        id: id,
-        conn: conn,
-        publication: publication,
-        subscribers_pids_table: subscribers_pids_table,
-        subscribers_nodes_table: subscribers_nodes_table,
-        oids: oids,
-        delete_queue: %{
-          ref: check_delete_queue(),
-          queue: :queue.new()
-        },
-        no_users_ref: check_no_users(),
-        check_region_interval: check_region_interval
-      }
+      state =
+        %State{
+          id: id,
+          conn: conn,
+          publication: publication,
+          subscribers_pids_table: subscribers_pids_table,
+          subscribers_nodes_table: subscribers_nodes_table,
+          oids: oids,
+          delete_queue: %{
+            ref: check_delete_queue(),
+            queue: :queue.new()
+          },
+          no_users_ref: check_no_users(),
+          check_region_interval: check_region_interval
+        }
 
-    send(self(), :check_oids)
-    {:noreply, state}
+      send(self(), :check_oids)
+      {:noreply, state}
+    else
+      {:error, reason} ->
+        log_error("SubscriptionManagerConnectionFailed", reason)
+        {:stop, reason, nil}
+    end
   end
 
   @impl true
@@ -139,6 +144,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
 
         new_oids ->
           Logger.warning("Found new oids #{inspect(new_oids, pretty: true)}")
+
           Subscriptions.delete_all(conn)
 
           fn {pid, _id, ref, _node}, _acc ->

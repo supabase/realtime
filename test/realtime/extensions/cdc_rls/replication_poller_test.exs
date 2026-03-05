@@ -14,6 +14,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     UpdatedRecord
   }
 
+  alias Realtime.Database
   alias Realtime.RateCounter
 
   alias RealtimeWeb.TenantBroadcaster
@@ -572,6 +573,41 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       # Encode then decode to get rid of the fragment
       assert old_record |> Jason.encode!() |> Jason.decode!() == @old_record
       assert columns |> Jason.encode!() |> Jason.decode!() == @columns
+    end
+  end
+
+  describe "get_pg_stat_activity_diff/2" do
+    setup do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+      {:ok, conn} = Database.connect(tenant, "realtime_rls", :stop)
+      %{conn: conn}
+    end
+
+    test "returns error when pid is not in pg_stat_activity", %{conn: conn} do
+      assert {:error, :pid_not_found} = Replications.get_pg_stat_activity_diff(conn, 0)
+    end
+  end
+
+  describe "error handling" do
+    setup do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+
+      args =
+        hd(tenant.extensions).settings
+        |> Map.put("id", tenant.external_id)
+        |> Map.put("subscribers_pids_table", :ets.new(__MODULE__, [:public, :bag]))
+        |> Map.put("subscribers_nodes_table", :ets.new(__MODULE__, [:public, :set]))
+
+      %{args: args}
+    end
+
+    test "stops cleanly when database connection fails", %{args: args} do
+      stub(Realtime.Database, :connect_db, fn _settings -> {:error, :econnrefused} end)
+
+      pid = start_supervised!({Poller, args}, restart: :temporary)
+      ref = Process.monitor(pid)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, :econnrefused}, 1000
     end
   end
 
