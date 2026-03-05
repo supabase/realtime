@@ -32,6 +32,9 @@ defmodule Extensions.PostgresCdcRls.Replications do
       query(conn, "select active_pid from pg_replication_slots where slot_name = $1", [slot_name])
 
     case slots do
+      {:ok, %Postgrex.Result{rows: [[nil]]}} ->
+        {:error, :slot_not_found}
+
       {:ok, %Postgrex.Result{rows: [[backend]]}} ->
         case query(conn, "select pg_terminate_backend($1)", [backend]) do
           {:ok, _resp} -> {:ok, :terminated}

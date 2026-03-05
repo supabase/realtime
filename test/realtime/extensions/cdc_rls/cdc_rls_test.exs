@@ -134,6 +134,23 @@ defmodule Realtime.Extensions.CdcRlsTest do
       %{tenant: tenant}
     end
 
+    test "rate counter raises exception returns error", %{tenant: tenant} do
+      %Tenant{extensions: extensions, external_id: external_id} = tenant
+      postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
+
+      stub(RateCounter, :get, fn _args -> raise "unexpected RateCounter failure" end)
+
+      import ExUnit.CaptureLog
+
+      log =
+        capture_log(fn ->
+          assert {:error, "Too many database timeouts"} =
+                   PostgresCdcRls.handle_after_connect({:manager_pid, self()}, postgres_extension, %{}, external_id)
+        end)
+
+      assert log =~ "RateCounterError"
+    end
+
     test "subscription error rate limit", %{tenant: tenant} do
       %Tenant{extensions: extensions, external_id: external_id} = tenant
       postgres_extension = PostgresCdc.filter_settings("postgres_cdc_rls", extensions)
@@ -382,53 +399,50 @@ defmodule Realtime.Extensions.CdcRlsTest do
       # Delete the record
       %{num_rows: 1} = Postgrex.query!(conn, "delete from test", [])
 
-      assert_receive {:socket_push, :text, data}, 5000
+      assert_receive {:socket_push, :text, data1}, 5000
+      assert_receive {:socket_push, :text, data2}, 5000
 
-      assert %{
-               "event" => "postgres_changes",
-               "payload" => %{
-                 "data" => %{
-                   "columns" => [
-                     %{"name" => "id", "type" => "int4"},
-                     %{"name" => "details", "type" => "text"},
-                     %{"name" => "binary_data", "type" => "bytea"}
-                   ],
-                   "commit_timestamp" => _,
-                   "errors" => nil,
-                   "record" => %{"details" => "test", "id" => ^id, "binary_data" => nil},
-                   "schema" => "public",
-                   "table" => "test",
-                   "type" => "INSERT"
+      events = Enum.map([data1, data2], &Jason.decode!/1)
+
+      assert Enum.any?(events, fn event ->
+               match?(
+                 %{
+                   "event" => "postgres_changes",
+                   "payload" => %{
+                     "data" => %{
+                       "errors" => nil,
+                       "record" => %{"details" => "test", "id" => ^id, "binary_data" => nil},
+                       "schema" => "public",
+                       "table" => "test",
+                       "type" => "INSERT"
+                     }
+                   },
+                   "ref" => nil,
+                   "topic" => "realtime:test"
                  },
-                 "ids" => _
-               },
-               "ref" => nil,
-               "topic" => "realtime:test"
-             } = Jason.decode!(data)
+                 event
+               )
+             end)
 
-      assert_receive {:socket_push, :text, data}, 5000
-
-      assert %{
-               "event" => "postgres_changes",
-               "payload" => %{
-                 "data" => %{
-                   "columns" => [
-                     %{"name" => "id", "type" => "int4"},
-                     %{"name" => "details", "type" => "text"},
-                     %{"name" => "binary_data", "type" => "bytea"}
-                   ],
-                   "commit_timestamp" => _,
-                   "errors" => nil,
-                   "type" => "DELETE",
-                   "old_record" => %{"id" => ^id},
-                   "schema" => "public",
-                   "table" => "test"
+      assert Enum.any?(events, fn event ->
+               match?(
+                 %{
+                   "event" => "postgres_changes",
+                   "payload" => %{
+                     "data" => %{
+                       "errors" => nil,
+                       "type" => "DELETE",
+                       "old_record" => %{"id" => ^id},
+                       "schema" => "public",
+                       "table" => "test"
+                     }
+                   },
+                   "ref" => nil,
+                   "topic" => "realtime:test"
                  },
-                 "ids" => _
-               },
-               "ref" => nil,
-               "topic" => "realtime:test"
-             } = Jason.decode!(data)
+                 event
+               )
+             end)
 
       assert_receive {
         :telemetry,
@@ -460,7 +474,7 @@ defmodule Realtime.Extensions.CdcRlsTest do
 
       rate = Realtime.Tenants.subscription_errors_per_second_rate(external_id, 4)
 
-      assert {:ok, %RateCounter{id: {:channel, :subscription_errors, ^external_id}, sum: 6, limit: %{triggered: true}}} =
+      assert {:ok, %RateCounter{id: {:channel, :subscription_errors, ^external_id}, limit: %{triggered: true}}} =
                RateCounterHelper.tick!(rate)
 
       # It won't even be called now

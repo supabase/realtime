@@ -3,6 +3,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
 
   doctest Extensions.PostgresCdcRls.Subscriptions, import: true
 
+  import ExUnit.CaptureLog
+
   alias Extensions.PostgresCdcRls.Subscriptions
   alias Realtime.Database
 
@@ -20,7 +22,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     Subscriptions.delete_all(conn)
     assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
 
-    %{conn: conn}
+    %{conn: conn, tenant: tenant}
   end
 
   describe "create/5" do
@@ -174,9 +176,22 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       conn = spawn(fn -> :ok end)
       assert :ok = Subscriptions.delete_all(conn)
     end
+
+    test "logs error when subscription table is dropped", %{conn: conn} do
+      Postgrex.query!(conn, "drop table if exists realtime.subscription cascade", [])
+
+      log = capture_log(fn -> Subscriptions.delete_all(conn) end)
+      assert log =~ "SubscriptionDeletionFailed"
+    end
   end
 
   describe "delete/2" do
+    test "returns error when subscription table is dropped", %{conn: conn} do
+      Postgrex.query!(conn, "drop table if exists realtime.subscription cascade", [])
+
+      assert {:error, %Postgrex.Error{}} = Subscriptions.delete(conn, UUID.string_to_binary!(UUID.uuid1()))
+    end
+
     test "delete", %{conn: conn} do
       id = UUID.uuid1()
       bin_id = UUID.string_to_binary!(id)
@@ -237,6 +252,53 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
 
       assert :ok = Subscriptions.delete_all_if_table_exists(conn)
       assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
+    test "logs error when trigger raises on delete", %{conn: conn, tenant: tenant} do
+      create_subscriptions(conn, 3)
+
+      Postgrex.query!(
+        conn,
+        """
+          create or replace function realtime.evil_delete_trigger()
+          returns trigger language plpgsql as $$
+          begin raise exception 'evil trigger'; end;
+          $$;
+        """,
+        []
+      )
+
+      Postgrex.query!(
+        conn,
+        """
+          create trigger evil_delete_trigger
+          before delete on realtime.subscription
+          for each row execute function realtime.evil_delete_trigger();
+        """,
+        []
+      )
+
+      on_exit(fn ->
+        {:ok, cleanup_conn} =
+          tenant
+          |> Database.from_tenant("realtime_rls")
+          |> Map.from_struct()
+          |> Keyword.new()
+          |> Postgrex.start_link()
+
+        Postgrex.query(cleanup_conn, "drop trigger if exists evil_delete_trigger on realtime.subscription", [])
+        Postgrex.query(cleanup_conn, "drop function if exists realtime.evil_delete_trigger()", [])
+        GenServer.stop(cleanup_conn)
+      end)
+
+      log = capture_log(fn -> Subscriptions.delete_all_if_table_exists(conn) end)
+      assert log =~ "SubscriptionCleanupFailed"
+    end
+
+    test "logs error when connection is dead" do
+      conn = spawn(fn -> :ok end)
+      log = capture_log(fn -> Subscriptions.delete_all_if_table_exists(conn) end)
+      assert log =~ "SubscriptionCleanupFailed"
     end
   end
 
