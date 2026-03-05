@@ -17,6 +17,7 @@ defmodule Realtime.Application do
 
   def start(_type, _args) do
     opentelemetry_setup()
+    Realtime.LogFilter.setup()
     primary_config = :logger.get_primary_config()
 
     # add the region to logs

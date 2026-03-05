@@ -1,9 +1,12 @@
 defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
-  use Realtime.DataCase, async: true
+  # async: false due to global Mimic stubs
+  use Realtime.DataCase, async: false
+  use Mimic
 
   alias Extensions.PostgresCdcRls
   alias Extensions.PostgresCdcRls.SubscriptionManager
   alias Extensions.PostgresCdcRls.Subscriptions
+  alias Realtime.Database
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
@@ -145,6 +148,19 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       send(pid, :check_no_users)
 
       assert_receive {:system, {^pid, _}, {:terminate, :shutdown}}
+    end
+  end
+
+  describe "error handling" do
+    setup :set_mimic_global
+
+    test "stops cleanly when database connection fails", %{args: args} do
+      stub(Database, :connect_db, fn _settings -> {:error, :econnrefused} end)
+
+      pid = start_supervised!({SubscriptionManager, args}, restart: :temporary)
+      ref = Process.monitor(pid)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, :econnrefused}, 1000
     end
   end
 

@@ -58,21 +58,22 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
     realtime_subscription_checker_settings = Database.from_tenant(tenant, "realtime_subscription_checker")
 
-    {:ok, conn} = Database.connect_db(realtime_subscription_checker_settings)
-
-    state = %State{
-      id: id,
-      conn: conn,
-      check_active_pids: check_active_pids(),
-      subscribers_pids_table: subscribers_pids_table,
-      subscribers_nodes_table: subscribers_nodes_table,
-      delete_queue: %{
-        ref: nil,
-        queue: :queue.new()
+    with {:ok, conn} <- Database.connect_db(realtime_subscription_checker_settings) do
+      state = %State{
+        id: id,
+        conn: conn,
+        check_active_pids: check_active_pids(),
+        subscribers_pids_table: subscribers_pids_table,
+        subscribers_nodes_table: subscribers_nodes_table,
+        delete_queue: %{ref: nil, queue: :queue.new()}
       }
-    }
 
-    {:noreply, state}
+      {:noreply, state}
+    else
+      {:error, reason} ->
+        log_error("SubscriptionsCheckerConnectionFailed", reason)
+        {:stop, reason, nil}
+    end
   end
 
   @impl true

@@ -61,11 +61,9 @@ defmodule Extensions.PostgresCdcRls.Replications do
       )
 
     case query do
-      {:ok, %{rows: [[diff]]}} ->
-        {:ok, diff}
-
-      {:error, error} ->
-        {:error, error}
+      {:ok, %{rows: [[diff]]}} -> {:ok, diff}
+      {:ok, _} -> {:error, :pid_not_found}
+      {:error, error} -> {:error, error}
     end
   end
 

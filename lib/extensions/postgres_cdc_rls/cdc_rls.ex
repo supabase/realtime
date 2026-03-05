@@ -41,9 +41,7 @@ defmodule Extensions.PostgresCdcRls do
 
   def create_subscription(conn, tenant, publication, pool_size, subscription_list, manager_pid, caller)
       when node(conn) == node() do
-    rate_counter = rate_counter(tenant, pool_size)
-
-    if rate_counter.limit.triggered == false do
+    with_rate_counter(tenant, pool_size, fn rate_counter ->
       case Subscriptions.create(conn, publication, subscription_list, manager_pid, caller) do
         {:error, %DBConnection.ConnectionError{}} ->
           GenCounter.add(rate_counter.id)
@@ -56,15 +54,11 @@ defmodule Extensions.PostgresCdcRls do
         response ->
           response
       end
-    else
-      {:error, @database_timeout_reason}
-    end
+    end)
   end
 
   def create_subscription(conn, tenant, publication, pool_size, subscription_list, manager_pid, caller) do
-    rate_counter = rate_counter(tenant, pool_size)
-
-    if rate_counter.limit.triggered == false do
+    with_rate_counter(tenant, pool_size, fn rate_counter ->
       args = [conn, tenant, publication, pool_size, subscription_list, manager_pid, caller]
 
       case GenRpc.call(node(conn), __MODULE__, :create_subscription, args, timeout: 15_000, tenant_id: tenant) do
@@ -75,15 +69,27 @@ defmodule Extensions.PostgresCdcRls do
         response ->
           response
       end
+    end)
+  end
+
+  defp with_rate_counter(tenant, pool_size, fun) do
+    with {:ok, %{limit: %{triggered: false}} = rate_counter} <- rate_counter(tenant, pool_size) do
+      fun.(rate_counter)
     else
-      {:error, @database_timeout_reason}
+      {:ok, _} ->
+        {:error, @database_timeout_reason}
+
+      {:error, reason} ->
+        log_error("RateCounterError", reason)
+        {:error, @database_timeout_reason}
     end
   end
 
   defp rate_counter(tenant_id, pool_size) do
     rate_counter_args = Realtime.Tenants.subscription_errors_per_second_rate(tenant_id, pool_size)
-    {:ok, rate_counter} = Realtime.RateCounter.get(rate_counter_args)
-    rate_counter
+    Realtime.RateCounter.get(rate_counter_args)
+  rescue
+    e -> {:error, e}
   end
 
   defp subscription_list(params_list) do

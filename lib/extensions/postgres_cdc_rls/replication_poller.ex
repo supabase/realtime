@@ -59,9 +59,14 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   @impl true
   def handle_continue({:connect, tenant}, state) do
     realtime_rls_settings = Database.from_tenant(tenant, "realtime_rls")
-    {:ok, conn} = Database.connect_db(realtime_rls_settings)
-    state = Map.put(state, :conn, conn)
-    {:noreply, state, {:continue, :prepare}}
+
+    with {:ok, conn} <- Database.connect_db(realtime_rls_settings) do
+      {:noreply, Map.put(state, :conn, conn), {:continue, :prepare}}
+    else
+      {:error, reason} ->
+        log_error("ReplicationPollerConnectionFailed", reason)
+        {:stop, reason, state}
+    end
   end
 
   def handle_continue(:prepare, state) do
@@ -113,9 +118,13 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         [_, db_pid] = Regex.run(~r/PID\s(\d*)$/, msg)
         db_pid = String.to_integer(db_pid)
 
-        {:ok, diff} = Replications.get_pg_stat_activity_diff(conn, db_pid)
+        case Replications.get_pg_stat_activity_diff(conn, db_pid) do
+          {:ok, diff} ->
+            Logger.warning("Database PID #{db_pid} found in pg_stat_activity with state_change diff of #{diff}")
 
-        Logger.warning("Database PID #{db_pid} found in pg_stat_activity with state_change diff of #{diff}")
+          {:error, reason} ->
+            log_error("PgStatActivityQueryFailed", reason)
+        end
 
         if retry_count > 3 do
           case Replications.terminate_backend(conn, slot_name) do

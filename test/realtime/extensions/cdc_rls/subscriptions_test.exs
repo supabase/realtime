@@ -166,8 +166,13 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
   describe "delete_all/1" do
     test "delete_all", %{conn: conn} do
       create_subscriptions(conn, 10)
-      assert {:ok, %Postgrex.Result{}} = Subscriptions.delete_all(conn)
+      assert :ok = Subscriptions.delete_all(conn)
       assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
+    test "returns ok when connection is unavailable" do
+      conn = spawn(fn -> :ok end)
+      assert :ok = Subscriptions.delete_all(conn)
     end
   end
 
@@ -188,6 +193,11 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
 
       assert {:ok, %Postgrex.Result{}} = Subscriptions.delete(conn, bin_id)
       assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+    end
+
+    test "returns error when connection is unavailable" do
+      conn = spawn(fn -> :ok end)
+      assert {:error, _} = Subscriptions.delete(conn, UUID.uuid1())
     end
   end
 
@@ -220,12 +230,12 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     end
   end
 
-  describe "maybe_delete_all/1" do
-    test "maybe_delete_all", %{conn: conn} do
+  describe "delete_all_if_table_exists/1" do
+    test "delete_all_if_table_exists", %{conn: conn} do
       Subscriptions.delete_all(conn)
       create_subscriptions(conn, 10)
 
-      assert {:ok, %Postgrex.Result{}} = Subscriptions.maybe_delete_all(conn)
+      assert :ok = Subscriptions.delete_all_if_table_exists(conn)
       assert %Postgrex.Result{rows: [[0]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
     end
   end
