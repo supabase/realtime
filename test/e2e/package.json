@@ -1,0 +1,15 @@
+{
+  "name": "realtime-check",
+  "version": "0.0.1",
+  "dependencies": {
+    "@supabase/supabase-js": "latest",
+    "cli-table3": "^0.6.5",
+    "commander": "^12.1.0",
+    "kleur": "^4.1.5"
+  },
+  "scripts": {
+    "check": "bun run realtime-check.ts --",
+    "build": "bun build --compile --minify-syntax --minify-whitespace --minify-identifiers realtime-check.ts --outfile realtime-check",
+    "nix": "bun run build && nix build"
+  }
+}
