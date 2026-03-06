@@ -41,6 +41,18 @@ defmodule Realtime.SignalHandlerTest do
     end
   end
 
+  describe "gen_event callbacks" do
+    test "handle_info delegates to erl_signal_handler" do
+      {:ok, state} = SignalHandler.init({%{handler_mod: FakeHandler}, :ok})
+      assert {:ok, _state} = SignalHandler.handle_info(:some_info, state)
+    end
+
+    test "handle_call delegates to erl_signal_handler" do
+      {:ok, state} = SignalHandler.init({%{handler_mod: FakeHandler}, :ok})
+      assert {:ok, _reply, _state} = SignalHandler.handle_call(:some_call, state)
+    end
+  end
+
   describe "shutdown_in_progress?/1" do
     test "shutdown_in_progress? returns error when shutdown is in progress" do
       Application.put_env(:realtime, :shutdown_in_progress, true)

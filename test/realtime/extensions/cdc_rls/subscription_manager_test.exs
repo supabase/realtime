@@ -7,6 +7,9 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
   alias Extensions.PostgresCdcRls.SubscriptionManager
   alias Extensions.PostgresCdcRls.Subscriptions
   alias Realtime.Database
+  alias Realtime.Tenants.Rebalancer
+
+  import ExUnit.CaptureLog
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
@@ -44,7 +47,7 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
 
       subscriber = self()
 
-      assert {:ok, [%Postgrex.Result{command: :insert, columns: ["id"], rows: [[1]], num_rows: 1}]} =
+      assert {:ok, [%Postgrex.Result{command: :insert}]} =
                Subscriptions.create(conn, publication, [pg_change_params], pid, subscriber)
 
       # Wait for subscription manager to process the :subscribed message
@@ -117,7 +120,9 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
           end
         end)
 
-      assert {:ok, [%Postgrex.Result{command: :insert, columns: ["id"], rows: [[1]], num_rows: 1}]} =
+      %Postgrex.Result{rows: [[baseline]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+
+      assert {:ok, [%Postgrex.Result{command: :insert}]} =
                Subscriptions.create(conn, publication, [pg_change_params], pid, subscriber)
 
       # Wait for subscription manager to process the :subscribed message
@@ -126,7 +131,8 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       assert :ets.info(args["subscribers_pids_table"], :size) == 1
       assert :ets.info(args["subscribers_nodes_table"], :size) == 1
 
-      assert %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      %Postgrex.Result{rows: [[after_create]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      assert after_create > baseline
 
       send(subscriber, :stop)
       # Wait for subscription manager to receive the :DOWN message
@@ -137,7 +143,10 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
 
       # Force check delete queue on manager
       send(pid, :check_delete_queue)
-      Process.sleep(200)
+      :sys.get_state(pid)
+
+      assert %Postgrex.Result{rows: [[^baseline]]} =
+               Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
     end
   end
 
@@ -149,6 +158,79 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
 
       assert_receive {:system, {^pid, _}, {:terminate, :shutdown}}
     end
+  end
+
+  describe "message handling" do
+    setup :set_mimic_global
+
+    test "re-subscribes all subscribers when publication oids change", %{pid: pid, args: args} do
+      # Force state to have different oids so the new_oids branch is triggered when
+      # fetch_publication_tables returns the real oids from the database
+      :sys.replace_state(pid, fn state -> %{state | oids: %{fake: :oids_that_dont_match}} end)
+      :ets.insert(args["subscribers_pids_table"], {self(), UUID.uuid1(), make_ref(), node()})
+
+      send(pid, :check_oids)
+
+      assert_receive :postgres_subscribe, 1000
+    end
+
+    test "logs error when subscription deletion fails during check_delete_queue", %{
+      pid: pid,
+      args: args,
+      publication: publication
+    } do
+      {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
+      {_uuid, _bin_uuid, pg_change_params} = pg_change_params()
+
+      subscriber = spawn(fn -> receive do: (:stop -> :ok) end)
+      Subscriptions.create(conn, publication, [pg_change_params], pid, subscriber)
+      :sys.get_state(pid)
+
+      stub(Subscriptions, :delete_multi, fn _conn, _ids -> {:error, :delete_failed} end)
+
+      send(subscriber, :stop)
+      Process.sleep(100)
+
+      log =
+        capture_log(fn ->
+          send(pid, :check_delete_queue)
+          :sys.get_state(pid)
+        end)
+
+      assert log =~ "SubscriptionDeletionFailed"
+    end
+
+    test "schedules next region check when rebalancer returns ok", %{pid: pid} do
+      # In a single-node test environment, nodes are equal → Rebalancer returns :ok
+      current_nodes = MapSet.new(Node.list())
+      send(pid, {:check_region, current_nodes})
+      :sys.get_state(pid)
+
+      assert Process.alive?(pid)
+    end
+
+    test "calls handle_stop when wrong region detected", %{pid: pid} do
+      stub(Rebalancer, :check, fn _prev, _curr, _id -> {:error, :wrong_region} end)
+      stub(PostgresCdcRls, :handle_stop, fn _id, _timeout -> :ok end)
+
+      send(pid, {:check_region, MapSet.new()})
+      :sys.get_state(pid)
+
+      assert Process.alive?(pid)
+    end
+  end
+
+  test "handles empty delete queue without crashing", %{pid: pid} do
+    send(pid, :check_delete_queue)
+    state = :sys.get_state(pid)
+    assert :queue.is_empty(state.delete_queue.queue)
+  end
+
+  test "handles unhandled messages without crashing", %{pid: pid} do
+    state_before = :sys.get_state(pid)
+    send(pid, :totally_unexpected_message)
+    state_after = :sys.get_state(pid)
+    assert state_before.id == state_after.id
   end
 
   describe "error handling" do

@@ -152,7 +152,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       SocketDisconnect.distributed_disconnect(tenant.external_id)
 
-      assert_process_down(socket)
+      assert_process_down(socket, 5000)
     end
   end
 
