@@ -689,6 +689,117 @@ defmodule Realtime.Tenants.ConnectTest do
     end
   end
 
+  describe "backoff configuration" do
+    test "backoff is configured with correct min/max/type values", %{tenant: tenant} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      pid = Connect.whereis(tenant.external_id)
+      state = :sys.get_state(pid)
+      assert state.backoff.min == :timer.seconds(1)
+      assert state.backoff.max == :timer.seconds(15)
+      assert state.backoff.type == :rand_exp
+    end
+  end
+
+  describe "replication recovery" do
+    test "recovery reschedules without stopping when pg_stat_activity shows existing walsender", %{tenant: tenant} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+
+      pid = Connect.whereis(tenant.external_id)
+
+      # The real replication connection is active, so pg_stat_activity returns num_rows: 1 naturally
+      send(pid, :recover_replication_connection)
+      Process.sleep(100)
+
+      assert Process.alive?(pid)
+    end
+
+    test "recovery stops when elapsed time exceeds 2-hour window", %{tenant: tenant} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+
+      pid = Connect.whereis(tenant.external_id)
+      ref = Process.monitor(pid)
+
+      past_ts = System.monotonic_time(:millisecond) - :timer.hours(3)
+      :sys.replace_state(pid, fn state -> %{state | replication_recovery_started_at: past_ts} end)
+
+      log =
+        capture_log(fn ->
+          send(pid, :recover_replication_connection)
+          assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 1000
+        end)
+
+      assert log =~ "Replication recovery window exceeded"
+    end
+
+    test "recovery preserves replication_recovery_started_at across multiple crashes", %{tenant: tenant} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+
+      pid = Connect.whereis(tenant.external_id)
+      original_ts = System.monotonic_time(:millisecond) - 1000
+
+      ref = make_ref()
+
+      :sys.replace_state(pid, fn state ->
+        %{
+          state
+          | replication_connection_reference: ref,
+            replication_connection_pid: self(),
+            replication_recovery_started_at: original_ts
+        }
+      end)
+
+      send(pid, {:DOWN, ref, :process, self(), :simulated_crash})
+      Process.sleep(100)
+
+      state = :sys.get_state(pid)
+      assert state.replication_recovery_started_at == original_ts
+
+      Connect.shutdown(tenant.external_id)
+    end
+
+    test "recovery resets replication_recovery_started_at on successful reconnection", %{tenant: tenant} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+
+      pid = Connect.whereis(tenant.external_id)
+
+      replication_pid = ReplicationConnection.whereis(tenant.external_id)
+      Process.monitor(replication_pid)
+      Process.exit(replication_pid, :kill)
+      assert_receive {:DOWN, _, :process, ^replication_pid, _}, 1000
+
+      Process.sleep(100)
+      assert {:error, :not_connected} = Connect.replication_status(tenant.external_id)
+
+      assert {:ok, _} = assert_replication_status(tenant.external_id)
+
+      state = :sys.get_state(pid)
+      assert state.replication_recovery_started_at == nil
+      assert Process.alive?(pid)
+
+      Connect.shutdown(tenant.external_id)
+    end
+  end
+
+  describe "get_status/1 degraded state" do
+    test "returns {:ok, conn} when replication_conn is nil in syn", %{tenant: tenant} do
+      assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
+      assert Connect.ready?(tenant.external_id)
+
+      tenant_id = tenant.external_id
+
+      :syn.update_registry(Connect, tenant_id, fn _pid, meta -> %{meta | replication_conn: nil} end)
+
+      assert {:ok, conn} = Connect.get_status(tenant_id)
+      assert is_pid(conn)
+
+      Connect.shutdown(tenant_id)
+    end
+  end
+
   describe "registers into local registry" do
     test "successfully registers a process", %{tenant: %{external_id: external_id}} do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(external_id)

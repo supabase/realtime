@@ -505,7 +505,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
       Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [name])
 
-      assert {:error, {:shutdown, "Temporary Replication slot already exists and in use"}} =
+      assert {:error, {:shutdown, :replication_slot_in_use}} =
                ReplicationConnection.start(tenant, self())
 
       Postgrex.query!(db_conn, "SELECT pg_drop_replication_slot($1)", [name])

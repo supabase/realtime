@@ -34,28 +34,28 @@ defmodule Realtime.LatencyTest do
 
   describe "ping/3" do
     setup do
-      Node.stop()
+      for node <- Node.list(), do: Node.disconnect(node)
       :ok
     end
 
-    @tag skip: "Clustered tests creating flakiness, requires time to analyse"
-    test "emulate a healthy remote node" do
-      assert [{%Task{}, {:ok, %{response: {:ok, {:pong, "not_set"}}}}}] = Latency.ping()
+    test "returns pong from healthy remote node" do
+      {:ok, _node} = Clustered.start()
+      results = Latency.ping()
+      assert Enum.all?(results, fn {%Task{}, result} -> match?({:ok, %{response: {:ok, {:pong, _}}}}, result) end)
     end
 
-    @tag skip: "Clustered tests creating flakiness, requires time to analyse"
-    test "emulate a slow but healthy remote node" do
-      assert [{%Task{}, {:ok, %{response: {:ok, {:pong, "not_set"}}}}}] = Latency.ping(5_000, 10_000, 30_000)
+    test "returns pong from slow but healthy remote node" do
+      {:ok, _node} = Clustered.start()
+      results = Latency.ping(100, 10_000, 30_000)
+      assert Enum.all?(results, fn {%Task{}, result} -> match?({:ok, %{response: {:ok, {:pong, _}}}}, result) end)
     end
 
-    @tag skip: "Clustered tests creating flakiness, requires time to analyse"
-    test "emulate an unhealthy remote node" do
-      assert [{%Task{}, {:ok, %{response: {:badrpc, :timeout}}}}] = Latency.ping(5_000, 1_000)
+    test "returns error when remote node exceeds timer timeout" do
+      assert [{%Task{}, {:ok, %{response: {:error, :rpc_error, _}}}}] = Latency.ping(500, 100)
     end
 
-    @tag skip: "Clustered tests creating flakiness, requires time to analyse"
-    test "no response from our Task for a remote node at all" do
-      assert [{%Task{}, nil}] = Latency.ping(10_000, 5_000, 2_000)
+    test "returns nil when task does not yield before yield timeout" do
+      assert [{%Task{}, nil}] = Latency.ping(1_000, 500, 100)
     end
   end
 end
