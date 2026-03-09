@@ -1,0 +1,159 @@
+name: E2E Tests
+on:
+  pull_request:
+    paths:
+      - "lib/**"
+      - "test/e2e/**"
+      - "config/**"
+      - "priv/**"
+      - "assets/**"
+      - "rel/**"
+      - "mix.exs"
+      - "Dockerfile"
+      - "run.sh"
+      - ".github/workflows/e2e_tests.yml"
+
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "Comma-separated test categories to run (default: all)"
+        required: false
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Realtime Image
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Docker image
+        run: docker build -t realtime:local .
+
+      - name: Save Docker image
+        run: |
+          mkdir -p /tmp/realtime-image
+          docker image save realtime:local | zstd -T0 -o /tmp/realtime-image/realtime.tar.zst
+
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: realtime-docker-image
+          path: /tmp/realtime-image/realtime.tar.zst
+          retention-days: 1
+
+  e2e:
+    name: E2E ${{ matrix.partition.name }}
+    needs: build
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        partition:
+          - name: functional
+            tests: "connection,broadcast,broadcast-replay,presence,authorization,postgres-changes,broadcast-changes"
+          - name: load
+            tests: "load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download Docker image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: realtime-docker-image
+          path: /tmp/realtime-image
+
+      - name: Load Realtime Docker image
+        run: zstd -d --stdout /tmp/realtime-image/realtime.tar.zst | docker image load
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase (without realtime)
+        run: |
+          supabase init
+          supabase start --exclude realtime
+
+      - name: Start Realtime from built image
+        run: |
+          STATUS=$(supabase status --output json)
+          JWT_SECRET=$(echo "$STATUS" | jq -r '.jwt_secret')
+          DB_URL=$(echo "$STATUS" | jq -r '.db_url')
+          DB_PORT=$(echo "$DB_URL" | sed 's|.*:\([0-9]*\)/.*|\1|')
+          DB_PASSWORD=$(echo "$DB_URL" | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')
+          NETWORK=$(docker network ls --filter name=supabase --format '{{.Name}}' | head -1)
+
+          docker run -d \
+            --name supabase_realtime_local \
+            --network "$NETWORK" \
+            --add-host=host.docker.internal:host-gateway \
+            -p 4000:4000 \
+            -e PORT=4000 \
+            -e DB_HOST=host.docker.internal \
+            -e DB_PORT="$DB_PORT" \
+            -e DB_USER=supabase_admin \
+            -e DB_PASSWORD="$DB_PASSWORD" \
+            -e DB_NAME=postgres \
+            -e DB_ENC_KEY=1234567890123456 \
+            -e DB_AFTER_CONNECT_QUERY='SET search_path TO _realtime' \
+            -e API_JWT_SECRET="$JWT_SECRET" \
+            -e METRICS_JWT_SECRET="$JWT_SECRET" \
+            -e SECRET_KEY_BASE=UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq \
+            -e ERL_AFLAGS="-proto_dist inet_tcp" \
+            -e DNS_NODES="''" \
+            -e APP_NAME=realtime \
+            -e SEED_SELF_HOST=true \
+            realtime:local
+
+          echo "Waiting for Realtime to be healthy..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/ > /dev/null 2>&1; then
+              echo "Realtime is up"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Realtime failed to start, dumping logs:"
+              docker logs supabase_realtime_local
+              exit 1
+            fi
+            echo "Attempt $i/30..."
+            sleep 5
+          done
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        working-directory: test/e2e
+        run: bun install
+
+      - name: Run E2E tests (${{ matrix.partition.name }})
+        working-directory: test/e2e
+        env:
+          PARTITION_TESTS: ${{ matrix.partition.tests }}
+          DISPATCH_TESTS: ${{ inputs.test }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          STATUS=$(supabase status --output json)
+          export SUPABASE_ANON_KEY=$(echo "$STATUS" | jq -r '.anon_key')
+          export SUPABASE_SERVICE_ROLE_KEY=$(echo "$STATUS" | jq -r '.service_role_key')
+          export SUPABASE_DB_PASSWORD=$(echo "$STATUS" | jq -r '.db_url' | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$DISPATCH_TESTS" ]; then
+            TESTS="$DISPATCH_TESTS"
+          else
+            TESTS="$PARTITION_TESTS"
+          fi
+
+          bun run check --env local --test "$TESTS"

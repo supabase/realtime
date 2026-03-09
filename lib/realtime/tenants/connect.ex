@@ -37,7 +37,7 @@ defmodule Realtime.Tenants.Connect do
           replication_connection_pid: pid(),
           replication_connection_reference: reference(),
           backoff: Backoff.t(),
-          replication_connection_attempts: non_neg_integer(),
+          replication_recovery_started_at: non_neg_integer() | nil,
           check_connected_user_interval: non_neg_integer(),
           connected_users_bucket: list(non_neg_integer()),
           check_connect_region_interval: non_neg_integer(),
@@ -50,7 +50,7 @@ defmodule Realtime.Tenants.Connect do
             replication_connection_pid: nil,
             replication_connection_reference: nil,
             backoff: nil,
-            replication_connection_attempts: 0,
+            replication_recovery_started_at: nil,
             check_connected_user_interval: nil,
             connected_users_bucket: [1],
             check_connect_region_interval: nil,
@@ -126,6 +126,9 @@ defmodule Realtime.Tenants.Connect do
     case :syn.lookup(__MODULE__, tenant_id) do
       {pid, %{conn: nil}} ->
         wait_for_connection(pid, tenant_id)
+
+      {_, %{conn: conn, replication_conn: nil}} ->
+        {:ok, conn}
 
       {_, %{conn: conn}} ->
         {:ok, conn}
@@ -246,7 +249,7 @@ defmodule Realtime.Tenants.Connect do
       tenant_id: tenant_id,
       check_connected_user_interval: check_connected_user_interval,
       check_connect_region_interval: check_connect_region_interval,
-      backoff: Backoff.new(min: :timer.seconds(1), max: :timer.seconds(15), type: :rand_exp)
+      backoff: Backoff.new(backoff_min: :timer.seconds(1), backoff_max: :timer.seconds(15), backoff_type: :rand_exp)
     }
 
     opts = Keyword.put(opts, :name, {:via, :syn, name})
@@ -388,47 +391,58 @@ defmodule Realtime.Tenants.Connect do
         %{replication_connection_reference: replication_connection_reference, tenant_id: tenant_id} = state
       ) do
     %{backoff: backoff} = state
-    log_warning("ReplicationConnectionDown", "Replication connection has been terminated")
+    log_warning("ReplicationConnectionDown", "Replication connection has been terminated, recovery window opened")
     update_syn_replication_conn(tenant_id, nil)
     {timeout, backoff} = Backoff.backoff(backoff)
     Process.send_after(self(), :recover_replication_connection, timeout)
-    state = %{state | replication_connection_pid: nil, replication_connection_reference: nil, backoff: backoff}
+
+    recovery_started_at = state.replication_recovery_started_at || System.monotonic_time(:millisecond)
+
+    state = %{
+      state
+      | replication_connection_pid: nil,
+        replication_connection_reference: nil,
+        backoff: backoff,
+        replication_recovery_started_at: recovery_started_at
+    }
+
     {:noreply, state}
   end
 
   @replication_connection_query "SELECT 1 from pg_stat_activity where application_name='realtime_replication_connection'"
-  @max_replication_connection_attempts 60
-  def handle_info(
-        :recover_replication_connection,
-        %{replication_connection_attempts: @max_replication_connection_attempts} = state
-      ) do
-    Logger.warning("Max replication connection attempts reached, terminating connection")
-    {:stop, :shutdown, state}
+  @max_replication_recovery_ms :timer.hours(2)
+  def handle_info(:recover_replication_connection, %{replication_recovery_started_at: nil} = state) do
+    {:noreply, state}
   end
 
   def handle_info(:recover_replication_connection, state) do
-    %{backoff: backoff, db_conn_pid: db_conn_pid, replication_connection_attempts: replication_connection_attempts} =
-      state
+    %{backoff: backoff, db_conn_pid: db_conn_pid, replication_recovery_started_at: started_at} = state
+    elapsed = System.monotonic_time(:millisecond) - started_at
 
-    with %{num_rows: 0} <- Postgrex.query!(db_conn_pid, @replication_connection_query, []),
-         {:ok, state} <- start_replication_connection(state) do
-      {:noreply, %{state | backoff: Backoff.reset(backoff), replication_connection_attempts: 0}}
+    if elapsed > @max_replication_recovery_ms do
+      log_warning(
+        "ReplicationRecoveryWindowExceeded",
+        "Replication recovery window exceeded after #{elapsed}ms, terminating connection"
+      )
+
+      {:stop, :shutdown, state}
     else
-      {:error, error} ->
-        {timeout, backoff} = Backoff.backoff(backoff)
+      with {:query, {:ok, %{num_rows: 0}}} <- {:query, Postgrex.query(db_conn_pid, @replication_connection_query, [])},
+           {:start, {:ok, state}} <- {:start, start_replication_connection(state)} do
+        {:noreply, %{state | backoff: Backoff.reset(backoff), replication_recovery_started_at: nil}}
+      else
+        {:query, {:ok, %{num_rows: _}}} ->
+          Logger.info("Waiting for old walsender to exit")
+          {:noreply, schedule_replication_retry(state)}
 
-        log_error(
-          "ReplicationConnectionRecoveryFailed",
-          "Replication connection recovery failed, next retry in #{timeout}ms : #{inspect(error)}"
-        )
+        {:query, {:error, error}} ->
+          log_error("ReplicationConnectionRecoveryFailed", "DB check failed during recovery: #{inspect(error)}")
+          {:noreply, schedule_replication_retry(state)}
 
-        Process.send_after(self(), :recover_replication_connection, timeout)
-        {:noreply, %{state | backoff: backoff, replication_connection_attempts: replication_connection_attempts + 1}}
-
-      _ ->
-        {timeout, backoff} = Backoff.backoff(backoff)
-        Process.send_after(self(), :recover_replication_connection, timeout)
-        {:noreply, %{state | backoff: backoff, replication_connection_attempts: replication_connection_attempts + 1}}
+        {:start, {:error, error}} ->
+          log_error("ReplicationConnectionRecoveryFailed", "Replication connection recovery failed: #{inspect(error)}")
+          {:noreply, schedule_replication_retry(state)}
+      end
     end
   end
 
@@ -488,6 +502,12 @@ defmodule Realtime.Tenants.Connect do
   defp tenant_suspended?(_), do: :ok
 
   defp rebalance_check_interval_in_ms(), do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
+
+  defp schedule_replication_retry(%{backoff: backoff} = state) do
+    {timeout, backoff} = Backoff.backoff(backoff)
+    Process.send_after(self(), :recover_replication_connection, timeout)
+    %{state | backoff: backoff}
+  end
 
   defp update_syn_replication_conn(tenant_id, pid) do
     :syn.update_registry(__MODULE__, tenant_id, fn _pid, meta -> %{meta | replication_conn: pid} end)

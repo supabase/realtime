@@ -195,8 +195,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
   end
 
   @impl true
-  def handle_result([%Postgrex.Result{num_rows: 1}], %__MODULE__{step: :check_replication_slot}) do
-    {:disconnect, {:shutdown, "Temporary Replication slot already exists and in use"}}
+  def handle_result([%Postgrex.Result{num_rows: 1}], %__MODULE__{step: :check_replication_slot} = _state) do
+    Logger.info("Replication slot already exists and in use, deferring connection")
+    {:disconnect, {:shutdown, :replication_slot_in_use}}
   end
 
   def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :check_replication_slot} = state) do
