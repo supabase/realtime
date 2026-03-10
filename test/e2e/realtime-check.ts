@@ -15,7 +15,8 @@ const program = new Command()
   .option("--db-password <password>", "Database password (required for staging/prod, or set SUPABASE_DB_PASSWORD)")
   .option("--env <env>", "Environment: local | staging | prod (default: prod)", "prod")
   .option("--domain <domain>", "Email domain for the test user", "example.com")
-  .option("--port <port>", "Override URL port (useful for local)")
+  .option("--port <port>", "Override API URL port (useful for local)")
+  .option("--db-port <port>", "Override DB port (useful for local, defaults to 54322)")
   .option("--json", "Output results as JSON to stdout")
   .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,broadcast-changes")
   .parse();
@@ -24,7 +25,7 @@ const opts = program.opts();
 const ANON_KEY: string = opts.publishableKey ?? process.env.SUPABASE_ANON_KEY;
 const SERVICE_KEY: string = opts.secretKey ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
 const dbPassword: string = opts.dbPassword ?? process.env.SUPABASE_DB_PASSWORD ?? "";
-const { project, env, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER } = opts;
+const { project, env, domain: EMAIL_DOMAIN, port, dbPort, json: JSON_OUTPUT, test: TEST_FILTER } = opts;
 
 const TEST_CATEGORIES = TEST_FILTER
   ? TEST_FILTER.split(",").map((s: string) => s.trim().toLowerCase())
@@ -55,7 +56,7 @@ const PROJECT_URL = (() => {
 
 const DB_URL = (() => {
   const pw = encodeURIComponent(dbPassword ?? "postgres");
-  if (env === "local") return `postgresql://postgres:${pw}@localhost:${port ?? 54322}/postgres`;
+  if (env === "local") return `postgresql://postgres:${pw}@localhost:${dbPort ?? 54322}/postgres`;
   if (env === "staging") return `postgresql://postgres:${pw}@db.${project}.green.supabase.co:5432/postgres`;
   return `postgresql://postgres:${pw}@db.${project}.supabase.co:5432/postgres`;
 })();
