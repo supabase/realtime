@@ -66,6 +66,7 @@ defmodule Realtime.Database do
       |> then(&Map.merge(settings, &1))
 
     {:ok, addrtype} = detect_ip_version(settings["db_host"])
+    log_warning("IpV4Detected", "IPv4 detected for project", project: settings["db_host"])
     ssl = if default_ssl_param(settings), do: [verify: :verify_none], else: false
 
     %__MODULE__{

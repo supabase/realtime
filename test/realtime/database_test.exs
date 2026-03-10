@@ -321,6 +321,18 @@ defmodule Realtime.DatabaseTest do
       assert result.backoff_type == :rand_exp
     end
 
+    test "logs a warning with project metadata when IPv4 is detected", %{tenant: tenant} do
+      settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
+
+      log =
+        capture_log(fn ->
+          Database.from_settings(settings, "realtime_connect")
+        end)
+
+      assert log =~ "IpV4Detected"
+      assert log =~ "project=127.0.0.1"
+    end
+
     test "returns struct with correct setup", %{tenant: tenant} do
       application_name = "realtime_connect"
       backoff = :stop
