@@ -66,7 +66,6 @@ defmodule Realtime.Database do
       |> then(&Map.merge(settings, &1))
 
     {:ok, addrtype} = detect_ip_version(settings["db_host"])
-    log_warning("IpV4Detected", "IPv4 detected for project", project: settings["db_host"])
     ssl = if default_ssl_param(settings), do: [verify: :verify_none], else: false
 
     %__MODULE__{
@@ -302,9 +301,16 @@ defmodule Realtime.Database do
     host = String.to_charlist(host)
 
     cond do
-      match?({:ok, _}, :inet6_tcp.getaddr(host)) -> {:ok, :inet6}
-      match?({:ok, _}, :inet.gethostbyname(host)) -> {:ok, :inet}
-      true -> {:error, :nxdomain}
+      match?({:ok, _}, :inet6_tcp.getaddr(host)) ->
+        {:ok, :inet6}
+
+      match?({:ok, _}, :inet.gethostbyname(host)) ->
+        log_warning("IpV4Detected", "IPv4 detected for host " <> inspect(host))
+
+        {:ok, :inet}
+
+      true ->
+        {:error, :nxdomain}
     end
   end
 
