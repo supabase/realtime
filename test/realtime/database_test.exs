@@ -290,20 +290,46 @@ defmodule Realtime.DatabaseTest do
   describe "detect_ip_version/1" do
     test "detects appropriate IP version" do
       # Using ipv4.google.com
-      assert Realtime.Database.detect_ip_version("ipv4.google.com") == {:ok, :inet}
+      log =
+        capture_log(fn ->
+          assert Realtime.Database.detect_ip_version("ipv4.google.com") == {:ok, :inet}
+        end)
+
+      assert log =~ "IpV4Detected"
 
       # Using ipv6.google.com
-      assert Realtime.Database.detect_ip_version("ipv6.google.com") == {:ok, :inet6}
+      log =
+        capture_log(fn ->
+          assert Realtime.Database.detect_ip_version("ipv6.google.com") == {:ok, :inet6}
+        end)
+
+      refute log =~ "IpV4Detected"
 
       # Using 2001:0db8:85a3:0000:0000:8a2e:0370:7334
-      assert Realtime.Database.detect_ip_version("2001:0db8:85a3:0000:0000:8a2e:0370:7334") ==
-               {:ok, :inet6}
+      log =
+        capture_log(fn ->
+          assert Realtime.Database.detect_ip_version("2001:0db8:85a3:0000:0000:8a2e:0370:7334") ==
+                   {:ok, :inet6}
+        end)
+
+      refute log =~ "IpV4Detected"
 
       # Using 127.0.0.1
-      assert Realtime.Database.detect_ip_version("127.0.0.1") == {:ok, :inet}
+      log =
+        capture_log(fn ->
+          assert Realtime.Database.detect_ip_version("127.0.0.1") == {:ok, :inet}
+        end)
+
+      assert log =~ "IpV4Detected"
 
       # Using invalid domain
-      assert Realtime.Database.detect_ip_version("potato") == {:error, :nxdomain}
+      #       # Using 127.0.0.1
+      log =
+        capture_log(fn ->
+          assert Realtime.Database.detect_ip_version("potato") == {:error, :nxdomain}
+        end)
+
+      refute log =~ "IpV4Detected"
     end
   end
 

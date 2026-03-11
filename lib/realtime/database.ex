@@ -301,9 +301,16 @@ defmodule Realtime.Database do
     host = String.to_charlist(host)
 
     cond do
-      match?({:ok, _}, :inet6_tcp.getaddr(host)) -> {:ok, :inet6}
-      match?({:ok, _}, :inet.gethostbyname(host)) -> {:ok, :inet}
-      true -> {:error, :nxdomain}
+      match?({:ok, _}, :inet6_tcp.getaddr(host)) ->
+        {:ok, :inet6}
+
+      match?({:ok, _}, :inet.gethostbyname(host)) ->
+        log_warning("IpV4Detected", "IPv4 detected for host " <> inspect(host))
+
+        {:ok, :inet}
+
+      true ->
+        {:error, :nxdomain}
     end
   end
 
