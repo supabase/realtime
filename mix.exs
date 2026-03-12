@@ -40,7 +40,7 @@ defmodule Realtime.MixProject do
   def application do
     [
       mod: {Realtime.Application, []},
-      extra_applications: [:logger, :runtime_tools, :prom_ex, :mix, :os_mon]
+      extra_applications: [:logger, :runtime_tools, :prom_ex, :mix, :os_mon, :sentry]
     ]
   end
 
@@ -69,6 +69,8 @@ defmodule Realtime.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 0.19"},
       {:jason, "~> 1.3"},
+      {:sentry, "~> 12.0.2"},
+      {:hackney, "~> 1.25"},
       {:plug_cowboy, "~> 2.6"},
       {:libcluster, "~> 3.3"},
       {:libcluster_postgres, "~> 0.2"},
