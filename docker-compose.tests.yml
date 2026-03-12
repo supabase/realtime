@@ -44,6 +44,8 @@ services:
       JANITOR_INTERVAL: 60000
       LOG_LEVEL: "info"
       SEED_SELF_HOST: true
+      DASHBOARD_USER: admin
+      DASHBOARD_PASSWORD: admin
     networks:
       test-network:
         aliases:
