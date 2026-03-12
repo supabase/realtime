@@ -300,17 +300,20 @@ defmodule Realtime.Database do
   def detect_ip_version(host) when is_binary(host) do
     host = String.to_charlist(host)
 
-    cond do
-      match?({:ok, _}, :inet6_tcp.getaddr(host)) ->
-        {:ok, :inet6}
+    if match?({:ok, _}, :inet6_tcp.getaddr(host)) do
+      {:ok, :inet6}
+    else
+      case :inet.gethostbyname(host) do
+        {:ok, hostent} ->
+          [addr | _] = elem(hostent, 5)
+          resolved = addr |> :inet.ntoa() |> to_string()
+          log_warning("IpV4Detected", "IPv4 detected for host #{inspect(host)} resolved to #{resolved}")
 
-      match?({:ok, _}, :inet.gethostbyname(host)) ->
-        log_warning("IpV4Detected", "IPv4 detected for host " <> inspect(host))
+          {:ok, :inet}
 
-        {:ok, :inet}
-
-      true ->
-        {:error, :nxdomain}
+        _ ->
+          {:error, :nxdomain}
+      end
     end
   end
 
