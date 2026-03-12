@@ -216,7 +216,12 @@ fn decode<'a>(env: Env<'a>, bytes: Binary<'a>) -> Term<'a> {
     (atoms::ok(), series.encode(env)).encode(env)
 }
 
-rustler::init!("Elixir.Realtime.PrometheusRemoteWrite");
+#[allow(dead_code)]
+fn on_upgrade(_env: rustler::Env, _old_code: rustler::Term) -> bool {
+    true
+}
+
+rustler::init!("Elixir.Realtime.PrometheusRemoteWrite", on_upgrade = on_upgrade);
 
 #[cfg(test)]
 mod tests {

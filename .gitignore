@@ -37,3 +37,6 @@ demo/.env
 # Rust/Rustler build artifacts
 /native/*/target/
 /priv/native/
+
+# Burrito binary output
+/burrito_out/

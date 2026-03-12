@@ -14,10 +14,17 @@ defmodule Realtime.MixProject do
       test_coverage: [tool: ExCoveralls],
       releases: [
         realtime: [
-          # This will ensure that if opentelemetry terminates, even abnormally, our application will not be terminated.
           applications: [
             opentelemetry_exporter: :permanent,
             opentelemetry: :temporary
+          ],
+          steps: release_steps(),
+          burrito: [
+            targets: [
+              linux_amd64: [os: :linux, cpu: :x86_64, skip_nifs: true],
+              linux_arm64: [os: :linux, cpu: :aarch64, skip_nifs: true],
+              macos_arm64: [os: :darwin, cpu: :aarch64, skip_nifs: true]
+            ]
           ]
         ]
       ]
@@ -40,7 +47,7 @@ defmodule Realtime.MixProject do
   def application do
     [
       mod: {Realtime.Application, []},
-      extra_applications: [:logger, :runtime_tools, :prom_ex, :mix, :os_mon]
+      extra_applications: [:logger, :runtime_tools, :prom_ex, :os_mon]
     ]
   end
 
@@ -108,7 +115,8 @@ defmodule Realtime.MixProject do
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       {:poolboy, "~> 1.5", only: :test},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:rustler, "~> 0.37", runtime: false}
+      {:rustler, "~> 0.37", runtime: false},
+      {:burrito, "~> 1.5"}
     ]
   end
 
@@ -118,6 +126,69 @@ defmodule Realtime.MixProject do
   #     $ mix setup
   #
   # See the documentation for `Mix` for more info on aliases.
+  defp release_steps do
+    if System.get_env("BURRITO_TARGET") not in [nil, ""] do
+      [:assemble, &compile_assets/1, &cross_compile_nif/1, &Burrito.wrap/1]
+    else
+      [:assemble]
+    end
+  end
+
+  defp compile_assets(%Mix.Release{} = release) do
+    Mix.shell().info("Compiling assets for Burrito release")
+    Mix.Task.run("cmd", ["--cd", "assets", "npm", "install"])
+    Mix.Task.run("assets.deploy")
+    release
+  end
+
+  defp cross_compile_nif(%Mix.Release{} = release) do
+    burrito_target = System.get_env("BURRITO_TARGET") |> then(&if(&1 == "", do: nil, else: &1))
+
+    if burrito_target != nil and burrito_target != host_platform() do
+      {rust_target, src_filename} = nif_rust_target(burrito_target)
+      crate_dir = Path.join([File.cwd!(), "native", "prometheus_remote_write"])
+
+      Mix.shell().info("Cross-compiling NIF for #{burrito_target} (#{rust_target})")
+
+      {output, code} =
+        System.cmd("cargo", ["zigbuild", "--release", "--target", rust_target],
+          cd: crate_dir,
+          stderr_to_stdout: true
+        )
+
+      if code != 0, do: Mix.raise("NIF cross-compilation failed:\n#{output}")
+
+      src = Path.join([crate_dir, "target", rust_target, "release", src_filename])
+
+      dst =
+        Path.join([release.path, "lib", "realtime-#{release.version}", "priv", "native", src_filename])
+
+      File.mkdir_p!(Path.dirname(dst))
+      File.cp!(src, dst)
+      Mix.shell().info("NIF installed at #{dst}")
+    else
+      Mix.shell().info("NIF: native build, skipping cross-compilation")
+    end
+
+    release
+  end
+
+  defp host_platform do
+    arch = :erlang.system_info(:system_architecture) |> List.to_string()
+    {_family, os} = :os.type()
+
+    cond do
+      os == :darwin and String.contains?(arch, "aarch64") -> "macos_arm64"
+      os == :linux and String.contains?(arch, "aarch64") -> "linux_arm64"
+      os == :linux and String.contains?(arch, "x86_64") -> "linux_amd64"
+      true -> "unknown"
+    end
+  end
+
+  defp nif_rust_target("linux_amd64"), do: {"x86_64-unknown-linux-gnu", "libprometheus_remote_write.so"}
+  defp nif_rust_target("linux_arm64"), do: {"aarch64-unknown-linux-gnu", "libprometheus_remote_write.so"}
+  defp nif_rust_target("macos_arm64"), do: {"aarch64-apple-darwin", "libprometheus_remote_write.dylib"}
+
   defp aliases do
     [
       setup: ["deps.get", "ecto.setup", "cmd npm install --prefix assets"],

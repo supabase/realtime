@@ -1,0 +1,53 @@
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-supabase/postgres:17.6.1.074}
+    container_name: burrito-db
+    ports:
+      - "5434:5432"
+    volumes:
+      - ./dev/postgres/00-supabase-schema.sql:/docker-entrypoint-initdb.d/00-supabase-schema.sql
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  realtime:
+    depends_on:
+      db:
+        condition: service_healthy
+    build:
+      context: .
+      args:
+        BURRITO_TARGET: ${BURRITO_TARGET:-linux_arm64}
+    container_name: burrito-realtime
+    ports:
+      - "4001:4000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    environment:
+      PORT: 4000
+      APP_NAME: realtime
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: postgres
+      DB_NAME: postgres
+      DB_ENC_KEY: supabaserealtime
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+      API_JWT_SECRET: dev-jwt-secret-for-testing
+      METRICS_JWT_SECRET: dev-metrics-secret
+      SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1u2oq
+      ERL_AFLAGS: "-proto_dist inet_tcp"
+      CLUSTER_STRATEGIES: EPMD
+      DNS_NODES: "''"
+      SEED_SELF_HOST: "true"
+      LOG_LEVEL: info

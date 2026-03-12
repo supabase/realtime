@@ -35,6 +35,104 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PROJECT_ACTION }}
 
+  binary_linux_amd64:
+    needs: release
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: needs.release.outputs.published == 'true'
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: 27.x
+          elixir-version: 1.18.x
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - run: mix deps.get --only prod
+
+      - name: Build Burrito binary
+        env:
+          MIX_ENV: prod
+          BURRITO_TARGET: linux_amd64
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+        run: mix release
+
+      - name: Upload binary to GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PROJECT_ACTION }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: gh release upload "v${VERSION}" burrito_out/realtime_linux_amd64 --clobber
+
+  binary_linux_arm64:
+    needs: release
+    runs-on: arm-runner
+    if: needs.release.outputs.published == 'true'
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: 27.x
+          elixir-version: 1.18.x
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: mix deps.get --only prod
+
+      - name: Build Burrito binary
+        env:
+          MIX_ENV: prod
+          BURRITO_TARGET: linux_arm64
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+        run: mix release
+
+      - name: Upload binary to GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PROJECT_ACTION }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: gh release upload "v${VERSION}" burrito_out/realtime_linux_arm64 --clobber
+
+  binary_macos_arm64:
+    needs: release
+    runs-on: macos-15
+    if: needs.release.outputs.published == 'true'
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: 27.x
+          elixir-version: 1.18.x
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: mix deps.get --only prod
+
+      - name: Build Burrito binary
+        env:
+          MIX_ENV: prod
+          BURRITO_TARGET: macos_arm64
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+        run: mix release
+
+      - name: Upload binary to GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN_PROJECT_ACTION }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: gh release upload "v${VERSION}" burrito_out/realtime_macos_arm64 --clobber
+
   docker_x86_release:
     needs: release
     runs-on: blacksmith-4vcpu-ubuntu-2404

@@ -3,18 +3,21 @@ ARG OTP_VERSION=27.3
 ARG DEBIAN_VERSION=bookworm-20250929-slim
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+ARG ZIG_VERSION=0.15.2
 
 FROM ${BUILDER_IMAGE} AS builder
 
+ARG ZIG_VERSION
+ARG BURRITO_TARGET=""
+
 ENV MIX_ENV="prod"
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH="/usr/local/cargo/bin:/usr/local/zig:${PATH}"
 
-RUN apt-get update -y \
-    && apt-get install curl -y \
-    && apt-get install -y build-essential git \
-    && apt-get clean
-
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-ENV PATH="/root/.cargo/bin:${PATH}"
+RUN apt-get update -y && apt-get install -y \
+    build-essential git curl xz-utils \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN set -uex; \
     apt-get update; \
@@ -28,45 +31,51 @@ RUN set -uex; \
     apt-get -qy update; \
     apt-get -qy install nodejs;
 
-# prepare build dir
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --no-modify-path --default-toolchain stable
+
+RUN if [ -n "${BURRITO_TARGET}" ]; then \
+      ARCH=$(uname -m) && \
+      curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-${ARCH}-linux-${ZIG_VERSION}.tar.xz" \
+      | tar -xJ -C /usr/local/ && \
+      mv /usr/local/zig-${ARCH}-linux-${ZIG_VERSION} /usr/local/zig && \
+      rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu && \
+      cargo install cargo-zigbuild; \
+    fi
+
 WORKDIR /app
 
-# install hex + rebar
-RUN mix local.hex --force && \
-    mix local.rebar --force
+RUN mix local.hex --force && mix local.rebar --force
 
-# install mix dependencies
 COPY mix.exs mix.lock ./
 COPY beacon beacon
 RUN mix deps.get --only $MIX_ENV
 RUN mkdir config
 
-# copy compile-time config files before we compile dependencies
-# to ensure any relevant config change will trigger the dependencies
-# to be re-compiled.
 COPY config/config.exs config/${MIX_ENV}.exs config/
 RUN mix deps.compile
+
 COPY priv priv
 COPY lib lib
 COPY native native
 COPY assets assets
 
-# compile assets with esbuild and npm
-RUN cd assets \
-    && npm install \
-    && cd .. \
-    && mix assets.deploy
+RUN cd assets && npm install && cd .. && mix assets.deploy
 
-# Compile the release
 RUN mix compile
 
-# Changes to config/runtime.exs don't require recompiling the code
 COPY config/runtime.exs config/
 COPY rel rel
-RUN mix release
 
-# start a new build stage so that the final image will only contain
-# the compiled release and other runtime necessities
+RUN mkdir -p /app/release && \
+    if [ -n "${BURRITO_TARGET}" ]; then \
+      BURRITO_TARGET=${BURRITO_TARGET} mix release && \
+      cp burrito_out/realtime_${BURRITO_TARGET} /app/release/realtime; \
+    else \
+      mix release && \
+      cp -r _build/prod/rel/realtime/. /app/release/; \
+    fi
+
 FROM ${RUNNER_IMAGE}
 ARG SLOT_NAME_SUFFIX
 
@@ -76,21 +85,22 @@ ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}" \
     LC_ALL="en_US.UTF-8" \
     MIX_ENV="prod" \
     ECTO_IPV6="true" \
-    ERL_AFLAGS="-proto_dist inet6_tcp"
+    ERL_AFLAGS="-proto_dist inet6_tcp" \
+    BURRITO_CACHE_DIR=/tmp/burrito_cache
 
 RUN apt-get update -y && \
     apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini curl awscli jq && \
     apt-get clean && rm -f /var/lib/apt/lists/*_*
 
-# Set the locale
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 
 WORKDIR "/app"
 
 RUN chown nobody /app
 
-COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
+COPY --from=builder --chown=nobody:root /app/release ./
 COPY run.sh run.sh
 RUN ls -la /app
+
 ENTRYPOINT ["/usr/bin/tini", "-s", "-g", "--", "/app/run.sh"]
 CMD ["/app/bin/server"]

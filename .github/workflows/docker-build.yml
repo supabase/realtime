@@ -5,16 +5,78 @@ on:
     branches:
       - main
 
+env:
+  POSTGRES_IMAGE: supabase/postgres:17.6.1.074
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build Docker image
-        run: docker build .
+        uses: useblacksmith/build-push-action@v2
+        with:
+          push: false
+
+  build-burrito:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - burrito_target: linux_amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - burrito_target: linux_arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: useblacksmith/setup-docker-builder@v1
+
+      - name: Cache Docker images
+        uses: actions/cache@v5
+        id: docker-cache
+        with:
+          path: /tmp/docker-images
+          key: docker-images-zstd-${{ env.POSTGRES_IMAGE }}
+      - name: Load Docker images from cache
+        if: steps.docker-cache.outputs.cache-hit == 'true'
+        run: zstd -d --stdout /tmp/docker-images/postgres.tar.zst | docker image load
+      - name: Pull and save Docker images
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: |
+          docker pull ${{ env.POSTGRES_IMAGE }}
+          mkdir -p /tmp/docker-images
+          docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
+
+      - name: Build realtime image with cache
+        uses: useblacksmith/build-push-action@v2
+        with:
+          load: true
+          build-args: BURRITO_TARGET=${{ matrix.burrito_target }}
+          tags: realtime-realtime:latest
+
+      - name: Build and start Burrito binary
+        env:
+          BURRITO_TARGET: ${{ matrix.burrito_target }}
+        run: docker compose -p realtime -f docker-compose.burrito.yml up --wait
+
+      - name: Test healthcheck endpoint
+        run: curl -f http://localhost:4001/healthcheck
+
+      - name: Print logs on failure
+        if: failure()
+        run: docker compose -p realtime -f docker-compose.burrito.yml logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose -p realtime -f docker-compose.burrito.yml down

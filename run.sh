@@ -9,6 +9,7 @@ if [ ! -z "${RLIMIT_NOFILE:-}" ]; then
 fi
 
 export ERL_CRASH_DUMP=/tmp/erl_crash.dump
+export BURRITO_CACHE_DIR="${BURRITO_CACHE_DIR:-/tmp/burrito_cache}"
 
 upload_crash_dump_to_s3() {
     EXIT_CODE=${?:-0}
@@ -95,13 +96,29 @@ if [[ -n "${GENERATE_CLUSTER_CERTS:-}" ]] ; then
 fi
 
 echo "Running migrations"
-sudo -E -u nobody /app/bin/migrate
 
-if [ "${SEED_SELF_HOST-}" = true ]; then
-    echo "Seeding selfhosted Realtime"
-    sudo -E -u nobody /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)'
+if [ -f "/app/bin/realtime" ]; then
+    # Traditional Mix release
+    sudo -E -u nobody /app/bin/migrate
+
+    if [ "${SEED_SELF_HOST-}" = true ]; then
+        echo "Seeding selfhosted Realtime"
+        sudo -E -u nobody /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)'
+    fi
+
+    echo "Starting Realtime"
+    ulimit -n
+    exec "$@"
+else
+    # Burrito single binary
+    /app/realtime eval "Realtime.Release.migrate()"
+
+    if [ "${SEED_SELF_HOST:-}" = "true" ]; then
+        echo "Seeding selfhosted Realtime"
+        /app/realtime eval "Realtime.Release.seeds(Realtime.Repo)"
+    fi
+
+    echo "Starting Realtime"
+    ulimit -n
+    exec /app/realtime start
 fi
-
-echo "Starting Realtime"
-ulimit -n
-exec "$@"
