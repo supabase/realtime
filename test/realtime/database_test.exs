@@ -296,6 +296,7 @@ defmodule Realtime.DatabaseTest do
         end)
 
       assert log =~ "IpV4Detected"
+      assert log =~ ~r/resolved to \d+\.\d+\.\d+\.\d+/
 
       # Using ipv6.google.com
       log =
@@ -321,6 +322,7 @@ defmodule Realtime.DatabaseTest do
         end)
 
       assert log =~ "IpV4Detected"
+      assert log =~ ~r/resolved to \d+\.\d+\.\d+\.\d+/
 
       # Using invalid domain
       #       # Using 127.0.0.1
