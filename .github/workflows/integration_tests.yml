@@ -11,7 +11,7 @@ on:
       - "mix.exs"
       - "Dockerfile"
       - "run.sh"
-      - "docker-compose.test.yml"
+      - "supabase/config.toml"
       - ".github/workflows/integration_tests.yml"
 
   push:
@@ -22,43 +22,131 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  POSTGRES_IMAGE: supabase/postgres:17.6.1.074
-  DENO_IMAGE: denoland/deno:alpine-2.5.6
+permissions:
+  contents: read
 
 jobs:
-  tests:
-    name: Tests
+  integration:
+    name: Integration Tests
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v6
-      - name: Cache Docker images
-        uses: actions/cache@v5
-        id: docker-cache
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@b60b5899c73b63a2d2d651b1e90db8d4c9392f51 # v1.6.0
         with:
-          path: /tmp/docker-images
-          key: docker-images-integration-zstd-${{ env.POSTGRES_IMAGE }}-${{ env.DENO_IMAGE }}
-      - name: Load Docker images from cache
-        if: steps.docker-cache.outputs.cache-hit == 'true'
+          version: latest
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: latest
+
+      - name: Cache bun dependencies
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        with:
+          path: test/e2e/node_modules
+          key: bun-${{ runner.os }}-${{ hashFiles('test/e2e/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install e2e test dependencies
+        working-directory: test/e2e
+        run: bun install
+
+      - name: Start Supabase local stack
+        run: supabase start
+
+      - name: Extract Supabase credentials
+        id: supabase
         run: |
-          zstd -d --stdout /tmp/docker-images/postgres.tar.zst | docker image load &
-          PID1=$!
-          zstd -d --stdout /tmp/docker-images/deno.tar.zst | docker image load &
-          PID2=$!
-          wait $PID1 || exit $?
-          wait $PID2 || exit $?
-      - name: Pull and save Docker images
-        if: steps.docker-cache.outputs.cache-hit != 'true'
+          set -euo pipefail
+          STATUS="$(supabase status --output json)"
+          ANON_KEY="$(echo "$STATUS" | jq -r '.ANON_KEY')"
+          SERVICE_KEY="$(echo "$STATUS" | jq -r '.SERVICE_ROLE_KEY')"
+          JWT_SECRET="$(echo "$STATUS" | jq -r '.JWT_SECRET')"
+          DB_CONTAINER="$(docker ps --filter name=supabase_db --format '{{.Names}}' | head -1)"
+          NETWORK_NAME="$(docker inspect "${DB_CONTAINER}" --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}')"
+          echo "::add-mask::${ANON_KEY}"
+          echo "::add-mask::${SERVICE_KEY}"
+          echo "::add-mask::${JWT_SECRET}"
+          echo "anon_key=${ANON_KEY}" >> "$GITHUB_OUTPUT"
+          echo "service_key=${SERVICE_KEY}" >> "$GITHUB_OUTPUT"
+          echo "jwt_secret=${JWT_SECRET}" >> "$GITHUB_OUTPUT"
+          echo "db_host=${DB_CONTAINER}" >> "$GITHUB_OUTPUT"
+          echo "network_name=${NETWORK_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Blacksmith Docker Builder
+        uses: useblacksmith/setup-docker-builder@v1
+
+      - name: Build realtime image
+        uses: useblacksmith/build-push-action@v2
+        with:
+          context: .
+          load: true
+          tags: realtime-dev:local
+          push: false
+
+      - name: Start realtime server
+        env:
+          JWT_SECRET: ${{ steps.supabase.outputs.jwt_secret }}
         run: |
-          docker pull ${{ env.POSTGRES_IMAGE }} &
-          PID1=$!
-          docker pull ${{ env.DENO_IMAGE }} &
-          PID2=$!
-          wait $PID1 || exit $?
-          wait $PID2 || exit $?
-          mkdir -p /tmp/docker-images
-          docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
-          docker image save ${{ env.DENO_IMAGE }} | zstd -T0 -o /tmp/docker-images/deno.tar.zst
-      - name: Run integration test
-        run: docker compose -f docker-compose.tests.yml up --abort-on-container-exit --exit-code-from test-runner
+          set -euo pipefail
+          docker run -d \
+            --name realtime-dev \
+            --network "${{ steps.supabase.outputs.network_name }}" \
+            --network-alias realtime \
+            -p 4000:4000 \
+            -e PORT=4000 \
+            -e "DB_HOST=${{ steps.supabase.outputs.db_host }}" \
+            -e DB_PORT=5432 \
+            -e DB_USER=supabase_admin \
+            -e DB_PASSWORD=postgres \
+            -e DB_NAME=postgres \
+            -e DB_ENC_KEY=supabaserealtime \
+            -e "DB_AFTER_CONNECT_QUERY=SET search_path TO _realtime" \
+            -e "API_JWT_SECRET=${JWT_SECRET}" \
+            -e "METRICS_JWT_SECRET=${JWT_SECRET}" \
+            -e SECRET_KEY_BASE=UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq \
+            -e "ERL_AFLAGS=-proto_dist inet_tcp" \
+            -e "DNS_NODES=''" \
+            -e APP_NAME=realtime \
+            -e RUN_JANITOR=true \
+            -e JANITOR_INTERVAL=60000 \
+            -e LOG_LEVEL=info \
+            -e SEED_SELF_HOST=true \
+            realtime-dev:local
+
+      - name: Wait for realtime server to be healthy
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/ > /dev/null 2>&1; then
+              echo "Realtime server is healthy"
+              exit 0
+            fi
+            echo "Waiting for realtime... attempt $i/30"
+            sleep 5
+          done
+          echo "Realtime server failed to become healthy"
+          docker logs realtime-dev
+          exit 1
+
+      - name: Run functional e2e tests
+        working-directory: test/e2e
+        env:
+          ANON_KEY: ${{ steps.supabase.outputs.anon_key }}
+          SERVICE_KEY: ${{ steps.supabase.outputs.service_key }}
+        run: |
+          bun run realtime-check.ts \
+            --env local \
+            --port 4000 \
+            --publishable-key "${ANON_KEY}" \
+            --secret-key "${SERVICE_KEY}" \
+            --db-password postgres \
+            --test functional
+
+      - name: Dump realtime logs on failure
+        if: failure()
+        run: docker logs realtime-dev
