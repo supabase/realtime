@@ -78,6 +78,7 @@ defmodule Realtime.MixProject do
       # https://github.com/akoutmos/prom_ex/pull/270
       {:peep, "~> 4.3", override: true},
       {:joken, "~> 2.5.0"},
+      {:nimble_zta, "~> 0.1"},
       {:ex_json_schema, "~> 0.7"},
       {:recon, "~> 2.5"},
       {:mint, "~> 1.4"},

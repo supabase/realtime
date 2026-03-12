@@ -65,6 +65,12 @@ defmodule Realtime.Application do
 
     :syn.join(RegionNodes, region, self(), node: node())
 
+    zta_children =
+      case Application.get_env(:realtime, :dashboard_auth) do
+        :zta -> [{NimbleZTA.Cloudflare, name: Realtime.ZTA, identity_key: System.fetch_env!("CF_TEAM_DOMAIN")}]
+        _ -> []
+      end
+
     children =
       [
         Realtime.ErlSysMon,
@@ -118,7 +124,7 @@ defmodule Realtime.Application do
          pool_size: presence_pool_size,
          broadcast_period: presence_broadcast_period,
          permdown_period: presence_permdown_period}
-      ] ++ extensions_supervisors() ++ janitor_tasks() ++ metrics_pusher_children()
+      ] ++ extensions_supervisors() ++ janitor_tasks() ++ metrics_pusher_children() ++ zta_children
 
     database_connections = if master_region == region, do: [Realtime.Repo], else: [Replica.replica()]
 

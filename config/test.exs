@@ -69,3 +69,6 @@ config :gen_rpc,
   tcp_server_port: 5969 + gen_rpc_offset,
   tcp_client_port: 5970 + gen_rpc_offset,
   connect_timeout: 500
+
+config :realtime, :dashboard_auth, :basic_auth
+config :realtime, :dashboard_credentials, {"test_user", "test_password"}

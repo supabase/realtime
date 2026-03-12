@@ -1,18 +1,20 @@
 defmodule RealtimeWeb.TenantsLive.IndexTest do
   use RealtimeWeb.ConnCase
   import Phoenix.LiveViewTest
+  import Generators
+  import Mimic
 
-  describe "TenantsLive Index" do
+  describe "TenantsLive Index with basic_auth" do
     setup do
       user = random_string()
       password = random_string()
 
-      System.put_env("DASHBOARD_USER", user)
-      System.put_env("DASHBOARD_PASSWORD", password)
+      Application.put_env(:realtime, :dashboard_auth, :basic_auth)
+      Application.put_env(:realtime, :dashboard_credentials, {user, password})
 
       on_exit(fn ->
-        System.delete_env("DASHBOARD_USER")
-        System.delete_env("DASHBOARD_PASSWORD")
+        Application.delete_env(:realtime, :dashboard_auth)
+        Application.delete_env(:realtime, :dashboard_credentials)
       end)
 
       %{user: user, password: password}
@@ -27,6 +29,38 @@ defmodule RealtimeWeb.TenantsLive.IndexTest do
 
     test "returns 401 if no credentials", %{conn: conn} do
       assert conn |> get(~p"/admin/tenants") |> response(401)
+    end
+
+    test "returns 401 with wrong credentials", %{conn: conn} do
+      assert conn |> using_basic_auth("wrong", "wrong") |> get(~p"/admin/tenants") |> response(401)
+    end
+  end
+
+  describe "TenantsLive Index with zta" do
+    setup do
+      Application.put_env(:realtime, :dashboard_auth, :zta)
+
+      on_exit(fn -> Application.delete_env(:realtime, :dashboard_auth) end)
+    end
+
+    test "renders tenant view with valid cf token", %{conn: conn} do
+      stub(NimbleZTA.Cloudflare, :authenticate, fn _name, conn -> {conn, %{email: "user@example.com"}} end)
+
+      {:ok, _view, html} = live(conn, ~p"/admin/tenants")
+
+      assert html =~ "Listing all Supabase Realtime tenants."
+    end
+
+    test "returns 403 without cf token", %{conn: conn} do
+      stub(NimbleZTA.Cloudflare, :authenticate, fn _name, conn -> {conn, nil} end)
+
+      assert conn |> get(~p"/admin/tenants") |> response(403)
+    end
+
+    test "returns 503 when zta service is unavailable", %{conn: conn} do
+      stub(NimbleZTA.Cloudflare, :authenticate, fn _name, _conn -> exit(:noproc) end)
+
+      assert conn |> get(~p"/admin/tenants") |> response(503)
     end
   end
 
