@@ -410,3 +410,17 @@ if config_env() == :prod do
       ssl: ssl_opts
   end
 end
+
+if config_env() != :test do
+  case System.get_env("DASHBOARD_AUTH", "basic_auth") do
+    "zta" ->
+      config :realtime, dashboard_auth: :zta
+
+    _ ->
+      config :realtime,
+        dashboard_auth: :basic_auth,
+        dashboard_credentials:
+          {System.get_env("DASHBOARD_USER") || raise("DASHBOARD_USER is not set"),
+           System.get_env("DASHBOARD_PASSWORD") || raise("DASHBOARD_PASSWORD is not set")}
+  end
+end

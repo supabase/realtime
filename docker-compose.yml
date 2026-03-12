@@ -47,4 +47,7 @@ services:
       JANITOR_INTERVAL: 60000
       LOG_LEVEL: "info"
       SEED_SELF_HOST: true
+      METRICS_JWT_SECRET: dc447559-996d-4761-a306-f47a5eab1623
+      DASHBOARD_USER: admin
+      DASHBOARD_PASSWORD: admin
 
