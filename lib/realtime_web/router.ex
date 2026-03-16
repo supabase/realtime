@@ -38,7 +38,7 @@ defmodule RealtimeWeb.Router do
   end
 
   pipeline :dashboard_admin do
-    plug(:dashboard_basic_auth)
+    plug(:dashboard_auth)
   end
 
   pipeline :metrics do
@@ -135,7 +135,8 @@ defmodule RealtimeWeb.Router do
       ecto_psql_extras_options: [long_running_queries: [threshold: "200 milliseconds"]],
       metrics: RealtimeWeb.Telemetry,
       additional_pages: [
-        route_name: Realtime.Dashboard.ProcessDump
+        route_name: Realtime.Dashboard.ProcessDump,
+        tenant_info: Realtime.Dashboard.TenantInfo
       ]
     )
   end
@@ -157,10 +158,20 @@ defmodule RealtimeWeb.Router do
     end
   end
 
-  defp dashboard_basic_auth(conn, _opts) do
-    user = System.fetch_env!("DASHBOARD_USER")
-    password = System.fetch_env!("DASHBOARD_PASSWORD")
-    Plug.BasicAuth.basic_auth(conn, username: user, password: password)
+  defp dashboard_auth(conn, _opts) do
+    case Application.fetch_env!(:realtime, :dashboard_auth) do
+      :zta ->
+        {conn, user} = NimbleZTA.Cloudflare.authenticate(Realtime.ZTA, conn)
+        if user, do: conn, else: conn |> send_resp(403, "") |> halt()
+
+      :basic_auth ->
+        {user, password} = Application.fetch_env!(:realtime, :dashboard_credentials)
+        Plug.BasicAuth.basic_auth(conn, username: user, password: password)
+    end
+  catch
+    :exit, reason ->
+      Logger.error("ZTA authentication failed: #{inspect(reason)}")
+      conn |> send_resp(503, "") |> halt()
   end
 
   defp set_span_request_id(conn, _) do
