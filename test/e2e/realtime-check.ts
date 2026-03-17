@@ -5,6 +5,12 @@ import { Command } from "commander";
 import kleur from "kleur";
 import { SQL } from "bun";
 import Table from "cli-table3";
+import { trace, context, SpanStatusCode, SpanKind, ROOT_CONTEXT } from "@opentelemetry/api";
+import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { resourceFromAttributes } from "@opentelemetry/resources";
+import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 
 const program = new Command()
   .name("realtime-check")
@@ -16,7 +22,10 @@ const program = new Command()
   .option("--env <env>", "Environment: local | staging | prod (default: prod)", "prod")
   .option("--domain <domain>", "Email domain for the test user", "example.com")
   .option("--port <port>", "Override URL port (useful for local)")
+  .option("--url <url>", "Override project URL (e.g. http://127.0.0.1:54321)")
+  .option("--db-url <url>", "Override database URL (e.g. postgresql://postgres:postgres@127.0.0.1:54322/postgres)")
   .option("--json", "Output results as JSON to stdout")
+  .option("--otel <endpoint>", "OTLP HTTP endpoint for tracing (e.g. http://localhost:4318)")
   .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,broadcast-changes")
   .parse();
 
@@ -24,7 +33,7 @@ const opts = program.opts();
 const ANON_KEY: string = opts.publishableKey ?? process.env.SUPABASE_ANON_KEY;
 const SERVICE_KEY: string = opts.secretKey ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
 const dbPassword: string = opts.dbPassword ?? process.env.SUPABASE_DB_PASSWORD ?? "";
-const { project, env, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER } = opts;
+const { project, env, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, url: URL_ARG, dbUrl: DB_URL_ARG } = opts;
 
 const TEST_CATEGORIES = TEST_FILTER
   ? TEST_FILTER.split(",").map((s: string) => s.trim().toLowerCase())
@@ -47,13 +56,13 @@ if (!SERVICE_KEY) {
   process.exit(1);
 }
 
-const PROJECT_URL = (() => {
+const PROJECT_URL = URL_ARG ?? process.env.SUPABASE_URL ?? (() => {
   if (env === "local") return `http://localhost:${port ?? 54321}`;
   if (env === "staging") return `https://${project}.green.supabase.co`;
   return `https://${project}.supabase.co`;
 })();
 
-const DB_URL = (() => {
+const DB_URL = DB_URL_ARG ?? process.env.SUPABASE_DB_URL ?? (() => {
   const pw = encodeURIComponent(dbPassword ?? "postgres");
   if (env === "local") return `postgresql://postgres:${pw}@localhost:${port ?? 54322}/postgres`;
   if (env === "staging") return `postgresql://postgres:${pw}@db.${project}.green.supabase.co:5432/postgres`;
@@ -75,7 +84,68 @@ const LOAD_MESSAGES = 20;
 const LOAD_SETTLE_MS = 5000;
 const LOAD_DELIVERY_SLO = 99;
 
+const OTEL_ENDPOINT = OTEL_ARG ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+const OTEL_API_TOKEN = process.env.OTEL_API_TOKEN;
+
+let tracer = trace.getTracer("realtime-check");
+let otelProvider: BasicTracerProvider | null = null;
+
+function initOtel() {
+  if (!OTEL_ENDPOINT) return;
+  const contextManager = new AsyncLocalStorageContextManager();
+  contextManager.enable();
+  context.setGlobalContextManager(contextManager);
+  const provider = new BasicTracerProvider({
+    resource: resourceFromAttributes({ [ATTR_SERVICE_NAME]: "realtime-check" }),
+    spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter({
+      url: `${OTEL_ENDPOINT}/v1/traces`,
+      ...(OTEL_API_TOKEN ? { headers: { Authorization: `Bearer ${OTEL_API_TOKEN}` } } : {}),
+    }))],
+  });
+  trace.setGlobalTracerProvider(provider);
+  tracer = trace.getTracer("realtime-check", "0.0.1");
+  otelProvider = provider;
+}
+
+async function flushOtel() {
+  if (otelProvider) await otelProvider.forceFlush();
+}
+
+function patchFetch() {
+  if (!OTEL_ENDPOINT) return;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async function tracedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.includes("/rest/v1") || url.includes("/auth/v1/logout") || url.includes("/auth/v1/admin")) return originalFetch(input, init);
+    const method = (init?.method ?? (typeof input === "object" && "method" in input ? input.method : undefined) ?? "GET").toUpperCase();
+    const span = tracer.startSpan(`HTTP ${method}`, {
+      kind: SpanKind.CLIENT,
+      attributes: { "http.method": method, "http.url": url },
+    }, context.active());
+    return context.with(trace.setSpan(context.active(), span), async () => {
+      try {
+        const res = await originalFetch(input, init);
+        span.setAttribute("http.status_code", res.status);
+        if (res.status >= 400) span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${res.status}` });
+        return res;
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: msg });
+        if (e instanceof Error) span.recordException(e);
+        throw e;
+      } finally {
+        span.end();
+      }
+    });
+  }) as typeof fetch;
+}
+
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const settle = async (getCount: () => number, expected: number, timeoutMs: number) => {
+  const deadline = performance.now() + timeoutMs;
+  while (getCount() < expected && performance.now() < deadline) await sleep(50);
+};
 const log = (...args: unknown[]) => JSON_OUTPUT ? process.stderr.write(args.map(String).join(" ") + "\n") : console.log(...args);
 const progress = (msg: string) => JSON_OUTPUT ? process.stderr.write(msg) : process.stdout.write(msg);
 
@@ -102,17 +172,28 @@ const results: TestResult[] = [];
 async function test(name: string, fn: () => Promise<Metric[]>) {
   progress(`  ${name} ... `);
   const start = performance.now();
+  const span = tracer.startSpan(name, {
+    kind: SpanKind.INTERNAL,
+    attributes: { "suite": currentSuite, "env": env, "project.url": PROJECT_URL },
+  });
+  const testContext = trace.setSpan(ROOT_CONTEXT, span);
   try {
-    const metrics = await fn();
+    const metrics = await context.with(testContext, fn);
     const durationMs = performance.now() - start;
+    for (const m of metrics) span.setAttribute(`metric.${m.label}`, `${m.value.toFixed(2)}${m.unit}`);
+    span.setStatus({ code: SpanStatusCode.OK });
     results.push({ suite: currentSuite, name, passed: true, durationMs, metrics });
     const summary = metrics.map((m) => `${m.label}: ${kleur.cyan(`${m.value.toFixed(m.unit === "%" ? 1 : 0)}${m.unit}`)}`).join("  ");
     log(`${kleur.green("PASS")}  ${kleur.dim(`${durationMs.toFixed(0)}ms`)}${summary ? "  " + summary : ""}`);
   } catch (e: any) {
     const durationMs = performance.now() - start;
+    span.setStatus({ code: SpanStatusCode.ERROR, message: e?.message ?? String(e) });
+    span.recordException(e);
     results.push({ suite: currentSuite, name, passed: false, durationMs, metrics: [], error: e?.message ?? String(e) });
     log(`${kleur.red("FAIL")}  ${kleur.dim(`${durationMs.toFixed(0)}ms`)}`);
     log(`    ${kleur.red(e?.message ?? e)}`);
+  } finally {
+    span.end();
   }
 }
 
@@ -122,12 +203,23 @@ function suite(name: string) {
 }
 
 async function waitFor<T>(getter: () => T | null, label: string): Promise<{ value: T; latencyMs: number }> {
+  const span = tracer.startSpan(`wait: ${label}`, { kind: SpanKind.INTERNAL });
   const start = performance.now();
   const deadline = start + EVENT_TIMEOUT_MS;
   let value: T | null;
-  while ((value = getter()) === null && performance.now() < deadline) await sleep(50);
-  if (value === null) throw new Error(`Timed out waiting for ${label}`);
-  return { value, latencyMs: performance.now() - start };
+  return context.with(trace.setSpan(context.active(), span), async () => {
+    while ((value = getter()) === null && performance.now() < deadline) await sleep(50);
+    const latencyMs = performance.now() - start;
+    if (value === null) {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: `Timed out` });
+      span.end();
+      throw new Error(`Timed out waiting for ${label}`);
+    }
+    span.setAttribute("latency_ms", latencyMs);
+    span.setStatus({ code: SpanStatusCode.OK });
+    span.end();
+    return { value, latencyMs };
+  });
 }
 
 async function stopClient(supabase: SupabaseClient) {
@@ -136,17 +228,37 @@ async function stopClient(supabase: SupabaseClient) {
 }
 
 async function signInUser(supabase: SupabaseClient, email: string, password: string) {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw new Error(`Error signing in: ${error.message}`);
-  return data!.session!.access_token;
+  const span = tracer.startSpan("sign in", { kind: SpanKind.INTERNAL });
+  return context.with(trace.setSpan(context.active(), span), async () => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+      span.end();
+      throw new Error(`Error signing in: ${error.message}`);
+    }
+    span.setStatus({ code: SpanStatusCode.OK });
+    span.end();
+    return data!.session!.access_token;
+  });
 }
 
 async function waitForSubscribed(channel: ReturnType<SupabaseClient["channel"]>): Promise<number> {
+  const span = tracer.startSpan("wait: subscribe", { kind: SpanKind.INTERNAL });
   const start = performance.now();
   const deadline = start + EVENT_TIMEOUT_MS;
-  while (channel.state === "joining" && performance.now() < deadline) await sleep(50);
-  if (channel.state !== "joined") throw new Error(`Channel failed to subscribe (state: ${channel.state})`);
-  return performance.now() - start;
+  return context.with(trace.setSpan(context.active(), span), async () => {
+    while (channel.state === "joining" && performance.now() < deadline) await sleep(50);
+    const latencyMs = performance.now() - start;
+    if (channel.state !== "joined") {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: `state: ${channel.state}` });
+      span.end();
+      throw new Error(`Channel failed to subscribe (state: ${channel.state})`);
+    }
+    span.setAttribute("latency_ms", latencyMs);
+    span.setStatus({ code: SpanStatusCode.OK });
+    span.end();
+    return latencyMs;
+  });
 }
 
 async function waitForPostgresChannel(channel: ReturnType<SupabaseClient["channel"]>): Promise<{ subscribeMs: number; systemMs: number }> {
@@ -357,7 +469,7 @@ async function runConnectionTest() {
         await channel.send({ type: "broadcast", event, payload: { seq: i } });
       }
 
-      await sleep(SETTLE_MS);
+      await settle(() => latencies.length, MESSAGES, SETTLE_MS);
 
       return measureThroughput(latencies, MESSAGES, "messages", DELIVERY_SLO);
     } finally {
@@ -409,7 +521,7 @@ async function runLoadPostgresChangesTests(testUser: { email: string; password: 
         sendTimes.set(id, t);
       }
 
-      await sleep(LOAD_SETTLE_MS);
+      await settle(() => latencies.length, LOAD_MESSAGES, LOAD_SETTLE_MS);
 
       return measureThroughput(latencies, LOAD_MESSAGES, "INSERT events", LOAD_DELIVERY_SLO);
     } finally {
@@ -442,7 +554,7 @@ async function runLoadPostgresChangesTests(testUser: { email: string; password: 
         return executeUpdate(supabase, "pg_changes", id);
       }));
 
-      await sleep(LOAD_SETTLE_MS);
+      await settle(() => latencies.length, LOAD_MESSAGES, LOAD_SETTLE_MS);
 
       return measureThroughput(latencies, LOAD_MESSAGES, "UPDATE events", LOAD_DELIVERY_SLO);
     } finally {
@@ -475,7 +587,7 @@ async function runLoadPostgresChangesTests(testUser: { email: string; password: 
         return executeDelete(supabase, "pg_changes", id);
       }));
 
-      await sleep(LOAD_SETTLE_MS);
+      await settle(() => latencies.length, LOAD_MESSAGES, LOAD_SETTLE_MS);
 
       return measureThroughput(latencies, LOAD_MESSAGES, "DELETE events", LOAD_DELIVERY_SLO);
     } finally {
@@ -524,7 +636,7 @@ async function runLoadPresenceTests() {
         return ch.track({ key });
       }));
 
-      await sleep(LOAD_SETTLE_MS);
+      await settle(() => latencies.length, CLIENTS, LOAD_SETTLE_MS);
 
       return measureThroughput(latencies, CLIENTS, "presence joins", LOAD_DELIVERY_SLO);
     } finally {
@@ -561,7 +673,7 @@ async function runLoadBroadcastFromDbTests(testUser: { email: string; password: 
         await supabase.from("broadcast_changes").insert({ id, value: crypto.randomUUID() });
       }));
 
-      await sleep(LOAD_SETTLE_MS);
+      await settle(() => latencies.length, LOAD_MESSAGES, LOAD_SETTLE_MS);
 
       await supabase.from("broadcast_changes").delete().in("id", [...sendTimes.keys()]);
 
@@ -599,7 +711,7 @@ async function runLoadBroadcastTests() {
         await channel.send({ type: "broadcast", event, payload: { seq: i } });
       }
 
-      await sleep(LOAD_SETTLE_MS);
+      await settle(() => latencies.length, LOAD_MESSAGES, LOAD_SETTLE_MS);
 
       return measureThroughput(latencies, LOAD_MESSAGES, "broadcast events", LOAD_DELIVERY_SLO);
     } finally {
@@ -636,7 +748,7 @@ async function runLoadBroadcastTests() {
         if (!res.ok) throw new Error(`Broadcast API returned ${res.status}`);
       }));
 
-      await sleep(LOAD_SETTLE_MS);
+      await settle(() => latencies.length, LOAD_MESSAGES, LOAD_SETTLE_MS);
 
       return measureThroughput(latencies, LOAD_MESSAGES, "broadcast API events", LOAD_DELIVERY_SLO);
     } finally {
@@ -661,8 +773,6 @@ async function runLoadBroadcastReplayTests(testUser: { email: string; password: 
         supabase.from("replay_check").insert({ id: crypto.randomUUID(), topic, event, payload: { seq: i } })
       ));
 
-      await sleep(LOAD_SETTLE_MS);
-
       const latencies: number[] = [];
       const replayStart = performance.now();
       const receiver = supabase.channel(topic, {
@@ -672,7 +782,7 @@ async function runLoadBroadcastReplayTests(testUser: { email: string; password: 
       }).subscribe();
       await waitForSubscribed(receiver);
 
-      await sleep(LOAD_SETTLE_MS);
+      await settle(() => latencies.length, LOAD_MESSAGES, LOAD_SETTLE_MS);
 
       return measureThroughput(latencies, LOAD_MESSAGES, "replayed broadcast events", LOAD_DELIVERY_SLO);
     } finally {
@@ -1160,7 +1270,6 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
 
       await supabase.from("replay_check").insert({ id: crypto.randomUUID(), topic, event, payload: { value: "old" } });
 
-      await sleep(1000);
       const since = Date.now();
 
       let result: any = null;
@@ -1169,7 +1278,7 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
       }).on("broadcast", { event }, (msg) => (result = msg.payload)).subscribe();
       await waitForSubscribed(receiver);
 
-      await sleep(2000);
+      await sleep(500);
 
       assert.strictEqual(result, null);
       return [];
@@ -1272,9 +1381,13 @@ const LOAD_SUITES = Object.keys(SUITES).filter((k) => k.startsWith("load"));
 const FUNCTIONAL_SUITES = Object.keys(SUITES).filter((k) => !k.startsWith("load"));
 
 async function main() {
+  initOtel();
+  patchFetch();
+
   log(kleur.bold("Realtime Check"));
   log(`Project: ${PROJECT_URL}`);
   log(`Env: ${env}  Email domain: ${EMAIL_DOMAIN}\n`);
+  if (OTEL_ENDPOINT) log(kleur.dim(`Tracing → ${OTEL_ENDPOINT}\n`));
 
   const activeCategories = TEST_CATEGORIES
     ? TEST_CATEGORIES.flatMap((c: string) => {
@@ -1299,6 +1412,7 @@ async function main() {
     : Object.entries(SUITES);
 
   const { userId, testUser } = await setup();
+
   const start = performance.now();
   try {
     for (const [, fn] of suitesToRun) await fn(testUser);
@@ -1307,6 +1421,7 @@ async function main() {
   }
 
   printSummary(performance.now() - start);
+  await flushOtel();
 
   if (results.some((r) => !r.passed)) process.exit(1);
 }
