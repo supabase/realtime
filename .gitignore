@@ -33,7 +33,3 @@ config/prod.secret.exs
 demo/.env
 .lexical
 .vscode
-
-# Rust/Rustler build artifacts
-/native/*/target/
-/priv/native/

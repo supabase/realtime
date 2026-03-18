@@ -13,9 +13,6 @@ RUN apt-get update -y \
     && apt-get install -y build-essential git \
     && apt-get clean
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-ENV PATH="/root/.cargo/bin:${PATH}"
-
 RUN set -uex; \
     apt-get update; \
     apt-get install -y ca-certificates curl gnupg; \
@@ -48,7 +45,6 @@ COPY config/config.exs config/${MIX_ENV}.exs config/
 RUN mix deps.compile
 COPY priv priv
 COPY lib lib
-COPY native native
 COPY assets assets
 
 # compile assets with esbuild and npm

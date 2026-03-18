@@ -44,27 +44,34 @@ defmodule Realtime.MetricsPusher do
         Application.get_env(:realtime, :metrics_pusher_timeout_ms, :timer.seconds(15))
       )
 
-    url = append_extra_labels(url, opts)
+    compress =
+      Keyword.get(
+        opts,
+        :compress,
+        Application.get_env(:realtime, :metrics_pusher_compress, true)
+      )
 
-    Logger.info("Starting MetricsPusher (url: #{url}, interval: #{interval}ms)")
+    Logger.info("Starting MetricsPusher (url: #{url}, interval: #{interval}ms, compress: #{compress})")
 
-    headers = [
-      {"content-type", "application/x-protobuf"},
-      {"content-encoding", "snappy"},
-      {"x-prometheus-remote-write-version", "0.1.0"}
-    ]
+    headers = [{"content-type", "text/plain"}]
+
+    basic_auth = if auth, do: [auth: {:basic, "#{user}:#{auth}"}], else: []
 
     req_options =
-      [method: :post, url: url, headers: headers, receive_timeout: timeout]
+      [
+        method: :post,
+        url: url,
+        headers: headers,
+        compress_body: compress,
+        receive_timeout: timeout
+      ]
+      |> Keyword.merge(basic_auth)
       |> Keyword.merge(Application.get_env(:realtime, :metrics_pusher_req_options, []))
-
-    encoded_auth = if auth, do: {:basic, "#{user}:#{auth}"}, else: nil
 
     state = %__MODULE__{
       push_ref: schedule_push(interval),
       interval: interval,
-      req_options: req_options,
-      auth: encoded_auth
+      req_options: req_options
     }
 
     {:ok, state}
@@ -72,7 +79,7 @@ defmodule Realtime.MetricsPusher do
 
   @impl true
   def handle_info(:push, state) do
-    {exec_time, _} = :timer.tc(fn -> push(state.req_options, state.auth) end, :millisecond)
+    {exec_time, _} = :timer.tc(fn -> push(state.req_options) end, :millisecond)
 
     if exec_time > :timer.seconds(5) do
       Logger.warning("Metrics push took: #{exec_time} ms")
@@ -89,42 +96,27 @@ defmodule Realtime.MetricsPusher do
 
   defp schedule_push(delay), do: Process.send_after(self(), :push, delay)
 
-  @service "realtime"
-  defp append_extra_labels(url, opts) do
-    extra_labels = [service: @service] ++ Keyword.get(opts, :extra_labels, [])
-    extra_query = Enum.map_join(extra_labels, "&", fn {k, v} -> ~s(extra_label="#{k}=#{v}") end)
-    uri = URI.parse(url)
-    new_query = if uri.query, do: "#{uri.query}&#{extra_query}", else: extra_query
-    URI.to_string(%{uri | query: new_query})
-  end
+  defp push(req_options) do
+    try do
+      metrics = Realtime.PromEx.get_metrics()
 
-  defp push(req_options, auth) do
-    metrics = Realtime.PromEx.get_metrics() |> IO.iodata_to_binary()
-    timestamp_ms = System.system_time(:millisecond)
+      case send_metrics(req_options, metrics) do
+        :ok ->
+          :ok
 
-    with {:ok, body} <- Realtime.PrometheusRemoteWrite.encode(metrics, timestamp_ms),
-         :ok <- send_metrics(req_options, auth, body) do
-      :ok
-    else
-      {:error, {:http_error, _, _} = reason} ->
-        Logger.error("MetricsPusher: Failed to push metrics to #{req_options[:url]}: #{inspect(reason)}")
-        :ok
-
-      {:error, reason} ->
-        Logger.error("MetricsPusher: Failed to encode metrics: #{inspect(reason)}")
+        {:error, reason} ->
+          Logger.error("MetricsPusher: Failed to push metrics to #{req_options[:url]}: #{inspect(reason)}")
+          :ok
+      end
+    rescue
+      error ->
+        Logger.error("MetricsPusher: Exception during push: #{inspect(error)}")
         :ok
     end
-  rescue
-    error ->
-      Logger.error("MetricsPusher: Exception during push: #{inspect(error)}")
-      :ok
   end
 
-  defp send_metrics(req_options, auth, body) do
-    opts = [{:body, body} | req_options]
-    opts = if auth, do: Keyword.put(opts, :auth, auth), else: opts
-
-    opts |> Req.request() |> handle_response()
+  defp send_metrics(req_options, metrics) do
+    [{:body, metrics} | req_options] |> Req.request() |> handle_response()
   end
 
   defp handle_response({:ok, %{status: status}}) when status in 200..299, do: :ok
