@@ -11,7 +11,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   * `publication_name` - The name of the publication to create. If not provided, it will use the schema and table name.
   * `replication_slot_name` - The name of the replication slot to create. If not provided, it will use the schema and table name.
   * `output_plugin` - The output plugin to use. Default is `pgoutput`.
-  * `proto_version` - The protocol version to use. Default is `1`.
+  * `proto_version` - The protocol version to use. Default is `2`.
   * `handler_module` - The module that will handle the data received from the replication stream.
   * `metadata` - The metadata to pass to the handler module.
 

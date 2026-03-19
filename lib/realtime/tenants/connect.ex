@@ -249,7 +249,7 @@ defmodule Realtime.Tenants.Connect do
       tenant_id: tenant_id,
       check_connected_user_interval: check_connected_user_interval,
       check_connect_region_interval: check_connect_region_interval,
-      backoff: Backoff.new(backoff_min: :timer.seconds(1), backoff_max: :timer.seconds(15), backoff_type: :rand_exp)
+      backoff: Backoff.new(backoff_min: :timer.seconds(5), backoff_max: :timer.minutes(5), backoff_type: :rand_exp)
     }
 
     opts = Keyword.put(opts, :name, {:via, :syn, name})

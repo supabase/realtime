@@ -694,8 +694,8 @@ defmodule Realtime.Tenants.ConnectTest do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
       pid = Connect.whereis(tenant.external_id)
       state = :sys.get_state(pid)
-      assert state.backoff.min == :timer.seconds(1)
-      assert state.backoff.max == :timer.seconds(15)
+      assert state.backoff.min == :timer.seconds(5)
+      assert state.backoff.max == :timer.minutes(5)
       assert state.backoff.type == :rand_exp
     end
   end
@@ -847,7 +847,7 @@ defmodule Realtime.Tenants.ConnectTest do
     Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
   end
 
-  defp assert_pid(call, attempts \\ 10)
+  defp assert_pid(call, attempts \\ 30)
 
   defp assert_pid(_call, 0) do
     raise "Timeout waiting for pid"
@@ -864,7 +864,7 @@ defmodule Realtime.Tenants.ConnectTest do
     end
   end
 
-  defp assert_replication_status(tenant_id, attempts \\ 20)
+  defp assert_replication_status(tenant_id, attempts \\ 30)
 
   defp assert_replication_status(tenant_id, 0) do
     Connect.replication_status(tenant_id)
