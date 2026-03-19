@@ -97,20 +97,45 @@ defmodule Realtime.MetricsPusher do
   defp schedule_push(delay), do: Process.send_after(self(), :push, delay)
 
   defp push(req_options) do
+    tasks = [
+      Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
+        push_metrics("global", &Realtime.PromEx.get_global_metrics/0, req_options)
+      end),
+      Task.Supervisor.async_nolink(Realtime.TaskSupervisor, fn ->
+        push_metrics("tenant", &Realtime.TenantPromEx.get_metrics/0, req_options)
+      end)
+    ]
+
+    tasks
+    |> Task.yield_many(:timer.minutes(1))
+    |> Enum.each(fn
+      {task, nil} ->
+        Task.shutdown(task, :brutal_kill)
+        Logger.error("MetricsPusher: Task timed out: #{inspect(task)}")
+
+      {_task, {:exit, reason}} ->
+        Logger.error("MetricsPusher: Task exited with reason: #{inspect(reason)}")
+
+      {_task, {:ok, _}} ->
+        :ok
+    end)
+  end
+
+  defp push_metrics(label, get_metrics_fn, req_options) do
     try do
-      metrics = Realtime.PromEx.get_metrics()
+      metrics = get_metrics_fn.()
 
       case send_metrics(req_options, metrics) do
         :ok ->
           :ok
 
         {:error, reason} ->
-          Logger.error("MetricsPusher: Failed to push metrics to #{req_options[:url]}: #{inspect(reason)}")
+          Logger.error("MetricsPusher: Failed to push #{label} metrics to #{req_options[:url]}: #{inspect(reason)}")
           :ok
       end
     rescue
       error ->
-        Logger.error("MetricsPusher: Exception during push: #{inspect(error)}")
+        Logger.error("MetricsPusher: Exception during #{label} push: #{inspect(error)}")
         :ok
     end
   end
