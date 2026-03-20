@@ -1,8 +1,6 @@
 defmodule Realtime.Tenants.ReplicationConnectionTest do
   # Async false due to tweaking application env
   use Realtime.DataCase, async: false
-  use Mimic
-  setup :set_mimic_global
 
   import ExUnit.CaptureLog
 
@@ -43,6 +41,36 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
       # Temporary process should not be registered
       refute ReplicationConnection.whereis(tenant.external_id)
+    end
+  end
+
+  describe "watchdog kills unresponsive replication" do
+    setup do
+      replication_watchdog_interval = Application.get_env(:realtime, :replication_watchdog_interval)
+      replication_watchdog_timeout = Application.get_env(:realtime, :replication_watchdog_timeout)
+
+      on_exit(fn ->
+        Application.put_env(:realtime, :replication_watchdog_interval, replication_watchdog_interval)
+        Application.put_env(:realtime, :replication_watchdog_timeout, replication_watchdog_timeout)
+      end)
+
+      Application.put_env(:realtime, :replication_watchdog_interval, 100)
+      Application.put_env(:realtime, :replication_watchdog_timeout, 100)
+    end
+
+    test "watchdog kills replication connection that is not responding to health checks", %{tenant: tenant} do
+      assert {:ok, pid} = ReplicationConnection.start(tenant, self())
+
+      log =
+        capture_log(fn ->
+          # Let's make it not reply to health checks
+          :sys.suspend(pid)
+
+          reason = assert_process_down(pid, 200)
+          assert reason == :shutdown
+        end)
+
+      assert log =~ "ReplicationConnectionWatchdogTimeout"
     end
   end
 
@@ -512,12 +540,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     end
 
     test "times out when init takes too long", %{tenant: tenant} do
-      expect(ReplicationConnection, :init, 1, fn arg ->
-        :timer.sleep(1000)
-        call_original(ReplicationConnection, :init, [arg])
-      end)
-
-      assert {:error, :replication_connection_timeout} = ReplicationConnection.start(tenant, self(), 100)
+      assert {:error, :replication_connection_timeout} = ReplicationConnection.start(tenant, self(), 0)
     end
 
     test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
@@ -707,8 +730,6 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
   end
 
   describe "whereis/1" do
-    @tag skip:
-           "We are using a GenServer wrapper so the pid returned is not the same as the ReplicationConnection for now"
     test "returns pid if exists", %{tenant: tenant} do
       {:ok, pid} = ReplicationConnection.start(tenant, self())
       assert ReplicationConnection.whereis(tenant.external_id) == pid
@@ -780,7 +801,8 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
   defp assert_process_down(pid, timeout \\ 100) do
     ref = Process.monitor(pid)
-    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
+    assert_receive {:DOWN, ^ref, :process, ^pid, reason}, timeout
+    reason
   end
 
   defp message_fixture_with_conn(_tenant, conn, override) do
