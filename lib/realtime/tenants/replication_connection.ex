@@ -31,6 +31,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
   alias Realtime.Tenants.BatchBroadcast
   alias Realtime.Tenants.Cache
 
+  @default_query_timeout 30_000
+
   @type t :: %__MODULE__{
           tenant_id: String.t(),
           opts: Keyword.t(),
@@ -50,7 +52,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
           relations: map(),
           buffer: list(),
           monitored_pid: pid(),
-          latency_committed_at: integer()
+          latency_committed_at: integer(),
+          query_timeout: timeout()
         }
   defstruct tenant_id: nil,
             opts: [],
@@ -62,42 +65,23 @@ defmodule Realtime.Tenants.ReplicationConnection do
             relations: %{},
             buffer: [],
             monitored_pid: nil,
-            latency_committed_at: nil
+            latency_committed_at: nil,
+            query_timeout: @default_query_timeout
 
-  defmodule Wrapper do
-    @moduledoc """
-    This GenServer exists at the moment so that we can have an init timeout for ReplicationConnection
-    """
-    use GenServer
-
-    def start_link(args, init_timeout) do
-      GenServer.start_link(__MODULE__, args, timeout: init_timeout)
-    end
-
-    @impl true
-    def init(args) do
-      case Realtime.Tenants.ReplicationConnection.start_link(args) do
-        {:ok, pid} -> {:ok, pid}
-        {:error, reason} -> {:stop, reason}
-      end
-    end
-  end
-
-  @default_init_timeout 30_000
   @table "messages"
   @schema "realtime"
   @doc """
   Starts the replication connection for a tenant and monitors a given pid to stop the ReplicationConnection.
   """
-  @spec start(Realtime.Api.Tenant.t(), pid()) :: {:ok, pid()} | {:error, any()}
-  def start(tenant, monitored_pid, init_timeout \\ @default_init_timeout) do
+  @spec start(Realtime.Api.Tenant.t(), pid(), query_timeout :: timeout) :: {:ok, pid()} | {:error, any()}
+  def start(tenant, monitored_pid, query_timeout \\ @default_query_timeout) do
     Logger.info("Starting replication for Broadcast Changes")
-    opts = %__MODULE__{tenant_id: tenant.external_id, monitored_pid: monitored_pid}
-    supervisor_spec = supervisor_spec(tenant)
+    opts = %__MODULE__{tenant_id: tenant.external_id, monitored_pid: monitored_pid, query_timeout: query_timeout}
+    supervisor_spec = supervisor_spec(tenant.external_id)
 
     child_spec = %{
       id: __MODULE__,
-      start: {Wrapper, :start_link, [opts, init_timeout]},
+      start: {__MODULE__, :start_link, [opts]},
       restart: :temporary,
       type: :worker
     }
@@ -115,13 +99,16 @@ defmodule Realtime.Tenants.ReplicationConnection do
       {:error, %Postgrex.Error{postgres: %{pg_code: pg_code}}} when pg_code in ~w(53300 53400) ->
         {:error, :max_wal_senders_reached}
 
-      {:error, :timeout} ->
+      {:error, %DBConnection.ConnectionError{}} ->
         {:error, :replication_connection_timeout}
 
       error ->
         error
     end
   end
+
+  @spec stop(String.t(), pid()) :: :ok | {:error, any()}
+  def stop(tenant_id, pid), do: DynamicSupervisor.terminate_child(supervisor_spec(tenant_id), pid)
 
   @doc """
   Finds replication connection by tenant_id
@@ -191,7 +178,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     query = "SELECT * FROM pg_replication_slots WHERE slot_name = '#{replication_slot_name}'"
 
-    {:query, query, %{state | step: :check_replication_slot}}
+    {:query, query, [timeout: state.query_timeout], %{state | step: :check_replication_slot}}
   end
 
   @impl true
@@ -211,7 +198,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     query = "CREATE_REPLICATION_SLOT #{replication_slot_name} TEMPORARY LOGICAL #{output_plugin} NOEXPORT_SNAPSHOT"
 
-    {:query, query, %{state | step: :check_publication}}
+    {:query, query, [timeout: state.query_timeout], %{state | step: :check_publication}}
   end
 
   def handle_result([%Postgrex.Result{}], %__MODULE__{step: :check_publication} = state) do
@@ -220,7 +207,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     Logger.info("Check publication #{publication_name} for table #{@schema}.#{@table} exists")
     query = "SELECT * FROM pg_publication WHERE pubname = '#{publication_name}'"
 
-    {:query, query, %{state | step: :create_publication}}
+    {:query, query, [timeout: state.query_timeout], %{state | step: :create_publication}}
   end
 
   def handle_result([%Postgrex.Result{num_rows: 0}], %__MODULE__{step: :create_publication} = state) do
@@ -229,7 +216,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     Logger.info("Create publication #{publication_name} for table #{@schema}.#{@table}")
     query = "CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
 
-    {:query, query, %{state | step: :start_replication_slot}}
+    {:query, query, [timeout: state.query_timeout], %{state | step: :start_replication_slot}}
   end
 
   def handle_result([%Postgrex.Result{num_rows: 1}], %__MODULE__{step: :create_publication} = state) do
@@ -243,7 +230,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
       WHERE pubname = '#{publication_name}'
     """
 
-    {:query, query, %{state | step: :validate_publication}}
+    {:query, query, [timeout: state.query_timeout], %{state | step: :validate_publication}}
   end
 
   def handle_result([%Postgrex.Result{rows: rows}], %__MODULE__{step: :validate_publication} = state) do
@@ -255,13 +242,13 @@ defmodule Realtime.Tenants.ReplicationConnection do
       end)
 
     if valid_tables and rows != [] do
-      {:query, "SELECT 1", %{state | step: :start_replication_slot}}
+      {:query, "SELECT 1", [timeout: state.query_timeout], %{state | step: :start_replication_slot}}
     else
       query =
         "DROP PUBLICATION IF EXISTS #{publication_name}; CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
 
       Logger.warning("Publication #{publication_name} contains unexpected tables. Recreating...")
-      {:query, query, %{state | step: :start_replication_slot}}
+      {:query, query, [timeout: state.query_timeout], %{state | step: :start_replication_slot}}
     end
   end
 
@@ -426,8 +413,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     {:noreply, %{state | step: :disconnected}}
   end
 
-  @spec supervisor_spec(Tenant.t()) :: term()
-  def supervisor_spec(%Tenant{external_id: tenant_id}) do
+  defp supervisor_spec(tenant_id) do
     {:via, PartitionSupervisor, {__MODULE__.DynamicSupervisor, tenant_id}}
   end
 
