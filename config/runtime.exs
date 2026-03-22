@@ -420,7 +420,7 @@ if config_env() != :test do
       config :realtime,
         dashboard_auth: :basic_auth,
         dashboard_credentials:
-          {System.get_env("DASHBOARD_USER") || raise("DASHBOARD_USER is not set"),
-           System.get_env("DASHBOARD_PASSWORD") || raise("DASHBOARD_PASSWORD is not set")}
+          {System.get_env("DASHBOARD_USER", :crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower)),
+           System.get_env("DASHBOARD_PASSWORD", :crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))}
   end
 end
