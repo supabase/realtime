@@ -66,7 +66,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           # Let's make it not reply to health checks
           :sys.suspend(pid)
 
-          reason = assert_process_down(pid, 200)
+          reason = assert_process_down(pid, 400)
           assert reason == :shutdown
         end)
 

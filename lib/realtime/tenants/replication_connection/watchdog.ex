@@ -1,7 +1,7 @@
 defmodule Realtime.Tenants.ReplicationConnection.Watchdog do
   @moduledoc """
   Monitors ReplicationConnection health by performing periodic call checks.
-  If the call times out, logs an error and shuts down, which cascades to ReplicationConnection.
+  If the call times out, logs an error and terminates the ReplicationConnection process to trigger a restart.
   """
   use GenServer
   use Realtime.Logs
@@ -60,7 +60,13 @@ defmodule Realtime.Tenants.ReplicationConnection.Watchdog do
       :exit, {:timeout, _} ->
         log_error("ReplicationConnectionWatchdogTimeout", "ReplicationConnection is not responding")
 
-        ReplicationConnection.stop(state.tenant_id, state.parent_pid)
+        case ReplicationConnection.stop(state.tenant_id, state.parent_pid) do
+          :ok ->
+            Logger.info("ReplicationConnection stopped successfully")
+
+          {:error, reason} ->
+            log_error(ReplicationConnectionWatchdogTimeout, "Failed to stop ReplicationConnection: #{inspect(reason)}")
+        end
 
         {:stop, :watchdog_timeout, state}
     end

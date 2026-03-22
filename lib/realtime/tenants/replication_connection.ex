@@ -73,7 +73,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   @doc """
   Starts the replication connection for a tenant and monitors a given pid to stop the ReplicationConnection.
   """
-  @spec start(Realtime.Api.Tenant.t(), pid()) :: {:ok, pid()} | {:error, any()}
+  @spec start(Realtime.Api.Tenant.t(), pid(), query_timeout :: timeout) :: {:ok, pid()} | {:error, any()}
   def start(tenant, monitored_pid, query_timeout \\ @default_query_timeout) do
     Logger.info("Starting replication for Broadcast Changes")
     opts = %__MODULE__{tenant_id: tenant.external_id, monitored_pid: monitored_pid, query_timeout: query_timeout}
@@ -242,7 +242,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
       end)
 
     if valid_tables and rows != [] do
-      {:query, "SELECT 1", %{state | step: :start_replication_slot}}
+      {:query, "SELECT 1", [timeout: state.query_timeout], %{state | step: :start_replication_slot}}
     else
       query =
         "DROP PUBLICATION IF EXISTS #{publication_name}; CREATE PUBLICATION #{publication_name} FOR TABLE #{@schema}.#{@table}"
