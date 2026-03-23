@@ -1,5 +1,5 @@
 {
   "dependencies": {
-    "@supabase/supabase-js": "2.100.0-canary.0"
+    "@supabase/supabase-js": "2.100.0"
   }
 }
