@@ -67,7 +67,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           :sys.suspend(pid)
 
           reason = assert_process_down(pid, 400)
-          assert reason == :shutdown
+          assert reason == :watchdog_timeout
         end)
 
       assert log =~ "ReplicationConnectionWatchdogTimeout"

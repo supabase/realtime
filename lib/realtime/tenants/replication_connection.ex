@@ -173,6 +173,10 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   @impl true
   def handle_connect(state) do
+    # Postgrex.Protocol.connect/1 traps exits due to how DbConnection works
+    # But ReplicationConnection does not interact with DbConnection so we don't
+    # want to trap exits
+    Process.flag(:trap_exit, false)
     replication_slot_name = replication_slot_name(@schema, @table)
     Logger.info("Checking if replication slot #{replication_slot_name} exists")
 

@@ -60,14 +60,6 @@ defmodule Realtime.Tenants.ReplicationConnection.Watchdog do
       :exit, {:timeout, _} ->
         log_error("ReplicationConnectionWatchdogTimeout", "ReplicationConnection is not responding")
 
-        case ReplicationConnection.stop(state.tenant_id, state.parent_pid) do
-          :ok ->
-            Logger.info("ReplicationConnection stopped successfully")
-
-          {:error, reason} ->
-            log_error(ReplicationConnectionWatchdogTimeout, "Failed to stop ReplicationConnection: #{inspect(reason)}")
-        end
-
         {:stop, :watchdog_timeout, state}
     end
   end
