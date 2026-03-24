@@ -743,6 +743,39 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {event, measures, metadata})
 
+  describe "handle_data/2 for KeepAlive" do
+    test "always sends standby_status when reply is :later" do
+      wal_end = 1_000_000
+      # KeepAlive binary: ?k + wal_end(64) + clock(64) + reply(8), reply=0 means :later
+      keep_alive = <<?k, wal_end::64, 0::64, 0::8>>
+      state = %ReplicationConnection{tenant_id: "test", step: :streaming}
+
+      assert {:noreply, message, ^state} = ReplicationConnection.handle_data(keep_alive, state)
+
+      assert [<<?r, received::64, flushed::64, applied::64, _clock::64, reply_byte::8>>] = message
+      assert received == wal_end + 1
+      assert flushed == wal_end + 1
+      assert applied == wal_end + 1
+      # :later maps to reply byte 0
+      assert reply_byte == 0
+    end
+
+    test "sends standby_status when reply is :now" do
+      wal_end = 2_000_000
+      keep_alive = <<?k, wal_end::64, 0::64, 1::8>>
+      state = %ReplicationConnection{tenant_id: "test", step: :streaming}
+
+      assert {:noreply, message, ^state} = ReplicationConnection.handle_data(keep_alive, state)
+
+      assert [<<?r, received::64, flushed::64, applied::64, _clock::64, reply_byte::8>>] = message
+      assert received == wal_end + 1
+      assert flushed == wal_end + 1
+      assert applied == wal_end + 1
+      # :now maps to reply byte 1
+      assert reply_byte == 1
+    end
+  end
+
   describe "telemetry events" do
     setup do
       :telemetry.detach(__MODULE__)
