@@ -300,11 +300,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
     %KeepAlive{reply: reply, wal_end: wal_end} = parse(data)
     wal_end = wal_end + 1
 
-    message =
-      case reply do
-        :now -> standby_status(wal_end, wal_end, wal_end, reply)
-        :later -> hold()
-      end
+    message = standby_status(wal_end, wal_end, wal_end, reply)
 
     {:noreply, message, state}
   end
