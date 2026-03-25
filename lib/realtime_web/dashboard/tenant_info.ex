@@ -1,4 +1,4 @@
-defmodule Realtime.Dashboard.TenantInfo do
+defmodule RealtimeWeb.Dashboard.TenantInfo do
   @moduledoc """
   Live Dashboard page to inspect tenant and extension information by external_id.
   Secrets (jwt_secret and encrypted extension fields) are never displayed.

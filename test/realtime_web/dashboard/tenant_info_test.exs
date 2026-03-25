@@ -1,4 +1,4 @@
-defmodule Realtime.Dashboard.TenantInfoTest do
+defmodule RealtimeWeb.Dashboard.TenantInfoTest do
   use RealtimeWeb.ConnCase
   import Phoenix.LiveViewTest
   import Generators
