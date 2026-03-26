@@ -56,6 +56,15 @@ config :logger, :console,
   format: "$time $metadata[$level] $message\n",
   metadata: [:request_id, :project, :external_id, :application_name, :error_code, :sub, :iss, :exp]
 
+config :sentry,
+  dsn: nil,
+  environment_name: Mix.env(),
+  release: nil,
+  sample_rate: 1.0,
+  enable_source_code_context: true,
+  root_source_code_paths: [File.cwd!()],
+  before_send: &Realtime.SentryEventFilter.before_send/1
+
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
