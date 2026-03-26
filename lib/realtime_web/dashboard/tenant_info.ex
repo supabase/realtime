@@ -1,6 +1,6 @@
-defmodule Realtime.Dashboard.TenantInfo do
+defmodule RealtimeWeb.Dashboard.TenantInfo do
   @moduledoc """
-  Live Dashboard page to inspect tenant and extension information by project ref.
+  Live Dashboard page to inspect tenant and extension information by external_id.
   Secrets (jwt_secret and encrypted extension fields) are never displayed.
   """
   use Phoenix.LiveDashboard.PageBuilder
@@ -12,18 +12,28 @@ defmodule Realtime.Dashboard.TenantInfo do
   def menu_link(_, _), do: {:ok, "Tenant Info"}
 
   @impl true
-  def mount(_, _, socket) do
-    {:ok, assign(socket, project_ref: "", tenant: nil, error: nil)}
+  def mount(_params, _, socket) do
+    {:ok, assign(socket, external_id: "", tenant: nil, error: nil)}
   end
 
   @impl true
-  def handle_event("lookup", %{"project_ref" => ref}, socket) do
+  def handle_params(%{"external_id" => ref}, _uri, socket) when ref != "" do
     ref = String.trim(ref)
 
     case Api.get_tenant_by_external_id(ref) do
-      nil -> {:noreply, assign(socket, project_ref: ref, tenant: nil, error: "Tenant not found")}
-      tenant -> {:noreply, assign(socket, project_ref: ref, tenant: prepare_tenant(tenant), error: nil)}
+      nil -> {:noreply, assign(socket, external_id: ref, tenant: nil, error: "Tenant not found")}
+      tenant -> {:noreply, assign(socket, external_id: ref, tenant: prepare_tenant(tenant), error: nil)}
     end
+  end
+
+  def handle_params(_params, _uri, socket) do
+    {:noreply, assign(socket, external_id: "", tenant: nil, error: nil)}
+  end
+
+  @impl true
+  def handle_event("lookup", %{"external_id" => ref}, socket) do
+    ref = String.trim(ref)
+    {:noreply, push_patch(socket, to: "/admin/dashboard/tenant_info?external_id=#{URI.encode(ref)}")}
   end
 
   @impl true
@@ -35,9 +45,9 @@ defmodule Realtime.Dashboard.TenantInfo do
       <form phx-submit="lookup" class="mb-4 d-flex gap-2">
         <input
           type="text"
-          name="project_ref"
-          value={@project_ref}
-          placeholder="Enter project ref"
+          name="external_id"
+          value={@external_id}
+          placeholder="Enter external_id"
           class="form-control w-auto"
           autocomplete="off"
         />
@@ -106,8 +116,43 @@ defmodule Realtime.Dashboard.TenantInfo do
         {key, value} when key in @encrypted_settings -> {key, Crypto.decrypt!(value)}
         {key, value} -> {key, value}
       end)
+
+    resolved_host =
+      case List.keyfind(settings, "db_host", 0) do
+        {"db_host", host} -> resolve_host(host)
+        nil -> nil
+      end
+
+    settings =
+      settings
+      |> then(fn s ->
+        if resolved_host, do: [{"db_host_resolved", resolved_host} | s], else: s
+      end)
       |> Enum.sort_by(&elem(&1, 0))
 
     %{ext | settings: settings}
+  end
+
+  defp resolve_host(host) do
+    host_charlist = String.to_charlist(host)
+
+    v4 =
+      case :inet.getaddrs(host_charlist, :inet) do
+        {:ok, ips} -> ips
+        _ -> []
+      end
+
+    v6 =
+      case :inet.getaddrs(host_charlist, :inet6) do
+        {:ok, ips} -> ips
+        _ -> []
+      end
+
+    ips = (v4 ++ v6) |> Enum.map(&:inet.ntoa/1) |> Enum.map(&to_string/1)
+
+    case ips do
+      [] -> "unresolved"
+      _ -> Enum.join(ips, ", ")
+    end
   end
 end

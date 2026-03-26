@@ -135,8 +135,8 @@ defmodule RealtimeWeb.Router do
       ecto_psql_extras_options: [long_running_queries: [threshold: "200 milliseconds"]],
       metrics: RealtimeWeb.Telemetry,
       additional_pages: [
-        route_name: Realtime.Dashboard.ProcessDump,
-        tenant_info: Realtime.Dashboard.TenantInfo
+        route_name: RealtimeWeb.Dashboard.ProcessDump,
+        tenant_info: RealtimeWeb.Dashboard.TenantInfo
       ]
     )
   end

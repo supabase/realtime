@@ -1,4 +1,4 @@
-defmodule Realtime.Dashboard.TenantInfoTest do
+defmodule RealtimeWeb.Dashboard.TenantInfoTest do
   use RealtimeWeb.ConnCase
   import Phoenix.LiveViewTest
   import Generators
@@ -22,41 +22,57 @@ defmodule Realtime.Dashboard.TenantInfoTest do
     {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info")
 
     assert html =~ "Tenant Info"
-    assert html =~ "project_ref"
+    assert html =~ "external_id"
   end
 
-  test "shows tenant info for valid project ref", %{conn: conn, tenant: tenant} do
-    {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info")
-
-    html = view |> element("form[phx-submit='lookup']") |> render_submit(%{project_ref: tenant.external_id})
+  test "shows tenant info for valid external_id via URL param", %{conn: conn, tenant: tenant} do
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 
     assert html =~ tenant.external_id
     assert html =~ tenant.name
     assert html =~ "postgres_cdc_rls"
   end
 
-  test "shows error for unknown project ref", %{conn: conn} do
+  test "shows tenant info for valid external_id via form submit", %{conn: conn, tenant: tenant} do
     {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info")
 
-    html = view |> element("form[phx-submit='lookup']") |> render_submit(%{project_ref: "nonexistent"})
+    html = view |> element("form[phx-submit='lookup']") |> render_submit(%{external_id: tenant.external_id})
+
+    assert html =~ tenant.external_id
+    assert html =~ tenant.name
+    assert html =~ "postgres_cdc_rls"
+  end
+
+  test "shows error for unknown external_id via URL param", %{conn: conn} do
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=nonexistent")
+
+    assert html =~ "Tenant not found"
+  end
+
+  test "shows error for unknown external_id via form submit", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info")
+
+    html = view |> element("form[phx-submit='lookup']") |> render_submit(%{external_id: "nonexistent"})
 
     assert html =~ "Tenant not found"
   end
 
   test "does not show db_password", %{conn: conn, tenant: tenant} do
-    {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info")
-
-    html = view |> element("form[phx-submit='lookup']") |> render_submit(%{project_ref: tenant.external_id})
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 
     refute html =~ "db_password"
   end
 
   test "shows decrypted db_host", %{conn: conn, tenant: tenant} do
-    {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_info")
-
-    html = view |> element("form[phx-submit='lookup']") |> render_submit(%{project_ref: tenant.external_id})
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
 
     assert html =~ "127.0.0.1"
+  end
+
+  test "shows resolved db_host", %{conn: conn, tenant: tenant} do
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    assert html =~ "db_host_resolved"
   end
 
   defp using_basic_auth(conn, username, password) do
