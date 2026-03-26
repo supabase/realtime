@@ -173,6 +173,31 @@ defmodule Realtime.MetricsPusherTest do
       assert log =~ "push: %RuntimeError{message: \"unexpected error\"}"
     end
 
+    test "appends extra_label query params to URL" do
+      opts = [
+        url: "http://localhost:8428/api/v1/import/prometheus",
+        compress: false,
+        interval: 10,
+        timeout: 5000,
+        extra_labels: [{"region", "us-east-1"}, {"env", "prod"}]
+      ]
+
+      parent = self()
+
+      Req.Test.expect(MetricsPusher, 2, fn conn ->
+        send(parent, {:req_called, conn.query_string})
+        Req.Test.text(conn, "")
+      end)
+
+      {:ok, _pid} = start_and_allow_pusher(opts)
+      assert_receive {:req_called, query_string}, 100
+      assert_receive {:req_called, _}, 100
+
+      decoded_params = query_string |> String.split("&") |> Enum.map(&URI.decode_www_form/1)
+      assert "extra_label=region=us-east-1" in decoded_params
+      assert "extra_label=env=prod" in decoded_params
+    end
+
     test "logs unexpected messages and stays alive" do
       parent = self()
 
