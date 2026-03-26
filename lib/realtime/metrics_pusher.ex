@@ -9,7 +9,7 @@ defmodule Realtime.MetricsPusher do
   use GenServer
   require Logger
 
-  defstruct [:push_ref, :interval, :req_options, :auth]
+  defstruct [:push_ref, :interval, :req_options]
 
   @spec start_link(keyword()) :: {:ok, pid()} | :ignore
   def start_link(opts) do
@@ -51,6 +51,15 @@ defmodule Realtime.MetricsPusher do
         Application.get_env(:realtime, :metrics_pusher_compress, true)
       )
 
+    extra_labels =
+      Keyword.get(
+        opts,
+        :extra_labels,
+        Application.get_env(:realtime, :metrics_pusher_extra_labels, [])
+      )
+
+    params = Enum.map(extra_labels, fn {k, v} -> {:extra_label, "#{k}=#{v}"} end)
+
     Logger.info("Starting MetricsPusher (url: #{url}, interval: #{interval}ms, compress: #{compress})")
 
     headers = [{"content-type", "text/plain"}]
@@ -63,7 +72,8 @@ defmodule Realtime.MetricsPusher do
         url: url,
         headers: headers,
         compress_body: compress,
-        receive_timeout: timeout
+        receive_timeout: timeout,
+        params: params
       ]
       |> Keyword.merge(basic_auth)
       |> Keyword.merge(Application.get_env(:realtime, :metrics_pusher_req_options, []))

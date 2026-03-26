@@ -94,6 +94,20 @@ metrics_pusher_interval_ms = Env.get_integer("METRICS_PUSHER_INTERVAL_MS", :time
 metrics_pusher_timeout_ms = Env.get_integer("METRICS_PUSHER_TIMEOUT_MS", :timer.seconds(15))
 metrics_pusher_compress = Env.get_boolean("METRICS_PUSHER_COMPRESS", true)
 
+metrics_pusher_extra_labels =
+  case System.get_env("METRICS_PUSHER_EXTRA_LABELS", "") do
+    "" ->
+      []
+
+    labels ->
+      labels
+      |> String.split(",")
+      |> Enum.map(fn pair ->
+        [k, v] = String.split(pair, "=", parts: 2)
+        {k, v}
+      end)
+  end
+
 if !(db_version in [nil, "ipv6", "ipv4"]),
   do: raise("Invalid IP version, please set either ipv6 or ipv4")
 
@@ -174,6 +188,7 @@ config :realtime,
   metrics_pusher_interval_ms: metrics_pusher_interval_ms,
   metrics_pusher_timeout_ms: metrics_pusher_timeout_ms,
   metrics_pusher_compress: metrics_pusher_compress,
+  metrics_pusher_extra_labels: metrics_pusher_extra_labels,
   metrics_separation_enabled: metrics_separation_enabled
 
 if config_env() != :test && run_janitor? do
