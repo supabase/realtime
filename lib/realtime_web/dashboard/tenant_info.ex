@@ -116,8 +116,43 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
         {key, value} when key in @encrypted_settings -> {key, Crypto.decrypt!(value)}
         {key, value} -> {key, value}
       end)
+
+    resolved_host =
+      case List.keyfind(settings, "db_host", 0) do
+        {"db_host", host} -> resolve_host(host)
+        nil -> nil
+      end
+
+    settings =
+      settings
+      |> then(fn s ->
+        if resolved_host, do: [{"db_host_resolved", resolved_host} | s], else: s
+      end)
       |> Enum.sort_by(&elem(&1, 0))
 
     %{ext | settings: settings}
+  end
+
+  defp resolve_host(host) do
+    host_charlist = String.to_charlist(host)
+
+    v4 =
+      case :inet.getaddrs(host_charlist, :inet) do
+        {:ok, ips} -> ips
+        _ -> []
+      end
+
+    v6 =
+      case :inet.getaddrs(host_charlist, :inet6) do
+        {:ok, ips} -> ips
+        _ -> []
+      end
+
+    ips = (v4 ++ v6) |> Enum.map(&:inet.ntoa/1) |> Enum.map(&to_string/1)
+
+    case ips do
+      [] -> "unresolved"
+      _ -> Enum.join(ips, ", ")
+    end
   end
 end

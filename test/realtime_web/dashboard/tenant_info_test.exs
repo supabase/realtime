@@ -69,6 +69,12 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
     assert html =~ "127.0.0.1"
   end
 
+  test "shows resolved db_host", %{conn: conn, tenant: tenant} do
+    {:ok, _view, html} = live(conn, "/admin/dashboard/tenant_info?external_id=#{tenant.external_id}")
+
+    assert html =~ "db_host_resolved"
+  end
+
   defp using_basic_auth(conn, username, password) do
     header_content = "Basic " <> Base.encode64("#{username}:#{password}")
     put_req_header(conn, "authorization", header_content)
