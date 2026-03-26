@@ -36,11 +36,26 @@ jobs:
           cache: "npm"
           cache-dependency-path: assets/package-lock.json
 
-      - name: Update @supabase/supabase-js
+      - name: Update @supabase/supabase-js in assets
         working-directory: assets
         run: |
           npm pkg set "dependencies.@supabase/supabase-js=${{ inputs.version }}"
           npm install --package-lock-only --ignore-scripts
+
+      - name: Update @supabase/supabase-js in test/e2e
+        working-directory: test/e2e
+        run: npm pkg set "dependencies.@supabase/supabase-js=${{ inputs.version }}"
+
+      - name: Setup Bun
+        if: ${{ hashFiles('test/e2e/bun.lock') != '' }}
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.1.8"
+
+      - name: Update test/e2e lockfile
+        if: ${{ hashFiles('test/e2e/bun.lock') != '' }}
+        working-directory: test/e2e
+        run: bun install --lockfile-only
 
       - name: Generate token
         id: app-token
