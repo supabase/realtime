@@ -15,7 +15,18 @@ defmodule Realtime.Application do
   defmodule JwtClaimValidatorsError, do: defexception([:message])
   defmodule RegionMappingError, do: defexception([:message])
 
+  defp check_for_local_ipv6_host() do
+    hostname = Node.self() |> Atom.to_string()
+
+    if String.contains?(hostname, "fd00:ec2::172:2") do
+      Logger.error("Invalid hostname #{hostname}")
+      :timer.sleep(5000)
+      :erlang.halt(222)
+    end
+  end
+
   def start(_type, _args) do
+    check_for_local_ipv6_host()
     opentelemetry_setup()
     Realtime.LogFilter.setup()
     primary_config = :logger.get_primary_config()
