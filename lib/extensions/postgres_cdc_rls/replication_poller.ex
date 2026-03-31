@@ -108,7 +108,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
             send(self(), :poll)
             nil
           else
-            Process.send_after(self(), :poll, poll_interval_ms)
+            jitter = Enum.random(50..100)
+            Process.send_after(self(), :poll, poll_interval_ms + jitter)
           end
 
         {:noreply, %{state | backoff: backoff, poll_ref: pool_ref}}
