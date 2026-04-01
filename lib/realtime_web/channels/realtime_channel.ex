@@ -882,5 +882,5 @@ defmodule RealtimeWeb.RealtimeChannel do
     client_enabled? || tenant_enabled
   end
 
-  defp max_heap_size(), do: Application.fetch_env!(:realtime, :websocket_max_heap_size)
+  defp max_heap_size(), do: :persistent_term.get({RealtimeWeb.UserSocket, :websocket_max_heap_size})
 end

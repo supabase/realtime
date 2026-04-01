@@ -46,6 +46,14 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: %{keys: ["potato"]}})
+
+      assert_receive %Message{
+                       topic: ^realtime_topic,
+                       event: "system",
+                       payload: %{"message" => "Server requested disconnect", "status" => "ok"}
+                     },
+                     1000
+
       assert_process_down(socket)
     end
 
@@ -63,6 +71,14 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "potato"})
+
+      assert_receive %Message{
+                       topic: ^realtime_topic,
+                       event: "system",
+                       payload: %{"message" => "Server requested disconnect", "status" => "ok"}
+                     },
+                     1000
+
       assert_process_down(socket)
     end
 
@@ -80,6 +96,14 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{private_only: true})
+
+      assert_receive %Message{
+                       topic: ^realtime_topic,
+                       event: "system",
+                       payload: %{"message" => "Server requested disconnect", "status" => "ok"}
+                     },
+                     1000
+
       assert_process_down(socket)
     end
 

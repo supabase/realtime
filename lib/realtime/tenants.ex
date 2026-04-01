@@ -511,7 +511,8 @@ defmodule Realtime.Tenants do
 
   @doc """
   """
-  @spec validate_payload_size(Tenant.t() | binary(), map()) :: :ok | {:error, :payload_size_exceeded}
+  @spec validate_payload_size(Tenant.t() | binary(), map()) ::
+          {:ok, non_neg_integer()} | {:error, :payload_size_exceeded}
   def validate_payload_size(tenant_id, payload) when is_binary(tenant_id) do
     tenant_id
     |> Cache.get_tenant_by_external_id()
@@ -522,6 +523,6 @@ defmodule Realtime.Tenants do
   def validate_payload_size(%Tenant{max_payload_size_in_kb: max_payload_size_in_kb}, payload) do
     max_payload_size = max_payload_size_in_kb * 1000 + @payload_size_padding
     payload_size = :erlang.external_size(payload)
-    if payload_size > max_payload_size, do: {:error, :payload_size_exceeded}, else: :ok
+    if payload_size > max_payload_size, do: {:error, :payload_size_exceeded}, else: {:ok, payload_size}
   end
 end

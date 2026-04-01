@@ -49,8 +49,14 @@ defmodule RealtimeWeb.TenantBroadcasterTest do
     )
 
     original = Application.fetch_env!(:realtime, :pubsub_adapter)
-    on_exit(fn -> Application.put_env(:realtime, :pubsub_adapter, original) end)
+
+    on_exit(fn ->
+      Application.put_env(:realtime, :pubsub_adapter, original)
+      :persistent_term.put({RealtimeWeb.TenantBroadcaster, :pubsub_adapter}, original)
+    end)
+
     Application.put_env(:realtime, :pubsub_adapter, context.pubsub_adapter)
+    :persistent_term.put({RealtimeWeb.TenantBroadcaster, :pubsub_adapter}, context.pubsub_adapter)
 
     {:ok, tenant_id: tenant_id}
   end

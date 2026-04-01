@@ -117,7 +117,7 @@ defmodule Realtime.Tenants.BatchBroadcast do
     payload = get_change(changeset, :payload)
 
     case Tenants.validate_payload_size(tenant, payload) do
-      :ok -> changeset
+      {:ok, _} -> changeset
       _ -> add_error(changeset, :payload, "Payload size exceeds tenant limit")
     end
   end

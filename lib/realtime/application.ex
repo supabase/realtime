@@ -59,6 +59,11 @@ defmodule Realtime.Application do
       )
 
     :ets.new(Realtime.Tenants.Connect, [:named_table, :set, :public])
+
+    set_persist_storage(RealtimeWeb.TenantBroadcaster, :realtime, :pubsub_adapter)
+    set_persist_storage(RealtimeWeb.UserSocket, :realtime, :websocket_max_heap_size)
+    set_persist_storage(RealtimeWeb.UserSocket, :realtime, :measure_traffic_interval_in_ms)
+
     :syn.set_event_handler(Realtime.SynHandler)
     :ok = :syn.add_node_to_scopes([RegionNodes, Realtime.Tenants.Connect])
 
@@ -231,4 +236,6 @@ defmodule Realtime.Application do
         end
     end
   end
+
+  defp set_persist_storage(mod, app, key), do: :persistent_term.put({mod, key}, Application.fetch_env!(app, key))
 end

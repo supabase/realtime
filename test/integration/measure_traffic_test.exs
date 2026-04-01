@@ -59,7 +59,12 @@ defmodule Realtime.Integration.MeasureTrafficTest do
 
       measure_traffic_interval_in_ms = Application.get_env(:realtime, :measure_traffic_interval_in_ms)
       Application.put_env(:realtime, :measure_traffic_interval_in_ms, 10)
-      on_exit(fn -> Application.put_env(:realtime, :measure_traffic_interval_in_ms, measure_traffic_interval_in_ms) end)
+      :persistent_term.put({RealtimeWeb.UserSocket, :measure_traffic_interval_in_ms}, 10)
+
+      on_exit(fn ->
+        Application.put_env(:realtime, :measure_traffic_interval_in_ms, measure_traffic_interval_in_ms)
+        :persistent_term.put({RealtimeWeb.UserSocket, :measure_traffic_interval_in_ms}, measure_traffic_interval_in_ms)
+      end)
 
       :ok
     end

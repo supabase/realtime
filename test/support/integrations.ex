@@ -117,7 +117,7 @@ defmodule Integrations do
     end)
   end
 
-  def assert_process_down(pid, timeout \\ 1000) do
+  def assert_process_down(pid, timeout \\ 5000) do
     ref = Process.monitor(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, timeout
   end

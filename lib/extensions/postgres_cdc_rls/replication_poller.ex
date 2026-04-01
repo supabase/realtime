@@ -212,10 +212,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
           Realtime.GenCounter.add(rate_counter_args.id, MapSet.size(change.subscription_ids))
 
-          payload =
-            change
-            |> Map.drop([:subscription_ids])
-            |> Jason.encode!()
+          payload = Jason.encode!(change)
 
           case collect_subscription_nodes(subscribers_nodes_table, change.subscription_ids) do
             {:ok, nodes} ->
@@ -231,7 +228,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
                 )
               end
 
-            {:error, :node_not_found} ->
+            {:error, reason} when reason in [:node_not_found, :all_subscribers_missing] ->
               TenantBroadcaster.pubsub_broadcast(
                 tenant_id,
                 topic,
@@ -250,20 +247,21 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   defp handle_list_changes_result({:error, reason}, _, _, _), do: {:error, reason}
 
   defp collect_subscription_nodes(subscribers_nodes_table, subscription_ids) do
-    Enum.reduce_while(subscription_ids, {:ok, %{}}, fn subscription_id, {:ok, acc} ->
-      case :ets.lookup(subscribers_nodes_table, subscription_id) do
-        [{_, node}] ->
-          updated_acc =
-            Map.update(acc, node, [subscription_id], fn existing_ids -> [subscription_id | existing_ids] end)
+    {result, missing} =
+      Enum.reduce(subscription_ids, {%{}, []}, fn subscription_id, {acc, missing} ->
+        case :ets.lookup(subscribers_nodes_table, subscription_id) do
+          [{_, node}] -> {Map.update(acc, node, [subscription_id], &[subscription_id | &1]), missing}
+          _ -> {acc, [subscription_id | missing]}
+        end
+      end)
 
-          {:cont, {:ok, updated_acc}}
+    if missing != [], do: Logger.debug("Subscribers not found in ETS, likely disconnected: #{inspect(missing)}")
 
-        _ ->
-          {:halt, {:error, :node_not_found}}
-      end
-    end)
+    if map_size(result) == 0, do: {:error, :all_subscribers_missing}, else: {:ok, result}
   rescue
-    _ -> {:error, :node_not_found}
+    e ->
+      Logger.warning("ETS lookup failed in collect_subscription_nodes: #{inspect(e)}")
+      {:error, :node_not_found}
   end
 
   def generate_record([
