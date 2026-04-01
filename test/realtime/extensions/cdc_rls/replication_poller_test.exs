@@ -291,7 +291,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
           <<251, 188, 190, 118, 168, 119, 17, 240, 188, 87, 118, 202, 193, 157, 232, 187>>
         ])
 
-      # Only one subscription has node information
       :ets.insert(args["subscribers_nodes_table"], {sub1, node()})
 
       expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
@@ -674,6 +673,70 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       # Encode then decode to get rid of the fragment
       assert old_record |> Jason.encode!() |> Jason.decode!() == @old_record
       assert columns |> Jason.encode!() |> Jason.decode!() == @columns
+    end
+  end
+
+  describe "generate_record/1 JSON encoding" do
+    test "subscription_ids is excluded from JSON encoding for INSERT" do
+      wal_record = [
+        {"type", "INSERT"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", Jason.encode!(@record)},
+        {"old_record", nil},
+        {"commit_timestamp", @ts},
+        {"subscription_ids", [@subscription_id]},
+        {"errors", []}
+      ]
+
+      record = generate_record(wal_record)
+      encoded = Jason.decode!(Jason.encode!(record))
+
+      refute Map.has_key?(encoded, "subscription_ids")
+      assert encoded["type"] == "INSERT"
+      assert encoded["schema"] == "public"
+      assert encoded["table"] == "todos"
+    end
+
+    test "subscription_ids is excluded from JSON encoding for UPDATE" do
+      wal_record = [
+        {"type", "UPDATE"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", Jason.encode!(@record)},
+        {"old_record", Jason.encode!(@old_record)},
+        {"commit_timestamp", @ts},
+        {"subscription_ids", [@subscription_id]},
+        {"errors", []}
+      ]
+
+      record = generate_record(wal_record)
+      encoded = Jason.decode!(Jason.encode!(record))
+
+      refute Map.has_key?(encoded, "subscription_ids")
+      assert encoded["type"] == "UPDATE"
+    end
+
+    test "subscription_ids is excluded from JSON encoding for DELETE" do
+      wal_record = [
+        {"type", "DELETE"},
+        {"schema", "public"},
+        {"table", "todos"},
+        {"columns", Jason.encode!(@columns)},
+        {"record", nil},
+        {"old_record", Jason.encode!(@old_record)},
+        {"commit_timestamp", @ts},
+        {"subscription_ids", [@subscription_id]},
+        {"errors", []}
+      ]
+
+      record = generate_record(wal_record)
+      encoded = Jason.decode!(Jason.encode!(record))
+
+      refute Map.has_key?(encoded, "subscription_ids")
+      assert encoded["type"] == "DELETE"
     end
   end
 

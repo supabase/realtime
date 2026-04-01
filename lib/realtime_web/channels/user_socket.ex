@@ -154,8 +154,8 @@ defmodule RealtimeWeb.UserSocket do
     end
   end
 
-  defp max_heap_size(), do: Application.fetch_env!(:realtime, :websocket_max_heap_size)
-  defp measure_traffic_interval_in_ms(), do: Application.fetch_env!(:realtime, :measure_traffic_interval_in_ms)
+  defp max_heap_size(), do: :persistent_term.get({__MODULE__, :websocket_max_heap_size})
+  defp measure_traffic_interval_in_ms(), do: :persistent_term.get({__MODULE__, :measure_traffic_interval_in_ms})
 
   defp collect_traffic_telemetry(nil, _tenant_external_id, previous_recv, previous_send),
     do: %{latest_recv: previous_recv, latest_send: previous_send}

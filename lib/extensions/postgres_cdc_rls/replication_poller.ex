@@ -212,10 +212,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
           Realtime.GenCounter.add(rate_counter_args.id, MapSet.size(change.subscription_ids))
 
-          payload =
-            change
-            |> Map.drop([:subscription_ids])
-            |> Jason.encode!()
+          payload = Jason.encode!(change)
 
           case collect_subscription_nodes(subscribers_nodes_table, change.subscription_ids) do
             {:ok, nodes} ->

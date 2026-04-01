@@ -87,7 +87,7 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
     res =
       case Tenants.validate_payload_size(tenant_id, payload) do
         :ok -> send_message(tenant_id, self_broadcast, tenant_topic, payload)
-        {:error, error} -> {:error, error}
+        error -> error
       end
 
     cond do

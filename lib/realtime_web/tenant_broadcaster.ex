@@ -26,11 +26,7 @@ defmodule RealtimeWeb.TenantBroadcaster do
 
   # Remote
   defp do_direct_broadcast(node, topic, message, dispatcher) when node != node() do
-    if pubsub_adapter() == :gen_rpc do
-      PubSub.direct_broadcast(node, Realtime.PubSub, topic, message, dispatcher)
-    else
-      Realtime.GenRpc.cast(node, PubSub, :local_broadcast, [Realtime.PubSub, topic, message, dispatcher], key: topic)
-    end
+    PubSub.direct_broadcast(node, Realtime.PubSub, topic, message, dispatcher)
   end
 
   # Local
@@ -42,13 +38,7 @@ defmodule RealtimeWeb.TenantBroadcaster do
           :ok
   def pubsub_broadcast(tenant_id, topic, message, dispatcher, message_type) do
     collect_payload_size(tenant_id, message, message_type)
-
-    if pubsub_adapter() == :gen_rpc do
-      PubSub.broadcast(Realtime.PubSub, topic, message, dispatcher)
-    else
-      Realtime.GenRpc.multicast(PubSub, :local_broadcast, [Realtime.PubSub, topic, message, dispatcher], key: topic)
-    end
-
+    PubSub.broadcast(Realtime.PubSub, topic, message, dispatcher)
     :ok
   end
 
@@ -63,18 +53,7 @@ defmodule RealtimeWeb.TenantBroadcaster do
           :ok
   def pubsub_broadcast_from(tenant_id, from, topic, message, dispatcher, message_type) do
     collect_payload_size(tenant_id, message, message_type)
-
-    if pubsub_adapter() == :gen_rpc do
-      PubSub.broadcast_from(Realtime.PubSub, from, topic, message, dispatcher)
-    else
-      Realtime.GenRpc.multicast(
-        PubSub,
-        :local_broadcast_from,
-        [Realtime.PubSub, from, topic, message, dispatcher],
-        key: topic
-      )
-    end
-
+    PubSub.broadcast_from(Realtime.PubSub, from, topic, message, dispatcher)
     :ok
   end
 
@@ -92,6 +71,4 @@ defmodule RealtimeWeb.TenantBroadcaster do
       message_type: message_type
     })
   end
-
-  defp pubsub_adapter, do: Application.fetch_env!(:realtime, :pubsub_adapter)
 end
