@@ -10,7 +10,6 @@ defmodule Realtime.Telemetry.Logger do
   @events [
     [:realtime, :connections],
     [:realtime, :rate_counter, :channel, :events],
-    [:realtime, :rate_counter, :channel, :joins],
     [:realtime, :rate_counter, :channel, :db_events],
     [:realtime, :rate_counter, :channel, :presence_events]
   ]
