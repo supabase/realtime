@@ -60,7 +60,6 @@ defmodule Realtime.Application do
 
     :ets.new(Realtime.Tenants.Connect, [:named_table, :set, :public])
 
-    set_persist_storage(RealtimeWeb.TenantBroadcaster, :realtime, :pubsub_adapter)
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :websocket_max_heap_size)
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :measure_traffic_interval_in_ms)
 
@@ -203,13 +202,7 @@ defmodule Realtime.Application do
     OpentelemetryEcto.setup([:realtime, :repo], db_statement: :enabled)
   end
 
-  defp pubsub_adapter do
-    if Application.fetch_env!(:realtime, :pubsub_adapter) == :gen_rpc do
-      Realtime.GenRpcPubSub
-    else
-      Phoenix.PubSub.PG2
-    end
-  end
+  defp pubsub_adapter, do: Realtime.GenRpcPubSub
 
   defp setup_region_mapping do
     case Application.get_env(:realtime, :region_mapping) do
