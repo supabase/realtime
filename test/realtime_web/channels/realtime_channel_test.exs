@@ -717,6 +717,39 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  describe "maximum number of channels per client" do
+    test "logs error once when last channel slot is taken", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "error"}, conn_opts(tenant, jwt))
+
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_channels_per_client: 1})
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _, _} = subscribe_and_join(socket, "realtime:test", %{})
+        end)
+
+      assert log =~ "ChannelRateLimitReached"
+    end
+
+    test "does not log when channel limit is already exceeded", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      Realtime.Tenants.Cache.update_cache(%{tenant | max_channels_per_client: 1})
+
+      capture_log(fn -> subscribe_and_join(socket, "realtime:test", %{}) end)
+
+      log =
+        capture_log(fn ->
+          assert {:error, %{reason: "ChannelRateLimitReached: Too many channels"}} =
+                   subscribe_and_join(socket, "realtime:test2", %{})
+        end)
+
+      refute log =~ "ChannelRateLimitReached"
+    end
+  end
+
   describe "maximum number of connected clients per tenant" do
     test "not reached", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
