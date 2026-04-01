@@ -85,6 +85,7 @@ defmodule Realtime.Tenants.Connect do
           | {:error, :rpc_error, term()}
   def lookup_or_start_connection(tenant_id, opts \\ []) when is_binary(tenant_id) do
     rate_args = Tenants.connect_errors_per_second_rate(tenant_id)
+    RateCounter.new(rate_args)
 
     with {:ok, %{limit: %{triggered: false}}} <- RateCounter.get(rate_args),
          {:ok, conn} <- get_status(tenant_id) do

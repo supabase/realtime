@@ -93,18 +93,5 @@ defmodule RealtimeWeb.TenantBroadcaster do
     })
   end
 
-  @spec collect_payload_size(
-          tenant_id :: String.t(),
-          payload :: term,
-          message_type :: message_type,
-          size :: non_neg_integer()
-        ) :: :ok
-  def collect_payload_size(tenant_id, _payload, message_type, size) do
-    :telemetry.execute(@payload_size_event, %{size: size}, %{
-      tenant: tenant_id,
-      message_type: message_type
-    })
-  end
-
   defp pubsub_adapter, do: :persistent_term.get({__MODULE__, :pubsub_adapter})
 end

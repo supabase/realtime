@@ -121,9 +121,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
 
     with :ok <- check_track_payload(socket.assigns, payload),
          tenant <- Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant),
-         {:ok, payload_size} <- validate_payload_size(tenant, payload),
-         _ <-
-           RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence, payload_size),
+         :ok <- validate_payload_size(tenant, payload),
+         _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
          :ok <- limit_presence_event(socket),
          {:ok, _} <- Presence.track(self(), tenant_topic, presence_key, payload) do
       socket =

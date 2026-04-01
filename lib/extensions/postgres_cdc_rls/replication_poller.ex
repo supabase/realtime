@@ -228,7 +228,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
                 )
               end
 
-            {:error, reason} when reason in [:node_not_found, :all_subscribers_missing] ->
+            {:error, :node_not_found} ->
               TenantBroadcaster.pubsub_broadcast(
                 tenant_id,
                 topic,
@@ -247,21 +247,20 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   defp handle_list_changes_result({:error, reason}, _, _, _), do: {:error, reason}
 
   defp collect_subscription_nodes(subscribers_nodes_table, subscription_ids) do
-    {result, missing} =
-      Enum.reduce(subscription_ids, {%{}, []}, fn subscription_id, {acc, missing} ->
-        case :ets.lookup(subscribers_nodes_table, subscription_id) do
-          [{_, node}] -> {Map.update(acc, node, [subscription_id], &[subscription_id | &1]), missing}
-          _ -> {acc, [subscription_id | missing]}
-        end
-      end)
+    Enum.reduce_while(subscription_ids, {:ok, %{}}, fn subscription_id, {:ok, acc} ->
+      case :ets.lookup(subscribers_nodes_table, subscription_id) do
+        [{_, node}] ->
+          updated_acc =
+            Map.update(acc, node, [subscription_id], fn existing_ids -> [subscription_id | existing_ids] end)
 
-    if missing != [], do: Logger.debug("Subscribers not found in ETS, likely disconnected: #{inspect(missing)}")
+          {:cont, {:ok, updated_acc}}
 
-    if map_size(result) == 0, do: {:error, :all_subscribers_missing}, else: {:ok, result}
+        _ ->
+          {:halt, {:error, :node_not_found}}
+      end
+    end)
   rescue
-    e ->
-      Logger.warning("ETS lookup failed in collect_subscription_nodes: #{inspect(e)}")
-      {:error, :node_not_found}
+    _ -> {:error, :node_not_found}
   end
 
   def generate_record([

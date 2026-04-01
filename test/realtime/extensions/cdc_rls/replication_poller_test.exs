@@ -294,14 +294,14 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       :ets.insert(args["subscribers_nodes_table"], {sub1, node()})
 
       expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
-      reject(&TenantBroadcaster.pubsub_broadcast/5)
+      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
 
-      expect(TenantBroadcaster, :pubsub_direct_broadcast, fn _node,
-                                                             ^tenant_id,
-                                                             "realtime:postgres:" <> ^tenant_id,
-                                                             {"INSERT", change_json, _sub_ids},
-                                                             MessageDispatcher,
-                                                             :postgres_changes ->
+      # Broadcast to the whole cluster due to missing node information
+      expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
+                                                      "realtime:postgres:" <> ^tenant_id,
+                                                      {"INSERT", change_json, _sub_ids},
+                                                      MessageDispatcher,
+                                                      :postgres_changes ->
         assert Jason.decode!(change_json) == Jason.decode!(@change_json)
         :ok
       end)
@@ -324,45 +324,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                        %{duration: _},
                        %{tenant: ^tenant_id}
                      },
-                     500
-
-      rate = Realtime.Tenants.db_events_per_second_rate(tenant)
-      assert {:ok, %RateCounter{sum: sum}} = RateCounterHelper.tick!(rate)
-      assert sum == 2
-    end
-
-    test "handles new changes with all subscription nodes missing falls back to cluster broadcast", %{
-      args: args,
-      tenant: tenant
-    } do
-      tenant_id = args["id"]
-
-      results =
-        build_result([
-          <<71, 36, 83, 212, 168, 9, 17, 240, 165, 186, 118, 202, 193, 157, 232, 187>>,
-          <<251, 188, 190, 118, 168, 119, 17, 240, 188, 87, 118, 202, 193, 157, 232, 187>>
-        ])
-
-      expect(Replications, :list_changes, fn _, _, _, _, _ -> results end)
-      reject(&TenantBroadcaster.pubsub_direct_broadcast/6)
-
-      expect(TenantBroadcaster, :pubsub_broadcast, fn ^tenant_id,
-                                                      "realtime:postgres:" <> ^tenant_id,
-                                                      {"INSERT", change_json, _sub_ids},
-                                                      MessageDispatcher,
-                                                      :postgres_changes ->
-        assert Jason.decode!(change_json) == Jason.decode!(@change_json)
-        :ok
-      end)
-
-      start_link_supervised!({Poller, args})
-
-      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], %{duration: _},
-                      %{tenant: ^tenant_id}},
-                     500
-
-      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], %{duration: _},
-                      %{tenant: ^tenant_id}},
                      500
 
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
