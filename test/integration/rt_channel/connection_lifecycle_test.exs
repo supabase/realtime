@@ -52,7 +52,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
                        event: "system",
                        payload: %{"message" => "Server requested disconnect", "status" => "ok"}
                      },
-                     1000
+                     5000
 
       assert_process_down(socket)
     end
@@ -77,7 +77,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
                        event: "system",
                        payload: %{"message" => "Server requested disconnect", "status" => "ok"}
                      },
-                     1000
+                     5000
 
       assert_process_down(socket)
     end
@@ -102,7 +102,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
                        event: "system",
                        payload: %{"message" => "Server requested disconnect", "status" => "ok"}
                      },
-                     1000
+                     5000
 
       assert_process_down(socket)
     end

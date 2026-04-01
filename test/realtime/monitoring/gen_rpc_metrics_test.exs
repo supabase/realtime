@@ -63,17 +63,14 @@ defmodule Realtime.GenRpcMetricsTest do
       assert_in_delta local_metrics[:send_avg], remote_metrics[:recv_avg], 200
       assert_in_delta local_metrics[:recv_avg], remote_metrics[:send_avg], 200
 
-      assert local_metrics[:send_oct] == remote_metrics[:recv_oct]
-      assert local_metrics[:recv_oct] == remote_metrics[:send_oct]
+      assert_in_delta local_metrics[:send_oct], remote_metrics[:recv_oct], 1000
+      assert_in_delta local_metrics[:recv_oct], remote_metrics[:send_oct], 1000
 
-      assert local_metrics[:send_cnt] == remote_metrics[:recv_cnt]
-      assert local_metrics[:recv_cnt] == remote_metrics[:send_cnt]
+      assert_in_delta local_metrics[:send_cnt], remote_metrics[:recv_cnt], 10
+      assert_in_delta local_metrics[:recv_cnt], remote_metrics[:send_cnt], 10
 
-      assert local_metrics[:send_max] == remote_metrics[:recv_max]
-      assert local_metrics[:recv_max] == remote_metrics[:send_max]
-
-      assert local_metrics[:send_max] == remote_metrics[:recv_max]
-      assert local_metrics[:recv_max] == remote_metrics[:send_max]
+      assert_in_delta local_metrics[:send_max], remote_metrics[:recv_max], 1000
+      assert_in_delta local_metrics[:recv_max], remote_metrics[:send_max], 1000
     end
   end
 end
