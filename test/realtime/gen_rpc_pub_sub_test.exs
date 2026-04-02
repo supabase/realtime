@@ -45,84 +45,76 @@ defmodule Realtime.GenRpcPubSubTest do
 
   @topic "gen-rpc-pub-sub-test-topic"
 
-  for regional_broadcasting <- [true, false] do
-    describe "regional balancing = #{regional_broadcasting}" do
-      setup do
-        previous_region = Application.get_env(:realtime, :region)
-        Application.put_env(:realtime, :region, "us-east-1")
-        on_exit(fn -> Application.put_env(:realtime, :region, previous_region) end)
+  describe "regional broadcasting" do
+    setup do
+      previous_region = Application.get_env(:realtime, :region)
+      Application.put_env(:realtime, :region, "us-east-1")
+      on_exit(fn -> Application.put_env(:realtime, :region, previous_region) end)
 
-        previous_regional_broadcast = Application.get_env(:realtime, :regional_broadcasting)
-        Application.put_env(:realtime, :regional_broadcasting, unquote(regional_broadcasting))
-        on_exit(fn -> Application.put_env(:realtime, :regional_broadcasting, previous_regional_broadcast) end)
+      :ok
+    end
 
-        :ok
-      end
+    test "all messages are received" do
+      # start 1 node in us-east-1 to test my region broadcasting
+      # start 2 nodes in ap-southeast-2 to test other region broadcasting
 
-      @describetag regional_broadcasting: regional_broadcasting
+      us_node = :us_node
+      ap2_nodeX = :ap2_nodeX
+      ap2_nodeY = :ap2_nodeY
 
-      test "all messages are received" do
-        # start 1 node in us-east-1 to test my region broadcasting
-        # start 2 nodes in ap-southeast-2 to test other region broadcasting
+      # Avoid port collision
+      gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
 
-        us_node = :us_node
-        ap2_nodeX = :ap2_nodeX
-        ap2_nodeY = :ap2_nodeY
+      client_config_per_node = %{
+        node() => gen_rpc_port,
+        :"#{us_node}@127.0.0.1" => 16970,
+        :"#{ap2_nodeX}@127.0.0.1" => 16971,
+        :"#{ap2_nodeY}@127.0.0.1" => 16972
+      }
 
-        # Avoid port collision
-        gen_rpc_port = Application.fetch_env!(:gen_rpc, :tcp_server_port)
+      extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
 
-        client_config_per_node = %{
-          node() => gen_rpc_port,
-          :"#{us_node}@127.0.0.1" => 16970,
-          :"#{ap2_nodeX}@127.0.0.1" => 16971,
-          :"#{ap2_nodeY}@127.0.0.1" => 16972
-        }
+      on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
+      Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
 
-        extra_config = [{:gen_rpc, :client_config_per_node, {:internal, client_config_per_node}}]
+      us_extra_config =
+        [{:realtime, :region, "us-east-1"}, {:gen_rpc, :tcp_server_port, 16970}] ++ extra_config
 
-        on_exit(fn -> Application.put_env(:gen_rpc, :client_config_per_node, {:internal, %{}}) end)
-        Application.put_env(:gen_rpc, :client_config_per_node, {:internal, client_config_per_node})
+      {:ok, _} = Clustered.start(@aux_mod, name: us_node, extra_config: us_extra_config, phoenix_port: 4014)
 
-        us_extra_config =
-          [{:realtime, :region, "us-east-1"}, {:gen_rpc, :tcp_server_port, 16970}] ++ extra_config
+      ap2_nodeX_extra_config =
+        [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16971}] ++ extra_config
 
-        {:ok, _} = Clustered.start(@aux_mod, name: us_node, extra_config: us_extra_config, phoenix_port: 4014)
+      {:ok, _} = Clustered.start(@aux_mod, name: ap2_nodeX, extra_config: ap2_nodeX_extra_config, phoenix_port: 4015)
 
-        ap2_nodeX_extra_config =
-          [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16971}] ++ extra_config
+      ap2_nodeY_extra_config =
+        [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16972}] ++ extra_config
 
-        {:ok, _} = Clustered.start(@aux_mod, name: ap2_nodeX, extra_config: ap2_nodeX_extra_config, phoenix_port: 4015)
+      {:ok, _} = Clustered.start(@aux_mod, name: ap2_nodeY, extra_config: ap2_nodeY_extra_config, phoenix_port: 4016)
 
-        ap2_nodeY_extra_config =
-          [{:realtime, :region, "ap-southeast-2"}, {:gen_rpc, :tcp_server_port, 16972}] ++ extra_config
+      # Ensuring that syn had enough time to propagate to all nodes the group information
+      Process.sleep(3000)
 
-        {:ok, _} = Clustered.start(@aux_mod, name: ap2_nodeY, extra_config: ap2_nodeY_extra_config, phoenix_port: 4016)
+      RealtimeWeb.Endpoint.subscribe(@topic)
+      :erpc.multicall(Node.list(), Subscriber, :subscribe, [self(), @topic])
 
-        # Ensuring that syn had enough time to propagate to all nodes the group information
-        Process.sleep(3000)
+      assert length(Realtime.Nodes.region_nodes("us-east-1")) == 2
+      assert length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
 
-        RealtimeWeb.Endpoint.subscribe(@topic)
-        :erpc.multicall(Node.list(), Subscriber, :subscribe, [self(), @topic])
+      assert_receive {:ready, "us-east-1"}
+      assert_receive {:ready, "ap-southeast-2"}
+      assert_receive {:ready, "ap-southeast-2"}
 
-        assert length(Realtime.Nodes.region_nodes("us-east-1")) == 2
-        assert length(Realtime.Nodes.region_nodes("ap-southeast-2")) == 2
+      message = %Phoenix.Socket.Broadcast{topic: @topic, event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
+      Phoenix.PubSub.broadcast(Realtime.PubSub, @topic, message)
 
-        assert_receive {:ready, "us-east-1"}
-        assert_receive {:ready, "ap-southeast-2"}
-        assert_receive {:ready, "ap-southeast-2"}
+      assert_receive ^message
 
-        message = %Phoenix.Socket.Broadcast{topic: @topic, event: "an event", payload: ["a", %{"b" => "c"}, 1, 23]}
-        Phoenix.PubSub.broadcast(Realtime.PubSub, @topic, message)
-
-        assert_receive ^message
-
-        # Remote nodes received the broadcast
-        assert_receive {:relay, :"us_node@127.0.0.1", ^message}, 5000
-        assert_receive {:relay, :"ap2_nodeX@127.0.0.1", ^message}, 1000
-        assert_receive {:relay, :"ap2_nodeY@127.0.0.1", ^message}, 1000
-        refute_receive _any
-      end
+      # Remote nodes received the broadcast
+      assert_receive {:relay, :"us_node@127.0.0.1", ^message}, 5000
+      assert_receive {:relay, :"ap2_nodeX@127.0.0.1", ^message}, 1000
+      assert_receive {:relay, :"ap2_nodeY@127.0.0.1", ^message}, 1000
+      refute_receive _any
     end
   end
 end

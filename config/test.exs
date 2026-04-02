@@ -32,7 +32,6 @@ config :realtime, RealtimeWeb.Endpoint,
 System.put_env("REGION", "us-east-1")
 
 config :realtime,
-  regional_broadcasting: true,
   region: "us-east-1",
   db_enc_key: "1234567890123456",
   jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
