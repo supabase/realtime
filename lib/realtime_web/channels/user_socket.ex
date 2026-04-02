@@ -108,7 +108,11 @@ defmodule RealtimeWeb.UserSocket do
         {:error, :tenant_not_found}
 
       %Tenant{suspend: true} ->
-        Logging.log_error(socket, "RealtimeDisabledForTenant", "Realtime disabled for this tenant")
+        Logging.log_error(socket, "RealtimeDisabledForTenant", "Realtime disabled for this tenant",
+          max: 1,
+          window_ms: 60_000
+        )
+
         {:error, :tenant_suspended}
 
       {:error, :expired_token, msg} ->
@@ -126,7 +130,7 @@ defmodule RealtimeWeb.UserSocket do
 
       {:error, :too_many_connections} ->
         msg = "Too many connected users"
-        Logging.log_error(socket, "ConnectionRateLimitReached", msg)
+        Logging.log_error(socket, "ConnectionRateLimitReached", msg, max: 1, window_ms: 60_000)
         {:error, :too_many_connections}
 
       {:error, :too_many_joins} ->

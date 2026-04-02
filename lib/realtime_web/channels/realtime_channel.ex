@@ -165,7 +165,7 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, :too_many_connections} ->
         msg = "Too many connected users"
-        log_error(socket, "ConnectionRateLimitReached", msg)
+        log_error(socket, "ConnectionRateLimitReached", msg, max: 1, window_ms: 60_000)
 
       {:error, :too_many_joins} ->
         msg = "ClientJoinRateLimitReached: Too many joins per second"
@@ -216,7 +216,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "TenantNotFound", "Tenant with the given ID does not exist")
 
       {:error, :tenant_suspended} ->
-        log_error(socket, "RealtimeDisabledForTenant", "Realtime disabled for this tenant")
+        log_error(socket, "RealtimeDisabledForTenant", "Realtime disabled for this tenant", max: 1, window_ms: 60_000)
 
       {:error, :signature_error} ->
         log_error(socket, "JwtSignatureError", "Failed to validate JWT signature")
