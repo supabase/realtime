@@ -15,6 +15,19 @@ defmodule Env do
     value = System.get_env(env)
     if value, do: value |> String.downcase() |> String.to_existing_atom(), else: default
   end
+
+  def get_float(env, default) do
+    case System.get_env(env) do
+      nil ->
+        default
+
+      value ->
+        case Float.parse(value) do
+          {parsed, ""} -> parsed
+          _ -> default
+        end
+    end
+  end
 end
 
 app_name = System.get_env("APP_NAME", "")
@@ -92,6 +105,12 @@ metrics_pusher_auth = System.get_env("METRICS_PUSHER_AUTH")
 metrics_pusher_interval_ms = Env.get_integer("METRICS_PUSHER_INTERVAL_MS", :timer.seconds(30))
 metrics_pusher_timeout_ms = Env.get_integer("METRICS_PUSHER_TIMEOUT_MS", :timer.seconds(15))
 metrics_pusher_compress = Env.get_boolean("METRICS_PUSHER_COMPRESS", true)
+sentry_dsn = System.get_env("SENTRY_DSN")
+sentry_environment = System.get_env("SENTRY_ENVIRONMENT", Atom.to_string(config_env()))
+sentry_release = System.get_env("SENTRY_RELEASE")
+sentry_error_sample_rate = Env.get_float("SENTRY_ERROR_SAMPLE_RATE", 1.0)
+sentry_channel_error_sample_rate = Env.get_float("SENTRY_CHANNEL_ERROR_SAMPLE_RATE", 0.1)
+sentry_controller_error_sample_rate = Env.get_float("SENTRY_CONTROLLER_ERROR_SAMPLE_RATE", 1.0)
 
 metrics_pusher_extra_labels =
   case System.get_env("METRICS_PUSHER_EXTRA_LABELS", "") do
@@ -329,6 +348,12 @@ if config_env() != :test do
 
   config :logger, level: System.get_env("LOG_LEVEL", "info") |> String.to_existing_atom()
 
+  config :sentry,
+    dsn: sentry_dsn,
+    environment_name: sentry_environment,
+    release: sentry_release,
+    sample_rate: sentry_error_sample_rate
+
   config :realtime,
     request_id_baggage_key: System.get_env("REQUEST_ID_BAGGAGE_KEY", "request-id"),
     jwt_claim_validators: System.get_env("JWT_CLAIM_VALIDATORS", "{}"),
@@ -340,7 +365,9 @@ if config_env() != :test do
     region: region,
     prom_poll_rate: Env.get_integer("PROM_POLL_RATE", 5000),
     slot_name_suffix: slot_name_suffix,
-    max_gen_rpc_clients: max_gen_rpc_clients
+    max_gen_rpc_clients: max_gen_rpc_clients,
+    sentry_channel_error_sample_rate: sentry_channel_error_sample_rate,
+    sentry_controller_error_sample_rate: sentry_controller_error_sample_rate
 end
 
 # Setup Production
