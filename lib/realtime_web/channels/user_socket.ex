@@ -1,46 +1,5 @@
 defmodule RealtimeWeb.UserSocket do
-  # This is defined up here before `use Phoenix.Socket` is called so that we can define `Phoenix.Socket.init/1`
-  # It has to be overridden because we need to set the `max_heap_size` flag from the transport process context
-  @impl Phoenix.Socket.Transport
-  def handle_in({payload, opts}, {_state, socket} = full_state) do
-    Phoenix.Socket.__in__({payload, opts}, full_state)
-  rescue
-    e in Phoenix.Socket.InvalidMessageError ->
-      RealtimeWeb.RealtimeChannel.Logging.log_error(socket, "MalformedWebSocketMessage", e.message)
-      {:ok, full_state}
-
-    e in Jason.DecodeError ->
-      RealtimeWeb.RealtimeChannel.Logging.log_error(socket, "MalformedWebSocketMessage", Jason.DecodeError.message(e))
-      {:ok, full_state}
-
-    e ->
-      RealtimeWeb.RealtimeChannel.Logging.log_error(socket, "UnknownErrorOnWebSocketMessage", Exception.message(e))
-      {:ok, full_state}
-  end
-
-  @impl true
-  def init(state) when is_tuple(state) do
-    Process.flag(:max_heap_size, max_heap_size())
-    Process.send_after(self(), {:measure_traffic, 0, 0}, measure_traffic_interval_in_ms())
-    Phoenix.Socket.__init__(state)
-  end
-
-  @impl true
-  def handle_info(
-        {:measure_traffic, previous_recv, previous_send},
-        {_, %{assigns: assigns, transport_pid: transport_pid}} = state
-      ) do
-    tenant_external_id = Map.get(assigns, :tenant)
-
-    %{latest_recv: latest_recv, latest_send: latest_send} =
-      collect_traffic_telemetry(transport_pid, tenant_external_id, previous_recv, previous_send)
-
-    Process.send_after(self(), {:measure_traffic, latest_recv, latest_send}, measure_traffic_interval_in_ms())
-
-    {:ok, state}
-  end
-
-  use Phoenix.Socket
+  use RealtimeWeb.Socket
   use Realtime.Logs
 
   alias Realtime.Api.Tenant
@@ -52,6 +11,7 @@ defmodule RealtimeWeb.UserSocket do
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RealtimeChannel.Logging
+
   ## Channels
   channel "realtime:*", RealtimeChannel
 
@@ -159,41 +119,5 @@ defmodule RealtimeWeb.UserSocket do
     {:error, reason}
   end
 
-  defp max_heap_size(), do: :persistent_term.get({__MODULE__, :websocket_max_heap_size})
-  defp measure_traffic_interval_in_ms(), do: :persistent_term.get({__MODULE__, :measure_traffic_interval_in_ms})
   defp connect_error_backoff_ms(), do: :persistent_term.get({__MODULE__, :connect_error_backoff_ms})
-
-  defp collect_traffic_telemetry(nil, _tenant_external_id, previous_recv, previous_send),
-    do: %{latest_recv: previous_recv, latest_send: previous_send}
-
-  defp collect_traffic_telemetry(transport_pid, tenant_external_id, previous_recv, previous_send) do
-    %{send_oct: latest_send, recv_oct: latest_recv} =
-      transport_pid
-      |> Process.info(:links)
-      |> then(fn {:links, links} -> links end)
-      |> Enum.filter(&is_port/1)
-      |> Enum.reduce(%{send_oct: 0, recv_oct: 0}, fn link, acc ->
-        case :inet.getstat(link, [:send_oct, :recv_oct]) do
-          {:ok, stats} ->
-            send_oct = Keyword.get(stats, :send_oct, 0)
-            recv_oct = Keyword.get(stats, :recv_oct, 0)
-
-            %{
-              send_oct: acc.send_oct + send_oct,
-              recv_oct: acc.recv_oct + recv_oct
-            }
-
-          {:error, _} ->
-            acc
-        end
-      end)
-
-    send_delta = max(0, latest_send - previous_send)
-    recv_delta = max(0, latest_recv - previous_recv)
-
-    :telemetry.execute([:realtime, :channel, :output_bytes], %{size: send_delta}, %{tenant: tenant_external_id})
-    :telemetry.execute([:realtime, :channel, :input_bytes], %{size: recv_delta}, %{tenant: tenant_external_id})
-
-    %{latest_recv: latest_recv, latest_send: latest_send}
-  end
 end
