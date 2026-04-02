@@ -60,6 +60,14 @@ defmodule Realtime.Application do
 
     :ets.new(Realtime.Tenants.Connect, [:named_table, :set, :public])
 
+    :ets.new(:log_rate_limiter, [
+      :set,
+      :public,
+      :named_table,
+      {:decentralized_counters, true},
+      {:write_concurrency, :auto}
+    ])
+
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :websocket_max_heap_size)
     set_persist_storage(RealtimeWeb.UserSocket, :realtime, :measure_traffic_interval_in_ms)
 

@@ -195,4 +195,60 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     log = capture_log(fn -> Logging.maybe_log_error(socket, "TestError", "test error") end)
     assert log =~ tenant_id
   end
+
+  describe "rate limiting" do
+    test "log_error stops logging after max is exceeded for a tenant+code" do
+      tenant_id = random_string()
+      socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
+
+      logs =
+        capture_log(fn ->
+          for _ <- 1..5, do: Logging.log_error(socket, "RateLimitCode", "msg", max: 3, window_ms: 60_000)
+        end)
+
+      assert logs |> String.split("RateLimitCode: msg") |> length() == 4
+    end
+
+    test "different codes for same tenant have independent limits" do
+      tenant_id = random_string()
+      socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
+
+      logs =
+        capture_log(fn ->
+          for _ <- 1..2, do: Logging.log_error(socket, "CodeA", "msg", max: 1, window_ms: 60_000)
+          for _ <- 1..2, do: Logging.log_error(socket, "CodeB", "msg", max: 1, window_ms: 60_000)
+        end)
+
+      assert logs |> String.split("CodeA: msg") |> length() == 2
+      assert logs |> String.split("CodeB: msg") |> length() == 2
+    end
+
+    test "after window expires, logging resumes" do
+      tenant_id = random_string()
+      socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
+      key = {tenant_id, "ExpiryCode"}
+
+      capture_log(fn ->
+        for _ <- 1..3, do: Logging.log_error(socket, "ExpiryCode", "msg", max: 2, window_ms: 60_000)
+      end)
+
+      stale_window_start = :erlang.monotonic_time(:millisecond) - 120_000
+      :ets.insert(:log_rate_limiter, {key, 5, stale_window_start})
+
+      log = capture_log(fn -> Logging.log_error(socket, "ExpiryCode", "msg", max: 2, window_ms: 60_000) end)
+      assert log =~ "ExpiryCode: msg"
+    end
+
+    test "maybe_log_info is never rate limited" do
+      tenant_id = random_string()
+      socket = %{assigns: %{log_level: :info, tenant: tenant_id, access_token: "test_token"}}
+
+      logs =
+        capture_log(fn ->
+          for _ <- 1..5, do: Logging.maybe_log_info(socket, "info message")
+        end)
+
+      assert logs |> String.split("info message") |> length() == 6
+    end
+  end
 end
