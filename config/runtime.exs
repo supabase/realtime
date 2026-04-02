@@ -81,7 +81,6 @@ presence_permdown_period = Env.get_integer("PRESENCE_PERMDOWN_PERIOD_IN_MS", 1_2
 websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_000), :erlang.system_info(:wordsize))
 users_scope_shards = Env.get_integer("USERS_SCOPE_SHARDS", 5)
 postgres_cdc_scope_shards = Env.get_integer("POSTGRES_CDC_SCOPE_SHARDS", 5)
-regional_broadcasting = Env.get_boolean("REGIONAL_BROADCASTING", false)
 no_channel_timeout_in_ms = Env.get_integer("NO_CHANNEL_TIMEOUT_IN_MS", :timer.minutes(10))
 measure_traffic_interval_in_ms = Env.get_integer("MEASURE_TRAFFIC_INTERVAL_IN_MS", :timer.seconds(10))
 metrics_pusher_enabled = Env.get_boolean("METRICS_PUSHER_ENABLED", false)
@@ -169,7 +168,6 @@ config :realtime,
   presence_permdown_period: presence_permdown_period,
   users_scope_shards: users_scope_shards,
   postgres_cdc_scope_shards: postgres_cdc_scope_shards,
-  regional_broadcasting: regional_broadcasting,
   master_region: master_region,
   region_mapping: region_mapping,
   metrics_tags: metrics_tags,
