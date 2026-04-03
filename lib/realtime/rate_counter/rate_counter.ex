@@ -4,6 +4,8 @@ defmodule Realtime.RateCounter do
 
   These rate counters use the GenCounter module.
   Start your RateCounter here and increment it with a `GenCounter.add/1` call, for example.
+
+  Average is calculated as the average number of events per second
   """
 
   use GenServer
@@ -208,7 +210,8 @@ defmodule Realtime.RateCounter do
     bucket_len = Enum.count(bucket)
 
     sum = Enum.sum(bucket)
-    avg = sum / bucket_len
+
+    avg = sum / bucket_len / (state.tick / 1_000)
 
     state = %{state | bucket: bucket, sum: sum, avg: avg}
 
