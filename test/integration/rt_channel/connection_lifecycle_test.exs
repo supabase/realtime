@@ -305,7 +305,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       log =
         capture_log(fn ->
-          for _ <- 1..300 do
+          for _ <- 1..1500 do
             WebsocketClient.join(socket, realtime_topic, %{config: config})
             assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^realtime_topic}, 500
           end

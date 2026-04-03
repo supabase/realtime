@@ -151,6 +151,8 @@ defmodule Realtime.Tenants do
   @spec joins_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
   def joins_per_second_rate(tenant_id, max_joins_per_second) when is_binary(tenant_id) do
     opts = [
+      tick: :timer.seconds(5),
+      max_bucket_len: 12,
       telemetry: %{
         event_name: [:channel, :joins],
         measurements: %{limit: max_joins_per_second},
@@ -197,6 +199,8 @@ defmodule Realtime.Tenants do
 
   def events_per_second_rate(tenant_id, max_events_per_second) do
     opts = [
+      tick: :timer.seconds(5),
+      max_bucket_len: 12,
       telemetry: %{
         event_name: [:channel, :events],
         measurements: %{limit: max_events_per_second},
@@ -244,6 +248,8 @@ defmodule Realtime.Tenants do
   @spec db_events_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
   def db_events_per_second_rate(tenant_id, max_events_per_second) when is_binary(tenant_id) do
     opts = [
+      tick: :timer.seconds(5),
+      max_bucket_len: 12,
       telemetry: %{
         event_name: [:channel, :db_events],
         measurements: %{},
@@ -290,6 +296,8 @@ defmodule Realtime.Tenants do
   @spec presence_events_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
   def presence_events_per_second_rate(tenant_id, max_presence_events_per_second) do
     opts = [
+      tick: :timer.seconds(5),
+      max_bucket_len: 12,
       telemetry: %{
         event_name: [:channel, :presence_events],
         measurements: %{limit: max_presence_events_per_second},
