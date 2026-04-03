@@ -450,7 +450,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       log =
         capture_log(fn ->
-          for _ <- 1..300, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+          for _ <- 1..1500, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
 
           {:ok, _} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
 
@@ -466,7 +466,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       log =
         capture_log(fn ->
-          for _ <- 1..300, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+          for _ <- 1..1500, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
 
           {:ok, _} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
 
@@ -535,7 +535,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       log =
         capture_log(fn ->
-          for _ <- 1..300, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+          for _ <- 1..1500, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
 
           {:ok, _} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
 
@@ -552,7 +552,7 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
 
       log =
         capture_log(fn ->
-          for _ <- 1..300, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
+          for _ <- 1..1500, do: PresenceHandler.handle(%{"event" => "track"}, db_conn, socket)
 
           {:ok, _} = RateCounterHelper.tick!(Tenants.presence_events_per_second_rate(tenant))
 
