@@ -1,6 +1,7 @@
 defmodule RealtimeWeb.JwtVerificationTest do
   # async: false due to mock usage and changing application env
   use Realtime.DataCase, async: false
+  use Mimic
 
   alias RealtimeWeb.JwtVerification
   alias RealtimeWeb.Joken.CurrentTime.Mock
@@ -432,6 +433,96 @@ defmodule RealtimeWeb.JwtVerificationTest do
       jwks = %{"keys" => [%{"kty" => "oct", "kid" => "wrong-kid"}]}
 
       assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, jwks)
+    end
+
+    test "fetches JWKS from OIDC discovery jwks_uri" do
+      Mock.freeze()
+      current_time = Mock.current_time()
+
+      issuer = "https://issuer.example.com"
+      kid = "oidc-kid-1"
+
+      signer = Joken.Signer.create("HS256", "oidc-secret", %{"kid" => kid})
+
+      token =
+        Joken.generate_and_sign!(
+          %{
+            "exp" => %Joken.Claim{generate: fn -> current_time + 100 end},
+            "iss" => %Joken.Claim{generate: fn -> issuer end}
+          },
+          %{},
+          signer
+        )
+
+      jwks = %{
+        "keys" => [
+          %{
+            "kty" => "oct",
+            "kid" => kid,
+            "k" => Base.url_encode64("oidc-secret", padding: false)
+          }
+        ]
+      }
+
+      expect(Req, :get, fn [url: url] ->
+        case url do
+          "#{issuer}/.well-known/openid-configuration" ->
+            {:ok, %Req.Response{status: 200, body: %{"jwks_uri" => "#{issuer}/oauth/jwks"}}}
+
+          "#{issuer}/oauth/jwks" ->
+            {:ok, %Req.Response{status: 200, body: jwks}}
+
+          _ ->
+            {:error, :unexpected_url}
+        end
+      end)
+
+      assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, nil)
+    end
+
+    test "falls back to .well-known/jwks.json when discovery fetch fails" do
+      Mock.freeze()
+      current_time = Mock.current_time()
+
+      issuer = "https://fallback-issuer.example.com"
+      kid = "fallback-kid-1"
+
+      signer = Joken.Signer.create("HS256", "fallback-secret", %{"kid" => kid})
+
+      token =
+        Joken.generate_and_sign!(
+          %{
+            "exp" => %Joken.Claim{generate: fn -> current_time + 100 end},
+            "iss" => %Joken.Claim{generate: fn -> issuer end}
+          },
+          %{},
+          signer
+        )
+
+      fallback_jwks = %{
+        "keys" => [
+          %{
+            "kty" => "oct",
+            "kid" => kid,
+            "k" => Base.url_encode64("fallback-secret", padding: false)
+          }
+        ]
+      }
+
+      expect(Req, :get, fn [url: url] ->
+        case url do
+          "#{issuer}/.well-known/openid-configuration" ->
+            {:error, :econnrefused}
+
+          "#{issuer}/.well-known/jwks.json" ->
+            {:ok, %Req.Response{status: 200, body: fallback_jwks}}
+
+          _ ->
+            {:error, :unexpected_url}
+        end
+      end)
+
+      assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, nil)
     end
   end
 end
