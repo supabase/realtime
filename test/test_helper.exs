@@ -39,6 +39,7 @@ Mimic.copy(RealtimeWeb.Endpoint)
 Mimic.copy(RealtimeWeb.JwtVerification)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
 Mimic.copy(NimbleZTA.Cloudflare)
+Mimic.copy(Req)
 
 partition = System.get_env("MIX_TEST_PARTITION")
 node_name = if partition, do: :"main#{partition}@127.0.0.1", else: :"main@127.0.0.1"

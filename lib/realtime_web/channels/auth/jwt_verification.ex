@@ -36,10 +36,11 @@ defmodule RealtimeWeb.JwtVerification do
   @doc """
   Verify JWT token and validate claims
   """
-  @spec verify(binary(), binary(), binary() | nil) :: {:ok, map()} | {:error, any()}
+  @spec verify(binary(), binary(), map() | nil) :: {:ok, map()} | {:error, any()}
   def verify(token, jwt_secret, jwt_jwks) when is_binary(token) do
-    with {:ok, _claims} <- check_claims_format(token),
+    with {:ok, claims} <- check_claims_format(token),
          {:ok, header} <- check_header_format(token),
+         {:ok, jwt_jwks} <- maybe_fetch_jwks(claims, header, jwt_jwks),
          {:ok, signer} <- generate_signer(header, jwt_secret, jwt_jwks) do
       JwtAuthToken.verify_and_validate(token, signer)
     else
@@ -63,6 +64,86 @@ defmodule RealtimeWeb.JwtVerification do
       _error -> {:error, :expected_header_map}
     end
   end
+
+  defp maybe_fetch_jwks(_claims, _header, %{"keys" => keys} = jwks) when is_list(keys), do: {:ok, jwks}
+  defp maybe_fetch_jwks(_claims, _header, %{keys: keys} = jwks) when is_list(keys), do: {:ok, normalize_jwks(jwks)}
+
+  defp maybe_fetch_jwks(claims, %{"kid" => kid}, jwt_jwks) when is_binary(kid) do
+    issuer = issuer_from(claims, jwt_jwks)
+
+    case issuer do
+      nil -> {:ok, jwt_jwks}
+      issuer ->
+        case fetch_jwks_from_issuer(issuer) do
+          {:ok, fetched_jwks} -> {:ok, fetched_jwks}
+          _ -> {:ok, jwt_jwks}
+        end
+    end
+  end
+
+  defp maybe_fetch_jwks(_claims, _header, jwt_jwks), do: {:ok, jwt_jwks}
+
+  defp issuer_from(_claims, %{"issuer" => issuer}) when is_binary(issuer), do: trim_issuer(issuer)
+  defp issuer_from(_claims, %{issuer: issuer}) when is_binary(issuer), do: trim_issuer(issuer)
+  defp issuer_from(%{"iss" => issuer}, _jwt_jwks) when is_binary(issuer), do: trim_issuer(issuer)
+  defp issuer_from(_claims, _jwt_jwks), do: nil
+
+  defp trim_issuer(issuer), do: issuer |> String.trim() |> String.trim_trailing("/")
+
+  defp fetch_jwks_from_issuer(issuer) do
+    discovery_url = "#{issuer}/.well-known/openid-configuration"
+    fallback_jwks_url = "#{issuer}/.well-known/jwks.json"
+
+    with {:ok, discovery} <- fetch_json(discovery_url),
+         {:ok, jwks_uri} <- extract_jwks_uri(discovery, issuer),
+         {:ok, jwks} <- fetch_json(jwks_uri),
+         {:ok, jwks} <- normalize_and_validate_jwks(jwks) do
+      {:ok, jwks}
+    else
+      _ ->
+        with {:ok, jwks} <- fetch_json(fallback_jwks_url),
+             {:ok, jwks} <- normalize_and_validate_jwks(jwks) do
+          {:ok, jwks}
+        end
+    end
+  end
+
+  defp fetch_json(url) do
+    case Req.get(url: url) do
+      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 and is_map(body) ->
+        {:ok, body}
+
+      _ ->
+        {:error, :failed_to_fetch_jwks}
+    end
+  end
+
+  defp extract_jwks_uri(%{"jwks_uri" => jwks_uri}, issuer) when is_binary(jwks_uri) do
+    {:ok, resolve_jwks_uri(issuer, jwks_uri)}
+  end
+
+  defp extract_jwks_uri(%{jwks_uri: jwks_uri}, issuer) when is_binary(jwks_uri) do
+    {:ok, resolve_jwks_uri(issuer, jwks_uri)}
+  end
+
+  defp extract_jwks_uri(_discovery, _issuer), do: {:error, :missing_jwks_uri}
+
+  defp resolve_jwks_uri(issuer, jwks_uri) do
+    uri = URI.parse(jwks_uri)
+
+    if uri.scheme do
+      jwks_uri
+    else
+      URI.merge("#{issuer}/", jwks_uri) |> to_string()
+    end
+  end
+
+  defp normalize_and_validate_jwks(%{"keys" => keys} = jwks) when is_list(keys), do: {:ok, jwks}
+  defp normalize_and_validate_jwks(%{keys: keys} = jwks) when is_list(keys), do: {:ok, normalize_jwks(jwks)}
+  defp normalize_and_validate_jwks(_jwks), do: {:error, :invalid_jwks}
+
+  defp normalize_jwks(%{keys: keys}), do: %{"keys" => keys}
+  defp normalize_jwks(jwks), do: jwks
 
   defp generate_signer(%{"alg" => alg, "kid" => kid}, _jwt_secret, %{
          "keys" => keys
