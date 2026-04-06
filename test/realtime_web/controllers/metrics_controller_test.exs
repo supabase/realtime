@@ -1,13 +1,11 @@
 defmodule RealtimeWeb.MetricsControllerTest do
   # Usage of Clustered
-  # Also changing Application env
   use RealtimeWeb.ConnCase, async: false
   alias Realtime.GenRpc
 
   import ExUnit.CaptureLog
   use Mimic
 
-  # Metrics that must appear on GET /metrics (global endpoint)
   @global_metrics [
     # BEAM / OS
     "beam_system_schedulers_online_info",
@@ -31,7 +29,6 @@ defmodule RealtimeWeb.MetricsControllerTest do
     "realtime_payload_size"
   ]
 
-  # Metrics that must appear on GET /tenant-metrics (tenant endpoint)
   @tenant_metrics [
     # Per-tenant channel events
     "realtime_channel_events",
@@ -117,10 +114,6 @@ defmodule RealtimeWeb.MetricsControllerTest do
   end
 
   setup %{conn: conn} do
-    previous = Application.get_env(:realtime, :metrics_separation_enabled)
-    Application.put_env(:realtime, :metrics_separation_enabled, true)
-    on_exit(fn -> Application.put_env(:realtime, :metrics_separation_enabled, previous) end)
-
     jwt_secret = Application.fetch_env!(:realtime, :metrics_jwt_secret)
     token = generate_jwt_token(jwt_secret, %{})
 
@@ -128,7 +121,7 @@ defmodule RealtimeWeb.MetricsControllerTest do
   end
 
   describe "GET /metrics" do
-    test "contains all expected global metrics", %{conn: conn} do
+    test "contains both global and tenant metrics", %{conn: conn} do
       fire_all_tenant_events()
 
       response =
@@ -139,18 +132,9 @@ defmodule RealtimeWeb.MetricsControllerTest do
       for metric <- @global_metrics do
         assert response =~ "# HELP #{metric}", "expected global metric #{metric} to be present"
       end
-    end
-
-    test "does not contain per-tenant labeled metrics", %{conn: conn} do
-      fire_all_tenant_events()
-
-      response =
-        conn
-        |> get(~p"/metrics")
-        |> text_response(200)
 
       for metric <- @tenant_metrics do
-        refute response =~ "# HELP #{metric}\n", "expected tenant metric #{metric} to be absent from global endpoint"
+        assert response =~ "# HELP #{metric}", "expected tenant metric #{metric} to be present"
       end
     end
 
@@ -202,74 +186,8 @@ defmodule RealtimeWeb.MetricsControllerTest do
     end
   end
 
-  describe "GET /tenant-metrics" do
-    test "contains all expected tenant metrics", %{conn: conn} do
-      fire_all_tenant_events()
-
-      response =
-        conn
-        |> get(~p"/tenant-metrics")
-        |> text_response(200)
-
-      for metric <- @tenant_metrics do
-        assert response =~ "# HELP #{metric}", "expected tenant metric #{metric} to be present"
-      end
-    end
-
-    test "does not contain global aggregated or BEAM metrics", %{conn: conn} do
-      fire_all_tenant_events()
-
-      response =
-        conn
-        |> get(~p"/tenant-metrics")
-        |> text_response(200)
-
-      for metric <- @global_metrics do
-        refute response =~ "# HELP #{metric}\n", "expected global metric #{metric} to be absent from tenant endpoint"
-      end
-    end
-
-    test "returns 200 and logs error on node timeout", %{conn: conn} do
-      Mimic.stub(GenRpc, :call, fn _node, _mod, _func, _args, _opts ->
-        {:error, :rpc_error, :timeout}
-      end)
-
-      log =
-        capture_log(fn ->
-          assert conn |> get(~p"/tenant-metrics") |> text_response(200) == ""
-        end)
-
-      assert log =~ "Cannot fetch metrics from the node"
-    end
-
-    test "returns 403 when authorization header is missing", %{conn: conn} do
-      conn
-      |> delete_req_header("authorization")
-      |> get(~p"/tenant-metrics")
-      |> response(403)
-    end
-
-    test "returns 403 when authorization header is wrong", %{conn: conn} do
-      conn
-      |> put_req_header("authorization", "Bearer #{generate_jwt_token("bad_secret", %{})}")
-      |> get(~p"/tenant-metrics")
-      |> response(403)
-    end
-  end
-
   describe "GET /metrics/:region" do
-    test "returns global metrics scoped to the given region", %{conn: conn} do
-      response =
-        conn
-        |> get(~p"/metrics/ap-southeast-2")
-        |> text_response(200)
-
-      assert response =~ "# HELP beam_system_schedulers_online_info"
-      assert response =~ "region=\"ap-southeast-2\""
-      refute response =~ "region=\"us-east-1\""
-    end
-
-    test "does not contain per-tenant labeled metrics", %{conn: conn} do
+    test "returns both global and tenant metrics scoped to the given region", %{conn: conn} do
       fire_all_tenant_events()
 
       response =
@@ -277,10 +195,23 @@ defmodule RealtimeWeb.MetricsControllerTest do
         |> get(~p"/metrics/us-east-1")
         |> text_response(200)
 
-      for metric <- @tenant_metrics do
-        refute response =~ "# HELP #{metric}\n",
-               "expected tenant metric #{metric} to be absent from region global endpoint"
+      for metric <- @global_metrics do
+        assert response =~ "# HELP #{metric}", "expected global metric #{metric} to be present"
       end
+
+      for metric <- @tenant_metrics do
+        assert response =~ "# HELP #{metric}", "expected tenant metric #{metric} to be present"
+      end
+    end
+
+    test "filters metrics to the given region", %{conn: conn} do
+      response =
+        conn
+        |> get(~p"/metrics/ap-southeast-2")
+        |> text_response(200)
+
+      assert response =~ "region=\"ap-southeast-2\""
+      refute response =~ "region=\"us-east-1\""
     end
 
     test "returns 200 and logs error on node timeout", %{conn: conn} do
@@ -307,62 +238,6 @@ defmodule RealtimeWeb.MetricsControllerTest do
       conn
       |> put_req_header("authorization", "Bearer #{generate_jwt_token("bad_secret", %{})}")
       |> get(~p"/metrics/ap-southeast-2")
-      |> response(403)
-    end
-  end
-
-  describe "GET /tenant-metrics/:region" do
-    test "returns tenant metrics scoped to the given region", %{conn: conn} do
-      fire_all_tenant_events()
-
-      response =
-        conn
-        |> get(~p"/tenant-metrics/us-east-1")
-        |> text_response(200)
-
-      for metric <- @tenant_metrics do
-        assert response =~ "# HELP #{metric}", "expected tenant metric #{metric} to be present"
-      end
-    end
-
-    test "does not contain global aggregated or BEAM metrics", %{conn: conn} do
-      fire_all_tenant_events()
-
-      response =
-        conn
-        |> get(~p"/tenant-metrics/ap-southeast-2")
-        |> text_response(200)
-
-      for metric <- @global_metrics do
-        refute response =~ "# HELP #{metric}\n",
-               "expected global metric #{metric} to be absent from region tenant endpoint"
-      end
-    end
-
-    test "returns 200 and logs error on node timeout", %{conn: conn} do
-      Mimic.stub(GenRpc, :call, fn _node, _mod, _func, _args, _opts ->
-        {:error, :rpc_error, :timeout}
-      end)
-
-      log =
-        capture_log(fn ->
-          assert conn |> get(~p"/tenant-metrics/ap-southeast-2") |> text_response(200) == ""
-        end)
-
-      assert log =~ "Cannot fetch metrics from the node"
-    end
-
-    test "returns 403 when authorization header is missing", %{conn: conn} do
-      conn
-      |> delete_req_header("authorization")
-      |> get(~p"/tenant-metrics/ap-southeast-2")
-      |> response(403)
-    end
-
-    test "returns 403 when authorization header is wrong", %{conn: conn} do
-      conn
-      |> put_req_header("authorization", "Bearer #{generate_jwt_token("bad_secret", %{})}")
-      |> get(~p"/tenant-metrics/ap-southeast-2")
       |> response(403)
     end
   end

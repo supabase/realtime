@@ -85,7 +85,6 @@ regional_broadcasting = Env.get_boolean("REGIONAL_BROADCASTING", false)
 no_channel_timeout_in_ms = Env.get_integer("NO_CHANNEL_TIMEOUT_IN_MS", :timer.minutes(10))
 measure_traffic_interval_in_ms = Env.get_integer("MEASURE_TRAFFIC_INTERVAL_IN_MS", :timer.seconds(10))
 metrics_pusher_enabled = Env.get_boolean("METRICS_PUSHER_ENABLED", false)
-metrics_separation_enabled = Env.get_boolean("METRICS_SEPARATION_ENABLED", false)
 metrics_pusher_url = System.get_env("METRICS_PUSHER_URL")
 metrics_pusher_user = System.get_env("METRICS_PUSHER_USER", "realtime")
 metrics_pusher_auth = System.get_env("METRICS_PUSHER_AUTH")
@@ -186,8 +185,7 @@ config :realtime,
   metrics_pusher_interval_ms: metrics_pusher_interval_ms,
   metrics_pusher_timeout_ms: metrics_pusher_timeout_ms,
   metrics_pusher_compress: metrics_pusher_compress,
-  metrics_pusher_extra_labels: metrics_pusher_extra_labels,
-  metrics_separation_enabled: metrics_separation_enabled
+  metrics_pusher_extra_labels: metrics_pusher_extra_labels
 
 if config_env() != :test && run_janitor? do
   config :realtime,
