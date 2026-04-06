@@ -20,7 +20,6 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
           {:error, %{reason: binary}}
   def log_error(socket, code, msg) do
     msg = build_msg(code, msg)
-    emit_system_error(:error, code)
     log(socket, :error, code, msg)
     {:error, %{reason: msg}}
   end
@@ -63,28 +62,17 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
     Logger.metadata(external_id: tenant, project: tenant)
     if level in [:error, :warning], do: update_metadata_with_token_claims(access_token)
     Logger.log(level, msg, error_code: code)
+    if level in [:error], do: emit_system_error(level, code, tenant)
   end
 
   defp maybe_log(%{assigns: %{log_level: log_level}} = socket, level, code, msg) do
     msg = build_msg(code, msg)
-    emit_system_error(level, code)
     if Logger.compare_levels(log_level, level) != :gt, do: log(socket, level, code, msg)
     if level in [:error, :warning], do: {:error, %{reason: msg}}, else: :ok
   end
 
-  @system_errors [
-    "UnableToSetPolicies",
-    "InitializingProjectConnection",
-    "DatabaseConnectionIssue",
-    "UnknownErrorOnChannel"
-  ]
-
-  def system_errors, do: @system_errors
-
-  defp emit_system_error(:error, code) when code in @system_errors,
-    do: Telemetry.execute([:realtime, :channel, :error], %{code: code}, %{code: code})
-
-  defp emit_system_error(_, _), do: nil
+  defp emit_system_error(level, code, tenant_id),
+    do: Telemetry.execute([:realtime, :channel, level], %{count: 1}, %{code: code, tenant: tenant_id})
 
   defp stringify!(msg) when is_binary(msg), do: msg
   defp stringify!(msg), do: inspect(msg, pretty: true)

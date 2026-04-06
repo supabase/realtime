@@ -304,15 +304,8 @@ defmodule Realtime.Database do
       {:ok, :inet6}
     else
       case :inet.gethostbyname(host) do
-        {:ok, hostent} ->
-          [addr | _] = elem(hostent, 5)
-          resolved = addr |> :inet.ntoa() |> to_string()
-          log_warning("IpV4Detected", "IPv4 detected for host #{inspect(host)} resolved to #{resolved}")
-
-          {:ok, :inet}
-
-        _ ->
-          {:error, :nxdomain}
+        {:ok, _} -> {:ok, :inet}
+        _ -> {:error, :nxdomain}
       end
     end
   end

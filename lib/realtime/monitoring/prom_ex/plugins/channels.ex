@@ -11,8 +11,8 @@ defmodule Realtime.PromEx.Plugins.Channels do
       counter(
         [:realtime, :channel, :error],
         event_name: [:realtime, :channel, :error],
-        measurement: :code,
-        tags: [:code],
+        measurement: :count,
+        tags: [:code, :tenant],
         description: "Count of errors in the Realtime channels initialization"
       )
     ])
