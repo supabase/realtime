@@ -174,7 +174,7 @@ defmodule Realtime.RateCounterTest do
 
       log =
         capture_log(fn ->
-          GenCounter.add(args.id, 50)
+          GenCounter.add(args.id, 6)
           Process.sleep(300)
         end)
 
@@ -185,7 +185,7 @@ defmodule Realtime.RateCounterTest do
       # Splitting by the error message returns the error message and the rest of the log only
       assert length(String.split(log, "ErrorMessage: Reason")) == 2
 
-      Process.sleep(300)
+      Process.sleep(400)
 
       assert {:ok, %RateCounter{limit: %{triggered: false}}} = RateCounter.get(args)
     end
@@ -298,6 +298,72 @@ defmodule Realtime.RateCounterTest do
       assert avg > 0.0
 
       assert GenCounter.get(args.id) == 0
+    end
+  end
+
+  describe "avg normalization" do
+    test "avg represents events per second regardless of tick interval" do
+      # 1-second tick: add 10 events → avg should be ~10 events/second
+      id_1s = {:domain, :metric, Ecto.UUID.generate()}
+      args_1s = %Args{id: id_1s, opts: [tick: 1_000, max_bucket_len: 1]}
+      {:ok, pid} = RateCounter.new(args_1s)
+      # wait for init to complete
+      :sys.get_state(pid)
+
+      GenCounter.add(id_1s, 10)
+      {:ok, state_1s} = RateCounterHelper.tick!(args_1s)
+      assert_in_delta state_1s.avg, 10.0, 0.01
+
+      # 5-second tick: add 50 events (= 10 per second) → avg should also be ~10 events/second
+      id_5s = {:domain, :metric, Ecto.UUID.generate()}
+      args_5s = %Args{id: id_5s, opts: [tick: 5_000, max_bucket_len: 1]}
+      {:ok, pid} = RateCounter.new(args_5s)
+      # wait for init to complete
+      :sys.get_state(pid)
+
+      GenCounter.add(id_5s, 50)
+      {:ok, state_5s} = RateCounterHelper.tick!(args_5s)
+      assert_in_delta state_5s.avg, 10.0, 0.01
+    end
+
+    test "avg limit triggers and unsets correctly with a non-1-second tick" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      args = %Args{
+        id: id,
+        opts: [
+          tick: 5_000,
+          max_bucket_len: 1,
+          limit: [
+            value: 10,
+            measurement: :avg,
+            log_fn: fn ->
+              Logger.warning("RateLimitReached", external_id: "tenant123", project: "tenant123")
+            end
+          ]
+        ]
+      }
+
+      {:ok, pid} = RateCounter.new(args)
+      # wait for init to complete
+      :sys.get_state(pid)
+
+      # 60 events over a 5-second tick = 12 events/second, above the 10/s limit
+      log =
+        capture_log(fn ->
+          GenCounter.add(id, 60)
+          RateCounterHelper.tick!(args)
+        end)
+
+      assert {:ok, %RateCounter{avg: avg, limit: %{triggered: true}}} = RateCounter.get(args)
+      assert_in_delta avg, 12.0, 0.01
+      assert log =~ "RateLimitReached"
+
+      # 40 events over a 5-second tick = 8 events/second, below the 10/s limit
+      GenCounter.add(id, 40)
+      RateCounterHelper.tick!(args)
+      assert {:ok, %RateCounter{avg: avg, limit: %{triggered: false}}} = RateCounter.get(args)
+      assert_in_delta avg, 8.0, 0.01
     end
   end
 
