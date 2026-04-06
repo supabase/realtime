@@ -160,20 +160,19 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     end
   end
 
-  test "emits telemetry for system errors" do
-    socket = %{assigns: %{log_level: :error, tenant: random_string(), access_token: "test_token"}}
+  test "emits telemetry for  errors with tenant metadata" do
+    tenant_id = random_string()
+    socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
+    error = "TestError"
 
-    for error <- Logging.system_errors() do
-      assert Logging.maybe_log_error(socket, error, "test error") ==
-               {:error, %{reason: "#{error}: test error"}}
+    assert Logging.maybe_log_error(socket, error, "test error") == {:error, %{reason: "#{error}: test error"}}
+    assert_receive {[:realtime, :channel, :error], %{count: 1}, %{code: ^error, tenant: ^tenant_id}}
 
-      assert_receive {[:realtime, :channel, :error], %{code: ^error}, %{code: ^error}}
-    end
+    assert Logging.maybe_log_warning(socket, error, "test error") == {:error, %{reason: "#{error}: test error"}}
+    refute_receive {[:realtime, :channel, :error], %{count: 1}, %{code: ^error, tenant: ^tenant_id}}
 
-    assert Logging.maybe_log_error(socket, "TestError", "test error") ==
-             {:error, %{reason: "TestError: test error"}}
-
-    refute_receive {[:realtime, :channel, :error], :_, :_}
+    assert Logging.maybe_log_info(socket, "test error") == :ok
+    refute_receive {[:realtime, :channel, :error], %{count: 1}, %{code: ^error, tenant: ^tenant_id}}
   end
 
   test "logs include JWT claims in metadata", %{tenant: tenant} do

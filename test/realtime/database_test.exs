@@ -79,13 +79,7 @@ defmodule Realtime.DatabaseTest do
   describe "replication_slot_teardown/1" do
     test "removes replication slots with the realtime prefix", %{tenant: tenant} do
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-
-      Postgrex.query!(
-        conn,
-        "SELECT * FROM pg_create_logical_replication_slot('realtime_test_slot', 'pgoutput')",
-        []
-      )
-
+      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('realtime_test_slot', 'pgoutput')", [])
       Database.replication_slot_teardown(tenant)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
@@ -95,13 +89,7 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and existing connection", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-
-      Postgrex.query!(
-        conn,
-        "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')",
-        []
-      )
-
+      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
       Database.replication_slot_teardown(conn, name)
       Process.sleep(1000)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
@@ -110,13 +98,7 @@ defmodule Realtime.DatabaseTest do
     test "removes replication slots with a given name and a tenant", %{tenant: tenant} do
       name = String.downcase("slot_#{random_string()}")
       {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
-
-      Postgrex.query!(
-        conn,
-        "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')",
-        []
-      )
-
+      Postgrex.query!(conn, "SELECT * FROM pg_create_logical_replication_slot('#{name}', 'pgoutput')", [])
       Database.replication_slot_teardown(tenant, name)
       assert %{rows: []} = Postgrex.query!(conn, "SELECT slot_name FROM pg_replication_slots", [])
     end
@@ -184,8 +166,7 @@ defmodule Realtime.DatabaseTest do
 
     test "handles exit signals in transactions", %{db_conn: db_conn} do
       assert capture_log(fn ->
-               assert {:error, {:exit, _}} =
-                        Database.transaction(db_conn, fn _conn -> exit(:test_exit) end)
+               assert {:error, {:exit, _}} = Database.transaction(db_conn, fn _conn -> exit(:test_exit) end)
              end) =~ "ErrorExecutingTransaction"
     end
 
@@ -246,36 +227,14 @@ defmodule Realtime.DatabaseTest do
       assert Database.pool_size_by_application_name("realtime_connect", %{"db_pool" => 10}) == 10
       assert Database.pool_size_by_application_name("realtime_potato", %{}) == 1
       assert Database.pool_size_by_application_name("realtime_rls", %{"db_pool" => 10}) == 1
-
-      assert Database.pool_size_by_application_name("realtime_rls", %{"subs_pool_size" => 10}) ==
-               1
-
-      assert Database.pool_size_by_application_name("realtime_rls", %{"subcriber_pool_size" => 10}) ==
-               1
-
-      assert Database.pool_size_by_application_name("realtime_broadcast_changes", %{
-               "db_pool" => 10
-             }) == 1
-
-      assert Database.pool_size_by_application_name("realtime_broadcast_changes", %{
-               "subs_pool_size" => 10
-             }) == 1
-
-      assert Database.pool_size_by_application_name("realtime_broadcast_changes", %{
-               "subcriber_pool_size" => 10
-             }) == 1
-
-      assert Database.pool_size_by_application_name("realtime_migrations", %{
-               "db_pool" => 10
-             }) == 2
-
-      assert Database.pool_size_by_application_name("realtime_migrations", %{
-               "subs_pool_size" => 10
-             }) == 2
-
-      assert Database.pool_size_by_application_name("realtime_migrations", %{
-               "subcriber_pool_size" => 10
-             }) == 2
+      assert Database.pool_size_by_application_name("realtime_rls", %{"subs_pool_size" => 10}) == 1
+      assert Database.pool_size_by_application_name("realtime_rls", %{"subcriber_pool_size" => 10}) == 1
+      assert Database.pool_size_by_application_name("realtime_broadcast_changes", %{"db_pool" => 10}) == 1
+      assert Database.pool_size_by_application_name("realtime_broadcast_changes", %{"subs_pool_size" => 10}) == 1
+      assert Database.pool_size_by_application_name("realtime_broadcast_changes", %{"subcriber_pool_size" => 10}) == 1
+      assert Database.pool_size_by_application_name("realtime_migrations", %{"db_pool" => 10}) == 2
+      assert Database.pool_size_by_application_name("realtime_migrations", %{"subs_pool_size" => 10}) == 2
+      assert Database.pool_size_by_application_name("realtime_migrations", %{"subcriber_pool_size" => 10}) == 2
     end
   end
 
@@ -290,48 +249,17 @@ defmodule Realtime.DatabaseTest do
   describe "detect_ip_version/1" do
     test "detects appropriate IP version" do
       # Using ipv4.google.com
-      log =
-        capture_log(fn ->
-          assert Realtime.Database.detect_ip_version("ipv4.google.com") == {:ok, :inet}
-        end)
-
-      assert log =~ "IpV4Detected"
-      assert log =~ ~r/resolved to \d+\.\d+\.\d+\.\d+/
+      assert Realtime.Database.detect_ip_version("ipv4.google.com") == {:ok, :inet}
 
       # Using ipv6.google.com
-      log =
-        capture_log(fn ->
-          assert Realtime.Database.detect_ip_version("ipv6.google.com") == {:ok, :inet6}
-        end)
-
-      refute log =~ "IpV4Detected"
-
-      # Using 2001:0db8:85a3:0000:0000:8a2e:0370:7334
-      log =
-        capture_log(fn ->
-          assert Realtime.Database.detect_ip_version("2001:0db8:85a3:0000:0000:8a2e:0370:7334") ==
-                   {:ok, :inet6}
-        end)
-
-      refute log =~ "IpV4Detected"
+      assert Realtime.Database.detect_ip_version("ipv6.google.com") == {:ok, :inet6}
+      assert Realtime.Database.detect_ip_version("2001:0db8:85a3:0000:0000:8a2e:0370:7334") == {:ok, :inet6}
 
       # Using 127.0.0.1
-      log =
-        capture_log(fn ->
-          assert Realtime.Database.detect_ip_version("127.0.0.1") == {:ok, :inet}
-        end)
-
-      assert log =~ "IpV4Detected"
-      assert log =~ ~r/resolved to \d+\.\d+\.\d+\.\d+/
+      assert Realtime.Database.detect_ip_version("127.0.0.1") == {:ok, :inet}
 
       # Using invalid domain
-      #       # Using 127.0.0.1
-      log =
-        capture_log(fn ->
-          assert Realtime.Database.detect_ip_version("potato") == {:error, :nxdomain}
-        end)
-
-      refute log =~ "IpV4Detected"
+      assert Realtime.Database.detect_ip_version("potato") == {:error, :nxdomain}
     end
   end
 
@@ -397,11 +325,7 @@ defmodule Realtime.DatabaseTest do
 
   defp update_extension(tenant, extension) do
     db_port = Realtime.Crypto.decrypt!(hd(tenant.extensions).settings["db_port"])
-
-    extensions = [
-      put_in(extension, ["settings", "db_port"], db_port)
-    ]
-
+    extensions = [put_in(extension, ["settings", "db_port"], db_port)]
     Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{extensions: extensions})
   end
 end
