@@ -4,6 +4,7 @@ defmodule Realtime.Application do
   @moduledoc false
 
   use Application
+  require Cachex.Spec
   require Logger
 
   alias Realtime.Repo.Replica
@@ -106,7 +107,16 @@ defmodule Realtime.Application do
              message_module: Realtime.BeaconPubSubAdapter
            ]
          ]},
-        {Cachex, name: Realtime.RateCounter},
+        Supervisor.child_spec({Cachex, name: Realtime.RateCounter}, id: Realtime.RateCounter),
+        Supervisor.child_spec(
+          {Cachex,
+           name: Realtime.LogThrottle,
+           expiration:
+             Cachex.Spec.expiration(
+               interval: Application.get_env(:realtime, :log_throttle_janitor_interval_ms, :timer.minutes(10))
+             )},
+          id: Realtime.LogThrottle
+        ),
         Realtime.Tenants.Cache,
         Realtime.RateCounter.DynamicSupervisor,
         Realtime.Latency,

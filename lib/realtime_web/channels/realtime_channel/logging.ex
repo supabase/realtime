@@ -36,59 +36,86 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   end
 
   @doc """
-  Logs an error if the log level is set to error
+  Logs an error if the log level is set to error.
+
+  Accepts an optional `throttle: {max_count, window_ms}` option to limit
+  how many times the log is emitted per tenant+code within the given time window.
   """
-  @spec maybe_log_error(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any()) :: {:error, %{reason: binary}}
-  def maybe_log_error(socket, code, msg), do: maybe_log(socket, :error, code, msg)
+  @spec maybe_log_error(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any(), opts :: keyword()) ::
+          {:error, %{reason: binary}}
+  def maybe_log_error(socket, code, msg, opts \\ []), do: maybe_log(socket, :error, code, msg, opts)
 
   @doc """
-  Logs a warning if the log level is set to warning
+  Logs a warning if the log level is set to warning.
+
+  Accepts an optional `throttle: {max_count, window_ms}` option to limit
+  how many times the log is emitted per tenant+code within the given time window.
   """
-  @spec maybe_log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any()) :: {:error, %{reason: binary}}
-  def maybe_log_warning(socket, code, msg), do: maybe_log(socket, :warning, code, msg)
+  @spec maybe_log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any(), opts :: keyword()) ::
+          {:error, %{reason: binary}}
+  def maybe_log_warning(socket, code, msg, opts \\ []), do: maybe_log(socket, :warning, code, msg, opts)
 
   @doc """
-  Logs an info if the log level is set to info
+  Logs an info if the log level is set to info.
   """
   @spec maybe_log_info(socket :: Phoenix.Socket.t(), msg :: any()) :: :ok
-  def maybe_log_info(socket, msg), do: maybe_log(socket, :info, nil, msg)
+  def maybe_log_info(socket, msg), do: maybe_log(socket, :info, nil, msg, [])
 
-  defp build_msg(code, msg) do
-    msg = stringify!(msg)
-    if code, do: "#{code}: #{msg}", else: msg
-  end
+  defp build_msg(nil, msg), do: stringify!(msg)
+  defp build_msg(code, msg), do: "#{code}: #{stringify!(msg)}"
 
-  defp log(%{assigns: %{tenant: tenant, access_token: access_token}}, level, code, msg) do
+  defp log(%{assigns: assigns}, level, code, msg) do
+    tenant = assigns.tenant
     Logger.metadata(external_id: tenant, project: tenant)
-    if level in [:error, :warning], do: update_metadata_with_token_claims(access_token)
+    enrich_metadata(level, Map.get(assigns, :access_token))
     Logger.log(level, msg, error_code: code)
-    if level in [:error], do: emit_system_error(level, code, tenant)
+    emit_telemetry(level, code, tenant)
   end
 
-  defp maybe_log(%{assigns: %{log_level: log_level}} = socket, level, code, msg) do
-    msg = build_msg(code, msg)
-    if Logger.compare_levels(log_level, level) != :gt, do: log(socket, level, code, msg)
-    if level in [:error, :warning], do: {:error, %{reason: msg}}, else: :ok
+  defp enrich_metadata(level, token) when level in [:error, :warning],
+    do: update_metadata_with_token_claims(token)
+
+  defp enrich_metadata(_level, _token), do: :ok
+
+  defp emit_telemetry(:error, code, tenant),
+    do: Telemetry.execute([:realtime, :channel, :error], %{count: 1}, %{code: code, tenant: tenant})
+
+  defp emit_telemetry(_level, _code, _tenant), do: :ok
+
+  defp maybe_log(%{assigns: %{log_level: log_level}} = socket, level, code, msg, opts) do
+    built_msg = build_msg(code, msg)
+    if Logger.compare_levels(log_level, level) != :gt, do: do_log(socket, level, code, built_msg, opts)
+    if level in [:error, :warning], do: {:error, %{reason: built_msg}}, else: :ok
   end
 
-  defp emit_system_error(level, code, tenant_id),
-    do: Telemetry.execute([:realtime, :channel, level], %{count: 1}, %{code: code, tenant: tenant_id})
+  defp do_log(socket, level, code, msg, []), do: log(socket, level, code, msg)
+
+  defp do_log(%{assigns: %{tenant: tenant}} = socket, level, code, msg, throttle: {max_count, window_ms}) do
+    key = {tenant, level, code}
+
+    case Cachex.get(Realtime.LogThrottle, key) do
+      {:ok, nil} ->
+        Cachex.put(Realtime.LogThrottle, key, 1, expire: window_ms)
+        log(socket, level, code, msg)
+
+      {:ok, count} when count < max_count ->
+        Cachex.incr(Realtime.LogThrottle, key)
+        log(socket, level, code, msg)
+
+      _ ->
+        emit_telemetry(level, code, tenant)
+    end
+  end
 
   defp stringify!(msg) when is_binary(msg), do: msg
   defp stringify!(msg), do: inspect(msg, pretty: true)
 
-  defp update_metadata_with_token_claims(nil), do: nil
+  defp update_metadata_with_token_claims(nil), do: :ok
 
   defp update_metadata_with_token_claims(token) do
     case Joken.peek_claims(token) do
-      {:ok, claims} ->
-        sub = Map.get(claims, "sub")
-        exp = Map.get(claims, "exp")
-        iss = Map.get(claims, "iss")
-        Logger.metadata(sub: sub, exp: exp, iss: iss)
-
-      _ ->
-        nil
+      {:ok, claims} -> Logger.metadata(sub: claims["sub"], exp: claims["exp"], iss: claims["iss"])
+      _ -> :ok
     end
   end
 end
