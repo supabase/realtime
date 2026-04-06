@@ -91,6 +91,7 @@ metrics_pusher_auth = System.get_env("METRICS_PUSHER_AUTH")
 metrics_pusher_interval_ms = Env.get_integer("METRICS_PUSHER_INTERVAL_MS", :timer.seconds(30))
 metrics_pusher_timeout_ms = Env.get_integer("METRICS_PUSHER_TIMEOUT_MS", :timer.seconds(15))
 metrics_pusher_compress = Env.get_boolean("METRICS_PUSHER_COMPRESS", true)
+log_throttle_janitor_interval_ms = Env.get_integer("LOG_THROTTLE_JANITOR_INTERVAL_IN_MS", :timer.minutes(10))
 
 metrics_pusher_extra_labels =
   case System.get_env("METRICS_PUSHER_EXTRA_LABELS", "") do
@@ -177,6 +178,7 @@ config :realtime,
     max_calls: client_presence_max_calls,
     window_ms: client_presence_window_ms
   ],
+  log_throttle_janitor_interval_ms: log_throttle_janitor_interval_ms,
   disable_healthcheck_logging: disable_healthcheck_logging,
   metrics_pusher_enabled: metrics_pusher_enabled,
   metrics_pusher_url: metrics_pusher_url,

@@ -1,5 +1,5 @@
 defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
-  # async: false due to changes in Logger levels
+  # async: false due to changes in Logger levels and shared Cachex state
   use Realtime.DataCase, async: false
   import ExUnit.CaptureLog
   alias RealtimeWeb.RealtimeChannel.Logging
@@ -11,6 +11,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     level = Logger.level()
     Logger.configure(level: :info)
     tenant = tenant_fixture()
+    Cachex.clear(Realtime.LogThrottle)
 
     on_exit(fn ->
       :telemetry.detach(__MODULE__)
@@ -62,7 +63,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     end
   end
 
-  describe "maybe_log_error/3" do
+  describe "maybe_log_error/4" do
     test "logs error message when log_level is less or equal to error" do
       log_levels = [:debug, :info, :warning, :error]
 
@@ -102,8 +103,8 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     end
   end
 
-  describe "maybe_log_warning/3" do
-    test "logs error message when log_level is less or equal to warning" do
+  describe "maybe_log_warning/4" do
+    test "logs warning message when log_level is less or equal to warning" do
       log_levels = [:debug, :info, :warning]
 
       for log_level <- log_levels do
@@ -193,5 +194,88 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
     log = capture_log(fn -> Logging.maybe_log_error(socket, "TestError", "test error") end)
     assert log =~ tenant_id
+  end
+
+  describe "throttle option" do
+    test "logs exactly max_count times within the window but always emits telemetry" do
+      tenant_id = random_string()
+      socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
+
+      logs =
+        capture_log(fn ->
+          for _ <- 1..5 do
+            Logging.maybe_log_error(socket, "ThrottleCode", "msg", throttle: {3, :timer.seconds(60)})
+          end
+        end)
+
+      assert logs |> String.split("ThrottleCode: msg") |> length() == 4
+
+      for _ <- 1..5 do
+        assert_receive {[:realtime, :channel, :error], %{count: 1}, %{code: "ThrottleCode", tenant: ^tenant_id}}
+      end
+    end
+
+    test "still returns {:error, reason} even when throttled" do
+      tenant_id = random_string()
+      socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
+
+      for _ <- 1..5 do
+        assert Logging.maybe_log_error(socket, "ThrottleCode", "msg", throttle: {2, :timer.seconds(60)}) ==
+                 {:error, %{reason: "ThrottleCode: msg"}}
+      end
+    end
+
+    test "resets after the window expires" do
+      tenant_id = random_string()
+      socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
+
+      logs_before =
+        capture_log(fn ->
+          for _ <- 1..3, do: Logging.maybe_log_error(socket, "WindowCode", "msg", throttle: {2, 200})
+        end)
+
+      assert logs_before |> String.split("WindowCode: msg") |> length() == 3
+
+      Process.sleep(400)
+
+      logs_after =
+        capture_log(fn ->
+          for _ <- 1..3, do: Logging.maybe_log_error(socket, "WindowCode", "msg", throttle: {2, 200})
+        end)
+
+      assert logs_after |> String.split("WindowCode: msg") |> length() == 3
+    end
+
+    test "different tenant+code pairs have independent counters" do
+      socket_a = %{assigns: %{log_level: :error, tenant: random_string(), access_token: "t"}}
+      socket_b = %{assigns: %{log_level: :error, tenant: random_string(), access_token: "t"}}
+
+      logs =
+        capture_log(fn ->
+          for _ <- 1..3 do
+            Logging.maybe_log_error(socket_a, "CodeA", "msg", throttle: {2, :timer.seconds(60)})
+            Logging.maybe_log_error(socket_b, "CodeB", "msg", throttle: {2, :timer.seconds(60)})
+          end
+        end)
+
+      assert logs |> String.split("CodeA: msg") |> length() == 3
+      assert logs |> String.split("CodeB: msg") |> length() == 3
+    end
+
+    test "concurrent callers do not exceed max_count" do
+      tenant_id = random_string()
+      socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
+
+      logs =
+        capture_log(fn ->
+          1..20
+          |> Task.async_stream(fn _ ->
+            Logging.maybe_log_error(socket, "ConcurrentCode", "msg", throttle: {5, :timer.seconds(60)})
+          end)
+          |> Stream.run()
+        end)
+
+      assert logs |> String.split("ConcurrentCode: msg") |> length() <= 6
+    end
   end
 end
