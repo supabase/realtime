@@ -16,23 +16,23 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   @doc """
   Logs an error message
   """
-  @spec log_error(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any()) ::
+  @spec log_error(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any(), opts :: keyword()) ::
           {:error, %{reason: binary}}
-  def log_error(socket, code, msg) do
-    msg = build_msg(code, msg)
-    log(socket, :error, code, msg)
-    {:error, %{reason: msg}}
+  def log_error(socket, code, msg, opts \\ []) do
+    built_msg = build_msg(code, msg)
+    do_log(socket, :error, code, built_msg, opts)
+    {:error, %{reason: built_msg}}
   end
 
   @doc """
   Logs a warning message
   """
-  @spec log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any()) ::
+  @spec log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any(), opts :: keyword()) ::
           {:error, %{reason: binary}}
-  def log_warning(socket, code, msg) do
-    msg = build_msg(code, msg)
-    log(socket, :warning, code, msg)
-    {:error, %{reason: msg}}
+  def log_warning(socket, code, msg, opts \\ []) do
+    built_msg = build_msg(code, msg)
+    do_log(socket, :warning, code, built_msg, opts)
+    {:error, %{reason: built_msg}}
   end
 
   @doc """
@@ -93,18 +93,21 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   defp do_log(%{assigns: %{tenant: tenant}} = socket, level, code, msg, throttle: {max_count, window_ms}) do
     key = {tenant, level, code}
 
-    case Cachex.get(Realtime.LogThrottle, key) do
-      {:ok, nil} ->
-        Cachex.put(Realtime.LogThrottle, key, 1, expire: window_ms)
-        log(socket, level, code, msg)
+    count =
+      Cachex.transaction!(Realtime.LogThrottle, [key], fn cache ->
+        case Cachex.get!(cache, key) do
+          nil ->
+            Cachex.put!(cache, key, 1, expire: window_ms)
+            1
 
-      {:ok, count} when count < max_count ->
-        Cachex.incr(Realtime.LogThrottle, key)
-        log(socket, level, code, msg)
+          n when is_integer(n) ->
+            Cachex.incr!(cache, key)
+        end
+      end)
 
-      _ ->
-        emit_telemetry(level, code, tenant)
-    end
+    if count <= max_count,
+      do: log(socket, level, code, msg),
+      else: emit_telemetry(level, code, tenant)
   end
 
   defp stringify!(msg) when is_binary(msg), do: msg

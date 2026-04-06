@@ -21,7 +21,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     %{tenant: tenant}
   end
 
-  describe "log_error/3" do
+  describe "log_error/4" do
     test "logs error message with JWT claims in metadata", %{tenant: tenant} do
       sub = random_string()
       exp = System.system_time(:second) + 1000
@@ -40,9 +40,37 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert log =~ "iss=#{iss}"
       assert log =~ "error_code=TestError"
     end
+
+    test "logs exactly max_count times within the window when throttled but always emits telemetry" do
+      tenant_id = random_string()
+      socket = %{assigns: %{tenant: tenant_id, access_token: "test_token"}}
+
+      logs =
+        capture_log(fn ->
+          for _ <- 1..5 do
+            Logging.log_error(socket, "ThrottledError", "msg", throttle: {2, :timer.seconds(60)})
+          end
+        end)
+
+      assert logs |> String.split("ThrottledError: msg") |> length() == 3
+
+      for _ <- 1..5 do
+        assert_receive {[:realtime, :channel, :error], %{count: 1}, %{code: "ThrottledError", tenant: ^tenant_id}}
+      end
+    end
+
+    test "always returns {:error, reason} even when throttled" do
+      tenant_id = random_string()
+      socket = %{assigns: %{tenant: tenant_id, access_token: "test_token"}}
+
+      for _ <- 1..5 do
+        assert Logging.log_error(socket, "ThrottledError", "msg", throttle: {1, :timer.seconds(60)}) ==
+                 {:error, %{reason: "ThrottledError: msg"}}
+      end
+    end
   end
 
-  describe "log_warning/3" do
+  describe "log_warning/4" do
     test "logs warning message with JWT claims in metadata", %{tenant: tenant} do
       sub = random_string()
       exp = System.system_time(:second) + 1000
@@ -60,6 +88,31 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert log =~ "exp=#{exp}"
       assert log =~ "iss=#{iss}"
       assert log =~ "error_code=TestWarning"
+    end
+
+    test "logs exactly max_count times within the window when throttled and never emits telemetry" do
+      tenant_id = random_string()
+      socket = %{assigns: %{tenant: tenant_id, access_token: "test_token"}}
+
+      logs =
+        capture_log(fn ->
+          for _ <- 1..5 do
+            Logging.log_warning(socket, "ThrottledWarning", "msg", throttle: {2, :timer.seconds(60)})
+          end
+        end)
+
+      assert logs |> String.split("ThrottledWarning: msg") |> length() == 3
+      refute_receive {[:realtime, :channel, :error], _, _}
+    end
+
+    test "always returns {:error, reason} even when throttled" do
+      tenant_id = random_string()
+      socket = %{assigns: %{tenant: tenant_id, access_token: "test_token"}}
+
+      for _ <- 1..5 do
+        assert Logging.log_warning(socket, "ThrottledWarning", "msg", throttle: {1, :timer.seconds(60)}) ==
+                 {:error, %{reason: "ThrottledWarning: msg"}}
+      end
     end
   end
 
@@ -275,7 +328,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
           |> Stream.run()
         end)
 
-      assert logs |> String.split("ConcurrentCode: msg") |> length() <= 6
+      assert logs |> String.split("ConcurrentCode: msg") |> length() == 6
     end
   end
 end
