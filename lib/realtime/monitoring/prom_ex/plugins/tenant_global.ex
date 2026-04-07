@@ -124,7 +124,7 @@ defmodule Realtime.PromEx.Plugins.TenantGlobal do
         counter(
           [:realtime, :channel, :global, :error],
           event_name: [:realtime, :channel, :error],
-          measurement: :code,
+          measurement: :count,
           tags: [:code],
           description: "Global count of errors in Realtime channel initialization."
         )
