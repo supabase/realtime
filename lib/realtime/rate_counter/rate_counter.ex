@@ -57,7 +57,15 @@ defmodule Realtime.RateCounter do
                 value: integer(),
                 measurement: :sum | :avg,
                 triggered: boolean(),
-                log_fn: (-> term())
+                trigger_count: non_neg_integer(),
+                log_fn: (-> term()),
+                auto_suspend:
+                  false
+                  | %{
+                      tenant_id: String.t(),
+                      after_triggers: pos_integer(),
+                      duration_ms: pos_integer()
+                    }
               },
           telemetry:
             %{emit: false}
@@ -161,12 +169,27 @@ defmodule Realtime.RateCounter do
 
     limit =
       if limit_opts do
+        auto_suspend_opts = Keyword.get(limit_opts, :auto_suspend)
+
+        auto_suspend =
+          if auto_suspend_opts do
+            %{
+              tenant_id: Keyword.fetch!(auto_suspend_opts, :tenant_id),
+              after_triggers: Keyword.fetch!(auto_suspend_opts, :after_triggers),
+              duration_ms: Keyword.fetch!(auto_suspend_opts, :duration_ms)
+            }
+          else
+            false
+          end
+
         %{
           log: true,
           value: Keyword.fetch!(limit_opts, :value),
           measurement: Keyword.fetch!(limit_opts, :measurement),
           log_fn: Keyword.fetch!(limit_opts, :log_fn),
-          triggered: false
+          triggered: false,
+          trigger_count: 0,
+          auto_suspend: auto_suspend
         }
       else
         %{log: false}
@@ -261,11 +284,9 @@ defmodule Realtime.RateCounter do
   defp maybe_trigger_limit(%{limit: %{log: false}} = state), do: state
 
   defp maybe_trigger_limit(%{limit: %{triggered: true, measurement: measurement}} = state) do
-    # Limit has been triggered, but we need to check if it is still above the limit
     if Map.fetch!(state, measurement) < state.limit.value do
       %{state | limit: %{state.limit | triggered: false}}
     else
-      # Limit is still above the threshold, so we keep the state as is
       state
     end
   end
@@ -273,11 +294,35 @@ defmodule Realtime.RateCounter do
   defp maybe_trigger_limit(%{limit: %{measurement: measurement}} = state) do
     if Map.fetch!(state, measurement) >= state.limit.value do
       state.limit.log_fn.()
-
-      %{state | limit: %{state.limit | triggered: true}}
+      new_count = state.limit.trigger_count + 1
+      state = %{state | limit: %{state.limit | triggered: true, trigger_count: new_count}}
+      maybe_auto_suspend(state, new_count)
     else
       state
     end
+  end
+
+  defp maybe_auto_suspend(%{limit: %{auto_suspend: false}} = state, _count), do: state
+
+  defp maybe_auto_suspend(%{limit: %{auto_suspend: %{after_triggers: n}}} = state, count)
+       when count < n,
+       do: state
+
+  defp maybe_auto_suspend(
+         %{limit: %{auto_suspend: %{tenant_id: tenant_id, duration_ms: duration_ms}}} = state,
+         _count
+       ) do
+    Task.Supervisor.start_child(Realtime.TaskSupervisor, fn ->
+      case Realtime.Tenants.auto_suspend_tenant_by_external_id(tenant_id, duration_ms) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.error("AutoSuspend failed for #{tenant_id}: #{inspect(reason)}")
+      end
+    end)
+
+    %{state | limit: %{state.limit | trigger_count: 0}}
   end
 
   defp tick(every) do

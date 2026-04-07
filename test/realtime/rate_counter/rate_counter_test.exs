@@ -379,6 +379,113 @@ defmodule Realtime.RateCounterTest do
     end
   end
 
+  describe "auto_suspend in limit opts" do
+    test "trigger_count increments on each false→true transition" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      args = %Args{
+        id: id,
+        opts: [
+          tick: 50,
+          max_bucket_len: 3,
+          limit: [
+            value: 5,
+            measurement: :sum,
+            log_fn: fn -> :ok end,
+            auto_suspend: [
+              tenant_id: "test_tenant",
+              after_triggers: 10,
+              duration_ms: :timer.minutes(5)
+            ]
+          ]
+        ]
+      }
+
+      {:ok, _pid} = RateCounter.new(args)
+
+      # First trigger: add above threshold, wait for tick
+      GenCounter.add(id, 10)
+      Process.sleep(80)
+      assert {:ok, %RateCounter{limit: %{trigger_count: 1, triggered: true}}} = RateCounter.get(args)
+
+      # Drop below threshold to reset triggered flag
+      Process.sleep(200)
+      assert {:ok, %RateCounter{limit: %{trigger_count: 1, triggered: false}}} = RateCounter.get(args)
+
+      # Second trigger
+      GenCounter.add(id, 10)
+      Process.sleep(80)
+      assert {:ok, %RateCounter{limit: %{trigger_count: 2, triggered: true}}} = RateCounter.get(args)
+    end
+
+    test "trigger_count does not reset when measurement drops below threshold" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      args = %Args{
+        id: id,
+        opts: [
+          tick: 50,
+          max_bucket_len: 3,
+          limit: [
+            value: 5,
+            measurement: :sum,
+            log_fn: fn -> :ok end,
+            auto_suspend: [
+              tenant_id: "test_tenant",
+              after_triggers: 10,
+              duration_ms: :timer.minutes(5)
+            ]
+          ]
+        ]
+      }
+
+      {:ok, _pid} = RateCounter.new(args)
+
+      GenCounter.add(id, 10)
+      Process.sleep(80)
+      assert {:ok, %RateCounter{limit: %{trigger_count: 1}}} = RateCounter.get(args)
+
+      # Drop below threshold — trigger_count should stay at 1
+      Process.sleep(200)
+      assert {:ok, %RateCounter{limit: %{trigger_count: 1, triggered: false}}} = RateCounter.get(args)
+    end
+
+    test "trigger_count resets to 0 after auto_suspend fires" do
+      id = {:domain, :metric, Ecto.UUID.generate()}
+
+      args = %Args{
+        id: id,
+        opts: [
+          tick: 50,
+          max_bucket_len: 3,
+          limit: [
+            value: 5,
+            measurement: :sum,
+            log_fn: fn -> :ok end,
+            auto_suspend: [
+              tenant_id: "test_tenant",
+              after_triggers: 2,
+              duration_ms: :timer.minutes(5)
+            ]
+          ]
+        ]
+      }
+
+      {:ok, _pid} = RateCounter.new(args)
+
+      # First trigger
+      GenCounter.add(id, 10)
+      Process.sleep(80)
+      assert {:ok, %RateCounter{limit: %{trigger_count: 1}}} = RateCounter.get(args)
+      Process.sleep(200)
+
+      # Second trigger — fires auto_suspend, resets count
+      GenCounter.add(id, 10)
+      Process.sleep(80)
+      assert {:ok, %RateCounter{limit: %{trigger_count: 0}}} = RateCounter.get(args)
+    end
+  end
+
   describe "get/1" do
     test "gets the state of a rate counter" do
       args = %Args{id: {:domain, :metric, Ecto.UUID.generate()}}

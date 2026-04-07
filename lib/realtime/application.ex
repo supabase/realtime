@@ -154,12 +154,19 @@ defmodule Realtime.Application do
          permdown_period: presence_permdown_period}
       ] ++ extensions_supervisors() ++ janitor_tasks() ++ metrics_pusher_children() ++ zta_children
 
-    database_connections = if master_region == region, do: [Realtime.Repo], else: [Replica.replica()]
+    master_node_children =
+      if master_region == region do
+        [
+          Realtime.Repo,
+          {Realtime.Tenants.AutoUnsuspend,
+           check_interval_ms: Application.get_env(:realtime, :auto_unsuspend_check_interval_ms, :timer.minutes(1))}
+        ]
+      else
+        [Replica.replica()]
+      end
 
-    children = database_connections ++ children
+    children = master_node_children ++ children
 
-    # See https://hexdocs.pm/elixir/Supervisor.html
-    # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Realtime.Supervisor]
     Supervisor.start_link(children, opts)
   end

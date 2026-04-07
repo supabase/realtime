@@ -73,6 +73,7 @@ janitor_chunk_size = Env.get_integer("JANITOR_CHUNK_SIZE", 10)
 janitor_run_after_in_ms = Env.get_integer("JANITOR_RUN_AFTER_IN_MS", :timer.minutes(10))
 janitor_children_timeout = Env.get_integer("JANITOR_CHILDREN_TIMEOUT", :timer.seconds(5))
 janitor_schedule_timer = Env.get_integer("JANITOR_SCHEDULE_TIMER_IN_MS", :timer.hours(4))
+auto_unsuspend_check_interval_ms = Env.get_integer("AUTO_UNSUSPEND_CHECK_INTERVAL_MS", :timer.minutes(5))
 platform = if System.get_env("AWS_EXECUTION_ENV") == "AWS_ECS_FARGATE", do: :aws, else: :fly
 broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
 presence_pool_size = Env.get_integer("PRESENCE_POOL_SIZE", 10)
@@ -185,7 +186,8 @@ config :realtime,
   metrics_pusher_interval_ms: metrics_pusher_interval_ms,
   metrics_pusher_timeout_ms: metrics_pusher_timeout_ms,
   metrics_pusher_compress: metrics_pusher_compress,
-  metrics_pusher_extra_labels: metrics_pusher_extra_labels
+  metrics_pusher_extra_labels: metrics_pusher_extra_labels,
+  auto_unsuspend_check_interval_ms: auto_unsuspend_check_interval_ms
 
 if config_env() != :test && run_janitor? do
   config :realtime,

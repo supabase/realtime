@@ -74,6 +74,42 @@ defmodule Realtime.TenantsTest do
     end
   end
 
+  describe "auto_suspend_tenant_by_external_id/2" do
+    setup do
+      tenant = tenant_fixture()
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
+      %{tenant: tenant}
+    end
+
+    test "sets suspend flag to true, sets auto_unsuspend_at, and publishes message", %{tenant: tenant} do
+      duration_ms = :timer.minutes(5)
+      before = DateTime.utc_now()
+
+      {:ok, updated} = Tenants.auto_suspend_tenant_by_external_id(tenant.external_id, duration_ms)
+
+      assert updated.suspend == true
+      assert updated.auto_unsuspend_at != nil
+      assert DateTime.compare(updated.auto_unsuspend_at, before) == :gt
+      assert_receive :suspend_tenant, 500
+    end
+  end
+
+  describe "auto_unsuspend_tenant_by_external_id/1" do
+    setup do
+      tenant = tenant_fixture(%{suspend: true, auto_unsuspend_at: DateTime.utc_now()})
+      :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
+      %{tenant: tenant}
+    end
+
+    test "sets suspend flag to false, clears auto_unsuspend_at, and publishes message", %{tenant: tenant} do
+      {:ok, updated} = Tenants.auto_unsuspend_tenant_by_external_id(tenant.external_id)
+
+      assert updated.suspend == false
+      assert updated.auto_unsuspend_at == nil
+      assert_receive :unsuspend_tenant, 500
+    end
+  end
+
   describe "run_migrations?/1" do
     test "returns true if migrations_ran is lower than existing migrations" do
       tenant = tenant_fixture(%{migrations_ran: 0})

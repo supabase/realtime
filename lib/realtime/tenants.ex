@@ -380,7 +380,9 @@ defmodule Realtime.Tenants do
   @connect_errors_limit 3
   @connect_errors_tick 1000
   @connect_errors_bucket_len 5
-  @doc "RateCounter arguments for counting connect errors. Uses a 1s tick with a 5-bucket window (5s) and triggers after 3 errors."
+  @connect_errors_auto_suspend_after_triggers 10
+  @connect_errors_auto_suspend_duration_ms :timer.minutes(5)
+  @doc "RateCounter arguments for counting connect errors. Uses a 1s tick with a 5-bucket window (5s) and triggers after 3 errors. Auto-suspends after 10 triggers for 5 minutes."
   @spec connect_errors_per_second_rate(Tenant.t() | String.t()) :: RateCounter.Args.t()
   def connect_errors_per_second_rate(%Tenant{external_id: external_id}) do
     connect_errors_per_second_rate(external_id)
@@ -399,7 +401,12 @@ defmodule Realtime.Tenants do
             external_id: tenant_id,
             project: tenant_id
           )
-        end
+        end,
+        auto_suspend: [
+          tenant_id: tenant_id,
+          after_triggers: @connect_errors_auto_suspend_after_triggers,
+          duration_ms: @connect_errors_auto_suspend_duration_ms
+        ]
       ]
     ]
 
@@ -491,6 +498,42 @@ defmodule Realtime.Tenants do
     external_id
     |> Api.update_tenant_by_external_id(%{suspend: false})
     |> tap(fn _ -> broadcast_operation_event(:unsuspend_tenant, external_id) end)
+  end
+
+  @doc """
+  Suspends a tenant and schedules automatic unsuspension after `duration_ms` milliseconds.
+  """
+  @spec auto_suspend_tenant_by_external_id(String.t(), pos_integer()) ::
+          {:ok, Tenant.t()} | {:error, term()}
+  def auto_suspend_tenant_by_external_id(external_id, duration_ms) do
+    auto_unsuspend_at =
+      DateTime.utc_now()
+      |> DateTime.add(duration_ms, :millisecond)
+      |> DateTime.truncate(:microsecond)
+
+    case Api.update_tenant_by_external_id(external_id, %{suspend: true, auto_unsuspend_at: auto_unsuspend_at}) do
+      {:ok, tenant} ->
+        broadcast_operation_event(:suspend_tenant, external_id)
+        {:ok, tenant}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Clears an automatic suspension, unsuspending the tenant and resetting auto_unsuspend_at.
+  """
+  @spec auto_unsuspend_tenant_by_external_id(String.t()) :: {:ok, Tenant.t()} | {:error, term()}
+  def auto_unsuspend_tenant_by_external_id(external_id) do
+    case Api.update_tenant_by_external_id(external_id, %{suspend: false, auto_unsuspend_at: nil}) do
+      {:ok, tenant} ->
+        broadcast_operation_event(:unsuspend_tenant, external_id)
+        {:ok, tenant}
+
+      error ->
+        error
+    end
   end
 
   @doc """

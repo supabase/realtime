@@ -25,6 +25,7 @@ defmodule Realtime.Api.Tenant do
     field(:max_channels_per_client, :integer)
     field(:max_joins_per_second, :integer)
     field(:suspend, :boolean, default: false)
+    field(:auto_unsuspend_at, :utc_datetime_usec)
     field(:events_per_second_rolling, :float, virtual: true)
     field(:events_per_second_now, :integer, virtual: true)
     field(:private_only, :boolean, default: false)
@@ -77,6 +78,7 @@ defmodule Realtime.Api.Tenant do
       :max_presence_events_per_second,
       :max_payload_size_in_kb,
       :suspend,
+      :auto_unsuspend_at,
       :private_only,
       :migrations_ran,
       :broadcast_adapter,
