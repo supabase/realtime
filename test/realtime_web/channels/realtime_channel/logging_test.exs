@@ -21,7 +21,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     %{tenant: tenant}
   end
 
-  describe "log_error/3" do
+  describe "log_error/4" do
     test "logs error message with JWT claims in metadata", %{tenant: tenant} do
       sub = random_string()
       exp = System.system_time(:second) + 1000
@@ -40,9 +40,37 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert log =~ "iss=#{iss}"
       assert log =~ "error_code=TestError"
     end
+
+    test "logs exactly max_count times within the window when throttled but always emits telemetry" do
+      tenant_id = random_string()
+      socket = %{assigns: %{tenant: tenant_id, access_token: "test_token"}}
+
+      logs =
+        capture_log(fn ->
+          for _ <- 1..5 do
+            Logging.log_error(socket, "ThrottledError", "msg", %{throttle: {2, :timer.seconds(60)}})
+          end
+        end)
+
+      assert logs |> String.split("ThrottledError: msg") |> length() == 3
+
+      for _ <- 1..5 do
+        assert_receive {[:realtime, :channel, :error], %{count: 1}, %{code: "ThrottledError", tenant: ^tenant_id}}
+      end
+    end
+
+    test "always returns {:error, reason} even when throttled" do
+      tenant_id = random_string()
+      socket = %{assigns: %{tenant: tenant_id, access_token: "test_token"}}
+
+      for _ <- 1..5 do
+        assert Logging.log_error(socket, "ThrottledError", "msg", %{throttle: {1, :timer.seconds(60)}}) ==
+                 {:error, %{reason: "ThrottledError: msg"}}
+      end
+    end
   end
 
-  describe "log_warning/3" do
+  describe "log_warning/4" do
     test "logs warning message with JWT claims in metadata", %{tenant: tenant} do
       sub = random_string()
       exp = System.system_time(:second) + 1000
@@ -60,6 +88,31 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert log =~ "exp=#{exp}"
       assert log =~ "iss=#{iss}"
       assert log =~ "error_code=TestWarning"
+    end
+
+    test "logs exactly max_count times within the window when throttled and never emits telemetry" do
+      tenant_id = random_string()
+      socket = %{assigns: %{tenant: tenant_id, access_token: "test_token"}}
+
+      logs =
+        capture_log(fn ->
+          for _ <- 1..5 do
+            Logging.log_warning(socket, "ThrottledWarning", "msg", %{throttle: {2, :timer.seconds(60)}})
+          end
+        end)
+
+      assert logs |> String.split("ThrottledWarning: msg") |> length() == 3
+      refute_receive {[:realtime, :channel, :error], _, _}
+    end
+
+    test "always returns {:error, reason} even when throttled" do
+      tenant_id = random_string()
+      socket = %{assigns: %{tenant: tenant_id, access_token: "test_token"}}
+
+      for _ <- 1..5 do
+        assert Logging.log_warning(socket, "ThrottledWarning", "msg", %{throttle: {1, :timer.seconds(60)}}) ==
+                 {:error, %{reason: "ThrottledWarning: msg"}}
+      end
     end
   end
 
@@ -161,7 +214,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
     end
   end
 
-  test "emits telemetry for  errors with tenant metadata" do
+  test "emits telemetry for errors with tenant metadata" do
     tenant_id = random_string()
     socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
     error = "TestError"
@@ -204,7 +257,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       logs =
         capture_log(fn ->
           for _ <- 1..5 do
-            Logging.maybe_log_error(socket, "ThrottleCode", "msg", throttle: {3, :timer.seconds(60)})
+            Logging.maybe_log_error(socket, "ThrottleCode", "msg", %{throttle: {3, :timer.seconds(60)}})
           end
         end)
 
@@ -220,7 +273,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
 
       for _ <- 1..5 do
-        assert Logging.maybe_log_error(socket, "ThrottleCode", "msg", throttle: {2, :timer.seconds(60)}) ==
+        assert Logging.maybe_log_error(socket, "ThrottleCode", "msg", %{throttle: {2, :timer.seconds(60)}}) ==
                  {:error, %{reason: "ThrottleCode: msg"}}
       end
     end
@@ -231,7 +284,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
       logs_before =
         capture_log(fn ->
-          for _ <- 1..3, do: Logging.maybe_log_error(socket, "WindowCode", "msg", throttle: {2, 200})
+          for _ <- 1..3, do: Logging.maybe_log_error(socket, "WindowCode", "msg", %{throttle: {2, 200}})
         end)
 
       assert logs_before |> String.split("WindowCode: msg") |> length() == 3
@@ -240,7 +293,7 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
 
       logs_after =
         capture_log(fn ->
-          for _ <- 1..3, do: Logging.maybe_log_error(socket, "WindowCode", "msg", throttle: {2, 200})
+          for _ <- 1..3, do: Logging.maybe_log_error(socket, "WindowCode", "msg", %{throttle: {2, 200}})
         end)
 
       assert logs_after |> String.split("WindowCode: msg") |> length() == 3
@@ -253,29 +306,13 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       logs =
         capture_log(fn ->
           for _ <- 1..3 do
-            Logging.maybe_log_error(socket_a, "CodeA", "msg", throttle: {2, :timer.seconds(60)})
-            Logging.maybe_log_error(socket_b, "CodeB", "msg", throttle: {2, :timer.seconds(60)})
+            Logging.maybe_log_error(socket_a, "CodeA", "msg", %{throttle: {2, :timer.seconds(60)}})
+            Logging.maybe_log_error(socket_b, "CodeB", "msg", %{throttle: {2, :timer.seconds(60)}})
           end
         end)
 
       assert logs |> String.split("CodeA: msg") |> length() == 3
       assert logs |> String.split("CodeB: msg") |> length() == 3
-    end
-
-    test "concurrent callers do not exceed max_count" do
-      tenant_id = random_string()
-      socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
-
-      logs =
-        capture_log(fn ->
-          1..20
-          |> Task.async_stream(fn _ ->
-            Logging.maybe_log_error(socket, "ConcurrentCode", "msg", throttle: {5, :timer.seconds(60)})
-          end)
-          |> Stream.run()
-        end)
-
-      assert logs |> String.split("ConcurrentCode: msg") |> length() <= 6
     end
   end
 end

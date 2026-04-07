@@ -16,23 +16,23 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   @doc """
   Logs an error message
   """
-  @spec log_error(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any()) ::
+  @spec log_error(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any(), opts :: map()) ::
           {:error, %{reason: binary}}
-  def log_error(socket, code, msg) do
-    msg = build_msg(code, msg)
-    log(socket, :error, code, msg)
-    {:error, %{reason: msg}}
+  def log_error(socket, code, msg, opts \\ %{}) do
+    built_msg = build_msg(code, msg)
+    do_log(socket, :error, code, built_msg, opts)
+    {:error, %{reason: built_msg}}
   end
 
   @doc """
   Logs a warning message
   """
-  @spec log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any()) ::
+  @spec log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any(), opts :: map()) ::
           {:error, %{reason: binary}}
-  def log_warning(socket, code, msg) do
-    msg = build_msg(code, msg)
-    log(socket, :warning, code, msg)
-    {:error, %{reason: msg}}
+  def log_warning(socket, code, msg, opts \\ %{}) do
+    built_msg = build_msg(code, msg)
+    do_log(socket, :warning, code, built_msg, opts)
+    {:error, %{reason: built_msg}}
   end
 
   @doc """
@@ -41,9 +41,9 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   Accepts an optional `throttle: {max_count, window_ms}` option to limit
   how many times the log is emitted per tenant+code within the given time window.
   """
-  @spec maybe_log_error(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any(), opts :: keyword()) ::
+  @spec maybe_log_error(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any(), opts :: map()) ::
           {:error, %{reason: binary}}
-  def maybe_log_error(socket, code, msg, opts \\ []), do: maybe_log(socket, :error, code, msg, opts)
+  def maybe_log_error(socket, code, msg, opts \\ %{}), do: maybe_log(socket, :error, code, msg, opts)
 
   @doc """
   Logs a warning if the log level is set to warning.
@@ -51,15 +51,15 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
   Accepts an optional `throttle: {max_count, window_ms}` option to limit
   how many times the log is emitted per tenant+code within the given time window.
   """
-  @spec maybe_log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any(), opts :: keyword()) ::
+  @spec maybe_log_warning(socket :: Phoenix.Socket.t(), code :: binary(), msg :: any(), opts :: map()) ::
           {:error, %{reason: binary}}
-  def maybe_log_warning(socket, code, msg, opts \\ []), do: maybe_log(socket, :warning, code, msg, opts)
+  def maybe_log_warning(socket, code, msg, opts \\ %{}), do: maybe_log(socket, :warning, code, msg, opts)
 
   @doc """
   Logs an info if the log level is set to info.
   """
   @spec maybe_log_info(socket :: Phoenix.Socket.t(), msg :: any()) :: :ok
-  def maybe_log_info(socket, msg), do: maybe_log(socket, :info, nil, msg, [])
+  def maybe_log_info(socket, msg), do: maybe_log(socket, :info, nil, msg, %{})
 
   defp build_msg(nil, msg), do: stringify!(msg)
   defp build_msg(code, msg), do: "#{code}: #{stringify!(msg)}"
@@ -72,25 +72,13 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
     emit_telemetry(level, code, tenant)
   end
 
-  defp enrich_metadata(level, token) when level in [:error, :warning],
-    do: update_metadata_with_token_claims(token)
-
-  defp enrich_metadata(_level, _token), do: :ok
-
-  defp emit_telemetry(:error, code, tenant),
-    do: Telemetry.execute([:realtime, :channel, :error], %{count: 1}, %{code: code, tenant: tenant})
-
-  defp emit_telemetry(_level, _code, _tenant), do: :ok
-
   defp maybe_log(%{assigns: %{log_level: log_level}} = socket, level, code, msg, opts) do
     built_msg = build_msg(code, msg)
     if Logger.compare_levels(log_level, level) != :gt, do: do_log(socket, level, code, built_msg, opts)
     if level in [:error, :warning], do: {:error, %{reason: built_msg}}, else: :ok
   end
 
-  defp do_log(socket, level, code, msg, []), do: log(socket, level, code, msg)
-
-  defp do_log(%{assigns: %{tenant: tenant}} = socket, level, code, msg, throttle: {max_count, window_ms}) do
+  defp do_log(%{assigns: %{tenant: tenant}} = socket, level, code, msg, %{throttle: {max_count, window_ms}}) do
     key = {tenant, level, code}
 
     case Cachex.get(Realtime.LogThrottle, key) do
@@ -98,7 +86,7 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
         Cachex.put(Realtime.LogThrottle, key, 1, expire: window_ms)
         log(socket, level, code, msg)
 
-      {:ok, count} when count < max_count ->
+      {:ok, n} when n < max_count ->
         Cachex.incr(Realtime.LogThrottle, key)
         log(socket, level, code, msg)
 
@@ -106,6 +94,8 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
         emit_telemetry(level, code, tenant)
     end
   end
+
+  defp do_log(socket, level, code, msg, %{}), do: log(socket, level, code, msg)
 
   defp stringify!(msg) when is_binary(msg), do: msg
   defp stringify!(msg), do: inspect(msg, pretty: true)
@@ -118,4 +108,14 @@ defmodule RealtimeWeb.RealtimeChannel.Logging do
       _ -> :ok
     end
   end
+
+  defp enrich_metadata(level, token) when level in [:error, :warning],
+    do: update_metadata_with_token_claims(token)
+
+  defp enrich_metadata(_level, _token), do: :ok
+
+  defp emit_telemetry(:error, code, tenant),
+    do: Telemetry.execute([:realtime, :channel, :error], %{count: 1}, %{code: code, tenant: tenant})
+
+  defp emit_telemetry(_level, _code, _tenant), do: :ok
 end
