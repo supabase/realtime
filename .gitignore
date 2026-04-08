@@ -31,5 +31,6 @@ node_modules
 .supabase
 config/prod.secret.exs
 demo/.env
+examples/realtime-jsonb-filter-mre/.env
 .lexical
 .vscode
