@@ -1,0 +1,13 @@
+{
+  "name": "supabase-realtime-jsonb-filter-fix",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node verify-fix.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
+    "dotenv": "^16.4.5"
+  }
+}
