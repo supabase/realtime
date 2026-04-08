@@ -149,10 +149,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
       assert slot_changes_count == 1
     end
 
-    test "slot has changes but subscriber does not match the INSERT: returns only the sentinel row with slot_changes_count of 1", %{
-      conn: conn,
-      tenant: tenant
-    } do
+    test "slot has changes but subscriber does not match the INSERT: returns only the sentinel row with slot_changes_count of 1",
+         %{
+           conn: conn,
+           tenant: tenant
+         } do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
       drop_slot_on_exit(tenant, slot_name)
 
