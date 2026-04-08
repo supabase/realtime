@@ -83,6 +83,7 @@ users_scope_shards = Env.get_integer("USERS_SCOPE_SHARDS", 5)
 postgres_cdc_scope_shards = Env.get_integer("POSTGRES_CDC_SCOPE_SHARDS", 5)
 no_channel_timeout_in_ms = Env.get_integer("NO_CHANNEL_TIMEOUT_IN_MS", :timer.minutes(10))
 measure_traffic_interval_in_ms = Env.get_integer("MEASURE_TRAFFIC_INTERVAL_IN_MS", :timer.seconds(10))
+connect_error_backoff_ms = Env.get_integer("CONNECT_ERROR_BACKOFF_MS", :timer.seconds(2))
 metrics_pusher_enabled = Env.get_boolean("METRICS_PUSHER_ENABLED", false)
 metrics_pusher_url = System.get_env("METRICS_PUSHER_URL")
 metrics_pusher_user = System.get_env("METRICS_PUSHER_USER", "realtime")
@@ -172,6 +173,7 @@ config :realtime,
   region_mapping: region_mapping,
   metrics_tags: metrics_tags,
   measure_traffic_interval_in_ms: measure_traffic_interval_in_ms,
+  connect_error_backoff_ms: connect_error_backoff_ms,
   client_presence_rate_limit: [
     max_calls: client_presence_max_calls,
     window_ms: client_presence_window_ms

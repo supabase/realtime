@@ -105,38 +105,38 @@ defmodule RealtimeWeb.UserSocket do
     else
       nil ->
         log_error("TenantNotFound", "Tenant not found: #{external_id}")
-        {:error, :tenant_not_found}
+        connect_error(:tenant_not_found)
 
       %Tenant{suspend: true} ->
         Logging.log_error(socket, "RealtimeDisabledForTenant", "Realtime disabled for this tenant")
-        {:error, :tenant_suspended}
+        connect_error(:tenant_suspended)
 
       {:error, :expired_token, msg} ->
         Logging.maybe_log_warning(socket, "InvalidJWTToken", msg)
-        {:error, :expired_token}
+        connect_error(:expired_token)
 
       {:error, :missing_claims} ->
         msg = "Fields `role` and `exp` are required in JWT"
         Logging.maybe_log_warning(socket, "InvalidJWTToken", msg)
-        {:error, :missing_claims}
+        connect_error(:missing_claims)
 
       {:error, :token_malformed} ->
         log_error("MalformedJWT", "The token provided is not a valid JWT")
-        {:error, :token_malformed}
+        connect_error(:token_malformed)
 
       {:error, :too_many_connections} ->
         msg = "Too many connected users"
         Logging.log_error(socket, "ConnectionRateLimitReached", msg)
-        {:error, :too_many_connections}
+        connect_error(:too_many_connections)
 
       {:error, :too_many_joins} ->
         msg = "Too many joins per second"
         Logging.log_error(socket, "JoinsRateLimitReached", msg)
-        {:error, :too_many_joins}
+        connect_error(:too_many_joins)
 
       error ->
         log_error("ErrorConnectingToWebsocket", error)
-        {:error, error}
+        connect_error(error)
     end
   end
 
@@ -154,8 +154,14 @@ defmodule RealtimeWeb.UserSocket do
     end
   end
 
+  defp connect_error(reason) do
+    Process.sleep(connect_error_backoff_ms())
+    {:error, reason}
+  end
+
   defp max_heap_size(), do: :persistent_term.get({__MODULE__, :websocket_max_heap_size})
   defp measure_traffic_interval_in_ms(), do: :persistent_term.get({__MODULE__, :measure_traffic_interval_in_ms})
+  defp connect_error_backoff_ms(), do: :persistent_term.get({__MODULE__, :connect_error_backoff_ms})
 
   defp collect_traffic_telemetry(nil, _tenant_external_id, previous_recv, previous_send),
     do: %{latest_recv: previous_recv, latest_send: previous_send}
