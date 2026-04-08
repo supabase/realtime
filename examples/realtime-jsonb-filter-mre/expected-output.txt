@@ -1,3 +1,6 @@
+NOTE:
+This output assumes migration.sql has already been applied.
+
 [SETUP] Supabase Realtime JSONB Filter MRE
 [SETUP] Realtime filter used: organization_id=eq.org_123
 [subscription] status: SUBSCRIBED

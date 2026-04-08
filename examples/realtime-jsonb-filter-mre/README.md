@@ -10,6 +10,24 @@ When filtering on a JSONB field expression like `data->>organization_id`, events
 ### Actual Behavior
 No events are received. The filter is silently ignored or rejected because Realtime does not evaluate SQL expressions.
 
+## Setup Required
+
+Before running the demo, you MUST apply the database migration.
+
+Steps:
+1. Open Supabase dashboard
+2. Confirm the project URL matches the `[DEBUG] SUPABASE_URL` printed by the demo
+3. Go to SQL Editor
+4. Copy contents of migration.sql
+5. Run it
+6. Go to Project Settings → API → Exposed schemas and add `pgboss`
+
+If not applied, you will see:
+
+```text
+[ERROR] Database schema not found
+```
+
 ## Reproduction Steps
 
 1. **Clone and setup:**
