@@ -8,7 +8,7 @@
     "start": "node run-demo.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.8",
+    "@supabase/supabase-js": "2.49.8",
     "dotenv": "^16.4.5"
   }
 }
