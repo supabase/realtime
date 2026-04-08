@@ -3,6 +3,7 @@ This output assumes migration.sql has already been applied.
 
 [SETUP] Supabase Realtime JSONB Filter MRE
 [SETUP] Realtime filter used: organization_id=eq.org_123
+[DEBUG] SUPABASE_URL = https://your-project.supabase.co
 [subscription] status: SUBSCRIBED
 [SUBSCRIBED] Ready to receive events
 [INSERT] Creating job with JSONB data: { organization_id: "org_123" }
