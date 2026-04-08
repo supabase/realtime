@@ -82,7 +82,8 @@ defmodule Extensions.PostgresCdcRls.Replications do
              COALESCE(wal->>'old_record', '{}') as old_record,
              wal->>'commit_timestamp' as commit_timestamp,
              subscription_ids,
-             errors
+             errors,
+             slot_changes_count
       FROM realtime.list_changes($1, $2, $3, $4)
       """,
       [

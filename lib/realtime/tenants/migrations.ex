@@ -82,7 +82,8 @@ defmodule Realtime.Tenants.Migrations do
     BroadcastSendIncludePayloadId,
     AddActionToSubscriptions,
     FilterActionPostgresChanges,
-    FixByteaDoubleEncodingInCast
+    FixByteaDoubleEncodingInCast,
+    ListChangesWithSlotCount
   }
 
   @migrations [
@@ -153,7 +154,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_251_103_001_201, BroadcastSendIncludePayloadId},
     {20_251_120_212_548, AddActionToSubscriptions},
     {20_251_120_215_549, FilterActionPostgresChanges},
-    {20_260_218_120_000, FixByteaDoubleEncodingInCast}
+    {20_260_218_120_000, FixByteaDoubleEncodingInCast},
+    {20_260_326_120_000, ListChangesWithSlotCount}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]

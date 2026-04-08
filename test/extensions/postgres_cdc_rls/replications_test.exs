@@ -2,6 +2,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
   use Realtime.DataCase, async: false
 
   alias Extensions.PostgresCdcRls.Replications
+  alias Extensions.PostgresCdcRls.Subscriptions
   alias Realtime.Database
 
   setup do
@@ -89,14 +90,113 @@ defmodule Extensions.PostgresCdcRls.ReplicationsTest do
   end
 
   describe "list_changes/5" do
-    test "returns empty result when no changes", %{conn: conn, tenant: tenant} do
+    @publication "supabase_realtime_test"
+
+    test "slot empty: returns only the sentinel row with slot_changes_count of 0", %{conn: conn, tenant: tenant} do
       slot_name = "test_slot_#{System.unique_integer([:positive])}"
       drop_slot_on_exit(tenant, slot_name)
 
       {:ok, _} = Replications.prepare_replication(conn, slot_name)
 
-      assert {:ok, %Postgrex.Result{}} =
-               Replications.list_changes(conn, slot_name, "supabase_realtime_test", 100, 1_048_576)
+      assert {:ok, %Postgrex.Result{rows: rows}} =
+               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      assert [sentinel] = rows
+      [nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, slot_changes_count] = sentinel
+      assert slot_changes_count == 0
+    end
+
+    test "slot has changes visible to subscriber: returns real row and slot_changes_count of 1", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      drop_slot_on_exit(tenant, slot_name)
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"event" => "*", "schema" => "public", "table" => "test"})
+
+      Subscriptions.create(
+        conn,
+        @publication,
+        [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}],
+        self(),
+        self()
+      )
+
+      {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+      Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('hello')", [])
+
+      assert {:ok, %Postgrex.Result{rows: rows}} =
+               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      assert [row] = rows
+
+      assert [
+               "INSERT",
+               "public",
+               "test",
+               _columns,
+               _record,
+               _old_record,
+               _commit_timestamp,
+               _sub_ids,
+               _errors,
+               slot_changes_count
+             ] = row
+
+      assert slot_changes_count == 1
+    end
+
+    test "slot has changes but subscriber does not match the INSERT: returns only the sentinel row with slot_changes_count of 1",
+         %{
+           conn: conn,
+           tenant: tenant
+         } do
+      slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      drop_slot_on_exit(tenant, slot_name)
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"event" => "UPDATE", "schema" => "public", "table" => "test"})
+
+      Subscriptions.create(
+        conn,
+        @publication,
+        [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}],
+        self(),
+        self()
+      )
+
+      {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+      Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('hello')", [])
+
+      assert {:ok, %Postgrex.Result{rows: rows}} =
+               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      assert [sentinel] = rows
+      [nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, slot_changes_count] = sentinel
+      assert slot_changes_count == 1
+    end
+
+    test "slot has changes but no subscribers: returns only the sentinel row with slot_changes_count of 1", %{
+      conn: conn,
+      tenant: tenant
+    } do
+      slot_name = "test_slot_#{System.unique_integer([:positive])}"
+      drop_slot_on_exit(tenant, slot_name)
+
+      {:ok, _} = Replications.prepare_replication(conn, slot_name)
+
+      Postgrex.query!(conn, "INSERT INTO public.test (details) VALUES ('hello'), ('hithere')", [])
+
+      assert {:ok, %Postgrex.Result{rows: rows}} =
+               Replications.list_changes(conn, slot_name, @publication, 100, 1_048_576)
+
+      assert [sentinel] = rows
+      [nil, nil, nil, "[]", "{}", "{}", nil, nil, nil, slot_changes_count] = sentinel
+      assert slot_changes_count == 2
     end
   end
 end

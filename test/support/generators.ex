@@ -23,7 +23,7 @@ defmodule Generators do
             "db_user" => "supabase_admin",
             "db_password" => "postgres",
             "db_port" => "#{override[:port] || port()}",
-            "poll_interval" => 100,
+            "poll_interval_ms" => 10,
             "poll_max_changes" => 100,
             "poll_max_record_bytes" => 1_048_576,
             "region" => "us-east-1",
