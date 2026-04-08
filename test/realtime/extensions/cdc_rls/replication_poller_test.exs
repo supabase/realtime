@@ -418,7 +418,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", nil},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", []}
+        {"errors", []},
+        {"slot_changes_count", 1}
       ]
 
       assert %NewRecord{
@@ -447,7 +448,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", Jason.encode!(@old_record)},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", []}
+        {"errors", []},
+        {"slot_changes_count", 1}
       ]
 
       assert %UpdatedRecord{
@@ -478,7 +480,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", Jason.encode!(@old_record)},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", []}
+        {"errors", []},
+        {"slot_changes_count", 1}
       ]
 
       assert %DeletedRecord{
@@ -507,7 +510,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", nil},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error 413: Payload Too Large"]}
+        {"errors", ["Error 413: Payload Too Large"]},
+        {"slot_changes_count", 1}
       ]
 
       assert %NewRecord{
@@ -536,7 +540,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", nil},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error..."]}
+        {"errors", ["Error..."]},
+        {"slot_changes_count", 1}
       ]
 
       assert %NewRecord{
@@ -565,7 +570,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", Jason.encode!(@old_record)},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error 413: Payload Too Large"]}
+        {"errors", ["Error 413: Payload Too Large"]},
+        {"slot_changes_count", 1}
       ]
 
       assert %UpdatedRecord{
@@ -596,7 +602,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", Jason.encode!(@old_record)},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error..."]}
+        {"errors", ["Error..."]},
+        {"slot_changes_count", 1}
       ]
 
       assert %UpdatedRecord{
@@ -627,7 +634,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", Jason.encode!(@old_record)},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error 413: Payload Too Large"]}
+        {"errors", ["Error 413: Payload Too Large"]},
+        {"slot_changes_count", 1}
       ]
 
       assert %DeletedRecord{
@@ -656,7 +664,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", Jason.encode!(@old_record)},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error..."]}
+        {"errors", ["Error..."]},
+        {"slot_changes_count", 1}
       ]
 
       assert %DeletedRecord{
@@ -687,7 +696,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", nil},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", []}
+        {"errors", []},
+        {"slot_changes_count", 1}
       ]
 
       record = generate_record(wal_record)
@@ -709,7 +719,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", Jason.encode!(@old_record)},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", []}
+        {"errors", []},
+        {"slot_changes_count", 1}
       ]
 
       record = generate_record(wal_record)
@@ -729,7 +740,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
         {"old_record", Jason.encode!(@old_record)},
         {"commit_timestamp", @ts},
         {"subscription_ids", [@subscription_id]},
-        {"errors", []}
+        {"errors", []},
+        {"slot_changes_count", 1}
       ]
 
       record = generate_record(wal_record)
@@ -808,7 +820,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
          "old_record",
          "commit_timestamp",
          "subscription_ids",
-         "errors"
+         "errors",
+         "slot_changes_count"
        ],
        rows: [
          [
@@ -820,7 +833,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
            nil,
            "2025-10-13T07:50:28.066Z",
            subscription_ids,
-           []
+           [],
+           1
          ]
        ],
        num_rows: 1,

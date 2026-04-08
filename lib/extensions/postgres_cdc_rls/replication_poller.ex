@@ -7,6 +7,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   use GenServer
   use Realtime.Logs
 
+  @idle_multiplier 5
+
   import Realtime.Helpers
 
   alias DBConnection.Backoff
@@ -100,16 +102,21 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     record_list_changes_telemetry(time, tenant_id)
 
     case handle_list_changes_result(list_changes, subscribers_nodes_table, tenant_id, rate_counter_args) do
-      {:ok, row_count} ->
-        Backoff.reset(backoff)
+      {:ok, {processed_count, slot_changes_count}} ->
+        backoff = Backoff.reset(backoff)
 
         pool_ref =
-          if row_count > 0 do
-            send(self(), :poll)
-            nil
-          else
-            jitter = Enum.random(50..100)
-            Process.send_after(self(), :poll, poll_interval_ms + jitter)
+          cond do
+            processed_count > 0 ->
+              send(self(), :poll)
+              nil
+
+            slot_changes_count > 0 ->
+              jitter = Enum.random(50..100)
+              Process.send_after(self(), :poll, poll_interval_ms + jitter)
+
+            true ->
+              Process.send_after(self(), :poll, poll_interval_ms * @idle_multiplier)
           end
 
         {:noreply, %{state | backoff: backoff, poll_ref: pool_ref}}
@@ -194,19 +201,30 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
          {:ok,
           %Postgrex.Result{
             columns: columns,
-            rows: [_ | _] = rows,
-            num_rows: rows_count
+            rows: [_ | _] = rows
           }},
          subscribers_nodes_table,
          tenant_id,
          rate_counter_args
        ) do
+    # The DB function always returns at least one row (sentinel row with wal=null).
+    # All rows carry the same slot_changes_count in the last column.
+    slot_changes_count = rows |> List.first() |> List.last()
+
+    # The sentinel only appears when there are no real rows (see list_changes SQL).
+    # So either all rows are real, or the sole row is the sentinel — check once.
+    real_rows =
+      case rows do
+        [[nil | _] | _] -> []
+        _ -> rows
+      end
+
     case RateCounter.get(rate_counter_args) do
       {:ok, %{limit: %{triggered: true}}} ->
         :ok
 
       _ ->
-        for row <- rows,
+        for row <- real_rows,
             change <- columns |> Enum.zip(row) |> generate_record() |> List.wrap() do
           topic = "realtime:postgres:" <> tenant_id
 
@@ -240,10 +258,10 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         end
     end
 
-    {:ok, rows_count}
+    {:ok, {length(real_rows), slot_changes_count}}
   end
 
-  defp handle_list_changes_result({:ok, _}, _, _, _), do: {:ok, 0}
+  defp handle_list_changes_result({:ok, _}, _, _, _), do: {:ok, {0, 0}}
   defp handle_list_changes_result({:error, reason}, _, _, _), do: {:error, reason}
 
   defp collect_subscription_nodes(subscribers_nodes_table, subscription_ids) do
@@ -272,7 +290,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         {"old_record", _},
         {"commit_timestamp", commit_timestamp},
         {"subscription_ids", subscription_ids},
-        {"errors", errors}
+        {"errors", errors},
+        {"slot_changes_count", _}
       ])
       when is_list(subscription_ids) do
     %NewRecord{
@@ -296,7 +315,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         {"old_record", old_record},
         {"commit_timestamp", commit_timestamp},
         {"subscription_ids", subscription_ids},
-        {"errors", errors}
+        {"errors", errors},
+        {"slot_changes_count", _}
       ])
       when is_list(subscription_ids) do
     %UpdatedRecord{
@@ -321,7 +341,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         {"old_record", old_record},
         {"commit_timestamp", commit_timestamp},
         {"subscription_ids", subscription_ids},
-        {"errors", errors}
+        {"errors", errors},
+        {"slot_changes_count", _}
       ])
       when is_list(subscription_ids) do
     %DeletedRecord{
