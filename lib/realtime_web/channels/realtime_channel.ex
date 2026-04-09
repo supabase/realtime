@@ -35,7 +35,9 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   @impl true
   def join("realtime:", _params, socket) do
-    log_error(socket, "TopicNameRequired", "You must provide a topic name")
+    socket
+    |> log_error("TopicNameRequired", "You must provide a topic name")
+    |> join_error()
   end
 
   def join("realtime:" <> sub_topic = topic, params, socket) do
@@ -244,6 +246,11 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "UnknownErrorOnChannel", error)
         {:error, %{reason: "Unknown Error on Channel"}}
     end
+    |> join_error()
+  rescue
+    e ->
+      log_error(socket, "UnknownErrorOnChannel", Exception.message(e))
+      |> join_error()
   end
 
   @impl true
@@ -890,4 +897,13 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   defp max_heap_size(), do: :persistent_term.get({RealtimeWeb.UserSocket, :websocket_max_heap_size})
+
+  defp join_error({:error, _} = error) do
+    Process.sleep(channel_error_backoff_ms())
+    error
+  end
+
+  defp join_error(other), do: other
+
+  defp channel_error_backoff_ms(), do: :persistent_term.get({__MODULE__, :channel_error_backoff_ms})
 end
