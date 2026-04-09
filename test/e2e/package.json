@@ -2,7 +2,7 @@
   "name": "realtime-check",
   "version": "0.0.1",
   "dependencies": {
-    "@supabase/supabase-js": "2.102.1",
+    "@supabase/supabase-js": "2.103.0",
     "cli-table3": "^0.6.5",
     "commander": "^12.1.0",
     "kleur": "^4.1.5"
