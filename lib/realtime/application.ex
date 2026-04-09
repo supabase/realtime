@@ -147,6 +147,7 @@ defmodule Realtime.Application do
         {RealtimeWeb.RealtimeChannel.Tracker, check_interval_in_ms: no_channel_timeout_in_ms},
         RealtimeWeb.Endpoint,
         {RealtimeWeb.Presence,
+         log_level: :info,
          pool_size: presence_pool_size,
          broadcast_period: presence_broadcast_period,
          permdown_period: presence_permdown_period}
