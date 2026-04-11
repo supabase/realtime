@@ -351,6 +351,25 @@ if config_env() == :prod do
   secret_key_base = System.fetch_env!("SECRET_KEY_BASE")
   if app_name == "", do: raise("APP_NAME not available")
 
+  realtime_ip_version =
+    case System.get_env("REALTIME_IP_VERSION") do
+      "ipv6" ->
+        :inet6
+
+      "ipv4" ->
+        :inet
+
+      _ ->
+        case :gen_tcp.listen(0, [:inet6]) do
+          {:ok, socket} ->
+            :gen_tcp.close(socket)
+            :inet6
+
+          {:error, _} ->
+            :inet
+        end
+    end
+
   config :realtime, RealtimeWeb.Endpoint,
     server: true,
     url: [host: "#{app_name}.supabase.co", port: 443],
@@ -363,7 +382,7 @@ if config_env() == :prod do
       transport_options: [
         max_connections: Env.get_integer("MAX_CONNECTIONS", 1000),
         num_acceptors: Env.get_integer("NUM_ACCEPTORS", 100),
-        socket_opts: [:inet6]
+        socket_opts: [realtime_ip_version]
       ]
     ],
     check_origin: false,
