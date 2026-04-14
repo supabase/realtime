@@ -8,15 +8,17 @@ defmodule Containers do
   use GenServer
 
   @image "supabase/postgres:17.6.1.074"
+  def image(), do: System.get_env("POSTGRES_IMAGE", @image)
+
   # Pull image if not available
   def pull do
-    case System.cmd("docker", ["image", "inspect", @image]) do
+    case System.cmd("docker", ["image", "inspect", image()]) do
       {_, 0} ->
         :ok
 
       _ ->
-        IO.puts("Pulling image #{@image}. This might take a while...")
-        {_, 0} = System.cmd("docker", ["pull", @image])
+        IO.puts("Pulling image #{image()}. This might take a while...")
+        {_, 0} = System.cmd("docker", ["pull", image()])
     end
   end
 
@@ -295,7 +297,7 @@ defmodule Containers do
         "POSTGRES_PASSWORD=postgres",
         "-p",
         "#{port}:5432",
-        @image,
+        image(),
         "postgres",
         "-c",
         "config_file=/etc/postgresql/postgresql.conf",
