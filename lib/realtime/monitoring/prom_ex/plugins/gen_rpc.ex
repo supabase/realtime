@@ -36,28 +36,28 @@ defmodule Realtime.PromEx.Plugins.GenRpc do
           measurement: :size,
           tags: [:origin_node, :target_node]
         ),
-        last_value(
+        sum(
           [:gen_rpc, :recv_bytes],
           event_name: @event_recv_bytes,
           description: "Number of bytes received by the socket.",
           measurement: :size,
           tags: [:origin_node, :target_node]
         ),
-        last_value(
+        sum(
           [:gen_rpc, :recv_count],
           event_name: @event_recv_count,
           description: "Number of packets received by the socket.",
           measurement: :size,
           tags: [:origin_node, :target_node]
         ),
-        last_value(
+        sum(
           [:gen_rpc, :send_bytes],
           event_name: @event_send_bytes,
           description: "Number of bytes sent by the socket.",
           measurement: :size,
           tags: [:origin_node, :target_node]
         ),
-        last_value(
+        sum(
           [:gen_rpc, :send_count],
           event_name: @event_send_count,
           description: "Number of packets sent by the socket.",
@@ -86,13 +86,14 @@ defmodule Realtime.PromEx.Plugins.GenRpc do
   end
 
   defp execute_inet_stats(node, info) do
+    if deltas = info[:deltas] do
+      :telemetry.execute(@event_recv_bytes, %{size: deltas[:recv_oct]}, %{origin_node: node(), target_node: node})
+      :telemetry.execute(@event_recv_count, %{size: deltas[:recv_cnt]}, %{origin_node: node(), target_node: node})
+      :telemetry.execute(@event_send_bytes, %{size: deltas[:send_oct]}, %{origin_node: node(), target_node: node})
+      :telemetry.execute(@event_send_count, %{size: deltas[:send_cnt]}, %{origin_node: node(), target_node: node})
+    end
+
     if stats = info[:inet_stats] do
-      :telemetry.execute(@event_recv_bytes, %{size: stats[:recv_oct]}, %{origin_node: node(), target_node: node})
-      :telemetry.execute(@event_recv_count, %{size: stats[:recv_cnt]}, %{origin_node: node(), target_node: node})
-
-      :telemetry.execute(@event_send_bytes, %{size: stats[:send_oct]}, %{origin_node: node(), target_node: node})
-      :telemetry.execute(@event_send_count, %{size: stats[:send_cnt]}, %{origin_node: node(), target_node: node})
-
       :telemetry.execute(@event_send_pending_bytes, %{size: stats[:send_pend]}, %{
         origin_node: node(),
         target_node: node

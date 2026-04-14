@@ -120,6 +120,7 @@ defmodule Realtime.Application do
         ),
         Realtime.Tenants.Cache,
         Realtime.RateCounter.DynamicSupervisor,
+        Realtime.GenRpcMetrics,
         Realtime.Latency,
         {Registry, keys: :duplicate, name: Realtime.Registry},
         {Registry, keys: :unique, name: Realtime.Registry.Unique},

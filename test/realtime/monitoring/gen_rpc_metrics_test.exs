@@ -30,6 +30,12 @@ defmodule Realtime.GenRpcMetricsTest do
                    send_max: _,
                    send_avg: _,
                    send_pend: _
+                 },
+                 deltas: %{
+                   recv_oct: _,
+                   recv_cnt: _,
+                   send_oct: _,
+                   send_cnt: _
                  }
                }
              } = GenRpcMetrics.info()
@@ -71,6 +77,25 @@ defmodule Realtime.GenRpcMetricsTest do
 
       assert_in_delta local_metrics[:send_max], remote_metrics[:recv_max], 1000
       assert_in_delta local_metrics[:recv_max], remote_metrics[:send_max], 1000
+    end
+
+    test "counter metrics (deltas) never decrease between calls", %{node: node} do
+      Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 1)
+
+      first = GenRpcMetrics.info()
+
+      Realtime.GenRpc.call(node, String, :to_integer, ["25"], key: 2)
+
+      second = GenRpcMetrics.info()
+
+      with node_first when node_first != nil <- first[node],
+           node_second when node_second != nil <- second[node] do
+        for field <- [:recv_oct, :recv_cnt, :send_oct, :send_cnt] do
+          _first_val = node_first[:deltas][field] || 0
+          second_val = node_second[:deltas][field] || 0
+          assert second_val >= 0, "delta for #{field} should be non-negative, got #{second_val}"
+        end
+      end
     end
   end
 end
