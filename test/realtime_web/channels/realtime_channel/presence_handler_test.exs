@@ -476,6 +476,18 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       assert log =~ "PresenceRateLimitReached"
     end
 
+    test "returns error when track payload is not a map", %{tenant: tenant, topic: topic, db_conn: db_conn} do
+      key = random_string()
+      policies = %Policies{presence: %PresencePolicies{read: true, write: true}}
+      socket = socket_fixture(tenant, topic, key, policies: policies, private?: false)
+
+      assert {:error, :invalid_payload} =
+               PresenceHandler.handle(%{"event" => "track", "payload" => "1111"}, db_conn, socket)
+
+      topic = socket.assigns.tenant_topic
+      refute_receive %Broadcast{topic: ^topic, event: "presence_diff"}
+    end
+
     test "fails on high payload size", %{tenant: tenant, topic: topic, db_conn: db_conn} do
       key = random_string()
       socket = socket_fixture(tenant, topic, key, private?: false)

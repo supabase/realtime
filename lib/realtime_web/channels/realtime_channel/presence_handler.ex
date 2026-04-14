@@ -119,7 +119,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     %{assigns: %{presence_key: presence_key, tenant_topic: tenant_topic}} = socket
     payload = Map.get(payload, "payload", %{})
 
-    with :ok <- check_track_payload(socket.assigns, payload),
+    with true <- is_map(payload) || {:error, :invalid_payload},
+         :ok <- check_track_payload(socket.assigns, payload),
          tenant <- Tenants.Cache.get_tenant_by_external_id(socket.assigns.tenant),
          :ok <- validate_payload_size(tenant, payload),
          _ <- RealtimeWeb.TenantBroadcaster.collect_payload_size(socket.assigns.tenant, payload, :presence),
@@ -145,6 +146,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
           {:error, _} ->
             {:error, :unable_to_track_presence}
         end
+
+      {:error, :invalid_payload} ->
+        {:error, :invalid_payload}
 
       {:error, :rate_limit_exceeded} ->
         {:error, :rate_limit_exceeded}
