@@ -23,13 +23,20 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  POSTGRES_IMAGE: supabase/postgres:17.6.1.074
   DENO_IMAGE: denoland/deno:alpine-2.5.6
 
 jobs:
   tests:
-    name: Tests
+    name: Tests (${{ matrix.postgres_image }})
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres_image:
+          - supabase/postgres:17.6.1.074
+          - supabase/postgres:17.6.0.064-orioledb
+    env:
+      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
