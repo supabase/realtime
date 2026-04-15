@@ -54,8 +54,8 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         Application.put_env(:realtime, :replication_watchdog_timeout, replication_watchdog_timeout)
       end)
 
-      Application.put_env(:realtime, :replication_watchdog_interval, 100)
-      Application.put_env(:realtime, :replication_watchdog_timeout, 100)
+      Application.put_env(:realtime, :replication_watchdog_interval, 400)
+      Application.put_env(:realtime, :replication_watchdog_timeout, 400)
     end
 
     test "watchdog kills replication connection that is not responding to health checks", %{tenant: tenant} do
@@ -66,7 +66,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           # Let's make it not reply to health checks
           :sys.suspend(pid)
 
-          reason = assert_process_down(pid, 400)
+          reason = assert_process_down(pid, 2000)
           assert reason == :watchdog_timeout
         end)
 

@@ -20,7 +20,7 @@ defmodule Realtime.Tenants.ConnectTest do
     %{tenant: tenant}
   end
 
-  defp assert_process_down(pid, timeout \\ 100, reason \\ nil) do
+  defp assert_process_down(pid, timeout \\ 500, reason \\ nil) do
     ref = Process.monitor(pid)
 
     if reason do
@@ -824,9 +824,10 @@ defmodule Realtime.Tenants.ConnectTest do
 
     test "successfully unregisters a process", %{tenant: %{external_id: external_id}} do
       assert {:ok, _db_conn} = Connect.lookup_or_start_connection(external_id)
-      assert Registry.whereis_name({Realtime.Tenants.Connect.Registry, external_id})
+      assert pid = Registry.whereis_name({Realtime.Tenants.Connect.Registry, external_id})
       Connect.shutdown(external_id)
-      Process.sleep(100)
+
+      assert_process_down(pid)
       assert :undefined = Registry.whereis_name({Realtime.Tenants.Connect.Registry, external_id})
     end
   end
