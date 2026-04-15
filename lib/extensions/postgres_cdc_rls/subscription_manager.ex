@@ -153,6 +153,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
           end
           |> :ets.foldl([], state.subscribers_pids_table)
 
+          :ets.delete_all_objects(state.subscribers_pids_table)
+          :ets.delete_all_objects(state.subscribers_nodes_table)
+
           new_oids
       end
 
