@@ -172,6 +172,8 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       send(pid, :check_oids)
 
       assert_receive :postgres_subscribe, 1000
+      assert :ets.tab2list(args["subscribers_pids_table"]) == []
+      assert :ets.tab2list(args["subscribers_nodes_table"]) == []
     end
 
     test "logs error when subscription deletion fails during check_delete_queue", %{
