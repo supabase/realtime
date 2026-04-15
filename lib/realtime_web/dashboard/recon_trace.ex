@@ -1,4 +1,5 @@
 defmodule RealtimeWeb.Dashboard.ReconTrace do
+  @moduledoc false
   use Phoenix.LiveDashboard.PageBuilder
 
   alias Phoenix.LiveView.JS
@@ -30,7 +31,6 @@ defmodule RealtimeWeb.Dashboard.ReconTrace do
      |> stream(:entries, [])}
   end
 
-  @impl true
   def terminate(_reason, socket) do
     if socket.assigns.tracing, do: do_stop(socket.assigns.collector_pid)
     :ok
@@ -194,10 +194,6 @@ defmodule RealtimeWeb.Dashboard.ReconTrace do
   end
 
   @impl true
-  def handle_info({:trace_call, :max_reached}, socket) do
-    {:noreply, assign(socket, tracing: false, collector_pid: nil)}
-  end
-
   def handle_info({:raw_trace_call, pid, mod, fun, args, ts, proc_info}, socket) do
     entry = build_entry(pid, mod, fun, args, ts, proc_info)
     entries = [entry | socket.assigns.entries]
@@ -208,7 +204,7 @@ defmodule RealtimeWeb.Dashboard.ReconTrace do
      |> stream_insert(:entries, entry, at: 0)}
   end
 
-  def handle_info({:raw_trace_return, pid, mod, fun, arity, return_val, duration_us}, socket) do
+  def handle_info({:raw_trace_return, pid, mod, fun, arity, return_val, return_ts}, socket) do
     pid_str = pid_to_string(pid)
     mod_str = mod_to_string(mod)
 
@@ -219,6 +215,8 @@ defmodule RealtimeWeb.Dashboard.ReconTrace do
         {:noreply, socket}
 
       entry ->
+        duration_us = System.convert_time_unit(return_ts - entry.called_at, :native, :microsecond)
+
         return_value =
           try do
             format_value(return_val)
@@ -244,7 +242,7 @@ defmodule RealtimeWeb.Dashboard.ReconTrace do
     <div class="phx-dashboard-section">
       <h5 class="card-title">Recon Trace</h5>
       <p class="text-muted small">
-        Traces function calls on the current node using <code>:erlang.trace</code>.
+        Traces function calls on the current node using <code>:recon_trace</code>.
         Stopping — or navigating away — always clears all trace flags
         to restore production to a clean state.
       </p>
@@ -594,68 +592,61 @@ defmodule RealtimeWeb.Dashboard.ReconTrace do
   defp parse_and_start(params, parent) do
     mod = Map.get(params, "mod", "")
     fun = Map.get(params, "fun", "_")
-    arity = Map.get(params, "arity", "_")
     max_calls = Map.get(params, "max_calls", "100")
+    scope = Map.get(params, "scope", "local")
 
     with {:ok, mod_atom} <- parse_module(mod),
          {:ok, max_val} <- parse_max_calls(max_calls) do
       fun_atom = parse_fun(fun)
-      arity_val = parse_arity(arity)
+      scope_atom = if scope == "global", do: :global, else: :local
+      io_server = spawn(fn -> io_discard_loop() end)
 
-      tracer_pid = spawn(fn -> tracer_loop(parent, max_val, %{}) end)
+      formatter_fun = fn
+        {:trace, pid, :call, {m, f, args}} ->
+          ts = System.monotonic_time()
+          proc_info = Process.info(pid, [:memory, :reductions, :message_queue_len, :binary])
+          send(parent, {:raw_trace_call, pid, m, f, args, ts, proc_info})
+          ""
+
+        {:trace, pid, :return_from, {m, f, a}, return_val} ->
+          ts = System.monotonic_time()
+          send(parent, {:raw_trace_return, pid, m, f, a, return_val, ts})
+          ""
+
+        _ ->
+          ""
+      end
 
       try do
-        :erlang.trace_pattern(
-          {mod_atom, fun_atom, arity_val},
-          [{:_, [], [{:return_trace}]}],
-          [:local]
+        :recon_trace.calls(
+          {mod_atom, fun_atom, :return_trace},
+          max_val,
+          formatter: formatter_fun,
+          io_server: io_server,
+          scope: scope_atom
         )
 
-        :erlang.trace(:all, true, [:call, {:tracer, tracer_pid}])
-        {:ok, tracer_pid}
+        {:ok, io_server}
       rescue
         e ->
-          Process.exit(tracer_pid, :kill)
+          Process.exit(io_server, :kill)
           {:error, "trace failed: #{inspect(e)}"}
       end
     end
   end
 
-  defp do_stop(tracer_pid) do
-    :erlang.trace(:all, false, [:call])
-    if is_pid(tracer_pid) && Process.alive?(tracer_pid), do: Process.exit(tracer_pid, :kill)
+  defp do_stop(io_server) do
+    :recon_trace.clear()
+    if is_pid(io_server) && Process.alive?(io_server), do: Process.exit(io_server, :kill)
   end
 
-  defp tracer_loop(parent, 0, _pending) do
-    send(parent, {:trace_call, :max_reached})
-    do_stop(self())
-  end
-
-  defp tracer_loop(parent, remaining, pending) do
+  defp io_discard_loop do
     receive do
-      {:trace, pid, :call, {mod, fun, args}} ->
-        ts = System.monotonic_time()
-        proc_info = Process.info(pid, [:memory, :reductions, :message_queue_len, :binary])
-        send(parent, {:raw_trace_call, pid, mod, fun, args, ts, proc_info})
-        tracer_loop(parent, remaining - 1, Map.put(pending, {pid, mod, fun, length(args)}, ts))
-
-      {:trace, pid, :return_from, {mod, fun, arity}, return_val} ->
-        ts = System.monotonic_time()
-        key = {pid, mod, fun, arity}
-
-        case Map.pop(pending, key) do
-          {call_ts, pending} when not is_nil(call_ts) ->
-            duration_us = System.convert_time_unit(ts - call_ts, :native, :microsecond)
-            send(parent, {:raw_trace_return, pid, mod, fun, arity, return_val, duration_us})
-            tracer_loop(parent, remaining, pending)
-
-          {nil, pending} ->
-            tracer_loop(parent, remaining, pending)
-        end
-
-      _ ->
-        tracer_loop(parent, remaining, pending)
+      {:io_request, from, ref, _} -> send(from, {:io_reply, ref, :ok})
+      _ -> :ok
     end
+
+    io_discard_loop()
   end
 
   defp build_entry(pid, mod, fun, args, ts, proc_info) do
@@ -800,16 +791,6 @@ defmodule RealtimeWeb.Dashboard.ReconTrace do
       String.to_existing_atom(f)
     rescue
       _ -> {:error, "Unknown function: #{f}"}
-    end
-  end
-
-  defp parse_arity("_"), do: :_
-  defp parse_arity(""), do: :_
-
-  defp parse_arity(a) do
-    case Integer.parse(a) do
-      {n, ""} when n >= 0 -> n
-      _ -> :_
     end
   end
 

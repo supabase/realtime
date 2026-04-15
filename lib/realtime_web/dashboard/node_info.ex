@@ -98,13 +98,14 @@ defmodule RealtimeWeb.Dashboard.NodeInfo do
   def gather_local_info do
     region = Application.get_env(:realtime, :region)
     master_region = Application.get_env(:realtime, :master_region) || region
-    replica = Realtime.Repo.Replica.replica()
+    replica_module = Realtime.Repo.Replica.replica()
+    replica_host = Application.get_env(:realtime, replica_module, [])[:hostname]
 
     %{
       region: region,
       master_region: master_region,
       is_master: region == master_region,
-      read_replica: replica |> inspect() |> String.replace_prefix("Elixir.", "")
+      read_replica: replica_host || "not set"
     }
   end
 end
