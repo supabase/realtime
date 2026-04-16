@@ -110,6 +110,7 @@ defmodule Realtime.Application do
            ]
          ]},
         Supervisor.child_spec({Cachex, name: Realtime.RateCounter}, id: Realtime.RateCounter),
+        Supervisor.child_spec({Cachex, name: Realtime.Nodes.Cache}, id: Realtime.Nodes.Cache),
         Supervisor.child_spec(
           {Cachex,
            name: Realtime.LogThrottle,
