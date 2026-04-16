@@ -65,6 +65,7 @@ client_presence_max_calls = Env.get_integer("CLIENT_PRESENCE_MAX_CALLS", 5)
 client_presence_window_ms = Env.get_integer("CLIENT_PRESENCE_WINDOW_MS", 30_000)
 rpc_timeout = Env.get_integer("RPC_TIMEOUT", :timer.seconds(30))
 max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
+max_gen_rpc_call_clients = Env.get_integer("MAX_GEN_RPC_CALL_CLIENTS", 1)
 run_janitor? = Env.get_boolean("RUN_JANITOR", false)
 disable_healthcheck_logging = Env.get_boolean("DISABLE_HEALTHCHECK_LOGGING", false)
 janitor_schedule_randomize = Env.get_boolean("JANITOR_SCHEDULE_RANDOMIZE", true)
@@ -339,6 +340,7 @@ if config_env() != :test do
     prom_poll_rate: Env.get_integer("PROM_POLL_RATE", 5000),
     slot_name_suffix: slot_name_suffix,
     max_gen_rpc_clients: max_gen_rpc_clients,
+    max_gen_rpc_call_clients: max_gen_rpc_call_clients,
     connect_error_backoff_ms: Env.get_integer("CONNECT_ERROR_BACKOFF_MS", :timer.seconds(2)),
     channel_error_backoff_ms: Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", :timer.seconds(5))
 end
