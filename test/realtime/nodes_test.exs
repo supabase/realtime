@@ -1,4 +1,5 @@
 defmodule Realtime.NodesTest do
+  # async: falase due to use of Clustered and tweaking Application env
   use Realtime.DataCase, async: false
   use Mimic
   alias Realtime.Nodes
@@ -177,6 +178,7 @@ defmodule Realtime.NodesTest do
 
   describe "node_load/1 with sufficient uptime" do
     setup do
+      Cachex.clear(Realtime.Nodes.Cache)
       Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 0)
 
       on_exit(fn ->
@@ -207,6 +209,24 @@ defmodule Realtime.NodesTest do
 
       assert is_integer(load)
       assert load >= 0
+    end
+
+    test "caches remote node load and sets expiration" do
+      {:ok, remote_node} = Clustered.start(nil, [{:realtime, :node_balance_uptime_threshold_in_ms, 0}])
+
+      assert {:ok, false} = Cachex.exists?(Realtime.Nodes.Cache, remote_node)
+
+      load1 = Nodes.node_load(remote_node)
+      assert is_integer(load1)
+
+      assert {:ok, true} = Cachex.exists?(Realtime.Nodes.Cache, remote_node)
+      assert {:ok, ttl} = Cachex.ttl(Realtime.Nodes.Cache, remote_node)
+      assert is_integer(ttl) and ttl > 0 and ttl <= 60_000
+
+      reject(&Realtime.GenRpc.call/5)
+
+      load2 = Nodes.node_load(remote_node)
+      assert load1 == load2
     end
   end
 
