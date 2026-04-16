@@ -2,8 +2,13 @@ defmodule Realtime.GenRpc do
   @moduledoc """
   RPC module for Realtime using :gen_rpc
 
-  :max_gen_rpc_clients is the maximum number of clients (TCP connections) used by gen_rpc
-  between two nodes
+  Two separate connection pools are maintained per remote node:
+
+  - Cast pool: used by `cast/5`, `abcast/4`, `multicast/4`. Size controlled by
+    `MAX_GEN_RPC_CLIENTS` env var (default 5). Client tags: `{:cast, 1..N}`.
+
+  - Call pool: used by `call/5`, `multicall/4`. Size controlled by
+    `MAX_GEN_RPC_CALL_CLIENTS` env var (default 1). Client tags: `{:call, 1..M}`.
   """
   use Realtime.Logs
   alias Realtime.Telemetry
@@ -20,7 +25,7 @@ defmodule Realtime.GenRpc do
   @spec abcast([node], atom, any, keyword()) :: :ok
   def abcast(nodes, name, msg, opts) when is_list(nodes) and is_atom(name) and is_list(opts) do
     key = Keyword.get(opts, :key, nil)
-    nodes = rpc_nodes(nodes, key)
+    nodes = cast_rpc_nodes(nodes, key)
 
     :gen_rpc.abcast(nodes, name, msg)
     :ok
@@ -48,7 +53,7 @@ defmodule Realtime.GenRpc do
 
     # Ensure this node is part of the connected nodes
     if node in Node.list() do
-      node_key = rpc_node(node, key)
+      node_key = cast_rpc_node(node, key)
 
       :gen_rpc.cast(node_key, mod, func, args)
     end
@@ -67,7 +72,7 @@ defmodule Realtime.GenRpc do
   def multicast(mod, func, args, opts \\ []) when is_atom(mod) and is_atom(func) and is_list(args) and is_list(opts) do
     key = Keyword.get(opts, :key, nil)
 
-    nodes = rpc_nodes(Node.list(), key)
+    nodes = cast_rpc_nodes(Node.list(), key)
 
     # Use erpc for the local node because :gen_rpc tries to connect with the local node
     :ok = :erpc.cast(Node.self(), mod, func, args)
@@ -108,7 +113,7 @@ defmodule Realtime.GenRpc do
     tenant_id = Keyword.get(opts, :tenant_id)
     key = Keyword.get(opts, :key, nil)
 
-    node_key = rpc_node(node, key)
+    node_key = call_rpc_node(node, key)
     {latency, response} = :timer.tc(fn -> :gen_rpc.call(node_key, mod, func, args, timeout) end)
 
     case response do
@@ -152,7 +157,7 @@ defmodule Realtime.GenRpc do
     tenant_id = Keyword.get(opts, :tenant_id)
     key = Keyword.get(opts, :key, nil)
 
-    nodes = rpc_nodes([node() | Node.list()], key)
+    nodes = call_rpc_nodes([node() | Node.list()], key)
     # Latency here is the amount of time that it takes for this node to gather the result.
     # If one node takes a while to reply the remaining calls will have at least the latency reported by this node
     # Example:
@@ -213,18 +218,17 @@ defmodule Realtime.GenRpc do
     )
   end
 
-  # Max amount of clients (TCP connections) used by gen_rpc
-  defp max_clients(), do: Application.fetch_env!(:realtime, :max_gen_rpc_clients)
+  defp max_cast_clients(), do: Application.fetch_env!(:realtime, :max_gen_rpc_clients)
+  defp max_call_clients(), do: Application.fetch_env!(:realtime, :max_gen_rpc_call_clients)
 
-  defp rpc_nodes(nodes, key), do: Enum.map(nodes, &rpc_node(&1, key))
+  defp cast_rpc_nodes(nodes, key), do: Enum.map(nodes, &cast_rpc_node(&1, key))
+  defp call_rpc_nodes(nodes, key), do: Enum.map(nodes, &call_rpc_node(&1, key))
 
-  # Tag the node with a random number from 1 to max_clients
-  # This ensures that we don't use the same client/tcp connection for this node
-  defp rpc_node(node, nil), do: {node, :rand.uniform(max_clients())}
+  defp cast_rpc_node(node, nil), do: {node, {:cast, :rand.uniform(max_cast_clients())}}
+  defp cast_rpc_node(node, key), do: {node, {:cast, :erlang.phash2(key, max_cast_clients()) + 1}}
 
-  # Tag the node with a random number from 1 to max_clients
-  # Using phash2 to ensure the same key and the same client per node
-  defp rpc_node(node, key), do: {node, :erlang.phash2(key, max_clients()) + 1}
+  defp call_rpc_node(node, nil), do: {node, {:call, :rand.uniform(max_call_clients())}}
+  defp call_rpc_node(node, key), do: {node, {:call, :erlang.phash2(key, max_call_clients()) + 1}}
 
   defp unwrap_reason({:unknown_error, {{:badrpc, reason}, _}}), do: reason
   defp unwrap_reason(reason), do: reason
