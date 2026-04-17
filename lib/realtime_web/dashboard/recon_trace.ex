@@ -599,7 +599,7 @@ defmodule RealtimeWeb.Dashboard.ReconTrace do
          {:ok, max_val} <- parse_max_calls(max_calls) do
       fun_atom = parse_fun(fun)
       scope_atom = if scope == "global", do: :global, else: :local
-      io_server = spawn(fn -> io_discard_loop() end)
+      io_server = spawn_link(fn -> io_discard_loop() end)
 
       formatter_fun = fn
         {:trace, pid, :call, {m, f, args}} ->
