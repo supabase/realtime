@@ -614,6 +614,29 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                      500
     end
 
+    test "presence track with non-map payload replies with error and keeps socket alive", %{tenant: tenant} do
+      topic = "realtime:test"
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      assert {:ok, _, %Socket{} = socket} =
+               subscribe_and_join(socket, topic, %{"config" => %{"presence" => %{"enabled" => true}}})
+
+      assert_receive %Phoenix.Socket.Message{topic: "realtime:test", event: "presence_state"}, 500
+
+      ref = push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => "not a map"})
+
+      assert_receive %Socket.Reply{
+                       ref: ^ref,
+                       status: :error,
+                       payload: %{reason: "Presence track payload must be a map"}
+                     },
+                     500
+
+      ref = push(socket, "presence", %{"type" => "presence", "event" => "TRACK", "payload" => %{"user" => "a"}})
+      assert_receive %Socket.Reply{ref: ^ref, status: :ok}, 500
+    end
+
     test "presence track with same payload does nothing", %{tenant: tenant} do
       topic = "realtime:test"
       jwt = Generators.generate_jwt_token(tenant)
