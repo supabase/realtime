@@ -1,5 +1,5 @@
 defmodule Realtime.NodesTest do
-  # async: falase due to use of Clustered and tweaking Application env
+  # async: false due to use of Clustered and tweaking Application env
   use Realtime.DataCase, async: false
   use Mimic
   alias Realtime.Nodes
