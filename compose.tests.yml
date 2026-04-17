@@ -1,5 +1,4 @@
 services:
-  # Supabase Realtime service
   test_db:
     image: supabase/postgres:17.6.1.074
     container_name: test-realtime-db
@@ -16,6 +15,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - test-network
+
   test_realtime:
     depends_on:
       - test_db
@@ -26,24 +28,25 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      PORT: 4100
-      DB_HOST: host.docker.internal
-      DB_PORT: 5532
-      DB_USER: supabase_admin
-      DB_PASSWORD: postgres
-      DB_NAME: postgres
-      DB_ENC_KEY: 1234567890123456
-      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
-      API_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-      METRICS_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-      SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
-      ERL_AFLAGS: -proto_dist inet_tcp
-      DNS_NODES: "''"
+      API_JWT_SECRET: dev
       APP_NAME: realtime
-      RUN_JANITOR: true
-      JANITOR_INTERVAL: 60000
-      LOG_LEVEL: "info"
-      SEED_SELF_HOST: true
+      DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
+      DB_ENC_KEY: "1234567890123456"
+      PORT: 4100
+      DB_HOST: test_db
+      DNS_NODES: "''"
+      ELIXIR_ERL_OPTIONS: +hmax 1000000000
+      ERL_AFLAGS: -proto_dist inet_tcp
+      GEN_RPC_TCP_CLIENT_PORT: 5469
+      GEN_RPC_TCP_SERVER_PORT: 5369
+      METRICS_JWT_SECRET: dev
+      NAME: pink
+      REGION: us-east-1
+      RLIMIT_NOFILE: 1000000
+      RUN_JANITOR: "true"
+      SECRET_KEY_BASE: UpNVntn3cDxHJpq99YMc1T1AQgQpc8kfYTuRgBiYa15BLrx8etQoXz3gZv1/u2oq
+      SEED_SELF_HOST: "true"
+      SLOT_NAME_SUFFIX: some_sha
       DASHBOARD_USER: admin
       DASHBOARD_PASSWORD: admin
     networks:

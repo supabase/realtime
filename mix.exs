@@ -121,20 +121,16 @@ defmodule Realtime.MixProject do
   defp aliases do
     [
       setup: ["deps.get", "ecto.setup", "cmd npm install --prefix assets"],
-      "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/dev_seeds.exs"],
+      "ecto.setup": ["ecto.create", "ecto.migrate", "seed"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: [
+      seed: ["run priv/repo/dev_seeds.exs"],
+      "test.setup": [
         "cmd epmd -daemon",
         "ecto.create --quiet",
-        "ecto.migrate --migrations-path=priv/repo/migrations",
-        "test"
+        "ecto.migrate"
       ],
-      "test.partitioned": [
-        "cmd epmd -daemon",
-        "ecto.create --quiet",
-        "ecto.migrate --migrations-path=priv/repo/migrations",
-        "test --partitions 4"
-      ],
+      test: ["test.setup", "test"],
+      "test.partitioned": ["test.setup", "test --partitions 4"],
       "assets.deploy": ["esbuild default --minify", "tailwind default --minify", "phx.digest"]
     ]
   end

@@ -33,3 +33,6 @@ config/prod.secret.exs
 demo/.env
 .lexical
 .vscode
+
+# Local
+mise.local.toml
