@@ -1,0 +1,32 @@
+NOTE:
+This output assumes migration.sql has already been applied.
+
+[SETUP] Supabase Realtime JSONB Filter MRE
+[SETUP] Realtime filter used: organization_id=eq.org_123
+[DEBUG] SUPABASE_URL = https://your-project.supabase.co
+[subscription] status: SUBSCRIBED
+[SUBSCRIBED] Ready to receive events
+[INSERT] Creating job with JSONB data: { organization_id: "org_123" }
+[INSERT] Row created with ID: 5f8a7f51-c13e-4baa-9ba8-9f0ec7f53d36
+[INSERT] organization_id auto-filled: org_123
+[WAIT] Waiting 8s for realtime event...
+
+[subscription] event received: {
+  "schema": "pgboss",
+  "table": "job",
+  "eventType": "INSERT",
+  "new": {
+    "id": "5f8a7f51-c13e-4baa-9ba8-9f0ec7f53d36",
+    "organization_id": "org_123",
+    "data": { "organization_id": "org_123" },
+    "created_at": "2026-04-08T12:00:00.000000"
+  }
+}
+
+[RESULT] Summary:
+[RESULT] Events received: 1
+
+[RESULT]
+[RESULT] ✅ PASS: Realtime event received with direct column filter
+[RESULT] ✅ PASS: Trigger kept organization_id in sync
+[RESULT]
