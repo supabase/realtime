@@ -1,4 +1,5 @@
 defmodule Realtime.NodesTest do
+  # async: false due to use of Clustered and tweaking Application env
   use Realtime.DataCase, async: false
   use Mimic
   alias Realtime.Nodes
@@ -177,6 +178,7 @@ defmodule Realtime.NodesTest do
 
   describe "node_load/1 with sufficient uptime" do
     setup do
+      Cachex.clear(Realtime.Nodes.Cache)
       Application.put_env(:realtime, :node_balance_uptime_threshold_in_ms, 0)
 
       on_exit(fn ->
@@ -207,6 +209,53 @@ defmodule Realtime.NodesTest do
 
       assert is_integer(load)
       assert load >= 0
+    end
+
+    test "caches remote node load and sets expiration" do
+      {:ok, remote_node} = Clustered.start(nil, extra_config: [{:realtime, :node_balance_uptime_threshold_in_ms, 0}])
+
+      assert {:ok, false} = Cachex.exists?(Realtime.Nodes.Cache, remote_node)
+
+      load1 = Nodes.node_load(remote_node)
+      assert is_integer(load1)
+
+      assert {:ok, true} = Cachex.exists?(Realtime.Nodes.Cache, remote_node)
+      assert {:ok, ttl} = Cachex.ttl(Realtime.Nodes.Cache, remote_node)
+      assert is_integer(ttl) and ttl > 0 and ttl <= 60_000
+
+      reject(&Realtime.GenRpc.call/5)
+
+      load2 = Nodes.node_load(remote_node)
+      assert load1 == load2
+    end
+
+    test "does not cache rpc errors for remote node" do
+      fake_node = :fake_remote_node
+
+      expect(Realtime.GenRpc, :call, fn _, _, _, _, _ -> {:error, :rpc_error, :badrpc} end)
+
+      assert {:ok, false} = Cachex.exists?(Realtime.Nodes.Cache, fake_node)
+
+      result = Nodes.node_load(fake_node)
+      assert result == {:error, :rpc_error, :badrpc}
+
+      assert {:ok, false} = Cachex.exists?(Realtime.Nodes.Cache, fake_node)
+    end
+
+    test "caches {:error, :not_enough_data} for remote node with insufficient uptime" do
+      {:ok, remote_node} =
+        Clustered.start(nil, extra_config: [{:realtime, :node_balance_uptime_threshold_in_ms, 999_999_999_999}])
+
+      assert {:ok, false} = Cachex.exists?(Realtime.Nodes.Cache, remote_node)
+
+      result = Nodes.node_load(remote_node)
+      assert result == {:error, :not_enough_data}
+
+      assert {:ok, true} = Cachex.exists?(Realtime.Nodes.Cache, remote_node)
+
+      reject(&Realtime.GenRpc.call/5)
+
+      assert {:error, :not_enough_data} = Nodes.node_load(remote_node)
     end
   end
 
