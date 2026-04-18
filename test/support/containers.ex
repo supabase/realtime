@@ -28,7 +28,14 @@ defmodule Containers do
   def init(max_cases) do
     existing_containers = existing_containers("realtime-test-*")
     ports = for {_, port} <- existing_containers, do: port
-    available_ports = Enum.shuffle(5501..9000) -- ports
+
+    partition = System.get_env("MIX_TEST_PARTITION", "1") |> String.to_integer()
+    total_partitions = System.get_env("MIX_TEST_TOTAL_PARTITIONS", "4") |> String.to_integer()
+    all_ports = 5501..9000
+    range_size = div(Enum.count(all_ports), total_partitions)
+
+    available_ports =
+      all_ports |> Enum.slice((partition - 1) * range_size, range_size) |> Enum.shuffle() |> Kernel.--(ports)
 
     {:ok, %{existing_containers: existing_containers, ports: available_ports}, {:continue, {:pool, max_cases}}}
   end

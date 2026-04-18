@@ -55,7 +55,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
   @spec handle(map(), pid() | nil, Socket.t()) ::
           {:ok, Socket.t()}
           | {:error,
-             :rls_policy_error
+             :invalid_payload
+             | :rls_policy_error
              | :unable_to_set_policies
              | :rate_limit_exceeded
              | :client_rate_limit_exceeded
@@ -146,11 +147,8 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
             {:error, :unable_to_track_presence}
         end
 
-      {:error, :rate_limit_exceeded} ->
-        {:error, :rate_limit_exceeded}
-
-      {:error, :payload_size_exceeded} ->
-        {:error, :payload_size_exceeded}
+      {:error, reason} when reason in [:invalid_payload, :rate_limit_exceeded, :payload_size_exceeded] ->
+        {:error, reason}
 
       {:error, error} ->
         log_error("UnableToTrackPresence", error)
@@ -158,13 +156,9 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
     end
   end
 
-  defp check_track_payload(assigns, new_payload) do
-    if assigns[:presence_track_payload] != new_payload do
-      :ok
-    else
-      {:error, :no_payload_change}
-    end
-  end
+  defp check_track_payload(_assigns, payload) when not is_map(payload), do: {:error, :invalid_payload}
+  defp check_track_payload(%{presence_track_payload: payload}, payload), do: {:error, :no_payload_change}
+  defp check_track_payload(_assigns, _payload), do: :ok
 
   defp presence_dirty_list(topic) do
     [{:pool_size, size}] = :ets.lookup(Presence, :pool_size)

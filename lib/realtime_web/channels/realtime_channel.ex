@@ -428,6 +428,10 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :payload_size_exceeded} ->
         shutdown_response(socket, "Track message size exceeded")
 
+      {:error, :invalid_payload} ->
+        log_error(socket, "InvalidPresencePayload", :invalid_payload)
+        {:reply, {:error, %{reason: "Presence track payload must be a map"}}, socket}
+
       {:error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
         {:reply, :error, socket}
@@ -447,6 +451,10 @@ defmodule RealtimeWeb.RealtimeChannel do
 
       {:error, :payload_size_exceeded} ->
         shutdown_response(socket, "Track message size exceeded")
+
+      {:error, :invalid_payload} ->
+        log_error(socket, "InvalidPresencePayload", :invalid_payload)
+        {:reply, {:error, %{reason: "Presence track payload must be a map"}}, socket}
 
       {:error, error} ->
         log_error(socket, "UnableToHandlePresence", error)
