@@ -135,15 +135,13 @@ defmodule Realtime.Database do
   """
 
   defp query_connection_info(conn) do
-    Postgrex.transaction(conn, fn conn ->
-      %{rows: [[available_connections]]} = Postgrex.query!(conn, @connections_query, [])
-      %{rows: [[table_exists]]} = Postgrex.query!(conn, @migrations_table_exists_query, [])
+    %{rows: [[available_connections]]} = Postgrex.query!(conn, @connections_query, [])
+    %{rows: [[table_exists]]} = Postgrex.query!(conn, @migrations_table_exists_query, [])
 
-      %{rows: [[migrations_ran]]} =
-        if table_exists, do: Postgrex.query!(conn, @migrations_count_query, []), else: %{rows: [[0]]}
+    %{rows: [[migrations_ran]]} =
+      if table_exists, do: Postgrex.query!(conn, @migrations_count_query, []), else: %{rows: [[0]]}
 
-      [available_connections, migrations_ran]
-    end)
+    {:ok, [available_connections, migrations_ran]}
   rescue
     e ->
       GenServer.stop(conn)
