@@ -128,7 +128,9 @@ defmodule RealtimeWeb.Router do
       metrics: RealtimeWeb.Telemetry,
       additional_pages: [
         route_name: RealtimeWeb.Dashboard.ProcessDump,
-        tenant_info: RealtimeWeb.Dashboard.TenantInfo
+        tenant_info: RealtimeWeb.Dashboard.TenantInfo,
+        recon_trace: RealtimeWeb.Dashboard.ReconTrace,
+        node_info: RealtimeWeb.Dashboard.NodeInfo
       ]
     )
   end
