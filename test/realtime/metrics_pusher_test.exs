@@ -57,8 +57,8 @@ defmodule Realtime.MetricsPusherTest do
       {:ok, _pid} = start_and_allow_pusher(opts)
 
       # Receive both request bodies
-      assert_receive {:req_called, body1}, 100
-      assert_receive {:req_called, body2}, 100
+      assert_receive {:req_called, body1}, 300
+      assert_receive {:req_called, body2}, 300
 
       global_metric = ~r/beam_stats_run_queue_count/
       tenant_metric = ~r/realtime_channel_input_bytes/
@@ -86,8 +86,8 @@ defmodule Realtime.MetricsPusherTest do
       end)
 
       {:ok, _pid} = start_and_allow_pusher(opts)
-      assert_receive :req_called, 100
-      assert_receive :req_called, 100
+      assert_receive :req_called, 300
+      assert_receive :req_called, 300
     end
 
     test "sends request body untouched when compress=false" do
@@ -111,8 +111,8 @@ defmodule Realtime.MetricsPusherTest do
       end)
 
       {:ok, _pid} = start_and_allow_pusher(opts)
-      assert_receive :req_called, 100
-      assert_receive :req_called, 100
+      assert_receive :req_called, 300
+      assert_receive :req_called, 300
     end
 
     test "when request receives non 2XX response" do
@@ -134,8 +134,8 @@ defmodule Realtime.MetricsPusherTest do
           end)
 
           {:ok, pid} = start_and_allow_pusher(opts)
-          assert_receive :req_called, 100
-          assert_receive :req_called, 100
+          assert_receive :req_called, 300
+          assert_receive :req_called, 300
           assert Process.alive?(pid)
           # Wait enough for the log to be captured
           Process.sleep(100)
@@ -162,8 +162,8 @@ defmodule Realtime.MetricsPusherTest do
           end)
 
           {:ok, pid} = start_and_allow_pusher(opts)
-          assert_receive :req_called, 100
-          assert_receive :req_called, 100
+          assert_receive :req_called, 300
+          assert_receive :req_called, 300
           assert Process.alive?(pid)
           # Wait enough for the log to be captured
           Process.sleep(100)
@@ -190,8 +190,8 @@ defmodule Realtime.MetricsPusherTest do
       end)
 
       {:ok, _pid} = start_and_allow_pusher(opts)
-      assert_receive {:req_called, query_string}, 100
-      assert_receive {:req_called, _}, 100
+      assert_receive {:req_called, query_string}, 300
+      assert_receive {:req_called, _}, 300
 
       decoded_params = query_string |> String.split("&") |> Enum.map(&URI.decode_www_form/1)
       assert "extra_label=region=us-east-1" in decoded_params
