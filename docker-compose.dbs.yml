@@ -21,3 +21,35 @@ services:
     environment:
       POSTGRES_HOST: /var/run/postgresql
       POSTGRES_PASSWORD: postgres
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    container_name: toxiproxy
+    ports:
+      - "8474:8474"
+      - "5434:5434"
+      - "5435:5435"
+    volumes:
+      - ./dev/toxiproxy.json:/config/toxiproxy.json
+    command: ["-config", "/config/toxiproxy.json", "-host", "0.0.0.0"]
+    depends_on:
+      - db
+      - tenant_db
+
+  toxiproxy-setup:
+    image: curlimages/curl:8.7.1
+    container_name: toxiproxy-setup
+    depends_on:
+      - toxiproxy
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until curl -sf http://toxiproxy:8474/proxies > /dev/null 2>&1; do sleep 1; done
+        curl -sf -X POST http://toxiproxy:8474/proxies/db/toxics \
+          -H 'Content-Type: application/json' \
+          -d '{"type":"latency","name":"slow_connect","attributes":{"latency":5000,"jitter":500}}'
+        curl -sf -X POST http://toxiproxy:8474/proxies/tenant_db/toxics \
+          -H 'Content-Type: application/json' \
+          -d '{"type":"latency","name":"slow_connect","attributes":{"latency":5000,"jitter":500}}'
