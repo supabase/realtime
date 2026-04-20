@@ -4,7 +4,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   """
   use Realtime.Logs
 
-  import Postgrex, only: [transaction: 2, query: 3, rollback: 2]
+  import Postgrex, only: [transaction: 3, query: 3, rollback: 2]
 
   @type conn() :: Postgrex.conn()
   @type filter :: {binary, binary, binary}
@@ -18,27 +18,33 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
           | {:error, Exception.t() | {:exit, term} | {:subscription_insert_failed, String.t()}}
 
   def create(conn, publication, subscription_list, manager, caller) do
-    transaction(conn, fn conn ->
-      Enum.map(subscription_list, fn %{id: id, claims: claims, subscription_params: params} ->
-        case query(conn, publication, id, claims, params) do
-          {:ok, %{num_rows: num} = result} when num > 0 ->
-            send(manager, {:subscribed, {caller, id}})
-            result
+    opts = [timeout: 10_000]
 
-          {:ok, _} ->
-            msg =
-              "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [#{params_to_log(params)}]"
+    transaction(
+      conn,
+      fn conn ->
+        Enum.map(subscription_list, fn %{id: id, claims: claims, subscription_params: params} ->
+          case query(conn, publication, id, claims, params) do
+            {:ok, %{num_rows: num} = result} when num > 0 ->
+              send(manager, {:subscribed, {caller, id}})
+              result
 
-            rollback(conn, {:subscription_insert_failed, msg})
+            {:ok, _} ->
+              msg =
+                "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [#{params_to_log(params)}]"
 
-          {:error, exception} ->
-            msg =
-              "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
+              rollback(conn, {:subscription_insert_failed, msg})
 
-            rollback(conn, {:subscription_insert_failed, msg})
-        end
-      end)
-    end)
+            {:error, exception} ->
+              msg =
+                "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [#{params_to_log(params)}]. Exception: #{Exception.message(exception)}"
+
+              rollback(conn, {:subscription_insert_failed, msg})
+          end
+        end)
+      end,
+      opts
+    )
   rescue
     e in DBConnection.ConnectionError -> {:error, e}
   catch

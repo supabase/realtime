@@ -138,7 +138,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     test "timeout", %{conn: conn} do
       {:ok, subscription_params} = Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
 
-      Task.start(fn -> Postgrex.query!(conn, "SELECT pg_sleep(20)", []) end)
+      Task.start(fn -> Postgrex.query!(conn, "SELECT pg_sleep(11)", []) end)
 
       subscription_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
 
