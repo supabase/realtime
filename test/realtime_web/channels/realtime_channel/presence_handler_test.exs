@@ -277,6 +277,26 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandlerTest do
       end
     end
 
+    test "increase_connection_pool from write authorization returns error and does not log UnableToSetPolicies",
+         %{tenant: tenant, topic: topic, db_conn: db_conn} do
+      stub(Authorization, :get_write_authorizations, fn _, _, _ -> {:error, :increase_connection_pool} end)
+
+      key = random_string()
+      socket = socket_fixture(tenant, topic, key)
+
+      log =
+        capture_log(fn ->
+          assert {:error, :increase_connection_pool} =
+                   PresenceHandler.handle(
+                     %{"event" => "track", "payload" => %{"metadata" => random_string()}},
+                     db_conn,
+                     socket
+                   )
+        end)
+
+      refute log =~ "UnableToSetPolicies"
+    end
+
     @tag policies: [:authenticated_read_broadcast_and_presence, :broken_write_presence]
     test "handle failing rls policy", %{tenant: tenant, topic: topic, db_conn: db_conn} do
       expect(Authorization, :get_write_authorizations, 1, fn conn, db_conn, auth_context ->
