@@ -3,8 +3,6 @@ defmodule Realtime.PromEx.Plugins.Channels do
   Realtime channels monitoring plugin for PromEx
   """
   use PromEx.Plugin
-  require Logger
-
   @impl true
   def event_metrics(_opts) do
     Event.build(:realtime, [

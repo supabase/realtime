@@ -1,8 +1,6 @@
 defmodule Realtime.PostgresCdc do
   @moduledoc false
 
-  require Logger
-
   alias Realtime.Api.Tenant
 
   @timeout 10_000

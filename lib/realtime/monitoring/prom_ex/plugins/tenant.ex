@@ -2,7 +2,6 @@ defmodule Realtime.PromEx.Plugins.Tenant do
   @moduledoc false
 
   use PromEx.Plugin
-  require Logger
   alias Realtime.Telemetry
   alias Realtime.Tenants
   alias Realtime.UsersCounter

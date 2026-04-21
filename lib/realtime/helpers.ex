@@ -2,8 +2,6 @@ defmodule Realtime.Helpers do
   @moduledoc """
   This module includes helper functions for different contexts that can't be union in one module.
   """
-  require Logger
-
   @spec cancel_timer(reference() | nil) :: non_neg_integer() | false | :ok | nil
   def cancel_timer(nil), do: nil
   def cancel_timer(ref), do: Process.cancel_timer(ref)

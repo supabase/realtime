@@ -6,8 +6,6 @@ defmodule Realtime.PromEx.Plugins.Tenants do
   alias PromEx.MetricTypes.Event
   alias Realtime.Tenants.Connect
 
-  require Logger
-
   defmodule Buckets do
     @moduledoc false
     use Peep.Buckets.Custom, buckets: [10, 250, 5000, 15_000]

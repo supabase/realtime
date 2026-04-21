@@ -2,8 +2,6 @@ defmodule Realtime.Repo.Replica do
   @moduledoc """
   Generates a read-only replica repo for the region specified in config/runtime.exs.
   """
-  require Logger
-
   use Ecto.Repo,
     otp_app: :realtime,
     adapter: Ecto.Adapters.Postgres,
@@ -30,12 +28,14 @@ defmodule Realtime.Repo.Replica do
     "us-west-1" => Realtime.Repo.Replica.SanJose
   }
 
-  @ast (quote do
-          use Ecto.Repo,
-            otp_app: :realtime,
-            adapter: Ecto.Adapters.Postgres,
-            read_only: true
-        end)
+  for replica_module <- Enum.uniq(Map.values(@replicas_fly) ++ Map.values(@replicas_aws)) do
+    defmodule replica_module do
+      use Ecto.Repo,
+        otp_app: :realtime,
+        adapter: Ecto.Adapters.Postgres,
+        read_only: true
+    end
+  end
 
   @doc """
   Returns the replica repo module for the region specified in config/runtime.exs.
@@ -44,28 +44,24 @@ defmodule Realtime.Repo.Replica do
   def replica do
     region = Application.get_env(:realtime, :region)
     master_region = Application.get_env(:realtime, :master_region) || region
-    replica = configured_replica_module(region)
-    replica_conf = Application.get_env(:realtime, replica)
 
-    # Do not create module if replica isn't set or configuration is not present
-    cond do
-      is_nil(replica) ->
+    case configured_replica_module(region) do
+      nil ->
         Realtime.Repo
 
-      is_nil(replica_conf) ->
-        Realtime.Repo
+      replica ->
+        replica_conf = Application.get_env(:realtime, replica)
 
-      region == master_region ->
-        Realtime.Repo
+        cond do
+          is_nil(replica_conf) ->
+            Realtime.Repo
 
-      true ->
-        # Check if module is present
-        case Code.ensure_compiled(replica) do
-          {:module, _} -> nil
-          _ -> {:module, _, _, _} = Module.create(replica, @ast, Macro.Env.location(__ENV__))
+          region == master_region ->
+            Realtime.Repo
+
+          true ->
+            replica
         end
-
-        replica
     end
   end
 

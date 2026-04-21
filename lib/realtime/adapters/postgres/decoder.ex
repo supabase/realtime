@@ -132,8 +132,6 @@ defmodule Realtime.Adapters.Postgres.Decoder do
     end
   end
 
-  require Logger
-
   @pg_epoch DateTime.from_iso8601("2000-01-01T00:00:00Z")
 
   alias Messages.Begin

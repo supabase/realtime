@@ -2,8 +2,6 @@ defmodule RealtimeWeb.AuthTenant do
   @moduledoc """
   Authorization plug to ensure that only authorized clients can connect to the their tenant's endpoints.
   """
-  require Logger
-
   import Plug.Conn
   import Phoenix.Controller, only: [json: 2]
 
