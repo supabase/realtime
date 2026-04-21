@@ -8,6 +8,7 @@ This is the list of operational codes that can help you understand your deployme
 | InvalidJoinPayload                 | The payload provided to Realtime on connect is invalid                                                                                                                                                |
 | RealtimeDisabledForConfiguration   | The configuration provided to Realtime on connect will not be able to provide you any Postgres Changes                                                                                                |
 | TenantNotFound                     | The tenant you are trying to connect to does not exist                                                                                                                                                |
+| MissingAPIKey                      | No API key was provided in the `x-api-key` header or `apikey` query parameter                                                                                                                         |
 | ErrorConnectingToWebsocket         | Error when trying to connect to the WebSocket server                                                                                                                                                  |
 | ErrorAuthorizingWebsocket          | Error when trying to authorize the WebSocket connection                                                                                                                                               |
 | TableHasSpacesInName               | The table you are trying to listen to has spaces in its name which we are unable to support                                                                                                           |
@@ -80,5 +81,4 @@ This is the list of operational codes that can help you understand your deployme
 | JwtSignerError                     | Failed to generate a JWT signer — check your JWT secret or JWKS configuration                                                                                                                         |
 | MalformedWebSocketMessage          | Received a WebSocket message that is empty, invalid JSON, or missing required fields (`ref`, `topic`, or `event`). The connection is kept alive but the message is dropped                            |
 | UnknownErrorOnWebSocketMessage     | An unexpected error occurred while processing an incoming WebSocket message. The connection is kept alive but the message is dropped                                                                  |
-
 

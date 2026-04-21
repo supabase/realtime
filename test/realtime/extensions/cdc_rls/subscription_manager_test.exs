@@ -172,6 +172,8 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       send(pid, :check_oids)
 
       assert_receive :postgres_subscribe, 1000
+      :sys.get_state(pid)
+      # Ensure the state is updated before we check the ETS tables
       assert :ets.tab2list(args["subscribers_pids_table"]) == []
       assert :ets.tab2list(args["subscribers_nodes_table"]) == []
     end

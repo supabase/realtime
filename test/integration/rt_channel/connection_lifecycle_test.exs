@@ -18,6 +18,35 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
   setup [:checkout_tenant_and_connect]
 
+  describe "socket connect - tenant not found" do
+    test "logs TenantNotFound and rejects connection for unknown external_id", %{serializer: serializer} do
+      external_id = "nonexistent-#{System.unique_integer([:positive])}"
+      fake_tenant = %{external_id: external_id}
+      Cachex.put(Realtime.Tenants.Cache, {:get_tenant_by_external_id, external_id}, :not_found)
+
+      log =
+        capture_log(fn ->
+          assert {:error, _} =
+                   WebsocketClient.connect(self(), uri(fake_tenant, serializer), serializer, [
+                     {"x-api-key", "some-token"}
+                   ])
+        end)
+
+      assert log =~ "TenantNotFound"
+    end
+  end
+
+  describe "socket connect - missing api key" do
+    test "logs MissingAPIKey and rejects connection when no token provided", %{tenant: tenant, serializer: serializer} do
+      log =
+        capture_log(fn ->
+          assert {:error, _} = WebsocketClient.connect(self(), uri(tenant, serializer), serializer, [])
+        end)
+
+      assert log =~ "MissingAPIKey"
+    end
+  end
+
   describe "socket disconnect - tenant suspension" do
     setup [:rls_context]
 
