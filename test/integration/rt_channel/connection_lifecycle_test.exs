@@ -20,7 +20,9 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
   describe "socket connect - tenant not found" do
     test "logs TenantNotFound and rejects connection for unknown external_id", %{serializer: serializer} do
-      fake_tenant = %{external_id: "nonexistent-#{System.unique_integer([:positive])}"}
+      external_id = "nonexistent-#{System.unique_integer([:positive])}"
+      fake_tenant = %{external_id: external_id}
+      Cachex.put(Realtime.Tenants.Cache, {:get_tenant_by_external_id, external_id}, :not_found)
 
       log =
         capture_log(fn ->
