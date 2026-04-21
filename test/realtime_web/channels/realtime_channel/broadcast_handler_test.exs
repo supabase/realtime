@@ -355,6 +355,20 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       end
     end
 
+    test "increase_connection_pool from write authorization does not log UnableToSetPolicies",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic)
+
+      stub(Authorization, :get_write_authorizations, fn _, _, _ -> {:error, :increase_connection_pool} end)
+
+      log =
+        capture_log(fn ->
+          {:noreply, _socket} = BroadcastHandler.handle(%{}, db_conn, socket)
+        end)
+
+      refute log =~ "UnableToSetPolicies"
+    end
+
     @tag policies: [:broken_write_presence]
     test "handle failing rls policy", %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket = socket_fixture(tenant, topic)

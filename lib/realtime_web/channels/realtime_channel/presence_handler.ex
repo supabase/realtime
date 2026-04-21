@@ -57,7 +57,11 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
           | {:error,
              :invalid_payload
              | :rls_policy_error
+             | :query_canceled
+             | :missing_partition
+             | :tenant_database_unavailable
              | :unable_to_set_policies
+             | :increase_connection_pool
              | :rate_limit_exceeded
              | :client_rate_limit_exceeded
              | :unable_to_track_presence
@@ -90,6 +94,20 @@ defmodule RealtimeWeb.RealtimeChannel.PresenceHandler do
       {:error, :rls_policy_error, error} ->
         log_error("RlsPolicyError", error)
         {:error, :rls_policy_error}
+
+      {:error, :query_canceled, error} ->
+        log_error("QueryCanceled", error)
+        {:error, :query_canceled}
+
+      {:error, :missing_partition} ->
+        log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
+        {:error, :missing_partition}
+
+      {:error, :tenant_database_unavailable} ->
+        {:error, :tenant_database_unavailable}
+
+      {:error, :increase_connection_pool} ->
+        {:error, :increase_connection_pool}
 
       {:error, error} ->
         log_error("UnableToSetPolicies", error)

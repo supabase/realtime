@@ -245,6 +245,73 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
   end
 
+  describe "database error classification" do
+    @tag role: "anon", policies: []
+    test "invalid_parameter_value Postgrex error is classified as rls_policy_error", context do
+      stub(Database, :transaction, fn _, _, _, _ ->
+        {:error,
+         %Postgrex.Error{postgres: %{code: :invalid_parameter_value, message: "role \"super_admin\" does not exist"}}}
+      end)
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+
+      assert {:error, :rls_policy_error, %Postgrex.Error{}} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+    end
+
+    @tag role: "anon", policies: []
+    test "MatchError wrapping query_canceled is classified as query_canceled", context do
+      query_canceled = %Postgrex.Error{
+        postgres: %{code: :query_canceled, message: "canceling statement due to user request"}
+      }
+
+      stub(Database, :transaction, fn _, _, _, _ ->
+        {:error, %MatchError{term: {:error, query_canceled}}}
+      end)
+
+      assert {:error, :query_canceled, %Postgrex.Error{}} =
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+
+      assert {:error, :query_canceled, %Postgrex.Error{}} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+    end
+
+    @tag role: "anon", policies: []
+    test "MatchError wrapping check_violation on messages is classified as missing_partition", context do
+      check_violation = %Postgrex.Error{
+        postgres: %{
+          code: :check_violation,
+          table: "messages",
+          message: "no partition of relation \"messages\" found for row"
+        }
+      }
+
+      stub(Database, :transaction, fn _, _, _, _ ->
+        {:error, %MatchError{term: {:error, check_violation}}}
+      end)
+
+      assert {:error, :missing_partition} =
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+
+      assert {:error, :missing_partition} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+    end
+
+    @tag role: "anon", policies: []
+    test "DBConnection.ConnectionError is classified as tenant_database_unavailable", context do
+      stub(Database, :transaction, fn _, _, _, _ ->
+        {:error, %DBConnection.ConnectionError{message: "ssl recv: closed", severity: :error, reason: :error}}
+      end)
+
+      assert {:error, :tenant_database_unavailable} =
+               Authorization.get_read_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+
+      assert {:error, :tenant_database_unavailable} =
+               Authorization.get_write_authorizations(%Policies{}, context.db_conn, context.authorization_context)
+    end
+  end
+
   describe "telemetry" do
     @tag role: "authenticated",
          policies: [
