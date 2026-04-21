@@ -5,8 +5,6 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
   import Plug.Conn
   import Phoenix.Controller, only: [json: 2]
 
-  require Logger
-
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Database

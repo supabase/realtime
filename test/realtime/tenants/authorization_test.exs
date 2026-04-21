@@ -2,8 +2,6 @@ defmodule Realtime.Tenants.AuthorizationTest do
   use RealtimeWeb.ConnCase, async: true
   use Mimic
 
-  require Phoenix.ChannelTest
-
   import ExUnit.CaptureLog
 
   alias Realtime.Api.Message

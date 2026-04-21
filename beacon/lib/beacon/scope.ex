@@ -115,7 +115,7 @@ defmodule Beacon.Scope do
           State.t()
         ) :: {:noreply, State.t()}
   # A remote peer is discovering us
-  def handle_info({:discover, peer}, state) do
+  def handle_info({:discover, peer}, %State{} = state) do
     Logger.info(
       "Beacon[#{node()}|#{state.scope}] Received DISCOVER request from node #{node(peer)}"
     )
@@ -188,7 +188,7 @@ defmodule Beacon.Scope do
 
   # A remote peer has disconnected/crashed
   # We forget about it and remove its member counts
-  def handle_info({:DOWN, ref, :process, peer, reason}, state) do
+  def handle_info({:DOWN, ref, :process, peer, reason}, %State{} = state) do
     Logger.info(
       "Beacon[#{node()}|#{state.scope}] Scope process is DOWN on node #{node(peer)}: #{inspect(reason)}"
     )

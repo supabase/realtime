@@ -5,8 +5,6 @@ defmodule Realtime.Tenants.AuthorizationRemoteTest do
 
   import ExUnit.CaptureLog
 
-  require Phoenix.ChannelTest
-
   alias Realtime.Database
   alias Realtime.Tenants
   alias Realtime.Tenants.Authorization

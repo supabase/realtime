@@ -2,7 +2,6 @@ defmodule RealtimeWeb.Router do
   use RealtimeWeb, :router
 
   require Logger
-  require OpenTelemetry.Tracer, as: Tracer
 
   import RealtimeWeb.ChannelsAuthorization, only: [authorize: 3]
 
@@ -172,7 +171,7 @@ defmodule RealtimeWeb.Router do
     # Must have been set by BaggageRequestId
     # We can't set the span attribute there because the phoenix span only starts after it reaches the Router
     if request_id = Logger.metadata()[:request_id] do
-      Tracer.set_attribute(:request_id, request_id)
+      OpenTelemetry.Tracer.set_attribute(:request_id, request_id)
     end
 
     conn

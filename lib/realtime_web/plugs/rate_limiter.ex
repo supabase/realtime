@@ -4,8 +4,6 @@ defmodule RealtimeWeb.Plugs.RateLimiter do
   """
   import Plug.Conn
   import Phoenix.Controller, only: [json: 2]
-  require Logger
-
   alias Realtime.Api.Tenant
 
   def init(opts) do

@@ -3,7 +3,6 @@ defmodule Realtime.Tenants.Cache do
   Cache for Tenants.
   """
   require Cachex.Spec
-  require Logger
 
   alias Realtime.GenRpc
   alias Realtime.Tenants

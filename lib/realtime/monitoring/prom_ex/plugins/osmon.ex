@@ -4,7 +4,6 @@ defmodule Realtime.PromEx.Plugins.OsMon do
   """
 
   use PromEx.Plugin
-  require Logger
   alias Realtime.OsMetrics
 
   @event_ram_usage [:prom_ex, :plugin, :osmon, :ram_usage]

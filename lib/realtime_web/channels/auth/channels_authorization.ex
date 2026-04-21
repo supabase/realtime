@@ -2,8 +2,6 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   @moduledoc """
   Check connection is authorized to access channel
   """
-  require Logger
-
   @doc """
   Authorize connection to access channel
   """

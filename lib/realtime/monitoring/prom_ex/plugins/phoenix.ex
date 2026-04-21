@@ -5,8 +5,6 @@ if Code.ensure_loaded?(Phoenix) do
     @moduledoc false
     use PromEx.Plugin
 
-    require Logger
-
     alias Phoenix.Socket
     alias RealtimeWeb.Endpoint.HTTP, as: HTTP
 
