@@ -37,6 +37,13 @@ We recommend the following practices to streamline the review process:
 - Add or update tests to prove the change is correct, and make sure those tests and related tests pass.
 - Review the code before requesting reviews, especially for AI-assisted changes.
 
+Examples:
+
+- Good: `fix: properly clean up subscriptions when oids changed`
+- Good: `feat: split gen rpc pools for calls vs casts`
+- Bad: `fix stuff`
+- Bad: `updates`
+
 ## License
 
 By contributing to Realtime, you agree that your contributions will be licensed under this repository's license.
