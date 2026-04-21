@@ -57,7 +57,7 @@ defmodule Realtime.Env do
           "expected a boolean as default value for env #{env}, got #{inspect(default)}"
   end
 
-  @spec get_boolean(binary(), binary()) :: binary()
+  @spec get_binary(binary(), binary() | (-> binary())) :: binary()
   def get_binary(env, default) when is_function(default, 0) do
     value = System.get_env(env)
     if value, do: value, else: default.()

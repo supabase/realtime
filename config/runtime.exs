@@ -57,7 +57,7 @@ max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
 max_gen_rpc_call_clients = Env.get_integer("MAX_GEN_RPC_CALL_CLIENTS", 1)
 measure_traffic_interval_in_ms = Env.get_integer("MEASURE_TRAFFIC_INTERVAL_IN_MS", :timer.seconds(10))
 metrics_cleaner_schedule_timer_in_ms = Env.get_integer("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", :timer.minutes(30))
-metrics_jwt_secret = System.get_env("METRICS_JWT_SECRET")
+metrics_jwt_secret = System.fetch_env!("METRICS_JWT_SECRET")
 metrics_pusher_auth = System.get_env("METRICS_PUSHER_AUTH")
 metrics_pusher_compress = Env.get_boolean("METRICS_PUSHER_COMPRESS", true)
 metrics_pusher_enabled = Env.get_boolean("METRICS_PUSHER_ENABLED", false)
@@ -421,7 +421,7 @@ if config_env() == :prod do
       password: db_password,
       database: db_name,
       port: db_port,
-      db_pool_size: db_replica_pool_size,
+      pool_size: db_replica_pool_size,
       queue_target: db_queue_target,
       queue_interval: db_queue_interval,
       parameters: [

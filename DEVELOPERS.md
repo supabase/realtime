@@ -28,7 +28,7 @@
 
 Pre-requisites:
 
-- [mise](https://mise.jdx.dev) installed and [activated](https://mise.jdx.dev/cli/activate.html) in your shell to load env vars
+- [mise](https://mise.jdx.dev) installed and [activated](https://mise.jdx.dev/cli/activate.html) so it can load env vars in your shell.
 
 Optional but recommended:
 

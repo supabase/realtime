@@ -5,6 +5,7 @@ node = "24"
 
 [env]
 DB_ENC_KEY = "1234567890123456"
+METRICS_JWT_SECRET = "dev"
 
 [tasks.dev]
 description = "Start the dev server"
