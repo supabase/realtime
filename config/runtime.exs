@@ -8,6 +8,7 @@ broadcast_pool_size = Env.get_integer("BROADCAST_POOL_SIZE", 10)
 channel_error_backoff_ms = Env.get_integer("CHANNEL_ERROR_BACKOFF_MS", :timer.seconds(5))
 client_presence_max_calls = Env.get_integer("CLIENT_PRESENCE_MAX_CALLS", 5)
 client_presence_window_ms = Env.get_integer("CLIENT_PRESENCE_WINDOW_MS", 30_000)
+cluster_strategies = Env.get_binary("CLUSTER_STRATEGIES", fn -> if config_env() == :prod, do: "POSTGRES", else: "EPMD" end)
 connect_error_backoff_ms = Env.get_integer("CONNECT_ERROR_BACKOFF_MS", :timer.seconds(2))
 connect_partition_slots = Env.get_integer("CONNECT_PARTITION_SLOTS", System.schedulers_online() * 2)
 dashboard_auth = System.get_env("DASHBOARD_AUTH", "basic_auth")
@@ -53,10 +54,11 @@ log_level = System.get_env("LOG_LEVEL", "info") |> String.to_existing_atom()
 log_throttle_janitor_interval_in_ms = Env.get_integer("LOG_THROTTLE_JANITOR_INTERVAL_IN_MS", :timer.minutes(10))
 logflare_logger_backend_url = System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "https://api.logflare.app")
 logs_engine = System.get_env("LOGS_ENGINE")
-max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
 max_gen_rpc_call_clients = Env.get_integer("MAX_GEN_RPC_CALL_CLIENTS", 1)
+max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
 measure_traffic_interval_in_ms = Env.get_integer("MEASURE_TRAFFIC_INTERVAL_IN_MS", :timer.seconds(10))
 metrics_cleaner_schedule_timer_in_ms = Env.get_integer("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", :timer.minutes(30))
+metrics_jwt_secret = if config_env() == :test, do: System.get_env("METRICS_JWT_SECRET"), else: System.fetch_env!("METRICS_JWT_SECRET")
 metrics_pusher_auth = System.get_env("METRICS_PUSHER_AUTH")
 metrics_pusher_compress = Env.get_boolean("METRICS_PUSHER_COMPRESS", true)
 metrics_pusher_enabled = Env.get_boolean("METRICS_PUSHER_ENABLED", false)
@@ -92,21 +94,6 @@ tenant_max_events_per_second = Env.get_integer("TENANT_MAX_EVENTS_PER_SECOND", 1
 tenant_max_joins_per_second = Env.get_integer("TENANT_MAX_JOINS_PER_SECOND", 100)
 users_scope_shards = Env.get_integer("USERS_SCOPE_SHARDS", 5)
 websocket_max_heap_size = div(Env.get_integer("WEBSOCKET_MAX_HEAP_SIZE", 50_000_000), :erlang.system_info(:wordsize))
-
-cluster_strategies =
-  Env.get_binary("CLUSTER_STRATEGIES", fn ->
-    case config_env() do
-      :prod -> "POSTGRES"
-      _ -> "EPMD"
-    end
-  end)
-
-metrics_jwt_secret =
-  if config_env() == :test do
-    System.get_env("METRICS_JWT_SECRET")
-  else
-    System.fetch_env!("METRICS_JWT_SECRET")
-  end
 
 after_connect_query_args =
   case db_after_connect_query do

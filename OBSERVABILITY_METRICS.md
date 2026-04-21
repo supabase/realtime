@@ -199,4 +199,3 @@ These metrics expose system-level resource usage and inter-node cluster communic
 | `dist_send_pending_bytes`    | Gauge   | Bytes pending in Erlang distribution queues. Works with queue size to diagnose cluster communication issues.                                |
 | `dist_send_bytes`            | Counter | Total bytes sent via Erlang distribution protocol. Includes all cluster metadata and RPC traffic.                                           |
 | `dist_recv_bytes`            | Counter | Total bytes received via Erlang distribution protocol. Compare with send to validate symmetric communication.                               |
-
