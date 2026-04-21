@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   db:
     image: supabase/postgres:17.6.1.074
@@ -12,6 +10,12 @@ services:
     environment:
       POSTGRES_HOST: /var/run/postgresql
       POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   tenant_db:
     image: supabase/postgres:17.6.1.074
     container_name: tenant-db
@@ -21,3 +25,8 @@ services:
     environment:
       POSTGRES_HOST: /var/run/postgresql
       POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

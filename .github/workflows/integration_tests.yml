@@ -61,4 +61,4 @@ jobs:
           docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
           docker image save ${{ env.DENO_IMAGE }} | zstd -T0 -o /tmp/docker-images/deno.tar.zst
       - name: Run integration test
-        run: docker compose -f docker-compose.tests.yml up --abort-on-container-exit --exit-code-from test-runner
+        run: docker compose -f compose.tests.yml up --abort-on-container-exit --exit-code-from test-runner

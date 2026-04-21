@@ -5,8 +5,8 @@
 <p>Understand the latency between nodes across the Realtime cluster.</p>
 
 <div class="my-5">
-  <div id="pings" phx-update="stream" class="grid grid-cols-4 gap-12 py-4">
-    <div :for={{id, p} <- @streams.pings} id={id} class="p-4 border-2 whitespace-nowrap overflow-hidden">
+  <div id="pings" phx-update="stream" class="grid grid-cols-1 gap-6 py-4 md:grid-cols-2">
+    <div :for={{id, p} <- @streams.pings} id={id} class="min-w-0 break-words border-2 p-4">
       <div>From: <%= p.payload.from_region %> - <%= p.payload.from_node %></div>
       <div>To: <%= p.payload.region %> - <%= p.payload.node %></div>
       <div><%= p.payload.latency %> ms</div>

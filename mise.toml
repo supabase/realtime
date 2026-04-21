@@ -1,0 +1,58 @@
+[tools]
+elixir = "1.18.4-otp-27"
+erlang = "27"
+node = "24"
+
+[env]
+DB_ENC_KEY = "1234567890123456"
+METRICS_JWT_SECRET = "dev"
+
+[tasks.dev]
+description = "Start the dev server"
+run = "iex --name ${NAME}@127.0.0.1 --cookie cookie -S mix phx.server"
+env = { NAME = "pink", PORT = "4000", REGION = "us-east-1", GEN_RPC_TCP_SERVER_PORT = "5369", GEN_RPC_TCP_CLIENT_PORT = "5469" }
+
+[tasks.dev-orange]
+description = "Start another dev server (orange)"
+run = "iex --name ${NAME}@127.0.0.1 --cookie cookie -S mix phx.server"
+env = { NAME = "orange", PORT = "4001", REGION = "eu-west-1", GEN_RPC_TCP_SERVER_PORT = "5469", GEN_RPC_TCP_CLIENT_PORT = "5369" }
+
+[tasks.db-start]
+description = "Start all dev databases"
+run = "docker compose -f compose.dbs.yml up -d --wait"
+
+[tasks.db-stop]
+description = "Stop all dev databases"
+run = "docker compose -f compose.dbs.yml stop"
+
+[tasks.db-rm]
+description = "Remove all dev databases"
+run = "docker compose -f compose.dbs.yml rm -sf"
+
+[tasks.realtime-start]
+description = "Start realtime server and dev databases"
+run = "docker compose up"
+
+[tasks.realtime-stop]
+description = "Stop realtime server and dev databases"
+run = "docker compose stop"
+
+[tasks.realtime-rm]
+description = "Remove realtime server and dev databases"
+run = "docker compose rm -sf"
+
+[tasks.realtime-rebuild]
+description = "Rebuild realtime server and dev databases"
+run = "docker compose down --remove-orphans && docker compose build"
+
+[tasks.test-start]
+description = "Start test services"
+run = "docker compose -f compose.tests.yml up"
+
+[tasks.test-stop]
+description = "Stop test services"
+run = "docker compose -f compose.tests.yml stop"
+
+[tasks.test-rm]
+description = "Remove test services"
+run = "docker compose -f compose.tests.yml rm -sf"
