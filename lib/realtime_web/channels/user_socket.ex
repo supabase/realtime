@@ -40,12 +40,13 @@ defmodule RealtimeWeb.UserSocket do
       |> assign(:log_level, log_level)
       |> assign(:access_token, token)
 
-    with %Tenant{
-           jwt_secret: jwt_secret,
-           jwt_jwks: jwt_jwks,
-           suspend: false
-         } = tenant <- Tenants.Cache.get_tenant_by_external_id(external_id),
-         token when is_binary(token) <- token,
+    with {:ok,
+          %Tenant{
+            jwt_secret: jwt_secret,
+            jwt_jwks: jwt_jwks,
+            suspend: false
+          } = tenant} <- get_tenant(external_id),
+         {:ok, token} <- validate_token(token),
          jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
          :ok <- TenantRateLimiters.check_tenant(tenant) do
@@ -63,13 +64,17 @@ defmodule RealtimeWeb.UserSocket do
 
       {:ok, assign(socket, assigns)}
     else
-      nil ->
+      {:error, :not_found} ->
         log_error("TenantNotFound", "Tenant not found: #{external_id}")
         connect_error(:tenant_not_found)
 
-      %Tenant{suspend: true} ->
+      {:ok, %Tenant{suspend: true}} ->
         Logging.log_error(socket, "RealtimeDisabledForTenant", "Realtime disabled for this tenant")
         connect_error(:tenant_suspended)
+
+      {:error, :missing_api_key} ->
+        log_error("MissingAPIKey", "API key is missing or not a valid string")
+        connect_error(:missing_api_key)
 
       {:error, :expired_token, msg} ->
         Logging.maybe_log_warning(socket, "InvalidJWTToken", msg)
@@ -113,6 +118,17 @@ defmodule RealtimeWeb.UserSocket do
       _ -> @default_log_level
     end
   end
+
+  defp get_tenant(external_id) do
+    case Tenants.Cache.get_tenant_by_external_id(external_id) do
+      nil -> {:error, :not_found}
+      %Tenant{} = tenant -> {:ok, tenant}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp validate_token(token) when is_binary(token), do: {:ok, token}
+  defp validate_token(_), do: {:error, :missing_api_key}
 
   defp connect_error(reason) do
     Process.sleep(connect_error_backoff_ms())

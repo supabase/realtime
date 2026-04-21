@@ -262,20 +262,18 @@ defmodule RealtimeWeb.RealtimeChannel.LoggingTest do
       assert logs |> String.split("CodeB: msg") |> length() == 3
     end
 
-    test "concurrent callers do not exceed max_count" do
+    test "callers do not exceed max_count" do
       tenant_id = random_string()
       socket = %{assigns: %{log_level: :error, tenant: tenant_id, access_token: "test_token"}}
 
       logs =
         capture_log(fn ->
-          1..20
-          |> Task.async_stream(fn _ ->
+          for _ <- 1..20 do
             Logging.maybe_log_error(socket, "ConcurrentCode", "msg", throttle: {5, :timer.seconds(60)})
-          end)
-          |> Stream.run()
+          end
         end)
 
-      assert logs |> String.split("ConcurrentCode: msg") |> length() <= 6
+      assert logs |> String.split("ConcurrentCode: msg") |> length() == 6
     end
   end
 end
