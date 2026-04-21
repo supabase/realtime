@@ -30,10 +30,19 @@ Before opening a PR:
 - Make sure there is an issue or discussion covering the work.
 - Check whether someone has already opened a PR for the same problem.
 - Link the related issue or discussion in your PR description.
-- Use the PR template and explain the problem your change is solving.
-- Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) when you can.
-- Tests are passing.
-- You have reviwed the code.
+
+We recommend the following practices to streamline the review process:
+
+- Use [Conventional Commits](https://www.conventionalcommits.org) for your commit messages.
+- Add or update tests to prove the change is correct, and make sure those tests and related tests pass.
+- Review the code before requesting reviews, especially for AI-assisted changes.
+
+Examples:
+
+- Good: `fix: properly clean up subscriptions when oids changed`
+- Good: `feat: split gen rpc pools for calls vs casts`
+- Bad: `fix stuff`
+- Bad: `updates`
 
 ## License
 
