@@ -122,7 +122,8 @@ defmodule RealtimeWeb.UserSocket do
   defp get_tenant(external_id) do
     case Tenants.Cache.get_tenant_by_external_id(external_id) do
       nil -> {:error, :not_found}
-      tenant -> {:ok, tenant}
+      %Tenant{} = tenant -> {:ok, tenant}
+      _ -> {:error, :not_found}
     end
   end
 
