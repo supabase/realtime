@@ -57,7 +57,6 @@ max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
 max_gen_rpc_call_clients = Env.get_integer("MAX_GEN_RPC_CALL_CLIENTS", 1)
 measure_traffic_interval_in_ms = Env.get_integer("MEASURE_TRAFFIC_INTERVAL_IN_MS", :timer.seconds(10))
 metrics_cleaner_schedule_timer_in_ms = Env.get_integer("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", :timer.minutes(30))
-metrics_jwt_secret = System.fetch_env!("METRICS_JWT_SECRET")
 metrics_pusher_auth = System.get_env("METRICS_PUSHER_AUTH")
 metrics_pusher_compress = Env.get_boolean("METRICS_PUSHER_COMPRESS", true)
 metrics_pusher_enabled = Env.get_boolean("METRICS_PUSHER_ENABLED", false)
@@ -101,6 +100,13 @@ cluster_strategies =
       _ -> "EPMD"
     end
   end)
+
+metrics_jwt_secret =
+  if config_env() == :test do
+    System.get_env("METRICS_JWT_SECRET")
+  else
+    System.fetch_env!("METRICS_JWT_SECRET")
+  end
 
 after_connect_query_args =
   case db_after_connect_query do
