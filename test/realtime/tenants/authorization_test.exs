@@ -261,13 +261,13 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
 
     @tag role: "anon", policies: []
-    test "MatchError wrapping query_canceled is classified as query_canceled", context do
+    test "query_canceled is classified as query_canceled", context do
       query_canceled = %Postgrex.Error{
         postgres: %{code: :query_canceled, message: "canceling statement due to user request"}
       }
 
       stub(Database, :transaction, fn _, _, _, _ ->
-        {:error, %MatchError{term: {:error, query_canceled}}}
+        {:error, query_canceled}
       end)
 
       assert {:error, :query_canceled, %Postgrex.Error{}} =
@@ -278,7 +278,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
     end
 
     @tag role: "anon", policies: []
-    test "MatchError wrapping check_violation on messages is classified as missing_partition", context do
+    test "check_violation on messages is classified as missing_partition", context do
       check_violation = %Postgrex.Error{
         postgres: %{
           code: :check_violation,
@@ -288,7 +288,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
       }
 
       stub(Database, :transaction, fn _, _, _, _ ->
-        {:error, %MatchError{term: {:error, check_violation}}}
+        {:error, check_violation}
       end)
 
       assert {:error, :missing_partition} =

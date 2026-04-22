@@ -152,9 +152,8 @@ defmodule Realtime.Tenants.Authorization do
     end
   end
 
-  def get_write_authorizations(db_conn, authorization_context) do
-    get_write_authorizations(%Policies{}, db_conn, authorization_context)
-  end
+  def get_write_authorizations(db_conn, authorization_context),
+    do: get_write_authorizations(%Policies{}, db_conn, authorization_context)
 
   defp handle_policies_result(result, rate_counter) do
     case result do
@@ -167,10 +166,10 @@ defmodule Realtime.Tenants.Authorization do
       {:error, %Postgrex.Error{postgres: %{code: :invalid_parameter_value}} = error} ->
         {:error, :rls_policy_error, error}
 
-      {:error, %MatchError{term: {:error, %Postgrex.Error{postgres: %{code: :query_canceled}} = error}}} ->
+      {:error, %Postgrex.Error{postgres: %{code: :query_canceled}} = error} ->
         {:error, :query_canceled, error}
 
-      {:error, %MatchError{term: {:error, %Postgrex.Error{postgres: %{code: :check_violation, table: "messages"}}}}} ->
+      {:error, %Postgrex.Error{postgres: %{code: :check_violation, table: "messages"}}} ->
         {:error, :missing_partition}
 
       {:error, %ConnectionError{reason: :queue_timeout}} ->
