@@ -129,7 +129,8 @@ defmodule RealtimeWeb.Router do
         route_name: RealtimeWeb.Dashboard.ProcessDump,
         tenant_info: RealtimeWeb.Dashboard.TenantInfo,
         recon_trace: RealtimeWeb.Dashboard.ReconTrace,
-        node_info: RealtimeWeb.Dashboard.NodeInfo
+        node_info: RealtimeWeb.Dashboard.NodeInfo,
+        sql_inspector: RealtimeWeb.Dashboard.SqlInspector
       ]
     )
   end
