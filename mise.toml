@@ -4,8 +4,11 @@ erlang = "27"
 node = "24"
 
 [env]
+API_JWT_SECRET = "dev"
 DB_ENC_KEY = "1234567890123456"
 METRICS_JWT_SECRET = "dev"
+DASHBOARD_USER = "admin"
+DASHBOARD_PASSWORD = "admin"
 
 [tasks.dev]
 description = "Start the dev server"

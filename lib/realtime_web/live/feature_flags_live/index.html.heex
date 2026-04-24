@@ -1,0 +1,66 @@
+<.h1>Feature Flags</.h1>
+
+<div class="my-5">
+  <form phx-submit="create" class="flex flex-row gap-2 mb-6">
+    <input
+      type="text"
+      name="name"
+      value={@new_name}
+      placeholder="New flag name"
+      class="border border-gray-300 rounded px-3 py-2 text-sm w-64"
+    />
+    <button type="submit" class="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 rounded">
+      Add
+    </button>
+  </form>
+
+  <table class="w-full text-sm text-left border-collapse">
+    <thead>
+      <tr class="border-b border-gray-200">
+        <th class="py-2 pr-4 font-semibold text-gray-700">Name</th>
+        <th class="py-2 pr-4 font-semibold text-gray-700">Status</th>
+        <th class="py-2 font-semibold text-gray-700">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <%= for flag <- @flags do %>
+        <tr class="border-b border-gray-100">
+          <td class="py-3 pr-4 font-mono"><%= flag.name %></td>
+          <td class="py-3 pr-4">
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                phx-click="toggle"
+                phx-value-id={flag.id}
+                role="switch"
+                aria-checked={to_string(flag.enabled)}
+                class={[
+                  "relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none",
+                  if(flag.enabled, do: "bg-green-500", else: "bg-gray-300")
+                ]}
+              >
+                <span class={[
+                  "absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out",
+                  if(flag.enabled, do: "translate-x-4", else: "translate-x-0")
+                ]} />
+              </button>
+              <span class={["text-xs font-medium", if(flag.enabled, do: "text-green-600", else: "text-gray-400")]}>
+                <%= if flag.enabled, do: "Enabled", else: "Disabled" %>
+              </span>
+            </div>
+          </td>
+          <td class="py-3">
+            <button
+              phx-click="delete"
+              phx-value-id={flag.id}
+              data-confirm={"Delete flag #{flag.name}?"}
+              class="bg-red-100 hover:bg-red-200 text-red-800 text-xs px-3 py-1 rounded"
+            >
+              Delete
+            </button>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</div>
