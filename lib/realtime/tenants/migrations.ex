@@ -251,11 +251,20 @@ defmodule Realtime.Tenants.Migrations do
         :ok
       rescue
         error ->
-          log_error("MigrationsFailedToRun", error)
+          log_error("MigrationsFailedToRun", error, migration_error_metadata(error))
           {:error, error}
       end
     end)
   end
+
+  defp migration_error_metadata(%Postgrex.Error{postgres: postgres}) when is_map(postgres) do
+    [
+      pg_code: postgres[:pg_code],
+      pg_routine: postgres[:routine]
+    ]
+  end
+
+  defp migration_error_metadata(_), do: []
 
   @doc """
   Create partitions against tenant db connection
