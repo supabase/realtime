@@ -245,16 +245,26 @@ defmodule Realtime.Tenants.Migrations do
 
       try do
         opts = [all: true, prefix: "realtime", dynamic_repo: repo]
-        Ecto.Migrator.run(Repo, @migrations, :up, opts)
+        {time, _} = :timer.tc(fn -> Ecto.Migrator.run(Repo, @migrations, :up, opts) end)
+        Logger.info("Finished applying tenant migrations in #{div(time, 1000)}ms")
 
         :ok
       rescue
         error ->
-          log_error("MigrationsFailedToRun", error)
+          log_error("MigrationsFailedToRun", error, migration_error_metadata(error))
           {:error, error}
       end
     end)
   end
+
+  defp migration_error_metadata(%Postgrex.Error{postgres: postgres}) when is_map(postgres) do
+    [
+      pg_code: postgres[:pg_code],
+      pg_routine: postgres[:routine]
+    ]
+  end
+
+  defp migration_error_metadata(_), do: []
 
   @doc """
   Create partitions against tenant db connection
