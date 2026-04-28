@@ -7,9 +7,9 @@ defmodule Realtime.Tenants.Migrations.EnableGenericSubscriptionClaims do
     execute("truncate table realtime.subscription restart identity")
 
     execute("alter table realtime.subscription
-      drop constraint subscription_entity_user_id_filters_key cascade,
-      drop column email cascade,
-      drop column created_at cascade")
+      drop constraint if exists subscription_entity_user_id_filters_key cascade,
+      drop column if exists email cascade,
+      drop column if exists created_at cascade")
 
     execute("alter table realtime.subscription rename user_id to subscription_id")
 
@@ -87,7 +87,7 @@ defmodule Realtime.Tenants.Migrations.EnableGenericSubscriptionClaims do
 
     execute("alter type realtime.wal_rls rename attribute users to subscription_ids cascade;")
 
-    execute("drop function realtime.apply_rls(jsonb, integer);")
+    execute("drop function if exists realtime.apply_rls(jsonb, integer);")
     execute("create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
       returns setof realtime.wal_rls
       language plpgsql

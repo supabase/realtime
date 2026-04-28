@@ -57,6 +57,8 @@ defmodule Realtime.Tenants.Migrations.CreateRealtimeCheckFiltersTrigger do
     end;
     $$;")
 
+    execute("drop trigger if exists tr_check_filters on realtime.subscription")
+
     execute("create trigger tr_check_filters
     before insert or update on realtime.subscription
     for each row

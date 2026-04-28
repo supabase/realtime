@@ -9,9 +9,11 @@ defmodule RealtimeWeb.Dashboard.SqlInspector do
   """
   use Phoenix.LiveDashboard.PageBuilder
 
+  require Logger
+
   alias Realtime.Repo.Replica
 
-  @query_timeout 10_000
+  @query_timeout 30_000
   @max_rows 1_000
 
   @sensitive_patterns ~w(password passwd secret token jwt key credential private salt hash)
@@ -52,6 +54,7 @@ defmodule RealtimeWeb.Dashboard.SqlInspector do
          )}
 
       {:error, msg} ->
+        Logger.warning("SqlInspector query error: #{msg}")
         {:noreply, assign(socket, error: msg, result: nil, sql: sql, display_rows: [], row_count: 0)}
     end
   end
@@ -74,7 +77,7 @@ defmodule RealtimeWeb.Dashboard.SqlInspector do
   @impl true
   def render(assigns) do
     ~H"""
-    <div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 16px;">
+    <div style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 16px; min-width: 0;">
       <h5 style="margin: 0 0 4px 0; font-weight: 600;">SQL Inspector</h5>
       <p style="color: #6c757d; font-size: 0.85rem; margin-bottom: 16px;">
         Read-only SELECT queries only. Sensitive column values are masked. Results capped at <%= @max_rows %> rows.
@@ -161,15 +164,18 @@ defmodule RealtimeWeb.Dashboard.SqlInspector do
       limited_sql = "SELECT * FROM (#{stripped}) AS _q LIMIT #{@max_rows}"
       repo = Replica.replica()
 
-      repo.transaction(fn ->
-        Ecto.Adapters.SQL.query!(repo, "SET TRANSACTION READ ONLY", [])
+      repo.transaction(
+        fn ->
+          Ecto.Adapters.SQL.query!(repo, "SET TRANSACTION READ ONLY", [])
 
-        case Ecto.Adapters.SQL.query(repo, limited_sql, [], timeout: @query_timeout) do
-          {:ok, result} -> repo.rollback({:ok, mask_sensitive_columns(result)})
-          {:error, %{postgres: %{message: message}}} -> repo.rollback({:error, message})
-          {:error, reason} -> repo.rollback({:error, inspect(reason)})
-        end
-      end)
+          case Ecto.Adapters.SQL.query(repo, limited_sql, [], timeout: @query_timeout) do
+            {:ok, result} -> repo.rollback({:ok, mask_sensitive_columns(result)})
+            {:error, %{postgres: %{message: message}}} -> repo.rollback({:error, message})
+            {:error, reason} -> repo.rollback({:error, inspect(reason)})
+          end
+        end,
+        timeout: @query_timeout
+      )
       |> case do
         {:error, {:ok, result}} -> {:ok, result}
         {:error, {:error, message}} -> {:error, message}
