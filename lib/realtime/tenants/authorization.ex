@@ -108,7 +108,7 @@ defmodule Realtime.Tenants.Authorization do
 
   Automatically uses RPC if the database connection is not in the same node
   """
-  @spec get_write_authorizations(Policies.t(), pid(), __MODULE__.t(), keyword()) ::
+  @spec get_write_authorizations(Policies.t(), pid(), t(), keyword()) ::
           {:ok, Policies.t()} | {:error, any()} | {:error, :rls_policy_error | :query_canceled, any()}
   def get_write_authorizations(policies, db_conn, authorization_context, opts \\ [])
 
