@@ -505,7 +505,7 @@ defmodule Realtime.Tenants do
   @doc """
   Broadcasts an operation event to the tenant's operations channel.
   """
-  @spec broadcast_operation_event(:suspend_tenant | :unsuspend_tenant | :disconnect, String.t()) :: :ok
+  @spec broadcast_operation_event(:suspend_tenant | :unsuspend_tenant, String.t()) :: :ok
   def broadcast_operation_event(action, external_id),
     do: Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> external_id, action)
 

@@ -22,7 +22,7 @@ defmodule RealtimeWeb.TenantController do
   alias RealtimeWeb.OpenApiSchemas.TenantResponse
   alias RealtimeWeb.OpenApiSchemas.TenantResponseList
   alias RealtimeWeb.OpenApiSchemas.UnauthorizedResponse
-  alias RealtimeWeb.SocketDisconnect
+  alias RealtimeWeb.UserSocket
 
   @stop_timeout 10_000
 
@@ -232,7 +232,7 @@ defmodule RealtimeWeb.TenantController do
       tenant ->
         PostgresCdc.stop_all(tenant, @stop_timeout)
         Connect.shutdown(tenant.external_id)
-        SocketDisconnect.disconnect(tenant.external_id)
+        UserSocket.disconnect(tenant.external_id)
         send_resp(conn, 204, "")
     end
   end

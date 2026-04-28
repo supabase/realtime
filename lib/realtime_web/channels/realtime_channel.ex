@@ -5,7 +5,6 @@ defmodule RealtimeWeb.RealtimeChannel do
   use RealtimeWeb, :channel
   use RealtimeWeb.RealtimeChannel.Logging
 
-  alias RealtimeWeb.SocketDisconnect
   alias DBConnection.Backoff
 
   alias Realtime.Api.Tenant
@@ -104,8 +103,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         )
 
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
-
-      Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant_id)
+      RealtimeWeb.Endpoint.subscribe("realtime:operations:" <> tenant_id, metadata: metadata)
 
       is_new_api = new_api?(params)
       presence_enabled? = socket.assigns.presence_enabled?
@@ -148,7 +146,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       if presence_enabled?, do: send(self(), :sync_presence)
 
       UsersCounter.add(transport_pid, tenant_id)
-      SocketDisconnect.add(tenant_id, socket)
 
       {:ok, state, assign(socket, assigns)}
     else
@@ -375,11 +372,6 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  def handle_info(:disconnect, %{assigns: %{channel_name: channel_name}} = socket) do
-    Logger.info("Received operational call to disconnect channel")
-    push_system_message("system", socket, "ok", "Server requested disconnect", channel_name)
-    {:stop, :shutdown, socket}
-  end
 
   def handle_info(:sync_presence, %{assigns: %{presence_enabled?: true}} = socket) do
     case PresenceHandler.sync(socket) do

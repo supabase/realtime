@@ -19,7 +19,7 @@ defmodule Realtime.Api do
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
-  alias RealtimeWeb.SocketDisconnect
+  alias RealtimeWeb.UserSocket
 
   defguard requires_disconnect(changeset)
            when changeset.valid? == true and
@@ -296,7 +296,7 @@ defmodule Realtime.Api do
 
   defp maybe_trigger_disconnect(%Changeset{data: %{external_id: external_id}} = changeset)
        when requires_disconnect(changeset) do
-    SocketDisconnect.distributed_disconnect(external_id)
+    UserSocket.disconnect(external_id)
   end
 
   defp maybe_trigger_disconnect(_changeset), do: nil

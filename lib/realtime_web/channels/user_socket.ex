@@ -11,6 +11,7 @@ defmodule RealtimeWeb.UserSocket do
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RealtimeChannel.Logging
+  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
 
   ## Channels
   channel "realtime:*", RealtimeChannel
@@ -22,6 +23,27 @@ defmodule RealtimeWeb.UserSocket do
 
   @spec subscribers_id(String.t()) :: String.t()
   def subscribers_id(tenant), do: "user_socket:" <> tenant
+
+  @spec disconnect(binary()) :: :ok | {:error, term()}
+  def disconnect(tenant_external_id) do
+    Logger.warning("Disconnecting all sockets for tenant #{tenant_external_id}",
+      external_id: tenant_external_id,
+      project: tenant_external_id
+    )
+
+    Phoenix.PubSub.broadcast(
+      Realtime.PubSub,
+      "realtime:operations:" <> tenant_external_id,
+      %Phoenix.Socket.Broadcast{
+        event: "system",
+        topic: "realtime:operations:" <> tenant_external_id,
+        payload: %{extension: "system", status: "ok", message: "Server requested disconnect"}
+      },
+      MessageDispatcher
+    )
+
+    RealtimeWeb.Endpoint.broadcast(subscribers_id(tenant_external_id), "disconnect", %{})
+  end
 
   @impl true
   def connect(params, socket, opts) do

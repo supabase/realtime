@@ -12,7 +12,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   alias Phoenix.Socket.Message
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Tenants
-  alias RealtimeWeb.SocketDisconnect
+  alias RealtimeWeb.UserSocket
 
   @moduletag :capture_log
 
@@ -166,7 +166,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   describe "socket disconnect - distributed disconnect" do
     setup [:rls_context]
 
-    test "check registry of SocketDisconnect and on distribution called, kill socket", %{
+    test "on disconnect called, socket is killed", %{
       tenant: tenant,
       serializer: serializer
     } do
@@ -182,7 +182,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       assert :ok = WebsocketClient.send_heartbeat(socket)
 
-      SocketDisconnect.distributed_disconnect(tenant.external_id)
+      UserSocket.disconnect(tenant.external_id)
 
       assert_process_down(socket, 5000)
     end
