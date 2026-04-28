@@ -115,7 +115,7 @@ ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}" \
 
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
-      libstdc++6 openssl libncurses6 locales iptables sudo tini curl awscli jq xz-utils && \
+      libstdc++6 openssl libncurses6 locales iptables sudo tini curl xz-utils && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=pgdelta-builder /tmp/pgdelta.xz /usr/local/share/pgdelta/pgdelta.xz
