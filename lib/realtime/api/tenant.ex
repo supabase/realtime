@@ -33,6 +33,7 @@ defmodule Realtime.Api.Tenant do
     field(:max_client_presence_events_per_window, :integer)
     field(:client_presence_window_ms, :integer)
     field(:presence_enabled, :boolean, default: false)
+    field(:feature_flags, :map, default: %{})
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -82,7 +83,8 @@ defmodule Realtime.Api.Tenant do
       :broadcast_adapter,
       :max_client_presence_events_per_window,
       :client_presence_window_ms,
-      :presence_enabled
+      :presence_enabled,
+      :feature_flags
     ])
     |> validate_required([:external_id])
     |> check_constraint(:jwt_secret,

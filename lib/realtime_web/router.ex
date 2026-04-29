@@ -69,6 +69,7 @@ defmodule RealtimeWeb.Router do
   scope "/admin", RealtimeWeb do
     pipe_through [:browser, :dashboard_admin]
     live("/tenants", TenantsLive.Index, :index)
+    live("/feature-flags", FeatureFlagsLive.Index, :index)
   end
 
   scope "/metrics", RealtimeWeb do
@@ -130,7 +131,8 @@ defmodule RealtimeWeb.Router do
         tenant_info: RealtimeWeb.Dashboard.TenantInfo,
         recon_trace: RealtimeWeb.Dashboard.ReconTrace,
         node_info: RealtimeWeb.Dashboard.NodeInfo,
-        sql_inspector: RealtimeWeb.Dashboard.SqlInspector
+        sql_inspector: RealtimeWeb.Dashboard.SqlInspector,
+        feature_flags: RealtimeWeb.Dashboard.FeatureFlags
       ]
     )
   end
