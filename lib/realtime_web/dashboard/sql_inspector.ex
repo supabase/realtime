@@ -9,6 +9,8 @@ defmodule RealtimeWeb.Dashboard.SqlInspector do
   """
   use Phoenix.LiveDashboard.PageBuilder
 
+  alias Realtime.Repo.Replica
+
   @query_timeout 10_000
   @max_rows 1_000
 
@@ -157,14 +159,15 @@ defmodule RealtimeWeb.Dashboard.SqlInspector do
     with :ok <- validate_select_only(sql) do
       stripped = String.trim_trailing(sql, ";")
       limited_sql = "SELECT * FROM (#{stripped}) AS _q LIMIT #{@max_rows}"
+      repo = Replica.replica()
 
-      Realtime.Repo.transaction(fn ->
-        Ecto.Adapters.SQL.query!(Realtime.Repo, "SET TRANSACTION READ ONLY", [])
+      repo.transaction(fn ->
+        Ecto.Adapters.SQL.query!(repo, "SET TRANSACTION READ ONLY", [])
 
-        case Ecto.Adapters.SQL.query(Realtime.Repo, limited_sql, [], timeout: @query_timeout) do
-          {:ok, result} -> Realtime.Repo.rollback({:ok, mask_sensitive_columns(result)})
-          {:error, %{postgres: %{message: message}}} -> Realtime.Repo.rollback({:error, message})
-          {:error, reason} -> Realtime.Repo.rollback({:error, inspect(reason)})
+        case Ecto.Adapters.SQL.query(repo, limited_sql, [], timeout: @query_timeout) do
+          {:ok, result} -> repo.rollback({:ok, mask_sensitive_columns(result)})
+          {:error, %{postgres: %{message: message}}} -> repo.rollback({:error, message})
+          {:error, reason} -> repo.rollback({:error, inspect(reason)})
         end
       end)
       |> case do
