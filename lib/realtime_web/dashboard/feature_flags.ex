@@ -26,7 +26,7 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
 
     case FeatureFlags.upsert_flag(%{name: flag.name, enabled: !flag.enabled}) do
       {:ok, updated} ->
-        Cache.global_revalidate(updated)
+        Cache.global_update_cache(updated)
         flags = Enum.map(socket.assigns.flags, fn f -> if f.id == id, do: updated, else: f end)
         {:noreply, assign(socket, flags: flags)}
 
@@ -39,7 +39,7 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
   def handle_event("create", %{"name" => name}, socket) when name != "" do
     case FeatureFlags.upsert_flag(%{name: String.trim(name), enabled: false}) do
       {:ok, flag} ->
-        Cache.global_revalidate(flag)
+        Cache.global_update_cache(flag)
         flags = Enum.sort_by([flag | socket.assigns.flags], & &1.name)
         {:noreply, assign(socket, flags: flags)}
 
@@ -57,7 +57,7 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
 
     case FeatureFlags.delete_flag(flag) do
       {:ok, _} ->
-        Cache.distributed_invalidate_cache(flag.name)
+        Cache.global_invalidate_cache(flag)
         {:noreply, assign(socket, flags: Enum.reject(socket.assigns.flags, &(&1.id == id)))}
 
       {:error, _} ->

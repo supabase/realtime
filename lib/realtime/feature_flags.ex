@@ -29,7 +29,7 @@ defmodule Realtime.FeatureFlags do
   def upsert_flag(attrs) do
     %FeatureFlag{}
     |> FeatureFlag.changeset(attrs)
-    |> Repo.insert(on_conflict: {:replace, [:enabled, :updated_at]}, conflict_target: :name)
+    |> Repo.insert(on_conflict: {:replace, [:enabled, :updated_at]}, conflict_target: :name, returning: true)
   end
 
   @spec delete_flag(FeatureFlag.t()) :: {:ok, FeatureFlag.t()} | {:error, Ecto.Changeset.t()}

@@ -6,8 +6,8 @@ defmodule Realtime.FeatureFlags.Cache do
   Nil results (flag not found) are intentionally not cached so that newly
   created flags become visible without requiring an explicit invalidation.
 
-  Use `global_revalidate/1` after mutations to push the updated struct to all
-  cluster nodes. Use `distributed_invalidate_cache/1` after deletes.
+  Use `global_update_cache/1` after mutations to push the updated struct to all
+  cluster nodes. Use `global_invalidate_cache/1` after deletes.
   """
 
   require Cachex.Spec
@@ -24,6 +24,7 @@ defmodule Realtime.FeatureFlags.Cache do
     }
   end
 
+  @spec get_flag(String.t()) :: FeatureFlag.t() | nil
   def get_flag(name) do
     with {_, value} <-
            Cachex.fetch(__MODULE__, cache_key(name), fn _key ->
@@ -35,20 +36,24 @@ defmodule Realtime.FeatureFlags.Cache do
     end
   end
 
+  @spec update_cache(FeatureFlag.t()) :: {:ok, boolean()} | {:error, boolean()}
   def update_cache(%FeatureFlag{} = flag) do
     Cachex.put(__MODULE__, cache_key(flag.name), flag)
   end
 
+  @spec invalidate_cache(String.t()) :: {:ok, boolean()} | {:error, boolean()}
   def invalidate_cache(name) when is_binary(name) do
     Cachex.del(__MODULE__, cache_key(name))
   end
 
-  def global_revalidate(flag) do
+  @spec global_update_cache(FeatureFlag.t()) :: :ok
+  def global_update_cache(%FeatureFlag{} = flag) do
     GenRpc.multicast(__MODULE__, :update_cache, [flag])
   end
 
-  def distributed_invalidate_cache(name) when is_binary(name) do
-    GenRpc.multicast(__MODULE__, :invalidate_cache, [name])
+  @spec global_invalidate_cache(FeatureFlag.t()) :: :ok
+  def global_invalidate_cache(%FeatureFlag{} = flag) do
+    GenRpc.multicast(__MODULE__, :invalidate_cache, [flag.name])
   end
 
   defp cache_key(name), do: {:get_flag, name}

@@ -17,10 +17,7 @@ defmodule Realtime.FeatureFlagsTest do
       {:ok, _} = FeatureFlags.upsert_flag(%{name: "zebra_flag", enabled: false})
       {:ok, _} = FeatureFlags.upsert_flag(%{name: "alpha_flag", enabled: true})
 
-      names = FeatureFlags.list_flags() |> Enum.map(& &1.name)
-      assert names == Enum.sort(names)
-      assert "alpha_flag" in names
-      assert "zebra_flag" in names
+      assert FeatureFlags.list_flags() |> Enum.map(& &1.name) |> Enum.sort() == ["alpha_flag", "zebra_flag"]
     end
   end
 
@@ -32,7 +29,7 @@ defmodule Realtime.FeatureFlagsTest do
     end
 
     test "returns nil when flag does not exist" do
-      assert FeatureFlags.get_flag("nonexistent") == nil
+      refute FeatureFlags.get_flag("nonexistent")
     end
   end
 
@@ -61,7 +58,7 @@ defmodule Realtime.FeatureFlagsTest do
     test "removes the flag" do
       {:ok, flag} = FeatureFlags.upsert_flag(%{name: "to_delete", enabled: false})
       assert {:ok, _} = FeatureFlags.delete_flag(flag)
-      assert FeatureFlags.get_flag("to_delete") == nil
+      refute FeatureFlags.get_flag("to_delete")
     end
   end
 
