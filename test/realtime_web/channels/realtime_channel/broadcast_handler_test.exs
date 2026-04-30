@@ -369,6 +369,54 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandlerTest do
       refute log =~ "UnableToSetPolicies"
     end
 
+    test "V2 json UserBroadcastPush on private channel with write policy",
+         %{topic: topic, tenant: tenant, db_conn: db_conn, serializer: serializer} do
+      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: true}})
+
+      user_broadcast_payload = %{"a" => "b"}
+      json_encoded_user_broadcast_payload = Jason.encode!(user_broadcast_payload)
+
+      {:reply, :ok, _socket} =
+        BroadcastHandler.handle({"event123", :json, json_encoded_user_broadcast_payload, %{}}, db_conn, socket)
+
+      topic = "realtime:#{topic}"
+      assert_receive {:socket_push, code, data}
+
+      if serializer == RealtimeWeb.Socket.V2Serializer do
+        assert code == :binary
+
+        assert data ==
+                 <<
+                   4::size(8),
+                   byte_size(topic),
+                   byte_size("event123"),
+                   0,
+                   1::size(8),
+                   topic::binary,
+                   "event123"
+                 >> <> json_encoded_user_broadcast_payload
+      else
+        assert code == :text
+
+        assert Jason.decode!(data) ==
+                 message(serializer, topic, %{
+                   "event" => "event123",
+                   "payload" => user_broadcast_payload,
+                   "type" => "broadcast"
+                 })
+      end
+    end
+
+    test "V2 json UserBroadcastPush on private channel with write false policy is dropped",
+         %{topic: topic, tenant: tenant, db_conn: db_conn} do
+      socket = socket_fixture(tenant, topic, policies: %Policies{broadcast: %BroadcastPolicies{write: false}})
+
+      json_encoded = Jason.encode!(%{"a" => "b"})
+      {:noreply, _socket} = BroadcastHandler.handle({"event123", :json, json_encoded, %{}}, db_conn, socket)
+
+      refute_receive {:socket_push, _code, _data}, 100
+    end
+
     @tag policies: [:broken_write_presence]
     test "handle failing rls policy", %{topic: topic, tenant: tenant, db_conn: db_conn} do
       socket = socket_fixture(tenant, topic)

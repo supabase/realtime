@@ -335,6 +335,42 @@ defmodule Realtime.Tenants do
     {:channel, :presence_events, tenant.external_id}
   end
 
+  @doc "RateCounter arguments for counting AI agent inputs per second."
+  @spec ai_events_per_second_rate(Tenant.t()) :: RateCounter.Args.t()
+  def ai_events_per_second_rate(%Tenant{} = tenant) do
+    ai_events_per_second_rate(tenant.external_id, tenant.max_ai_events_per_second)
+  end
+
+  @spec ai_events_per_second_rate(String.t(), non_neg_integer) :: RateCounter.Args.t()
+  def ai_events_per_second_rate(tenant_id, max_ai_events_per_second) do
+    opts = [
+      tick: :timer.seconds(5),
+      max_bucket_len: 12,
+      telemetry: %{
+        event_name: [:channel, :ai_events],
+        measurements: %{limit: max_ai_events_per_second},
+        metadata: %{tenant: tenant_id}
+      },
+      limit: [
+        value: max_ai_events_per_second,
+        measurement: :avg,
+        log: true,
+        log_fn: fn ->
+          Logger.error("AiEventsPerSecondRateLimitReached",
+            external_id: tenant_id,
+            project: tenant_id
+          )
+        end
+      ]
+    ]
+
+    %RateCounter.Args{id: ai_events_per_second_key(tenant_id), opts: opts}
+  end
+
+  @spec ai_events_per_second_key(Tenant.t() | String.t()) :: {:channel, :ai_events, String.t()}
+  def ai_events_per_second_key(tenant) when is_binary(tenant), do: {:channel, :ai_events, tenant}
+  def ai_events_per_second_key(%Tenant{} = tenant), do: {:channel, :ai_events, tenant.external_id}
+
   @spec authorization_errors_per_second_rate(Tenant.t()) :: RateCounter.Args.t()
   def authorization_errors_per_second_rate(%Tenant{external_id: external_id} = tenant) do
     opts = [

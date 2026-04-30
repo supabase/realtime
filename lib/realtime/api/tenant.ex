@@ -34,6 +34,9 @@ defmodule Realtime.Api.Tenant do
     field(:client_presence_window_ms, :integer)
     field(:presence_enabled, :boolean, default: false)
     field(:feature_flags, :map, default: %{})
+    field(:ai_enabled, :boolean, default: false)
+    field(:max_ai_events_per_second, :integer, default: 100)
+    field(:max_ai_tokens_per_minute, :integer, default: 60_000)
 
     has_many(:extensions, Realtime.Api.Extensions,
       foreign_key: :tenant_external_id,
@@ -84,7 +87,10 @@ defmodule Realtime.Api.Tenant do
       :max_client_presence_events_per_window,
       :client_presence_window_ms,
       :presence_enabled,
-      :feature_flags
+      :feature_flags,
+      :ai_enabled,
+      :max_ai_events_per_second,
+      :max_ai_tokens_per_minute
     ])
     |> validate_required([:external_id])
     |> check_constraint(:jwt_secret,

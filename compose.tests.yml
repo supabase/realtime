@@ -1,5 +1,7 @@
+include:
+  - compose.ollama.yml
+
 services:
-  # Supabase Realtime service
   test_db:
     image: supabase/postgres:17.6.1.074
     container_name: test-realtime-db
@@ -16,9 +18,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
   test_realtime:
     depends_on:
       - test_db
+      - ollama-model-init
     build: .
     container_name: test-realtime-server
     ports:
@@ -46,6 +50,7 @@ services:
       SEED_SELF_HOST: true
       DASHBOARD_USER: admin
       DASHBOARD_PASSWORD: admin
+      OLLAMA_HOST: http://ollama:11434
     networks:
       test-network:
         aliases:
@@ -58,7 +63,6 @@ services:
       retries: 5
       start_period: 5s
 
-  # Deno test runner
   test-runner:
     image: denoland/deno:alpine-2.5.6
     container_name: deno-test-runner

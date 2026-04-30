@@ -360,6 +360,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     with %{columns: columns} <- Map.get(relations, relation_id),
          to_broadcast = tuple_to_map(tuple_data, columns),
+         {:ok, "broadcast"} <- get_or_error(to_broadcast, "extension", :not_broadcast),
          {:ok, payload} <- get_or_error(to_broadcast, "payload", :payload_missing),
          {:ok, inserted_at} <- get_or_error(to_broadcast, "inserted_at", :inserted_at_missing),
          {:ok, event} <- get_or_error(to_broadcast, "event", :event_missing),
@@ -385,6 +386,9 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
       {:noreply, state}
     else
+      {:error, :not_broadcast} ->
+        {:noreply, state}
+
       {:error, %Ecto.Changeset{valid?: false} = changeset} ->
         error = Ecto.Changeset.traverse_errors(changeset, &elem(&1, 0))
         log_error("UnableToBroadcastChanges", error)

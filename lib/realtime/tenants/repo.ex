@@ -169,20 +169,22 @@ defmodule Realtime.Tenants.Repo do
       prefix = schema.__schema__(:prefix)
       changes = Enum.map(changesets, & &1.changes)
 
-      %{header: header, rows: rows} =
-        Enum.reduce(changes, %{header: [], rows: []}, fn v, changes_acc ->
-          Enum.reduce(v, changes_acc, fn {field, row}, %{header: header, rows: rows} ->
-            row =
-              case row do
-                row when is_boolean(row) -> row
-                row when is_atom(row) -> Atom.to_string(row)
-                _ -> row
-              end
+      header =
+        changes
+        |> Enum.flat_map(&Map.keys/1)
+        |> Enum.uniq()
+        |> Enum.map(&Atom.to_string/1)
 
-            %{
-              header: Enum.uniq([Atom.to_string(field) | header]),
-              rows: [row | rows]
-            }
+      rows =
+        Enum.flat_map(changes, fn row ->
+          Enum.map(header, fn field ->
+            value = Map.get(row, String.to_atom(field))
+
+            case value do
+              v when is_boolean(v) -> v
+              v when is_atom(v) and not is_nil(v) -> Atom.to_string(v)
+              v -> v
+            end
           end)
         end)
 

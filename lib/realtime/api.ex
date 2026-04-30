@@ -8,7 +8,6 @@ defmodule Realtime.Api do
 
   alias Ecto.Changeset
   alias Extensions.PostgresCdcRls
-  alias Realtime.Api.Extensions
   alias Realtime.Api.Tenant
   alias Realtime.GenCounter
   alias Realtime.GenRpc
@@ -193,21 +192,15 @@ defmodule Realtime.Api do
     end
   end
 
-  defp list_extensions(type) do
-    query = from(e in Extensions, where: e.type == ^type, select: e)
-    replica = Replica.replica()
-    replica.all(query)
-  end
-
   def rename_settings_field(from, to) do
     if master_region?() do
-      for extension <- list_extensions("postgres_cdc_rls") do
-        {value, settings} = Map.pop(extension.settings, from)
-        new_settings = Map.put(settings, to, value)
+      {:ok, %{rows: rows}} =
+        Repo.query("SELECT id, settings FROM extensions WHERE type = $1", ["postgres_cdc_rls"])
 
-        extension
-        |> Changeset.cast(%{settings: new_settings}, [:settings])
-        |> Repo.update()
+      for [id, settings] <- rows do
+        {value, new_settings} = Map.pop(settings, from)
+        updated = Map.put(new_settings, to, value)
+        Repo.query!("UPDATE extensions SET settings = $1 WHERE id = $2", [updated, id])
       end
     else
       call(:rename_settings_field, [from, to], from)

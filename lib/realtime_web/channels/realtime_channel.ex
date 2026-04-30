@@ -23,6 +23,8 @@ defmodule RealtimeWeb.RealtimeChannel do
   alias Realtime.Tenants.Connect
   alias Realtime.UsersCounter
 
+  alias Extensions.AiAgent.SessionSupervisor
+
   alias RealtimeWeb.Channels.Payloads.Join
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel.BroadcastHandler
@@ -60,12 +62,15 @@ defmodule RealtimeWeb.RealtimeChannel do
         _ -> false
       end
 
+    ai_config = get_in(params, ["config", "ai"]) || %{}
+
     socket =
       socket
       |> assign_access_token(params)
       |> assign(:private?, !!params["config"]["private"])
       |> assign(:policies, nil)
       |> assign(:presence_enabled?, presence_enabled?)
+      |> assign(:ai_config, ai_config)
 
     case Join.validate(params) do
       {:ok, _join} ->
@@ -88,11 +93,22 @@ defmodule RealtimeWeb.RealtimeChannel do
          socket = assign_authorization_context(socket, sub_topic, claims),
          {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant_id),
          {:ok, socket} <- maybe_assign_policies(sub_topic, db_conn, socket),
+         tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?),
          {:ok, replayed_message_ids} <-
-           maybe_replay_messages(params["config"], sub_topic, db_conn, tenant_id, socket.assigns.private?) do
-      tenant_topic = Tenants.tenant_topic(tenant_id, sub_topic, !socket.assigns.private?)
+           maybe_replay_messages(params["config"], sub_topic, db_conn, tenant_id, socket.assigns.private?),
+         {:ok, ai_replayed_message_ids} <-
+           maybe_replay_ai_messages(params["config"], tenant_topic, db_conn, tenant_id, socket.assigns.private?),
+         {:ok, ai_session} <-
+           maybe_start_ai_session(
+             socket.assigns.ai_config,
+             tenant,
+             tenant_topic,
+             tenant_id,
+             self(),
+             socket.assigns.private?
+           ) do
+      all_replayed_ids = MapSet.union(replayed_message_ids, ai_replayed_message_ids)
 
-      # fastlane subscription
       metadata =
         MessageDispatcher.fastlane_metadata(
           transport_pid,
@@ -100,7 +116,7 @@ defmodule RealtimeWeb.RealtimeChannel do
           topic,
           log_level,
           tenant_id,
-          replayed_message_ids
+          all_replayed_ids
         )
 
       RealtimeWeb.Endpoint.subscribe(tenant_topic, metadata: metadata)
@@ -135,7 +151,8 @@ defmodule RealtimeWeb.RealtimeChannel do
         self_broadcast: !!params["config"]["broadcast"]["self"],
         tenant_topic: tenant_topic,
         channel_name: sub_topic,
-        presence_enabled?: presence_enabled?
+        presence_enabled?: presence_enabled?,
+        ai_session: ai_session
       }
 
       socket =
@@ -144,7 +161,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         |> assign_presence_counter(tenant)
         |> assign_client_presence_rate_limit(tenant)
 
-      # Start presence and add user if presence is enabled
       if presence_enabled?, do: send(self(), :sync_presence)
 
       UsersCounter.add(transport_pid, tenant_id)
@@ -241,6 +257,15 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :invalid_replay_channel} ->
         log_error(socket, "UnableToReplayMessages", "Replay is not allowed for public channels")
 
+      {:error, :ai_requires_private_channel} ->
+        log_error(socket, "AiAgentRequiresPrivateChannel", "AI agent is only supported on private channels")
+
+      {:error, :no_ai_agent_configured} ->
+        log_error(socket, "AiAgentNotConfigured", "No AI agent configured for this tenant")
+
+      {:error, :ai_session_start_failed} ->
+        log_error(socket, "AiSessionStartFailed", "Failed to start AI agent session")
+
       {:error, :error_generating_signer} ->
         log_error(
           socket,
@@ -263,9 +288,10 @@ defmodule RealtimeWeb.RealtimeChannel do
   def handle_info({:replay, messages}, socket) do
     for message <- messages do
       meta = %{"replayed" => true, "id" => message.id}
-      payload = %{"payload" => message.payload, "event" => message.event, "type" => "broadcast", "meta" => meta}
+      {channel_event, type} = replay_channel_event(message.extension, message.event)
+      payload = %{"payload" => message.payload, "event" => message.event, "type" => type, "meta" => meta}
 
-      push(socket, "broadcast", payload)
+      push(socket, channel_event, payload)
     end
 
     {:noreply, socket}
@@ -294,6 +320,13 @@ defmodule RealtimeWeb.RealtimeChannel do
 
   def handle_info(_msg, %{assigns: %{policies: %Policies{broadcast: %BroadcastPolicies{read: false}}}} = socket) do
     Logger.warning("Broadcast message ignored")
+    {:noreply, socket}
+  end
+
+  def handle_info(%{event: "agent_" <> _ = event, payload: payload} = msg, socket) do
+    count(socket)
+    maybe_log_info(socket, msg)
+    push(socket, "ai_event", %{"event" => event, "payload" => payload, "type" => "ai_agent"})
     {:noreply, socket}
   end
 
@@ -492,7 +525,6 @@ defmodule RealtimeWeb.RealtimeChannel do
       }
     } = socket
 
-    # Update token and reset policies
     socket = assign(socket, %{access_token: refresh_token, policies: nil})
 
     with {:ok, claims, confirm_token_ref} <- confirm_token(socket),
@@ -564,6 +596,72 @@ defmodule RealtimeWeb.RealtimeChannel do
     :telemetry.execute([:prom_ex, :plugin, :realtime, :disconnected], %{})
     Tracker.untrack(transport_pid)
     :ok
+  end
+
+  @dialyzer {:nowarn_function, maybe_start_ai_session: 6}
+  defp maybe_start_ai_session(%{"enabled" => true}, _tenant, _tenant_topic, _tenant_id, _channel_pid, false) do
+    {:error, :ai_requires_private_channel}
+  end
+
+  defp maybe_start_ai_session(
+         %{"enabled" => true, "agent" => agent_name} = ai_config,
+         %{ai_enabled: true} = tenant,
+         tenant_topic,
+         tenant_id,
+         channel_pid,
+         true
+       )
+       when is_binary(agent_name) do
+    case Enum.find(tenant.extensions, &(&1.type == "ai_agent" and &1.name == agent_name)) do
+      nil ->
+        Logger.error("AiAgentNotFound agent=#{agent_name} tenant=#{tenant_id}")
+        {:error, :no_ai_agent_configured}
+
+      extension ->
+        session_id = if is_binary(ai_config["session_id"]), do: ai_config["session_id"]
+
+        opts = [
+          tenant_id: tenant_id,
+          tenant_topic: tenant_topic,
+          settings: extension.settings,
+          channel_pid: channel_pid,
+          session_id: session_id,
+          max_ai_events_per_second: tenant.max_ai_events_per_second,
+          max_ai_tokens_per_minute: tenant.max_ai_tokens_per_minute
+        ]
+
+        start_ai_session(opts, tenant_id, agent_name)
+    end
+  end
+
+  defp maybe_start_ai_session(
+         %{"enabled" => true, "agent" => agent_name},
+         _tenant,
+         _tenant_topic,
+         tenant_id,
+         _channel_pid,
+         _private?
+       )
+       when is_binary(agent_name) do
+    Logger.error("AiNotEnabledForTenant agent=#{agent_name} tenant=#{tenant_id}")
+    {:error, :no_ai_agent_configured}
+  end
+
+  defp maybe_start_ai_session(_ai_config, _tenant, _tenant_topic, _tenant_id, _channel_pid, _private?), do: {:ok, nil}
+
+  defp start_ai_session(opts, tenant_id, agent_name) do
+    case SessionSupervisor.start_session(opts) do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      {:error, reason} ->
+        Logger.error("AiSessionStartFailed reason=#{inspect(reason)} tenant=#{tenant_id} agent=#{agent_name}")
+        {:error, :ai_session_start_failed}
+    end
+  catch
+    :exit, reason ->
+      Logger.error("AiSessionStartFailed reason=#{inspect(reason)} tenant=#{tenant_id} agent=#{agent_name}")
+      {:error, :ai_session_start_failed}
   end
 
   defp postgres_subscribe(min \\ 1, max \\ 3) do
@@ -855,10 +953,13 @@ defmodule RealtimeWeb.RealtimeChannel do
     authorization_context = socket.assigns.authorization_context
     policies = socket.assigns.policies || %Policies{}
     presence_enabled? = socket.assigns.presence_enabled?
+    ai_config = socket.assigns[:ai_config] || %{}
+    ai_enabled? = ai_config["enabled"] == true and is_binary(ai_config["agent"])
 
     with {:ok, policies} <-
            Authorization.get_read_authorizations(policies, db_conn, authorization_context,
-             presence_enabled?: presence_enabled?
+             presence_enabled?: presence_enabled?,
+             ai_enabled?: ai_enabled?
            ) do
       socket = assign(socket, :policies, policies)
 
@@ -892,33 +993,30 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
   end
 
-  defp maybe_replay_messages(%{"broadcast" => %{"replay" => _}}, _sub_topic, _db_conn, _tenant_id, false = _private?) do
-    {:error, :invalid_replay_channel}
-  end
+  defp maybe_replay_messages(%{"broadcast" => %{"replay" => _}}, _, _, _, false), do: {:error, :invalid_replay_channel}
 
-  defp maybe_replay_messages(
-         %{"broadcast" => %{"replay" => replay_params}},
-         sub_topic,
-         db_conn,
-         tenant_id,
-         true = _private?
-       )
-       when is_map(replay_params) do
+  defp maybe_replay_messages(%{"broadcast" => %{"replay" => params}}, topic, conn, tid, true) when is_map(params),
+    do: do_replay(params, [:broadcast], topic, conn, tid)
+
+  defp maybe_replay_messages(_, _, _, _, _), do: {:ok, MapSet.new()}
+
+  defp maybe_replay_ai_messages(%{"ai" => %{"replay" => _}}, _, _, _, false), do: {:error, :invalid_replay_channel}
+
+  defp maybe_replay_ai_messages(%{"ai" => %{"replay" => params}}, topic, conn, tid, true) when is_map(params),
+    do: do_replay(params, [:ai_agent_event], topic, conn, tid)
+
+  defp maybe_replay_ai_messages(_, _, _, _, _), do: {:ok, MapSet.new()}
+
+  defp do_replay(params, extensions, sub_topic, db_conn, tenant_id) do
     with {:ok, messages, message_ids} <-
-           Realtime.Messages.replay(
-             db_conn,
-             tenant_id,
-             sub_topic,
-             replay_params["since"],
-             replay_params["limit"] || 25
-           ) do
-      # Send to self because we can't write to the socket before finishing the join process
+           Realtime.Messages.replay(db_conn, tenant_id, sub_topic, params["since"], params["limit"] || 25, extensions) do
       send(self(), {:replay, messages})
       {:ok, message_ids}
     end
   end
 
-  defp maybe_replay_messages(_, _, _, _, _), do: {:ok, MapSet.new()}
+  defp replay_channel_event(:ai_agent_event, _event), do: {"ai_event", "ai_agent"}
+  defp replay_channel_event(_, _), do: {"broadcast", "broadcast"}
 
   defp presence_enabled?(client_enabled?, %Tenant{presence_enabled: tenant_enabled}) do
     client_enabled? || tenant_enabled

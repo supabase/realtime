@@ -1,11 +1,13 @@
 include:
   - compose.dbs.yml
+  - compose.ollama.yml
 
 services:
   realtime:
     depends_on:
       - db
       - tenant_db
+      - ollama-model-init
     build: .
     container_name: realtime-server
     environment:

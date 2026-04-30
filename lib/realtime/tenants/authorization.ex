@@ -286,12 +286,11 @@ defmodule Realtime.Tenants.Authorization do
     )
   end
 
-  @all_extensions [:broadcast, :presence]
+  @base_extensions [:broadcast, :presence]
 
   defp extensions_to_check(opts) do
-    if Keyword.get(opts, :presence_enabled?, true),
-      do: @all_extensions,
-      else: [:broadcast]
+    base = if Keyword.get(opts, :presence_enabled?, true), do: [:broadcast, :presence], else: [:broadcast]
+    if Keyword.get(opts, :ai_enabled?, false), do: [:ai_agent | base], else: base
   end
 
   defp check_read_policies(conn, authorization_context, messages_by_extension, policies) do
@@ -302,18 +301,21 @@ defmodule Realtime.Tenants.Authorization do
     with {:ok, res} <- Repo.all(conn, query, Message) do
       returned_ids = MapSet.new(res, & &1.id)
 
-      Enum.reduce(@all_extensions, policies, fn extension, acc ->
-        can? =
-          Map.has_key?(messages_by_extension, extension) and
-            MapSet.member?(returned_ids, messages_by_extension[extension])
+      policies_with_checked =
+        Enum.reduce(messages_by_extension, policies, fn {extension, msg_id}, acc ->
+          Policies.update_policies(acc, extension, :read, MapSet.member?(returned_ids, msg_id))
+        end)
 
-        Policies.update_policies(acc, extension, :read, can?)
+      Enum.reduce(@base_extensions, policies_with_checked, fn ext, acc ->
+        if Map.has_key?(messages_by_extension, ext), do: acc, else: Policies.update_policies(acc, ext, :read, false)
       end)
     end
   end
 
   defp check_write_policies(conn, authorization_context, extensions, policies) do
-    Enum.reduce(@all_extensions, policies, fn extension, acc ->
+    all_to_consider = Enum.uniq(@base_extensions ++ extensions)
+
+    Enum.reduce(all_to_consider, policies, fn extension, acc ->
       if extension in extensions do
         changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
 

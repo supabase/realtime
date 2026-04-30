@@ -132,22 +132,20 @@ defmodule Realtime.MetricsPusher do
   end
 
   defp push_metrics(label, get_metrics_fn, req_options) do
-    try do
-      metrics = get_metrics_fn.()
+    metrics = get_metrics_fn.()
 
-      case send_metrics(req_options, metrics) do
-        :ok ->
-          :ok
+    case send_metrics(req_options, metrics) do
+      :ok ->
+        :ok
 
-        {:error, reason} ->
-          Logger.error("MetricsPusher: Failed to push #{label} metrics to #{req_options[:url]}: #{inspect(reason)}")
-          :ok
-      end
-    rescue
-      error ->
-        Logger.error("MetricsPusher: Exception during #{label} push: #{inspect(error)}")
+      {:error, reason} ->
+        Logger.error("MetricsPusher: Failed to push #{label} metrics to #{req_options[:url]}: #{inspect(reason)}")
         :ok
     end
+  rescue
+    error ->
+      Logger.error("MetricsPusher: Exception during #{label} push: #{inspect(error)}")
+      :ok
   end
 
   defp send_metrics(req_options, metrics) do

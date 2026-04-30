@@ -486,6 +486,88 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
       refute_receive %Socket.Message{}
     end
+
+    @tag policies: [:authenticated_all_topic_read]
+    test "replay ai_agent_event messages on private topic as ai_event channel event", %{tenant: tenant} do
+      %{id: message_id} =
+        message_fixture(tenant, %{
+          "private" => true,
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+          "event" => "agent_done",
+          "extension" => "ai_agent_event",
+          "topic" => "#{tenant.external_id}-private:test",
+          "payload" => %{"text" => "hello from AI"}
+        })
+
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{
+        "private" => true,
+        "ai" => %{"replay" => %{"limit" => 2, "since" => :erlang.system_time(:millisecond) - 5 * 60000}}
+      }
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "ai_event",
+        payload: %{
+          "event" => "agent_done",
+          "meta" => %{"id" => ^message_id, "replayed" => true},
+          "payload" => %{"text" => "hello from AI"},
+          "type" => "ai_agent"
+        }
+      }
+
+      refute_receive %Socket.Message{}
+    end
+
+    @tag policies: [:authenticated_all_topic_read]
+    test "broadcast and ai replay are independent and both delivered on join", %{tenant: tenant} do
+      %{id: broadcast_id} =
+        message_fixture(tenant, %{
+          "private" => true,
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+          "event" => "my_event",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "payload" => %{"data" => "broadcast"}
+        })
+
+      %{id: ai_event_id} =
+        message_fixture(tenant, %{
+          "private" => true,
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+          "event" => "agent_done",
+          "extension" => "ai_agent_event",
+          "topic" => "#{tenant.external_id}-private:test",
+          "payload" => %{"text" => "AI response"}
+        })
+
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{"log_level" => "warning"}, conn_opts(tenant, jwt))
+
+      config = %{
+        "private" => true,
+        "broadcast" => %{"replay" => %{"limit" => 2, "since" => :erlang.system_time(:millisecond) - 5 * 60000}},
+        "ai" => %{"replay" => %{"limit" => 2, "since" => :erlang.system_time(:millisecond) - 5 * 60000}}
+      }
+
+      assert {:ok, _, %Socket{}} = subscribe_and_join(socket, "realtime:test", %{"config" => config})
+
+      assert_receive %Socket.Message{
+        event: "broadcast",
+        payload: %{"event" => "my_event", "meta" => %{"id" => ^broadcast_id, "replayed" => true}}
+      }
+
+      assert_receive %Socket.Message{
+        event: "ai_event",
+        payload: %{"event" => "agent_done", "meta" => %{"id" => ^ai_event_id, "replayed" => true}}
+      }
+
+      refute_receive %Socket.Message{}
+    end
   end
 
   describe "presence" do
@@ -1475,6 +1557,29 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert {:error,
               %{reason: "DatabaseLackOfConnections: Database can't accept more connections, Realtime won't connect"}} =
                subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
+    end
+  end
+
+  describe "AI agent" do
+    @tag policies: [:authenticated_all_topic_read]
+    test "returns error when AI is requested but no agent is configured for the tenant", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      config = %{"private" => true, "ai" => %{"enabled" => true, "agent" => "nonexistent-agent"}}
+
+      assert {:error, %{reason: "AiAgentNotConfigured: No AI agent configured for this tenant"}} =
+               subscribe_and_join(socket, "realtime:test", %{"config" => config})
+    end
+
+    test "returns error when AI is enabled on a public channel", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      config = %{"ai" => %{"enabled" => true, "agent" => "some-agent"}}
+
+      assert {:error, %{reason: "AiAgentRequiresPrivateChannel: AI agent is only supported on private channels"}} =
+               subscribe_and_join(socket, "realtime:test", %{"config" => config})
     end
   end
 

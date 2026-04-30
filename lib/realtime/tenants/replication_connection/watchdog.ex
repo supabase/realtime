@@ -50,17 +50,15 @@ defmodule Realtime.Tenants.ReplicationConnection.Watchdog do
 
   @impl true
   def handle_info(:health_check, state) do
-    try do
-      case ReplicationConnection.health_check(state.parent_pid, state.timeout) do
-        :ok ->
-          Process.send_after(self(), :health_check, state.check_interval)
-          {:noreply, state}
-      end
-    catch
-      :exit, {:timeout, _} ->
-        log_error("ReplicationConnectionWatchdogTimeout", "ReplicationConnection is not responding")
-
-        {:stop, :watchdog_timeout, state}
+    case ReplicationConnection.health_check(state.parent_pid, state.timeout) do
+      :ok ->
+        Process.send_after(self(), :health_check, state.check_interval)
+        {:noreply, state}
     end
+  catch
+    :exit, {:timeout, _} ->
+      log_error("ReplicationConnectionWatchdogTimeout", "ReplicationConnection is not responding")
+
+      {:stop, :watchdog_timeout, state}
   end
 end

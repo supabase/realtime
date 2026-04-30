@@ -2,7 +2,7 @@ start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
 max_cases = String.to_integer(System.get_env("MAX_CASES", "4"))
-ExUnit.start(exclude: [:failing], max_cases: max_cases, capture_log: true)
+ExUnit.start(exclude: [:failing, :live_llm], max_cases: max_cases, capture_log: true)
 
 max_cases = ExUnit.configuration()[:max_cases]
 
@@ -40,6 +40,13 @@ Mimic.copy(RealtimeWeb.Endpoint)
 Mimic.copy(RealtimeWeb.JwtVerification)
 Mimic.copy(RealtimeWeb.TenantBroadcaster)
 Mimic.copy(NimbleZTA.Cloudflare)
+Mimic.copy(Finch)
+Mimic.copy(Realtime.Tenants.Repo)
+Mimic.copy(Realtime.Tenants.Connect)
+Mimic.copy(Extensions.AiAgent.Adapter.ChatCompletions)
+Mimic.copy(Extensions.AiAgent.Adapter.AnthropicMessages)
+Mimic.copy(Extensions.AiAgent.Session)
+Mimic.copy(Extensions.AiAgent.SessionSupervisor)
 
 partition = System.get_env("MIX_TEST_PARTITION")
 node_name = if partition, do: :"main#{partition}@127.0.0.1", else: :"main@127.0.0.1"
