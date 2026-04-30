@@ -1,4 +1,7 @@
+alias Realtime.Api
+alias Realtime.Api.Extensions
 alias Realtime.Api.Tenant
+alias Realtime.Crypto
 alias Realtime.Database
 alias Realtime.Repo
 alias Realtime.Tenants
@@ -71,3 +74,41 @@ case Tenants.Migrations.run_migrations(tenant) do
 end
 
 Tenants.Migrations.run_migrations(tenant)
+
+Postgrex.transaction(tenant_conn, fn db_conn ->
+  [
+    """
+    CREATE POLICY "authenticated_all_topic_read"
+    ON realtime.messages FOR SELECT
+    TO authenticated
+    USING ( true );
+    """,
+    """
+    CREATE POLICY "authenticated_all_topic_write"
+    ON realtime.messages FOR INSERT
+    TO authenticated
+    WITH CHECK ( true );
+    """
+  ]
+  |> Enum.each(&Postgrex.query!(db_conn, &1))
+end)
+
+ollama_host = System.get_env("OLLAMA_HOST", "http://localhost:11434")
+ollama_model = System.get_env("OLLAMA_MODEL", "qwen2:0.5b")
+
+%Extensions{}
+|> Extensions.changeset(%{
+  "type" => "ai_agent",
+  "name" => "local-agent",
+  "tenant_external_id" => tenant.external_id,
+  "settings" => %{
+    "protocol" => "openai_compatible",
+    "model" => ollama_model,
+    "api_key" => Crypto.encrypt!("ollama"),
+    "base_url" => ollama_host <> "/v1",
+    "topic_pattern" => "agent:*"
+  }
+})
+|> Repo.insert!()
+
+Api.update_tenant_by_external_id(tenant.external_id, %{"ai_enabled" => true})

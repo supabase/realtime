@@ -5,7 +5,7 @@ defmodule RealtimeWeb.TenantBroadcaster do
 
   alias Phoenix.PubSub
 
-  @type message_type :: :broadcast | :presence | :postgres_changes
+  @type message_type :: :broadcast | :presence | :postgres_changes | :ai_events
 
   @spec pubsub_direct_broadcast(
           node :: node(),

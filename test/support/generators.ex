@@ -45,6 +45,50 @@ defmodule Generators do
     tenant
   end
 
+  @spec tenant_fixture_with_ai_agent(map()) :: Realtime.Api.Tenant.t()
+  def tenant_fixture_with_ai_agent(ai_opts \\ %{}, override \\ %{}) do
+    agent_name = Map.get(ai_opts, :agent_name, "test-agent")
+
+    base_override =
+      override
+      |> Enum.map(fn {k, v} -> {"#{k}", v} end)
+      |> Map.new()
+
+    tenant = tenant_fixture(base_override)
+    tenant = add_ai_agent_extension(tenant, agent_name, ai_opts)
+    Realtime.Tenants.Cache.update_cache(tenant)
+    tenant
+  end
+
+  @spec add_ai_agent_extension(Realtime.Api.Tenant.t(), String.t(), map()) :: Realtime.Api.Tenant.t()
+  def add_ai_agent_extension(tenant, agent_name \\ "test-agent", ai_opts \\ %{}) do
+    ai_settings = %{
+      "protocol" => Map.get(ai_opts, :protocol, "openai_compatible"),
+      "base_url" => Map.get(ai_opts, :base_url, Ollama.base_url() <> "/v1"),
+      "model" => Map.get(ai_opts, :model, Ollama.model()),
+      "api_key" => Map.get(ai_opts, :api_key, "ollama"),
+      "topic_pattern" => Map.get(ai_opts, :topic_pattern, "agent:*"),
+      "max_concurrent_sessions" => 5
+    }
+
+    %Realtime.Api.Extensions{}
+    |> Realtime.Api.Extensions.changeset(%{
+      "type" => "ai_agent",
+      "name" => agent_name,
+      "tenant_external_id" => tenant.external_id,
+      "settings" => ai_settings
+    })
+    |> Realtime.Repo.insert!()
+
+    Realtime.Api.upsert_feature_flag(%{"name" => "ai_agent", "enabled" => false})
+    Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{"ai_enabled" => true})
+
+    {:ok, updated} = Realtime.FeatureFlags.set_tenant_flag("ai_agent", tenant.external_id, true)
+
+    Realtime.Tenants.Cache.update_cache(updated)
+    updated
+  end
+
   @spec message_fixture(Realtime.Api.Tenant.t()) :: any()
   def message_fixture(tenant, override \\ %{}) do
     {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -52,7 +96,7 @@ defmodule Generators do
 
     create_attrs = %{
       "topic" => random_string(),
-      "extension" => Enum.random([:presence, :broadcast])
+      "extension" => :broadcast
     }
 
     override = override |> Enum.map(fn {k, v} -> {"#{k}", v} end) |> Map.new()

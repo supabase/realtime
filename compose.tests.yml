@@ -1,5 +1,4 @@
 services:
-  # Supabase Realtime service
   test_db:
     image: supabase/postgres:17.6.1.074
     container_name: test-realtime-db
@@ -16,9 +15,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
   test_realtime:
     depends_on:
-      - test_db
+      test_db:
+        condition: service_healthy
     build: .
     container_name: test-realtime-server
     ports:
@@ -58,7 +59,6 @@ services:
       retries: 5
       start_period: 5s
 
-  # Deno test runner
   test-runner:
     image: denoland/deno:alpine-2.5.6
     container_name: deno-test-runner

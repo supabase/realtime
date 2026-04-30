@@ -98,27 +98,109 @@ defmodule Realtime.MessagesTest do
       assert Messages.replay(conn, tenant.external_id, "test", 0, 10) == {:ok, [privatem], MapSet.new([privatem.id])}
     end
 
-    test "replay extension=broadcast", %{conn: conn, tenant: tenant} do
-      privatem =
+    test "ai_agent LLM context messages are excluded from broadcast replay", %{conn: conn, tenant: tenant} do
+      broadcast_msg =
         message_fixture(tenant, %{
           "private" => true,
           "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
-          "event" => "new",
+          "event" => "INSERT",
           "extension" => "broadcast",
           "topic" => "test",
-          "payload" => %{"value" => "new"}
+          "payload" => %{"value" => "user message"}
         })
 
       message_fixture(tenant, %{
         "private" => true,
         "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
-        "event" => "old",
-        "extension" => "presence",
+        "extension" => "ai_agent",
         "topic" => "test",
-        "payload" => %{"value" => "old"}
+        "payload" => %{"role" => "assistant", "content" => "hello"}
       })
 
-      assert Messages.replay(conn, tenant.external_id, "test", 0, 10) == {:ok, [privatem], MapSet.new([privatem.id])}
+      assert Messages.replay(conn, tenant.external_id, "test", 0, 10) ==
+               {:ok, [broadcast_msg], MapSet.new([broadcast_msg.id])}
+    end
+
+    test "mixed broadcast and ai_agent messages on same topic only replays broadcast", %{conn: conn, tenant: tenant} do
+      broadcast_msgs =
+        for i <- 1..3 do
+          message_fixture(tenant, %{
+            "private" => true,
+            "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-i, :minute),
+            "event" => "INSERT",
+            "extension" => "broadcast",
+            "topic" => "test",
+            "payload" => %{"seq" => i}
+          })
+        end
+
+      for i <- 1..3 do
+        message_fixture(tenant, %{
+          "private" => true,
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-i, :minute),
+          "extension" => "ai_agent",
+          "topic" => "test",
+          "payload" => %{"role" => "assistant", "content" => "response #{i}"}
+        })
+      end
+
+      {:ok, replayed, replayed_ids} = Messages.replay(conn, tenant.external_id, "test", 0, 10)
+
+      assert length(replayed) == 3
+      assert MapSet.size(replayed_ids) == 3
+      assert Enum.all?(replayed, &(&1.extension == :broadcast))
+      assert MapSet.equal?(replayed_ids, MapSet.new(broadcast_msgs, & &1.id))
+    end
+
+    test "ai_agent_event messages are included when requested", %{conn: conn, tenant: tenant} do
+      ai_event_msg =
+        message_fixture(tenant, %{
+          "private" => true,
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+          "event" => "agent_done",
+          "extension" => "ai_agent_event",
+          "topic" => "test",
+          "payload" => %{"text" => "hello world"}
+        })
+
+      message_fixture(tenant, %{
+        "private" => true,
+        "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+        "extension" => "ai_agent",
+        "topic" => "test",
+        "payload" => %{"role" => "assistant", "content" => "hello world"}
+      })
+
+      assert Messages.replay(conn, tenant.external_id, "test", 0, 10, [:ai_agent_event]) ==
+               {:ok, [ai_event_msg], MapSet.new([ai_event_msg.id])}
+    end
+
+    test "ai_agent_event and broadcast messages replay independently by extension filter", %{conn: conn, tenant: tenant} do
+      broadcast_msg =
+        message_fixture(tenant, %{
+          "private" => true,
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-1, :minute),
+          "event" => "my_event",
+          "extension" => "broadcast",
+          "topic" => "test",
+          "payload" => %{"data" => "broadcast"}
+        })
+
+      ai_event_msg =
+        message_fixture(tenant, %{
+          "private" => true,
+          "inserted_at" => NaiveDateTime.utc_now() |> NaiveDateTime.add(-2, :minute),
+          "event" => "agent_done",
+          "extension" => "ai_agent_event",
+          "topic" => "test",
+          "payload" => %{"text" => "AI response"}
+        })
+
+      {:ok, broadcast_replayed, _} = Messages.replay(conn, tenant.external_id, "test", 0, 10)
+      {:ok, ai_replayed, _} = Messages.replay(conn, tenant.external_id, "test", 0, 10, [:ai_agent_event])
+
+      assert broadcast_replayed == [broadcast_msg]
+      assert ai_replayed == [ai_event_msg]
     end
 
     test "replay respects since", %{conn: conn, tenant: tenant} do

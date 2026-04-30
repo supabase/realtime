@@ -26,6 +26,8 @@ concurrency:
 env:
   MIX_ENV: test
   POSTGRES_IMAGE: supabase/postgres:17.6.1.074
+  OLLAMA_IMAGE: ollama/ollama
+  OLLAMA_MODEL: qwen2:0.5b
 
 jobs:
   tests:
@@ -84,6 +86,65 @@ jobs:
         with:
           name: coverage-partition-${{ matrix.partition }}
           path: cover/lcov.info
+
+  live-llm-tests:
+    name: Tests (AI Agent / Live LLM)
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup elixir
+        id: beam
+        uses: erlef/setup-beam@ee09b1e59bb240681c382eb1f0abc6a04af72764 # v1.23.0
+        with:
+          otp-version: 27.x
+          elixir-version: 1.18.x
+      - name: Cache Mix
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            deps
+            _build
+            priv/native
+          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ env.elixir }}-${{ env.otp }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ github.workflow }}-${{ runner.os }}-mix-${{ env.elixir }}-${{ env.otp }}-
+      - name: Cache Docker images
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        id: docker-cache
+        with:
+          path: /tmp/docker-images
+          key: docker-images-live-llm-zstd-${{ env.POSTGRES_IMAGE }}-${{ env.OLLAMA_IMAGE }}-${{ env.OLLAMA_MODEL }}
+      - name: Load Docker images from cache
+        if: steps.docker-cache.outputs.cache-hit == 'true'
+        run: |
+          zstd -d --stdout /tmp/docker-images/postgres.tar.zst | docker image load
+          zstd -d --stdout /tmp/docker-images/ollama.tar.zst | docker image load
+      - name: Pull and save Docker images
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: |
+          docker pull ${{ env.POSTGRES_IMAGE }} &
+          PID1=$!
+          docker pull ${{ env.OLLAMA_IMAGE }} &
+          PID2=$!
+          wait $PID1 || exit $?
+          wait $PID2 || exit $?
+          mkdir -p /tmp/docker-images
+          docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
+          docker image save ${{ env.OLLAMA_IMAGE }} | zstd -T0 -o /tmp/docker-images/ollama.tar.zst
+      - name: Install dependencies
+        run: mix deps.get
+      - name: Set up Postgres
+        run: docker compose -f compose.dbs.yml up -d --wait
+      - name: Set up Ollama
+        run: docker compose -f compose.ollama.yml up -d --wait
+      - name: Start epmd
+        run: epmd -daemon
+      - name: Run AI agent live tests
+        env:
+          OLLAMA_HOST: http://localhost:11434
+          OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
+        run: mix test --include live_llm test/integration/ai_agent/
 
   coverage:
     name: Merge Coverage
