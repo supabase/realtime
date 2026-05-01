@@ -76,7 +76,7 @@ defmodule RealtimeWeb.RealtimeChannel do
     end
 
     with :ok <- SignalHandler.shutdown_in_progress?(),
-         %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id),
+         {:ok, tenant} <- Cache.fetch_tenant_by_external_id(tenant_id),
          socket =
            assign(socket, :presence_enabled?, presence_enabled?(socket.assigns.presence_enabled?, tenant)),
          :ok <- only_private?(tenant, socket),
@@ -371,7 +371,6 @@ defmodule RealtimeWeb.RealtimeChannel do
         shutdown_response(socket, Realtime.Logs.to_log(error))
     end
   end
-
 
   def handle_info(:sync_presence, %{assigns: %{presence_enabled?: true}} = socket) do
     case PresenceHandler.sync(socket) do

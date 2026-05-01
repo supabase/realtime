@@ -4,6 +4,7 @@ defmodule Realtime.Tenants.Cache do
   """
   require Cachex.Spec
 
+  alias Realtime.Api.Tenant
   alias Realtime.GenRpc
   alias Realtime.Tenants
 
@@ -16,11 +17,20 @@ defmodule Realtime.Tenants.Cache do
     }
   end
 
+  @spec fetch_tenant_by_external_id(String.t()) :: {:ok, Tenant.t()} | {:error, :tenant_not_found}
+  def fetch_tenant_by_external_id(tenant_id) do
+    case get_tenant_by_external_id(tenant_id) do
+      %Tenant{} = tenant -> {:ok, tenant}
+      _ -> {:error, :tenant_not_found}
+    end
+  end
+
+  @spec get_tenant_by_external_id(String.t()) :: Tenant.t() | nil
   def get_tenant_by_external_id(tenant_id) do
     case Cachex.fetch(__MODULE__, cache_key(tenant_id), fn _key ->
            case Tenants.get_tenant_by_external_id(tenant_id) do
-             nil -> {:ignore, nil}
-             tenant -> {:commit, tenant}
+             %Tenant{} = tenant -> {:commit, tenant}
+             _ -> {:ignore, nil}
            end
          end) do
       {:commit, value} -> value

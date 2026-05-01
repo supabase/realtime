@@ -22,7 +22,10 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     test "logs TenantNotFound and rejects connection for unknown external_id", %{serializer: serializer} do
       external_id = "nonexistent-#{System.unique_integer([:positive])}"
       fake_tenant = %{external_id: external_id}
-      Cachex.put(Realtime.Tenants.Cache, {:get_tenant_by_external_id, external_id}, :not_found)
+      # Our code does not store values that are not Tenant structs
+      # but we do it here to avoid an Ecto.Sandbox issue due to the async tests
+      # Because Cachex.fetch will try to call the DB when there is no cached information
+      Cachex.put(Realtime.Tenants.Cache, {:get_tenant_by_external_id, external_id}, {:error, :not_found})
 
       log =
         capture_log(fn ->
@@ -173,18 +176,33 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       config = %{broadcast: %{self: true}, private: false}
 
-      for _ <- 1..10 do
-        topic = "realtime:#{random_string()}"
-        WebsocketClient.join(socket, topic, %{config: config})
+      topics =
+        for i <- 1..10 do
+          topic = "realtime:#{serializer}:#{i}"
+          WebsocketClient.join(socket, topic, %{config: config})
 
-        assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
-      end
+          assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+          topic
+        end
 
       assert :ok = WebsocketClient.send_heartbeat(socket)
 
       UserSocket.disconnect(tenant.external_id)
 
-      assert_process_down(socket, 5000)
+      for topic <- topics do
+        assert_receive %Message{
+                         topic: ^topic,
+                         event: "system",
+                         payload: %{
+                           "extension" => "system",
+                           "message" => "Server requested disconnect",
+                           "status" => "ok"
+                         }
+                       },
+                       5000
+      end
+
+      assert_process_down(socket, 1000)
     end
   end
 

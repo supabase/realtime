@@ -67,7 +67,7 @@ defmodule RealtimeWeb.UserSocket do
             jwt_secret: jwt_secret,
             jwt_jwks: jwt_jwks,
             suspend: false
-          } = tenant} <- get_tenant(external_id),
+          } = tenant} <- Tenants.Cache.fetch_tenant_by_external_id(external_id),
          {:ok, token} <- validate_token(token),
          jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
@@ -86,7 +86,7 @@ defmodule RealtimeWeb.UserSocket do
 
       {:ok, assign(socket, assigns)}
     else
-      {:error, :not_found} ->
+      {:error, :tenant_not_found} ->
         log_error("TenantNotFound", "Tenant not found: #{external_id}")
         connect_error(:tenant_not_found)
 
@@ -138,14 +138,6 @@ defmodule RealtimeWeb.UserSocket do
     case Map.get(params, "log_level") do
       level when level in ["info", "warning", "error"] -> String.to_existing_atom(level)
       _ -> @default_log_level
-    end
-  end
-
-  defp get_tenant(external_id) do
-    case Tenants.Cache.get_tenant_by_external_id(external_id) do
-      nil -> {:error, :not_found}
-      %Tenant{} = tenant -> {:ok, tenant}
-      _ -> {:error, :not_found}
     end
   end
 

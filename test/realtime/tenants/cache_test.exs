@@ -10,6 +10,34 @@ defmodule Realtime.Tenants.CacheTest do
     {:ok, tenant: tenant_fixture()}
   end
 
+  describe "fetch_tenant_by_external_id/1" do
+    test "returns {:ok, tenant} when tenant exists", %{tenant: tenant} do
+      assert {:ok, %Api.Tenant{external_id: external_id}} =
+               Cache.fetch_tenant_by_external_id(tenant.external_id)
+
+      assert external_id == tenant.external_id
+    end
+
+    test "returns cached result on subsequent calls", %{tenant: tenant} do
+      external_id = tenant.external_id
+      assert {:ok, %Api.Tenant{name: "tenant"}} = Cache.fetch_tenant_by_external_id(external_id)
+
+      changeset = Api.Tenant.changeset(tenant, %{name: "new name"})
+      Repo.update!(changeset)
+
+      assert {:ok, %Api.Tenant{name: "tenant"}} = Cache.fetch_tenant_by_external_id(external_id)
+    end
+
+    test "returns {:error, :tenant_not_found} when tenant does not exist" do
+      assert {:error, :tenant_not_found} = Cache.fetch_tenant_by_external_id("nonexistent-id")
+    end
+
+    test "does not cache when tenant is not found" do
+      Cache.fetch_tenant_by_external_id("nonexistent-id")
+      assert {:ok, false} = Cachex.exists?(Cache, {:get_tenant_by_external_id, "nonexistent-id"})
+    end
+  end
+
   describe "get_tenant_by_external_id/1" do
     test "tenants cache returns a cached result", %{tenant: tenant} do
       external_id = tenant.external_id
