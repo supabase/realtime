@@ -44,7 +44,7 @@ defmodule Realtime.Database do
   @doc """
   Creates a database connection struct from the given tenant.
   """
-  @spec from_tenant(Tenant.t(), binary(), :stop | :exp | :rand | :rand_exp) :: t()
+  @spec from_tenant(Tenant.t(), binary(), :stop | :exp | :rand | :rand_exp) :: {:ok, t()} | {:error, :nxdomain}
   def from_tenant(%Tenant{} = tenant, application_name, backoff \\ :rand_exp) do
     tenant
     |> then(&Realtime.PostgresCdc.filter_settings(@cdc, &1.extensions))
@@ -54,7 +54,7 @@ defmodule Realtime.Database do
   @doc """
   Creates a database connection struct from the given settings.
   """
-  @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: t()
+  @spec from_settings(map(), binary(), :stop | :exp | :rand | :rand_exp) :: {:ok, t()} | {:error, :nxdomain}
   def from_settings(settings, application_name, backoff \\ :rand_exp) do
     pool = pool_size_by_application_name(application_name, settings)
 
@@ -65,22 +65,24 @@ defmodule Realtime.Database do
       |> Map.new()
       |> then(&Map.merge(settings, &1))
 
-    {:ok, addrtype} = detect_ip_version(settings["db_host"])
-    ssl = if default_ssl_param(settings), do: [verify: :verify_none], else: false
+    with {:ok, addrtype} <- detect_ip_version(settings["db_host"]) do
+      ssl = if default_ssl_param(settings), do: [verify: :verify_none], else: false
 
-    %__MODULE__{
-      hostname: settings["db_host"],
-      port: String.to_integer(settings["db_port"]),
-      database: settings["db_name"],
-      username: settings["db_user"],
-      password: settings["db_password"],
-      pool_size: pool,
-      queue_target: settings["db_queue_target"] || 5_000,
-      application_name: application_name,
-      backoff_type: backoff,
-      socket_options: [addrtype],
-      ssl: ssl
-    }
+      {:ok,
+       %__MODULE__{
+         hostname: settings["db_host"],
+         port: String.to_integer(settings["db_port"]),
+         database: settings["db_name"],
+         username: settings["db_user"],
+         password: settings["db_password"],
+         pool_size: pool,
+         queue_target: settings["db_queue_target"] || 5_000,
+         application_name: application_name,
+         backoff_type: backoff,
+         socket_options: [addrtype],
+         ssl: ssl
+       }}
+    end
   end
 
   @available_connection_factor 0.95
@@ -97,10 +99,10 @@ defmodule Realtime.Database do
     |> then(&PostgresCdc.filter_settings(@cdc, &1.extensions))
     |> then(fn settings ->
       required_pool = tenant_pool_requirements(settings)
-      check_settings = from_settings(settings, "realtime_connect", :stop)
-      check_settings = Map.put(check_settings, :max_restarts, 0)
 
-      with {:ok, conn} <- connect_db(check_settings),
+      with {:ok, base_settings} <- from_settings(settings, "realtime_connect", :stop),
+           check_settings = %{base_settings | max_restarts: 0},
+           {:ok, conn} <- connect_db(check_settings),
            {:ok, [available_connections, migrations_ran]} <- query_connection_info(conn) do
         requirement = ceil(required_pool * @available_connection_factor)
 
@@ -154,9 +156,9 @@ defmodule Realtime.Database do
   @spec connect(Tenant.t(), binary(), :stop | :exp | :rand | :rand_exp) ::
           {:ok, pid()} | {:error, any()}
   def connect(tenant, application_name, backoff \\ :stop) do
-    tenant
-    |> from_tenant(application_name, backoff)
-    |> connect_db()
+    with {:ok, settings} <- from_tenant(tenant, application_name, backoff) do
+      connect_db(settings)
+    end
   end
 
   @doc """

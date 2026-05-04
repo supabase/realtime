@@ -226,35 +226,35 @@ defmodule Realtime.Tenants.Migrations do
   end
 
   defp migrate(settings) do
-    settings = Database.from_settings(settings, "realtime_migrations", :stop)
+    with {:ok, settings} <- Database.from_settings(settings, "realtime_migrations", :stop) do
+      [
+        hostname: settings.hostname,
+        port: settings.port,
+        database: settings.database,
+        password: settings.password,
+        username: settings.username,
+        pool_size: settings.pool_size,
+        backoff_type: settings.backoff_type,
+        socket_options: settings.socket_options,
+        parameters: [application_name: settings.application_name],
+        ssl: settings.ssl
+      ]
+      |> Repo.with_dynamic_repo(fn repo ->
+        Logger.info("Applying migrations to #{settings.hostname}")
 
-    [
-      hostname: settings.hostname,
-      port: settings.port,
-      database: settings.database,
-      password: settings.password,
-      username: settings.username,
-      pool_size: settings.pool_size,
-      backoff_type: settings.backoff_type,
-      socket_options: settings.socket_options,
-      parameters: [application_name: settings.application_name],
-      ssl: settings.ssl
-    ]
-    |> Repo.with_dynamic_repo(fn repo ->
-      Logger.info("Applying migrations to #{settings.hostname}")
+        try do
+          opts = [all: true, prefix: "realtime", dynamic_repo: repo]
+          {time, _} = :timer.tc(fn -> Ecto.Migrator.run(Repo, @migrations, :up, opts) end)
+          Logger.info("Finished applying tenant migrations in #{div(time, 1000)}ms")
 
-      try do
-        opts = [all: true, prefix: "realtime", dynamic_repo: repo]
-        {time, _} = :timer.tc(fn -> Ecto.Migrator.run(Repo, @migrations, :up, opts) end)
-        Logger.info("Finished applying tenant migrations in #{div(time, 1000)}ms")
-
-        :ok
-      rescue
-        error ->
-          log_error("MigrationsFailedToRun", error, migration_error_metadata(error))
-          {:error, error}
-      end
-    end)
+          :ok
+        rescue
+          error ->
+            log_error("MigrationsFailedToRun", error, migration_error_metadata(error))
+            {:error, error}
+        end
+      end)
+    end
   end
 
   defp migration_error_metadata(%Postgrex.Error{postgres: postgres}) when is_map(postgres) do

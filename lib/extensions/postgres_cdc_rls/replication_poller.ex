@@ -60,9 +60,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   @impl true
   def handle_continue({:connect, tenant}, state) do
-    realtime_rls_settings = Database.from_tenant(tenant, "realtime_rls")
-
-    with {:ok, conn} <- Database.connect_db(realtime_rls_settings) do
+    with {:ok, realtime_rls_settings} <- Database.from_tenant(tenant, "realtime_rls"),
+         {:ok, conn} <- Database.connect_db(realtime_rls_settings) do
       {:noreply, Map.put(state, :conn, conn), {:continue, :prepare}}
     else
       {:error, reason} ->

@@ -123,8 +123,10 @@ defmodule Containers do
   end
 
   defp storage_up!(tenant) do
+    {:ok, db_settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+
     settings =
-      Database.from_tenant(tenant, "realtime_test", :stop)
+      db_settings
       |> Map.from_struct()
       |> Keyword.new()
 
@@ -145,7 +147,7 @@ defmodule Containers do
 
       run_migrations? = Keyword.get(opts, :run_migrations, false)
 
-      settings = Database.from_tenant(tenant, "realtime_test", :stop)
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
       settings = %{settings | max_restarts: 0, ssl: false}
       {:ok, conn} = Database.connect_db(settings)
 
@@ -260,7 +262,7 @@ defmodule Containers do
   # This exists so we avoid using an external process on Realtime.Tenants.Migrations
   defp run_migrations(tenant) do
     %{extensions: [%{settings: settings} | _]} = tenant
-    settings = Database.from_settings(settings, "realtime_migrations", :stop)
+    {:ok, settings} = Database.from_settings(settings, "realtime_migrations", :stop)
 
     [
       hostname: settings.hostname,

@@ -569,7 +569,8 @@ defmodule Realtime.Tenants.ConnectTest do
     end
 
     test "handles max_wal_senders by logging the correct operational code", %{tenant: tenant} do
-      opts = tenant |> Database.from_tenant("realtime_test", :stop) |> Database.opts()
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+      opts = Database.opts(settings)
       parent = self()
 
       pids =

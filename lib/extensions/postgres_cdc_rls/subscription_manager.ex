@@ -79,10 +79,10 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     extension = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
     extension = Map.merge(extension, %{"subs_pool_size" => Map.get(extension, "subcriber_pool_size", 4)})
 
-    subscription_manager_settings = Database.from_settings(extension, "realtime_subscription_manager")
-    subscription_manager_pub_settings = Database.from_settings(extension, "realtime_subscription_manager_pub")
-
-    with {:ok, conn} <- Database.connect_db(subscription_manager_settings),
+    with {:ok, subscription_manager_settings} <- Database.from_settings(extension, "realtime_subscription_manager"),
+         {:ok, subscription_manager_pub_settings} <-
+           Database.from_settings(extension, "realtime_subscription_manager_pub"),
+         {:ok, conn} <- Database.connect_db(subscription_manager_settings),
          {:ok, conn_pub} <- Database.connect_db(subscription_manager_pub_settings) do
       Subscriptions.delete_all_if_table_exists(conn)
 

@@ -265,7 +265,7 @@ defmodule Realtime.DatabaseTest do
 
   describe "from_tenant/3" do
     test "uses default backoff when not provided", %{tenant: tenant} do
-      settings = Database.from_tenant(tenant, "realtime_test")
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test")
       assert settings.backoff_type == :rand_exp
     end
   end
@@ -273,7 +273,7 @@ defmodule Realtime.DatabaseTest do
   describe "from_settings/3" do
     test "uses default backoff when not provided", %{tenant: tenant} do
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
-      result = Database.from_settings(settings, "realtime_connect")
+      {:ok, result} = Database.from_settings(settings, "realtime_connect")
       assert result.backoff_type == :rand_exp
     end
 
@@ -283,7 +283,7 @@ defmodule Realtime.DatabaseTest do
       {:ok, ip_version} = Database.detect_ip_version("127.0.0.1")
       socket_options = [ip_version]
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
-      settings = Database.from_settings(settings, application_name, backoff)
+      {:ok, settings} = Database.from_settings(settings, application_name, backoff)
       port = settings.port
 
       assert %Realtime.Database{
@@ -313,12 +313,12 @@ defmodule Realtime.DatabaseTest do
 
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
       settings = Map.put(settings, "ssl_enforced", true)
-      settings = Database.from_settings(settings, application_name, backoff)
+      {:ok, settings} = Database.from_settings(settings, application_name, backoff)
       assert settings.ssl == [verify: :verify_none]
 
       settings = Realtime.PostgresCdc.filter_settings("postgres_cdc_rls", tenant.extensions)
       settings = Map.put(settings, "ssl_enforced", false)
-      settings = Database.from_settings(settings, application_name, backoff)
+      {:ok, settings} = Database.from_settings(settings, application_name, backoff)
       assert settings.ssl == false
     end
   end
