@@ -218,6 +218,59 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       refute_receive _any
     end
 
+    test "encodes message separately for each unique serializer and join topic combination" do
+      parent = self()
+
+      subscriber_pid =
+        spawn(fn ->
+          loop = fn loop ->
+            receive do
+              msg ->
+                send(parent, {:subscriber, msg})
+                loop.(loop)
+            end
+          end
+
+          loop.(loop)
+        end)
+
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+
+      # Four subscribers: same serializer, two different join_topics (two each)
+      subscribers = [
+        {subscriber_pid, {:rc_fastlane, self(), TestSerializer, "realtime:topic-a", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), TestSerializer, "realtime:topic-a", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), TestSerializer, "realtime:topic-b", :info, "tenant123", MapSet.new()}},
+        {subscriber_pid, {:rc_fastlane, self(), TestSerializer, "realtime:topic-b", :info, "tenant123", MapSet.new()}}
+      ]
+
+      msg = %Broadcast{topic: "some:other:topic", event: "event", payload: %{data: "test"}}
+
+      log =
+        capture_log(fn ->
+          assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+        end)
+
+      assert log =~ "Received message on realtime:topic-a"
+      assert log =~ "Received message on realtime:topic-b"
+
+      # Serializer called once per unique {serializer, join_topic} pair (2 topics = 2 calls)
+      assert Agent.get(TestSerializer, & &1) == 2
+
+      # Each topic gets encoded with the correct topic rewritten
+      assert_receive {:encoded, %Broadcast{event: "event", topic: "realtime:topic-a"}}
+      assert_receive {:encoded, %Broadcast{event: "event", topic: "realtime:topic-a"}}
+      assert_receive {:encoded, %Broadcast{event: "event", topic: "realtime:topic-b"}}
+      assert_receive {:encoded, %Broadcast{event: "event", topic: "realtime:topic-b"}}
+
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+      assert_receive {:subscriber, :update_rate_counter}
+
+      refute_receive _any
+    end
+
     test "dispatches messages to non fastlane subscribers" do
       from_pid = :erlang.list_to_pid(~c'<0.2.1>')
 
