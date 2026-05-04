@@ -193,6 +193,12 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :tenant_database_unavailable} ->
         log_error(socket, "UnableToConnectToProject", "Realtime was unable to connect to the project database")
 
+      {:error, :query_canceled, error} ->
+        log_error(socket, "QueryCanceled", error)
+
+      {:error, :missing_partition} ->
+        log_error(socket, "MissingPartition", "Realtime was unable to find the expected messages partition")
+
       {:error, :rpc_error, :timeout} ->
         log_error(socket, "TimeoutOnRpcCall", "Node request timeout")
 
@@ -519,14 +525,25 @@ defmodule RealtimeWeb.RealtimeChannel do
       {:error, :unable_to_set_policies, _msg} ->
         shutdown_response(socket, "Realtime was unable to connect to the project database")
 
-      {:error, error} ->
-        shutdown_response(socket, inspect(error))
+      {:error, :tenant_database_unavailable} ->
+        shutdown_response(socket, "Realtime was unable to connect to the project database")
+
+      {:error, :query_canceled, error} ->
+        log_error(socket, "QueryCanceled", error)
+        shutdown_response(socket, "Query was cancelled, please try again")
+
+      {:error, :missing_partition} ->
+        log_error(socket, "MissingPartition", "Realtime was unable to find the expected messages partition")
+        shutdown_response(socket, "Realtime was unable to connect to the project database")
 
       {:error, :rpc_error, :timeout} ->
         shutdown_response(socket, "Node request timeout")
 
       {:error, :rpc_error, reason} ->
         shutdown_response(socket, "RPC call error: " <> inspect(reason))
+
+      {:error, error} ->
+        shutdown_response(socket, inspect(error))
     end
   end
 
@@ -857,8 +874,11 @@ defmodule RealtimeWeb.RealtimeChannel do
 
         {:error, :unauthorized, "You do not have permissions to read from this Channel topic: #{topic}"}
 
-      {:error, error} ->
+      {:error, %_{} = error} ->
         {:error, :unable_to_set_policies, error}
+
+      other ->
+        other
     end
   end
 

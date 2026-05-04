@@ -60,7 +60,13 @@ defmodule Realtime.Tenants.Authorization do
   Automatically uses RPC if the database connection is not in the same node
   """
   @spec get_read_authorizations(Policies.t(), pid(), t(), keyword()) ::
-          {:ok, Policies.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
+          {:ok, Policies.t()}
+          | {:error, :rls_policy_error, Postgrex.Error.t()}
+          | {:error, :query_canceled, Postgrex.Error.t()}
+          | {:error, :missing_partition}
+          | {:error, :increase_connection_pool}
+          | {:error, :tenant_database_unavailable}
+          | {:error, any()}
   def get_read_authorizations(policies, db_conn, authorization_context, opts \\ [])
 
   def get_read_authorizations(policies, db_conn, authorization_context, opts) when node() == node(db_conn) do
@@ -108,8 +114,14 @@ defmodule Realtime.Tenants.Authorization do
 
   Automatically uses RPC if the database connection is not in the same node
   """
-  @spec get_write_authorizations(Policies.t(), pid(), __MODULE__.t(), keyword()) ::
-          {:ok, Policies.t()} | {:error, any()} | {:error, :rls_policy_error, any()}
+  @spec get_write_authorizations(Policies.t(), pid(), t(), keyword()) ::
+          {:ok, Policies.t()}
+          | {:error, :rls_policy_error, Postgrex.Error.t()}
+          | {:error, :query_canceled, Postgrex.Error.t()}
+          | {:error, :missing_partition}
+          | {:error, :increase_connection_pool}
+          | {:error, :tenant_database_unavailable}
+          | {:error, any()}
   def get_write_authorizations(policies, db_conn, authorization_context, opts \\ [])
 
   def get_write_authorizations(policies, db_conn, authorization_context, opts) when node() == node(db_conn) do
@@ -152,9 +164,8 @@ defmodule Realtime.Tenants.Authorization do
     end
   end
 
-  def get_write_authorizations(db_conn, authorization_context) do
-    get_write_authorizations(%Policies{}, db_conn, authorization_context)
-  end
+  def get_write_authorizations(db_conn, authorization_context),
+    do: get_write_authorizations(%Policies{}, db_conn, authorization_context)
 
   defp handle_policies_result(result, rate_counter) do
     case result do
@@ -164,6 +175,15 @@ defmodule Realtime.Tenants.Authorization do
       {:ok, {:error, %Postgrex.Error{} = error}} ->
         {:error, :rls_policy_error, error}
 
+      {:error, %Postgrex.Error{postgres: %{code: :invalid_parameter_value}} = error} ->
+        {:error, :rls_policy_error, error}
+
+      {:error, %Postgrex.Error{postgres: %{code: :query_canceled}} = error} ->
+        {:error, :query_canceled, error}
+
+      {:error, %Postgrex.Error{postgres: %{code: :check_violation, table: "messages"}}} ->
+        {:error, :missing_partition}
+
       {:error, %ConnectionError{reason: :queue_timeout}} ->
         GenCounter.add(rate_counter.id)
         {:error, :increase_connection_pool}
@@ -171,6 +191,9 @@ defmodule Realtime.Tenants.Authorization do
       {:error, {:exit, _}} ->
         GenCounter.add(rate_counter.id)
         {:error, :increase_connection_pool}
+
+      {:error, %ConnectionError{}} ->
+        {:error, :tenant_database_unavailable}
 
       {:error, error} ->
         {:error, error}

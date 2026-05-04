@@ -725,18 +725,59 @@ defmodule RealtimeWeb.RealtimeChannelTest do
              end) =~ "UnknownErrorOnChannel: Realtime was unable to connect to the project database"
     end
 
-    test "unexpected error while setting policies", %{tenant: tenant} do
+    test "unexpected error while setting policies logs UnknownErrorOnChannel", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
       {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
 
       expect(Authorization, :get_read_authorizations, fn _, _, _, _ ->
-        {:error, "Realtime was unable to connect to the project database"}
+        {:error, "unexpected error"}
+      end)
+
+      assert capture_log(fn ->
+               assert {:error, %{reason: "Unknown Error on Channel"}} =
+                        subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
+             end) =~ "UnknownErrorOnChannel"
+    end
+
+    test "struct error while setting policies logs UnableToSetPolicies", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      expect(Authorization, :get_read_authorizations, fn _, _, _, _ ->
+        {:error, %DBConnection.ConnectionError{message: "unexpected error", reason: :error, severity: :error}}
       end)
 
       assert capture_log(fn ->
                assert {:error, %{reason: "Realtime was unable to connect to the project database"}} =
                         subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
              end) =~ "UnableToSetPolicies"
+    end
+
+    test "query canceled during join logs QueryCanceled", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      expect(Authorization, :get_read_authorizations, fn _, _, _, _ ->
+        {:error, :query_canceled,
+         %Postgrex.Error{postgres: %{code: :query_canceled, message: "canceling statement due to user request"}}}
+      end)
+
+      assert capture_log(fn ->
+               assert {:error, _} =
+                        subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
+             end) =~ "QueryCanceled"
+    end
+
+    test "missing partition during join logs MissingPartition", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      expect(Authorization, :get_read_authorizations, fn _, _, _, _ -> {:error, :missing_partition} end)
+
+      assert capture_log(fn ->
+               assert {:error, _} =
+                        subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
+             end) =~ "MissingPartition"
     end
   end
 

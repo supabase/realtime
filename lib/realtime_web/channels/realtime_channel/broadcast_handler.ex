@@ -66,6 +66,21 @@ defmodule RealtimeWeb.RealtimeChannel.BroadcastHandler do
         log_error("RlsPolicyError", error)
         {:noreply, socket}
 
+      {:error, :query_canceled, error} ->
+        log_error("QueryCanceled", error)
+        {:noreply, socket}
+
+      {:error, :missing_partition} ->
+        log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
+        {:noreply, socket}
+
+      {:error, :tenant_database_unavailable} ->
+        log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
+        {:noreply, socket}
+
+      {:error, :increase_connection_pool} ->
+        {:noreply, socket}
+
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
         {:noreply, socket}
