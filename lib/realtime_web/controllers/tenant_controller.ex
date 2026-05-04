@@ -22,7 +22,7 @@ defmodule RealtimeWeb.TenantController do
   alias RealtimeWeb.OpenApiSchemas.TenantResponse
   alias RealtimeWeb.OpenApiSchemas.TenantResponseList
   alias RealtimeWeb.OpenApiSchemas.UnauthorizedResponse
-  alias RealtimeWeb.SocketDisconnect
+  alias RealtimeWeb.UserSocket
 
   @stop_timeout 10_000
 
@@ -188,9 +188,10 @@ defmodule RealtimeWeb.TenantController do
     stop_all_timeout = Enum.count(PostgresCdc.available_drivers()) * 1_000
 
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(tenant_id, use_replica: false),
-         _ <- Tenants.suspend_tenant_by_external_id(tenant_id),
+         _ <- RealtimeWeb.UserSocket.disconnect(tenant_id),
          true <- Api.delete_tenant_by_external_id(tenant_id),
          :ok <- Cache.distributed_invalidate_tenant_cache(tenant_id),
+         :ok <- Connect.shutdown(tenant_id),
          :ok <- PostgresCdc.stop_all(tenant, stop_all_timeout),
          :ok <- Database.replication_slot_teardown(tenant) do
       send_resp(conn, 204, "")
@@ -232,7 +233,7 @@ defmodule RealtimeWeb.TenantController do
       tenant ->
         PostgresCdc.stop_all(tenant, @stop_timeout)
         Connect.shutdown(tenant.external_id)
-        SocketDisconnect.disconnect(tenant.external_id)
+        UserSocket.disconnect(tenant.external_id)
         send_resp(conn, 204, "")
     end
   end

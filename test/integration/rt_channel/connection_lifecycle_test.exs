@@ -12,9 +12,12 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
   alias Phoenix.Socket.Message
   alias Realtime.Integration.WebsocketClient
   alias Realtime.Tenants
-  alias RealtimeWeb.SocketDisconnect
+  alias RealtimeWeb.UserSocket
 
   @moduletag :capture_log
+
+  @service_restart_close_code 1012
+  @normal_close_code 1000
 
   setup [:checkout_tenant_and_connect]
 
@@ -22,7 +25,10 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     test "logs TenantNotFound and rejects connection for unknown external_id", %{serializer: serializer} do
       external_id = "nonexistent-#{System.unique_integer([:positive])}"
       fake_tenant = %{external_id: external_id}
-      Cachex.put(Realtime.Tenants.Cache, {:get_tenant_by_external_id, external_id}, :not_found)
+      # Our code does not store values that are not Tenant structs
+      # but we do it here to avoid an Ecto.Sandbox issue due to the async tests
+      # Because Cachex.fetch will try to call the DB when there is no cached information
+      Cachex.put(Realtime.Tenants.Cache, {:get_tenant_by_external_id, external_id}, {:error, :not_found})
 
       log =
         capture_log(fn ->
@@ -76,6 +82,8 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: %{keys: ["potato"]}})
 
+      assert_receive {:close_code, @service_restart_close_code}, 1000
+
       assert_process_down(socket)
     end
 
@@ -94,6 +102,8 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "potato"})
 
+      assert_receive {:close_code, @service_restart_close_code}, 1000
+
       assert_process_down(socket)
     end
 
@@ -111,6 +121,8 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{private_only: true})
+
+      assert_receive {:close_code, @service_restart_close_code}, 1000
 
       assert_process_down(socket)
     end
@@ -141,8 +153,8 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
                      },
                      500
 
-      Process.sleep(500)
       assert :ok = WebsocketClient.send_heartbeat(socket)
+      refute_receive {:close_code, @service_restart_close_code}
     end
   end
 
@@ -163,28 +175,74 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     end
   end
 
-  describe "socket disconnect - distributed disconnect" do
+  describe "socket disconnect" do
     setup [:rls_context]
 
-    test "check registry of SocketDisconnect and on distribution called, kill socket", %{
+    test "on disconnect called, socket is killed", %{
       tenant: tenant,
       serializer: serializer
     } do
       {socket, _} = get_connection(tenant, serializer, role: "authenticated")
       config = %{broadcast: %{self: true}, private: false}
 
-      for _ <- 1..10 do
-        topic = "realtime:#{random_string()}"
-        WebsocketClient.join(socket, topic, %{config: config})
+      topics =
+        for i <- 1..10 do
+          topic = "realtime:#{serializer}:#{i}"
+          WebsocketClient.join(socket, topic, %{config: config})
 
-        assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
-      end
+          assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 500
+          topic
+        end
 
       assert :ok = WebsocketClient.send_heartbeat(socket)
+      # heartbeat reply
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: "phoenix"}, 500
 
-      SocketDisconnect.distributed_disconnect(tenant.external_id)
+      UserSocket.disconnect(tenant.external_id)
 
-      assert_process_down(socket, 5000)
+      for topic <- topics do
+        assert_receive %Message{
+                         topic: ^topic,
+                         event: "system",
+                         payload: %{
+                           "extension" => "system",
+                           "message" => "Server requested disconnect",
+                           "status" => "ok"
+                         }
+                       },
+                       5000
+      end
+
+      assert_receive {:close_code, @service_restart_close_code}, 1000
+      refute_receive _any
+
+      assert_process_down(socket, 1000)
+    end
+  end
+
+  describe "socket disconnect - tenant deleted during session" do
+    setup [:rls_context]
+
+    test "sends disconnect to socket when tenant not found during channel join", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+
+      Cachex.put(Realtime.Tenants.Cache, {:get_tenant_by_external_id, tenant.external_id}, {:error, :not_found})
+
+      realtime_topic_2 = "realtime:#{random_string()}"
+      WebsocketClient.join(socket, realtime_topic_2, %{config: config})
+
+      assert_receive {:close_code, @normal_close_code}, 1000
+
+      assert_process_down(socket, 1000)
     end
   end
 

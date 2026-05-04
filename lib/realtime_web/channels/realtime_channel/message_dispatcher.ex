@@ -87,11 +87,11 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   defp do_dispatch(msg, fastlane_pid, serializer, join_topic, cache, tenant_id, log_level) do
     case cache do
-      %{^serializer => {:ok, encoded_msg}} ->
+      %{{^serializer, ^join_topic} => {:ok, encoded_msg}} ->
         send(fastlane_pid, encoded_msg)
         cache
 
-      %{^serializer => {:error, _reason}} ->
+      %{{^serializer, ^join_topic} => {:error, _reason}} ->
         # We do nothing at this stage. It has been already logged depending on the log level
         cache
 
@@ -110,7 +110,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
               {:error, reason}
           end
 
-        Map.put(cache, serializer, result)
+        Map.put(cache, {serializer, join_topic}, result)
     end
   end
 

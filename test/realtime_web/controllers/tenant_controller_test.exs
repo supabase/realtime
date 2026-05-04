@@ -364,7 +364,11 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       assert status == 204
 
-      assert_receive :disconnect
+      assert_receive %Phoenix.Socket.Broadcast{
+        payload: %{message: "Server requested disconnect", status: "ok", extension: "system"},
+        event: "system"
+      }
+
       assert_receive {:DOWN, _, :process, ^manager_pid, _}
       assert_receive {:DOWN, _, :process, ^connect_pid, _}
 

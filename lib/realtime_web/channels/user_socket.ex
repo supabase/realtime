@@ -11,6 +11,7 @@ defmodule RealtimeWeb.UserSocket do
   alias RealtimeWeb.ChannelsAuthorization
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.RealtimeChannel.Logging
+  alias RealtimeWeb.RealtimeChannel.MessageDispatcher
 
   ## Channels
   channel "realtime:*", RealtimeChannel
@@ -22,6 +23,29 @@ defmodule RealtimeWeb.UserSocket do
 
   @spec subscribers_id(String.t()) :: String.t()
   def subscribers_id(tenant), do: "user_socket:" <> tenant
+
+  @spec disconnect(binary()) :: :ok
+  def disconnect(tenant_external_id) do
+    Logger.warning("Disconnecting all sockets for tenant #{tenant_external_id}",
+      external_id: tenant_external_id,
+      project: tenant_external_id
+    )
+
+    disconnect_msg = %Phoenix.Socket.Broadcast{
+      event: "system",
+      payload: %{extension: "system", status: "ok", message: "Server requested disconnect"}
+    }
+
+    Phoenix.PubSub.broadcast!(
+      Realtime.PubSub,
+      "realtime:operations:" <> tenant_external_id,
+      disconnect_msg,
+      MessageDispatcher
+    )
+
+    Phoenix.PubSub.broadcast(Realtime.PubSub, subscribers_id(tenant_external_id), :socket_drain)
+    :ok
+  end
 
   @impl true
   def connect(params, socket, opts) do
@@ -45,7 +69,7 @@ defmodule RealtimeWeb.UserSocket do
             jwt_secret: jwt_secret,
             jwt_jwks: jwt_jwks,
             suspend: false
-          } = tenant} <- get_tenant(external_id),
+          } = tenant} <- Tenants.Cache.fetch_tenant_by_external_id(external_id),
          {:ok, token} <- validate_token(token),
          jwt_secret_dec <- Crypto.decrypt!(jwt_secret),
          {:ok, claims} <- ChannelsAuthorization.authorize_conn(token, jwt_secret_dec, jwt_jwks),
@@ -64,7 +88,7 @@ defmodule RealtimeWeb.UserSocket do
 
       {:ok, assign(socket, assigns)}
     else
-      {:error, :not_found} ->
+      {:error, :tenant_not_found} ->
         log_error("TenantNotFound", "Tenant not found: #{external_id}")
         connect_error(:tenant_not_found)
 
@@ -116,14 +140,6 @@ defmodule RealtimeWeb.UserSocket do
     case Map.get(params, "log_level") do
       level when level in ["info", "warning", "error"] -> String.to_existing_atom(level)
       _ -> @default_log_level
-    end
-  end
-
-  defp get_tenant(external_id) do
-    case Tenants.Cache.get_tenant_by_external_id(external_id) do
-      nil -> {:error, :not_found}
-      %Tenant{} = tenant -> {:ok, tenant}
-      _ -> {:error, :not_found}
     end
   end
 

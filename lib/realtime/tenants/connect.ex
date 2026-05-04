@@ -225,7 +225,7 @@ defmodule Realtime.Tenants.Connect do
   @doc """
   Shutdown the tenant Connection and linked processes
   """
-  @spec shutdown(binary()) :: :ok | nil
+  @spec shutdown(binary()) :: :ok
   def shutdown(tenant_id) do
     case whereis(tenant_id) do
       pid when is_pid(pid) ->

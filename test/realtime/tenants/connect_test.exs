@@ -379,39 +379,6 @@ defmodule Realtime.Tenants.ConnectTest do
              end) =~ ~r/Only \d+ available connections\. At least \d+ connections are required/
     end
 
-    test "handles tenant suspension and unsuspension in a reactive way", %{tenant: tenant} do
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-      assert Connect.ready?(tenant.external_id)
-
-      Realtime.Tenants.suspend_tenant_by_external_id(tenant.external_id)
-      assert_process_down(db_conn)
-      # Wait for syn to unregister and Cachex to be invalided
-      Process.sleep(500)
-
-      assert {:error, :tenant_suspended} = Connect.lookup_or_start_connection(tenant.external_id)
-      refute Process.alive?(db_conn)
-
-      Realtime.Tenants.unsuspend_tenant_by_external_id(tenant.external_id)
-      Process.sleep(50)
-      assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
-      Connect.shutdown(tenant.external_id)
-    end
-
-    test "handles tenant suspension only on targetted suspended user", %{tenant: tenant1} do
-      tenant2 = Containers.checkout_tenant(run_migrations: true)
-
-      assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant1.external_id)
-
-      log =
-        capture_log(fn ->
-          Realtime.Tenants.suspend_tenant_by_external_id(tenant2.external_id)
-          Process.sleep(50)
-        end)
-
-      refute log =~ "Tenant was suspended"
-      assert Process.alive?(db_conn)
-    end
-
     test "properly handles of failing calls by avoid creating too many connections", %{tenant: tenant} do
       extension = %{
         "type" => "postgres_cdc_rls",
