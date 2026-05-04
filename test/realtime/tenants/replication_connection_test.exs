@@ -544,7 +544,8 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
     end
 
     test "handle standby connections exceeds max_wal_senders", %{tenant: tenant} do
-      opts = Database.from_tenant(tenant, "realtime_test", :stop) |> Database.opts()
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+      opts = Database.opts(settings)
       parent = self()
 
       # This creates a loop of errors that occupies all WAL senders and lets us test the error handling

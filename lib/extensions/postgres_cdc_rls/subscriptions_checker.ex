@@ -56,9 +56,8 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
 
     %Realtime.Api.Tenant{} = tenant = Realtime.Tenants.Cache.get_tenant_by_external_id(id)
 
-    realtime_subscription_checker_settings = Database.from_tenant(tenant, "realtime_subscription_checker")
-
-    with {:ok, conn} <- Database.connect_db(realtime_subscription_checker_settings) do
+    with {:ok, realtime_subscription_checker_settings} <- Database.from_tenant(tenant, "realtime_subscription_checker"),
+         {:ok, conn} <- Database.connect_db(realtime_subscription_checker_settings) do
       state = %State{
         id: id,
         conn: conn,

@@ -126,28 +126,29 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
   def start_link(%__MODULE__{tenant_id: tenant_id} = attrs) do
     tenant = Cache.get_tenant_by_external_id(tenant_id)
-    connection_opts = Database.from_tenant(tenant, "realtime_broadcast_changes", :stop)
 
-    connection_opts =
-      [
-        name: {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, tenant_id}}},
-        hostname: connection_opts.hostname,
-        username: connection_opts.username,
-        password: connection_opts.password,
-        database: connection_opts.database,
-        port: connection_opts.port,
-        socket_options: connection_opts.socket_options,
-        ssl: connection_opts.ssl,
-        sync_connect: true,
-        auto_reconnect: false,
-        parameters: [application_name: "realtime_replication_connection"]
-      ]
+    with {:ok, db_settings} <- Database.from_tenant(tenant, "realtime_broadcast_changes", :stop) do
+      connection_opts =
+        [
+          name: {:via, Registry, {Realtime.Registry.Unique, {__MODULE__, tenant_id}}},
+          hostname: db_settings.hostname,
+          username: db_settings.username,
+          password: db_settings.password,
+          database: db_settings.database,
+          port: db_settings.port,
+          socket_options: db_settings.socket_options,
+          ssl: db_settings.ssl,
+          sync_connect: true,
+          auto_reconnect: false,
+          parameters: [application_name: "realtime_replication_connection"]
+        ]
 
-    case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do
-      {:ok, pid} -> {:ok, pid}
-      {:error, {:already_started, pid}} -> {:ok, pid}
-      {:error, {:bad_return_from_init, {:stop, error}}} -> {:error, error}
-      {:error, error} -> {:error, error}
+      case Postgrex.ReplicationConnection.start_link(__MODULE__, attrs, connection_opts) do
+        {:ok, pid} -> {:ok, pid}
+        {:error, {:already_started, pid}} -> {:ok, pid}
+        {:error, {:bad_return_from_init, {:stop, error}}} -> {:error, error}
+        {:error, error} -> {:error, error}
+      end
     end
   end
 
