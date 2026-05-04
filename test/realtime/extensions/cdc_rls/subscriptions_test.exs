@@ -11,9 +11,10 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
 
+    {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
+
     {:ok, conn} =
-      tenant
-      |> Database.from_tenant("realtime_rls")
+      db_settings
       |> Map.from_struct()
       |> Keyword.new()
       |> Postgrex.start_link()
@@ -279,9 +280,10 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       )
 
       on_exit(fn ->
+        {:ok, db_settings} = Database.from_tenant(tenant, "realtime_rls")
+
         {:ok, cleanup_conn} =
-          tenant
-          |> Database.from_tenant("realtime_rls")
+          db_settings
           |> Map.from_struct()
           |> Keyword.new()
           |> Postgrex.start_link()
