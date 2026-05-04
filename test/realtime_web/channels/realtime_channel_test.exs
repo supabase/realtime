@@ -23,6 +23,25 @@ defmodule RealtimeWeb.RealtimeChannelTest do
 
   setup :rls_context
 
+  describe "join - tenant not found" do
+    test "sends disconnect to transport_pid and logs TenantNotFound", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+
+      stub(Realtime.Tenants.Cache, :fetch_tenant_by_external_id, fn _id ->
+        {:error, :tenant_not_found}
+      end)
+
+      log =
+        capture_log(fn ->
+          assert {:error, _} = subscribe_and_join(socket, "realtime:test", %{})
+        end)
+
+      assert log =~ "TenantNotFound"
+      assert_received %Phoenix.Socket.Broadcast{event: "disconnect"}
+    end
+  end
+
   describe "process flags" do
     test "max heap size is set for both transport and channel processes", %{tenant: tenant} do
       jwt = Generators.generate_jwt_token(tenant)
@@ -1436,7 +1455,6 @@ defmodule RealtimeWeb.RealtimeChannelTest do
                subscribe_and_join(socket, "realtime:test", %{"config" => %{"private" => true}})
     end
   end
-
 
   defp conn_opts(tenant, token) do
     [

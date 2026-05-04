@@ -42,7 +42,7 @@ defmodule RealtimeWeb.UserSocket do
       MessageDispatcher
     )
 
-    RealtimeWeb.Endpoint.broadcast(subscribers_id(tenant_external_id), "disconnect", %{})
+    Phoenix.PubSub.broadcast(Realtime.PubSub, subscribers_id(tenant_external_id), :socket_drain)
   end
 
   @impl true

@@ -16,6 +16,9 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
   @moduletag :capture_log
 
+  @service_restart_close_code 1012
+  @normal_close_code 1000
+
   setup [:checkout_tenant_and_connect]
 
   describe "socket connect - tenant not found" do
@@ -186,6 +189,8 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
         end
 
       assert :ok = WebsocketClient.send_heartbeat(socket)
+      # heartbeat reply
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: "phoenix"}, 500
 
       UserSocket.disconnect(tenant.external_id)
 
@@ -201,6 +206,35 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
                        },
                        5000
       end
+
+      assert_receive {:close_code, @service_restart_close_code}, 1000
+      refute_receive _any
+
+      assert_process_down(socket, 1000)
+    end
+  end
+
+  describe "socket disconnect - tenant deleted during session" do
+    setup [:rls_context]
+
+    test "sends disconnect to socket when tenant not found during channel join", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      config = %{broadcast: %{self: true}, private: false}
+      realtime_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, realtime_topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+
+      Cachex.put(Realtime.Tenants.Cache, {:get_tenant_by_external_id, tenant.external_id}, {:error, :not_found})
+
+      realtime_topic_2 = "realtime:#{random_string()}"
+      WebsocketClient.join(socket, realtime_topic_2, %{config: config})
+
+      assert_receive {:close_code, @normal_close_code}, 1000
 
       assert_process_down(socket, 1000)
     end

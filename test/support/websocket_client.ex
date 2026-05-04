@@ -223,7 +223,8 @@ defmodule Realtime.Integration.WebsocketClient do
           {[binary_decode(data)], state}
 
         # prepare to close the connection when a close frame is received
-        {:close, _code, _data}, state ->
+        {:close, code, _data}, state ->
+          Kernel.send(state.sender, {:close_code, code})
           {[], put_in(state.closing?, true)}
 
         frame, state ->

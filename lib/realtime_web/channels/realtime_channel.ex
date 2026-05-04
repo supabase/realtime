@@ -212,6 +212,7 @@ defmodule RealtimeWeb.RealtimeChannel do
         log_error(socket, "PrivateOnly", "This project only allows private channels")
 
       {:error, :tenant_not_found} ->
+        send(transport_pid, %Phoenix.Socket.Broadcast{event: "disconnect"})
         log_error(socket, "TenantNotFound", "Tenant with the given ID does not exist")
 
       {:error, :tenant_suspended} ->
