@@ -134,7 +134,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "renders tenant when data is valid", %{conn: conn, tenant: tenant} do
       external_id = tenant.external_id
-      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      port = tenant_db_port(tenant)
       attrs = default_tenant_attrs(port)
       attrs = Map.put(attrs, "external_id", external_id)
       conn = post(conn, ~p"/api/tenants", tenant: attrs)
@@ -150,7 +150,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "can set max_client_presence_events_per_window", %{conn: conn, tenant: tenant} do
       external_id = tenant.external_id
-      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      port = tenant_db_port(tenant)
       attrs = default_tenant_attrs(port) |> Map.put("max_client_presence_events_per_window", 42)
       attrs = Map.put(attrs, "external_id", external_id)
 
@@ -170,7 +170,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "can set client_presence_window_ms", %{conn: conn, tenant: tenant} do
       external_id = tenant.external_id
-      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      port = tenant_db_port(tenant)
       attrs = default_tenant_attrs(port) |> Map.put("client_presence_window_ms", 5_000)
       attrs = Map.put(attrs, "external_id", external_id)
 
@@ -205,7 +205,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "renders tenant when data is valid", %{tenant: tenant, conn: conn} do
       external_id = tenant.external_id
-      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      port = tenant_db_port(tenant)
       attrs = default_tenant_attrs(port)
 
       conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
@@ -221,7 +221,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "can update max_client_presence_events_per_window", %{tenant: tenant, conn: conn} do
       external_id = tenant.external_id
-      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      port = tenant_db_port(tenant)
       attrs = default_tenant_attrs(port) |> Map.put("max_client_presence_events_per_window", 99)
 
       conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
@@ -230,7 +230,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "can update client_presence_window_ms", %{tenant: tenant, conn: conn} do
       external_id = tenant.external_id
-      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      port = tenant_db_port(tenant)
       attrs = default_tenant_attrs(port) |> Map.put("client_presence_window_ms", 10_000)
 
       conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
@@ -239,7 +239,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "can update presence_enabled", %{tenant: tenant, conn: conn} do
       external_id = tenant.external_id
-      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      port = tenant_db_port(tenant)
 
       assert tenant.presence_enabled == false
 
@@ -264,7 +264,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
     test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
       external_id = tenant.external_id
-      port = Database.from_tenant(tenant, "realtime_test", :stop).port
+      port = tenant_db_port(tenant)
       attrs = default_tenant_attrs(port)
 
       # opentelemetry_phoenix expects to be a child of the originating cowboy process hence the Task here :shrug:
@@ -687,5 +687,10 @@ defmodule RealtimeWeb.TenantControllerTest do
         Process.sleep(100)
         wait_on_postgres_cdc_rls(external_id, attempt - 1)
     end
+  end
+
+  defp tenant_db_port(tenant) do
+    {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+    settings.port
   end
 end
