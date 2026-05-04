@@ -4,9 +4,9 @@ defmodule Realtime.Tenants.Migrations.RedefineAuthorizationTables do
   use Ecto.Migration
 
   def change do
-    drop table(:broadcasts), mode: :cascade
-    drop table(:presences), mode: :cascade
-    drop table(:channels), mode: :cascade
+    drop_if_exists table(:broadcasts), mode: :cascade
+    drop_if_exists table(:presences), mode: :cascade
+    drop_if_exists table(:channels), mode: :cascade
 
     create_if_not_exists table(:messages) do
       add :topic, :text, null: false
@@ -31,7 +31,7 @@ defmodule Realtime.Tenants.Migrations.RedefineAuthorizationTables do
     execute("ALTER table realtime.messages OWNER to supabase_realtime_admin")
 
     execute("""
-    DROP function realtime.channel_name
+    DROP function IF EXISTS realtime.channel_name
     """)
 
     execute("""

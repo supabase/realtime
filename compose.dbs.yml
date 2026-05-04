@@ -1,7 +1,6 @@
 services:
   db:
     image: supabase/postgres:17.6.1.074
-    container_name: realtime-db
     ports:
       - "5432:5432"
     volumes:
@@ -18,7 +17,6 @@ services:
 
   tenant_db:
     image: supabase/postgres:17.6.1.074
-    container_name: tenant-db
     ports:
       - "5433:5432"
     command: postgres -c config_file=/etc/postgresql/postgresql.conf

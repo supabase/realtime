@@ -10,6 +10,6 @@ defmodule Realtime.Tenants.Migrations.MessagesUsingUuid do
     end
 
     execute("ALTER TABLE realtime.messages ADD PRIMARY KEY (id, inserted_at)")
-    execute("DROP SEQUENCE realtime.messages_id_seq")
+    execute("DROP SEQUENCE IF EXISTS realtime.messages_id_seq")
   end
 end

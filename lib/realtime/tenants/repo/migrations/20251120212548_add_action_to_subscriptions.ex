@@ -19,7 +19,7 @@ defmodule Realtime.Tenants.Migrations.AddActionToSubscriptions do
 
   def down do
     execute("""
-    ALTER TABLE realtime.subscription DROP COLUMN action_filter;
+    ALTER TABLE realtime.subscription DROP COLUMN IF EXISTS action_filter;
     """)
 
     execute("""
