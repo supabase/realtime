@@ -13,6 +13,7 @@ defmodule Realtime.Tenants.Migrations do
   alias Realtime.Api
   alias Realtime.Nodes
   alias Realtime.GenRpc
+  alias Realtime.Telemetry
 
   alias Realtime.Tenants.Migrations.{
     CreateRealtimeSubscriptionTable,
@@ -211,7 +212,7 @@ defmodule Realtime.Tenants.Migrations do
   def init(%__MODULE__{tenant_external_id: tenant_external_id, settings: settings}) do
     Logger.metadata(external_id: tenant_external_id, project: tenant_external_id)
 
-    case migrate(settings) do
+    case migrate(tenant_external_id, settings) do
       :ok ->
         Task.Supervisor.async_nolink(__MODULE__.TaskSupervisor, Api, :update_migrations_ran, [
           tenant_external_id,
@@ -225,7 +226,7 @@ defmodule Realtime.Tenants.Migrations do
     end
   end
 
-  defp migrate(settings) do
+  defp migrate(tenant_external_id, settings) do
     with {:ok, settings} <- Database.from_settings(settings, "realtime_migrations", :stop) do
       [
         hostname: settings.hostname,
@@ -240,31 +241,36 @@ defmodule Realtime.Tenants.Migrations do
         ssl: settings.ssl
       ]
       |> Repo.with_dynamic_repo(fn repo ->
-        Logger.info("Applying migrations to #{settings.hostname}")
+        event = [:realtime, :tenants, :migrations]
+        metadata = %{external_id: tenant_external_id, hostname: settings.hostname}
+        start_time = Telemetry.start(event, metadata)
 
         try do
           opts = [all: true, prefix: "realtime", dynamic_repo: repo]
-          {time, _} = :timer.tc(fn -> Ecto.Migrator.run(Repo, @migrations, :up, opts) end)
-          Logger.info("Finished applying tenant migrations in #{div(time, 1000)}ms")
-
-          :ok
+          result = Ecto.Migrator.run(Repo, @migrations, :up, opts)
+          Telemetry.stop(event, start_time, Map.put(metadata, :migrations_executed, length(result)))
         rescue
           error ->
-            log_error("MigrationsFailedToRun", error, migration_error_metadata(error))
+            metadata = Map.put(metadata, :error_code, error_code(error))
+
+            Telemetry.exception(
+              event,
+              start_time,
+              :error,
+              error,
+              __STACKTRACE__,
+              metadata
+            )
+
             {:error, error}
         end
       end)
     end
   end
 
-  defp migration_error_metadata(%Postgrex.Error{postgres: postgres}) when is_map(postgres) do
-    [
-      pg_code: postgres[:pg_code],
-      pg_routine: postgres[:routine]
-    ]
-  end
-
-  defp migration_error_metadata(_), do: []
+  defp error_code(%Postgrex.Error{postgres: %{code: code}}), do: code
+  defp error_code(%DBConnection.ConnectionError{}), do: :connection_error
+  defp error_code(_), do: :other
 
   @doc """
   Create partitions against tenant db connection

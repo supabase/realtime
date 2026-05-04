@@ -9,6 +9,7 @@
 - [Payload & Traffic Metrics](#payload--traffic-metrics)
 - [Latency & Performance Metrics](#latency--performance-metrics)
 - [Authorization & Error Metrics](#authorization--error-metrics)
+- [Tenant Migration Metrics](#tenant-migration-metrics)
 - [BEAM/Erlang VM Metrics](#beamerlang-vm-metrics)
   - [Memory Metrics](#memory-metrics)
   - [Process & Resource Metrics](#process--resource-metrics)
@@ -132,6 +133,21 @@ These metrics track security policy enforcement and error rates.
 | `realtime_channel_error`        | Counter | Unhandled channel errors per tenant. Any non-zero value warrants investigation.                                                                 | **Per-Tenant**   | `/tenant-metrics` |
 | `realtime_channel_global_error` | Counter | Global unhandled channel error count across all tenants, tagged by error code.                                                                  | Global Aggregate | `/metrics`        |
 | `phoenix_channel_joined_total`  | Counter | WebSocket channel join attempts tagged by `result` (`ok`/`error`) and `transport`. Use `result="error"` rate to detect client or policy issues. | Per-Node         | `/metrics`        |
+
+## Tenant Migration Metrics
+
+These metrics track tenants migration execution and reconciliations.
+
+| Metric                                                     | Type      | Description                                                                                                  | Scope            | Endpoint   |
+| ---------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------ | ---------------- | ---------- |
+| `realtime_tenants_migrations_duration_milliseconds_bucket` | Histogram | Tenant migration duration in milliseconds.                                                                   | Global Aggregate | `/metrics` |
+| `realtime_tenants_migrations_duration_milliseconds_count`  | Counter   | Completed tenant migration runs.                                                                             | Global Aggregate | `/metrics` |
+| `realtime_tenants_migrations_duration_milliseconds_sum`    | Counter   | Cumulative tenant migration time in milliseconds.                                                            | Global Aggregate | `/metrics` |
+| `realtime_tenants_migrations_exceptions_total`             | Counter   | Failed tenant migration runs, tagged by `error_code`.                                                        | Global Aggregate | `/metrics` |
+| `realtime_tenants_migrations_reconcile_total`              | Counter   | Tenants whose cached `migrations_ran` was reconciled against the database on connect.                        | Global Aggregate | `/metrics` |
+| `realtime_tenants_migrations_reconcile_exceptions_total`   | Counter   | Failed reconciliations.                                                                                      | Global Aggregate | `/metrics` |
+
+Per-tenant attribution lives on the log path — see [TELEMETRY.md](./TELEMETRY.md) for the alert query foundation.
 
 ## BEAM/Erlang VM Metrics
 

@@ -43,7 +43,7 @@ default_db_host = "127.0.0.1"
   end)
 
 # Reset Tenant DB
-settings = Database.from_tenant(tenant, "realtime_migrations", :stop)
+{:ok, settings} = Database.from_tenant(tenant, "realtime_migrations", :stop)
 settings = %{settings | max_restarts: 0, ssl: false}
 {:ok, tenant_conn} = Database.connect_db(settings)
 publication = "supabase_realtime"
