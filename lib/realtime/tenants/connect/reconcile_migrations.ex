@@ -7,26 +7,34 @@ defmodule Realtime.Tenants.Connect.ReconcileMigrations do
   to revert while the migrations_ran counter remains at the latest value.
   """
 
-  use Realtime.Logs
-
   alias Realtime.Api
+  alias Realtime.Telemetry
 
   @behaviour Realtime.Tenants.Connect.Piper
 
-  @impl true
-  def run(%{tenant: tenant, migrations_ran_on_database: migrations_ran_on_database} = acc) do
-    if tenant.migrations_ran != migrations_ran_on_database do
-      log_warning(
-        "MigrationCountMismatch",
-        "cached=#{tenant.migrations_ran} database=#{migrations_ran_on_database}"
-      )
+  @event [:realtime, :tenants, :migrations, :reconcile]
 
-      case Api.update_migrations_ran(tenant.external_id, migrations_ran_on_database) do
-        {:ok, updated_tenant} -> {:ok, %{acc | tenant: updated_tenant}}
-        {:error, error} -> {:error, error}
-      end
-    else
-      {:ok, acc}
+  @impl true
+  def run(%{tenant: %{migrations_ran: migrations_ran}, migrations_ran_on_database: migrations_ran} = acc),
+    do: {:ok, acc}
+
+  def run(%{tenant: tenant, migrations_ran_on_database: migrations_ran_on_database} = acc) do
+    metadata = %{
+      external_id: tenant.external_id,
+      cached_migrations_ran: tenant.migrations_ran,
+      database_migrations_ran: migrations_ran_on_database
+    }
+
+    start_time = Telemetry.start(@event, metadata)
+
+    case Api.update_migrations_ran(tenant.external_id, migrations_ran_on_database) do
+      {:ok, updated_tenant} ->
+        Telemetry.stop(@event, start_time, metadata)
+        {:ok, %{acc | tenant: updated_tenant}}
+
+      {:error, error} ->
+        Telemetry.exception(@event, start_time, :error, error, [], metadata)
+        {:error, error}
     end
   end
 end
