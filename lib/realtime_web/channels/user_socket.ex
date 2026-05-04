@@ -36,7 +36,12 @@ defmodule RealtimeWeb.UserSocket do
       payload: %{extension: "system", status: "ok", message: "Server requested disconnect"}
     }
 
-    Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> tenant_external_id, disconnect_msg, MessageDispatcher)
+    Phoenix.PubSub.broadcast!(
+      Realtime.PubSub,
+      "realtime:operations:" <> tenant_external_id,
+      disconnect_msg,
+      MessageDispatcher
+    )
 
     Phoenix.PubSub.broadcast(Realtime.PubSub, subscribers_id(tenant_external_id), :socket_drain)
     :ok
