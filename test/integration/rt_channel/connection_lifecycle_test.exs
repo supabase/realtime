@@ -82,6 +82,8 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: %{keys: ["potato"]}})
 
+      assert_receive {:close_code, @service_restart_close_code}, 1000
+
       assert_process_down(socket)
     end
 
@@ -100,6 +102,8 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "potato"})
 
+      assert_receive {:close_code, @service_restart_close_code}, 1000
+
       assert_process_down(socket)
     end
 
@@ -117,6 +121,8 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
       assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
 
       Realtime.Api.update_tenant_by_external_id(tenant.external_id, %{private_only: true})
+
+      assert_receive {:close_code, @service_restart_close_code}, 1000
 
       assert_process_down(socket)
     end
@@ -147,8 +153,8 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
                      },
                      500
 
-      Process.sleep(500)
       assert :ok = WebsocketClient.send_heartbeat(socket)
+      refute_receive {:close_code, @service_restart_close_code}
     end
   end
 
@@ -169,7 +175,7 @@ defmodule Realtime.Integration.RtChannel.ConnectionLifecycleTest do
     end
   end
 
-  describe "socket disconnect - distributed disconnect" do
+  describe "socket disconnect" do
     setup [:rls_context]
 
     test "on disconnect called, socket is killed", %{

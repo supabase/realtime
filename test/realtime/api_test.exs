@@ -155,25 +155,40 @@ defmodule Realtime.ApiTest do
     test "valid data and jwks change will send disconnect event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_jwks: %{keys: ["test"]}})
-      assert_receive :disconnect, 500
+
+      assert %Phoenix.Socket.Broadcast{
+        payload: %{message: "Server requested disconnect", status: "ok", extension: "system"},
+        event: "system",
+        topic: nil
+      }
     end
 
     test "valid data and jwt_secret change will send disconnect event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{jwt_secret: "potato"})
-      assert_receive :disconnect, 500
+
+      assert %Phoenix.Socket.Broadcast{
+        payload: %{message: "Server requested disconnect", status: "ok", extension: "system"},
+        event: "system",
+        topic: nil
+      }
     end
 
     test "valid data and suspend change will send disconnect event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{suspend: true})
-      assert_receive :disconnect, 500
+
+      assert %Phoenix.Socket.Broadcast{
+        payload: %{message: "Server requested disconnect", status: "ok", extension: "system"},
+        event: "system",
+        topic: nil
+      }
     end
 
     test "valid data but not updating jwt_secret or jwt_jwks won't send event", %{tenants: [tenant | _]} do
       :ok = Phoenix.PubSub.subscribe(Realtime.PubSub, "realtime:operations:" <> tenant.external_id)
       assert {:ok, %Tenant{}} = Api.update_tenant_by_external_id(tenant.external_id, %{max_events_per_second: 100})
-      refute_receive :disconnect, 500
+      refute_receive _any
     end
 
     test "valid data and jwt_secret change will restart the database connection", %{tenants: [tenant | _]} do

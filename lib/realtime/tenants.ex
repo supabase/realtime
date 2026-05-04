@@ -5,7 +5,6 @@ defmodule Realtime.Tenants do
 
   require Logger
 
-  alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.RateCounter
@@ -474,26 +473,6 @@ defmodule Realtime.Tenants do
     do: "#{external_id}:#{sub_topic}"
 
   @doc """
-  Sets tenant as suspended. New connections won't be accepted
-  """
-  @spec suspend_tenant_by_external_id(String.t()) :: {:ok, Tenant.t()} | {:error, term()}
-  def suspend_tenant_by_external_id(external_id) do
-    external_id
-    |> Api.update_tenant_by_external_id(%{suspend: true})
-    |> tap(fn _ -> broadcast_operation_event(:suspend_tenant, external_id) end)
-  end
-
-  @doc """
-  Sets tenant as unsuspended. New connections will be accepted
-  """
-  @spec unsuspend_tenant_by_external_id(String.t()) :: {:ok, Tenant.t()} | {:error, term()}
-  def unsuspend_tenant_by_external_id(external_id) do
-    external_id
-    |> Api.update_tenant_by_external_id(%{suspend: false})
-    |> tap(fn _ -> broadcast_operation_event(:unsuspend_tenant, external_id) end)
-  end
-
-  @doc """
   Checks if migrations for a given tenant need to run.
   """
   @spec run_migrations?(Tenant.t() | integer()) :: boolean()
@@ -501,13 +480,6 @@ defmodule Realtime.Tenants do
 
   def run_migrations?(migrations_ran) when is_integer(migrations_ran),
     do: migrations_ran < Enum.count(Migrations.migrations())
-
-  @doc """
-  Broadcasts an operation event to the tenant's operations channel.
-  """
-  @spec broadcast_operation_event(:suspend_tenant | :unsuspend_tenant, String.t()) :: :ok
-  def broadcast_operation_event(action, external_id),
-    do: Phoenix.PubSub.broadcast!(Realtime.PubSub, "realtime:operations:" <> external_id, action)
 
   @doc """
   Returns the region of the tenant based on its extensions.
