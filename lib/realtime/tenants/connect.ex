@@ -110,7 +110,6 @@ defmodule Realtime.Tenants.Connect do
               {:error, :tenant_database_unavailable}
 
             {:error, reason} ->
-              GenCounter.add(rate_args.id)
               {:error, reason}
           end
         end

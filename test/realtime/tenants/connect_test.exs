@@ -664,6 +664,54 @@ defmodule Realtime.Tenants.ConnectTest do
 
       refute log =~ "DatabaseConnectionRateLimitReached: Too many connection attempts against the tenant database"
     end
+
+    test "rate limit connect does not trigger for non-connection-attempt errors like db pool exhaustion",
+         %{tenant: tenant} do
+      extension = %{
+        "type" => "postgres_cdc_rls",
+        "settings" => %{
+          "db_host" => "127.0.0.1",
+          "db_name" => "postgres",
+          "db_user" => "supabase_admin",
+          "db_password" => "postgres",
+          "poll_interval" => 100,
+          "poll_max_changes" => 100,
+          "poll_max_record_bytes" => 1_048_576,
+          "region" => "us-east-1",
+          "ssl_enforced" => false,
+          "db_pool" => 100,
+          "subcriber_pool_size" => 100,
+          "subs_pool_size" => 100
+        }
+      }
+
+      {:ok, tenant} = update_extension(tenant, extension)
+      parent = self()
+
+      expect(Database, :check_tenant_connection, fn t ->
+        :timer.sleep(1000)
+        call_original(Database, :check_tenant_connection, [t])
+      end)
+
+      connect = fn -> send(parent, Connect.lookup_or_start_connection(tenant.external_id)) end
+
+      spawn(connect)
+      :timer.sleep(100)
+      spawn(connect)
+      spawn(connect)
+
+      assert {:error, :tenant_db_too_many_connections} =
+               Connect.lookup_or_start_connection(tenant.external_id)
+
+      assert_receive {:error, :tenant_db_too_many_connections}
+      assert_receive {:error, :tenant_db_too_many_connections}
+      assert_receive {:error, :tenant_db_too_many_connections}
+      refute_receive _any
+
+      # Only 1 call_external_node failure should count toward the rate limit.
+      rate_args = Tenants.connect_errors_per_second_rate(tenant.external_id)
+      assert Realtime.GenCounter.get(rate_args.id) == 1
+    end
   end
 
   describe "shutdown/1" do
