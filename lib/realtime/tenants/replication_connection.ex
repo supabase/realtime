@@ -158,13 +158,19 @@ defmodule Realtime.Tenants.ReplicationConnection do
     Logger.metadata(external_id: tenant_id, project: tenant_id)
     Process.monitor(monitored_pid)
 
+    slot_name = replication_slot_name(@schema, @table)
+
     {:ok, _watchdog_pid} =
-      Realtime.Tenants.ReplicationConnection.Watchdog.start_link(parent_pid: self(), tenant_id: tenant_id)
+      Realtime.Tenants.ReplicationConnection.Watchdog.start_link(
+        parent_pid: self(),
+        tenant_id: tenant_id,
+        replication_slot_name: slot_name
+      )
 
     state = %{
       state
       | publication_name: publication_name(@schema, @table),
-        replication_slot_name: replication_slot_name(@schema, @table)
+        replication_slot_name: slot_name
     }
 
     Logger.info("Initializing connection with the status: #{inspect(state, pretty: true)}")

@@ -1,8 +1,13 @@
 defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
   use ExUnit.Case, async: true
 
+  use Mimic
+
   import ExUnit.CaptureLog
 
+  alias Realtime.Database
+  alias Realtime.FeatureFlags
+  alias Realtime.Tenants.Connect
   alias Realtime.Tenants.ReplicationConnection.Watchdog
 
   defmodule FakeReplicationConnection do
@@ -144,6 +149,113 @@ defmodule Realtime.Tenants.ReplicationConnection.WatchdogTest do
         end)
 
       assert logs =~ "ReplicationConnectionWatchdogTimeout"
+    end
+  end
+
+  describe "slot lag monitoring" do
+    setup do
+      fake_pid = start_link_supervised!(FakeReplicationConnection)
+      %{fake_pid: fake_pid}
+    end
+
+    test "continues when slot lag is below threshold", %{fake_pid: fake_pid} do
+      stub(FeatureFlags, :enabled?, fn _flag, _tenant -> true end)
+      stub(Connect, :get_status, fn _tenant_id -> {:ok, :fake_conn} end)
+      stub(Database, :check_replication_slot_lag, fn _conn, _slot -> :ok end)
+
+      watchdog_pid =
+        start_supervised!(
+          {Watchdog,
+           parent_pid: fake_pid,
+           tenant_id: "lag-test",
+           watchdog_interval: 50,
+           watchdog_timeout: 100,
+           replication_slot_name: "test_slot"}
+        )
+
+      Mimic.allow(FeatureFlags, self(), watchdog_pid)
+      Mimic.allow(Connect, self(), watchdog_pid)
+      Mimic.allow(Database, self(), watchdog_pid)
+
+      Process.sleep(120)
+
+      assert Process.alive?(watchdog_pid)
+    end
+
+    test "stops with :slot_lag_too_high when lag exceeds threshold", %{fake_pid: fake_pid} do
+      stub(FeatureFlags, :enabled?, fn _flag, _tenant -> true end)
+      stub(Connect, :get_status, fn _tenant_id -> {:ok, :fake_conn} end)
+      stub(Database, :check_replication_slot_lag, fn _conn, _slot -> {:error, :lag_too_high} end)
+
+      logs =
+        capture_log(fn ->
+          watchdog_pid =
+            start_supervised!(
+              {Watchdog,
+               parent_pid: fake_pid,
+               tenant_id: "lag-test",
+               watchdog_interval: 50,
+               watchdog_timeout: 100,
+               replication_slot_name: "test_slot"}
+            )
+
+          Mimic.allow(FeatureFlags, self(), watchdog_pid)
+          Mimic.allow(Connect, self(), watchdog_pid)
+          Mimic.allow(Database, self(), watchdog_pid)
+
+          ref = Process.monitor(watchdog_pid)
+          assert_receive {:DOWN, ^ref, :process, ^watchdog_pid, :slot_lag_too_high}, 500
+        end)
+
+      assert logs =~ "ReplicationSlotLagTooHigh"
+    end
+
+    test "continues when DB connection is unavailable (graceful degradation)", %{fake_pid: fake_pid} do
+      stub(FeatureFlags, :enabled?, fn _flag, _tenant -> true end)
+      stub(Connect, :get_status, fn _tenant_id -> {:error, :tenant_database_unavailable} end)
+
+      logs =
+        capture_log(fn ->
+          watchdog_pid =
+            start_supervised!(
+              {Watchdog,
+               parent_pid: fake_pid,
+               tenant_id: "lag-test",
+               watchdog_interval: 50,
+               watchdog_timeout: 100,
+               replication_slot_name: "test_slot"}
+            )
+
+          Mimic.allow(FeatureFlags, self(), watchdog_pid)
+          Mimic.allow(Connect, self(), watchdog_pid)
+
+          Process.sleep(120)
+
+          assert Process.alive?(watchdog_pid)
+        end)
+
+      assert logs =~ "ReplicationSlotLagCheckSkipped"
+    end
+
+    test "skips lag check when feature flag is disabled", %{fake_pid: fake_pid} do
+      stub(FeatureFlags, :enabled?, fn _flag, _tenant -> false end)
+      reject(&Database.check_replication_slot_lag/2)
+
+      watchdog_pid =
+        start_supervised!(
+          {Watchdog,
+           parent_pid: fake_pid,
+           tenant_id: "lag-test",
+           watchdog_interval: 50,
+           watchdog_timeout: 100,
+           replication_slot_name: "test_slot"}
+        )
+
+      Mimic.allow(FeatureFlags, self(), watchdog_pid)
+
+      Process.sleep(120)
+
+      assert Process.alive?(watchdog_pid)
     end
   end
 end
