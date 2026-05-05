@@ -82,4 +82,6 @@ This is the list of operational codes that can help you understand your deployme
 | JwtSignerError                     | Failed to generate a JWT signer — check your JWT secret or JWKS configuration                                                                                                                         |
 | MalformedWebSocketMessage          | Received a WebSocket message that is empty, invalid JSON, or missing required fields (`ref`, `topic`, or `event`). The connection is kept alive but the message is dropped                            |
 | UnknownErrorOnWebSocketMessage     | An unexpected error occurred while processing an incoming WebSocket message. The connection is kept alive but the message is dropped                                                                  |
+| ReplicationSlotLagTooHigh          | The replication slot WAL lag has exceeded 50% of `max_slot_wal_keep_size`. The replication connection is shut down and will be restarted to prevent the slot from being invalidated by PostgreSQL     |
+| ReplicationSlotLagCheckSkipped     | The periodic replication slot lag check could not be completed, typically because the tenant database connection was unavailable. The check is skipped and retried on the next watchdog interval      |
 

@@ -323,6 +323,73 @@ defmodule Realtime.DatabaseTest do
     end
   end
 
+  describe "check_replication_slot_lag/2" do
+    setup %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      suffix = System.unique_integer([:positive])
+      slot_name = "test_lag_#{suffix}"
+      table_name = "lag_test_#{suffix}"
+
+      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'pgoutput')", [slot_name])
+      Postgrex.query!(db_conn, "CREATE TABLE IF NOT EXISTS #{table_name} (id INT, data TEXT)", [])
+
+      on_exit(fn ->
+        case Database.connect(tenant, "realtime_test_cleanup", :stop) do
+          {:ok, conn} ->
+            Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+            Postgrex.query(conn, "DROP TABLE IF EXISTS #{table_name} CASCADE", [])
+            GenServer.stop(conn)
+
+          _ ->
+            :ok
+        end
+      end)
+
+      %{db_conn: db_conn, slot_name: slot_name, table_name: table_name}
+    end
+
+    test "returns :ok when slot lag is below threshold", %{db_conn: db_conn, slot_name: slot_name} do
+      assert :ok == Database.check_replication_slot_lag(db_conn, slot_name)
+    end
+
+    test "returns :ok when slot lag is non-zero but below threshold", %{
+      db_conn: db_conn,
+      slot_name: slot_name,
+      table_name: table_name
+    } do
+      # Generate ~40% of the 32MB max_slot_wal_keep_size (test container value) by inserting
+      # ~50k rows of 200 bytes each — produces roughly 12-13MB of WAL, safely under the 16MB
+      # (50%) shutdown threshold. The slot is inactive so restart_lsn stays pinned.
+      Postgrex.query!(
+        db_conn,
+        "INSERT INTO #{table_name} SELECT generate_series(1, 50000), repeat('x', 200)",
+        []
+      )
+
+      assert :ok == Database.check_replication_slot_lag(db_conn, slot_name)
+    end
+
+    test "returns {:error, :lag_too_high} when slot is far behind", %{
+      db_conn: db_conn,
+      slot_name: slot_name,
+      table_name: table_name
+    } do
+      # Generate >16MB of WAL (50% of the 32MB max_slot_wal_keep_size in test containers).
+      # The slot is inactive so restart_lsn stays pinned at creation LSN.
+      Postgrex.query!(
+        db_conn,
+        "INSERT INTO #{table_name} SELECT generate_series(1, 100000), repeat('x', 200)",
+        []
+      )
+
+      assert {:error, :lag_too_high} == Database.check_replication_slot_lag(db_conn, slot_name)
+    end
+
+    test "returns :ok for unknown slot", %{db_conn: db_conn} do
+      assert :ok == Database.check_replication_slot_lag(db_conn, "nonexistent_slot_xyz")
+    end
+  end
+
   defp update_extension(tenant, extension) do
     db_port = Realtime.Crypto.decrypt!(hd(tenant.extensions).settings["db_port"])
     extensions = [put_in(extension, ["settings", "db_port"], db_port)]

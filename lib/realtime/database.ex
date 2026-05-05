@@ -150,6 +150,32 @@ defmodule Realtime.Database do
       {:error, e}
   end
 
+  @slot_lag_query """
+  SELECT
+    COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn), 0) >
+      (pg_size_bytes(current_setting('max_slot_wal_keep_size')) / 2)
+  FROM pg_replication_slots
+  WHERE slot_name = $1
+    AND current_setting('max_slot_wal_keep_size') != '-1'
+  """
+
+  @doc """
+  Checks if a replication slot's WAL lag exceeds 50% of max_slot_wal_keep_size.
+
+  Returns :ok when the slot is within safe bounds, max_slot_wal_keep_size is disabled (-1),
+  or the slot does not exist. Returns {:error, :lag_too_high} only when the slot is confirmed
+  to be consuming more than 50% of the per-slot WAL limit.
+  """
+  @spec check_replication_slot_lag(pid(), String.t()) ::
+          :ok | {:error, :lag_too_high} | {:error, any()}
+  def check_replication_slot_lag(conn, slot_name) do
+    case Postgrex.query(conn, @slot_lag_query, [slot_name]) do
+      {:ok, %{rows: [[true]]}} -> {:error, :lag_too_high}
+      {:ok, %{rows: _}} -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
   @doc """
   Connects to the database using the given settings.
   """
