@@ -42,6 +42,8 @@ gen_rpc_ssl_client_port = Env.get_integer("GEN_RPC_SSL_CLIENT_PORT", 6369)
 gen_rpc_ssl_server_port = Env.get_integer("GEN_RPC_SSL_SERVER_PORT")
 gen_rpc_tcp_client_port = Env.get_integer("GEN_RPC_TCP_CLIENT_PORT", 5369)
 gen_rpc_tcp_server_port = Env.get_integer("GEN_RPC_TCP_SERVER_PORT", 5369)
+http_dynamic_buffer_min = Env.get_integer("HTTP_DYNAMIC_BUFFER_MIN")
+http_dynamic_buffer_max = Env.get_integer("HTTP_DYNAMIC_BUFFER_MAX")
 janitor_children_timeout = Env.get_integer("JANITOR_CHILDREN_TIMEOUT", :timer.seconds(5))
 janitor_chunk_size = Env.get_integer("JANITOR_CHUNK_SIZE", 10)
 janitor_max_children = Env.get_integer("JANITOR_MAX_CHILDREN", 5)
@@ -385,15 +387,23 @@ if config_env() == :prod do
         end
     end
 
+  http_dynamic_buffer =
+    case {http_dynamic_buffer_min, http_dynamic_buffer_max} do
+      {nil, nil} -> []
+      {min, max} when is_integer(min) and is_integer(max) -> [dynamic_buffer: {min, max}]
+      _ -> raise ArgumentError, "HTTP_DYNAMIC_BUFFER_MIN and HTTP_DYNAMIC_BUFFER_MAX must both be set or both be unset"
+    end
+
+  http_protocol_options =
+    [max_header_value_length: Env.get_integer("MAX_HEADER_LENGTH", 4096)] ++ http_dynamic_buffer
+
   config :realtime, RealtimeWeb.Endpoint,
     server: true,
     url: [host: "#{app_name}.supabase.co", port: 443],
     http: [
       compress: true,
       port: Env.get_integer("PORT", 4000),
-      protocol_options: [
-        max_header_value_length: Env.get_integer("MAX_HEADER_LENGTH", 4096)
-      ],
+      protocol_options: http_protocol_options,
       transport_options: [
         max_connections: Env.get_integer("MAX_CONNECTIONS", 1000),
         num_acceptors: Env.get_integer("NUM_ACCEPTORS", 100),
