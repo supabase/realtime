@@ -37,7 +37,10 @@ gen_rpc_connect_timeout_in_ms = Env.get_integer("GEN_RPC_CONNECT_TIMEOUT_IN_MS",
 gen_rpc_ipv6_only = Env.get_boolean("GEN_RPC_IPV6_ONLY", false)
 gen_rpc_max_batch_size = Env.get_integer("GEN_RPC_MAX_BATCH_SIZE", 0)
 gen_rpc_send_timeout_in_ms = Env.get_integer("GEN_RPC_SEND_TIMEOUT_IN_MS", 10_000)
+gen_rpc_socket_buffer = Env.get_integer("GEN_RPC_SOCKET_BUFFER")
 gen_rpc_socket_ip = Env.get_charlist("GEN_RPC_SOCKET_IP", ~c"0.0.0.0")
+gen_rpc_socket_recbuf = Env.get_integer("GEN_RPC_SOCKET_RECEIVE_BUFFER")
+gen_rpc_socket_sndbuf = Env.get_integer("GEN_RPC_SOCKET_SEND_BUFFER")
 gen_rpc_ssl_client_port = Env.get_integer("GEN_RPC_SSL_CLIENT_PORT", 6369)
 gen_rpc_ssl_server_port = Env.get_integer("GEN_RPC_SSL_SERVER_PORT")
 gen_rpc_tcp_client_port = Env.get_integer("GEN_RPC_TCP_CLIENT_PORT", 5369)
@@ -331,6 +334,17 @@ if config_env() != :test do
         max_batch_size: gen_rpc_max_batch_size,
         compress: gen_rpc_compress,
         compression_threshold: gen_rpc_compression_threshold_in_bytes
+
+      [
+        socket_buffer: gen_rpc_socket_buffer,
+        socket_recbuf: gen_rpc_socket_recbuf,
+        socket_sndbuf: gen_rpc_socket_sndbuf
+      ]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> case do
+        [] -> :ok
+        opts -> config(:gen_rpc, opts)
+      end
 
     _ ->
       raise """
