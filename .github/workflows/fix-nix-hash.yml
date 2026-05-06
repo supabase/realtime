@@ -1,0 +1,66 @@
+name: Fix Nix Hash
+
+on:
+  pull_request:
+    paths:
+      - "test/e2e/flake.nix"
+      - "test/e2e/flake.lock"
+      - "test/e2e/bun.lock"
+      - "test/e2e/package.json"
+      - "test/e2e/nix-build.sh"
+      - ".github/workflows/fix-nix-hash.yml"
+
+permissions:
+  contents: read  # push uses GH_AUTOFIX app token, not GITHUB_TOKEN
+
+concurrency:
+  group: fix-nix-hash-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  fix-nix-hash:
+    name: Validate and Fix Nix Hash
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Generate token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.GH_AUTOFIX_APP_ID }}
+          private-key: ${{ secrets.GH_AUTOFIX_PRIVATE_KEY }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 1
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@da36cb69b1c3247ad7a1f931ebfd954a1105ef14 # v14
+
+      - name: Fix Nix hash
+        working-directory: test/e2e
+        run: bash nix-build.sh
+
+      - name: Check if hash was updated
+        id: check-changes
+        run: |
+          if git diff --quiet test/e2e/flake.nix; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push updated hash
+        if: steps.check-changes.outputs.changed == 'true'
+        env:
+          TARGET_BRANCH: ${{ github.head_ref }}
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git add test/e2e/flake.nix
+          git commit -m "fix: update nix node_modules hash"
+          git push origin "HEAD:${TARGET_BRANCH}"
