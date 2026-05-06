@@ -34,7 +34,7 @@ jobs:
       matrix:
         postgres_image:
           - supabase/postgres:17.6.1.074
-          - supabase/postgres:17.6.0.064-orioledb
+          - supabase/postgres:17.6.0.072-orioledb
     env:
       POSTGRES_IMAGE: ${{ matrix.postgres_image }}
 

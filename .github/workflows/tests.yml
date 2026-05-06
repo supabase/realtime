@@ -36,7 +36,7 @@ jobs:
         pg:
           - image: supabase/postgres:17.6.1.074
             label: standard
-          - image: supabase/postgres:17.6.0.064-orioledb
+          - image: supabase/postgres:17.6.0.072-orioledb
             label: orioledb
     env:
       POSTGRES_IMAGE: ${{ matrix.pg.image }}
