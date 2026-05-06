@@ -246,7 +246,7 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       pid = start_supervised!({SubscriptionManager, args}, restart: :temporary)
       ref = Process.monitor(pid)
 
-      assert_receive {:DOWN, ^ref, :process, ^pid, :econnrefused}, 1000
+      assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :econnrefused}}, 1000
     end
   end
 

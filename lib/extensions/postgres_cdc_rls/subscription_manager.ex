@@ -115,7 +115,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
     else
       {:error, reason} ->
         log_error("SubscriptionManagerConnectionFailed", reason)
-        {:stop, reason, nil}
+        {:stop, {:shutdown, reason}, nil}
     end
   end
 

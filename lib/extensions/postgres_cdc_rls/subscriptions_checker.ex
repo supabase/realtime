@@ -71,7 +71,7 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
     else
       {:error, reason} ->
         log_error("SubscriptionsCheckerConnectionFailed", reason)
-        {:stop, reason, nil}
+        {:stop, {:shutdown, reason}, nil}
     end
   end
 

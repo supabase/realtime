@@ -66,7 +66,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
     else
       {:error, reason} ->
         log_error("ReplicationPollerConnectionFailed", reason)
-        {:stop, reason, state}
+        {:stop, {:shutdown, reason}, state}
     end
   end
 

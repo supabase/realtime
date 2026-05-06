@@ -63,7 +63,7 @@ defmodule Realtime.Extensions.PostgresCdcRl.SubscriptionsCheckerTest do
       pid = start_supervised!({Checker, args}, restart: :temporary)
       ref = Process.monitor(pid)
 
-      assert_receive {:DOWN, ^ref, :process, ^pid, :econnrefused}, 2000
+      assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :econnrefused}}, 2000
     end
   end
 
