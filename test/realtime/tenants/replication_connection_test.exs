@@ -116,7 +116,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         value = random_string()
 
         row =
-          message_fixture(tenant, %{
+          message_fixture_with_conn(tenant, db_conn, %{
             "topic" => topic,
             "private" => true,
             "event" => "INSERT",
@@ -198,7 +198,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
         value = random_string()
 
         row =
-          message_fixture(tenant, %{
+          message_fixture_with_conn(tenant, db_conn, %{
             "topic" => topic,
             "private" => false,
             "event" => "INSERT",
@@ -264,7 +264,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       end
     end
 
-    test "replicates binary with exactly 16 bytes to test UUID conversion error", %{tenant: tenant} do
+    test "replicates binary with exactly 16 bytes to test UUID conversion error", %{tenant: tenant, db_conn: db_conn} do
       start_link_supervised!(
         {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
         restart: :transient
@@ -276,7 +276,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       payload = %{"value" => random_string()}
 
       row =
-        message_fixture(tenant, %{
+        message_fixture_with_conn(tenant, db_conn, %{
           "topic" => topic,
           "private" => true,
           "event" => "UPDATE",
@@ -340,7 +340,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           payload = %{"value" => random_string()}
 
           row =
-            message_fixture(tenant, %{
+            message_fixture_with_conn(tenant, db_conn, %{
               "topic" => topic,
               "private" => true,
               "event" => "UPDATE",
@@ -789,7 +789,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       )
     end
 
-    test "receives telemetry event", %{tenant: %{external_id: external_id} = tenant} do
+    test "receives telemetry event", %{tenant: %{external_id: external_id} = tenant, db_conn: db_conn} do
       start_link_supervised!(
         {ReplicationConnection, %ReplicationConnection{tenant_id: external_id, monitored_pid: self()}},
         restart: :transient
@@ -799,7 +799,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       tenant_topic = Tenants.tenant_topic(external_id, topic, false)
       subscribe(tenant_topic, topic)
 
-      message_fixture(tenant, %{
+      message_fixture_with_conn(tenant, db_conn, %{
         "topic" => topic,
         "private" => true,
         "event" => "INSERT",
