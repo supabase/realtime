@@ -35,6 +35,20 @@ defmodule Realtime.PromEx.Plugins.MigrationsTest do
     assert metric_value("realtime_tenants_migrations_duration_milliseconds_bucket", le: "100.0") > 0
   end
 
+  test "skips duration histogram when migrations_executed is 0" do
+    before = metric_value("realtime_tenants_migrations_duration_milliseconds_count")
+
+    start_time = Telemetry.start([:realtime, :tenants, :migrations], %{external_id: "tenant", hostname: "localhost"})
+
+    Telemetry.stop(
+      [:realtime, :tenants, :migrations],
+      start_time,
+      %{external_id: "tenant", hostname: "localhost", migrations_executed: 0}
+    )
+
+    assert metric_value("realtime_tenants_migrations_duration_milliseconds_count") == before
+  end
+
   test "tags Postgrex errors with the SQLSTATE atom" do
     metric = "realtime_tenants_migrations_exceptions_total"
     start_time = Telemetry.start([:realtime, :tenants, :migrations], %{external_id: "tenant", hostname: "localhost"})

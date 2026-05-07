@@ -20,6 +20,7 @@ defmodule Realtime.PromEx.Plugins.Migrations do
         measurement: :duration,
         unit: {:native, :millisecond},
         description: "Tenant migrations duration",
+        keep: &__MODULE__.migrations_executed/1,
         reporter_options: [peep_bucket_calculator: Buckets]
       ),
       counter(
@@ -40,4 +41,7 @@ defmodule Realtime.PromEx.Plugins.Migrations do
       )
     ])
   end
+
+  def migrations_executed(%{migrations_executed: n}) when is_integer(n) and n > 0, do: true
+  def migrations_executed(_), do: false
 end
