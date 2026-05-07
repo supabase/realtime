@@ -150,7 +150,7 @@ defmodule Realtime.Tenants.ConnectTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_admin",
+          "db_user" => "supabase_realtime_admin",
           "db_password" => "postgres",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
@@ -359,7 +359,7 @@ defmodule Realtime.Tenants.ConnectTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_admin",
+          "db_user" => "supabase_realtime_admin",
           "db_password" => "postgres",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
@@ -385,7 +385,7 @@ defmodule Realtime.Tenants.ConnectTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_admin",
+          "db_user" => "supabase_realtime_admin",
           "db_password" => "postgres",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
@@ -545,7 +545,7 @@ defmodule Realtime.Tenants.ConnectTest do
           replication_slot_opts =
             %PostgresReplication{
               connection_opts: opts,
-              table: :all,
+              table: "test",
               output_plugin: "pgoutput",
               output_plugin_options: [proto_version: "1", publication_names: "test_#{i}_publication"],
               handler_module: Replication.TestHandler,
@@ -592,7 +592,7 @@ defmodule Realtime.Tenants.ConnectTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_admin",
+          "db_user" => "supabase_realtime_admin",
           "db_password" => "postgres",
           "poll_interval" => 100,
           "poll_max_changes" => 100,
@@ -640,7 +640,7 @@ defmodule Realtime.Tenants.ConnectTest do
         "settings" => %{
           "db_host" => "127.0.0.1",
           "db_name" => "postgres",
-          "db_user" => "supabase_admin",
+          "db_user" => "supabase_realtime_admin",
           "db_password" => "postgres",
           "poll_interval" => 100,
           "poll_max_changes" => 100,

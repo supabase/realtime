@@ -1,12 +1,12 @@
 services:
   # Supabase Realtime service
   test_db:
-    image: supabase/postgres:17.6.1.074
+    image: supabase/postgres:17.6.1.120
     container_name: test-realtime-db
     ports:
       - "5532:5432"
     volumes:
-      - ./dev/postgres:/docker-entrypoint-initdb.d/
+      - ./dev/postgres/01-realtime-setup.sql:/docker-entrypoint-initdb.d/init-scripts/01-realtime-setup.sql
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_HOST: /var/run/postgresql

@@ -7,16 +7,19 @@ defmodule Containers do
 
   use GenServer
 
-  @image "supabase/postgres:17.6.1.074"
+  @setup_init Path.expand("../../dev/postgres/01-realtime-setup.sql", __DIR__)
+
+  defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.120")
+
   # Pull image if not available
   def pull do
-    case System.cmd("docker", ["image", "inspect", @image]) do
+    case System.cmd("docker", ["image", "inspect", image()]) do
       {_, 0} ->
         :ok
 
       _ ->
-        IO.puts("Pulling image #{@image}. This might take a while...")
-        {_, 0} = System.cmd("docker", ["pull", @image])
+        IO.puts("Pulling image #{image()}. This might take a while...")
+        {_, 0} = System.cmd("docker", ["pull", image()])
     end
   end
 
@@ -152,11 +155,7 @@ defmodule Containers do
       {:ok, conn} = Database.connect_db(settings)
 
       try do
-        Postgrex.transaction(conn, fn db_conn ->
-          Postgrex.query!(db_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
-          Postgrex.query!(db_conn, "CREATE SCHEMA IF NOT EXISTS realtime", [])
-        end)
-
+        reset_realtime_schema!(settings)
         storage_up!(tenant)
 
         RateCounterHelper.stop(tenant.external_id)
@@ -212,11 +211,27 @@ defmodule Containers do
   defp repo_run(:unboxed, fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Realtime.Repo, fun)
   defp repo_run(:sandbox, fun), do: fun.()
 
+  defp reset_realtime_schema!(settings) do
+    {:ok, admin_conn} =
+      Postgrex.start_link(
+        hostname: settings.hostname,
+        port: settings.port,
+        database: settings.database,
+        username: "supabase_admin",
+        password: settings.password
+      )
+
+    Postgrex.query!(admin_conn, "DROP PUBLICATION IF EXISTS supabase_realtime_test", [])
+    Postgrex.query!(admin_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
+    Postgrex.query!(admin_conn, "CREATE SCHEMA realtime", [])
+    Postgrex.query!(admin_conn, "GRANT USAGE ON SCHEMA realtime TO postgres, anon, authenticated, service_role", [])
+    Postgrex.query!(admin_conn, "GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION", [])
+  end
+
   def stop_containers() do
     {list, 0} = System.cmd("docker", ["ps", "-a", "--format", "{{.Names}}", "--filter", "name=realtime-test-*"])
-    names = list |> String.trim() |> String.split("\n")
 
-    for name <- names do
+    for name <- String.split(list, "\n", trim: true) do
       System.cmd("docker", ["rm", "-f", name])
     end
   end
@@ -304,7 +319,9 @@ defmodule Containers do
         "POSTGRES_PASSWORD=postgres",
         "-p",
         "#{port}:5432",
-        @image,
+        "-v",
+        "#{@setup_init}:/docker-entrypoint-initdb.d/init-scripts/01-realtime-setup.sql",
+        image(),
         "postgres",
         "-c",
         "config_file=/etc/postgresql/postgresql.conf",
