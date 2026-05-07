@@ -11,7 +11,7 @@ on:
       - ".github/workflows/fix-nix-hash.yml"
 
 permissions:
-  contents: read  # push uses GH_AUTOFIX app token, not GITHUB_TOKEN
+  contents: read # push uses GH_AUTOFIX app token, not GITHUB_TOKEN
 
 concurrency:
   group: fix-nix-hash-${{ github.head_ref }}
@@ -36,7 +36,6 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           token: ${{ steps.app-token.outputs.token }}
-          fetch-depth: 1
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@da36cb69b1c3247ad7a1f931ebfd954a1105ef14 # v14
@@ -62,5 +61,5 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git add test/e2e/flake.nix
-          git commit -m "fix: update nix node_modules hash"
+          git commit -m "chore: update nix node_modules hash"
           git push origin "HEAD:${TARGET_BRANCH}"
