@@ -6,11 +6,11 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
   import Phoenix.Controller, only: [json: 2]
 
   alias Realtime.Api
-  alias Realtime.Api.Tenant
   alias Realtime.Database
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
+  alias Realtime.Tenants.Cache
 
   def init(opts) do
     opts
@@ -18,7 +18,7 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
 
   def call(%Plug.Conn{host: host} = conn, _opts) do
     with {:ok, external_id} <- Database.get_external_id(host),
-         %Tenant{} = tenant <- Api.get_tenant_by_external_id(external_id, use_replica?: true) do
+         {:ok, tenant} <- Cache.fetch_tenant_by_external_id(external_id) do
       Logger.metadata(external_id: external_id, project: external_id)
       OpenTelemetry.Tracer.set_attributes(external_id: external_id)
 
@@ -30,7 +30,7 @@ defmodule RealtimeWeb.Plugs.AssignTenant do
 
       assign(conn, :tenant, tenant)
     else
-      nil -> error_response(conn, "Tenant not found in database")
+      _ -> error_response(conn, "Tenant not found in database")
     end
   end
 
