@@ -16,6 +16,6 @@
   "scripts": {
     "check": "bun run realtime-check.ts --",
     "build": "bun build --compile --minify-syntax --minify-whitespace --minify-identifiers realtime-check.ts --outfile realtime-check",
-    "nix": "bun install && bun run build && bash nix-build.sh"
+    "nix": "bash nix-build.sh"
   }
 }

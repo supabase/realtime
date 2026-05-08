@@ -16,7 +16,7 @@
           src = ./.;
           filter = path: type:
             let baseName = baseNameOf path;
-            in baseName != "node_modules" && baseName != "result" && baseName != "realtime-check";
+            in baseName != "node_modules" && baseName != "result" && baseName != "realtime-check" && baseName != ".env";
         };
 
         node_modules = pkgs.stdenv.mkDerivation {
@@ -38,6 +38,18 @@
           version = "0.0.1";
           inherit src;
           nativeBuildInputs = [ pkgs.bun ];
+
+          # Bun's `--compile` output is a self-contained binary that appends a
+          # JavaScript blob to the end of the ELF image. Nix's default fixupPhase
+          # runs patchelf (to rewrite the interpreter / RPATH) and strip, both of
+          # which rewrite ELF section layout and corrupt the trailing blob —
+          # causing the binary to fall back to the bare Bun CLI at runtime.
+          # The Bun runtime is statically linked and needs no patching, so we
+          # disable the entire fixup phase.
+          dontFixup = true;
+          dontPatchELF = true;
+          dontStrip = true;
+
           buildPhase = ''
             export HOME=$TMPDIR
             cp -r ${node_modules} node_modules
