@@ -248,6 +248,24 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
     assert Realtime.Repo.get_by(FeatureFlag, name: flag_name)
   end
 
+  test "upsert_feature_flag surfaces error", %{master_node: master_node} do
+    # validation will fail
+    flag_name = ""
+    on_exit(fn -> Realtime.Repo.delete_all(from f in FeatureFlag, where: f.name == ^flag_name) end)
+
+    Mimic.expect(GenRpc, :call, fn node, mod, func, args, opts ->
+      assert node == master_node
+      assert mod == Realtime.Api
+      assert func == :upsert_feature_flag
+      assert opts == []
+
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
+    end)
+
+    assert {:error, %Ecto.Changeset{errors: [name: {"can't be blank", [validation: :required]}]}} =
+             Api.upsert_feature_flag(%{name: flag_name, enabled: true})
+  end
+
   test "delete_feature_flag automatically routes to master region", %{master_node: master_node} do
     flag_name = "test_routing_delete_#{System.unique_integer([:positive])}"
 
