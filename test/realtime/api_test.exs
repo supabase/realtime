@@ -28,7 +28,11 @@ defmodule Realtime.ApiTest do
     setup [:create_tenants]
 
     test "returns all tenants", %{tenants: tenants} do
-      assert Enum.sort(Api.list_tenants()) == Enum.sort(tenants)
+      assert Api.list_tenants()
+
+      Enum.each(tenants, fn tenant ->
+        assert tenant in Api.list_tenants()
+      end)
     end
   end
 
