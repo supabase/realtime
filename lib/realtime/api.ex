@@ -9,7 +9,9 @@ defmodule Realtime.Api do
   alias Ecto.Changeset
   alias Extensions.PostgresCdcRls
   alias Realtime.Api.Extensions
+  alias Realtime.Api.FeatureFlag
   alias Realtime.Api.Tenant
+  alias Realtime.FeatureFlags
   alias Realtime.GenCounter
   alias Realtime.GenRpc
   alias Realtime.Nodes
@@ -129,7 +131,7 @@ defmodule Realtime.Api do
           error
       end
     else
-      call(:create_tenant, [attrs], tenant_id)
+      call(:create_tenant, [attrs], tenant_id: tenant_id)
     end
   end
 
@@ -143,7 +145,7 @@ defmodule Realtime.Api do
       |> get_tenant_by_external_id(use_replica?: false)
       |> update_tenant(attrs)
     else
-      call(:update_tenant_by_external_id, [tenant_id, attrs], tenant_id)
+      call(:update_tenant_by_external_id, [tenant_id, attrs], tenant_id: tenant_id)
     end
   end
 
@@ -173,7 +175,7 @@ defmodule Realtime.Api do
       {num, _} = Repo.delete_all(query)
       num > 0
     else
-      call(:delete_tenant_by_external_id, [id], id)
+      call(:delete_tenant_by_external_id, [id], tenant_id: id)
     end
   end
 
@@ -189,7 +191,45 @@ defmodule Realtime.Api do
         Repo.get_by(Tenant, external_id: external_id) |> Repo.preload(:extensions)
 
       true ->
-        call(:get_tenant_by_external_id, [external_id, opts], external_id)
+        call(:get_tenant_by_external_id, [external_id, opts], tenant_id: external_id)
+    end
+  end
+
+  @spec list_feature_flags() :: [FeatureFlag.t()]
+  def list_feature_flags do
+    Replica.replica().all(from f in FeatureFlag, order_by: [asc: f.name])
+  end
+
+  @spec get_feature_flag(String.t()) :: FeatureFlag.t() | nil
+  def get_feature_flag(name) when is_binary(name),
+    do: Replica.replica().get_by(FeatureFlag, name: name)
+
+  @spec upsert_feature_flag(map()) :: {:ok, FeatureFlag.t()} | {:error, Ecto.Changeset.t()}
+  def upsert_feature_flag(attrs) do
+    if master_region?() do
+      %FeatureFlag{}
+      |> FeatureFlag.changeset(attrs)
+      |> Repo.insert(on_conflict: {:replace, [:enabled, :updated_at]}, conflict_target: :name, returning: true)
+      |> tap(fn
+        {:ok, flag} -> FeatureFlags.Cache.global_update_cache(flag)
+        _ -> :ok
+      end)
+    else
+      call(:upsert_feature_flag, [attrs])
+    end
+  end
+
+  @spec delete_feature_flag(FeatureFlag.t()) :: {:ok, FeatureFlag.t()} | {:error, Ecto.Changeset.t()}
+  def delete_feature_flag(%FeatureFlag{} = flag) do
+    if master_region?() do
+      flag
+      |> Repo.delete()
+      |> tap(fn
+        {:ok, deleted} -> FeatureFlags.Cache.global_invalidate_cache(deleted)
+        _ -> :ok
+      end)
+    else
+      call(:delete_feature_flag, [flag])
     end
   end
 
@@ -210,7 +250,7 @@ defmodule Realtime.Api do
         |> Repo.update()
       end
     else
-      call(:rename_settings_field, [from, to], from)
+      call(:rename_settings_field, [from, to])
     end
   end
 
@@ -233,7 +273,7 @@ defmodule Realtime.Api do
         end
       end)
     else
-      call(:update_migrations_ran, [external_id, count], external_id)
+      call(:update_migrations_ran, [external_id, count], tenant_id: external_id)
     end
   end
 
@@ -323,17 +363,17 @@ defmodule Realtime.Api do
     region == master_region
   end
 
-  defp call(operation, args, tenant_id) do
+  defp call(operation, args, opts \\ []) do
     master_region = Application.get_env(:realtime, :master_region)
 
     with {:ok, master_node} <- Nodes.node_from_region(master_region, self()),
-         {:ok, result} <- wrapped_call(master_node, operation, args, tenant_id) do
+         {:ok, result} <- wrapped_call(master_node, operation, args, opts) do
       result
     end
   end
 
-  defp wrapped_call(master_node, operation, args, tenant_id) do
-    case GenRpc.call(master_node, __MODULE__, operation, args, tenant_id: tenant_id) do
+  defp wrapped_call(master_node, operation, args, opts) do
+    case GenRpc.call(master_node, __MODULE__, operation, args, opts) do
       {:error, :rpc_error, reason} -> {:error, reason}
       {:error, reason} -> {:error, reason}
       result -> {:ok, result}

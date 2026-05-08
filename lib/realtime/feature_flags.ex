@@ -12,28 +12,10 @@ defmodule Realtime.FeatureFlags do
     3. `false` when the flag does not exist
   """
 
-  import Ecto.Query
   alias Realtime.Api
-  alias Realtime.FeatureFlags.Cache
-  alias Realtime.Repo
   alias Realtime.Api.FeatureFlag
+  alias Realtime.FeatureFlags.Cache
   alias Realtime.Tenants.Cache, as: TenantsCache
-
-  @spec list_flags() :: [FeatureFlag.t()]
-  def list_flags, do: Repo.all(from f in FeatureFlag, order_by: [asc: f.name])
-
-  @spec get_flag(String.t()) :: FeatureFlag.t() | nil
-  def get_flag(name) when is_binary(name), do: Repo.get_by(FeatureFlag, name: name)
-
-  @spec upsert_flag(map()) :: {:ok, FeatureFlag.t()} | {:error, Ecto.Changeset.t()}
-  def upsert_flag(attrs) do
-    %FeatureFlag{}
-    |> FeatureFlag.changeset(attrs)
-    |> Repo.insert(on_conflict: {:replace, [:enabled, :updated_at]}, conflict_target: :name, returning: true)
-  end
-
-  @spec delete_flag(FeatureFlag.t()) :: {:ok, FeatureFlag.t()} | {:error, Ecto.Changeset.t()}
-  def delete_flag(%FeatureFlag{} = flag), do: Repo.delete(flag)
 
   @spec set_tenant_flag(String.t(), String.t(), boolean()) ::
           {:ok, Realtime.Api.Tenant.t()} | {:error, :not_found | Ecto.Changeset.t()}

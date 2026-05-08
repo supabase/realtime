@@ -11,9 +11,9 @@ defmodule Realtime.FeatureFlags.Cache do
   """
 
   require Cachex.Spec
+  alias Realtime.Api
   alias Realtime.Api.FeatureFlag
   alias Realtime.GenRpc
-  alias Realtime.FeatureFlags
 
   def child_spec(_) do
     tenant_cache_expiration = Application.get_env(:realtime, :tenant_cache_expiration)
@@ -28,7 +28,7 @@ defmodule Realtime.FeatureFlags.Cache do
   def get_flag(name) do
     with {_, value} <-
            Cachex.fetch(__MODULE__, cache_key(name), fn _key ->
-             with %FeatureFlag{} = flag <- FeatureFlags.get_flag(name),
+             with %FeatureFlag{} = flag <- Api.get_feature_flag(name),
                   do: {:commit, flag},
                   else: (_ -> {:ignore, nil})
            end) do

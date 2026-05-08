@@ -1,15 +1,14 @@
 defmodule RealtimeWeb.FeatureFlagsLive.Index do
   use RealtimeWeb, :live_view
 
-  alias Realtime.FeatureFlags
-  alias Realtime.FeatureFlags.Cache
+  alias Realtime.Api
   alias RealtimeWeb.Endpoint
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket), do: Endpoint.subscribe("feature_flags")
 
-    {:ok, assign(socket, flags: FeatureFlags.list_flags(), new_name: "")}
+    {:ok, assign(socket, flags: Api.list_feature_flags(), new_name: "")}
   end
 
   @impl true
@@ -21,9 +20,8 @@ defmodule RealtimeWeb.FeatureFlagsLive.Index do
   def handle_event("toggle", %{"id" => id}, socket) do
     flag = Enum.find(socket.assigns.flags, &(&1.id == id))
 
-    case FeatureFlags.upsert_flag(%{name: flag.name, enabled: !flag.enabled}) do
+    case Api.upsert_feature_flag(%{name: flag.name, enabled: !flag.enabled}) do
       {:ok, updated} ->
-        Cache.global_update_cache(updated)
         Endpoint.broadcast_from(self(), "feature_flags", "updated", updated)
         flags = Enum.map(socket.assigns.flags, fn f -> if f.id == id, do: updated, else: f end)
         {:noreply, assign(socket, flags: flags)}
@@ -35,9 +33,8 @@ defmodule RealtimeWeb.FeatureFlagsLive.Index do
 
   @impl true
   def handle_event("create", %{"name" => name}, socket) when name != "" do
-    case FeatureFlags.upsert_flag(%{name: String.trim(name), enabled: false}) do
+    case Api.upsert_feature_flag(%{name: String.trim(name), enabled: false}) do
       {:ok, flag} ->
-        Cache.global_update_cache(flag)
         Endpoint.broadcast_from(self(), "feature_flags", "updated", flag)
         flags = Enum.sort_by([flag | socket.assigns.flags], & &1.name)
         {:noreply, assign(socket, flags: flags, new_name: "")}
@@ -54,9 +51,8 @@ defmodule RealtimeWeb.FeatureFlagsLive.Index do
   def handle_event("delete", %{"id" => id}, socket) do
     flag = Enum.find(socket.assigns.flags, &(&1.id == id))
 
-    case FeatureFlags.delete_flag(flag) do
+    case Api.delete_feature_flag(flag) do
       {:ok, _} ->
-        Cache.global_invalidate_cache(flag)
         Endpoint.broadcast_from(self(), "feature_flags", "deleted", %{name: flag.name})
         {:noreply, assign(socket, flags: Enum.reject(socket.assigns.flags, &(&1.id == id)))}
 
