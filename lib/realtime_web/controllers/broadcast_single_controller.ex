@@ -8,6 +8,7 @@ defmodule RealtimeWeb.BroadcastSingleController do
   use RealtimeWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
+  alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.SingleBroadcast
   alias RealtimeWeb.OpenApiSchemas.EmptyResponse
   alias RealtimeWeb.OpenApiSchemas.BroadcastSingleJsonParams
@@ -83,8 +84,9 @@ defmodule RealtimeWeb.BroadcastSingleController do
       )
       when is_binary(binary) do
     private = parse_private(params["private"])
+    auth_params = build_auth_params(conn, tenant)
 
-    with :ok <- SingleBroadcast.broadcast(conn, tenant, topic, event, private, binary, :binary) do
+    with :ok <- SingleBroadcast.broadcast(auth_params, tenant, topic, event, private, binary, :binary) do
       send_resp(conn, :accepted, "")
     end
   end
@@ -96,10 +98,21 @@ defmodule RealtimeWeb.BroadcastSingleController do
       ) do
     private = parse_private(params["private"])
     payload = conn.body_params
+    auth_params = build_auth_params(conn, tenant)
 
-    with :ok <- SingleBroadcast.broadcast(conn, tenant, topic, event, private, payload, :json) do
+    with :ok <- SingleBroadcast.broadcast(auth_params, tenant, topic, event, private, payload, :json) do
       send_resp(conn, :accepted, "")
     end
+  end
+
+  defp build_auth_params(conn, tenant) do
+    Authorization.build_authorization_params(%{
+      tenant_id: tenant.external_id,
+      headers: conn.req_headers,
+      claims: conn.assigns.claims,
+      role: conn.assigns.role,
+      sub: conn.assigns.sub
+    })
   end
 
   defp parse_private("true"), do: true

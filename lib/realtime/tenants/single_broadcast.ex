@@ -46,20 +46,16 @@ defmodule Realtime.Tenants.SingleBroadcast do
   Broadcasts a single message to the specified topic.
 
   ## Parameters
-  - `conn` - Plug.Conn or auth_params map containing JWT claims
+  - `auth_params` - `%Realtime.Tenants.Authorization{}` struct
   - `tenant` - Tenant struct
   - `topic` - Channel topic from URL (e.g., "room:123")
   - `event` - Event name from URL (e.g., "message")
   - `private` - Whether this is a private broadcast (requires authorization)
   - `payload` - Message payload (map for JSON, binary for binary)
   - `content_type` - :json or :binary
-
-  ## Returns
-  - `:ok` on success
-  - `{:error, term()}` on failure
   """
   @spec broadcast(
-          Plug.Conn.t() | map(),
+          Authorization.t(),
           Tenant.t(),
           String.t(),
           String.t(),
@@ -67,19 +63,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
           any(),
           content_type()
         ) :: :ok | {:error, term()} | {:error, atom(), String.t()}
-  def broadcast(conn, tenant, topic, event, private, payload, content_type)
-
-  def broadcast(%Plug.Conn{} = conn, %Tenant{} = tenant, topic, event, private, payload, content_type) do
-    auth_params = %{
-      tenant_id: tenant.external_id,
-      headers: conn.req_headers,
-      claims: conn.assigns.claims,
-      role: conn.assigns.role,
-      sub: conn.assigns.sub
-    }
-
-    broadcast(auth_params, tenant, topic, event, private, payload, content_type)
-  end
+  def broadcast(auth_params, tenant, topic, event, private, payload, content_type)
 
   def broadcast(auth_params, %Tenant{} = tenant, topic, event, private, payload, content_type) do
     with %Ecto.Changeset{valid?: true} <- validate_message(topic, event, private, payload, content_type, tenant),
@@ -177,9 +161,6 @@ defmodule Realtime.Tenants.SingleBroadcast do
       {:ok, %Policies{broadcast: %BroadcastPolicies{write: _}}} ->
         {:error, :forbidden, "Unauthorized"}
 
-      {:error, :forbidden} ->
-        {:error, :forbidden, "Unauthorized"}
-
       {:error, :rls_policy_error, error} ->
         log_error("RlsPolicyError", error)
         {:error, :unprocessable_entity, "RLS policy error"}
@@ -190,7 +171,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
       {:error, :rpc_error, error} ->
         log_error("RpcError", error)
-        {:error, :service_unavailable, "RPC error"}
+        {:error, :internal_server_error, "RPC error"}
 
       {:error, :missing_partition} ->
         log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
@@ -201,7 +182,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
       {:error, :tenant_database_unavailable} ->
         log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
-        {:error, :service_unavailable, "Tenant database unavailable"}
+        {:error, :unprocessable_entity, "Tenant database unavailable"}
 
       {:error, :initializing} ->
         {:error, :unprocessable_entity, "Tenant database initializing"}
@@ -226,15 +207,9 @@ defmodule Realtime.Tenants.SingleBroadcast do
     end
   end
 
-  defp permissions_for_message(_, nil, _), do: {:error, :forbidden}
-
   defp permissions_for_message(tenant, auth_params, topic) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id) do
-      auth_params =
-        auth_params
-        |> Map.put(:topic, topic)
-        |> Authorization.build_authorization_params()
-
+      auth_params = %{auth_params | topic: topic}
       Authorization.get_write_authorizations(db_conn, auth_params)
     end
   end
