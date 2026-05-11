@@ -2,9 +2,12 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
   use RealtimeWeb.ConnCase, async: true
   use Mimic
 
+  alias Realtime.Crypto
   alias Realtime.GenCounter
   alias Realtime.RateCounter
   alias Realtime.Tenants
+  alias Realtime.Tenants.Authorization
+  alias Realtime.Tenants.Connect
 
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.Endpoint
@@ -22,28 +25,8 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
     {:ok, conn: conn, tenant: tenant}
   end
 
-  defp subscribe(tenant_topic, topic) do
-    fastlane =
-      RealtimeChannel.MessageDispatcher.fastlane_metadata(
-        self(),
-        Phoenix.Socket.V1.JSONSerializer,
-        topic,
-        :error,
-        "tenant_id"
-      )
-
-    Endpoint.subscribe(tenant_topic, metadata: fastlane)
-  end
-
-  defp subscribe_v2(tenant_topic, topic) do
-    fastlane =
-      RealtimeChannel.MessageDispatcher.fastlane_metadata(
-        self(),
-        RealtimeWeb.Socket.V2Serializer,
-        topic,
-        :error,
-        "tenant_id"
-      )
+  defp subscribe(tenant_topic, topic, serializer \\ Phoenix.Socket.V1.JSONSerializer) do
+    fastlane = RealtimeChannel.MessageDispatcher.fastlane_metadata(self(), serializer, topic, :error, "tenant_id")
 
     Endpoint.subscribe(tenant_topic, metadata: fastlane)
   end
@@ -118,7 +101,18 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
 
       message = assert_receive_message()
 
-      assert message["payload"]["payload"] == %{}
+      assert message == %{
+               "event" => "broadcast",
+               "payload" => %{
+                 "payload" => %{},
+                 "event" => event,
+                 "type" => "broadcast"
+               },
+               "ref" => nil,
+               "topic" => sub_topic
+             }
+
+      refute_receive {:socket_push, _, _}
     end
 
     test "handles topics with colons", %{conn: conn, tenant: tenant} do
@@ -141,12 +135,27 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
         |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, event), %{"data" => "test"})
 
       assert conn.status == 202
+
+      message = assert_receive_message()
+
+      assert message == %{
+               "event" => "broadcast",
+               "payload" => %{
+                 "payload" => %{"data" => "test"},
+                 "event" => event,
+                 "type" => "broadcast"
+               },
+               "ref" => nil,
+               "topic" => sub_topic
+             }
+
+      refute_receive {:socket_push, _, _}
     end
 
-    test "handles private=true query param", %{conn: conn, tenant: tenant} do
+    test "returns 422 when private=true and the JWT role cannot be set in Postgres", %{conn: conn, tenant: tenant} do
       request_events_key = Tenants.requests_per_second_key(tenant)
 
-      # Only expect request counter, not broadcast counter (since it will fail authorization silently)
+      # Only request counter is bumped; broadcast counter must NOT be incremented because no message is published.
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
       sub_topic = "private:room"
@@ -159,8 +168,8 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
           "secret" => "data"
         })
 
-      # Returns 202 even if unauthorized (silently fails)
-      assert conn.status == 202
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "RLS policy error"
     end
 
     test "handles private=false query param (default)", %{conn: conn, tenant: tenant} do
@@ -250,7 +259,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       binary_payload = <<1, 2, 3, 4, 5>>
 
       # Subscribe with V2Serializer to receive binary messages
-      subscribe_v2(topic, sub_topic)
+      subscribe(topic, sub_topic, RealtimeWeb.Socket.V2Serializer)
 
       conn =
         conn
@@ -269,21 +278,21 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       event_size = byte_size(event)
 
       assert data == <<
-        # user broadcast type = 4
-        4::size(8),
-        # sizes
-        topic_size::size(8),
-        event_size::size(8),
-        # metadata_size = 0 (no metadata)
-        0::size(8),
-        # binary encoding = 0
-        0::size(8),
-        # topic and event strings
-        sub_topic::binary,
-        event::binary,
-        # binary payload
-        binary_payload::binary
-      >>
+               # user broadcast type = 4
+               4::size(8),
+               # sizes
+               topic_size::size(8),
+               event_size::size(8),
+               # metadata_size = 0 (no metadata)
+               0::size(8),
+               # binary encoding = 0
+               0::size(8),
+               # topic and event strings
+               sub_topic::binary,
+               event::binary,
+               # binary payload
+               binary_payload::binary
+             >>
     end
 
     test "handles empty binary payload", %{conn: conn, tenant: tenant} do
@@ -405,32 +414,191 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
     end
   end
 
-  describe "URL parameter extraction" do
-    test "correctly extracts topic and event from URL", %{conn: conn, tenant: tenant} do
-      broadcast_events_key = Tenants.events_per_second_key(tenant)
+  describe "Private broadcast authorization" do
+    setup %{conn: conn, tenant: tenant} do
+      jwt_secret = Crypto.decrypt!(tenant.jwt_secret)
+      claims = %{sub: "test-user", role: "anon", exp: Joken.current_time() + 1_000}
+      signer = Joken.Signer.create("HS256", jwt_secret)
+      jwt = Joken.generate_and_sign!(%{}, claims, signer)
+
+      conn =
+        conn
+        |> delete_req_header("authorization")
+        |> put_req_header("authorization", "Bearer #{jwt}")
+
+      {:ok, conn: conn}
+    end
+
+    test "returns 403 when anon caller has no RLS write policy", %{conn: conn, tenant: tenant} do
       request_events_key = Tenants.requests_per_second_key(tenant)
 
-      GenCounter
-      |> expect(:add, fn ^request_events_key -> :ok end)
-      |> expect(:add, fn ^broadcast_events_key -> :ok end)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
-      # Test with URL-encoded topic
-      sub_topic = "room:test"
-      event = "my-event"
-      topic = Tenants.tenant_topic(tenant, sub_topic)
-
-      subscribe(topic, sub_topic)
+      sub_topic = "private:room"
+      event = "secret"
 
       conn =
         conn
         |> put_req_header("content-type", "application/json")
-        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, event), %{"msg" => "test"})
+        |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, event) <> "?private=true", %{
+          "secret" => "data"
+        })
 
-      assert conn.status == 202
+      assert conn.status == 403
+      assert Jason.decode!(conn.resp_body)["message"] == "Unauthorized"
+    end
 
-      message = assert_receive_message()
-      assert message["payload"]["event"] == event
-      assert message["topic"] == sub_topic
+    test "returns 422 when authorization query is canceled", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _ ->
+        {:error, :query_canceled,
+         %Postgrex.Error{postgres: %{code: :query_canceled, message: "canceling statement due to user request"}}}
+      end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "Query canceled"
+    end
+
+    test "returns 422 when messages partition is missing", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, :missing_partition} end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "Missing messages partition"
+    end
+
+    test "returns 429 when authorization signals connection pool exhaustion", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, :increase_connection_pool} end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
+
+      assert conn.status == 429
+      assert Jason.decode!(conn.resp_body)["message"] == "Connection pool exhausted"
+    end
+
+    test "returns 503 when tenant database is unavailable", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, :tenant_database_unavailable} end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
+
+      assert conn.status == 503
+      assert Jason.decode!(conn.resp_body)["message"] == "Tenant database unavailable"
+    end
+
+    test "returns 500 for unexpected authorization errors", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      expect(Authorization, :get_write_authorizations, fn _, _ -> {:error, "boom"} end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
+
+      assert conn.status == 500
+      assert Jason.decode!(conn.resp_body)["message"] == "Unable to authorize broadcast"
+    end
+
+    test "returns 422 when tenant database is initializing", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :initializing} end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "Tenant database initializing"
+    end
+
+    test "returns 422 when tenant database connection is initializing", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :tenant_database_connection_initializing} end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "Tenant database connection initializing"
+    end
+
+    test "returns 422 when tenant database has too many connections", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :tenant_db_too_many_connections} end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "Tenant database has too many connections"
+    end
+
+    test "returns 422 when connect rate limit is reached", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :connect_rate_limit_reached} end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["message"] == "Connect rate limit reached"
+    end
+
+    test "returns 503 when an RPC error occurs while looking up the connection", %{conn: conn, tenant: tenant} do
+      request_events_key = Tenants.requests_per_second_key(tenant)
+      expect(GenCounter, :add, fn ^request_events_key -> :ok end)
+
+      expect(Connect, :lookup_or_start_connection, fn _ -> {:error, :rpc_error, :timeout} end)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
+
+      assert conn.status == 503
+      assert Jason.decode!(conn.resp_body)["message"] == "RPC error"
     end
   end
 

@@ -78,9 +78,10 @@ defmodule RealtimeWeb.BroadcastSingleController do
 
   # Handles broadcast request with binary payload
   def broadcast(
-        %{assigns: %{tenant: tenant, binary_payload: binary}} = conn,
+        %{assigns: %{tenant: tenant}, body_params: %{"_binary" => binary}} = conn,
         %{"topic" => topic, "event" => event} = params
-      ) do
+      )
+      when is_binary(binary) do
     private = parse_private(params["private"])
 
     with :ok <- SingleBroadcast.broadcast(conn, tenant, topic, event, private, binary, :binary) do
@@ -94,7 +95,6 @@ defmodule RealtimeWeb.BroadcastSingleController do
         %{"topic" => topic, "event" => event} = params
       ) do
     private = parse_private(params["private"])
-    # Body is the payload directly
     payload = conn.body_params
 
     with :ok <- SingleBroadcast.broadcast(conn, tenant, topic, event, private, payload, :json) do

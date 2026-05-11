@@ -13,6 +13,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
   - Simpler validation
   """
   use Ecto.Schema
+  use Realtime.Logs
   import Ecto.Changeset
 
   alias Realtime.Api.Tenant
@@ -32,9 +33,11 @@ defmodule Realtime.Tenants.SingleBroadcast do
   embedded_schema do
     field :topic, :string
     field :event, :string
-    field :payload, :any, virtual: true  # map for JSON, binary for binary
+    # map for JSON, binary for binary
+    field :payload, :any, virtual: true
     field :private, :boolean, default: false
-    field :content_type, :string  # "json" or "binary"
+    # "json" or "binary"
+    field :content_type, :string
   end
 
   @type content_type :: :json | :binary
@@ -63,7 +66,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
           boolean(),
           any(),
           content_type()
-        ) :: :ok | {:error, term()}
+        ) :: :ok | {:error, term()} | {:error, atom(), String.t()}
   def broadcast(conn, tenant, topic, event, private, payload, content_type)
 
   def broadcast(%Plug.Conn{} = conn, %Tenant{} = tenant, topic, event, private, payload, content_type) do
@@ -167,17 +170,63 @@ defmodule Realtime.Tenants.SingleBroadcast do
 
   defp handle_private_message(tenant, auth_params, topic, event, payload, content_type, rate_counter) do
     case permissions_for_message(tenant, auth_params, topic) do
-      %Policies{broadcast: %BroadcastPolicies{write: true}} ->
+      {:ok, %Policies{broadcast: %BroadcastPolicies{write: true}}} ->
         send_message_and_count(tenant, rate_counter, topic, event, payload, content_type, false)
         :ok
 
-      _ ->
-        # Silently fail unauthorized (same as batch API)
-        :ok
+      {:ok, %Policies{broadcast: %BroadcastPolicies{write: _}}} ->
+        {:error, :forbidden, "Unauthorized"}
+
+      {:error, :forbidden} ->
+        {:error, :forbidden, "Unauthorized"}
+
+      {:error, :rls_policy_error, error} ->
+        log_error("RlsPolicyError", error)
+        {:error, :unprocessable_entity, "RLS policy error"}
+
+      {:error, :query_canceled, error} ->
+        log_error("QueryCanceled", error)
+        {:error, :unprocessable_entity, "Query canceled"}
+
+      {:error, :rpc_error, error} ->
+        log_error("RpcError", error)
+        {:error, :service_unavailable, "RPC error"}
+
+      {:error, :missing_partition} ->
+        log_error("MissingPartition", "Realtime was unable to find the expected messages partition")
+        {:error, :unprocessable_entity, "Missing messages partition"}
+
+      {:error, :increase_connection_pool} ->
+        {:error, :too_many_requests, "Connection pool exhausted"}
+
+      {:error, :tenant_database_unavailable} ->
+        log_error("UnableToConnectToProject", "Realtime was unable to connect to the project database")
+        {:error, :service_unavailable, "Tenant database unavailable"}
+
+      {:error, :initializing} ->
+        {:error, :unprocessable_entity, "Tenant database initializing"}
+
+      {:error, :tenant_database_connection_initializing} ->
+        {:error, :unprocessable_entity, "Tenant database connection initializing"}
+
+      {:error, :tenant_db_too_many_connections} ->
+        log_error("DatabaseLackOfConnections", "Database can't accept more connections, Realtime won't connect")
+        {:error, :unprocessable_entity, "Tenant database has too many connections"}
+
+      {:error, :connect_rate_limit_reached} ->
+        {:error, :unprocessable_entity, "Connect rate limit reached"}
+
+      {:error, error} ->
+        log_error("UnableToSetPolicies", error)
+        {:error, :internal_server_error, "Unable to authorize broadcast"}
+
+      other ->
+        log_error("UnableToSetPolicies", other)
+        {:error, :internal_server_error, "Unable to authorize broadcast"}
     end
   end
 
-  defp permissions_for_message(_, nil, _), do: nil
+  defp permissions_for_message(_, nil, _), do: {:error, :forbidden}
 
   defp permissions_for_message(tenant, auth_params, topic) do
     with {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id) do
@@ -186,11 +235,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
         |> Map.put(:topic, topic)
         |> Authorization.build_authorization_params()
 
-      case Authorization.get_write_authorizations(db_conn, auth_params) do
-        {:ok, policies} -> policies
-        {:error, :not_found} -> nil
-        error -> error
-      end
+      Authorization.get_write_authorizations(db_conn, auth_params)
     end
   end
 
