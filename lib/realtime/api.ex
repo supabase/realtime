@@ -261,17 +261,21 @@ defmodule Realtime.Api do
   @spec update_migrations_ran(binary(), integer()) :: {:ok, Tenant.t()} | {:error, term()}
   def update_migrations_ran(external_id, count) do
     if master_region?() do
-      tenant = get_tenant_by_external_id(external_id, use_replica?: false)
+      case get_tenant_by_external_id(external_id, use_replica?: false) do
+        nil ->
+          {:error, :tenant_not_found}
 
-      tenant
-      |> Tenant.changeset(%{migrations_ran: count})
-      |> Repo.update()
-      |> tap(fn result ->
-        case result do
-          {:ok, tenant} -> Cache.global_cache_update(tenant)
-          _ -> :ok
-        end
-      end)
+        tenant ->
+          tenant
+          |> Tenant.changeset(%{migrations_ran: count})
+          |> Repo.update()
+          |> tap(fn result ->
+            case result do
+              {:ok, tenant} -> Cache.global_cache_update(tenant)
+              _ -> :ok
+            end
+          end)
+      end
     else
       call(:update_migrations_ran, [external_id, count], tenant_id: external_id)
     end

@@ -1,6 +1,7 @@
 defmodule Realtime.Tenants.Connect.ReconcileMigrationsTest do
   use Realtime.DataCase, async: true
 
+  alias Realtime.Api
   alias Realtime.Tenants.Connect.ReconcileMigrations
   alias Realtime.Tenants.Migrations
 
@@ -34,6 +35,12 @@ defmodule Realtime.Tenants.Connect.ReconcileMigrationsTest do
 
       assert {:ok, %{tenant: updated_tenant}} = ReconcileMigrations.run(acc)
       assert updated_tenant.migrations_ran == total
+    end
+
+    test "returns :tenant_not_found when tenant has been removed", %{tenant: tenant} do
+      assert Api.delete_tenant_by_external_id(tenant.external_id)
+      acc = %{tenant: tenant, migrations_ran_on_database: 11}
+      assert {:error, :tenant_not_found} = ReconcileMigrations.run(acc)
     end
   end
 end

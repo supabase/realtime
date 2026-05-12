@@ -516,6 +516,10 @@ defmodule Realtime.ApiTest do
       assert {:ok, tenant} = Api.update_migrations_ran(tenant.external_id, 1)
       assert tenant.migrations_ran == 1
     end
+
+    test "returns {:error, :tenant_not_found} when tenant does not exist" do
+      assert {:error, :tenant_not_found} = Api.update_migrations_ran("removed", 11)
+    end
   end
 
   describe "list_feature_flags/0" do
