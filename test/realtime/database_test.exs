@@ -126,7 +126,7 @@ defmodule Realtime.DatabaseTest do
     end
 
     test "handles transaction errors", %{db_conn: db_conn} do
-      assert {:error, %DBConnection.ConnectionError{reason: :error}} =
+      assert {:error, %Postgrex.Error{postgres: %{code: :admin_shutdown}}} =
                Database.transaction(db_conn, fn conn ->
                  Postgrex.query!(conn, "select pg_terminate_backend(pg_backend_pid())", [])
                end)
