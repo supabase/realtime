@@ -34,9 +34,7 @@ defmodule RealtimeWeb.BroadcastSingleController do
         name: "topic",
         schema: %OpenApiSpex.Schema{type: :string},
         required: true,
-        example: "room:123",
-        description:
-          "Channel topic. Note: libraries will prepend the channel name with 'realtime:' so if you use this endpoint directly you'll need to also prepend 'realtime:' so it's captured by clients properly"
+        example: "room:123"
       ],
       event: [
         in: :path,
@@ -77,12 +75,10 @@ defmodule RealtimeWeb.BroadcastSingleController do
     }
   )
 
-  # Handles broadcast request with binary payload
   def broadcast(
         %{assigns: %{tenant: tenant}, body_params: %{"_binary" => binary}} = conn,
         %{"topic" => topic, "event" => event} = params
-      )
-      when is_binary(binary) do
+      ) do
     private = parse_private(params["private"])
     auth_params = build_auth_params(conn, tenant)
 
@@ -91,11 +87,7 @@ defmodule RealtimeWeb.BroadcastSingleController do
     end
   end
 
-  # Handles broadcast request with JSON payload
-  def broadcast(
-        %{assigns: %{tenant: tenant}} = conn,
-        %{"topic" => topic, "event" => event} = params
-      ) do
+  def broadcast(%{assigns: %{tenant: tenant}} = conn, %{"topic" => topic, "event" => event} = params) do
     private = parse_private(params["private"])
     payload = conn.body_params
     auth_params = build_auth_params(conn, tenant)

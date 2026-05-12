@@ -63,8 +63,6 @@ defmodule Realtime.Tenants.SingleBroadcast do
           any(),
           content_type()
         ) :: :ok | {:error, term()} | {:error, atom(), String.t()}
-  def broadcast(auth_params, tenant, topic, event, private, payload, content_type)
-
   def broadcast(auth_params, %Tenant{} = tenant, topic, event, private, payload, content_type) do
     with %Ecto.Changeset{valid?: true} <- validate_message(topic, event, private, payload, content_type, tenant),
          events_per_second_rate = Tenants.events_per_second_rate(tenant),
@@ -72,7 +70,7 @@ defmodule Realtime.Tenants.SingleBroadcast do
       if private do
         handle_private_message(tenant, auth_params, topic, event, payload, content_type, events_per_second_rate)
       else
-        send_message_and_count(tenant, events_per_second_rate, topic, event, payload, content_type, true)
+        send_message_and_count(tenant, events_per_second_rate, topic, event, payload, content_type, _public? = true)
         :ok
       end
     else
@@ -80,8 +78,6 @@ defmodule Realtime.Tenants.SingleBroadcast do
       error -> error
     end
   end
-
-  def broadcast(_, nil, _, _, _, _, _), do: {:error, :tenant_not_found}
 
   defp validate_message(topic, event, private, payload, content_type, tenant) do
     %__MODULE__{}
@@ -232,10 +228,10 @@ defmodule Realtime.Tenants.SingleBroadcast do
     broadcast =
       case content_type do
         :json ->
-          build_json_broadcast(topic, event, payload)
+          build_json_broadcast(tenant_topic, event, payload)
 
         :binary ->
-          build_binary_broadcast(topic, event, payload)
+          build_binary_broadcast(tenant_topic, event, payload)
       end
 
     GenCounter.add(events_per_second_rate.id)

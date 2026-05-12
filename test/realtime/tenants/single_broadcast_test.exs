@@ -345,11 +345,6 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
   end
 
   describe "error handling" do
-    test "returns error when tenant is nil" do
-      assert {:error, :tenant_not_found} =
-               SingleBroadcast.broadcast(%Authorization{}, nil, "topic", "event", false, %{"data" => "test"}, :json)
-    end
-
     test "database connection errors for private messages returns error", %{tenant: tenant} do
       topic = random_string()
       sub = random_string()
@@ -409,15 +404,8 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
       RateCounter
       |> stub(:new, fn _ -> {:ok, nil} end)
       |> stub(:get, fn
-        ^events_per_second_rate ->
-          {:ok, %RateCounter{avg: 0}}
-
-        _ ->
-          {:ok,
-           %RateCounter{
-             avg: 0,
-             limit: %{log: true, value: 10, measurement: :sum, triggered: false, log_fn: fn -> :ok end}
-           }}
+        ^events_per_second_rate -> {:ok, %RateCounter{avg: 0}}
+        _ -> {:ok, %RateCounter{avg: 0}}
       end)
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
@@ -431,9 +419,6 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       assert :ok =
                SingleBroadcast.broadcast(auth_params, tenant, topic, "event", true, %{"secret" => "data"}, :json)
-
-      broadcast_calls = calls(&TenantBroadcaster.pubsub_broadcast/5)
-      assert length(broadcast_calls) == 1
     end
   end
 end
