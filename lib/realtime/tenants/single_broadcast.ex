@@ -194,10 +194,6 @@ defmodule Realtime.Tenants.SingleBroadcast do
       {:error, error} ->
         log_error("UnableToSetPolicies", error)
         {:error, :internal_server_error, "Unable to authorize broadcast"}
-
-      other ->
-        log_error("UnableToSetPolicies", other)
-        {:error, :internal_server_error, "Unable to authorize broadcast"}
     end
   end
 
