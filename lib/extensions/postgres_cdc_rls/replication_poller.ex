@@ -9,6 +9,13 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   @idle_multiplier 5
 
+  # Column order returned by realtime.list_changes/4 (see Replications.list_changes/5
+  # and the SQL function in
+  # lib/realtime/tenants/repo/migrations/20260326120000_list_changes_with_slot_count.ex).
+  # generate_record/1 below pattern-matches positionally on this order; the runtime
+  # check in handle_list_changes_result/4 fails loudly if the SQL ever changes.
+  @expected_columns ~w(type schema table columns record old_record commit_timestamp subscription_ids errors slot_changes_count)
+
   import Realtime.Helpers
 
   alias DBConnection.Backoff
@@ -206,6 +213,9 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
          tenant_id,
          rate_counter_args
        ) do
+    expected_columns = @expected_columns
+    ^expected_columns = columns
+
     # The DB function always returns at least one row (sentinel row with wal=null).
     # All rows carry the same slot_changes_count in the last column.
     slot_changes_count = rows |> List.first() |> List.last()
@@ -223,10 +233,10 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         :ok
 
       _ ->
-        for row <- real_rows,
-            change <- columns |> Enum.zip(row) |> generate_record() |> List.wrap() do
-          topic = "realtime:postgres:" <> tenant_id
+        topic = "realtime:postgres:" <> tenant_id
 
+        for row <- real_rows,
+            change <- row |> generate_record() |> List.wrap() do
           Realtime.GenCounter.add(rate_counter_args.id, MapSet.size(change.subscription_ids))
 
           payload = Jason.encode!(change)
@@ -265,15 +275,15 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   defp collect_subscription_nodes(subscribers_nodes_table, subscription_ids) do
     Enum.reduce_while(subscription_ids, {:ok, %{}}, fn subscription_id, {:ok, acc} ->
-      case :ets.lookup(subscribers_nodes_table, subscription_id) do
-        [{_, node}] ->
+      case :ets.lookup_element(subscribers_nodes_table, subscription_id, 2, :not_found) do
+        :not_found ->
+          {:halt, {:error, :node_not_found}}
+
+        node ->
           updated_acc =
             Map.update(acc, node, [subscription_id], fn existing_ids -> [subscription_id | existing_ids] end)
 
           {:cont, {:ok, updated_acc}}
-
-        _ ->
-          {:halt, {:error, :node_not_found}}
       end
     end)
   rescue
@@ -281,16 +291,16 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   def generate_record([
-        {"type", "INSERT" = type},
-        {"schema", schema},
-        {"table", table},
-        {"columns", columns},
-        {"record", record},
-        {"old_record", _},
-        {"commit_timestamp", commit_timestamp},
-        {"subscription_ids", subscription_ids},
-        {"errors", errors},
-        {"slot_changes_count", _}
+        "INSERT" = type,
+        schema,
+        table,
+        columns,
+        record,
+        _old_record,
+        commit_timestamp,
+        subscription_ids,
+        errors,
+        _slot_changes_count
       ])
       when is_list(subscription_ids) do
     %NewRecord{
@@ -306,16 +316,16 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   def generate_record([
-        {"type", "UPDATE" = type},
-        {"schema", schema},
-        {"table", table},
-        {"columns", columns},
-        {"record", record},
-        {"old_record", old_record},
-        {"commit_timestamp", commit_timestamp},
-        {"subscription_ids", subscription_ids},
-        {"errors", errors},
-        {"slot_changes_count", _}
+        "UPDATE" = type,
+        schema,
+        table,
+        columns,
+        record,
+        old_record,
+        commit_timestamp,
+        subscription_ids,
+        errors,
+        _slot_changes_count
       ])
       when is_list(subscription_ids) do
     %UpdatedRecord{
@@ -332,16 +342,16 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   def generate_record([
-        {"type", "DELETE" = type},
-        {"schema", schema},
-        {"table", table},
-        {"columns", columns},
-        {"record", _},
-        {"old_record", old_record},
-        {"commit_timestamp", commit_timestamp},
-        {"subscription_ids", subscription_ids},
-        {"errors", errors},
-        {"slot_changes_count", _}
+        "DELETE" = type,
+        schema,
+        table,
+        columns,
+        _record,
+        old_record,
+        commit_timestamp,
+        subscription_ids,
+        errors,
+        _slot_changes_count
       ])
       when is_list(subscription_ids) do
     %DeletedRecord{

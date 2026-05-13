@@ -410,16 +410,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
   describe "generate_record/1" do
     test "INSERT" do
       wal_record = [
-        {"type", "INSERT"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", Jason.encode!(@record)},
-        {"old_record", nil},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", []},
-        {"slot_changes_count", 1}
+        "INSERT",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        Jason.encode!(@record),
+        nil,
+        @ts,
+        [@subscription_id],
+        [],
+        1
       ]
 
       assert %NewRecord{
@@ -440,16 +440,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "UPDATE" do
       wal_record = [
-        {"type", "UPDATE"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", Jason.encode!(@record)},
-        {"old_record", Jason.encode!(@old_record)},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", []},
-        {"slot_changes_count", 1}
+        "UPDATE",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        Jason.encode!(@record),
+        Jason.encode!(@old_record),
+        @ts,
+        [@subscription_id],
+        [],
+        1
       ]
 
       assert %UpdatedRecord{
@@ -472,16 +472,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "DELETE" do
       wal_record = [
-        {"type", "DELETE"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", nil},
-        {"old_record", Jason.encode!(@old_record)},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", []},
-        {"slot_changes_count", 1}
+        "DELETE",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        nil,
+        Jason.encode!(@old_record),
+        @ts,
+        [@subscription_id],
+        [],
+        1
       ]
 
       assert %DeletedRecord{
@@ -502,16 +502,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "INSERT, large payload error present" do
       wal_record = [
-        {"type", "INSERT"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", Jason.encode!(@record)},
-        {"old_record", nil},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error 413: Payload Too Large"]},
-        {"slot_changes_count", 1}
+        "INSERT",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        Jason.encode!(@record),
+        nil,
+        @ts,
+        [@subscription_id],
+        ["Error 413: Payload Too Large"],
+        1
       ]
 
       assert %NewRecord{
@@ -532,16 +532,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "INSERT, other errors present" do
       wal_record = [
-        {"type", "INSERT"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", Jason.encode!(@record)},
-        {"old_record", nil},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error..."]},
-        {"slot_changes_count", 1}
+        "INSERT",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        Jason.encode!(@record),
+        nil,
+        @ts,
+        [@subscription_id],
+        ["Error..."],
+        1
       ]
 
       assert %NewRecord{
@@ -562,16 +562,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "UPDATE, large payload error present" do
       wal_record = [
-        {"type", "UPDATE"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", Jason.encode!(@record)},
-        {"old_record", Jason.encode!(@old_record)},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error 413: Payload Too Large"]},
-        {"slot_changes_count", 1}
+        "UPDATE",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        Jason.encode!(@record),
+        Jason.encode!(@old_record),
+        @ts,
+        [@subscription_id],
+        ["Error 413: Payload Too Large"],
+        1
       ]
 
       assert %UpdatedRecord{
@@ -594,16 +594,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "UPDATE, other errors present" do
       wal_record = [
-        {"type", "UPDATE"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", Jason.encode!(@record)},
-        {"old_record", Jason.encode!(@old_record)},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error..."]},
-        {"slot_changes_count", 1}
+        "UPDATE",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        Jason.encode!(@record),
+        Jason.encode!(@old_record),
+        @ts,
+        [@subscription_id],
+        ["Error..."],
+        1
       ]
 
       assert %UpdatedRecord{
@@ -626,16 +626,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "DELETE, large payload error present" do
       wal_record = [
-        {"type", "DELETE"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", nil},
-        {"old_record", Jason.encode!(@old_record)},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error 413: Payload Too Large"]},
-        {"slot_changes_count", 1}
+        "DELETE",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        nil,
+        Jason.encode!(@old_record),
+        @ts,
+        [@subscription_id],
+        ["Error 413: Payload Too Large"],
+        1
       ]
 
       assert %DeletedRecord{
@@ -656,16 +656,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "DELETE, other errors present" do
       wal_record = [
-        {"type", "DELETE"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", nil},
-        {"old_record", Jason.encode!(@old_record)},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", ["Error..."]},
-        {"slot_changes_count", 1}
+        "DELETE",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        nil,
+        Jason.encode!(@old_record),
+        @ts,
+        [@subscription_id],
+        ["Error..."],
+        1
       ]
 
       assert %DeletedRecord{
@@ -688,16 +688,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
   describe "generate_record/1 JSON encoding" do
     test "subscription_ids is excluded from JSON encoding for INSERT" do
       wal_record = [
-        {"type", "INSERT"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", Jason.encode!(@record)},
-        {"old_record", nil},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", []},
-        {"slot_changes_count", 1}
+        "INSERT",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        Jason.encode!(@record),
+        nil,
+        @ts,
+        [@subscription_id],
+        [],
+        1
       ]
 
       record = generate_record(wal_record)
@@ -711,16 +711,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "subscription_ids is excluded from JSON encoding for UPDATE" do
       wal_record = [
-        {"type", "UPDATE"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", Jason.encode!(@record)},
-        {"old_record", Jason.encode!(@old_record)},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", []},
-        {"slot_changes_count", 1}
+        "UPDATE",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        Jason.encode!(@record),
+        Jason.encode!(@old_record),
+        @ts,
+        [@subscription_id],
+        [],
+        1
       ]
 
       record = generate_record(wal_record)
@@ -732,16 +732,16 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
     test "subscription_ids is excluded from JSON encoding for DELETE" do
       wal_record = [
-        {"type", "DELETE"},
-        {"schema", "public"},
-        {"table", "todos"},
-        {"columns", Jason.encode!(@columns)},
-        {"record", nil},
-        {"old_record", Jason.encode!(@old_record)},
-        {"commit_timestamp", @ts},
-        {"subscription_ids", [@subscription_id]},
-        {"errors", []},
-        {"slot_changes_count", 1}
+        "DELETE",
+        "public",
+        "todos",
+        Jason.encode!(@columns),
+        nil,
+        Jason.encode!(@old_record),
+        @ts,
+        [@subscription_id],
+        [],
+        1
       ]
 
       record = generate_record(wal_record)
