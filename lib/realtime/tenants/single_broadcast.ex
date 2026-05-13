@@ -1,16 +1,14 @@
 defmodule Realtime.Tenants.SingleBroadcast do
   @moduledoc """
-  Handles single broadcast messages via the /api/broadcast/:topic/:event API.
-
-  This module supports both JSON and binary payloads via Content-Type header:
-  - application/json: Sends Phoenix.Socket.Broadcast with JSON payload
-  - application/octet-stream: Sends RealtimeWeb.Socket.UserBroadcast with binary payload
+  Handles single broadcast messages via the /api/broadcast/:topic/events/:event API.
 
   Unlike the batch API, this API:
-  - Takes topic and event from URL path (not body)
+  - Takes topic and event from URL path
   - Sends single message (no batching)
-  - No message ID tracking
-  - Simpler validation
+
+  This module supports both JSON and binary payloads via Content-Type header:
+  - application/json
+  - application/octet-stream
   """
   use Ecto.Schema
   use Realtime.Logs
@@ -221,7 +219,6 @@ defmodule Realtime.Tenants.SingleBroadcast do
     end
   end
 
-  @event_type "broadcast"
   defp send_message_and_count(tenant, events_per_second_rate, topic, event, payload, content_type, public?) do
     tenant_topic = Tenants.tenant_topic(tenant, topic, public?)
 
@@ -246,16 +243,15 @@ defmodule Realtime.Tenants.SingleBroadcast do
   end
 
   defp build_json_broadcast(topic, event, payload) do
-    formatted_payload = %{
-      "payload" => payload,
-      "event" => event,
-      "type" => "broadcast"
-    }
-
-    %Phoenix.Socket.Broadcast{
+    %UserBroadcast{
       topic: topic,
-      event: @event_type,
-      payload: formatted_payload
+      user_event: event,
+      # We don't use encode_to_iodata because this message will be sent through gen_rpc which will
+      # call term_to_iovec and then binary_to_term which is more expensive on an iolist compared to
+      # a single binary
+      user_payload: Jason.encode!(payload),
+      user_payload_encoding: :json,
+      metadata: nil
     }
   end
 

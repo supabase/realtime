@@ -52,8 +52,10 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       event = "message"
       topic = Tenants.tenant_topic(tenant, sub_topic)
       payload = %{"text" => "hello", "user" => "alice"}
+      json_payload = Jason.encode!(payload)
 
       subscribe(topic, sub_topic)
+      subscribe(topic, sub_topic, RealtimeWeb.Socket.V2Serializer)
 
       conn =
         conn
@@ -74,6 +76,32 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
                "ref" => nil,
                "topic" => sub_topic
              }
+
+      # Assert binary message received with V2Serializer format
+      assert_receive {:socket_push, :binary, data}
+
+      # Verify V2 binary format:
+      # Header: [type(1), topic_size(1), event_size(1), metadata_size(1), encoding(1)]
+      # Body: [topic, event, metadata?, payload]
+      topic_size = byte_size(sub_topic)
+      event_size = byte_size(event)
+
+      assert IO.iodata_to_binary(data) == <<
+               # user broadcast type = 4
+               4::size(8),
+               # sizes
+               topic_size::size(8),
+               event_size::size(8),
+               # metadata_size = 0 (no metadata)
+               0::size(8),
+               # json encoding = 1
+               1::size(8),
+               # topic and event strings
+               sub_topic::binary,
+               event::binary,
+               # binary payload
+               json_payload::binary
+             >>
 
       refute_receive {:socket_push, _, _}
     end
@@ -277,7 +305,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       topic_size = byte_size(sub_topic)
       event_size = byte_size(event)
 
-      assert data == <<
+      assert IO.iodata_to_binary(data) == <<
                # user broadcast type = 4
                4::size(8),
                # sizes
@@ -496,7 +524,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert Jason.decode!(conn.resp_body)["message"] == "Connection pool exhausted"
     end
 
-    test "returns 503 when tenant database is unavailable", %{conn: conn, tenant: tenant} do
+    test "returns 422 when tenant database is unavailable", %{conn: conn, tenant: tenant} do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
@@ -507,7 +535,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
         |> put_req_header("content-type", "application/json")
         |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
 
-      assert conn.status == 503
+      assert conn.status == 422
       assert Jason.decode!(conn.resp_body)["message"] == "Tenant database unavailable"
     end
 
@@ -586,7 +614,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert Jason.decode!(conn.resp_body)["message"] == "Connect rate limit reached"
     end
 
-    test "returns 503 when an RPC error occurs while looking up the connection", %{conn: conn, tenant: tenant} do
+    test "returns 500 when an RPC error occurs while looking up the connection", %{conn: conn, tenant: tenant} do
       request_events_key = Tenants.requests_per_second_key(tenant)
       expect(GenCounter, :add, fn ^request_events_key -> :ok end)
 
@@ -597,7 +625,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
         |> put_req_header("content-type", "application/json")
         |> post(Routes.broadcast_single_path(conn, :broadcast, "private:room", "evt") <> "?private=true", %{"a" => 1})
 
-      assert conn.status == 503
+      assert conn.status == 500
       assert Jason.decode!(conn.resp_body)["message"] == "RPC error"
     end
   end

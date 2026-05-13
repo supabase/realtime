@@ -37,11 +37,10 @@ defmodule RealtimeWeb.Socket.V2Serializer do
       user_payload_encoding::size(8),
       msg.topic::binary-size(topic_size),
       msg.user_event::binary-size(user_event_size),
-      metadata || <<>>::binary-size(metadata_size),
-      msg.user_payload::binary
+      metadata || <<>>::binary-size(metadata_size)
     >>
 
-    {:socket_push, :binary, bin}
+    {:socket_push, :binary, [bin, msg.user_payload]}
   end
 
   def fastlane!(%Broadcast{payload: {:binary, data}} = msg) do

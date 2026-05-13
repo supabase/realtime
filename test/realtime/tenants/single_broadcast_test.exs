@@ -25,21 +25,22 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
     test "broadcasts JSON public message successfully", %{tenant: tenant} do
       broadcast_events_key = Tenants.events_per_second_key(tenant)
       topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic)
       event = "test-event"
       payload = %{"text" => "hello", "user" => "alice"}
 
       expect(GenCounter, :add, fn ^broadcast_events_key -> :ok end)
 
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, broadcast, _, _ ->
-        assert %Phoenix.Socket.Broadcast{
-                 topic: ^topic,
-                 event: "broadcast",
-                 payload: %{
-                   "payload" => ^payload,
-                   "event" => ^event,
-                   "type" => "broadcast"
-                 }
+        assert %UserBroadcast{
+                 topic: ^tenant_topic,
+                 user_event: ^event,
+                 user_payload: json,
+                 user_payload_encoding: :json,
+                 metadata: nil
                } = broadcast
+
+        assert IO.iodata_to_binary(json) == Jason.encode!(payload)
 
         :ok
       end)
@@ -77,6 +78,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
     test "broadcasts binary message successfully", %{tenant: tenant} do
       broadcast_events_key = Tenants.events_per_second_key(tenant)
       topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic)
       event = "binary-event"
       binary = <<1, 2, 3, 4, 5>>
 
@@ -84,7 +86,7 @@ defmodule Realtime.Tenants.SingleBroadcastTest do
 
       expect(TenantBroadcaster, :pubsub_broadcast, fn _, _, broadcast, _, _ ->
         assert %UserBroadcast{
-                 topic: ^topic,
+                 topic: ^tenant_topic,
                  user_event: ^event,
                  user_payload: ^binary,
                  user_payload_encoding: :binary,
