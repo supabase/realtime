@@ -246,9 +246,9 @@ defmodule Realtime.Tenants.SingleBroadcast do
     %UserBroadcast{
       topic: topic,
       user_event: event,
-      # We don't use encode_to_iodata because this message will be sent through gen_rpc which will
-      # call term_to_iovec and then binary_to_term which is more expensive on an iolist compared to
-      # a single binary
+      # We don't use Jason.encode_to_iodata because this message will be sent through gen_rpc which will
+      # call term_to_iovec and then binary_to_term from the remote peer. All of this is more expensive on an
+      # iolist compared to a single binary. Reconstructing a single binary is cheaper than an iolist
       user_payload: Jason.encode!(payload),
       user_payload_encoding: :json,
       metadata: nil
