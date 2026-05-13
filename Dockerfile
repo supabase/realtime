@@ -3,6 +3,26 @@ ARG OTP_VERSION=27.3
 ARG DEBIAN_VERSION=bookworm-20250929-slim
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+# @supabase/pg-delta@1.0.0-alpha.24
+ARG PG_DELTA_COMMIT=102ef99ae5aabb29510d48b39fbb8ecee34f5458 
+
+FROM debian:${DEBIAN_VERSION} AS pgdelta-builder
+
+ARG PG_DELTA_COMMIT
+
+RUN set -eux; \
+    apt-get update -y; \
+    apt-get install -y --no-install-recommends curl ca-certificates unzip; \
+    curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.14"; \
+    export PATH="/root/.bun/bin:${PATH}"; \
+    mkdir -p /build && cd /build; \
+    curl -fsSL "https://github.com/supabase/pg-toolbelt/archive/${PG_DELTA_COMMIT}.tar.gz" \
+      | tar xz --strip-components=1; \
+    bun install --frozen-lockfile --ignore-scripts; \
+    cd /build/packages/pg-delta; \
+    bun build --compile src/cli/bin/cli.ts --outfile /tmp/pgdelta; \
+    /tmp/pgdelta --help > /dev/null; \
+    rm -rf /build /root/.bun /var/lib/apt/lists/*
 
 FROM ${BUILDER_IMAGE} AS builder
 
@@ -77,6 +97,8 @@ ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}" \
 RUN apt-get update -y && \
     apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini curl awscli jq && \
     apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+COPY --from=pgdelta-builder /tmp/pgdelta /usr/local/bin/pgdelta
 
 # Set the locale
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen

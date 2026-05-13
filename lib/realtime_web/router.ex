@@ -132,7 +132,8 @@ defmodule RealtimeWeb.Router do
         recon_trace: RealtimeWeb.Dashboard.ReconTrace,
         node_info: RealtimeWeb.Dashboard.NodeInfo,
         sql_inspector: RealtimeWeb.Dashboard.SqlInspector,
-        feature_flags: RealtimeWeb.Dashboard.FeatureFlags
+        feature_flags: RealtimeWeb.Dashboard.FeatureFlags,
+        tenant_migrations: RealtimeWeb.Dashboard.TenantMigrations
       ]
     )
   end
