@@ -1,7 +1,6 @@
 defmodule RealtimeWeb.Dashboard.TenantInfoTest do
   use RealtimeWeb.ConnCase
   import Phoenix.LiveViewTest
-  import Generators
 
   setup do
     Application.put_env(:realtime, :dashboard_auth, :basic_auth)
@@ -12,7 +11,7 @@ defmodule RealtimeWeb.Dashboard.TenantInfoTest do
       Application.delete_env(:realtime, :dashboard_credentials)
     end)
 
-    tenant = tenant_fixture()
+    tenant = Containers.checkout_tenant(run_migrations: true)
     conn = using_basic_auth(build_conn(), "user", "pass")
 
     %{tenant: tenant, conn: conn}
