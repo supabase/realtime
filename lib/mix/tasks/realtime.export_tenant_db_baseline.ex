@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
 
   The target DB is expected to already have all tenant migrations applied.
 
-  Requires the `pgdelta` binary on `$PATH`.
+  Requires `pgdelta` on `$PATH`.
   """
   use Mix.Task
 
@@ -26,7 +26,7 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
     Mix.shell().info("[export_tenant_db_baseline] target: #{redact(url)}")
 
     unless System.find_executable("pgdelta") do
-      Mix.raise("pgdelta binary not found on PATH")
+      Mix.raise("pgdelta not found on PATH")
     end
 
     output = Path.expand(@baseline_path, File.cwd!())

@@ -4,16 +4,16 @@ ARG DEBIAN_VERSION=bookworm-20250929-slim
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
 # @supabase/pg-delta@1.0.0-alpha.24
-ARG PG_DELTA_COMMIT=102ef99ae5aabb29510d48b39fbb8ecee34f5458 
+ARG PG_DELTA_COMMIT=102ef99ae5aabb29510d48b39fbb8ecee34f5458
 
 FROM debian:${DEBIAN_VERSION} AS pgdelta-builder
-
 ARG PG_DELTA_COMMIT
+ARG BUN_VERSION=1.3.14
 
 RUN set -eux; \
     apt-get update -y; \
-    apt-get install -y --no-install-recommends curl ca-certificates unzip; \
-    curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.14"; \
+    apt-get install -y --no-install-recommends curl ca-certificates unzip xz-utils; \
+    curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"; \
     export PATH="/root/.bun/bin:${PATH}"; \
     mkdir -p /build && cd /build; \
     curl -fsSL "https://github.com/supabase/pg-toolbelt/archive/${PG_DELTA_COMMIT}.tar.gz" \
@@ -22,7 +22,22 @@ RUN set -eux; \
     cd /build/packages/pg-delta; \
     bun build --compile src/cli/bin/cli.ts --outfile /tmp/pgdelta; \
     /tmp/pgdelta --help > /dev/null; \
-    rm -rf /build /root/.bun /var/lib/apt/lists/*
+    xz -9 -e -T0 -c /tmp/pgdelta > /tmp/pgdelta.xz; \
+    cd / && find build -path '*/@libpg-query/parser/wasm/libpg-query.wasm' \
+      | tar -czf /tmp/libpg-query.tar.gz -T -; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'set -e' \
+      'BIN=/app/.pgdelta-cache/pgdelta' \
+      'if [ ! -x "$BIN" ]; then' \
+      '  mkdir -p "$(dirname "$BIN")"' \
+      '  xz -dcT0 /usr/local/share/pgdelta/pgdelta.xz > "$BIN"' \
+      '  chmod +x "$BIN"' \
+      'fi' \
+      'exec "$BIN" "$@"' \
+      > /tmp/pgdelta-wrapper; \
+    chmod +x /tmp/pgdelta-wrapper; \
+    rm -rf /tmp/pgdelta /build /root/.bun /var/lib/apt/lists/*
 
 FROM ${BUILDER_IMAGE} AS builder
 
@@ -95,17 +110,21 @@ ENV SLOT_NAME_SUFFIX="${SLOT_NAME_SUFFIX}" \
     ERL_AFLAGS="-proto_dist inet6_tcp"
 
 RUN apt-get update -y && \
-    apt-get install -y libstdc++6 openssl libncurses5 locales iptables sudo tini curl awscli jq && \
-    apt-get clean && rm -f /var/lib/apt/lists/*_*
+    apt-get install -y --no-install-recommends \
+      libstdc++6 openssl libncurses5 locales iptables sudo tini curl awscli jq xz-utils && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY --from=pgdelta-builder /tmp/pgdelta /usr/local/bin/pgdelta
+COPY --from=pgdelta-builder /tmp/pgdelta.xz /usr/local/share/pgdelta/pgdelta.xz
+COPY --from=pgdelta-builder /tmp/pgdelta-wrapper /usr/local/bin/pgdelta
+COPY --from=pgdelta-builder /tmp/libpg-query.tar.gz /tmp/libpg-query.tar.gz
+RUN tar -C / -xzf /tmp/libpg-query.tar.gz && rm /tmp/libpg-query.tar.gz
 
 # Set the locale
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 
 WORKDIR "/app"
 
-RUN chown nobody /app
+RUN chown nobody /app && mkdir -p /app/.pgdelta-cache && chown nobody /app/.pgdelta-cache
 
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/realtime ./
 COPY run.sh run.sh

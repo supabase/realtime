@@ -2,7 +2,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   @moduledoc """
   Live Dashboard page to inspect tenant migrations state.
 
-  Requires `pgdelta` binary on `$PATH`.
+  Requires `pgdelta` on `$PATH`.
 
   Regenerate the baseline with `mix realtime.export_tenant_db_baseline`.
   """
@@ -299,8 +299,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   defp run_pg_delta(%Database{} = settings) do
     case System.find_executable("pgdelta") do
       nil ->
-        log_warning("TenantMigrationsPgDeltaMissing", "pgdelta binary not found on PATH")
-        {:error, "pgdelta binary not found on PATH"}
+        log_warning("TenantMigrationsPgDeltaMissing", "pgdelta not found on PATH")
+        {:error, "pgdelta not found on PATH"}
 
       path ->
         baseline = Application.app_dir(:realtime, "priv/repo/tenant_db_baseline.json")
