@@ -13,7 +13,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   alias Realtime.Api.Tenant
   alias Realtime.Database
 
-  @pg_delta_filter ~s({"*/schema": "realtime"})
+  @pg_delta_filter ~s({"and": [{"*/schema": "realtime"}, {"not": {"table/is_partition": true}}]})
   @application_name "realtime_dashboard_tenant_migrations"
   @query_timeout 30_000
   @schema_migrations_query "SELECT version, inserted_at FROM realtime.schema_migrations ORDER BY version DESC"
@@ -115,7 +115,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
           autocomplete="off"
           spellcheck="false"
         />
-        <button type="submit" class="btn btn-primary">Lookup</button>
+        <button type="submit" class="btn btn-primary" phx-disable-with="Loading...">Lookup</button>
       </form>
 
       <%= if @error do %>
@@ -332,9 +332,11 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   defp apply_pg_delta(%Tenant{} = tenant, sql) do
+    opts = [query_type: :text, timeout: @query_timeout]
+
     with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
          {:ok, db_conn} <- Database.connect_db(settings),
-         {:ok, _} <- Postgrex.query(db_conn, sql, [], query_type: :text, timeout: @query_timeout) do
+         {:ok, _} <- Postgrex.query(db_conn, sql, [], opts) do
       :ok
     else
       {:error, %{postgres: %{message: message}}} ->
