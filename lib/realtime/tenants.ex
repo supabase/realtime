@@ -491,7 +491,7 @@ defmodule Realtime.Tenants do
 
   @doc """
   """
-  @spec validate_payload_size(Tenant.t() | binary(), map()) :: :ok | {:error, :payload_size_exceeded}
+  @spec validate_payload_size(Tenant.t() | binary(), map() | binary()) :: :ok | {:error, :payload_size_exceeded}
   def validate_payload_size(tenant_id, payload) when is_binary(tenant_id) do
     tenant_id
     |> Cache.get_tenant_by_external_id()
