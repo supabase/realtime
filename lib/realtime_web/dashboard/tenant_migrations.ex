@@ -12,7 +12,6 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Database
-  alias Realtime.Tenants.Connect
 
   @pg_delta_filter ~s({"*/schema": "realtime"})
   @application_name "realtime_dashboard_tenant_migrations"
@@ -39,8 +38,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     ref = String.trim(ref)
 
     with %Tenant{} = tenant <- Api.get_tenant_by_external_id(ref),
-         {:ok, db_conn} <- Connect.lookup_or_start_connection(tenant.external_id),
-         {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop) do
+         {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
+         {:ok, db_conn} <- Database.connect_db(settings) do
       {:noreply,
        assign(socket,
          external_id: ref,
