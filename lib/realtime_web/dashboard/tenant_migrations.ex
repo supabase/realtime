@@ -76,6 +76,27 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   @impl true
+  def handle_event(
+        "apply_plan",
+        _params,
+        %{
+          assigns: %{
+            tenant: %Tenant{} = tenant,
+            external_id: ref,
+            pg_delta: {:ok, %{status: :changes, sql: sql}}
+          }
+        } = socket
+      ) do
+    case apply_pg_delta(tenant, sql) do
+      :ok ->
+        {:noreply, push_patch(socket, to: "/admin/dashboard/tenant_migrations?external_id=#{URI.encode(ref)}")}
+
+      {:error, msg} ->
+        {:noreply, assign(socket, error: msg)}
+    end
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div class="phx-dashboard-section">
@@ -213,6 +234,17 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       >Copy</button>
       <pre style="background: #0d1117; color: #e6edf3; padding: 16px; padding-right: 64px; border-radius: 6px; overflow: auto; max-height: 500px; margin: 0;"><code class="language-sql"><%= @sql %></code></pre>
     </div>
+    <div class="d-flex justify-content-end mt-3">
+      <button
+        type="button"
+        class="btn btn-danger"
+        phx-click="apply_plan"
+        phx-disable-with="Applying..."
+        data-confirm="Apply this SQL plan to the tenant database? This may include destructive statements and is irreversible."
+      >
+        Apply
+      </button>
+    </div>
     """
   end
 
@@ -296,6 +328,22 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
             log_warning("TenantMigrationsPgDeltaNonZeroExit", "exit #{code}: #{output}")
             {:error, "pg-delta exited #{code}:\n#{output}"}
         end
+    end
+  end
+
+  defp apply_pg_delta(%Tenant{} = tenant, sql) do
+    with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
+         {:ok, db_conn} <- Database.connect_db(settings),
+         {:ok, _} <- Postgrex.query(db_conn, sql, [], query_type: :text, timeout: @query_timeout) do
+      :ok
+    else
+      {:error, %{postgres: %{message: message}}} ->
+        log_warning("TenantMigrationsApplyFailed", message)
+        {:error, "Apply failed: #{message}"}
+
+      {:error, reason} ->
+        log_warning("TenantMigrationsApplyFailed", reason)
+        {:error, "Apply failed: #{inspect(reason)}"}
     end
   end
 end
