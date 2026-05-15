@@ -9,6 +9,7 @@ on:
       - "assets/**"
       - "rel/**"
       - "mix.exs"
+      - "mix.lock"
       - "Dockerfile"
       - "run.sh"
       - "docker-compose.test.yml"
