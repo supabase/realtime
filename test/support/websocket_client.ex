@@ -343,4 +343,34 @@ defmodule Realtime.Integration.WebsocketClient do
     payload = %{"status" => status, "response" => {:binary, data}}
     %Message{join_ref: join_ref, ref: ref, topic: topic, event: "phx_reply", payload: payload}
   end
+
+  # user broadcast
+  defp binary_decode(<<
+         4::size(8),
+         topic_size::size(8),
+         user_event_size::size(8),
+         metadata_size::size(8),
+         user_payload_encoding::size(8),
+         topic::binary-size(topic_size),
+         user_event::binary-size(user_event_size),
+         metadata::binary-size(metadata_size),
+         user_payload::binary
+       >>) do
+    decoded_metadata = if metadata_size > 0, do: Jason.decode!(metadata), else: %{}
+
+    decoded_payload =
+      case user_payload_encoding do
+        1 -> Jason.decode!(user_payload)
+        0 -> {:binary, user_payload}
+      end
+
+    payload = %{
+      "event" => user_event,
+      "payload" => decoded_payload,
+      "type" => "broadcast",
+      "meta" => decoded_metadata
+    }
+
+    %Message{topic: topic, event: "broadcast", payload: payload}
+  end
 end
