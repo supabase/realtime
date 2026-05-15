@@ -110,6 +110,39 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
+         serializer: RealtimeWeb.Socket.V2Serializer
+    test "private broadcast with binary payload and ack returns reply and delivers self-broadcast", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: RealtimeWeb.Socket.V2Serializer = serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      config = %{broadcast: %{self: true, ack: true}, private: true}
+      full_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, full_topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 500
+
+      binary = <<0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x11, 0x22, 0x33>>
+      event = "my-binary-event"
+
+      WebsocketClient.send_user_broadcast(socket, full_topic, event, binary, encoding: :binary)
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 500
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^full_topic,
+                       payload: %{
+                         "event" => ^event,
+                         "payload" => {:binary, ^binary},
+                         "type" => "broadcast"
+                       }
+                     },
+                     1000
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
          topic: "topic"
     test "private broadcast with valid channel a colon character sends message and won't intercept in public channels",
          %{topic: topic, tenant: tenant, serializer: serializer} do
