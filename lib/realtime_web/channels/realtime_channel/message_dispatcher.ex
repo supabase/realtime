@@ -134,6 +134,7 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcher do
 
   defp increment_presence_counter(_tenant_id, _event, _count), do: :ok
 
+  defp message_id(%UserBroadcast{metadata: %{"id" => id}}), do: id
   defp message_id(%Broadcast{payload: %{"meta" => %{"id" => id}}}), do: id
   defp message_id(_), do: nil
 
