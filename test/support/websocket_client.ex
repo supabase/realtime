@@ -62,6 +62,18 @@ defmodule Realtime.Integration.WebsocketClient do
   def send_heartbeat(socket), do: send_event(socket, "phoenix", "heartbeat", %{})
 
   @doc """
+  Sends a user broadcast push (V2 binary wire format, type 3). `payload` is the
+  raw user payload (binary). `opts` may include `:encoding` (`:binary` (default)
+  or `:json`) and `:metadata` (a map JSON-encoded into the frame).
+  """
+  def send_user_broadcast(socket, topic, user_event, payload, opts \\ []) do
+    encoding = Keyword.get(opts, :encoding, :binary)
+    metadata = Keyword.get(opts, :metadata)
+    payload_tuple = {user_event, encoding, payload, metadata}
+    GenServer.call(socket, {:send, %Message{topic: topic, event: "broadcast", payload: payload_tuple}})
+  end
+
+  @doc """
   Sends join event to the WebSocket server per the Message protocol
   """
   def join(socket, topic, msg), do: send_event(socket, topic, "phx_join", msg)
@@ -266,6 +278,15 @@ defmodule Realtime.Integration.WebsocketClient do
     {{:binary, binary_encode_push!(msg)}, put_in(state.ref, ref + 1)}
   end
 
+  defp serialize_msg(%Message{payload: {user_event, encoding, user_payload, metadata}} = msg, %{ref: ref} = state)
+       when is_binary(user_event) and encoding in [:json, :binary] and is_binary(user_payload) do
+    {join_ref, state} = join_ref_for(msg, state)
+    msg = Map.merge(msg, %{ref: to_string(ref), join_ref: to_string(join_ref)})
+
+    {{:binary, binary_encode_user_broadcast_push!(msg, user_event, encoding, user_payload, metadata)},
+     put_in(state.ref, ref + 1)}
+  end
+
   defp serialize_msg(%Message{} = msg, %{ref: ref} = state) do
     {join_ref, state} = join_ref_for(msg, state)
     msg = Map.merge(msg, %{ref: to_string(ref), join_ref: to_string(join_ref)})
@@ -289,6 +310,29 @@ defmodule Realtime.Integration.WebsocketClient do
   defp encode!(map, state) do
     {:socket_push, :text, chardata} = state.serializer.encode!(map)
     IO.chardata_to_string(chardata)
+  end
+
+  defp binary_encode_user_broadcast_push!(%Message{} = msg, user_event, encoding, user_payload, metadata) do
+    ref = to_string(msg.ref)
+    join_ref = to_string(msg.join_ref)
+    metadata_bin = if metadata, do: Jason.encode!(metadata), else: <<>>
+    encoding_byte = if encoding == :json, do: 1, else: 0
+
+    <<
+      3::size(8),
+      byte_size(join_ref)::size(8),
+      byte_size(ref)::size(8),
+      byte_size(msg.topic)::size(8),
+      byte_size(user_event)::size(8),
+      byte_size(metadata_bin)::size(8),
+      encoding_byte::size(8),
+      join_ref::binary,
+      ref::binary,
+      msg.topic::binary,
+      user_event::binary,
+      metadata_bin::binary,
+      user_payload::binary
+    >>
   end
 
   defp binary_encode_push!(%Message{payload: {:binary, data}} = msg) do
