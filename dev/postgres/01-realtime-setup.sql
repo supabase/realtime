@@ -21,3 +21,4 @@ GRANT USAGE ON SCHEMA auth TO supabase_realtime_admin;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO supabase_realtime_admin;
 GRANT USAGE ON SCHEMA realtime TO postgres, anon, authenticated, service_role;
 GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION;
+GRANT CREATE, USAGE ON SCHEMA _realtime TO supabase_realtime_admin;
