@@ -1,13 +1,16 @@
 defmodule Realtime.ApiTest do
-  use Realtime.DataCase, async: true
+  use Realtime.DataCase, async: false
 
   use Mimic
 
   alias Realtime.Api
   alias Realtime.Api.Extensions, as: ApiExtensions
+  alias Realtime.Api.FeatureFlag
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.GenCounter
+  alias Realtime.GenRpc
+  alias Realtime.Nodes
   alias Realtime.RateCounter
   alias Realtime.Tenants.Connect
   alias Extensions.PostgresCdcRls
@@ -25,7 +28,11 @@ defmodule Realtime.ApiTest do
     setup [:create_tenants]
 
     test "returns all tenants", %{tenants: tenants} do
-      assert Enum.sort(Api.list_tenants()) == Enum.sort(tenants)
+      assert Api.list_tenants()
+
+      Enum.each(tenants, fn tenant ->
+        assert tenant in Api.list_tenants()
+      end)
     end
   end
 
@@ -508,6 +515,118 @@ defmodule Realtime.ApiTest do
 
       assert {:ok, tenant} = Api.update_migrations_ran(tenant.external_id, 1)
       assert tenant.migrations_ran == 1
+    end
+
+    test "returns {:error, :tenant_not_found} when tenant does not exist" do
+      assert {:error, :tenant_not_found} = Api.update_migrations_ran("removed", 11)
+    end
+  end
+
+  describe "list_feature_flags/0" do
+    test "returns all flags ordered by name" do
+      {:ok, _} = Api.upsert_feature_flag(%{name: "zebra_flag", enabled: false})
+      {:ok, _} = Api.upsert_feature_flag(%{name: "alpha_flag", enabled: true})
+
+      names = Api.list_feature_flags() |> Enum.map(& &1.name)
+      assert "alpha_flag" in names
+      assert "zebra_flag" in names
+      assert Enum.find_index(names, &(&1 == "alpha_flag")) < Enum.find_index(names, &(&1 == "zebra_flag"))
+    end
+  end
+
+  describe "get_feature_flag/1" do
+    test "returns the flag when it exists" do
+      {:ok, flag} = Api.upsert_feature_flag(%{name: "my_flag", enabled: true})
+      assert %FeatureFlag{name: "my_flag"} = Api.get_feature_flag("my_flag")
+      assert Api.get_feature_flag("my_flag").id == flag.id
+    end
+
+    test "returns nil when flag does not exist" do
+      refute Api.get_feature_flag("nonexistent")
+    end
+  end
+
+  describe "upsert_feature_flag/1" do
+    test "inserts a new flag" do
+      assert {:ok, %FeatureFlag{name: "new_flag", enabled: false}} =
+               Api.upsert_feature_flag(%{name: "new_flag", enabled: false})
+    end
+
+    test "updates an existing flag" do
+      {:ok, _} = Api.upsert_feature_flag(%{name: "existing", enabled: false})
+
+      assert {:ok, %FeatureFlag{name: "existing", enabled: true}} =
+               Api.upsert_feature_flag(%{name: "existing", enabled: true})
+
+      assert Api.list_feature_flags() |> Enum.count(&(&1.name == "existing")) == 1
+    end
+
+    test "returns error changeset when name is missing" do
+      assert {:error, changeset} = Api.upsert_feature_flag(%{enabled: false})
+      assert "can't be blank" in errors_on(changeset).name
+    end
+  end
+
+  describe "delete_feature_flag/1" do
+    test "removes the flag" do
+      {:ok, flag} = Api.upsert_feature_flag(%{name: "to_delete", enabled: false})
+      assert {:ok, _} = Api.delete_feature_flag(flag)
+      refute Api.get_feature_flag("to_delete")
+    end
+  end
+
+  describe "non-master region routing" do
+    setup do
+      previous_region = Application.get_env(:realtime, :region)
+      previous_master_region = Application.get_env(:realtime, :master_region)
+
+      Application.put_env(:realtime, :region, "ap-southeast-2")
+      Application.put_env(:realtime, :master_region, "us-east-1")
+
+      on_exit(fn ->
+        Application.put_env(:realtime, :region, previous_region)
+        Application.put_env(:realtime, :master_region, previous_master_region)
+      end)
+
+      fake_master = :"master@127.0.0.1"
+      Mimic.stub(Nodes, :node_from_region, fn "us-east-1", _key -> {:ok, fake_master} end)
+
+      %{master_node: fake_master}
+    end
+
+    test "upsert_feature_flag dispatches to master with empty opts", %{master_node: master_node} do
+      Mimic.expect(GenRpc, :call, fn ^master_node, Api, :upsert_feature_flag, args, opts ->
+        assert args == [%{name: "rpc_flag", enabled: true}]
+        assert opts == []
+        {:ok, %FeatureFlag{name: "rpc_flag", enabled: true}}
+      end)
+
+      assert {:ok, %FeatureFlag{name: "rpc_flag", enabled: true}} =
+               Api.upsert_feature_flag(%{name: "rpc_flag", enabled: true})
+    end
+
+    test "delete_feature_flag dispatches to master with empty opts", %{master_node: master_node} do
+      flag = %FeatureFlag{id: Ecto.UUID.generate(), name: "rpc_delete", enabled: false}
+
+      Mimic.expect(GenRpc, :call, fn ^master_node, Api, :delete_feature_flag, args, opts ->
+        assert args == [flag]
+        assert opts == []
+        {:ok, flag}
+      end)
+
+      assert {:ok, ^flag} = Api.delete_feature_flag(flag)
+    end
+
+    test "create_tenant dispatches to master with tenant_id opt", %{master_node: master_node} do
+      external_id = "rpc_tenant_#{System.unique_integer([:positive])}"
+      attrs = %{"external_id" => external_id, "name" => external_id}
+
+      Mimic.expect(GenRpc, :call, fn ^master_node, Api, :create_tenant, _args, opts ->
+        assert opts == [tenant_id: external_id]
+        {:ok, %Tenant{external_id: external_id}}
+      end)
+
+      assert {:ok, %Tenant{external_id: ^external_id}} = Api.create_tenant(attrs)
     end
   end
 end

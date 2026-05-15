@@ -143,6 +143,7 @@ defmodule Realtime.MetricsPusherTest do
 
       assert log =~ "MetricsPusher: Failed to push"
       assert log =~ "metrics to"
+      assert log =~ "error_code=MetricsPusherFailed"
     end
 
     test "when an error is raised" do
@@ -171,6 +172,7 @@ defmodule Realtime.MetricsPusherTest do
 
       assert log =~ "MetricsPusher: Exception during"
       assert log =~ "push: %RuntimeError{message: \"unexpected error\"}"
+      assert log =~ "error_code=MetricsPusherException"
     end
 
     test "appends extra_label query params to URL" do

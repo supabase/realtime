@@ -7,6 +7,8 @@ defmodule Realtime.MetricsPusher do
   """
 
   use GenServer
+  use Realtime.Logs
+
   require Logger
 
   defstruct [:push_ref, :interval, :req_options]
@@ -121,10 +123,10 @@ defmodule Realtime.MetricsPusher do
     |> Enum.each(fn
       {task, nil} ->
         Task.shutdown(task, :brutal_kill)
-        Logger.error("MetricsPusher: Task timed out: #{inspect(task)}")
+        log_error("MetricsPusherTimeout", "MetricsPusher: Task timed out: #{inspect(task)}")
 
       {_task, {:exit, reason}} ->
-        Logger.error("MetricsPusher: Task exited with reason: #{inspect(reason)}")
+        log_error("MetricsPusherTaskExited", "MetricsPusher: Task exited with reason: #{inspect(reason)}")
 
       {_task, {:ok, _}} ->
         :ok
@@ -140,12 +142,16 @@ defmodule Realtime.MetricsPusher do
           :ok
 
         {:error, reason} ->
-          Logger.error("MetricsPusher: Failed to push #{label} metrics to #{req_options[:url]}: #{inspect(reason)}")
+          log_error(
+            "MetricsPusherFailed",
+            "MetricsPusher: Failed to push #{label} metrics to #{req_options[:url]}: #{inspect(reason)}"
+          )
+
           :ok
       end
     rescue
       error ->
-        Logger.error("MetricsPusher: Exception during #{label} push: #{inspect(error)}")
+        log_error("MetricsPusherException", "MetricsPusher: Exception during #{label} push: #{inspect(error)}")
         :ok
     end
   end

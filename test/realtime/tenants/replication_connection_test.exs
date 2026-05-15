@@ -6,6 +6,8 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
   alias Realtime.Api.Message
   alias Realtime.Database
+  alias Realtime.GenCounter
+  alias Realtime.RateCounter
   alias Realtime.Tenants
   alias Realtime.Tenants.ReplicationConnection
   alias RealtimeWeb.Endpoint
@@ -422,7 +424,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert logs =~ "UnableToBroadcastChanges"
     end
 
-    test "message that exceeds payload size logs error", %{tenant: tenant} do
+    test "message that exceeds payload size is not broadcast and logs error", %{tenant: tenant} do
       logs =
         capture_log(fn ->
           start_supervised!(
@@ -436,7 +438,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
           message_fixture(tenant, %{
             "event" => random_string(),
-            "topic" => random_string(),
+            "topic" => topic,
             "private" => true,
             "payload" => %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
           })
@@ -444,7 +446,41 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           refute_receive %Phoenix.Socket.Broadcast{}, 500
         end)
 
-      assert logs =~ "UnableToBroadcastChanges: %{messages: [%{payload: [\"Payload size exceeds tenant limit\"]}]}"
+      assert logs =~ "UnableToBroadcastChanges: :payload_size_exceeded"
+    end
+
+    test "message is not broadcast and logs error when rate limit is exceeded", %{tenant: tenant} do
+      events_per_second_rate = Tenants.events_per_second_rate(tenant)
+
+      # Start with a clean rate counter and push it well above the limit so the
+      # avg stays over the threshold for the full duration of the test.
+      RateCounterHelper.stop(tenant.external_id)
+      {:ok, _} = RateCounter.new(events_per_second_rate)
+      GenCounter.add(events_per_second_rate.id, tenant.max_events_per_second * 60 + 1)
+      {:ok, %{limit: %{triggered: true}}} = RateCounterHelper.tick!(events_per_second_rate)
+
+      logs =
+        capture_log(fn ->
+          start_supervised!(
+            {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+            restart: :transient
+          )
+
+          topic = random_string()
+          tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+          assert :ok = Endpoint.subscribe(tenant_topic)
+
+          message_fixture(tenant, %{
+            "event" => "INSERT",
+            "topic" => topic,
+            "private" => true,
+            "payload" => %{"value" => random_string()}
+          })
+
+          refute_receive %Phoenix.Socket.Broadcast{}, 500
+        end)
+
+      assert logs =~ "UnableToBroadcastChanges: :too_many_requests"
     end
 
     test "payload without id", %{tenant: tenant, db_conn: db_conn} do

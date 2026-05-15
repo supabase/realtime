@@ -8,8 +8,8 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
 
   use Phoenix.LiveDashboard.PageBuilder
 
+  alias Realtime.Api
   alias Realtime.FeatureFlags
-  alias Realtime.FeatureFlags.Cache
   alias Realtime.Tenants.Cache, as: TenantsCache
 
   @impl true
@@ -17,16 +17,15 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
 
   @impl true
   def mount(_params, _, socket) do
-    {:ok, reset_tenant_state(assign(socket, flags: FeatureFlags.list_flags()))}
+    {:ok, reset_tenant_state(assign(socket, flags: Api.list_feature_flags()))}
   end
 
   @impl true
   def handle_event("toggle", %{"id" => id}, socket) do
     flag = Enum.find(socket.assigns.flags, &(&1.id == id))
 
-    case FeatureFlags.upsert_flag(%{name: flag.name, enabled: !flag.enabled}) do
+    case Api.upsert_feature_flag(%{name: flag.name, enabled: !flag.enabled}) do
       {:ok, updated} ->
-        Cache.global_update_cache(updated)
         flags = Enum.map(socket.assigns.flags, fn f -> if f.id == id, do: updated, else: f end)
         {:noreply, assign(socket, flags: flags)}
 
@@ -37,9 +36,8 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
 
   @impl true
   def handle_event("create", %{"name" => name}, socket) when name != "" do
-    case FeatureFlags.upsert_flag(%{name: String.trim(name), enabled: false}) do
+    case Api.upsert_feature_flag(%{name: String.trim(name), enabled: false}) do
       {:ok, flag} ->
-        Cache.global_update_cache(flag)
         flags = Enum.sort_by([flag | socket.assigns.flags], & &1.name)
         {:noreply, assign(socket, flags: flags)}
 
@@ -55,9 +53,8 @@ defmodule RealtimeWeb.Dashboard.FeatureFlags do
   def handle_event("delete", %{"id" => id}, socket) do
     flag = Enum.find(socket.assigns.flags, &(&1.id == id))
 
-    case FeatureFlags.delete_flag(flag) do
+    case Api.delete_feature_flag(flag) do
       {:ok, _} ->
-        Cache.global_invalidate_cache(flag)
         {:noreply, assign(socket, flags: Enum.reject(socket.assigns.flags, &(&1.id == id)))}
 
       {:error, _} ->

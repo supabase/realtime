@@ -2,7 +2,10 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
   use Realtime.DataCase, async: false
   use Mimic
 
+  import Ecto.Query
+
   alias Realtime.Api
+  alias Realtime.Api.FeatureFlag
   alias Realtime.Api.Tenant
   alias Realtime.GenRpc
   alias Realtime.Nodes
@@ -224,5 +227,63 @@ defmodule Realtime.Integration.RegionAwareRoutingTest do
     Mimic.expect(GenRpc, :call, fn _node, _mod, _func, _args, _opts -> {:error, :rpc_error, rpc_error_reason} end)
     result = Api.create_tenant(attrs)
     assert {:error, ^rpc_error_reason} = result
+  end
+
+  test "upsert_feature_flag automatically routes to master region", %{master_node: master_node} do
+    flag_name = "test_routing_flag_#{System.unique_integer([:positive])}"
+    on_exit(fn -> Realtime.Repo.delete_all(from f in FeatureFlag, where: f.name == ^flag_name) end)
+
+    Mimic.expect(GenRpc, :call, fn node, mod, func, args, opts ->
+      assert node == master_node
+      assert mod == Realtime.Api
+      assert func == :upsert_feature_flag
+      assert opts == []
+
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
+    end)
+
+    assert {:ok, %FeatureFlag{name: ^flag_name, enabled: true}} =
+             Api.upsert_feature_flag(%{name: flag_name, enabled: true})
+
+    assert Realtime.Repo.get_by(FeatureFlag, name: flag_name)
+  end
+
+  test "upsert_feature_flag surfaces error", %{master_node: master_node} do
+    # validation will fail
+    flag_name = ""
+    on_exit(fn -> Realtime.Repo.delete_all(from f in FeatureFlag, where: f.name == ^flag_name) end)
+
+    Mimic.expect(GenRpc, :call, fn node, mod, func, args, opts ->
+      assert node == master_node
+      assert mod == Realtime.Api
+      assert func == :upsert_feature_flag
+      assert opts == []
+
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
+    end)
+
+    assert {:error, %Ecto.Changeset{errors: [name: {"can't be blank", [validation: :required]}]}} =
+             Api.upsert_feature_flag(%{name: flag_name, enabled: true})
+  end
+
+  test "delete_feature_flag automatically routes to master region", %{master_node: master_node} do
+    flag_name = "test_routing_delete_#{System.unique_integer([:positive])}"
+
+    GenRpc
+    |> Mimic.expect(:call, fn node, mod, func, args, opts ->
+      assert node == master_node
+      assert func == :upsert_feature_flag
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
+    end)
+    |> Mimic.expect(:call, fn node, mod, func, args, opts ->
+      assert node == master_node
+      assert func == :delete_feature_flag
+      assert opts == []
+      call_original(GenRpc, :call, [node, mod, func, args, opts])
+    end)
+
+    {:ok, flag} = Api.upsert_feature_flag(%{name: flag_name, enabled: true})
+    assert {:ok, _} = Api.delete_feature_flag(flag)
+    refute Realtime.Repo.get_by(FeatureFlag, name: flag_name)
   end
 end

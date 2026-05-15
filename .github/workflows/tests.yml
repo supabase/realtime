@@ -12,6 +12,7 @@ on:
       - "dev/**"
       - "mix.exs"
       - "compose.dbs.yml"
+      - "mix.lock"
       - "Dockerfile"
       - "run.sh"
       - ".github/workflows/tests.yml"
