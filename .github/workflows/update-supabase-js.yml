@@ -80,9 +80,11 @@ jobs:
              elif $end_adj != null and $start >= $end_adj then ["Downgrade — no release notes available."]
              else [.[$start:$end_adj][] | "## " + .tag_name + "\n\n" + (.body // "No release notes.")]
              end | .[]')
-          echo "RELEASE_NOTES<<EOF" >> "$GITHUB_ENV"
-          echo "$RELEASE_NOTES" >> "$GITHUB_ENV"
-          echo "EOF" >> "$GITHUB_ENV"
+          {
+            echo "RELEASE_NOTES<<EOF"
+            echo "$RELEASE_NOTES"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: Generate token
         id: app-token
