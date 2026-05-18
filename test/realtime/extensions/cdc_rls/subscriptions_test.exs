@@ -38,6 +38,62 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
         Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
     end
 
+    test "create with filter on valid column succeeds", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "id=eq.123"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert %Postgrex.Result{
+               rows: [
+                 [
+                   "test",
+                   [{"id", "eq", "123"}],
+                   "*"
+                 ]
+               ]
+             } =
+               Postgrex.query!(
+                 conn,
+                 "select entity::text, filters, action_filter from realtime.subscription",
+                 []
+               )
+    end
+
+    test "subscription works when role lacks usage permission", %{conn: conn, tenant: tenant} do
+      {:ok, admin_settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+
+      {:ok, admin_conn} =
+        Postgrex.start_link(
+          hostname: admin_settings.hostname,
+          port: admin_settings.port,
+          database: admin_settings.database,
+          username: "supabase_admin",
+          password: admin_settings.password
+        )
+
+      Postgrex.query!(admin_conn, "REVOKE USAGE ON SCHEMA vault FROM supabase_realtime_admin", [])
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "id=eq.1"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+    end
+
     test "create all tables & all events on INSERT", %{conn: conn} do
       {:ok, subscription_params} = Subscriptions.parse_subscription_params(%{"event" => "INSERT", "schema" => "public"})
       params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]

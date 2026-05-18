@@ -86,7 +86,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
               "settings" => %{
                 "db_host" => "127.0.0.1",
                 "db_name" => "postgres",
-                "db_user" => "supabase_admin",
+                "db_user" => "supabase_realtime_admin",
                 "db_password" => "postgres",
                 "db_port" => "9001",
                 "poll_interval" => 100,
@@ -590,7 +590,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
           replication_slot_opts =
             %PostgresReplication{
               connection_opts: opts,
-              table: :all,
+              table: "test",
               output_plugin: "pgoutput",
               output_plugin_options: [proto_version: "1", publication_names: "test_#{i}_publication"],
               handler_module: Replication.TestHandler,

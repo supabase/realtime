@@ -100,7 +100,8 @@ defmodule Realtime.Extensions.CdcRlsTest do
       %{oids: oids2} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids, oids2)
 
-      Postgrex.query!(conn, "create publication supabase_realtime_test for all tables", [])
+      # `for all tables` requires superuser
+      Postgrex.query!(conn, "create publication supabase_realtime_test for table public.test", [])
       send(subscriber_manager_pid, :check_oids)
       %{oids: oids3} = :sys.get_state(subscriber_manager_pid)
       assert !Map.equal?(oids2, oids3)
