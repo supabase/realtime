@@ -77,7 +77,7 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
                "topic" => sub_topic
              }
 
-      # Assert binary message received with V2Serializer format
+      # Assert WebSocket binary message received with V2Serializer format
       assert_receive {:socket_push, :binary, data}
 
       # Verify V2 binary format:
