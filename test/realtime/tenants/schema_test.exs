@@ -8,17 +8,13 @@ defmodule Realtime.Tenants.SchemaTest do
     tenant = Containers.checkout_tenant(run_migrations: true)
     {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
 
+    opts = settings |> Map.from_struct() |> Keyword.new()
+
     # simulate postgres dashboard role
-    {:ok, conn} =
-      settings
-      |> Map.from_struct()
-      |> Keyword.new()
-      |> Keyword.put(:username, "postgres")
-      |> Postgrex.start_link()
+    {:ok, conn} = opts |> Keyword.put(:username, "postgres") |> Postgrex.start_link()
+    {:ok, realtime_conn} = Postgrex.start_link(opts)
 
-    on_exit(fn -> if Process.alive?(conn), do: GenServer.stop(conn) end)
-
-    %{conn: conn, settings: settings}
+    %{conn: conn, realtime_conn: realtime_conn, settings: settings}
   end
 
   describe "restrictions" do
@@ -73,13 +69,7 @@ defmodule Realtime.Tenants.SchemaTest do
                )
     end
 
-    test "supabase_realtime_admin cannot grant super to postgres", %{settings: settings} do
-      {:ok, realtime_conn} =
-        settings
-        |> Map.from_struct()
-        |> Keyword.new()
-        |> Postgrex.start_link()
-
+    test "supabase_realtime_admin cannot grant super to postgres", %{realtime_conn: realtime_conn} do
       assert {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} =
                Postgrex.query(realtime_conn, "ALTER ROLE postgres WITH SUPERUSER", [])
     end
@@ -136,6 +126,41 @@ defmodule Realtime.Tenants.SchemaTest do
 
       Postgrex.query!(conn, "REVOKE USAGE ON SCHEMA realtime FROM role_test", [])
       Postgrex.query!(conn, "DROP ROLE role_test", [])
+    end
+
+    test "supabase_realtime_admin can create a role", %{realtime_conn: realtime_conn} do
+      role = "role_realtime_admin_create_#{System.unique_integer([:positive])}"
+
+      assert {:ok, _} = Postgrex.query(realtime_conn, "CREATE ROLE #{role}", [])
+
+      assert %Postgrex.Result{rows: [[true]]} =
+               Postgrex.query!(realtime_conn, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", [role])
+    end
+
+    test "supabase_realtime_admin has NOINHERIT", %{realtime_conn: realtime_conn} do
+      assert %Postgrex.Result{rows: [[false]]} =
+               Postgrex.query!(
+                 realtime_conn,
+                 "SELECT rolinherit FROM pg_roles WHERE rolname = 'supabase_realtime_admin'",
+                 []
+               )
+    end
+
+    test "supabase_realtime_admin can SET ROLE to granted roles", %{realtime_conn: realtime_conn} do
+      for role <- ~w(anon authenticated service_role) do
+        assert {:ok, _} = Postgrex.query(realtime_conn, "SET ROLE #{role}", [])
+        Postgrex.query!(realtime_conn, "RESET ROLE", [])
+      end
+    end
+
+    test "supabase_realtime_admin can drop a role", %{realtime_conn: realtime_conn} do
+      role = "role_realtime_admin_drop_#{System.unique_integer([:positive])}"
+      Postgrex.query!(realtime_conn, "CREATE ROLE #{role}", [])
+
+      assert {:ok, _} = Postgrex.query(realtime_conn, "DROP ROLE #{role}", [])
+
+      assert %Postgrex.Result{rows: [[false]]} =
+               Postgrex.query!(realtime_conn, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", [role])
     end
 
     test "insert into realtime.messages", %{conn: conn} do

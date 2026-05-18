@@ -8,7 +8,7 @@ defmodule Realtime.Tenants.Migrations.SetupSupabaseRealtimeAdmin do
     DO $$
     BEGIN
       IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
-        ALTER ROLE supabase_realtime_admin WITH LOGIN REPLICATION;
+        ALTER ROLE supabase_realtime_admin WITH NOINHERIT CREATEROLE LOGIN REPLICATION;
         ALTER ROLE supabase_realtime_admin SET search_path = public, extensions, realtime;
         GRANT CREATE ON DATABASE postgres TO supabase_realtime_admin;
         GRANT SET ON PARAMETER log_min_messages TO supabase_realtime_admin;
