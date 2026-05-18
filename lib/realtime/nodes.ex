@@ -65,7 +65,6 @@ defmodule Realtime.Nodes do
   Lists the nodes in a region. Sorts by node name in case the list order
   is unstable.
   """
-
   @spec region_nodes(String.t() | nil) :: [atom()]
   def region_nodes(region) when is_binary(region) do
     :syn.members(RegionNodes, region)
