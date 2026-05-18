@@ -8,7 +8,7 @@ defmodule TenantConnection do
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.Endpoint
 
-  def create_message(attrs, conn, opts \\ [mode: :savepoint]) do
+  def create_message(attrs, conn, opts \\ []) do
     message = Message.changeset(%Message{}, attrs)
 
     {:ok, result} =
