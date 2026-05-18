@@ -9,10 +9,13 @@ on:
       - "assets/**"
       - "rel/**"
       - "mix.exs"
+      - "mix.lock"
       - "Dockerfile"
       - "run.sh"
       - "mise.toml"
-      - ".github/workflows/lint.yml"
+      - "test/e2e/nix-build.sh"
+      - ".github/workflows/**"
+      - ".github/actionlint.yaml"
 
   push:
     branches:
@@ -124,3 +127,19 @@ jobs:
             echo "::error file=priv/repo/tenant_db_baseline.json::Baseline snapshot is stale. Run 'mix realtime.export_tenant_db_baseline' locally and commit the result."
             exit 1
           fi
+          
+  actionlint:
+    name: Actionlint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Run actionlint
+        uses: rhysd/actionlint@v1.7.7
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Run shellcheck
+        run: shellcheck run.sh test/e2e/nix-build.sh

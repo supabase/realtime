@@ -27,9 +27,13 @@ defmodule Realtime.Tenants.ReplicationConnection do
   alias Realtime.Adapters.Postgres.Protocol.Write
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.GenCounter
+  alias Realtime.RateCounter
   alias Realtime.Telemetry
-  alias Realtime.Tenants.BatchBroadcast
+  alias Realtime.Tenants
   alias Realtime.Tenants.Cache
+  alias RealtimeWeb.RealtimeChannel
+  alias RealtimeWeb.TenantBroadcaster
 
   @default_query_timeout 30_000
 
@@ -373,14 +377,32 @@ defmodule Realtime.Tenants.ReplicationConnection do
          {:ok, topic} <- get_or_error(to_broadcast, "topic", :topic_missing),
          {:ok, private} <- get_or_error(to_broadcast, "private", :private_missing),
          %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id),
-         broadcast_message = %{
-           id: id,
-           topic: topic,
-           event: event,
-           private: private,
-           payload: Jason.Fragment.new(payload)
-         },
-         :ok <- BatchBroadcast.broadcast(nil, tenant, %{messages: [broadcast_message]}, true) do
+         :ok <- Tenants.validate_payload_size(tenant, payload),
+         events_per_second_rate = Tenants.events_per_second_rate(tenant),
+         :ok <- check_rate_limit(events_per_second_rate) do
+      tenant_topic = Tenants.tenant_topic(tenant, topic, not private)
+
+      broadcast = %Phoenix.Socket.Broadcast{
+        topic: topic,
+        event: "broadcast",
+        payload: %{
+          "payload" => Jason.Fragment.new(payload),
+          "event" => event,
+          "type" => "broadcast",
+          "meta" => %{"id" => id}
+        }
+      }
+
+      GenCounter.add(events_per_second_rate.id)
+
+      TenantBroadcaster.pubsub_broadcast(
+        tenant.external_id,
+        tenant_topic,
+        broadcast,
+        RealtimeChannel.MessageDispatcher,
+        :broadcast
+      )
+
       latency_inserted_at = NaiveDateTime.utc_now(:microsecond) |> NaiveDateTime.diff(inserted_at, :microsecond)
 
       Telemetry.execute(
@@ -391,11 +413,6 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
       {:noreply, state}
     else
-      {:error, %Ecto.Changeset{valid?: false} = changeset} ->
-        error = Ecto.Changeset.traverse_errors(changeset, &elem(&1, 0))
-        log_error("UnableToBroadcastChanges", error)
-        {:noreply, state}
-
       {:error, error} ->
         log_error("UnableToBroadcastChanges", error)
         {:noreply, state}
@@ -443,6 +460,13 @@ defmodule Realtime.Tenants.ReplicationConnection do
       {value, %{name: name, type: "bool"}} -> {name, value}
       {value, %{name: name}} -> {name, value}
     end)
+  end
+
+  defp check_rate_limit(events_per_second_rate) do
+    case RateCounter.get(events_per_second_rate) do
+      {:ok, %{limit: %{triggered: true}}} -> {:error, :too_many_requests}
+      _ -> :ok
+    end
   end
 
   defp get_or_error(map, key, error_type) do

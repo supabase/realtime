@@ -10,6 +10,7 @@ on:
       - "rel/**"
       - "native/**"
       - "mix.exs"
+      - "mix.lock"
       - "Dockerfile"
       - "run.sh"
       - ".github/workflows/tests.yml"
