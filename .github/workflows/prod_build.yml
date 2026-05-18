@@ -84,7 +84,7 @@ jobs:
 
   docker_arm_release:
     needs: release
-    runs-on: arm-runner
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     if: needs.release.outputs.published == 'true'
     timeout-minutes: 120
     env:
@@ -120,7 +120,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           platforms: linux/${{ env.arch }}
-          no-cache: true
 
   merge_manifest:
     needs: [release, docker_x86_release, docker_arm_release]
