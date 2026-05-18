@@ -38,5 +38,16 @@ defmodule Realtime.ExtensionsTest do
       result = Extensions.db_settings("unknown_extension")
       assert %{default: %{}, required: []} = result
     end
+
+    test "returns default and required for ai_agent" do
+      result = Extensions.db_settings("ai_agent")
+
+      assert %{default: default, required: required} = result
+      assert is_map(default)
+      assert Map.has_key?(default, "max_concurrent_sessions")
+      assert is_list(required)
+      field_names = Enum.map(required, fn {name, _, _} -> name end)
+      assert "api_key" in field_names
+    end
   end
 end

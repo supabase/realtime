@@ -29,6 +29,13 @@ config :realtime, :extensions,
     driver: Extensions.PostgresCdcRls,
     supervisor: Extensions.PostgresCdcRls.Supervisor,
     db_settings: Extensions.PostgresCdcRls.DbSettings
+  },
+  ai_agent: %{
+    type: :ai_agent,
+    key: "ai_agent",
+    driver: Extensions.AiAgent,
+    supervisor: Extensions.AiAgent.Supervisor,
+    db_settings: Extensions.AiAgent.DbSettings
   }
 
 config :esbuild,

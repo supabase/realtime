@@ -9,6 +9,7 @@ defmodule Realtime.Tenants.AuthorizationTest do
   alias Realtime.Tenants.Repo
   alias Realtime.Tenants.Authorization
   alias Realtime.Tenants.Authorization.Policies
+  alias Realtime.Tenants.Authorization.Policies.AiPolicies
   alias Realtime.Tenants.Authorization.Policies.BroadcastPolicies
   alias Realtime.Tenants.Authorization.Policies.PresencePolicies
 
@@ -29,7 +30,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       assert %Policies{
                broadcast: %BroadcastPolicies{read: true, write: true},
-               presence: %PresencePolicies{read: true, write: true}
+               presence: %PresencePolicies{read: true, write: true},
+               ai_agent: %AiPolicies{read: false, write: false}
              } == policies
     end
 
@@ -73,7 +75,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       assert %Policies{
                broadcast: %BroadcastPolicies{read: true, write: true},
-               presence: %PresencePolicies{read: false, write: false}
+               presence: %PresencePolicies{read: false, write: false},
+               ai_agent: %AiPolicies{read: false, write: false}
              } == policies
     end
 
@@ -91,7 +94,8 @@ defmodule Realtime.Tenants.AuthorizationTest do
 
       assert %Policies{
                broadcast: %BroadcastPolicies{read: false, write: false},
-               presence: %PresencePolicies{read: false, write: false}
+               presence: %PresencePolicies{read: false, write: false},
+               ai_agent: %AiPolicies{read: false, write: false}
              } == policies
     end
 

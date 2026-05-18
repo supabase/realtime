@@ -400,7 +400,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert logs =~ "Disconnecting broadcast changes handler in the step"
     end
 
-    test "message without event logs error", %{tenant: tenant} do
+    test "broadcast message without event logs error", %{tenant: tenant} do
       logs =
         capture_log(fn ->
           start_supervised!(
@@ -414,6 +414,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
           message_fixture(tenant, %{
             "topic" => "some_topic",
+            "extension" => "broadcast",
             "private" => true,
             "payload" => %{"value" => "something"}
           })
@@ -424,7 +425,32 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
       assert logs =~ "UnableToBroadcastChanges"
     end
 
-    test "message that exceeds payload size is not broadcast and logs error", %{tenant: tenant} do
+    test "ai_agent message is silently skipped without error", %{tenant: tenant} do
+      logs =
+        capture_log(fn ->
+          start_supervised!(
+            {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+            restart: :transient
+          )
+
+          topic = random_string()
+          tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+          assert :ok = Endpoint.subscribe(tenant_topic)
+
+          message_fixture(tenant, %{
+            "topic" => topic,
+            "extension" => "ai_agent",
+            "private" => true,
+            "payload" => %{"role" => "assistant", "content" => "hello"}
+          })
+
+          refute_receive %Phoenix.Socket.Broadcast{}, 500
+        end)
+
+      refute logs =~ "UnableToBroadcastChanges"
+    end
+
+    test "message that exceeds payload size logs error", %{tenant: tenant} do
       logs =
         capture_log(fn ->
           start_supervised!(
