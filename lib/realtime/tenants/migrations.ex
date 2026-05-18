@@ -227,6 +227,8 @@ defmodule Realtime.Tenants.Migrations do
   end
 
   defp migrate(tenant_external_id, settings) do
+    platform_region = Map.get(settings, "region")
+
     with {:ok, settings} <- Database.from_settings(settings, "realtime_migrations", :stop) do
       [
         hostname: settings.hostname,
@@ -242,7 +244,7 @@ defmodule Realtime.Tenants.Migrations do
       ]
       |> Repo.with_dynamic_repo(fn repo ->
         event = [:realtime, :tenants, :migrations]
-        metadata = %{external_id: tenant_external_id, hostname: settings.hostname}
+        metadata = %{external_id: tenant_external_id, hostname: settings.hostname, platform_region: platform_region}
         start_time = Telemetry.start(event, metadata)
 
         try do

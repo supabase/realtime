@@ -21,6 +21,7 @@ defmodule Realtime.PromEx.Plugins.Migrations do
         unit: {:native, :millisecond},
         description: "Tenant migrations duration",
         keep: &__MODULE__.migrations_executed/1,
+        tags: [:platform_region],
         reporter_options: [peep_bucket_calculator: Buckets]
       ),
       counter(

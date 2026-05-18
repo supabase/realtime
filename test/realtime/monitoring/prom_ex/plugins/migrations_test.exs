@@ -23,30 +23,46 @@ defmodule Realtime.PromEx.Plugins.MigrationsTest do
   end
 
   test "records migration duration histogram on stop" do
-    start_time = Telemetry.start([:realtime, :tenants, :migrations], %{external_id: "tenant", hostname: "localhost"})
+    start_time =
+      Telemetry.start([:realtime, :tenants, :migrations], %{
+        external_id: "tenant",
+        hostname: "localhost",
+        platform_region: "sa-east-1"
+      })
 
     Telemetry.stop(
       [:realtime, :tenants, :migrations],
       start_time,
-      %{external_id: "tenant", hostname: "localhost", migrations_executed: 3}
+      %{external_id: "tenant", hostname: "localhost", platform_region: "sa-east-1", migrations_executed: 3}
     )
 
-    assert metric_value("realtime_tenants_migrations_duration_milliseconds_count") == 1
-    assert metric_value("realtime_tenants_migrations_duration_milliseconds_bucket", le: "100.0") > 0
+    assert metric_value("realtime_tenants_migrations_duration_milliseconds_count", platform_region: "sa-east-1") == 1
+
+    assert metric_value("realtime_tenants_migrations_duration_milliseconds_bucket",
+             platform_region: "sa-east-1",
+             le: "100.0"
+           ) > 0
   end
 
   test "skips duration histogram when migrations_executed is 0" do
-    before = metric_value("realtime_tenants_migrations_duration_milliseconds_count")
+    before =
+      metric_value("realtime_tenants_migrations_duration_milliseconds_count", platform_region: "sa-east-1") || 0
 
-    start_time = Telemetry.start([:realtime, :tenants, :migrations], %{external_id: "tenant", hostname: "localhost"})
+    start_time =
+      Telemetry.start([:realtime, :tenants, :migrations], %{
+        external_id: "tenant",
+        hostname: "localhost",
+        platform_region: "sa-east-1"
+      })
 
     Telemetry.stop(
       [:realtime, :tenants, :migrations],
       start_time,
-      %{external_id: "tenant", hostname: "localhost", migrations_executed: 0}
+      %{external_id: "tenant", hostname: "localhost", platform_region: "sa-east-1", migrations_executed: 0}
     )
 
-    assert metric_value("realtime_tenants_migrations_duration_milliseconds_count") == before
+    assert (metric_value("realtime_tenants_migrations_duration_milliseconds_count", platform_region: "sa-east-1") || 0) ==
+             before
   end
 
   test "tags Postgrex errors with the SQLSTATE atom" do
