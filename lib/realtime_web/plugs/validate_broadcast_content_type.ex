@@ -11,7 +11,7 @@ defmodule RealtimeWeb.Plugs.ValidateBroadcastContentType do
   """
   import Plug.Conn
 
-  @allowed ["application/json", "application/octet-stream"]
+  @allowed ["json", "octet-stream"]
 
   def init(opts), do: opts
 
@@ -21,18 +21,20 @@ defmodule RealtimeWeb.Plugs.ValidateBroadcastContentType do
         conn
 
       [content_type | _] ->
-        if Enum.any?(@allowed, &String.starts_with?(content_type, &1)) do
-          conn
-        else
-          conn
-          |> put_resp_content_type("application/json")
-          |> send_resp(
-            415,
-            Jason.encode!(%{
-              error: "Unsupported Media Type. Use application/json or application/octet-stream"
-            })
-          )
-          |> halt()
+        case Plug.Conn.Utils.content_type(content_type) do
+          {:ok, "application", subtype, _params} when subtype in @allowed ->
+            conn
+
+          _ ->
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(
+              415,
+              Jason.encode!(%{
+                error: "Unsupported Media Type. Use application/json or application/octet-stream"
+              })
+            )
+            |> halt()
         end
     end
   end
