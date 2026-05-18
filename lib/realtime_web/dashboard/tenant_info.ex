@@ -4,16 +4,21 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
   Secrets (jwt_secret and encrypted extension fields) are never displayed.
   """
   use Phoenix.LiveDashboard.PageBuilder
+  use Realtime.Logs
 
   alias Realtime.Api
+  alias Realtime.Api.Tenant
   alias Realtime.Crypto
+  alias Realtime.Database
+
+  @application_name "realtime_dashboard_tenant_info"
 
   @impl true
   def menu_link(_, _), do: {:ok, "Tenant Info"}
 
   @impl true
   def mount(_params, _, socket) do
-    {:ok, assign(socket, external_id: "", tenant: nil, error: nil)}
+    {:ok, assign(socket, external_id: "", tenant: nil, pg_version: nil, error: nil)}
   end
 
   @impl true
@@ -21,13 +26,22 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
     ref = String.trim(ref)
 
     case Api.get_tenant_by_external_id(ref) do
-      nil -> {:noreply, assign(socket, external_id: ref, tenant: nil, error: "Tenant not found")}
-      tenant -> {:noreply, assign(socket, external_id: ref, tenant: prepare_tenant(tenant), error: nil)}
+      nil ->
+        {:noreply, assign(socket, external_id: ref, tenant: nil, pg_version: nil, error: "Tenant not found")}
+
+      %Tenant{} = tenant ->
+        {:noreply,
+         assign(socket,
+           external_id: ref,
+           tenant: prepare_tenant(tenant),
+           pg_version: fetch_pg_version(tenant),
+           error: nil
+         )}
     end
   end
 
   def handle_params(_params, _uri, socket) do
-    {:noreply, assign(socket, external_id: "", tenant: nil, error: nil)}
+    {:noreply, assign(socket, external_id: "", tenant: nil, pg_version: nil, error: nil)}
   end
 
   @impl true
@@ -84,6 +98,22 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
           </tbody>
         </table>
 
+        <h6 class="mt-4">Database</h6>
+        <table class="table table-hover">
+          <tbody>
+            <tr>
+              <td>postgres_version</td>
+              <td>
+                <%= case @pg_version do %>
+                  <% nil -> %>
+                  <% {:ok, version} -> %><span class="font-monospace"><%= version %></span>
+                  <% {:error, msg} -> %><span class="text-danger"><%= msg %></span>
+                <% end %>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
         <%= for ext <- @tenant.extensions do %>
           <h6 class="mt-4">Extension: <%= ext.type %></h6>
           <table class="table table-hover">
@@ -131,6 +161,18 @@ defmodule RealtimeWeb.Dashboard.TenantInfo do
       |> Enum.sort_by(&elem(&1, 0))
 
     %{ext | settings: settings}
+  end
+
+  defp fetch_pg_version(%Tenant{} = tenant) do
+    with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
+         {:ok, conn} <- Database.connect_db(settings),
+         {:ok, %{rows: [[version]]}} <- Postgrex.query(conn, "SELECT version()", []) do
+      {:ok, version}
+    else
+      {:error, reason} ->
+        log_warning("TenantInfoPgVersionFailed", reason)
+        {:error, "Failed to query postgres version: #{inspect(reason)}"}
+    end
   end
 
   defp resolve_host(host) do
