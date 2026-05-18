@@ -12,7 +12,9 @@ on:
       - "mix.lock"
       - "Dockerfile"
       - "run.sh"
-      - ".github/workflows/lint.yml"
+      - "test/e2e/nix-build.sh"
+      - ".github/workflows/**"
+      - ".github/actionlint.yaml"
 
   push:
     branches:
@@ -72,3 +74,19 @@ jobs:
           mix dialyzer.build
       - name: Run dialyzer
         run: mix dialyzer
+
+  actionlint:
+    name: Actionlint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Run actionlint
+        uses: rhysd/actionlint@v1.7.7
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Run shellcheck
+        run: shellcheck run.sh test/e2e/nix-build.sh
