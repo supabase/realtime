@@ -9,7 +9,7 @@ defmodule Containers do
 
   @setup_init Path.expand("../../dev/postgres/01-realtime-setup.sql", __DIR__)
 
-  defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.120")
+  defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.074")
 
   # Pull image if not available
   def pull do

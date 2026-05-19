@@ -38,13 +38,17 @@ jobs:
 
       - name: Update @supabase/supabase-js in assets
         working-directory: assets
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          npm pkg set "dependencies.@supabase/supabase-js=${{ inputs.version }}"
+          npm pkg set "dependencies.@supabase/supabase-js=${VERSION}"
           npm install --package-lock-only --ignore-scripts
 
       - name: Update @supabase/supabase-js in test/e2e
         working-directory: test/e2e
-        run: npm pkg set "dependencies.@supabase/supabase-js=${{ inputs.version }}"
+        env:
+          VERSION: ${{ inputs.version }}
+        run: npm pkg set "dependencies.@supabase/supabase-js=${VERSION}"
 
       - name: Setup Bun
         if: ${{ hashFiles('test/e2e/bun.lock') != '' }}
@@ -80,9 +84,11 @@ jobs:
              elif $end_adj != null and $start >= $end_adj then ["Downgrade — no release notes available."]
              else [.[$start:$end_adj][] | "## " + .tag_name + "\n\n" + (.body // "No release notes.")]
              end | .[]')
-          echo "RELEASE_NOTES<<EOF" >> "$GITHUB_ENV"
-          echo "$RELEASE_NOTES" >> "$GITHUB_ENV"
-          echo "EOF" >> "$GITHUB_ENV"
+          {
+            echo "RELEASE_NOTES<<EOF"
+            echo "$RELEASE_NOTES"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: Generate token
         id: app-token

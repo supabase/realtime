@@ -3,7 +3,7 @@ set -euo pipefail
 set -x
 ulimit -n
 
-if [ ! -z "${RLIMIT_NOFILE:-}" ]; then
+if [ -n "${RLIMIT_NOFILE:-}" ]; then
     echo "Setting RLIMIT_NOFILE to ${RLIMIT_NOFILE}"
     ulimit -Sn "$RLIMIT_NOFILE"
 fi
@@ -17,7 +17,7 @@ upload_crash_dump_to_s3() {
     s3Port=$ERL_CRASH_DUMP_S3_PORT
 
     if [ "${AWS_CONTAINER_CREDENTIALS_RELATIVE_URI-}" ]; then
-        response=$(curl -s http://169.254.170.2$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI)
+        response=$(curl -s "http://169.254.170.2${AWS_CONTAINER_CREDENTIALS_RELATIVE_URI}")
         s3Key=$(echo "$response" | grep -o '"AccessKeyId": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"')
         s3Secret=$(echo "$response" | grep -o '"SecretAccessKey": *"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"')
     else
@@ -28,7 +28,7 @@ upload_crash_dump_to_s3() {
     filePath=${ERL_CRASH_DUMP_FOLDER:-tmp}/$(date +%s)_${ERL_CRASH_DUMP_FILE_NAME:-erl_crash.dump}
 
     if [ -f "${ERL_CRASH_DUMP_FOLDER:-tmp}/${ERL_CRASH_DUMP_FILE_NAME:-erl_crash.dump}" ]; then
-        mv ${ERL_CRASH_DUMP_FOLDER:-tmp}/${ERL_CRASH_DUMP_FILE_NAME:-erl_crash.dump} $filePath
+        mv "${ERL_CRASH_DUMP_FOLDER:-tmp}/${ERL_CRASH_DUMP_FILE_NAME:-erl_crash.dump}" "$filePath"
 
         resource="/${bucket}/realtime/crash_dumps${filePath}"
 
@@ -36,7 +36,7 @@ upload_crash_dump_to_s3() {
         dateValue=$(date -R)
         stringToSign="PUT\n\n${contentType}\n${dateValue}\n${resource}"
 
-        signature=$(echo -en ${stringToSign} | openssl sha1 -hmac ${s3Secret} -binary | base64)
+        signature=$(echo -en "${stringToSign}" | openssl sha1 -hmac "${s3Secret}" -binary | base64)
 
         if [ "${ERL_CRASH_DUMP_S3_SSL:-}" = true ]; then
             protocol="https"
@@ -49,7 +49,7 @@ upload_crash_dump_to_s3() {
             -H "Date: ${dateValue}" \
             -H "Content-Type: ${contentType}" \
             -H "Authorization: AWS ${s3Key}:${signature}" \
-            ${protocol}://${s3Host}:${s3Port}${resource}
+            "${protocol}://${s3Host}:${s3Port}${resource}"
     fi
 
     exit "$EXIT_CODE"
@@ -62,7 +62,7 @@ generate_certs() {
     openssl req -new -nodes -out server.csr -keyout server.key -subj "/C=US/ST=Delaware/L=New Castle/O=Supabase Inc/CN=$(hostname -f)"
     openssl x509 -req -in server.csr -days 90 -CA ca.cert -CAkey ca.key -out server.cert
     rm -f ca.key
-    CWD=`pwd`
+    CWD=$(pwd)
     export GEN_RPC_CACERTFILE="$CWD/ca.cert"
     export GEN_RPC_KEYFILE="$CWD/server.key"
     export GEN_RPC_CERTFILE="$CWD/server.cert"
@@ -87,7 +87,7 @@ EOF
 }
 
 if [ "${ENABLE_ERL_CRASH_DUMP:-false}" = true ]; then
-    trap upload_crash_dump_to_s3 INT TERM KILL EXIT
+    trap upload_crash_dump_to_s3 INT TERM EXIT
 fi
 
 if [[ -n "${GENERATE_CLUSTER_CERTS:-}" ]] ; then

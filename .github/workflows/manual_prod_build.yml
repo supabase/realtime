@@ -17,6 +17,8 @@ jobs:
     outputs:
       image_digest: ${{ steps.build.outputs.digest }}
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
@@ -41,7 +43,7 @@ jobs:
           platforms: linux/${{ env.arch }}
 
   docker_arm_release:
-    runs-on: arm-runner
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 120
     env:
       arch: arm64
@@ -73,7 +75,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           platforms: linux/${{ env.arch }}
-          no-cache: true
 
   merge_manifest:
     needs: [docker_x86_release, docker_arm_release]
@@ -92,10 +93,13 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Merge multi-arch manifests for custom output
+        env:
+          DOCKER_TAG: ${{ github.event.inputs.docker_tag }}
+          IMAGE_DIGEST: ${{ needs.docker_arm_release.outputs.image_digest }}
         run: |
-          docker buildx imagetools create -t supabase/realtime:v${{ github.event.inputs.docker_tag }} \
-          supabase/realtime@${{ needs.docker_x86_release.outputs.image_digest }} \
-          supabase/realtime@${{ needs.docker_arm_release.outputs.image_digest }}
+          docker buildx imagetools create -t "supabase/realtime:v${DOCKER_TAG}" \
+          "supabase/realtime@${IMAGE_DIGEST}" \
+          "supabase/realtime@${IMAGE_DIGEST}"
 
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
@@ -122,4 +126,3 @@ jobs:
           dst: |
             public.ecr.aws/supabase/realtime:v${{ github.event.inputs.docker_tag }}
             ghcr.io/supabase/realtime:v${{ github.event.inputs.docker_tag }}
-
