@@ -110,6 +110,39 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
+         serializer: RealtimeWeb.Socket.V2Serializer
+    test "private broadcast with binary payload and ack returns reply and delivers self-broadcast", %{
+      tenant: tenant,
+      topic: topic,
+      serializer: RealtimeWeb.Socket.V2Serializer = serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      config = %{broadcast: %{self: true, ack: true}, private: true}
+      full_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, full_topic, %{config: config})
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 500
+
+      binary = <<0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x11, 0x22, 0x33>>
+      event = "my-binary-event"
+
+      WebsocketClient.send_user_broadcast(socket, full_topic, event, binary, encoding: :binary)
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^full_topic}, 500
+
+      assert_receive %Message{
+                       event: "broadcast",
+                       topic: ^full_topic,
+                       payload: %{
+                         "event" => ^event,
+                         "payload" => {:binary, ^binary},
+                         "type" => "broadcast"
+                       }
+                     },
+                     1000
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
          topic: "topic"
     test "private broadcast with valid channel a colon character sends message and won't intercept in public channels",
          %{topic: topic, tenant: tenant, serializer: serializer} do
@@ -367,7 +400,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       Postgrex.query!(
         db_conn,
-        "SELECT realtime.send (json_build_object ('value', $1 :: text)::jsonb, $2 :: text, $3 :: text, TRUE::bool);",
+        "SELECT realtime.send (jsonb_build_object ('value', $1 :: text), $2 :: text, $3 :: text, TRUE::bool);",
         [value, event, topic]
       )
 
@@ -383,6 +416,50 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
                        ref: nil
                      },
                      1000
+    end
+
+    @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
+    test "broadcast event when function 'send' is called with a binary payload", %{
+      tenant: tenant,
+      topic: topic,
+      db_conn: db_conn,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer, role: "authenticated")
+      config = %{broadcast: %{self: true}, private: true}
+      full_topic = "realtime:#{topic}"
+
+      WebsocketClient.join(socket, full_topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}}, 500
+
+      binary = <<0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xFF, 0x01, 0x02>>
+      event = random_string()
+
+      Postgrex.query!(
+        db_conn,
+        "SELECT realtime.send ($1::bytea, $2::text, $3::text, TRUE::bool);",
+        [binary, event, topic]
+      )
+
+      case serializer do
+        RealtimeWeb.Socket.V2Serializer ->
+          assert_receive %Message{
+                           event: "broadcast",
+                           payload: %{
+                             "event" => ^event,
+                             "payload" => {:binary, ^binary},
+                             "type" => "broadcast",
+                             "meta" => %{"id" => _}
+                           },
+                           topic: ^full_topic
+                         },
+                         1000
+
+        Phoenix.Socket.V1.JSONSerializer ->
+          # V1 cannot represent binary payloads; the broadcast is dropped for this socket.
+          refute_receive %Message{event: "broadcast"}, 500
+      end
     end
 
     test "broadcast event when function 'send' is called with public topic", %{

@@ -418,7 +418,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
             "payload" => %{"value" => "something"}
           })
 
-          refute_receive %Phoenix.Socket.Broadcast{}, 500
+          refute_receive %RealtimeWeb.Socket.UserBroadcast{}, 500
         end)
 
       assert logs =~ "UnableToBroadcastChanges"
@@ -443,7 +443,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
             "payload" => %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
           })
 
-          refute_receive %Phoenix.Socket.Broadcast{}, 500
+          refute_receive %RealtimeWeb.Socket.UserBroadcast{}, 500
         end)
 
       assert logs =~ "UnableToBroadcastChanges: :payload_size_exceeded"
@@ -477,7 +477,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
             "payload" => %{"value" => random_string()}
           })
 
-          refute_receive %Phoenix.Socket.Broadcast{}, 500
+          refute_receive %RealtimeWeb.Socket.UserBroadcast{}, 500
         end)
 
       assert logs =~ "UnableToBroadcastChanges: :too_many_requests"
@@ -523,6 +523,50 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                "value" => "something",
                "id" => id
              }
+    end
+
+    test "binary payload is replicated as UserBroadcast with binary encoding", %{tenant: tenant, db_conn: db_conn} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      assert :ok = Endpoint.subscribe(tenant_topic)
+
+      Realtime.Tenants.Migrations.create_partitions(db_conn)
+
+      binary = <<0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xFF>>
+      event = "INSERT"
+
+      Postgrex.query!(
+        db_conn,
+        "SELECT realtime.send($1::bytea, $2::text, $3::text, TRUE::bool);",
+        [binary, event, topic]
+      )
+
+      assert_receive %RealtimeWeb.Socket.UserBroadcast{
+                       user_event: ^event,
+                       user_payload_encoding: :binary,
+                       user_payload: ^binary,
+                       metadata: %{"id" => _id}
+                     },
+                     500
+    end
+
+    test "rejects insert with both payload and binary_payload set", %{db_conn: db_conn} do
+      Realtime.Tenants.Migrations.create_partitions(db_conn)
+
+      assert {:error, %Postgrex.Error{postgres: %{code: :check_violation, constraint: "messages_payload_exclusive"}}} =
+               Postgrex.query(
+                 db_conn,
+                 """
+                 INSERT INTO realtime.messages (payload, binary_payload, event, topic, private, extension)
+                 VALUES ($1::jsonb, $2::bytea, 'evt', $3::text, false, 'broadcast')
+                 """,
+                 [%{"value" => "x"}, <<1, 2, 3>>, random_string()]
+               )
     end
 
     test "payload including id", %{tenant: tenant, db_conn: db_conn} do
