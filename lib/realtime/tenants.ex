@@ -476,7 +476,14 @@ defmodule Realtime.Tenants do
   Checks if migrations for a given tenant need to run.
   """
   @spec run_migrations?(Tenant.t() | integer()) :: boolean()
-  def run_migrations?(%Tenant{} = tenant), do: run_migrations?(tenant.migrations_ran)
+  def run_migrations?(%Tenant{} = tenant) do
+    available_migrations =
+      tenant.external_id
+      |> Migrations.migrations()
+      |> Enum.count()
+
+    tenant.migrations_ran < available_migrations
+  end
 
   def run_migrations?(migrations_ran) when is_integer(migrations_ran),
     do: migrations_ran < Enum.count(Migrations.migrations())

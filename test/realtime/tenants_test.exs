@@ -37,7 +37,8 @@ defmodule Realtime.TenantsTest do
       tenant = tenant_fixture(%{migrations_ran: 0})
       assert Tenants.run_migrations?(tenant)
 
-      tenant = tenant_fixture(%{migrations_ran: Enum.count(Migrations.migrations()) - 1})
+      migrations = Enum.count(Migrations.migrations(tenant.external_id))
+      tenant = tenant_fixture(%{migrations_ran: migrations - 1})
       assert Tenants.run_migrations?(tenant)
     end
 
