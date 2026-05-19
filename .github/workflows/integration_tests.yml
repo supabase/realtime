@@ -23,14 +23,27 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
-  POSTGRES_IMAGE: supabase/postgres:17.6.1.074
   DENO_IMAGE: denoland/deno:alpine-2.5.6
 
 jobs:
   tests:
-    name: Tests
+    name: Tests (${{ matrix.postgres }})
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    env:
+      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: [pg15, pg17]
+        include:
+          - postgres: pg15
+            postgres_image: supabase/postgres:15.14.1.122
+          - postgres: pg17
+            postgres_image: supabase/postgres:17.6.1.074
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
