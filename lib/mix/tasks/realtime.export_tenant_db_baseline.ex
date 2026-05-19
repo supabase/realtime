@@ -8,31 +8,37 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
   Usage:
 
       mix realtime.export_tenant_db_baseline
+      mix realtime.export_tenant_db_baseline --pgdelta-path /path/to/pgdelta
 
-  The target DB is read from `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` /
-  `DB_PASSWORD` env vars.
+  The target tenant DB is expected to already have all tenant migrations applied,
+  so make sure the it is in a good state before generating it:
 
-  The target DB is expected to already have all tenant migrations applied.
+      mise task run db-rm
+      mise task run db-start
+      mix setup
 
-  Requires `pgdelta` on `$PATH`.
+  The target DB is read from `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` env vars.
+
+  Requires `pgdelta` on `$PATH` or pass `--pgdelta-path` to force a custom path.
   """
   use Mix.Task
 
   @baseline_path "priv/repo/tenant_db_baseline.json"
 
   @impl Mix.Task
-  def run(_args) do
+  def run(args) do
+    {opts, _, _} = OptionParser.parse(args, strict: [pgdelta_path: :string])
+
     url = build_url_from_env()
     Mix.shell().info("[export_tenant_db_baseline] target: #{redact(url)}")
 
-    unless System.find_executable("pgdelta") do
-      Mix.raise("pgdelta not found on PATH")
-    end
+    pgdelta = pgdelta_bin!(opts[:pgdelta_path])
+    Mix.shell().info("[export_tenant_db_baseline] pgdelta: #{pgdelta}")
 
     output = Path.expand(@baseline_path, File.cwd!())
     args = ["catalog-export", "--target", url, "--output", output]
 
-    case System.cmd("pgdelta", args, stderr_to_stdout: true) do
+    case System.cmd(pgdelta, args, stderr_to_stdout: true) do
       {output_str, 0} ->
         validate_snapshot!(output)
         Mix.shell().info(output_str)
@@ -40,6 +46,13 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
       {output_str, code} ->
         Mix.raise("pgdelta catalog-export exited #{code}:\n#{output_str}")
     end
+  end
+
+  defp pgdelta_bin!(nil), do: System.find_executable("pgdelta") || Mix.raise("pgdelta not found on $PATH")
+
+  defp pgdelta_bin!(path) do
+    path = Path.expand(path)
+    System.find_executable(path) || Mix.raise("pgdelta not found or not executable at #{path}")
   end
 
   defp build_url_from_env do
