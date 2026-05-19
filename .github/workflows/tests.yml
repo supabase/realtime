@@ -23,18 +23,28 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   MIX_ENV: test
-  POSTGRES_IMAGE: supabase/postgres:17.6.1.074
 
 jobs:
   tests:
-    name: Tests (Partition ${{ matrix.partition }})
+    name: Tests (${{ matrix.postgres }} - Partition ${{ matrix.partition }})
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    env:
+      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
     strategy:
       fail-fast: false
       matrix:
         partition: [1, 2, 3, 4]
+        postgres: [pg15, pg17]
+        include:
+          - postgres: pg15
+            postgres_image: supabase/postgres:15.14.1.122
+          - postgres: pg17
+            postgres_image: supabase/postgres:17.6.1.074
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -80,6 +90,7 @@ jobs:
       - name: Run tests
         run: MIX_TEST_PARTITION=${{ matrix.partition }} mix coveralls.lcov --partitions 4
       - name: Upload coverage artifact
+        if: matrix.postgres == 'pg17'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-partition-${{ matrix.partition }}
