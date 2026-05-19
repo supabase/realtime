@@ -38,13 +38,17 @@ jobs:
 
       - name: Update @supabase/supabase-js in assets
         working-directory: assets
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          npm pkg set "dependencies.@supabase/supabase-js=${{ inputs.version }}"
+          npm pkg set "dependencies.@supabase/supabase-js=${VERSION}"
           npm install --package-lock-only --ignore-scripts
 
       - name: Update @supabase/supabase-js in test/e2e
         working-directory: test/e2e
-        run: npm pkg set "dependencies.@supabase/supabase-js=${{ inputs.version }}"
+        env:
+          VERSION: ${{ inputs.version }}
+        run: npm pkg set "dependencies.@supabase/supabase-js=${VERSION}"
 
       - name: Setup Bun
         if: ${{ hashFiles('test/e2e/bun.lock') != '' }}
