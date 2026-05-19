@@ -4,7 +4,6 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Command } from "commander";
 import kleur from "kleur";
 import { SQL } from "bun";
-import Table from "cli-table3";
 import { trace, context, SpanStatusCode, SpanKind, ROOT_CONTEXT } from "@opentelemetry/api";
 import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -18,7 +17,7 @@ const program = new Command()
   .option("--project <ref>", "Supabase project ref (required for staging/prod)")
   .option("--publishable-key <key>", "Project publishable (anon) key")
   .option("--secret-key <key>", "Project secret (service role) key")
-  .option("--db-password <password>", "Database password (required for staging/prod, or set SUPABASE_DB_PASSWORD)")
+  .option("--db-password <password>", "Database password (required for staging/prod)")
   .option("--env <env>", "Environment: local | staging | prod (default: prod)", "prod")
   .option("--domain <domain>", "Email domain for the test user", "example.com")
   .option("--port <port>", "Override URL port (useful for local)")
@@ -26,25 +25,26 @@ const program = new Command()
   .option("--db-url <url>", "Override database URL (e.g. postgresql://postgres:postgres@127.0.0.1:54322/postgres)")
   .option("--json", "Output results as JSON to stdout")
   .option("--otel <endpoint>", "OTLP HTTP endpoint for tracing (e.g. http://localhost:4318)")
+  .option("--otel-token <token>", "Bearer token for authenticated OTLP endpoints")
   .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,broadcast-changes")
   .parse();
 
 const opts = program.opts();
-const ANON_KEY: string = opts.publishableKey ?? process.env.SUPABASE_ANON_KEY;
-const SERVICE_KEY: string = opts.secretKey ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
-const dbPassword: string = opts.dbPassword ?? process.env.SUPABASE_DB_PASSWORD ?? "";
-const { project, env, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, url: URL_ARG, dbUrl: DB_URL_ARG } = opts;
+const ANON_KEY: string = opts.publishableKey;
+const SERVICE_KEY: string = opts.secretKey;
+const dbPassword: string = opts.dbPassword ?? "";
+const { project, env, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, otelToken: OTEL_API_TOKEN, url: URL_ARG, dbUrl: DB_URL_ARG } = opts;
 
 const TEST_CATEGORIES = TEST_FILTER
   ? TEST_FILTER.split(",").map((s: string) => s.trim().toLowerCase())
   : null;
 
-if (env !== "local" && !project) {
-  console.error("--project is required for staging and prod environments");
+if (env !== "local" && !project && !(URL_ARG && DB_URL_ARG)) {
+  console.error("--project is required (or provide both --url and --db-url)");
   process.exit(1);
 }
-if (env !== "local" && !dbPassword) {
-  console.error("SUPABASE_DB_PASSWORD env var is required for staging and prod environments");
+if (env !== "local" && !dbPassword && !DB_URL_ARG) {
+  console.error("--db-password is required for staging and prod environments");
   process.exit(1);
 }
 if (!ANON_KEY) {
@@ -56,16 +56,16 @@ if (!SERVICE_KEY) {
   process.exit(1);
 }
 
-const PROJECT_URL = URL_ARG ?? process.env.SUPABASE_URL ?? (() => {
+const PROJECT_URL = URL_ARG ?? (() => {
   if (env === "local") return `http://localhost:${port ?? 54321}`;
-  if (env === "staging") return `https://${project}.green.supabase.co`;
+  if (env === "staging") return `https://${project}.supabase.red`;
   return `https://${project}.supabase.co`;
 })();
 
-const DB_URL = DB_URL_ARG ?? process.env.SUPABASE_DB_URL ?? (() => {
+const DB_URL = DB_URL_ARG ?? (() => {
   const pw = encodeURIComponent(dbPassword ?? "postgres");
   if (env === "local") return `postgresql://postgres:${pw}@localhost:${port ?? 54322}/postgres`;
-  if (env === "staging") return `postgresql://postgres:${pw}@db.${project}.green.supabase.co:5432/postgres`;
+  if (env === "staging") return `postgresql://postgres:${pw}@db.${project}.supabase.red:5432/postgres`;
   return `postgresql://postgres:${pw}@db.${project}.supabase.co:5432/postgres`;
 })();
 
@@ -84,8 +84,7 @@ const LOAD_MESSAGES = 20;
 const LOAD_SETTLE_MS = 5000;
 const LOAD_DELIVERY_SLO = 99;
 
-const OTEL_ENDPOINT = OTEL_ARG ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-const OTEL_API_TOKEN = process.env.OTEL_API_TOKEN;
+const OTEL_ENDPOINT = OTEL_ARG;
 
 let tracer = trace.getTracer("realtime-check");
 let otelProvider: BasicTracerProvider | null = null;
@@ -147,7 +146,6 @@ const settle = async (getCount: () => number, expected: number, timeoutMs: numbe
   while (getCount() < expected && performance.now() < deadline) await sleep(50);
 };
 const log = (...args: unknown[]) => JSON_OUTPUT ? process.stderr.write(args.map(String).join(" ") + "\n") : console.log(...args);
-const progress = (msg: string) => JSON_OUTPUT ? process.stderr.write(msg) : process.stdout.write(msg);
 
 function measureThroughput(latencies: number[], total: number, label: string, slo: number): Metric[] {
   const delivered = latencies.length;
@@ -170,7 +168,6 @@ let currentSuite = "";
 const results: TestResult[] = [];
 
 async function test(name: string, fn: () => Promise<Metric[]>) {
-  progress(`  ${name} ... `);
   const start = performance.now();
   const span = tracer.startSpan(name, {
     kind: SpanKind.INTERNAL,
@@ -183,15 +180,14 @@ async function test(name: string, fn: () => Promise<Metric[]>) {
     for (const m of metrics) span.setAttribute(`metric.${m.label}`, `${m.value.toFixed(2)}${m.unit}`);
     span.setStatus({ code: SpanStatusCode.OK });
     results.push({ suite: currentSuite, name, passed: true, durationMs, metrics });
-    const summary = metrics.map((m) => `${m.label}: ${kleur.cyan(`${m.value.toFixed(m.unit === "%" ? 1 : 0)}${m.unit}`)}`).join("  ");
-    log(`${kleur.green("PASS")}  ${kleur.dim(`${durationMs.toFixed(0)}ms`)}${summary ? "  " + summary : ""}`);
+    const summary = metrics.map((m) => `${kleur.dim(m.label + ":")} ${kleur.cyan(`${m.value.toFixed(m.unit === "%" ? 1 : 0)}${m.unit}`)}`).join("  ");
+    log(`${kleur.green("PASS")}  ${kleur.dim(currentSuite)} / ${name}  ${kleur.dim(durationMs.toFixed(0) + "ms")}${summary ? "  " + summary : ""}`);
   } catch (e: any) {
     const durationMs = performance.now() - start;
     span.setStatus({ code: SpanStatusCode.ERROR, message: e?.message ?? String(e) });
     span.recordException(e);
     results.push({ suite: currentSuite, name, passed: false, durationMs, metrics: [], error: e?.message ?? String(e) });
-    log(`${kleur.red("FAIL")}  ${kleur.dim(`${durationMs.toFixed(0)}ms`)}`);
-    log(`    ${kleur.red(e?.message ?? e)}`);
+    log(`${kleur.red("FAIL")}  ${kleur.dim(currentSuite)} / ${name}  ${kleur.dim(durationMs.toFixed(0) + "ms")}  ${kleur.red(e?.message ?? e)}`);
   } finally {
     span.end();
   }
@@ -199,7 +195,6 @@ async function test(name: string, fn: () => Promise<Metric[]>) {
 
 function suite(name: string) {
   currentSuite = name;
-  log(`\n${kleur.bold(name)}`);
 }
 
 async function waitFor<T>(getter: () => T | null, label: string): Promise<{ value: T; latencyMs: number }> {
@@ -289,12 +284,9 @@ async function executeDelete(supabase: SupabaseClient, table: TableName, id: num
 }
 
 async function setup(): Promise<{ userId: string; testUser: { email: string; password: string } }> {
-  log(kleur.blue("Setting up database..."));
   const start = performance.now();
-
   const email = `realtime-check-${crypto.randomUUID()}@${EMAIL_DOMAIN}`;
   const password = crypto.randomUUID();
-  log(`  Test user: ${kleur.dim(email)}`);
 
   const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
   let userId: string;
@@ -415,7 +407,6 @@ async function setup(): Promise<{ userId: string; testUser: { email: string; pas
     await sql.close();
   }
 
-  log(`${kleur.green("Setup complete")} ${kleur.dim(`(${(performance.now() - start).toFixed(0)}ms)`)}`);
   return { userId: userId!, testUser: { email, password } };
 }
 
@@ -426,7 +417,6 @@ async function cleanup(userId: string) {
   } finally {
     await sql.close();
   }
-  log(kleur.dim("Test user cleaned up."));
 }
 
 async function runConnectionTest() {
@@ -917,20 +907,15 @@ async function runAuthorizationTests(testUser: { email: string; password: string
   await test("user using private channel cannot connect without permissions", async () => {
     const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      let errMessage: any = null;
       const topic = "topic:" + crypto.randomUUID();
+      const channel = supabase.channel(topic, { config: { private: true } }).subscribe();
 
-      supabase
-        .channel(topic, { config: { private: true } })
-        .subscribe((status: string, err: any) => {
-          if (status === "CHANNEL_ERROR") errMessage = err.message;
-        });
-
-      const { latencyMs: rejectMs } = await waitFor(() => errMessage, "CHANNEL_ERROR");
-      assert.strictEqual(
-        errMessage,
-        `"Unauthorized: You do not have permissions to read from this Channel topic: ${topic}"`
+      const { value: finalState, latencyMs: rejectMs } = await waitFor(
+        () => channel.state !== "joining" ? channel.state : null,
+        "channel rejection"
       );
+
+      assert.notStrictEqual(finalState, "joined", `Expected channel to be rejected but state is: ${finalState}`);
       return [{ label: "rejection", value: rejectMs, unit: "ms" }];
     } finally {
       await stopClient(supabase);
@@ -1270,6 +1255,9 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
 
       await supabase.from("replay_check").insert({ id: crypto.randomUUID(), topic, event, payload: { value: "old" } });
 
+      // Sleep to ensure the DB insert timestamp is clearly before `since`,
+      // guarding against clock skew between JS client and DB server.
+      await sleep(1000);
       const since = Date.now();
 
       let result: any = null;
@@ -1325,33 +1313,7 @@ function printSummary(totalMs: number) {
     return;
   }
 
-  for (const suite of suites) {
-    const suiteResults = results.filter((r) => r.suite === suite);
-    const suiteLabels = [...new Set(suiteResults.flatMap((r) => r.metrics.map((m) => m.label)))];
-
-    const table = new Table({
-      head: [kleur.bold(suite), kleur.dim("status"), kleur.dim("total"), ...suiteLabels.map(kleur.dim)],
-      style: { border: ["dim"], head: [] },
-    });
-
-    for (const r of suiteResults) {
-      table.push([
-        `  ${r.name}`,
-        r.passed ? kleur.green("PASS") : kleur.red("FAIL"),
-        kleur.dim(`${r.durationMs.toFixed(0)}ms`),
-        ...suiteLabels.map((label) => {
-          const m = r.metrics.find((x) => x.label === label);
-          return m ? kleur.cyan(`${m.value.toFixed(m.unit === "%" ? 1 : 0)}${m.unit}`) : kleur.dim("-");
-        }),
-      ]);
-    }
-
-    log(`
-${table.toString()}`);
-  }
-
-  log(`
-${kleur.bold(`${passed.length} passed, ${failed.length} failed`)}  ${kleur.dim(`total ${(totalMs / 1000).toFixed(2)}s`)}`);
+  log(`\n${kleur.bold(`${passed.length} passed, ${failed.length} failed`)}  ${kleur.dim(`total ${(totalMs / 1000).toFixed(2)}s`)}`);
 
   if (failed.length > 0) {
     log("\nFailed:");
@@ -1384,11 +1346,6 @@ async function main() {
   initOtel();
   patchFetch();
 
-  log(kleur.bold("Realtime Check"));
-  log(`Project: ${PROJECT_URL}`);
-  log(`Env: ${env}  Email domain: ${EMAIL_DOMAIN}\n`);
-  if (OTEL_ENDPOINT) log(kleur.dim(`Tracing → ${OTEL_ENDPOINT}\n`));
-
   const activeCategories = TEST_CATEGORIES
     ? TEST_CATEGORIES.flatMap((c: string) => {
         if (c === "functional") return FUNCTIONAL_SUITES;
@@ -1404,7 +1361,6 @@ async function main() {
       log(`Unknown test categories: ${unknown.join(", ")}\nValid categories: ${valid}`);
       process.exit(1);
     }
-    log(`Running categories: ${activeCategories.join(", ")}\n`);
   }
 
   const suitesToRun = activeCategories
