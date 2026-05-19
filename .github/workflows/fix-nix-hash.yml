@@ -23,19 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.event.pull_request.head.repo.full_name == github.repository
+    outputs:
+      changed: ${{ steps.check-changes.outputs.changed }}
 
     steps:
-      - name: Generate token
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
-        with:
-          app-id: ${{ secrets.GH_AUTOFIX_APP_ID }}
-          private-key: ${{ secrets.GH_AUTOFIX_PRIVATE_KEY }}
-
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.head_ref }}
-          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@da36cb69b1c3247ad7a1f931ebfd954a1105ef14 # v14
@@ -53,13 +48,52 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit and push updated hash
+      - name: Upload updated hash
         if: steps.check-changes.outputs.changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: updated-nix-hash
+          path: test/e2e/flake.nix
+          retention-days: 1
+
+  push-nix-hash:
+    name: Commit Fixed Nix Hash
+    needs: fix-nix-hash
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: needs.fix-nix-hash.outputs.changed == 'true'
+
+    steps:
+      - name: Generate token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.GH_AUTOFIX_APP_ID }}
+          private-key: ${{ secrets.GH_AUTOFIX_PRIVATE_KEY }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: false
+
+      - name: Download updated hash
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: updated-nix-hash
+          path: test/e2e
+
+      - name: Commit and push updated hash
         env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
           TARGET_BRANCH: ${{ github.head_ref }}
         run: |
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git add test/e2e/flake.nix
-          git commit -m "chore: update nix node_modules hash"
-          git push origin "HEAD:${TARGET_BRANCH}"
+          /usr/bin/git config --local user.name "supabase-autofix-bot"
+          /usr/bin/git config --local user.email "noreply@supabase.com"
+          /usr/bin/git add test/e2e/flake.nix
+
+          if /usr/bin/git diff --cached --quiet; then
+            exit 0
+          fi
+
+          /usr/bin/git commit -m "chore: update nix node_modules hash"
+          /usr/bin/git -c credential.helper= push "https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${TARGET_BRANCH}"
