@@ -93,10 +93,13 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Merge multi-arch manifests for custom output
+        env:
+          DOCKER_TAG: ${{ github.event.inputs.docker_tag }}
+          IMAGE_DIGEST: ${{ needs.docker_arm_release.outputs.image_digest }}
         run: |
-          docker buildx imagetools create -t supabase/realtime:v${{ github.event.inputs.docker_tag }} \
-          supabase/realtime@${{ needs.docker_x86_release.outputs.image_digest }} \
-          supabase/realtime@${{ needs.docker_arm_release.outputs.image_digest }}
+          docker buildx imagetools create -t "supabase/realtime:v${DOCKER_TAG}" \
+          "supabase/realtime@${IMAGE_DIGEST}" \
+          "supabase/realtime@${IMAGE_DIGEST}"
 
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
@@ -123,4 +126,3 @@ jobs:
           dst: |
             public.ecr.aws/supabase/realtime:v${{ github.event.inputs.docker_tag }}
             ghcr.io/supabase/realtime:v${{ github.event.inputs.docker_tag }}
-
