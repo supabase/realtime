@@ -87,8 +87,8 @@ jobs:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
           TARGET_BRANCH: ${{ github.head_ref }}
         run: |
-          /usr/bin/git config --local user.name "github-actions[bot]"
-          /usr/bin/git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          /usr/bin/git config --local user.name "supabase-autofix-bot"
+          /usr/bin/git config --local user.email "noreply@supabase.com"
           /usr/bin/git add test/e2e/flake.nix
 
           if /usr/bin/git diff --cached --quiet; then
