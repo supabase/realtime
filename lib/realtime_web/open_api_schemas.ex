@@ -55,6 +55,28 @@ defmodule RealtimeWeb.OpenApiSchemas do
     def params, do: {"Tenant Batch Params", "application/json", __MODULE__}
   end
 
+  defmodule BroadcastSingleJsonParams do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :object,
+      description: "JSON payload - any valid JSON object",
+      example: %{"text" => "hello world", "user" => "alice"}
+    })
+  end
+
+  defmodule BroadcastSingleBinaryParams do
+    @moduledoc false
+    require OpenApiSpex
+
+    OpenApiSpex.schema(%{
+      type: :string,
+      format: :binary,
+      description: "Binary payload - raw binary data"
+    })
+  end
+
   defmodule TenantParams do
     @moduledoc false
     require OpenApiSpex

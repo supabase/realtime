@@ -1,0 +1,116 @@
+name: Update Tenant DB Baseline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "priv/repo/migrations/**"
+      - "lib/mix/tasks/realtime.export_tenant_db_baseline.ex"
+      - "mix.lock"
+      - "mise.toml"
+      - "compose.dbs.yml"
+      - ".github/workflows/update-tenant-db-baseline.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  POSTGRES_IMAGE: supabase/postgres:17.6.1.074
+
+jobs:
+  update-tenant-db-baseline:
+    name: Regenerate baseline and open PR if stale
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref_name }}
+          # peter-evans/create-pull-request uses its own app token; persisting
+          # the default GITHUB_TOKEN here causes a duplicate Authorization
+          # header on git pushes -> HTTP 400.
+          persist-credentials: false
+
+      - name: Setup mise
+        uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+
+      - name: Cache Mix
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ github.workflow }}-${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ github.workflow }}-${{ runner.os }}-mix-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Cache Docker images
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        id: docker-cache
+        with:
+          path: /tmp/docker-images
+          key: docker-images-zstd-${{ env.POSTGRES_IMAGE }}
+
+      - name: Load Docker images from cache
+        if: steps.docker-cache.outputs.cache-hit == 'true'
+        run: zstd -d --stdout /tmp/docker-images/postgres.tar.zst | docker image load
+
+      - name: Pull and save Docker images
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: |
+          docker pull ${{ env.POSTGRES_IMAGE }}
+          mkdir -p /tmp/docker-images
+          docker image save ${{ env.POSTGRES_IMAGE }} | zstd -T0 -o /tmp/docker-images/postgres.tar.zst
+
+      - name: Start Postgres
+        run: docker compose -f compose.dbs.yml up -d --wait
+
+      - name: Set up realtime DB and migrate tenant DB
+        run: mix ecto.setup
+
+      - name: Export baseline snapshot
+        run: mix realtime.export_tenant_db_baseline
+
+      - name: Check if baseline changed
+        id: check-changes
+        run: |
+          if git diff --quiet priv/repo/tenant_db_baseline.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate GitHub App token
+        if: steps.check-changes.outputs.changed == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.GH_AUTOFIX_APP_ID }}
+          private-key: ${{ secrets.GH_AUTOFIX_PRIVATE_KEY }}
+
+      - name: Create pull request
+        if: steps.check-changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6.1.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          commit-message: "chore: update tenant_db_baseline.json"
+          title: "chore: update tenant_db_baseline.json"
+          body: |
+            Update pg-delta tenant DB baseline file `priv/repo/tenant_db_baseline.json`.
+
+            Triggered by ${{ github.event_name }} on `${{ github.ref_name }}` @ ${{ github.sha }}.
+
+            This PR was created automatically.
+          branch: chore/update-tenant-db-baseline
+          base: main
+          add-paths: priv/repo/tenant_db_baseline.json

@@ -49,8 +49,6 @@ publication = "supabase_realtime"
 
 Postgrex.transaction(admin_conn, fn db_conn ->
   [
-    "drop schema if exists realtime cascade",
-    "create schema realtime",
     "grant usage on schema realtime to postgres, anon, authenticated, service_role",
     "grant all on schema realtime to supabase_realtime_admin with grant option",
     "drop publication if exists #{publication}",
