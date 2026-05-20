@@ -2,7 +2,7 @@ defmodule Beacon do
   @moduledoc """
   Distributed process group membership tracking.
 
-  Check Beacon.GroupCount
+  Check Beacon.Census
   """
 
   @type group :: any

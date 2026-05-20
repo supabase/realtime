@@ -1,4 +1,4 @@
-defmodule Beacon.GroupCount do
+defmodule Beacon.Census do
   alias Beacon.Partition
   alias Beacon.Scope
 
