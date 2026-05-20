@@ -112,5 +112,5 @@ jobs:
 
             This PR was created automatically.
           branch: chore/update-tenant-db-baseline
-          base: ${{ github.ref_name }}
+          base: main
           add-paths: priv/repo/tenant_db_baseline.json
