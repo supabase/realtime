@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - chore/lp-ci-gen-tenant-db
     paths:
       - "priv/repo/migrations/**"
       - "lib/mix/tasks/realtime.export_tenant_db_baseline.ex"
@@ -79,7 +78,7 @@ jobs:
       - name: Set up realtime DB and migrate tenant DB
         run: mix ecto.setup
 
-      - name: Regenerate baseline snapshot
+      - name: Export baseline snapshot
         run: mix realtime.export_tenant_db_baseline
 
       - name: Check if baseline changed
@@ -104,14 +103,12 @@ jobs:
         uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6.1.0
         with:
           token: ${{ steps.app-token.outputs.token }}
-          commit-message: "chore: refresh tenant DB baseline snapshot"
-          title: "chore: refresh tenant DB baseline snapshot"
+          commit-message: "chore: update tenant_db_baseline.json"
+          title: "chore: update tenant_db_baseline.json"
           body: |
-            Regenerates `priv/repo/tenant_db_baseline.json` against the
-            current `priv/repo/migrations/**` state.
+            Update pg-delta tenant DB baseline file `priv/repo/tenant_db_baseline.json`.
 
-            Triggered by ${{ github.event_name }} on
-            `${{ github.ref_name }}` @ ${{ github.sha }}.
+            Triggered by ${{ github.event_name }} on `${{ github.ref_name }}` @ ${{ github.sha }}.
 
             This PR was created automatically.
           branch: chore/update-tenant-db-baseline
