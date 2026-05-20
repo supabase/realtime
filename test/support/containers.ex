@@ -148,6 +148,12 @@ defmodule Containers do
          port <- Container.port(container) do
       tenant = repo_run(mode, fn -> Generators.tenant_fixture(%{port: port, migrations_ran: 0}) end)
 
+      # TODO: REAL-818 - remove when Project Migrations v2 is done
+      Realtime.FeatureFlags.Cache.update_cache(%Realtime.Api.FeatureFlag{
+        name: "use_supabase_realtime_admin",
+        enabled: true
+      })
+
       run_migrations? = Keyword.get(opts, :run_migrations, false)
 
       {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)

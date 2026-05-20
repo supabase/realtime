@@ -42,13 +42,21 @@ defmodule Realtime.Tenants.MigrationsTest do
   end
 
   describe "migrations/1" do
-    test "excludes SetupSupabaseRealtimeAdmin by default" do
+    test "excludes SetupSupabaseRealtimeAdmin when the feature flag is disabled" do
+      {:ok, _} = Api.upsert_feature_flag(%{name: "use_supabase_realtime_admin", enabled: false})
+
       modules = Enum.map(Migrations.migrations(), fn {_v, m} -> m end)
       refute Migrations.SetupSupabaseRealtimeAdmin in modules
     end
 
-    test "excludes SetupSupabaseRealtimeAdmin by default with tenant" do
+    test "excludes SetupSupabaseRealtimeAdmin when the tenant override is disabled" do
       tenant = Containers.checkout_tenant()
+      {:ok, _} = Api.upsert_feature_flag(%{name: "use_supabase_realtime_admin", enabled: true})
+      {:ok, _} = Realtime.FeatureFlags.set_tenant_flag("use_supabase_realtime_admin", tenant.external_id, false)
+
+      Process.sleep(100)
+      Cache.invalidate_tenant_cache(tenant.external_id)
+
       modules = Enum.map(Migrations.migrations(tenant.external_id), fn {_v, m} -> m end)
       refute Migrations.SetupSupabaseRealtimeAdmin in modules
     end
