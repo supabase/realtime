@@ -3,6 +3,7 @@ defmodule Realtime.SynHandler do
   Custom defined Syn's callbacks
   """
   require Logger
+  alias Realtime.Nodes
   alias Realtime.Syn.PostgresCdc
   alias Realtime.Tenants.Connect
   alias RealtimeWeb.Endpoint
@@ -33,6 +34,20 @@ defmodule Realtime.SynHandler do
   def on_process_registered(scope, name, _pid, _meta, _reason) do
     :telemetry.execute([:syn, scope, :registered], %{}, %{name: name})
   end
+
+  @impl true
+  def on_process_joined(RegionNodes, region, _pid, _meta, _reason) when is_binary(region) do
+    Nodes.refresh_region_cache(region)
+  end
+
+  def on_process_joined(_scope, _name, _pid, _meta, _reason), do: :ok
+
+  @impl true
+  def on_process_left(RegionNodes, region, _pid, _meta, _reason) when is_binary(region) do
+    Nodes.refresh_region_cache(region)
+  end
+
+  def on_process_left(_scope, _name, _pid, _meta, _reason), do: :ok
 
   @doc """
   When processes registered with :syn are unregistered, either manually or by stopping, this

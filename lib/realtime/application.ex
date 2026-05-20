@@ -82,6 +82,7 @@ defmodule Realtime.Application do
     user_scope_broadast_interval_in_ms = Application.get_env(:realtime, :users_scope_broadcast_interval_in_ms, 10_000)
 
     :syn.join(RegionNodes, region, self(), node: node())
+    Realtime.Nodes.init_region_cache(region)
 
     zta_children =
       case Application.get_env(:realtime, :dashboard_auth) do

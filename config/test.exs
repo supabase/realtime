@@ -44,6 +44,10 @@ config :realtime,
   channel_error_backoff_ms: 100,
   max_gen_rpc_clients: 5,
   max_gen_rpc_call_clients: 1,
+  max_gen_rpc_clients_intra: 5,
+  max_gen_rpc_clients_inter: 5,
+  max_gen_rpc_call_clients_intra: 1,
+  max_gen_rpc_call_clients_inter: 1,
   metrics_pusher_req_options: [
     plug: {Req.Test, Realtime.MetricsPusher}
   ]

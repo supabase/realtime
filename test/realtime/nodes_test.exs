@@ -355,6 +355,68 @@ defmodule Realtime.NodesTest do
     end
   end
 
+  describe "same_region?/1" do
+    setup do
+      Nodes.init_region_cache(Application.get_env(:realtime, :region))
+      :ok
+    end
+
+    test "local node is always in the same-region set" do
+      assert Nodes.same_region?(node())
+    end
+
+    test "node in local region is counted as same-region" do
+      local_region = Application.get_env(:realtime, :region)
+      spawn_fake_node(local_region, :same_region_node)
+
+      assert Nodes.same_region?(:same_region_node)
+    end
+
+    test "node in another region is not counted as same-region" do
+      spawn_fake_node("some-other-region", :other_region_node)
+
+      refute Nodes.same_region?(:other_region_node)
+    end
+
+    test "node is removed from the set when it leaves the local region" do
+      local_region = Application.get_env(:realtime, :region)
+      spawn_fake_node(local_region, :transient_node)
+      assert Nodes.same_region?(:transient_node)
+
+      stop_supervised!({local_region, :transient_node})
+
+      # syn fires on_process_left asynchronously after the DOWN signal
+      assert wait_until(fn -> not Nodes.same_region?(:transient_node) end)
+    end
+  end
+
+  describe "init_region_cache/1" do
+    test "nil region seeds the cache with the local node only" do
+      Nodes.init_region_cache(nil)
+      assert Nodes.same_region?(node())
+      refute Nodes.same_region?(:totally_unknown_node)
+    end
+  end
+
+  defp wait_until(fun, timeout_ms \\ 1_000, interval_ms \\ 10) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_wait_until(fun, deadline, interval_ms)
+  end
+
+  defp do_wait_until(fun, deadline, interval_ms) do
+    cond do
+      fun.() ->
+        true
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        false
+
+      true ->
+        Process.sleep(interval_ms)
+        do_wait_until(fun, deadline, interval_ms)
+    end
+  end
+
   describe "short_node_id_from_name/1" do
     test "extracts short ID from fly.io-style IPv6 node name" do
       assert Nodes.short_node_id_from_name(:"realtime-prod@fdaa:0:cc:a7b:b385:83c3:cfe3:2") ==

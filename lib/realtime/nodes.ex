@@ -254,6 +254,58 @@ defmodule Realtime.Nodes do
   @doc "List all the regions where nodes can be launched"
   def all_node_regions(), do: :syn.group_names(RegionNodes)
 
+  @region_cache_key {__MODULE__, :same_region_nodes}
+
+  @doc """
+  Returns true if `node` is in the same region as the local node.
+
+  Backed by a `:persistent_term` cache of the local-region members of the
+  `RegionNodes` syn group; reads are O(1) and safe to use on hot paths.
+  The cache is maintained by `Realtime.SynHandler` group callbacks and
+  initialized on application boot via `init_region_cache/1`.
+  """
+  @spec same_region?(node()) :: boolean()
+  def same_region?(node) when is_atom(node) do
+    MapSet.member?(:persistent_term.get(@region_cache_key, MapSet.new([node()])), node)
+  end
+
+  @doc """
+  Seeds the region cache with the local region's members. Safe to call multiple
+  times; called from `Realtime.Application` after the local node joins the
+  `RegionNodes` syn group.
+  """
+  @spec init_region_cache(String.t() | nil) :: :ok
+  def init_region_cache(nil) do
+    :persistent_term.put(@region_cache_key, MapSet.new([node()]))
+    :ok
+  end
+
+  def init_region_cache(region) when is_binary(region), do: refresh_region_cache(region)
+
+  @doc """
+  Rebuilds the region cache when `changed_region` matches the local region.
+
+  Called from `Realtime.SynHandler` `on_process_joined/5` and `on_process_left/5`
+  whenever the `RegionNodes` syn group changes. The new set is written only if
+  it differs from the current one, to avoid the global GC triggered by a
+  `:persistent_term.put/2` write.
+  """
+  @spec refresh_region_cache(String.t()) :: :ok
+  def refresh_region_cache(changed_region) when is_binary(changed_region) do
+    local_region = Application.get_env(:realtime, :region)
+
+    if changed_region == local_region do
+      new_set = region_nodes(local_region) |> MapSet.new() |> MapSet.put(node())
+      current = :persistent_term.get(@region_cache_key, MapSet.new())
+
+      unless MapSet.equal?(current, new_set) do
+        :persistent_term.put(@region_cache_key, new_set)
+      end
+    end
+
+    :ok
+  end
+
   defp uptime_ms do
     start_time = :erlang.system_info(:start_time)
     now = :erlang.monotonic_time()

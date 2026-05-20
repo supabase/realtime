@@ -60,6 +60,10 @@ logflare_logger_backend_url = System.get_env("LOGFLARE_LOGGER_BACKEND_URL", "htt
 logs_engine = System.get_env("LOGS_ENGINE")
 max_gen_rpc_clients = Env.get_integer("MAX_GEN_RPC_CLIENTS", 5)
 max_gen_rpc_call_clients = Env.get_integer("MAX_GEN_RPC_CALL_CLIENTS", 1)
+max_gen_rpc_clients_intra = Env.get_integer("MAX_GEN_RPC_CLIENTS_INTRA", max_gen_rpc_clients)
+max_gen_rpc_clients_inter = Env.get_integer("MAX_GEN_RPC_CLIENTS_INTER", max_gen_rpc_clients)
+max_gen_rpc_call_clients_intra = Env.get_integer("MAX_GEN_RPC_CALL_CLIENTS_INTRA", max_gen_rpc_call_clients)
+max_gen_rpc_call_clients_inter = Env.get_integer("MAX_GEN_RPC_CALL_CLIENTS_INTER", max_gen_rpc_call_clients)
 measure_traffic_interval_in_ms = Env.get_integer("MEASURE_TRAFFIC_INTERVAL_IN_MS", :timer.seconds(10))
 metrics_cleaner_schedule_timer_in_ms = Env.get_integer("METRICS_CLEANER_SCHEDULE_TIMER_IN_MS", :timer.minutes(30))
 metrics_pusher_auth = System.get_env("METRICS_PUSHER_AUTH")
@@ -370,6 +374,10 @@ if config_env() != :test do
     slot_name_suffix: slot_name_suffix,
     max_gen_rpc_clients: max_gen_rpc_clients,
     max_gen_rpc_call_clients: max_gen_rpc_call_clients,
+    max_gen_rpc_clients_intra: max_gen_rpc_clients_intra,
+    max_gen_rpc_clients_inter: max_gen_rpc_clients_inter,
+    max_gen_rpc_call_clients_intra: max_gen_rpc_call_clients_intra,
+    max_gen_rpc_call_clients_inter: max_gen_rpc_call_clients_inter,
     connect_error_backoff_ms: connect_error_backoff_ms,
     channel_error_backoff_ms: channel_error_backoff_ms
 end

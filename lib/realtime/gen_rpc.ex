@@ -2,15 +2,22 @@ defmodule Realtime.GenRpc do
   @moduledoc """
   RPC module for Realtime using :gen_rpc
 
-  Two separate connection pools are maintained per remote node:
+  Two separate connection pools are maintained per remote node, and each pool
+  has different sizes depending on whether the remote node is in the same
+  region as the local node (intra-region) or in another region (inter-region).
 
-  - Cast pool: used by `cast/5`, `abcast/4`, `multicast/4`. Size controlled by
-    `MAX_GEN_RPC_CLIENTS` env var (default 5). Client tags: `{:cast, 1..N}`.
+  Same-region check is O(1) via `Realtime.Nodes.same_region?/1`.
 
-  - Call pool: used by `call/5`, `multicall/4`. Size controlled by
-    `MAX_GEN_RPC_CALL_CLIENTS` env var (default 1). Client tags: `{:call, 1..M}`.
+  - Cast pool: used by `cast/5`, `abcast/4`, `multicast/4`. Sizes controlled by
+    `MAX_GEN_RPC_CLIENTS_INTRA` / `MAX_GEN_RPC_CLIENTS_INTER` (both default to
+    `MAX_GEN_RPC_CLIENTS`, default 5). Client tags: `{:cast, 1..N}`.
+
+  - Call pool: used by `call/5`, `multicall/4`. Sizes controlled by
+    `MAX_GEN_RPC_CALL_CLIENTS_INTRA` / `MAX_GEN_RPC_CALL_CLIENTS_INTER` (both
+    default to `MAX_GEN_RPC_CALL_CLIENTS`, default 1). Client tags: `{:call, 1..M}`.
   """
   use Realtime.Logs
+  alias Realtime.Nodes
   alias Realtime.Telemetry
 
   @type result :: any | {:error, :rpc_error, reason :: any}
@@ -218,17 +225,26 @@ defmodule Realtime.GenRpc do
     )
   end
 
-  defp max_cast_clients(), do: Application.fetch_env!(:realtime, :max_gen_rpc_clients)
-  defp max_call_clients(), do: Application.fetch_env!(:realtime, :max_gen_rpc_call_clients)
+  defp max_cast_clients(node) do
+    if Nodes.same_region?(node),
+      do: Application.fetch_env!(:realtime, :max_gen_rpc_clients_intra),
+      else: Application.fetch_env!(:realtime, :max_gen_rpc_clients_inter)
+  end
+
+  defp max_call_clients(node) do
+    if Nodes.same_region?(node),
+      do: Application.fetch_env!(:realtime, :max_gen_rpc_call_clients_intra),
+      else: Application.fetch_env!(:realtime, :max_gen_rpc_call_clients_inter)
+  end
 
   defp cast_rpc_nodes(nodes, key), do: Enum.map(nodes, &cast_rpc_node(&1, key))
   defp call_rpc_nodes(nodes, key), do: Enum.map(nodes, &call_rpc_node(&1, key))
 
-  defp cast_rpc_node(node, nil), do: {node, {:cast, :rand.uniform(max_cast_clients())}}
-  defp cast_rpc_node(node, key), do: {node, {:cast, :erlang.phash2(key, max_cast_clients()) + 1}}
+  defp cast_rpc_node(node, nil), do: {node, {:cast, :rand.uniform(max_cast_clients(node))}}
+  defp cast_rpc_node(node, key), do: {node, {:cast, :erlang.phash2(key, max_cast_clients(node)) + 1}}
 
-  defp call_rpc_node(node, nil), do: {node, {:call, :rand.uniform(max_call_clients())}}
-  defp call_rpc_node(node, key), do: {node, {:call, :erlang.phash2(key, max_call_clients()) + 1}}
+  defp call_rpc_node(node, nil), do: {node, {:call, :rand.uniform(max_call_clients(node))}}
+  defp call_rpc_node(node, key), do: {node, {:call, :erlang.phash2(key, max_call_clients(node)) + 1}}
 
   defp unwrap_reason({:unknown_error, {{:badrpc, reason}, _}}), do: reason
   defp unwrap_reason(reason), do: reason
