@@ -23,14 +23,14 @@ defmodule Beacon.Supervisor do
     end
   end
 
-  @spec start_link(atom, pos_integer(), Keyword.t()) :: Supervisor.on_start()
-  def start_link(scope, partitions, opts \\ []) do
-    args = [scope, partitions, opts]
+  @spec start_link(module, atom, pos_integer(), Keyword.t()) :: Supervisor.on_start()
+  def start_link(module, scope, partitions, opts \\ []) do
+    args = [module, scope, partitions, opts]
     Supervisor.start_link(__MODULE__, args, name: supervisor_name(scope))
   end
 
   @impl true
-  def init([scope, partitions, opts]) do
+  def init([module, scope, partitions, opts]) do
     children =
       for i <- 0..(partitions - 1) do
         partition_name = partition_name(scope, i)
@@ -53,7 +53,7 @@ defmodule Beacon.Supervisor do
     :persistent_term.put(scope, List.to_tuple(partition_names))
 
     children = [
-      %{id: :scope, start: {Beacon.Scope, :start_link, [scope, opts]}} | children
+      %{id: :scope, start: {module, :start_link, [scope, opts]}} | children
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

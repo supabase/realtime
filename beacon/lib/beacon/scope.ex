@@ -4,6 +4,7 @@ defmodule Beacon.Scope do
 
   use GenServer
   require Logger
+  alias Beacon.GroupCount
 
   @default_broadcast_interval 5_000
 
@@ -123,7 +124,7 @@ defmodule Beacon.Scope do
     state.message_module.send(
       state.scope,
       node(peer),
-      {:sync, self(), Beacon.local_member_counts(state.scope)}
+      {:sync, self(), GroupCount.local_member_counts(state.scope)}
     )
 
     # We don't do anything if we already know about this peer
@@ -161,7 +162,7 @@ defmodule Beacon.Scope do
     state.message_module.broadcast(
       state.scope,
       nodes,
-      {:sync, self(), Beacon.local_member_counts(state.scope)}
+      {:sync, self(), GroupCount.local_member_counts(state.scope)}
     )
 
     Process.send_after(self(), :broadcast_counts, state.broadcast_interval)
