@@ -84,7 +84,7 @@ defmodule RealtimeWeb.Endpoint do
   def log_level(_), do: :info
 
   plug Plug.Parsers,
-    parsers: [:urlencoded, :multipart, :json],
+    parsers: [:urlencoded, :multipart, :json, RealtimeWeb.Plugs.Parsers.OctetStream],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library()
 
