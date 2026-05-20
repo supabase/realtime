@@ -43,16 +43,8 @@ if (env !== "local" && !project && !(URL_ARG && DB_URL_ARG)) {
   console.error("--project is required (or provide both --url and --db-url)");
   process.exit(1);
 }
-if (env !== "local" && !dbPassword && !DB_URL_ARG) {
-  console.error("--db-password is required for staging and prod environments");
-  process.exit(1);
-}
 if (!ANON_KEY) {
   console.error("--publishable-key is required");
-  process.exit(1);
-}
-if (!SERVICE_KEY) {
-  console.error("--secret-key is required");
   process.exit(1);
 }
 
@@ -1377,6 +1369,17 @@ const SUITES: Record<string, (testUser: { email: string; password: string }) => 
 const LOAD_SUITES = Object.keys(SUITES).filter((k) => k.startsWith("load"));
 const FUNCTIONAL_SUITES = Object.keys(SUITES).filter((k) => !k.startsWith("load"));
 
+const DB_REQUIRED_SUITES = new Set([
+  "load-postgres-changes",
+  "load-broadcast-from-db",
+  "load-broadcast-replay",
+  "broadcast-replay",
+  "presence",
+  "authorization",
+  "postgres-changes",
+  "broadcast-changes",
+]);
+
 async function main() {
   initOtel();
   patchFetch();
@@ -1402,13 +1405,32 @@ async function main() {
     ? Object.entries(SUITES).filter(([key]) => activeCategories.includes(key))
     : Object.entries(SUITES);
 
-  const { userId, testUser } = await setup();
+  const needsDb = suitesToRun.some(([key]) => DB_REQUIRED_SUITES.has(key));
+
+  if (needsDb && !SERVICE_KEY) {
+    console.error("--secret-key is required");
+    process.exit(1);
+  }
+
+  if (needsDb && env !== "local" && !dbPassword && !DB_URL_ARG) {
+    console.error("--db-password is required for staging and prod environments");
+    process.exit(1);
+  }
+
+  let userId: string | null = null;
+  let testUser: { email: string; password: string } = { email: "", password: "" };
+
+  if (needsDb) {
+    const setupResult = await setup();
+    userId = setupResult.userId;
+    testUser = setupResult.testUser;
+  }
 
   const start = performance.now();
   try {
     for (const [, fn] of suitesToRun) await fn(testUser);
   } finally {
-    await cleanup(userId);
+    if (userId) await cleanup(userId);
   }
 
   printSummary(performance.now() - start);
