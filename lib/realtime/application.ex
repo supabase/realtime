@@ -100,13 +100,13 @@ defmodule Realtime.Application do
         {Cluster.Supervisor, [topologies, [name: Realtime.ClusterSupervisor]]},
         {Phoenix.PubSub,
          name: Realtime.PubSub, pool_size: 10, adapter: pubsub_adapter(), broadcast_pool_size: broadcast_pool_size},
-        {Beacon,
+        {Forum.Census,
          [
            :users,
            [
              partitions: user_scope_shards,
              broadcast_interval_in_ms: user_scope_broadast_interval_in_ms,
-             message_module: Realtime.BeaconPubSubAdapter
+             message_module: Realtime.ForumPubSubAdapter
            ]
          ]},
         Supervisor.child_spec({Cachex, name: Realtime.RateCounter}, id: Realtime.RateCounter),

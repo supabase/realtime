@@ -76,7 +76,7 @@ defmodule Peer do
     :ok = :peer.call(pid, Mix, :env, [Mix.env()])
 
     Enum.map(
-      [:logger, :runtime_tools, :mix, :os_mon, :beacon],
+      [:logger, :runtime_tools, :mix, :os_mon, :forum],
       fn app -> {:ok, _} = :peer.call(pid, Application, :ensure_all_started, [app]) end
     )
 

@@ -62,12 +62,12 @@ defmodule Realtime.UsersCounterTest do
       assert counts[tenant_id] == expected + 1
       assert map_size(counts) >= 61
 
-      counts = Beacon.local_member_counts(:users)
+      counts = Forum.Census.local_member_counts(:users)
 
       assert counts[tenant_id] == 1
       assert map_size(counts) >= 1
 
-      counts = Beacon.member_counts(:users)
+      counts = Forum.Census.member_counts(:users)
 
       assert counts[tenant_id] == expected + 1
       assert map_size(counts) >= 61
