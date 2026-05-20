@@ -21,6 +21,7 @@ defmodule Realtime.Monitoring.Peep.PartitionedTables do
 
   alias Peep.Storage
   alias Telemetry.Metrics
+  require Storage.Atomics
 
   @behaviour Peep.Storage
 
@@ -107,7 +108,9 @@ defmodule Realtime.Monitoring.Peep.PartitionedTables do
   end
 
   @impl true
-  def get_all_metrics({tids, _routing_tag}, %Peep.Persistent{ids_to_metrics: itm}) do
+  def get_all_metrics({tids, _routing_tag}, persistent) do
+    itm = Peep.Persistent.ids_to_metrics(persistent)
+
     tids
     |> Tuple.to_list()
     |> Enum.flat_map(&:ets.tab2list/1)
@@ -163,6 +166,6 @@ defmodule Realtime.Monitoring.Peep.PartitionedTables do
     end
   end
 
-  defp to_value(%Storage.Atomics{} = atomics), do: Storage.Atomics.values(atomics)
+  defp to_value(Storage.Atomics.atomic() = atomics), do: Storage.Atomics.values(atomics)
   defp to_value(value), do: value
 end

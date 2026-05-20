@@ -4,6 +4,7 @@ defmodule Realtime.Monitoring.Peep.Partitioned do
   """
   alias Peep.Storage
   alias Telemetry.Metrics
+  require Storage.Atomics
 
   @behaviour Peep.Storage
 
@@ -76,57 +77,43 @@ defmodule Realtime.Monitoring.Peep.Partitioned do
   end
 
   @impl true
-  def get_all_metrics({tid, _partitions}, %Peep.Persistent{ids_to_metrics: itm}) do
-    :ets.tab2list(tid)
-    |> group_metrics(itm, %{})
+  def get_all_metrics({tid, _partitions}, persistent) do
+    itm = Peep.Persistent.ids_to_metrics(persistent)
+    Enum.reduce(:ets.tab2list(tid), %{}, &group_metric(&1, itm, &2))
   end
 
   @impl true
   def get_metric({tid, _partitions}, id, %Metrics.Counter{}, tags) do
     :ets.select(tid, [{{{id, :"$2", :_}, :"$1"}, [{:==, :"$2", tags}], [:"$1"]}])
-    |> Enum.reduce(0, fn count, acc -> count + acc end)
+    |> Enum.sum()
   end
 
   def get_metric({tid, _partitions}, id, %Metrics.Sum{}, tags) do
     :ets.select(tid, [{{{id, :"$2", :_}, :"$1"}, [{:==, :"$2", tags}], [:"$1"]}])
-    |> Enum.reduce(0, fn count, acc -> count + acc end)
+    |> Enum.sum()
   end
 
   def get_metric({tid, _partitions}, id, %Metrics.LastValue{}, tags) do
     case :ets.lookup(tid, {id, tags}) do
       [{_key, value}] -> value
-      _ -> nil
+      [] -> nil
     end
   end
 
   def get_metric({tid, _partitions}, id, %Metrics.Distribution{}, tags) do
-    key = {id, tags}
-
-    case :ets.lookup(tid, key) do
+    case :ets.lookup(tid, {id, tags}) do
       [{_key, atomics}] -> Storage.Atomics.values(atomics)
-      _ -> nil
+      [] -> nil
     end
   end
 
   @impl true
   def prune_tags({tid, _partitions}, patterns) do
     match_spec =
-      patterns
-      |> Enum.flat_map(fn pattern ->
-        counter_or_sum_key = {:_, pattern, :_}
-        dist_or_last_value_key = {:_, pattern}
-
+      Enum.flat_map(patterns, fn pattern ->
         [
-          {
-            {counter_or_sum_key, :_},
-            [],
-            [true]
-          },
-          {
-            {dist_or_last_value_key, :_},
-            [],
-            [true]
-          }
+          {{{:_, pattern, :_}, :_}, [], [true]},
+          {{{:_, pattern}, :_}, [], [true]}
         ]
       end)
 
@@ -134,21 +121,12 @@ defmodule Realtime.Monitoring.Peep.Partitioned do
     :ok
   end
 
-  defp group_metrics([], _itm, acc) do
-    acc
-  end
-
-  defp group_metrics([metric | rest], itm, acc) do
-    acc2 = group_metric(metric, itm, acc)
-    group_metrics(rest, itm, acc2)
-  end
-
   defp group_metric({{id, tags, _}, value}, itm, acc) do
     %{^id => metric} = itm
     update_in(acc, [Access.key(metric, %{}), Access.key(tags, 0)], &(&1 + value))
   end
 
-  defp group_metric({{id, tags}, %Storage.Atomics{} = atomics}, itm, acc) do
+  defp group_metric({{id, tags}, Storage.Atomics.atomic() = atomics}, itm, acc) do
     %{^id => metric} = itm
     put_in(acc, [Access.key(metric, %{}), Access.key(tags)], Storage.Atomics.values(atomics))
   end
