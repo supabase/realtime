@@ -13,7 +13,15 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   alias Realtime.Api.Tenant
   alias Realtime.Database
 
-  @pg_delta_filter ~s({"and": [{"*/schema": "realtime"}, {"not": {"table/is_partition": true}}]})
+  @pg_delta_filter ~s"""
+  {
+    "and": [
+      {"*/schema": "realtime"},
+      {"not": {"table/is_partition": true}},
+      {"not": {"and": [{"objectType": "rls_policy"}, {"operation": "drop"}]}}
+    ]
+  }
+  """
   @application_name "realtime_dashboard_tenant_migrations"
   @query_timeout 30_000
   @schema_migrations_query "SELECT version, inserted_at FROM realtime.schema_migrations ORDER BY version DESC"
