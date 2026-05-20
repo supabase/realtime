@@ -49,9 +49,6 @@ settings = %{settings | max_restarts: 0, ssl: false}
 publication = "supabase_realtime"
 
 Postgrex.transaction(tenant_conn, fn db_conn ->
-  Postgrex.query!(db_conn, "DROP SCHEMA IF EXISTS realtime CASCADE", [])
-  Postgrex.query!(db_conn, "CREATE SCHEMA IF NOT EXISTS realtime", [])
-
   [
     "drop publication if exists #{publication}",
     "drop table if exists public.test_tenant;",
