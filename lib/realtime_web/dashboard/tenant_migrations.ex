@@ -298,6 +298,10 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     ])
   end
 
+  @doc false
+  # Used for debugging
+  def pg_delta_filter, do: @pg_delta_filter
+
   defp run_pg_delta(%Database{} = settings) do
     case System.find_executable("pgdelta") do
       nil ->
@@ -314,7 +318,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
           "--target",
           baseline,
           "--filter",
-          @pg_delta_filter,
+          pg_delta_filter(),
           "--format",
           "sql"
         ]
