@@ -25,9 +25,15 @@ defmodule Realtime.GenRpc do
   @spec abcast([node], atom, any, keyword()) :: :ok
   def abcast(nodes, name, msg, opts) when is_list(nodes) and is_atom(name) and is_list(opts) do
     key = Keyword.get(opts, :key, nil)
-    nodes = cast_rpc_nodes(nodes, key)
 
-    :gen_rpc.abcast(nodes, name, msg)
+    {local, remote} = Enum.split_with(nodes, &(&1 == node()))
+
+    if local != [], do: send({name, node()}, msg)
+
+    remote
+    |> cast_rpc_nodes(key)
+    |> :gen_rpc.abcast(name, msg)
+
     :ok
   end
 
