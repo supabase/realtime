@@ -218,7 +218,7 @@ defmodule Realtime.GenRpcTest do
           Process.sleep(100)
         end)
 
-      assert log =~ "[error] event=connect_to_remote_server"
+      assert log =~ "failed_to_connect_server"
 
       refute_receive _any
     end
@@ -265,7 +265,7 @@ defmodule Realtime.GenRpcTest do
           Process.sleep(100)
         end)
 
-      assert log =~ "[error] event=connect_to_remote_server"
+      assert log =~ "failed_to_connect_server"
 
       refute_receive _any
     end
@@ -294,7 +294,7 @@ defmodule Realtime.GenRpcTest do
           Process.sleep(100)
         end)
 
-      assert log =~ "[error] event=connect_to_remote_server"
+      assert log =~ "failed_to_connect_server"
 
       assert_receive :sent
       refute_receive _any
