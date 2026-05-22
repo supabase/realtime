@@ -40,8 +40,12 @@ defmodule RealtimeWeb.JwtVerification do
   def verify(token, jwt_secret, jwt_jwks) when is_binary(token) do
     with {:ok, _claims} <- check_claims_format(token),
          {:ok, header} <- check_header_format(token),
-         {:ok, signer} <- generate_signer(header, jwt_secret, jwt_jwks) do
-      JwtAuthToken.verify_and_validate(token, signer)
+         {:ok, signer} <- generate_signer(header, jwt_secret, jwt_jwks),
+         {:ok, claims} <- JwtAuthToken.verify_and_validate(token, signer) do
+      # JWT spec allows exp and iat to be a decimal number. This is uncommon
+      # though, so most implementation round them to integer to avoid unexpected
+      # type errors. So, we round it before returning.
+      {:ok, round_decimal_numbers(claims)}
     else
       {:error, _e} = error -> error
     end
@@ -61,6 +65,19 @@ defmodule RealtimeWeb.JwtVerification do
     case Joken.peek_header(token) do
       {:ok, header} when is_map(header) -> {:ok, header}
       _error -> {:error, :expected_header_map}
+    end
+  end
+
+  defp round_decimal_numbers(claims) do
+    claims
+    |> round_claim("exp")
+    |> round_claim("iat")
+  end
+
+  defp round_claim(claims, key) do
+    case Map.get(claims, key) do
+      value when is_number(value) -> Map.put(claims, key, round(value))
+      _ -> claims
     end
   end
 
