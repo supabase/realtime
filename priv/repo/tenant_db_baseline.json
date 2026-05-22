@@ -449,26 +449,6 @@
         "procedure:extensions.uuid_ns_x500()"
       ]
     },
-    "extension:pg_graphql": {
-      "name": "pg_graphql",
-      "schema": "graphql",
-      "relocatable": false,
-      "version": "1.5.11",
-      "owner": "supabase_admin",
-      "comment": "pg_graphql: GraphQL support",
-      "members": [
-        "eventTrigger:graphql_watch_ddl",
-        "eventTrigger:graphql_watch_drop",
-        "procedure:graphql._internal_resolve(text,jsonb,text,jsonb)",
-        "procedure:graphql.comment_directive(text)",
-        "procedure:graphql.exception(text)",
-        "procedure:graphql.get_schema_version()",
-        "procedure:graphql.increment_schema_version()",
-        "procedure:graphql.resolve(text,jsonb,text,jsonb)",
-        "procedure:graphql_public.graphql(text,text,jsonb,jsonb)",
-        "sequence:graphql.seq_schema_version"
-      ]
-    },
     "extension:pg_stat_statements": {
       "name": "pg_stat_statements",
       "schema": "extensions",
@@ -784,10 +764,10 @@
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": null,
-      "source_code": "\nDECLARE\n    func_is_graphql_resolve bool;\nBEGIN\n    func_is_graphql_resolve = (\n        SELECT n.proname = 'resolve'\n        FROM pg_event_trigger_ddl_commands() AS ev\n        LEFT JOIN pg_catalog.pg_proc AS n\n        ON ev.objid = n.oid\n    );\n\n    IF func_is_graphql_resolve\n    THEN\n        -- Update public wrapper to pass all arguments through to the pg_graphql resolve func\n        DROP FUNCTION IF EXISTS graphql_public.graphql;\n        create or replace function graphql_public.graphql(\n            \"operationName\" text default null,\n            query text default null,\n            variables jsonb default null,\n            extensions jsonb default null\n        )\n            returns jsonb\n            language sql\n        as $$\n            select graphql.resolve(\n                query := query,\n                variables := coalesce(variables, '{}'),\n                \"operationName\" := \"operationName\",\n                extensions := extensions\n            );\n        $$;\n\n        -- This hook executes when `graphql.resolve` is created. That is not necessarily the last\n        -- function in the extension so we need to grant permissions on existing entities AND\n        -- update default permissions to any others that are created after `graphql.resolve`\n        grant usage on schema graphql to postgres, anon, authenticated, service_role;\n        grant select on all tables in schema graphql to postgres, anon, authenticated, service_role;\n        grant execute on all functions in schema graphql to postgres, anon, authenticated, service_role;\n        grant all on all sequences in schema graphql to postgres, anon, authenticated, service_role;\n        alter default privileges in schema graphql grant all on tables to postgres, anon, authenticated, service_role;\n        alter default privileges in schema graphql grant all on functions to postgres, anon, authenticated, service_role;\n        alter default privileges in schema graphql grant all on sequences to postgres, anon, authenticated, service_role;\n\n        -- Allow postgres role to allow granting usage on graphql and graphql_public schemas to custom roles\n        grant usage on schema graphql_public to postgres with grant option;\n        grant usage on schema graphql to postgres with grant option;\n    END IF;\n\nEND;\n",
+      "source_code": "\nbegin\n    if not exists (\n        select 1\n        from pg_event_trigger_ddl_commands() ev\n        join pg_catalog.pg_extension e on ev.objid = e.oid\n        where e.extname = 'pg_graphql'\n    ) then\n        return;\n    end if;\n\n    drop function if exists graphql_public.graphql;\n    create or replace function graphql_public.graphql(\n        \"operationName\" text default null,\n        query text default null,\n        variables jsonb default null,\n        extensions jsonb default null\n    )\n        returns jsonb\n        language sql\n    as $$\n        select graphql.resolve(\n            query := query,\n            variables := coalesce(variables, '{}'),\n            \"operationName\" := \"operationName\",\n            extensions := extensions\n        );\n    $$;\n\n    -- Attach the wrapper to the extension so DROP EXTENSION cascades to it,\n    -- which in turn triggers set_graphql_placeholder to reinstall the \"not enabled\" stub.\n    alter extension pg_graphql add function graphql_public.graphql(text, text, jsonb, jsonb);\n\n    grant usage on schema graphql to postgres, anon, authenticated, service_role;\n    grant execute on function graphql.resolve to postgres, anon, authenticated, service_role;\n    grant usage on schema graphql to postgres with grant option;\n    grant usage on schema graphql_public to postgres with grant option;\nend;\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION extensions.grant_pg_graphql_access()\n RETURNS event_trigger\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n    func_is_graphql_resolve bool;\nBEGIN\n    func_is_graphql_resolve = (\n        SELECT n.proname = 'resolve'\n        FROM pg_event_trigger_ddl_commands() AS ev\n        LEFT JOIN pg_catalog.pg_proc AS n\n        ON ev.objid = n.oid\n    );\n\n    IF func_is_graphql_resolve\n    THEN\n        -- Update public wrapper to pass all arguments through to the pg_graphql resolve func\n        DROP FUNCTION IF EXISTS graphql_public.graphql;\n        create or replace function graphql_public.graphql(\n            \"operationName\" text default null,\n            query text default null,\n            variables jsonb default null,\n            extensions jsonb default null\n        )\n            returns jsonb\n            language sql\n        as $$\n            select graphql.resolve(\n                query := query,\n                variables := coalesce(variables, '{}'),\n                \"operationName\" := \"operationName\",\n                extensions := extensions\n            );\n        $$;\n\n        -- This hook executes when `graphql.resolve` is created. That is not necessarily the last\n        -- function in the extension so we need to grant permissions on existing entities AND\n        -- update default permissions to any others that are created after `graphql.resolve`\n        grant usage on schema graphql to postgres, anon, authenticated, service_role;\n        grant select on all tables in schema graphql to postgres, anon, authenticated, service_role;\n        grant execute on all functions in schema graphql to postgres, anon, authenticated, service_role;\n        grant all on all sequences in schema graphql to postgres, anon, authenticated, service_role;\n        alter default privileges in schema graphql grant all on tables to postgres, anon, authenticated, service_role;\n        alter default privileges in schema graphql grant all on functions to postgres, anon, authenticated, service_role;\n        alter default privileges in schema graphql grant all on sequences to postgres, anon, authenticated, service_role;\n\n        -- Allow postgres role to allow granting usage on graphql and graphql_public schemas to custom roles\n        grant usage on schema graphql_public to postgres with grant option;\n        grant usage on schema graphql to postgres with grant option;\n    END IF;\n\nEND;\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION extensions.grant_pg_graphql_access()\n RETURNS event_trigger\n LANGUAGE plpgsql\nAS $function$\nbegin\n    if not exists (\n        select 1\n        from pg_event_trigger_ddl_commands() ev\n        join pg_catalog.pg_extension e on ev.objid = e.oid\n        where e.extname = 'pg_graphql'\n    ) then\n        return;\n    end if;\n\n    drop function if exists graphql_public.graphql;\n    create or replace function graphql_public.graphql(\n        \"operationName\" text default null,\n        query text default null,\n        variables jsonb default null,\n        extensions jsonb default null\n    )\n        returns jsonb\n        language sql\n    as $$\n        select graphql.resolve(\n            query := query,\n            variables := coalesce(variables, '{}'),\n            \"operationName\" := \"operationName\",\n            extensions := extensions\n        );\n    $$;\n\n    -- Attach the wrapper to the extension so DROP EXTENSION cascades to it,\n    -- which in turn triggers set_graphql_placeholder to reinstall the \"not enabled\" stub.\n    alter extension pg_graphql add function graphql_public.graphql(text, text, jsonb, jsonb);\n\n    grant usage on schema graphql to postgres, anon, authenticated, service_role;\n    grant execute on function graphql.resolve to postgres, anon, authenticated, service_role;\n    grant usage on schema graphql to postgres with grant option;\n    grant usage on schema graphql_public to postgres with grant option;\nend;\n$function$\n",
       "config": null,
       "owner": "supabase_admin",
       "comment": "Grants access to pg_graphql",
@@ -998,6 +978,79 @@
           "grantee": "postgres",
           "privilege": "EXECUTE",
           "grantable": true
+        }
+      ],
+      "security_labels": []
+    },
+    "procedure:graphql_public.graphql(text,text,jsonb,jsonb)": {
+      "schema": "graphql_public",
+      "name": "graphql",
+      "kind": "f",
+      "return_type": "jsonb",
+      "return_type_schema": "pg_catalog",
+      "language": "plpgsql",
+      "security_definer": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "execution_cost": 100,
+      "result_rows": 0,
+      "is_strict": false,
+      "leakproof": false,
+      "returns_set": false,
+      "argument_count": 4,
+      "argument_default_count": 4,
+      "argument_names": [
+        "\"operationName\"",
+        "query",
+        "variables",
+        "extensions"
+      ],
+      "argument_types": [
+        "text",
+        "text",
+        "jsonb",
+        "jsonb"
+      ],
+      "all_argument_types": [],
+      "argument_modes": null,
+      "argument_defaults": "NULL::text, NULL::text, NULL::jsonb, NULL::jsonb",
+      "source_code": "\n            DECLARE\n                server_version float;\n            BEGIN\n                server_version = (SELECT (SPLIT_PART((select version()), ' ', 2))::float);\n\n                IF server_version >= 14 THEN\n                    RETURN jsonb_build_object(\n                        'errors', jsonb_build_array(\n                            jsonb_build_object(\n                                'message', 'pg_graphql extension is not enabled.'\n                            )\n                        )\n                    );\n                ELSE\n                    RETURN jsonb_build_object(\n                        'errors', jsonb_build_array(\n                            jsonb_build_object(\n                                'message', 'pg_graphql is only available on projects running Postgres 14 onwards.'\n                            )\n                        )\n                    );\n                END IF;\n            END;\n        ",
+      "binary_path": null,
+      "sql_body": null,
+      "definition": "CREATE OR REPLACE FUNCTION graphql_public.graphql(\"operationName\" text DEFAULT NULL::text, query text DEFAULT NULL::text, variables jsonb DEFAULT NULL::jsonb, extensions jsonb DEFAULT NULL::jsonb)\n RETURNS jsonb\n LANGUAGE plpgsql\nAS $function$\n            DECLARE\n                server_version float;\n            BEGIN\n                server_version = (SELECT (SPLIT_PART((select version()), ' ', 2))::float);\n\n                IF server_version >= 14 THEN\n                    RETURN jsonb_build_object(\n                        'errors', jsonb_build_array(\n                            jsonb_build_object(\n                                'message', 'pg_graphql extension is not enabled.'\n                            )\n                        )\n                    );\n                ELSE\n                    RETURN jsonb_build_object(\n                        'errors', jsonb_build_array(\n                            jsonb_build_object(\n                                'message', 'pg_graphql is only available on projects running Postgres 14 onwards.'\n                            )\n                        )\n                    );\n                END IF;\n            END;\n        $function$\n",
+      "config": null,
+      "owner": "supabase_admin",
+      "comment": null,
+      "privileges": [
+        {
+          "grantee": "PUBLIC",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "anon",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "authenticated",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "service_role",
+          "privilege": "EXECUTE",
+          "grantable": false
         }
       ],
       "security_labels": []
@@ -3102,7 +3155,7 @@
       "connection_limit": -1,
       "can_bypass_rls": false,
       "config": [
-        "session_preload_libraries=safeupdate",
+        "session_preload_libraries=supautils, safeupdate",
         "statement_timeout=8s",
         "lock_timeout=8s"
       ],
@@ -5998,6 +6051,154 @@
       ],
       "security_labels": []
     },
+    "role:supabase_privileged_role": {
+      "name": "supabase_privileged_role",
+      "is_superuser": false,
+      "can_inherit": true,
+      "can_create_roles": false,
+      "can_create_databases": false,
+      "can_login": false,
+      "can_replicate": false,
+      "connection_limit": -1,
+      "can_bypass_rls": false,
+      "config": null,
+      "comment": null,
+      "members": [
+        {
+          "member": "supabase_etl_admin",
+          "grantor": "supabase_admin",
+          "admin_option": false,
+          "inherit_option": true,
+          "set_option": true
+        },
+        {
+          "member": "postgres",
+          "grantor": "supabase_admin",
+          "admin_option": false,
+          "inherit_option": true,
+          "set_option": true
+        }
+      ],
+      "default_privileges": [
+        {
+          "in_schema": null,
+          "objtype": "S",
+          "grantee": "supabase_privileged_role",
+          "privileges": [
+            {
+              "privilege": "USAGE",
+              "grantable": false
+            }
+          ],
+          "is_implicit": true
+        },
+        {
+          "in_schema": null,
+          "objtype": "T",
+          "grantee": "PUBLIC",
+          "privileges": [
+            {
+              "privilege": "USAGE",
+              "grantable": false
+            }
+          ],
+          "is_implicit": true
+        },
+        {
+          "in_schema": null,
+          "objtype": "T",
+          "grantee": "supabase_privileged_role",
+          "privileges": [
+            {
+              "privilege": "USAGE",
+              "grantable": false
+            }
+          ],
+          "is_implicit": true
+        },
+        {
+          "in_schema": null,
+          "objtype": "f",
+          "grantee": "PUBLIC",
+          "privileges": [
+            {
+              "privilege": "EXECUTE",
+              "grantable": false
+            }
+          ],
+          "is_implicit": true
+        },
+        {
+          "in_schema": null,
+          "objtype": "f",
+          "grantee": "supabase_privileged_role",
+          "privileges": [
+            {
+              "privilege": "EXECUTE",
+              "grantable": false
+            }
+          ],
+          "is_implicit": true
+        },
+        {
+          "in_schema": null,
+          "objtype": "n",
+          "grantee": "supabase_privileged_role",
+          "privileges": [
+            {
+              "privilege": "CREATE",
+              "grantable": false
+            },
+            {
+              "privilege": "USAGE",
+              "grantable": false
+            }
+          ],
+          "is_implicit": true
+        },
+        {
+          "in_schema": null,
+          "objtype": "r",
+          "grantee": "supabase_privileged_role",
+          "privileges": [
+            {
+              "privilege": "DELETE",
+              "grantable": false
+            },
+            {
+              "privilege": "INSERT",
+              "grantable": false
+            },
+            {
+              "privilege": "MAINTAIN",
+              "grantable": false
+            },
+            {
+              "privilege": "REFERENCES",
+              "grantable": false
+            },
+            {
+              "privilege": "SELECT",
+              "grantable": false
+            },
+            {
+              "privilege": "TRIGGER",
+              "grantable": false
+            },
+            {
+              "privilege": "TRUNCATE",
+              "grantable": false
+            },
+            {
+              "privilege": "UPDATE",
+              "grantable": false
+            }
+          ],
+          "is_implicit": true
+        }
+      ],
+      "security_labels": []
+    },
     "role:supabase_read_only_user": {
       "name": "supabase_read_only_user",
       "is_superuser": false,
@@ -6504,154 +6705,6 @@
           "in_schema": null,
           "objtype": "r",
           "grantee": "supabase_storage_admin",
-          "privileges": [
-            {
-              "privilege": "DELETE",
-              "grantable": false
-            },
-            {
-              "privilege": "INSERT",
-              "grantable": false
-            },
-            {
-              "privilege": "MAINTAIN",
-              "grantable": false
-            },
-            {
-              "privilege": "REFERENCES",
-              "grantable": false
-            },
-            {
-              "privilege": "SELECT",
-              "grantable": false
-            },
-            {
-              "privilege": "TRIGGER",
-              "grantable": false
-            },
-            {
-              "privilege": "TRUNCATE",
-              "grantable": false
-            },
-            {
-              "privilege": "UPDATE",
-              "grantable": false
-            }
-          ],
-          "is_implicit": true
-        }
-      ],
-      "security_labels": []
-    },
-    "role:supabase_superuser": {
-      "name": "supabase_superuser",
-      "is_superuser": false,
-      "can_inherit": true,
-      "can_create_roles": false,
-      "can_create_databases": false,
-      "can_login": false,
-      "can_replicate": false,
-      "connection_limit": -1,
-      "can_bypass_rls": false,
-      "config": null,
-      "comment": null,
-      "members": [
-        {
-          "member": "supabase_etl_admin",
-          "grantor": "supabase_admin",
-          "admin_option": false,
-          "inherit_option": true,
-          "set_option": true
-        },
-        {
-          "member": "postgres",
-          "grantor": "supabase_admin",
-          "admin_option": false,
-          "inherit_option": true,
-          "set_option": true
-        }
-      ],
-      "default_privileges": [
-        {
-          "in_schema": null,
-          "objtype": "S",
-          "grantee": "supabase_superuser",
-          "privileges": [
-            {
-              "privilege": "USAGE",
-              "grantable": false
-            }
-          ],
-          "is_implicit": true
-        },
-        {
-          "in_schema": null,
-          "objtype": "T",
-          "grantee": "PUBLIC",
-          "privileges": [
-            {
-              "privilege": "USAGE",
-              "grantable": false
-            }
-          ],
-          "is_implicit": true
-        },
-        {
-          "in_schema": null,
-          "objtype": "T",
-          "grantee": "supabase_superuser",
-          "privileges": [
-            {
-              "privilege": "USAGE",
-              "grantable": false
-            }
-          ],
-          "is_implicit": true
-        },
-        {
-          "in_schema": null,
-          "objtype": "f",
-          "grantee": "PUBLIC",
-          "privileges": [
-            {
-              "privilege": "EXECUTE",
-              "grantable": false
-            }
-          ],
-          "is_implicit": true
-        },
-        {
-          "in_schema": null,
-          "objtype": "f",
-          "grantee": "supabase_superuser",
-          "privileges": [
-            {
-              "privilege": "EXECUTE",
-              "grantable": false
-            }
-          ],
-          "is_implicit": true
-        },
-        {
-          "in_schema": null,
-          "objtype": "n",
-          "grantee": "supabase_superuser",
-          "privileges": [
-            {
-              "privilege": "CREATE",
-              "grantable": false
-            },
-            {
-              "privilege": "USAGE",
-              "grantable": false
-            }
-          ],
-          "is_implicit": true
-        },
-        {
-          "in_schema": null,
-          "objtype": "r",
-          "grantee": "supabase_superuser",
           "privileges": [
             {
               "privilege": "DELETE",
@@ -10520,7 +10573,7 @@
       "function_name": "grant_pg_graphql_access",
       "enabled": "O",
       "tags": [
-        "CREATE FUNCTION"
+        "CREATE EXTENSION"
       ],
       "owner": "supabase_admin",
       "comment": null,
@@ -10837,6 +10890,66 @@
     },
     {
       "dependent_stable_id": "acl:procedure:extensions.set_graphql_placeholder()::grantee:supabase_admin",
+      "referenced_stable_id": "role:supabase_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:anon",
+      "referenced_stable_id": "procedure:graphql_public.graphql(text,text,jsonb,jsonb)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:anon",
+      "referenced_stable_id": "role:anon",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:authenticated",
+      "referenced_stable_id": "procedure:graphql_public.graphql(text,text,jsonb,jsonb)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:authenticated",
+      "referenced_stable_id": "role:authenticated",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:postgres",
+      "referenced_stable_id": "procedure:graphql_public.graphql(text,text,jsonb,jsonb)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:postgres",
+      "referenced_stable_id": "role:postgres",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:PUBLIC",
+      "referenced_stable_id": "procedure:graphql_public.graphql(text,text,jsonb,jsonb)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:PUBLIC",
+      "referenced_stable_id": "role:PUBLIC",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:service_role",
+      "referenced_stable_id": "procedure:graphql_public.graphql(text,text,jsonb,jsonb)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:service_role",
+      "referenced_stable_id": "role:service_role",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:supabase_admin",
+      "referenced_stable_id": "procedure:graphql_public.graphql(text,text,jsonb,jsonb)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:graphql_public.graphql(text,text,jsonb,jsonb)::grantee:supabase_admin",
       "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
     },
@@ -12671,11 +12784,6 @@
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "comment:extension:pg_graphql",
-      "referenced_stable_id": "extension:pg_graphql",
-      "deptype": "a"
-    },
-    {
       "dependent_stable_id": "comment:extension:pg_stat_statements",
       "referenced_stable_id": "extension:pg_stat_statements",
       "deptype": "a"
@@ -14026,26 +14134,6 @@
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "eventTrigger:graphql_watch_ddl",
-      "referenced_stable_id": "procedure:graphql.increment_schema_version()",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "eventTrigger:graphql_watch_ddl",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "eventTrigger:graphql_watch_drop",
-      "referenced_stable_id": "procedure:graphql.increment_schema_version()",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "eventTrigger:graphql_watch_drop",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "eventTrigger:issue_graphql_placeholder",
       "referenced_stable_id": "procedure:extensions.set_graphql_placeholder()",
       "deptype": "n"
@@ -14113,16 +14201,6 @@
     {
       "dependent_stable_id": "extension:\"uuid-ossp\"",
       "referenced_stable_id": "schema:extensions",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "extension:pg_graphql",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "extension:pg_graphql",
-      "referenced_stable_id": "schema:graphql",
       "deptype": "n"
     },
     {
@@ -14626,6 +14704,26 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "membership:supabase_privileged_role->postgres",
+      "referenced_stable_id": "role:postgres",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "membership:supabase_privileged_role->postgres",
+      "referenced_stable_id": "role:supabase_privileged_role",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "membership:supabase_privileged_role->supabase_etl_admin",
+      "referenced_stable_id": "role:supabase_etl_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "membership:supabase_privileged_role->supabase_etl_admin",
+      "referenced_stable_id": "role:supabase_privileged_role",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "membership:supabase_realtime_admin->postgres",
       "referenced_stable_id": "role:postgres",
       "deptype": "n"
@@ -14636,26 +14734,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "membership:supabase_superuser->postgres",
-      "referenced_stable_id": "role:postgres",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "membership:supabase_superuser->postgres",
-      "referenced_stable_id": "role:supabase_superuser",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "membership:supabase_superuser->supabase_etl_admin",
-      "referenced_stable_id": "role:supabase_etl_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "membership:supabase_superuser->supabase_etl_admin",
-      "referenced_stable_id": "role:supabase_superuser",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "procedure:auth.email()",
       "referenced_stable_id": "role:supabase_auth_admin",
       "deptype": "n"
@@ -15263,6 +15341,11 @@
     {
       "dependent_stable_id": "procedure:extensions.uuid_ns_x500()",
       "referenced_stable_id": "schema:extensions",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "procedure:graphql_public.graphql(text,text,jsonb,jsonb)",
+      "referenced_stable_id": "language:plpgsql",
       "deptype": "n"
     },
     {
@@ -15273,81 +15356,6 @@
     {
       "dependent_stable_id": "procedure:graphql_public.graphql(text,text,jsonb,jsonb)",
       "referenced_stable_id": "schema:graphql_public",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql._internal_resolve(text,jsonb,text,jsonb)",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql._internal_resolve(text,jsonb,text,jsonb)",
-      "referenced_stable_id": "schema:graphql",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.comment_directive(text)",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.comment_directive(text)",
-      "referenced_stable_id": "schema:graphql",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.exception(text)",
-      "referenced_stable_id": "language:plpgsql",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.exception(text)",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.exception(text)",
-      "referenced_stable_id": "schema:graphql",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.get_schema_version()",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.get_schema_version()",
-      "referenced_stable_id": "schema:graphql",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.increment_schema_version()",
-      "referenced_stable_id": "language:plpgsql",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.increment_schema_version()",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.increment_schema_version()",
-      "referenced_stable_id": "schema:graphql",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.resolve(text,jsonb,text,jsonb)",
-      "referenced_stable_id": "language:plpgsql",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.resolve(text,jsonb,text,jsonb)",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "procedure:graphql.resolve(text,jsonb,text,jsonb)",
-      "referenced_stable_id": "schema:graphql",
       "deptype": "n"
     },
     {
@@ -15736,16 +15744,6 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "sequence:graphql.seq_schema_version",
-      "referenced_stable_id": "role:supabase_admin",
-      "deptype": "n"
-    },
-    {
-      "dependent_stable_id": "sequence:graphql.seq_schema_version",
-      "referenced_stable_id": "schema:graphql",
-      "deptype": "n"
-    },
-    {
       "dependent_stable_id": "sequence:public.test_tenant_id_seq",
       "referenced_stable_id": "column:public.test_tenant.id",
       "deptype": "a"
@@ -16031,22 +16029,22 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16851",
+      "dependent_stable_id": "unknown:pg_class.16853",
       "referenced_stable_id": "column:realtime.messages.extension",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16851",
+      "dependent_stable_id": "unknown:pg_class.16853",
       "referenced_stable_id": "column:realtime.messages.inserted_at",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16851",
+      "dependent_stable_id": "unknown:pg_class.16853",
       "referenced_stable_id": "column:realtime.messages.private",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16851",
+      "dependent_stable_id": "unknown:pg_class.16853",
       "referenced_stable_id": "column:realtime.messages.topic",
       "deptype": "a"
     },
