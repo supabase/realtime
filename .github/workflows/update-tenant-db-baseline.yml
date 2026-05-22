@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  POSTGRES_IMAGE: supabase/postgres:17.6.1.074
+  POSTGRES_IMAGE: supabase/postgres:17.6.1.127
 
 jobs:
   update-tenant-db-baseline:

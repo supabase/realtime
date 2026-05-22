@@ -1,6 +1,6 @@
 services:
   db:
-    image: ${POSTGRES_IMAGE:-supabase/postgres:17.6.1.074}
+    image: ${POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}
     ports:
       - "5432:5432"
     volumes:
@@ -16,7 +16,7 @@ services:
       retries: 5
 
   tenant_db:
-    image: ${POSTGRES_IMAGE:-supabase/postgres:17.6.1.074}
+    image: ${POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}
     ports:
       - "5433:5432"
     volumes:

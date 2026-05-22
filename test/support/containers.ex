@@ -7,7 +7,7 @@ defmodule Containers do
 
   use GenServer
 
-  defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.074")
+  defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.127")
 
   # Pull image if not available
   def pull do
