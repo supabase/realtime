@@ -1,42 +1,46 @@
 name: Update Tenant DB Baseline
 
 on:
-  push:
-    branches:
-      - main
+  pull_request:
     paths:
-      - "priv/repo/migrations/**"
+      - "lib/realtime/tenants/repo/migrations/**"
+      - "lib/realtime/tenants/migrations.ex"
       - "lib/mix/tasks/realtime.export_tenant_db_baseline.ex"
       - "mix.lock"
       - "mise.toml"
       - "compose.dbs.yml"
       - ".github/workflows/update-tenant-db-baseline.yml"
-  workflow_dispatch:
 
 permissions:
   contents: read
   pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 env:
-  POSTGRES_IMAGE: supabase/postgres:17.6.1.074
+  POSTGRES_IMAGE: supabase/postgres:17.6.1.127
 
 jobs:
   update-tenant-db-baseline:
-    name: Regenerate baseline and open PR if stale
+    name: Maybe regenerate tenant baseline
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    if: github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.GH_AUTOFIX_APP_ID }}
+          private-key: ${{ secrets.GH_AUTOFIX_PRIVATE_KEY }}
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.ref_name }}
-          # peter-evans/create-pull-request uses its own app token; persisting
-          # the default GITHUB_TOKEN here causes a duplicate Authorization
-          # header on git pushes -> HTTP 400.
-          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup mise
         uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
@@ -90,27 +94,13 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Generate GitHub App token
+      - name: Commit and push baseline
         if: steps.check-changes.outputs.changed == 'true'
-        id: app-token
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
-        with:
-          app-id: ${{ secrets.GH_AUTOFIX_APP_ID }}
-          private-key: ${{ secrets.GH_AUTOFIX_PRIVATE_KEY }}
-
-      - name: Create pull request
-        if: steps.check-changes.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6.1.0
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-          commit-message: "chore: update tenant_db_baseline.json"
-          title: "chore: update tenant_db_baseline.json"
-          body: |
-            Update pg-delta tenant DB baseline file `priv/repo/tenant_db_baseline.json`.
-
-            Triggered by ${{ github.event_name }} on `${{ github.ref_name }}` @ ${{ github.sha }}.
-
-            This PR was created automatically.
-          branch: chore/update-tenant-db-baseline
-          base: main
-          add-paths: priv/repo/tenant_db_baseline.json
+        env:
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add priv/repo/tenant_db_baseline.json
+          git commit -m "chore: update tenant_db_baseline.json"
+          git push origin "HEAD:$PR_HEAD_REF"

@@ -9,7 +9,7 @@ defmodule Containers do
 
   @setup_init Path.expand("../../dev/postgres/01-realtime-setup.sql", __DIR__)
 
-  defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.074")
+  defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.127")
 
   # Pull image if not available
   def pull do
@@ -312,6 +312,8 @@ defmodule Containers do
   end
 
   defp docker_run!(name, port) do
+    initdb = Path.expand("../../dev/postgres/zz-supabase-schema.sql", __DIR__)
+
     {_, 0} =
       System.cmd("docker", [
         "run",
@@ -323,6 +325,8 @@ defmodule Containers do
         "POSTGRES_HOST=/var/run/postgresql",
         "-e",
         "POSTGRES_PASSWORD=postgres",
+        "-v",
+        "#{initdb}:/docker-entrypoint-initdb.d/zz-supabase-schema.sql",
         "-p",
         "#{port}:5432",
         "-v",
