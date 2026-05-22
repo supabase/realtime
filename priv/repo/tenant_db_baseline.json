@@ -6693,6 +6693,24 @@
     }
   },
   "schemas": {
+    "schema:_realtime": {
+      "name": "_realtime",
+      "owner": "supabase_admin",
+      "comment": null,
+      "privileges": [
+        {
+          "grantee": "supabase_admin",
+          "privilege": "CREATE",
+          "grantable": false
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "USAGE",
+          "grantable": false
+        }
+      ],
+      "security_labels": []
+    },
     "schema:auth": {
       "name": "auth",
       "owner": "supabase_admin",
@@ -15650,6 +15668,11 @@
     {
       "dependent_stable_id": "rule:vault.decrypted_secrets.\"_RETURN\"",
       "referenced_stable_id": "procedure:vault._crypto_aead_det_decrypt(bytea,bytea,bigint,bytea,bytea)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "schema:_realtime",
+      "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
     },
     {

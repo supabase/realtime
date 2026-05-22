@@ -292,6 +292,8 @@ defmodule Containers do
   end
 
   defp docker_run!(name, port) do
+    initdb = Path.expand("../../dev/postgres", __DIR__)
+
     {_, 0} =
       System.cmd("docker", [
         "run",
@@ -303,6 +305,8 @@ defmodule Containers do
         "POSTGRES_HOST=/var/run/postgresql",
         "-e",
         "POSTGRES_PASSWORD=postgres",
+        "-v",
+        "#{initdb}:/docker-entrypoint-initdb.d",
         "-p",
         "#{port}:5432",
         image(),

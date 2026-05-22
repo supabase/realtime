@@ -39,10 +39,10 @@ jobs:
       fail-fast: false
       matrix:
         partition: [1, 2, 3, 4]
-        postgres: [pg15, pg17]
+        postgres: [pg14, pg17]
         include:
-          - postgres: pg15
-            postgres_image: supabase/postgres:15.14.1.122
+          - postgres: pg14
+            postgres_image: supabase/postgres:14.1.0.85
           - postgres: pg17
             postgres_image: supabase/postgres:17.6.1.074
 

@@ -24,7 +24,7 @@ env:
 
 jobs:
   update-tenant-db-baseline:
-    name: Regenerate baseline and commit to PR if stale
+    name: Maybe regenerate tenant baseline
     runs-on: blacksmith-2vcpu-ubuntu-2404
     if: github.event.pull_request.head.repo.full_name == github.repository
 

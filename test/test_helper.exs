@@ -2,7 +2,22 @@ start_time = :os.system_time(:millisecond)
 
 alias Realtime.Api
 max_cases = String.to_integer(System.get_env("MAX_CASES", "4"))
-ExUnit.start(exclude: [:failing], max_cases: max_cases, capture_log: true)
+
+{:ok, pg_conn} =
+  Postgrex.start_link(
+    hostname: "127.0.0.1",
+    port: 5432,
+    username: "supabase_admin",
+    password: "postgres",
+    database: "postgres"
+  )
+
+%{rows: [[pg_version_num]]} = Postgrex.query!(pg_conn, "SELECT current_setting('server_version_num')::int")
+
+# `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
+exclude = [:failing] ++ if pg_version_num < 140_006, do: [:requires_pg14_6_plus], else: []
+
+ExUnit.start(exclude: exclude, max_cases: max_cases, capture_log: true)
 
 max_cases = ExUnit.configuration()[:max_cases]
 
