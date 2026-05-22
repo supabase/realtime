@@ -3,12 +3,14 @@ start_time = :os.system_time(:millisecond)
 alias Realtime.Api
 max_cases = String.to_integer(System.get_env("MAX_CASES", "4"))
 
+repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
+
 {:ok, pg_conn} =
   Postgrex.start_link(
-    hostname: "127.0.0.1",
-    port: 5432,
-    username: "supabase_admin",
-    password: "postgres",
+    hostname: repo_config[:hostname],
+    port: repo_config[:port] || 5432,
+    username: repo_config[:username],
+    password: repo_config[:password],
     database: "postgres"
   )
 

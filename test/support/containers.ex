@@ -292,7 +292,7 @@ defmodule Containers do
   end
 
   defp docker_run!(name, port) do
-    initdb = Path.expand("../../dev/postgres", __DIR__)
+    initdb = Path.expand("../../dev/postgres/zz-supabase-schema.sql", __DIR__)
 
     {_, 0} =
       System.cmd("docker", [
@@ -306,7 +306,7 @@ defmodule Containers do
         "-e",
         "POSTGRES_PASSWORD=postgres",
         "-v",
-        "#{initdb}:/docker-entrypoint-initdb.d",
+        "#{initdb}:/docker-entrypoint-initdb.d/zz-supabase-schema.sql",
         "-p",
         "#{port}:5432",
         image(),
