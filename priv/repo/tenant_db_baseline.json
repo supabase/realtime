@@ -1816,6 +1816,69 @@
       ],
       "security_labels": []
     },
+    "procedure:realtime.send(bytea,text,text,boolean)": {
+      "schema": "realtime",
+      "name": "send",
+      "kind": "f",
+      "return_type": "void",
+      "return_type_schema": "pg_catalog",
+      "language": "plpgsql",
+      "security_definer": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "execution_cost": 100,
+      "result_rows": 0,
+      "is_strict": false,
+      "leakproof": false,
+      "returns_set": false,
+      "argument_count": 4,
+      "argument_default_count": 1,
+      "argument_names": [
+        "payload",
+        "event",
+        "topic",
+        "private"
+      ],
+      "argument_types": [
+        "bytea",
+        "text",
+        "text",
+        "boolean"
+      ],
+      "all_argument_types": [],
+      "argument_modes": null,
+      "argument_defaults": "true",
+      "source_code": "\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n",
+      "binary_path": null,
+      "sql_body": null,
+      "definition": "CREATE OR REPLACE FUNCTION realtime.send(payload bytea, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
+      "config": null,
+      "owner": "supabase_admin",
+      "comment": null,
+      "privileges": [
+        {
+          "grantee": "PUBLIC",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ],
+      "security_labels": []
+    },
     "procedure:realtime.subscription_check_filters()": {
       "schema": "realtime",
       "name": "subscription_check_filters",
@@ -9502,9 +9565,62 @@
           "default": "gen_random_uuid()",
           "comment": null,
           "security_labels": []
+        },
+        {
+          "name": "binary_payload",
+          "position": 11,
+          "data_type": "bytea",
+          "data_type_str": "bytea",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": false,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": null,
+          "comment": null,
+          "security_labels": []
         }
       ],
       "constraints": [
+        {
+          "name": "messages_payload_exclusive",
+          "constraint_type": "c",
+          "deferrable": false,
+          "initially_deferred": false,
+          "validated": false,
+          "is_local": true,
+          "no_inherit": false,
+          "is_temporal": false,
+          "is_partition_clone": false,
+          "parent_constraint_schema": null,
+          "parent_constraint_name": null,
+          "parent_table_schema": null,
+          "parent_table_name": null,
+          "key_columns": [
+            "payload",
+            "binary_payload"
+          ],
+          "foreign_key_columns": null,
+          "foreign_key_table": null,
+          "foreign_key_schema": null,
+          "foreign_key_table_is_partition": null,
+          "foreign_key_parent_schema": null,
+          "foreign_key_parent_table": null,
+          "foreign_key_effective_schema": null,
+          "foreign_key_effective_table": null,
+          "on_update": null,
+          "on_delete": null,
+          "match_type": null,
+          "check_expression": "((payload IS NULL) OR (binary_payload IS NULL))",
+          "owner": "supabase_realtime_admin",
+          "definition": "CHECK (payload IS NULL OR binary_payload IS NULL) NOT VALID",
+          "comment": null
+        },
         {
           "name": "messages_pkey",
           "constraint_type": "p",
@@ -11534,6 +11650,46 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:dashboard_user",
+      "referenced_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:dashboard_user",
+      "referenced_stable_id": "role:dashboard_user",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:postgres",
+      "referenced_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:postgres",
+      "referenced_stable_id": "role:postgres",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:PUBLIC",
+      "referenced_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:PUBLIC",
+      "referenced_stable_id": "role:PUBLIC",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:supabase_admin",
+      "referenced_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:supabase_admin",
+      "referenced_stable_id": "role:supabase_admin",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "acl:procedure:realtime.send(jsonb,text,text,boolean)::grantee:dashboard_user",
       "referenced_stable_id": "procedure:realtime.send(jsonb,text,text,boolean)",
       "deptype": "n"
@@ -12896,6 +13052,26 @@
     {
       "dependent_stable_id": "constraint:public.test_tenant.test_tenant_pkey",
       "referenced_stable_id": "column:public.test_tenant.id",
+      "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.binary_payload",
+      "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.binary_payload",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.payload",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "a"
     },
     {
@@ -15495,6 +15671,21 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.quote_wal2json(regclass)",
+      "referenced_stable_id": "schema:realtime",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "referenced_stable_id": "language:plpgsql",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "referenced_stable_id": "role:supabase_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
       "referenced_stable_id": "schema:realtime",
       "deptype": "n"
     },

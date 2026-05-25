@@ -175,6 +175,47 @@ defmodule RealtimeWeb.RealtimeChannel.MessageDispatcherTest do
       refute_receive _any
     end
 
+    test "does not dispatch UserBroadcast to fastlane subscribers if they already replayed it" do
+      parent = self()
+
+      subscriber_pid =
+        spawn(fn ->
+          loop = fn loop ->
+            receive do
+              msg ->
+                send(parent, {:subscriber, msg})
+                loop.(loop)
+            end
+          end
+
+          loop.(loop)
+        end)
+
+      from_pid = :erlang.list_to_pid(~c'<0.2.1>')
+      replayed_message_ids = MapSet.new(["abc"])
+
+      subscribers = [
+        {subscriber_pid,
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :info, "tenant123", replayed_message_ids}},
+        {subscriber_pid,
+         {:rc_fastlane, self(), TestSerializer, "realtime:topic", :warning, "tenant123", replayed_message_ids}}
+      ]
+
+      msg = %UserBroadcast{
+        topic: "some:other:topic",
+        user_event: "event",
+        user_payload: Jason.encode!(%{data: "test"}),
+        user_payload_encoding: :json,
+        metadata: %{"id" => "abc"}
+      }
+
+      assert MessageDispatcher.dispatch(subscribers, from_pid, msg) == :ok
+
+      assert Agent.get(TestSerializer, & &1) == 0
+
+      refute_receive _any
+    end
+
     test "payload is not a map" do
       parent = self()
 

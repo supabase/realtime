@@ -274,6 +274,9 @@ defmodule Realtime.Adapters.Postgres.Decoder do
 
         "uuid" ->
           UUID.binary_to_string!(data)
+
+        "bytea" ->
+          data
       end
 
     decode_tuple_data(remainder, columns_remaining - 1, relations, [data | accumulator])
