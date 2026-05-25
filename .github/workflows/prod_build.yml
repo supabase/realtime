@@ -175,6 +175,31 @@ jobs:
             public.ecr.aws/supabase/realtime:v${{ needs.release.outputs.version }}
             ghcr.io/supabase/realtime:v${{ needs.release.outputs.version }}
 
+  notify-platform:
+    needs: [release, merge_manifest]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    if: needs.release.outputs.published == 'true'
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.GH_APP_LIBS_PR_MANAGER_ID }}
+          private-key: ${{ secrets.GH_APP_LIBS_PR_MANAGER_PRIVATE_KEY }}
+          owner: supabase
+
+      - name: Dispatch platform version update
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PLATFORM_REPO: ${{ secrets.PLATFORM_REPO }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          gh api "repos/${PLATFORM_REPO}/dispatches" \
+            --method POST \
+            --field event_type=realtime-release \
+            --field "client_payload[version]=${VERSION}" \
+            --field "client_payload[source]=realtime-release"
+
   update-branch-name:
     needs: [release, docker_x86_release, docker_arm_release, merge_manifest]
     runs-on: blacksmith-4vcpu-ubuntu-2404
