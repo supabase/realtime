@@ -1143,6 +1143,21 @@ defmodule RealtimeWeb.RealtimeChannelTest do
   end
 
   describe "access_token validations" do
+    test "access_token has exp and iat in decimal format", %{tenant: tenant} do
+      api_key = Generators.generate_jwt_token(tenant)
+
+      jwt =
+        Generators.generate_jwt_token(tenant, %{
+          role: "authenticated",
+          exp: System.system_time(:second) + 100.99,
+          iat: System.system_time(:second) - 100.99
+        })
+
+      assert {:ok, socket} = connect(UserSocket, %{}, conn_opts(tenant, api_key))
+
+      assert {:ok, _, _} = subscribe_and_join(socket, "realtime:test", %{"access_token" => jwt})
+    end
+
     test "access_token has expired", %{tenant: tenant} do
       api_key = Generators.generate_jwt_token(tenant)
       jwt = Generators.generate_jwt_token(tenant, %{role: "authenticated", exp: System.system_time(:second) - 1})

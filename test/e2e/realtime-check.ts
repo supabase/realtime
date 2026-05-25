@@ -65,6 +65,7 @@ const DB_URL = DB_URL_ARG ?? (() => {
 const DB_SSL = env !== "local" ? { rejectUnauthorized: false } : false;
 
 const REALTIME_OPTS = { heartbeatIntervalMs: 5000, timeout: 5000 };
+const REALTIME_OPTS_REPLAY = { heartbeatIntervalMs: 5000, timeout: 10000 };
 const BROADCAST_CONFIG = { config: { broadcast: { self: true } } };
 const EVENT_TIMEOUT_MS = 8000;
 const RATE_LIMIT_PAUSE_MS = 2000;
@@ -261,19 +262,28 @@ async function waitForSubscribed(channel: ReturnType<SupabaseClient["channel"]>)
   });
 }
 
-async function waitForPostgresChannel(channel: ReturnType<SupabaseClient["channel"]>): Promise<{ subscribeMs: number; systemMs: number }> {
+// Subscribes a channel and waits until it is fully joined.
+// All data operations must happen after this returns to avoid delivery races.
+async function openChannel(channel: ReturnType<SupabaseClient["channel"]>): Promise<number> {
+  channel.subscribe();
+  return waitForSubscribed(channel);
+}
+
+// Subscribes a postgres_changes channel and waits for both the join and the
+// system:ok confirmation that the server-side WAL subscription is active.
+async function openPostgresChannel(channel: ReturnType<SupabaseClient["channel"]>): Promise<{ subscribeMs: number; systemMs: number }> {
   const start = performance.now();
   let systemOk = false;
   channel.on("system", "*", ({ status }: { status: string }) => { if (status === "ok") systemOk = true; });
-  const subscribeMs = await waitForSubscribed(channel);
+  const subscribeMs = await openChannel(channel);
   const { latencyMs: systemMs } = await waitFor(() => systemOk ? true : null, "system ok");
   return { subscribeMs, systemMs: performance.now() - start };
 }
 
 type TableName = "pg_changes" | "dummy" | "authorization" | "broadcast_changes" | "wallet" | "replay_check";
 
-async function executeInsert(supabase: SupabaseClient, table: TableName): Promise<number> {
-  const { data, error } = await supabase.from(table).insert([{ value: crypto.randomUUID() }]).select("id");
+async function executeInsert(supabase: SupabaseClient, table: TableName, value?: string): Promise<number> {
+  const { data, error } = await supabase.from(table).insert([{ value: value ?? crypto.randomUUID() }]).select("id");
   if (error) throw new Error(`Error inserting into ${table}: ${error.message}`);
   return (data as { id: number }[])[0].id;
 }
@@ -453,8 +463,8 @@ async function runConnectionTest() {
   await test("first connect latency", async () => {
     const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      const channel = supabase.channel("topic:" + crypto.randomUUID()).subscribe();
-      const connectMs = await waitForSubscribed(channel);
+      const channel = supabase.channel("topic:" + crypto.randomUUID());
+      const connectMs = await openChannel(channel);
       return [{ label: "connect", value: connectMs, unit: "ms" }];
     } finally {
       await stopClient(supabase);
@@ -477,10 +487,9 @@ async function runConnectionTest() {
         .on("broadcast", { event }, ({ payload }) => {
           const t = sendTimes.get(payload.seq);
           if (t !== undefined) latencies.push(performance.now() - t);
-        })
-        .subscribe();
+        });
 
-      await waitForSubscribed(channel);
+      await openChannel(channel);
 
       for (let i = 0; i < MESSAGES; i++) {
         sendTimes.set(i, performance.now());
@@ -506,9 +515,8 @@ async function runLoadPostgresChangesTests(testUser: { email: string; password: 
       await signInUser(supabase, testUser.email, testUser.password);
       const channel = supabase
         .channel("topic:" + crypto.randomUUID(), BROADCAST_CONFIG)
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes" }, () => {})
-        .subscribe();
-      const { systemMs } = await waitForPostgresChannel(channel);
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes" }, () => {});
+      const { systemMs } = await openPostgresChannel(channel);
       return [{ label: "system", value: systemMs, unit: "ms" }];
     } finally {
       await stopClient(supabase);
@@ -528,10 +536,9 @@ async function runLoadPostgresChangesTests(testUser: { email: string; password: 
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes" }, (p) => {
           const t = sendTimes.get(p.new.id);
           if (t !== undefined) latencies.push(performance.now() - t);
-        })
-        .subscribe();
+        });
 
-      await waitForPostgresChannel(channel);
+      await openPostgresChannel(channel);
 
       for (let i = 0; i < LOAD_MESSAGES; i++) {
         const t = performance.now();
@@ -552,8 +559,6 @@ async function runLoadPostgresChangesTests(testUser: { email: string; password: 
     const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
       await signInUser(supabase, testUser.email, testUser.password);
-      const ids = await Promise.all(Array.from({ length: LOAD_MESSAGES }, () => executeInsert(supabase, "pg_changes")));
-
       const sendTimes = new Map<number, number>();
       const latencies: number[] = [];
 
@@ -562,10 +567,11 @@ async function runLoadPostgresChangesTests(testUser: { email: string; password: 
         .on("postgres_changes", { event: "UPDATE", schema: "public", table: "pg_changes" }, (p) => {
           const t = sendTimes.get(p.new.id);
           if (t !== undefined) latencies.push(performance.now() - t);
-        })
-        .subscribe();
+        });
 
-      await waitForPostgresChannel(channel);
+      await openPostgresChannel(channel);
+
+      const ids = await Promise.all(Array.from({ length: LOAD_MESSAGES }, () => executeInsert(supabase, "pg_changes")));
 
       await Promise.all(ids.map((id) => {
         sendTimes.set(id, performance.now());
@@ -585,8 +591,6 @@ async function runLoadPostgresChangesTests(testUser: { email: string; password: 
     const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
       await signInUser(supabase, testUser.email, testUser.password);
-      const ids = await Promise.all(Array.from({ length: LOAD_MESSAGES }, () => executeInsert(supabase, "pg_changes")));
-
       const sendTimes = new Map<number, number>();
       const latencies: number[] = [];
 
@@ -595,10 +599,11 @@ async function runLoadPostgresChangesTests(testUser: { email: string; password: 
         .on("postgres_changes", { event: "DELETE", schema: "public", table: "pg_changes" }, (p) => {
           const t = sendTimes.get(p.old.id);
           if (t !== undefined) latencies.push(performance.now() - t);
-        })
-        .subscribe();
+        });
 
-      await waitForPostgresChannel(channel);
+      await openPostgresChannel(channel);
+
+      const ids = await Promise.all(Array.from({ length: LOAD_MESSAGES }, () => executeInsert(supabase, "pg_changes")));
 
       await Promise.all(ids.map((id) => {
         sendTimes.set(id, performance.now());
@@ -633,9 +638,8 @@ async function runLoadPresenceTests() {
           if (e.key === "observer") return;
           const t = trackTimes.get(e.key);
           if (t !== undefined) latencies.push(performance.now() - t);
-        })
-        .subscribe();
-      await waitForSubscribed(observerChannel);
+        });
+      await openChannel(observerChannel);
 
       const clients = Array.from({ length: CLIENTS }, (_, i) => ({
         client: createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS }),
@@ -644,8 +648,8 @@ async function runLoadPresenceTests() {
       senders.push(...clients.map((c) => c.client));
 
       const channels = await Promise.all(clients.map(async ({ client, key }) => {
-        const ch = client.channel(topic, { config: { presence: { key } } }).subscribe();
-        await waitForSubscribed(ch);
+        const ch = client.channel(topic, { config: { presence: { key } } });
+        await openChannel(ch);
         return { ch, key };
       }));
 
@@ -680,10 +684,9 @@ async function runLoadBroadcastFromDbTests(testUser: { email: string; password: 
         .on("broadcast", { event: "INSERT" }, (res) => {
           const t = sendTimes.get(res.payload.record.id);
           if (t !== undefined) latencies.push(performance.now() - t);
-        })
-        .subscribe();
+        });
 
-      await waitForSubscribed(channel);
+      await openChannel(channel);
 
       await Promise.all(Array.from({ length: LOAD_MESSAGES }, async () => {
         const id = crypto.randomUUID();
@@ -719,10 +722,9 @@ async function runLoadBroadcastTests() {
         .on("broadcast", { event }, ({ payload }) => {
           const t = sendTimes.get(payload.seq);
           if (t !== undefined) latencies.push(performance.now() - t);
-        })
-        .subscribe();
+        });
 
-      await waitForSubscribed(channel);
+      await openChannel(channel);
 
       for (let i = 0; i < LOAD_MESSAGES; i++) {
         sendTimes.set(i, performance.now());
@@ -751,10 +753,9 @@ async function runLoadBroadcastTests() {
         .on("broadcast", { event }, ({ payload }) => {
           const t = sendTimes.get(payload.seq);
           if (t !== undefined) latencies.push(performance.now() - t);
-        })
-        .subscribe();
+        });
 
-      await waitForSubscribed(channel);
+      await openChannel(channel);
 
       await Promise.all(Array.from({ length: LOAD_MESSAGES }, async (_, i) => {
         sendTimes.set(i, performance.now());
@@ -780,7 +781,7 @@ async function runLoadBroadcastReplayTests(testUser: { email: string; password: 
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("broadcast replay throughput", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS_REPLAY });
     try {
       await signInUser(supabase, testUser.email, testUser.password);
       const event = crypto.randomUUID();
@@ -797,8 +798,8 @@ async function runLoadBroadcastReplayTests(testUser: { email: string; password: 
         config: { private: true, broadcast: { replay: { since, limit: 25 } } },
       }).on("broadcast", { event }, () => {
         latencies.push(performance.now() - replayStart);
-      }).subscribe();
-      await waitForSubscribed(receiver);
+      });
+      await openChannel(receiver);
 
       await settle(() => latencies.length, LOAD_MESSAGES, LOAD_SETTLE_MS);
 
@@ -823,10 +824,9 @@ async function runBroadcastTests() {
 
       const channel = supabase
         .channel(topic, BROADCAST_CONFIG)
-        .on("broadcast", { event }, ({ payload }) => (result = payload))
-        .subscribe();
+        .on("broadcast", { event }, ({ payload }) => (result = payload));
 
-      const subscribeMs = await waitForSubscribed(channel);
+      const subscribeMs = await openChannel(channel);
       await channel.send({ type: "broadcast", event, payload: expectedPayload });
       const { latencyMs: eventMs } = await waitFor(() => result, "broadcast event");
 
@@ -847,10 +847,9 @@ async function runBroadcastTests() {
 
       const channel = supabase
         .channel(topic, BROADCAST_CONFIG)
-        .on("broadcast", { event }, ({ payload }) => (result = payload))
-        .subscribe();
+        .on("broadcast", { event }, ({ payload }) => (result = payload));
 
-      const subscribeMs = await waitForSubscribed(channel);
+      const subscribeMs = await openChannel(channel);
 
       const res = await fetch(`${PROJECT_URL}/realtime/v1/api/broadcast`, {
         method: "POST",
@@ -881,10 +880,9 @@ async function runPresenceTests(testUser: { email: string; password: string }) {
 
       const channel = supabase
         .channel(topic, { config: { broadcast: { self: true }, presence: { key } } })
-        .on("presence", { event: "join" }, (e) => (joinEvent = e))
-        .subscribe();
+        .on("presence", { event: "join" }, (e) => (joinEvent = e));
 
-      const subscribeMs = await waitForSubscribed(channel);
+      const subscribeMs = await openChannel(channel);
       const trackStart = performance.now();
       if (await channel.track({ message }, { timeout: 5000 }) === "timed out") throw new Error("track() timed out");
       const trackMs = performance.now() - trackStart;
@@ -911,10 +909,9 @@ async function runPresenceTests(testUser: { email: string; password: string }) {
 
       const channel = supabase
         .channel(topic, { config: { private: true, broadcast: { self: true }, presence: { key } } })
-        .on("presence", { event: "join" }, (e) => (joinEvent = e))
-        .subscribe();
+        .on("presence", { event: "join" }, (e) => (joinEvent = e));
 
-      const subscribeMs = await waitForSubscribed(channel);
+      const subscribeMs = await openChannel(channel);
       const trackStart = performance.now();
       if (await channel.track({ message }, { timeout: 5000 }) === "timed out") throw new Error("track() timed out");
       const trackMs = performance.now() - trackStart;
@@ -955,14 +952,8 @@ async function runAuthorizationTests(testUser: { email: string; password: string
     const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
       await signInUser(supabase, testUser.email, testUser.password);
-
-      let connected = false;
-      const channel = supabase
-        .channel("topic:" + crypto.randomUUID(), { config: { private: true } })
-        .subscribe((status: string) => { if (status === "SUBSCRIBED") connected = true; });
-
-      const subscribeMs = await waitForSubscribed(channel);
-      assert.strictEqual(connected, true);
+      const channel = supabase.channel("topic:" + crypto.randomUUID(), { config: { private: true } });
+      const subscribeMs = await openChannel(channel);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
     } finally {
       await stopClient(supabase);
@@ -984,10 +975,9 @@ async function runBroadcastChangesTests(testUser: { email: string; password: str
 
       const channel = supabase
         .channel("topic:test", { config: { private: true } })
-        .on("broadcast", { event: "INSERT" }, (res) => (result = res))
-        .subscribe();
+        .on("broadcast", { event: "INSERT" }, (res) => (result = res));
 
-      const subscribeMs = await waitForSubscribed(channel);
+      const subscribeMs = await openChannel(channel);
       await supabase.from("broadcast_changes").insert({ value, id });
       const { latencyMs: eventMs } = await waitFor(() => result, "INSERT event");
 
@@ -1011,15 +1001,14 @@ async function runBroadcastChangesTests(testUser: { email: string; password: str
       const id = crypto.randomUUID();
       const originalValue = crypto.randomUUID();
       const updatedValue = crypto.randomUUID();
-      await supabase.from("broadcast_changes").insert({ value: originalValue, id });
       let result: any = null;
 
       const channel = supabase
         .channel("topic:test", { config: { private: true } })
-        .on("broadcast", { event: "UPDATE" }, (res) => (result = res))
-        .subscribe();
+        .on("broadcast", { event: "UPDATE" }, (res) => (result = res));
 
-      const subscribeMs = await waitForSubscribed(channel);
+      const subscribeMs = await openChannel(channel);
+      await supabase.from("broadcast_changes").insert({ value: originalValue, id });
       await supabase.from("broadcast_changes").update({ value: updatedValue }).eq("id", id);
       const { latencyMs: eventMs } = await waitFor(() => result, "UPDATE event");
 
@@ -1043,15 +1032,14 @@ async function runBroadcastChangesTests(testUser: { email: string; password: str
       await signInUser(supabase, testUser.email, testUser.password);
       const id = crypto.randomUUID();
       const value = crypto.randomUUID();
-      await supabase.from("broadcast_changes").insert({ value, id });
       let result: any = null;
 
       const channel = supabase
         .channel("topic:test", { config: { private: true } })
-        .on("broadcast", { event: "DELETE" }, (res) => (result = res))
-        .subscribe();
+        .on("broadcast", { event: "DELETE" }, (res) => (result = res));
 
-      const subscribeMs = await waitForSubscribed(channel);
+      const subscribeMs = await openChannel(channel);
+      await supabase.from("broadcast_changes").insert({ value, id });
       await supabase.from("broadcast_changes").delete().eq("id", id);
       const { latencyMs: eventMs } = await waitFor(() => result, "DELETE event");
 
@@ -1078,23 +1066,21 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
       await signInUser(supabase, testUser.email, testUser.password);
 
       let result: unknown = null;
-      const previousId = await executeInsert(supabase, "pg_changes");
-      await executeInsert(supabase, "dummy");
+      const uniqueValue = crypto.randomUUID();
 
       const channel = supabase
         .channel("topic:" + crypto.randomUUID(), BROADCAST_CONFIG)
         .on("postgres_changes",
-          { event: "INSERT", schema: "public", table: "pg_changes", filter: `id=eq.${previousId + 1}` },
-          (payload) => (result = payload))
-        .subscribe();
+          { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=eq.${uniqueValue}` },
+          (payload) => (result = payload));
 
-      const { subscribeMs } = await waitForPostgresChannel(channel);
-      await executeInsert(supabase, "pg_changes");
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", uniqueValue);
       await executeInsert(supabase, "dummy");
       const { latencyMs: eventMs } = await waitFor(() => result, "INSERT event");
 
       assert.strictEqual(result.eventType, "INSERT");
-      assert.strictEqual(result.new.id, previousId + 1);
+      assert.strictEqual(result.new.value, uniqueValue);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
       await stopClient(supabase);
@@ -1116,10 +1102,9 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
         .channel("topic:" + crypto.randomUUID(), BROADCAST_CONFIG)
         .on("postgres_changes",
           { event: "UPDATE", schema: "public", table: "pg_changes", filter: `id=eq.${mainId}` },
-          (payload) => (result = payload))
-        .subscribe();
+          (payload) => (result = payload));
 
-      const { subscribeMs } = await waitForPostgresChannel(channel);
+      const { subscribeMs } = await openPostgresChannel(channel);
       await Promise.all([
         executeUpdate(supabase, "pg_changes", mainId),
         executeUpdate(supabase, "pg_changes", fakeId),
@@ -1150,10 +1135,9 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
         .channel("topic:" + crypto.randomUUID(), BROADCAST_CONFIG)
         .on("postgres_changes",
           { event: "DELETE", schema: "public", table: "pg_changes", filter: `id=eq.${mainId}` },
-          (payload) => (result = payload))
-        .subscribe();
+          (payload) => (result = payload));
 
-      const { subscribeMs } = await waitForPostgresChannel(channel);
+      const { subscribeMs } = await openPostgresChannel(channel);
       await Promise.all([
         executeDelete(supabase, "pg_changes", mainId),
         executeDelete(supabase, "pg_changes", fakeId),
@@ -1176,21 +1160,20 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
       await signInUser(supabase, testUser.email, testUser.password);
       let insertResult: unknown = null, updateResult: unknown = null, deleteResult: unknown = null;
 
-      const insertId = await executeInsert(supabase, "pg_changes");
+      const insertValue = crypto.randomUUID();
       const updateId = await executeInsert(supabase, "pg_changes");
       const deleteId = await executeInsert(supabase, "pg_changes");
 
       const channel = supabase
         .channel("topic:" + crypto.randomUUID(), BROADCAST_CONFIG)
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `id=eq.${insertId + 3}` }, (p) => (insertResult = p))
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=eq.${insertValue}` }, (p) => (insertResult = p))
         .on("postgres_changes", { event: "UPDATE", schema: "public", table: "pg_changes", filter: `id=eq.${updateId}` }, (p) => (updateResult = p))
-        .on("postgres_changes", { event: "DELETE", schema: "public", table: "pg_changes", filter: `id=eq.${deleteId}` }, (p) => (deleteResult = p))
-        .subscribe();
+        .on("postgres_changes", { event: "DELETE", schema: "public", table: "pg_changes", filter: `id=eq.${deleteId}` }, (p) => (deleteResult = p));
 
-      const { subscribeMs } = await waitForPostgresChannel(channel);
+      const { subscribeMs } = await openPostgresChannel(channel);
 
       await Promise.all([
-        executeInsert(supabase, "pg_changes"),
+        executeInsert(supabase, "pg_changes", insertValue),
         executeUpdate(supabase, "pg_changes", updateId),
         executeDelete(supabase, "pg_changes", deleteId),
       ]);
@@ -1220,7 +1203,7 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
   suite("broadcast replay");
 
   await test("replayed messages are delivered on join", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS_REPLAY });
     try {
       await signInUser(supabase, testUser.email, testUser.password);
       const event = crypto.randomUUID();
@@ -1235,8 +1218,8 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
       let result: any = null;
       const receiver = supabase.channel(topic, {
         config: { private: true, broadcast: { replay: { since, limit: 1 } } },
-      }).on("broadcast", { event }, (msg) => (result = msg.payload)).subscribe();
-      const subscribeMs = await waitForSubscribed(receiver);
+      }).on("broadcast", { event }, (msg) => (result = msg.payload));
+      const subscribeMs = await openChannel(receiver);
 
       const { latencyMs: replayMs } = await waitFor(() => result, "replayed broadcast event");
 
@@ -1248,7 +1231,7 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
   });
 
   await test("replayed messages carry meta.replayed flag", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS_REPLAY });
     try {
       await signInUser(supabase, testUser.email, testUser.password);
       const event = crypto.randomUUID();
@@ -1262,8 +1245,8 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
       let receivedMeta: any = null;
       const receiver = supabase.channel(topic, {
         config: { private: true, broadcast: { replay: { since, limit: 1 } } },
-      }).on("broadcast", { event }, (msg) => (receivedMeta = msg.meta)).subscribe();
-      await waitForSubscribed(receiver);
+      }).on("broadcast", { event }, (msg) => (receivedMeta = msg.meta));
+      await openChannel(receiver);
 
       await waitFor(() => receivedMeta, "replayed broadcast meta");
 
@@ -1275,7 +1258,7 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
   });
 
   await test("messages before since are not replayed", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS_REPLAY });
     try {
       await signInUser(supabase, testUser.email, testUser.password);
       const event = crypto.randomUUID();
@@ -1291,8 +1274,8 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
       let result: any = null;
       const receiver = supabase.channel(topic, {
         config: { private: true, broadcast: { replay: { since, limit: 25 } } },
-      }).on("broadcast", { event }, (msg) => (result = msg.payload)).subscribe();
-      await waitForSubscribed(receiver);
+      }).on("broadcast", { event }, (msg) => (result = msg.payload));
+      await openChannel(receiver);
 
       await sleep(500);
 

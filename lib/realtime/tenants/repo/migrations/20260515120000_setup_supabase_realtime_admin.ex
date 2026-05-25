@@ -55,6 +55,7 @@ defmodule Realtime.Tenants.Migrations.SetupSupabaseRealtimeAdmin do
     execute("ALTER FUNCTION realtime.list_changes(name, name, integer, integer) OWNER TO supabase_realtime_admin")
     execute("ALTER FUNCTION realtime.quote_wal2json(regclass) OWNER TO supabase_realtime_admin")
     execute("ALTER FUNCTION realtime.send(jsonb, text, text, boolean) OWNER TO supabase_realtime_admin")
+    execute("ALTER FUNCTION realtime.send(bytea, text, text, boolean) OWNER TO supabase_realtime_admin")
     execute("ALTER FUNCTION realtime.subscription_check_filters() OWNER TO supabase_realtime_admin")
     execute("ALTER FUNCTION realtime.to_regrole(text) OWNER TO supabase_realtime_admin")
     execute("ALTER FUNCTION realtime.topic() OWNER TO supabase_realtime_admin")

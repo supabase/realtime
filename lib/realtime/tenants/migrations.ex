@@ -87,6 +87,7 @@ defmodule Realtime.Tenants.Migrations do
     FixByteaDoubleEncodingInCast,
     ListChangesWithSlotCount,
     SubscriptionCheckFiltersUsePgAttribute,
+    AddBinaryPayloadToMessages,
     SetupSupabaseRealtimeAdmin
   }
 
@@ -161,7 +162,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_218_120_000, FixByteaDoubleEncodingInCast},
     {20_260_326_120_000, ListChangesWithSlotCount},
     {20_260_506_120_000, SubscriptionCheckFiltersUsePgAttribute},
-    {20_260_511_170_200, SetupSupabaseRealtimeAdmin}
+    {20_260_514_120_000, AddBinaryPayloadToMessages},
+    {20_260_515_120_000, SetupSupabaseRealtimeAdmin}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]

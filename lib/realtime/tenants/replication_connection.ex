@@ -33,6 +33,7 @@ defmodule Realtime.Tenants.ReplicationConnection do
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
   alias RealtimeWeb.RealtimeChannel
+  alias RealtimeWeb.Socket.UserBroadcast
   alias RealtimeWeb.TenantBroadcaster
 
   @default_query_timeout 30_000
@@ -370,27 +371,24 @@ defmodule Realtime.Tenants.ReplicationConnection do
 
     with %{columns: columns} <- Map.get(relations, relation_id),
          to_broadcast = tuple_to_map(tuple_data, columns),
-         {:ok, payload} <- get_or_error(to_broadcast, "payload", :payload_missing),
          {:ok, inserted_at} <- get_or_error(to_broadcast, "inserted_at", :inserted_at_missing),
          {:ok, event} <- get_or_error(to_broadcast, "event", :event_missing),
          {:ok, id} <- get_or_error(to_broadcast, "id", :id_missing),
          {:ok, topic} <- get_or_error(to_broadcast, "topic", :topic_missing),
          {:ok, private} <- get_or_error(to_broadcast, "private", :private_missing),
+         {:ok, encoding, body} <- pick_payload(to_broadcast),
          %Tenant{} = tenant <- Cache.get_tenant_by_external_id(tenant_id),
-         :ok <- Tenants.validate_payload_size(tenant, payload),
+         :ok <- Tenants.validate_payload_size(tenant, body),
          events_per_second_rate = Tenants.events_per_second_rate(tenant),
          :ok <- check_rate_limit(events_per_second_rate) do
       tenant_topic = Tenants.tenant_topic(tenant, topic, not private)
 
-      broadcast = %Phoenix.Socket.Broadcast{
-        topic: topic,
-        event: "broadcast",
-        payload: %{
-          "payload" => Jason.Fragment.new(payload),
-          "event" => event,
-          "type" => "broadcast",
-          "meta" => %{"id" => id}
-        }
+      broadcast = %UserBroadcast{
+        topic: tenant_topic,
+        user_event: event,
+        user_payload: body,
+        user_payload_encoding: encoding,
+        metadata: %{"id" => id}
       }
 
       GenCounter.add(events_per_second_rate.id)
@@ -475,4 +473,8 @@ defmodule Realtime.Tenants.ReplicationConnection do
       value -> {:ok, value}
     end
   end
+
+  defp pick_payload(%{"binary_payload" => bin}) when is_binary(bin), do: {:ok, :binary, bin}
+  defp pick_payload(%{"payload" => json}) when is_binary(json), do: {:ok, :json, json}
+  defp pick_payload(_), do: {:error, :payload_missing}
 end

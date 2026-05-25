@@ -166,6 +166,38 @@ defmodule Realtime.PostgresDecoderTest do
              }
     end
 
+    test "decodes insert messages with bytea column" do
+      relation = %{
+        id: 24_576,
+        namespace: "realtime",
+        name: "messages",
+        columns: [
+          %Column{name: "id", type: "uuid"},
+          %Column{name: "binary_payload", type: "bytea"}
+        ]
+      }
+
+      uuid = UUID.uuid4()
+      bytes = <<0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xFF, 0x01>>
+
+      data =
+        "I" <>
+          <<relation.id::integer-32>> <>
+          "N" <>
+          <<2::integer-16>> <>
+          "b" <>
+          <<16::integer-32>> <>
+          UUID.string_to_binary!(uuid) <>
+          "b" <>
+          <<byte_size(bytes)::integer-32>> <>
+          bytes
+
+      assert Decoder.decode_message(data, %{relation.id => relation}) == %Insert{
+               relation_id: relation.id,
+               tuple_data: {uuid, bytes}
+             }
+    end
+
     test "decodes insert messages with unchanged toasted values", %{relation: relation} do
       string = Generators.random_string()
 
