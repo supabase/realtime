@@ -6,7 +6,8 @@ services:
     ports:
       - "5532:5432"
     volumes:
-      - ./dev/postgres/01-realtime-setup.sql:/docker-entrypoint-initdb.d/init-scripts/01-realtime-setup.sql
+      - ./dev/postgres/za-permit-supabase-admin.sh:/docker-entrypoint-initdb.d/za-permit-supabase-admin.sh
+      - ./dev/postgres/zb-supabase-schema.sql:/docker-entrypoint-initdb.d/zb-supabase-schema.sql
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_HOST: /var/run/postgresql
@@ -29,7 +30,7 @@ services:
       PORT: 4100
       DB_HOST: host.docker.internal
       DB_PORT: 5532
-      DB_USER: supabase_realtime_admin
+      DB_USER: ${DB_USER:-supabase_realtime_admin}
       DB_PASSWORD: postgres
       DB_NAME: postgres
       DB_ENC_KEY: 1234567890123456

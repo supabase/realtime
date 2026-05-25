@@ -7,8 +7,6 @@ defmodule Containers do
 
   use GenServer
 
-  @setup_init Path.expand("../../dev/postgres/01-realtime-setup.sql", __DIR__)
-
   defp image, do: System.get_env("POSTGRES_IMAGE", "supabase/postgres:17.6.1.127")
 
   # Pull image if not available
@@ -312,7 +310,8 @@ defmodule Containers do
   end
 
   defp docker_run!(name, port) do
-    initdb = Path.expand("../../dev/postgres/zz-supabase-schema.sql", __DIR__)
+    initdb_sh = Path.expand("../../dev/postgres/za-permit-supabase-admin.sh", __DIR__)
+    initdb_sql = Path.expand("../../dev/postgres/zb-supabase-schema.sql", __DIR__)
 
     {_, 0} =
       System.cmd("docker", [
@@ -326,11 +325,11 @@ defmodule Containers do
         "-e",
         "POSTGRES_PASSWORD=postgres",
         "-v",
-        "#{initdb}:/docker-entrypoint-initdb.d/zz-supabase-schema.sql",
+        "#{initdb_sh}:/docker-entrypoint-initdb.d/za-permit-supabase-admin.sh",
+        "-v",
+        "#{initdb_sql}:/docker-entrypoint-initdb.d/zb-supabase-schema.sql",
         "-p",
         "#{port}:5432",
-        "-v",
-        "#{@setup_init}:/docker-entrypoint-initdb.d/init-scripts/01-realtime-setup.sql",
         image(),
         "postgres",
         "-c",

@@ -4,8 +4,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./dev/postgres/zz-supabase-schema.sql:/docker-entrypoint-initdb.d/zz-supabase-schema.sql
-      - ./dev/postgres/01-realtime-setup.sql:/docker-entrypoint-initdb.d/init-scripts/01-realtime-setup.sql
+      - ./dev/postgres/za-permit-supabase-admin.sh:/docker-entrypoint-initdb.d/za-permit-supabase-admin.sh
+      - ./dev/postgres/zb-supabase-schema.sql:/docker-entrypoint-initdb.d/zb-supabase-schema.sql
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_HOST: /var/run/postgresql
@@ -21,8 +21,8 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - ./dev/postgres/zz-supabase-schema.sql:/docker-entrypoint-initdb.d/zz-supabase-schema.sql
-      - ./dev/postgres/01-realtime-setup.sql:/docker-entrypoint-initdb.d/init-scripts/01-realtime-setup.sql
+      - ./dev/postgres/za-permit-supabase-admin.sh:/docker-entrypoint-initdb.d/za-permit-supabase-admin.sh
+      - ./dev/postgres/zb-supabase-schema.sql:/docker-entrypoint-initdb.d/zb-supabase-schema.sql
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_HOST: /var/run/postgresql

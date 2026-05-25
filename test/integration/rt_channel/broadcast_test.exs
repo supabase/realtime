@@ -264,7 +264,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
          requires_data: true,
-         requires_pg14_6_plus: true
+         requires_pg_140006: true
     test "broadcast update event changes on update in table with trigger", %{
       tenant: tenant,
       topic: topic,
@@ -308,7 +308,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence],
-         requires_pg14_6_plus: true
+         requires_pg_140006: true
     test "broadcast delete event changes on delete in table with trigger", %{
       tenant: tenant,
       topic: topic,

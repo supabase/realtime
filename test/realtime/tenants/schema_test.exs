@@ -12,12 +12,14 @@ defmodule Realtime.Tenants.SchemaTest do
 
     # simulate postgres dashboard role
     {:ok, conn} = opts |> Keyword.put(:username, "postgres") |> Postgrex.start_link()
-    {:ok, realtime_conn} = Postgrex.start_link(opts)
+    {:ok, realtime_conn} = opts |> Keyword.put(:username, "supabase_realtime_admin") |> Postgrex.start_link()
 
     %{conn: conn, realtime_conn: realtime_conn, settings: settings}
   end
 
   describe "restrictions" do
+    @describetag :requires_supautils_policy_grants
+
     test "deny create trigger on realtime.messages", %{conn: conn} do
       Postgrex.query!(
         conn,
@@ -169,6 +171,40 @@ defmodule Realtime.Tenants.SchemaTest do
                  conn,
                  "INSERT INTO realtime.messages (payload, event, topic, private, extension) VALUES ($1, $2, $3, $4, $5)",
                  [%{"hello" => "world"}, "test_event", "test_topic", false, "broadcast"]
+               )
+    end
+  end
+
+  describe "ownership" do
+    test "all objects in realtime schema are owned by supabase_realtime_admin", %{conn: conn} do
+      query = """
+      SELECT r.rolname FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_roles r ON r.oid = c.relowner
+      WHERE n.nspname = 'realtime' AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+        AND c.relname <> 'schema_migrations'
+      UNION
+      SELECT r.rolname FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      JOIN pg_roles r ON r.oid = p.proowner
+      WHERE n.nspname = 'realtime'
+      UNION
+      SELECT r.rolname FROM pg_type t
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+      JOIN pg_roles r ON r.oid = t.typowner
+      WHERE n.nspname = 'realtime' AND t.typtype IN ('b', 'd', 'e', 'r', 'm')
+        AND t.typname <> '_schema_migrations'
+      """
+
+      assert %Postgrex.Result{rows: [["supabase_realtime_admin"]]} = Postgrex.query!(conn, query, [])
+    end
+
+    test "realtime schema is owned by supabase_admin", %{conn: conn} do
+      assert %Postgrex.Result{rows: [["supabase_admin"]]} =
+               Postgrex.query!(
+                 conn,
+                 "SELECT r.rolname FROM pg_namespace n JOIN pg_roles r ON r.oid = n.nspowner WHERE n.nspname = 'realtime'",
+                 []
                )
     end
   end

@@ -20,7 +20,7 @@ defmodule Generators do
           "settings" => %{
             "db_host" => "127.0.0.1",
             "db_name" => "postgres",
-            "db_user" => "supabase_realtime_admin",
+            "db_user" => System.get_env("DB_USER", "supabase_realtime_admin"),
             "db_password" => "postgres",
             "db_port" => "#{override[:port] || port()}",
             "poll_interval_ms" => 10,

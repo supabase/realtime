@@ -4,6 +4,7 @@ defmodule Realtime.Tenants.MigrationsTest do
   use Mimic
 
   alias Realtime.Api
+  alias Realtime.Database
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Migrations
 
@@ -79,6 +80,49 @@ defmodule Realtime.Tenants.MigrationsTest do
       modules = Enum.map(Migrations.migrations(tenant.external_id), fn {_v, m} -> m end)
       assert Migrations.SetupSupabaseRealtimeAdmin in modules
     end
+  end
+
+  describe "create_partitions/1" do
+    test "reassigns ownership of existing partitions to supabase_realtime_admin" do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+      {:ok, settings} = Database.from_tenant(tenant, "realtime_test", :stop)
+      {:ok, conn} = Database.connect_db(%{settings | username: "supabase_admin", max_restarts: 0, ssl: false})
+
+      # Pick a date inside the window create_partitions iterates over (today-1 .. today+3).
+      date = Date.utc_today()
+      partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"
+      next_day = Date.to_string(Date.add(date, 1))
+      start_day = Date.to_string(date)
+
+      Postgrex.query!(conn, "DROP TABLE IF EXISTS realtime.#{partition_name}", [])
+
+      Postgrex.query!(
+        conn,
+        """
+        CREATE TABLE realtime.#{partition_name}
+        PARTITION OF realtime.messages
+        FOR VALUES FROM ('#{start_day}') TO ('#{next_day}')
+        """,
+        []
+      )
+
+      assert {:ok, %{rows: [["supabase_admin"]]}} = partition_owner(conn, partition_name)
+      assert :ok = Migrations.create_partitions(conn)
+      assert {:ok, %{rows: [["supabase_realtime_admin"]]}} = partition_owner(conn, partition_name)
+    end
+  end
+
+  defp partition_owner(conn, name) do
+    Postgrex.query(
+      conn,
+      """
+      SELECT r.rolname FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_roles r ON r.oid = c.relowner
+      WHERE n.nspname = 'realtime' AND c.relname = $1
+      """,
+      [name]
+    )
   end
 
   describe "telemetry" do

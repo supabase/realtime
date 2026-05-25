@@ -79,6 +79,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
           password: admin_settings.password
         )
 
+      Postgrex.query!(admin_conn, "CREATE SCHEMA IF NOT EXISTS vault", [])
       Postgrex.query!(admin_conn, "REVOKE USAGE ON SCHEMA vault FROM supabase_realtime_admin", [])
 
       {:ok, subscription_params} =

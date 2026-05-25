@@ -11,7 +11,9 @@ defmodule Realtime.Tenants.Migrations.SetupSupabaseRealtimeAdmin do
         ALTER ROLE supabase_realtime_admin WITH NOINHERIT CREATEROLE LOGIN REPLICATION;
         ALTER ROLE supabase_realtime_admin SET search_path = public, extensions, realtime;
         GRANT CREATE ON DATABASE postgres TO supabase_realtime_admin;
-        GRANT SET ON PARAMETER log_min_messages TO supabase_realtime_admin;
+        IF current_setting('server_version_num')::int >= 150000 THEN
+          EXECUTE 'GRANT SET ON PARAMETER log_min_messages TO supabase_realtime_admin';
+        END IF;
         GRANT anon, authenticated, service_role TO supabase_realtime_admin;
         GRANT CREATE, USAGE ON SCHEMA public TO supabase_realtime_admin;
         GRANT USAGE ON SCHEMA extensions TO supabase_realtime_admin;
@@ -57,11 +59,17 @@ defmodule Realtime.Tenants.Migrations.SetupSupabaseRealtimeAdmin do
     execute("ALTER FUNCTION realtime.to_regrole(text) OWNER TO supabase_realtime_admin")
     execute("ALTER FUNCTION realtime.topic() OWNER TO supabase_realtime_admin")
 
+    # Revoke supabase_realtime_admin from postgres when supautils.policy_grants is available (supabase/postgres 15.14.1.015 or higher),
+    # otherwise keep the membership so postgres can manage policies via inheritance.
     execute("""
     DO $$
     BEGIN
       IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
-        REVOKE supabase_realtime_admin FROM postgres;
+        IF EXISTS (SELECT 1 FROM pg_settings WHERE name = 'supautils.policy_grants') THEN
+          REVOKE supabase_realtime_admin FROM postgres;
+        ELSE
+          GRANT supabase_realtime_admin TO postgres;
+        END IF;
       END IF;
     END $$;
     """)
