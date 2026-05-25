@@ -16,14 +16,14 @@ repo_config = Application.fetch_env!(:realtime, Realtime.Repo)
 
 %{rows: [[pg_version_num]]} = Postgrex.query!(pg_conn, "SELECT current_setting('server_version_num')::int")
 
-%{rows: [[has_supautils_policy_grants]]} =
-  Postgrex.query!(pg_conn, "SELECT EXISTS (SELECT 1 FROM pg_settings WHERE name = 'supautils.policy_grants')")
+%{rows: [[has_supautils_subscription_grants]]} =
+  Postgrex.query!(pg_conn, "SELECT current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%'")
 
 # `realtime.broadcast_changes(..., NEW record, OLD record, ...)` (introduced in commit 2922658c) called from a trigger via `PERFORM` fails on PG <= 14.5
 requires_pg_140006 = if pg_version_num < 140_006, do: :requires_pg_140006
 
-# Restriction assertions on the postgres role only hold on builds with supautils.policy_grants (supabase/postgres 15.14.1.015 or higher)
-requires_supautils_policy_grants = if !has_supautils_policy_grants, do: :requires_supautils_policy_grants
+# Restriction assertions on the postgres role only hold on builds where supautils.policy_grants includes realtime.subscription (supabase/postgres 15.14.1.018 or higher)
+requires_supautils_policy_grants = if !has_supautils_subscription_grants, do: :requires_supautils_policy_grants
 
 exclude = [:failing, requires_pg_140006, requires_supautils_policy_grants]
 

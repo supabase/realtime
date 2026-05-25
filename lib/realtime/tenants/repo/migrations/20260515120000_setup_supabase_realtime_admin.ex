@@ -60,13 +60,13 @@ defmodule Realtime.Tenants.Migrations.SetupSupabaseRealtimeAdmin do
     execute("ALTER FUNCTION realtime.to_regrole(text) OWNER TO supabase_realtime_admin")
     execute("ALTER FUNCTION realtime.topic() OWNER TO supabase_realtime_admin")
 
-    # Revoke supabase_realtime_admin from postgres when supautils.policy_grants is available (supabase/postgres 15.14.1.015 or higher),
+    # Revoke supabase_realtime_admin from postgres when supautils.policy_grants includes realtime.subscription (supabase/postgres 15.14.1.018 or higher),
     # otherwise keep the membership so postgres can manage policies via inheritance.
     execute("""
     DO $$
     BEGIN
       IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
-        IF EXISTS (SELECT 1 FROM pg_settings WHERE name = 'supautils.policy_grants') THEN
+        IF current_setting('supautils.policy_grants', true) LIKE '%realtime.subscription%' THEN
           REVOKE supabase_realtime_admin FROM postgres;
         ELSE
           GRANT supabase_realtime_admin TO postgres;
