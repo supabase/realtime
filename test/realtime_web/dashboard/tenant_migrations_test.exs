@@ -71,47 +71,40 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
 
   describe "postgres_url/1" do
     test "builds a valid URL for IPv4 hosts" do
-      url =
-        TenantMigrations.postgres_url(%Database{
-          hostname: "db.example.com",
-          port: 5432,
-          database: "postgres",
-          username: "supabase_admin",
-          password: "s3cr3t",
-          socket_options: [:inet],
-          ssl: true
-        })
-
-      assert %URI{
-               scheme: "postgresql",
-               host: "db.example.com",
+      assert TenantMigrations.postgres_url(%Database{
+               hostname: "db.example.com",
                port: 5432,
-               path: "/postgres",
-               userinfo: "supabase_admin:s3cr3t",
-               query: "sslmode=require"
-             } = URI.parse(url)
+               database: "postgres",
+               username: "supabase_admin",
+               password: "s3cr3t",
+               socket_options: [:inet],
+               ssl: true
+             }) == "postgresql://supabase_admin:s3cr3t@db.example.com:5432/postgres?sslmode=require"
     end
 
     test "builds a valid URL for IPv6 hosts" do
-      url =
-        TenantMigrations.postgres_url(%Database{
-          hostname: "2600:1f14:359d:9302:205d:38ca:a017:c7e3",
-          port: 5432,
-          database: "postgres",
-          username: "supabase_admin",
-          password: "s3cr3t",
-          socket_options: [:inet6],
-          ssl: true
-        })
-
-      assert url =~ "@[2600:1f14:359d:9302:205d:38ca:a017:c7e3]:5432/"
-
-      assert %URI{
-               scheme: "postgresql",
-               host: "2600:1f14:359d:9302:205d:38ca:a017:c7e3",
+      assert TenantMigrations.postgres_url(%Database{
+               hostname: "2600:1f14:359d:9302:205d:38ca:a017:c7e3",
                port: 5432,
-               path: "/postgres"
-             } = URI.parse(url)
+               database: "postgres",
+               username: "supabase_admin",
+               password: "s3cr3t",
+               socket_options: [:inet6],
+               ssl: true
+             }) ==
+               "postgresql://supabase_admin:s3cr3t@[2600:1f14:359d:9302:205d:38ca:a017:c7e3]:5432/postgres?sslmode=require"
+    end
+
+    test "builds a valid URL for DNS hostnames resolved over IPv6" do
+      assert TenantMigrations.postgres_url(%Database{
+               hostname: "db.example.com",
+               port: 5432,
+               database: "postgres",
+               username: "supabase_admin",
+               password: "s3cr3t",
+               socket_options: [:inet6],
+               ssl: true
+             }) == "postgresql://supabase_admin:s3cr3t@db.example.com:5432/postgres?sslmode=require"
     end
   end
 

@@ -288,7 +288,12 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   @doc false
   def postgres_url(%Database{} = db) do
     sslmode = if db.ssl, do: "require", else: "disable"
-    host = if :inet6 in db.socket_options, do: "[#{db.hostname}]", else: db.hostname
+
+    hostname =
+      case :inet.parse_ipv6strict_address(String.to_charlist(db.hostname)) do
+        {:ok, _} -> "[#{db.hostname}]"
+        _ -> db.hostname
+      end
 
     IO.iodata_to_binary([
       "postgresql://",
@@ -296,7 +301,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       ":",
       URI.encode_www_form(db.password),
       "@",
-      host,
+      hostname,
       ":",
       Integer.to_string(db.port),
       "/",
