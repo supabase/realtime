@@ -28,8 +28,8 @@ defmodule Realtime.Tenants.Connect do
   alias DBConnection.Backoff
 
   @rpc_timeout_default 30_000
-  @check_connected_user_interval_default 50_000
-  @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0]
+  @check_connected_user_interval_default :timer.seconds(60)
+  @connected_users_bucket_shutdown [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   @type t :: %__MODULE__{
           tenant_id: binary(),
           db_conn_reference: reference(),
@@ -482,7 +482,7 @@ defmodule Realtime.Tenants.Connect do
   defp update_connected_users_bucket(tenant_id, connected_users_bucket) do
     connected_users_bucket
     |> then(&(&1 ++ [UsersCounter.tenant_users(tenant_id)]))
-    |> Enum.take(-6)
+    |> Enum.take(-11)
   end
 
   defp send_connected_user_check_message(
