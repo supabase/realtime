@@ -7063,12 +7063,12 @@
         {
           "grantee": "supabase_realtime_admin",
           "privilege": "USAGE",
-          "grantable": false
+          "grantable": true
         },
         {
           "grantee": "supabase_realtime_admin",
           "privilege": "USAGE",
-          "grantable": true
+          "grantable": false
         }
       ],
       "security_labels": []
