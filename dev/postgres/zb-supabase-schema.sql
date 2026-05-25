@@ -10,6 +10,7 @@ end$$;
 create schema if not exists _realtime;
 
 alter user supabase_realtime_admin set search_path = public, extensions, realtime;
+grant create on database postgres to supabase_realtime_admin;
 do $$
 begin
   if current_setting('server_version_num')::int >= 150000 then
