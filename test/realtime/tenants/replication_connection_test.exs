@@ -418,7 +418,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
             "payload" => %{"value" => "something"}
           })
 
-          refute_receive %RealtimeWeb.Socket.UserBroadcast{}, 500
+          refute_receive _any, 500
         end)
 
       assert logs =~ "UnableToBroadcastChanges"
@@ -443,7 +443,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
             "payload" => %{"data" => random_string(tenant.max_payload_size_in_kb * 1000 + 1)}
           })
 
-          refute_receive %RealtimeWeb.Socket.UserBroadcast{}, 500
+          refute_receive _any, 500
         end)
 
       assert logs =~ "UnableToBroadcastChanges: :payload_size_exceeded"
@@ -477,7 +477,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
             "payload" => %{"value" => random_string()}
           })
 
-          refute_receive %RealtimeWeb.Socket.UserBroadcast{}, 500
+          refute_receive _any, 500
         end)
 
       assert logs =~ "UnableToBroadcastChanges: :too_many_requests"
