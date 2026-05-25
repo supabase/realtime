@@ -35,8 +35,10 @@ defmodule Mix.Tasks.Realtime.ExportTenantDbBaseline do
     pgdelta = pgdelta_bin!(opts[:pgdelta_path])
     Mix.shell().info("[export_tenant_db_baseline] pgdelta: #{pgdelta}")
 
+    pgdelta_filter = RealtimeWeb.Dashboard.TenantMigrations.pgdelta_filter()
+
     output = Path.expand(@baseline_path, File.cwd!())
-    args = ["catalog-export", "--target", url, "--output", output]
+    args = ["catalog-export", "--target", url, "--output", output, "--filter", pgdelta_filter]
 
     case System.cmd(pgdelta, args, stderr_to_stdout: true) do
       {output_str, 0} ->

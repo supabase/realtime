@@ -13,7 +13,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   alias Realtime.Api.Tenant
   alias Realtime.Database
 
-  @pg_delta_filter ~s"""
+  @pgdelta_filter ~s"""
   {
     "and": [
       {"*/schema": "realtime"},
@@ -36,7 +36,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
        external_id: "",
        tenant: nil,
        schema_migrations: nil,
-       pg_delta: nil,
+       pgdelta: nil,
        error: nil
      )}
   end
@@ -53,7 +53,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
          external_id: ref,
          tenant: tenant,
          schema_migrations: fetch_schema_migrations(db_conn),
-         pg_delta: run_pg_delta(settings),
+         pgdelta: run_pgdelta(settings),
          error: nil
        )}
     else
@@ -72,7 +72,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
        external_id: "",
        tenant: nil,
        schema_migrations: nil,
-       pg_delta: nil,
+       pgdelta: nil,
        error: nil
      )}
   end
@@ -91,11 +91,11 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
           assigns: %{
             tenant: %Tenant{} = tenant,
             external_id: ref,
-            pg_delta: {:ok, %{status: :changes, sql: sql}}
+            pgdelta: {:ok, %{status: :changes, sql: sql}}
           }
         } = socket
       ) do
-    case apply_pg_delta(tenant, sql) do
+    case apply_pgdelta(tenant, sql) do
       :ok ->
         {:noreply, push_patch(socket, to: "/admin/dashboard/tenant_migrations?external_id=#{URI.encode(ref)}")}
 
@@ -135,7 +135,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
         <%= schema_migrations(@schema_migrations) %>
 
         <h6 class="mt-4">pg-delta plan vs baseline</h6>
-        <%= pg_delta_plan(@pg_delta) %>
+        <%= pgdelta_plan(@pgdelta) %>
       <% end %>
     </div>
     """
@@ -188,12 +188,12 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     """
   end
 
-  defp pg_delta_plan(nil) do
+  defp pgdelta_plan(nil) do
     assigns = %{}
     ~H""
   end
 
-  defp pg_delta_plan({:error, msg}) do
+  defp pgdelta_plan({:error, msg}) do
     assigns = %{msg: msg}
 
     ~H"""
@@ -204,7 +204,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     """
   end
 
-  defp pg_delta_plan({:ok, %{status: :no_changes}}) do
+  defp pgdelta_plan({:ok, %{status: :no_changes}}) do
     assigns = %{}
 
     ~H"""
@@ -214,7 +214,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     """
   end
 
-  defp pg_delta_plan({:ok, %{status: :changes, sql: sql}}) do
+  defp pgdelta_plan({:ok, %{status: :changes, sql: sql}}) do
     assigns = %{sql: sql}
 
     ~H"""
@@ -261,7 +261,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       external_id: ref,
       tenant: nil,
       schema_migrations: nil,
-      pg_delta: nil,
+      pgdelta: nil,
       error: msg
     )
   end
@@ -306,7 +306,12 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     ])
   end
 
-  defp run_pg_delta(%Database{} = settings) do
+  @doc """
+  Filter used to generate baselines and plans.
+  """
+  def pgdelta_filter, do: @pgdelta_filter
+
+  defp run_pgdelta(%Database{} = settings) do
     case System.find_executable("pgdelta") do
       nil ->
         log_warning("TenantMigrationsPgDeltaMissing", "pgdelta not found on PATH")
@@ -322,7 +327,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
           "--target",
           baseline,
           "--filter",
-          @pg_delta_filter,
+          pgdelta_filter(),
           "--format",
           "sql"
         ]
@@ -341,7 +346,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     end
   end
 
-  defp apply_pg_delta(%Tenant{} = tenant, sql) do
+  defp apply_pgdelta(%Tenant{} = tenant, sql) do
     opts = [query_type: :text, timeout: @query_timeout]
 
     with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
