@@ -8,8 +8,11 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   @type conn() :: Postgrex.conn()
   @type filter :: {binary, binary, binary}
-  @type subscription_params :: {action_filter :: binary, schema :: binary, table :: binary, [filter]}
-  @type subscription_list :: [%{id: binary, claims: map, subscription_params: subscription_params}]
+  @type subscription_params ::
+          {action_filter :: binary, schema :: binary, table :: binary, [filter]}
+  @type subscription_list :: [
+          %{id: binary, claims: map, subscription_params: subscription_params}
+        ]
 
   @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
 
@@ -274,11 +277,13 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         {:ok, {action_filter, schema, table, []}}
 
       %{"schema" => schema}
-      when is_binary(schema) and not is_map_key(params, "table") and not is_map_key(params, "filter") ->
+      when is_binary(schema) and not is_map_key(params, "table") and
+             not is_map_key(params, "filter") ->
         {:ok, {action_filter, schema, "*", []}}
 
       %{"table" => table}
-      when is_binary(table) and not is_map_key(params, "schema") and not is_map_key(params, "filter") ->
+      when is_binary(table) and not is_map_key(params, "schema") and
+             not is_map_key(params, "filter") ->
         {:ok, {action_filter, "public", table, []}}
 
       map when is_map_key(map, "user_token") or is_map_key(map, "auth_token") ->
@@ -304,73 +309,68 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   defp action_filter(_), do: "*"
 
-  defp parse_filters(filter) do
+  defp parse_filters(filter) when is_binary(filter) do
     case String.trim(filter) do
+      "" -> {:ok, []}
+      trimmed -> scan(trimmed, trimmed, 0, 0, 0, [])
+    end
+  end
+
+  # Reached end of binary — parse the final segment
+  defp scan(<<>>, orig, start, len, _depth, acc) do
+    case parse_segment(binary_part(orig, start, len)) do
+      {:ok, parsed} -> {:ok, Enum.reverse([parsed | acc])}
+      {:error, _} = e -> e
+    end
+  end
+
+  defp scan(<<"(", rest::binary>>, orig, start, len, depth, acc) do
+    scan(rest, orig, start, len + 1, depth + 1, acc)
+  end
+
+  defp scan(<<")", rest::binary>>, orig, start, len, depth, acc) do
+    scan(rest, orig, start, len + 1, max(0, depth - 1), acc)
+  end
+
+  # Comma at depth 0 — segment boundary
+  defp scan(<<",", rest::binary>>, orig, start, len, 0, acc) do
+    case parse_segment(binary_part(orig, start, len)) do
+      {:ok, parsed} -> scan(rest, orig, start + len + 1, 0, 0, [parsed | acc])
+      {:error, _} = e -> e
+    end
+  end
+
+  defp scan(<<_::8, rest::binary>>, orig, start, len, depth, acc) do
+    scan(rest, orig, start, len + 1, depth, acc)
+  end
+
+  defp parse_segment(segment) do
+    case String.trim(segment) do
       "" ->
-        {:ok, []}
+        {:error, "filter must not contain empty segments (check for extra commas)"}
 
       trimmed ->
-        result =
-          trimmed
-          |> split_filter_segments()
-          |> Enum.map(&String.trim/1)
-          |> Enum.reduce_while([], fn
-            "", _acc ->
-              {:halt, {:error, "filter must not contain empty segments (check for extra commas)"}}
-
-            segment, acc ->
-              case parse_single_filter(segment) do
-                {:ok, parsed} -> {:cont, [parsed | acc]}
-                {:error, reason} -> {:halt, {:error, reason}}
-              end
-          end)
-
-        case result do
-          {:error, _} = error -> error
-          filters -> {:ok, Enum.reverse(filters)}
+        with [col, rest] <- String.split(trimmed, "=", parts: 2),
+             [filter_type, value] when filter_type in @filter_types <-
+               String.split(rest, ".", parts: 2),
+             {:ok, formatted_value} <- format_filter_value(filter_type, value) do
+          {:ok, {col, filter_type, formatted_value}}
+        else
+          {:error, msg} -> {:error, msg}
+          e -> {:error, inspect(e)}
         end
     end
   end
 
-  # Splits on commas at paren-depth 0, preserving commas inside `in` values
-  # e.g. "id=in.(1,2,3),status=eq.active" → ["id=in.(1,2,3)", "status=eq.active"]
-  defp split_filter_segments(filter) do
-    {segments, current, _depth} =
-      Enum.reduce(String.graphemes(filter), {[], "", 0}, fn
-        "(", {segs, cur, depth} -> {segs, cur <> "(", depth + 1}
-        ")", {segs, cur, depth} -> {segs, cur <> ")", max(0, depth - 1)}
-        ",", {segs, cur, 0} -> {[cur | segs], "", 0}
-        char, {segs, cur, depth} -> {segs, cur <> char, depth}
-      end)
+  defp format_filter_value("in", value) do
+    size = byte_size(value)
 
-    Enum.reverse([current | segments])
-  end
-
-  defp parse_single_filter(segment) do
-    with [col, rest] <- String.split(segment, "=", parts: 2),
-         [filter_type, value] when filter_type in @filter_types <-
-           String.split(rest, ".", parts: 2),
-         {:ok, formatted_value} <- format_filter_value(filter_type, value) do
-      {:ok, {col, filter_type, formatted_value}}
+    if size >= 2 and binary_part(value, 0, 1) == "(" and binary_part(value, size - 1, 1) == ")" do
+      {:ok, "{" <> binary_part(value, 1, size - 2) <> "}"}
     else
-      {:error, msg} -> {:error, msg}
-      e -> {:error, inspect(e)}
+      {:error, "`in` filter value must be wrapped by parentheses"}
     end
   end
 
-  defp format_filter_value(filter, value) do
-    case filter do
-      "in" ->
-        case Regex.run(~r/^\((.*)\)$/, value) do
-          nil ->
-            {:error, "`in` filter value must be wrapped by parentheses"}
-
-          [_, new_value] ->
-            {:ok, "{#{new_value}}"}
-        end
-
-      _ ->
-        {:ok, value}
-    end
-  end
+  defp format_filter_value(_filter, value), do: {:ok, value}
 end
