@@ -199,6 +199,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   We currently support the following filters: 'eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in'
 
+  Multiple filters can be combined with commas and are applied as AND conditions:
+  `"col1=eq.val,col2=gt.5"` means `col1 = val AND col2 > 5`.
+
   ## Examples
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=eq.hey"})
@@ -208,6 +211,19 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=in.(hidee,ho)"})
       {:ok, {"*", "public", "messages", [{"subject", "in", "{hidee,ho}"}]}}
+
+  AND composition — multiple filters separated by commas:
+
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "id=gt.0,id=lt.100"})
+      {:ok, {"*", "public", "messages", [{"id", "gt", "0"}, {"id", "lt", "100"}]}}
+
+  empty or whitespace-only filter string is treated as no filter:
+
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => ""})
+      {:ok, {"*", "public", "messages", []}}
+
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "   "})
+      {:ok, {"*", "public", "messages", []}}
 
   no filter:
 
@@ -248,17 +264,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter}
       when is_binary(schema) and is_binary(table) and is_binary(filter) ->
-        with [col, rest] <- String.split(filter, "=", parts: 2),
-             [filter_type, value] when filter_type in @filter_types <-
-               String.split(rest, ".", parts: 2),
-             {:ok, formatted_value} <- format_filter_value(filter_type, value) do
-          {:ok, {action_filter, schema, table, [{col, filter_type, formatted_value}]}}
-        else
-          {:error, msg} ->
-            {:error, "Error parsing `filter` params: #{msg}"}
-
-          e ->
-            {:error, "Error parsing `filter` params: #{inspect(e)}"}
+        case parse_filters(filter) do
+          {:ok, filters} -> {:ok, {action_filter, schema, table, filters}}
+          {:error, reason} -> {:error, "Error parsing `filter` params: #{reason}"}
         end
 
       %{"schema" => schema, "table" => table}
@@ -295,6 +303,60 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   end
 
   defp action_filter(_), do: "*"
+
+  defp parse_filters(filter) do
+    case String.trim(filter) do
+      "" ->
+        {:ok, []}
+
+      trimmed ->
+        result =
+          trimmed
+          |> split_filter_segments()
+          |> Enum.map(&String.trim/1)
+          |> Enum.reduce_while([], fn
+            "", _acc ->
+              {:halt, {:error, "filter must not contain empty segments (check for extra commas)"}}
+
+            segment, acc ->
+              case parse_single_filter(segment) do
+                {:ok, parsed} -> {:cont, [parsed | acc]}
+                {:error, reason} -> {:halt, {:error, reason}}
+              end
+          end)
+
+        case result do
+          {:error, _} = error -> error
+          filters -> {:ok, Enum.reverse(filters)}
+        end
+    end
+  end
+
+  # Splits on commas at paren-depth 0, preserving commas inside `in` values
+  # e.g. "id=in.(1,2,3),status=eq.active" → ["id=in.(1,2,3)", "status=eq.active"]
+  defp split_filter_segments(filter) do
+    {segments, current, _depth} =
+      Enum.reduce(String.graphemes(filter), {[], "", 0}, fn
+        "(", {segs, cur, depth} -> {segs, cur <> "(", depth + 1}
+        ")", {segs, cur, depth} -> {segs, cur <> ")", max(0, depth - 1)}
+        ",", {segs, cur, 0} -> {[cur | segs], "", 0}
+        char, {segs, cur, depth} -> {segs, cur <> char, depth}
+      end)
+
+    Enum.reverse([current | segments])
+  end
+
+  defp parse_single_filter(segment) do
+    with [col, rest] <- String.split(segment, "=", parts: 2),
+         [filter_type, value] when filter_type in @filter_types <-
+           String.split(rest, ".", parts: 2),
+         {:ok, formatted_value} <- format_filter_value(filter_type, value) do
+      {:ok, {col, filter_type, formatted_value}}
+    else
+      {:error, msg} -> {:error, msg}
+      e -> {:error, inspect(e)}
+    end
+  end
 
   defp format_filter_value(filter, value) do
     case filter do

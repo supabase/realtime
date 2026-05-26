@@ -26,6 +26,116 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
     %{conn: conn, tenant: tenant}
   end
 
+  describe "parse_subscription_params/1 with comma-separated (AND) filters" do
+    test "two valid filters produce a two-element filter list" do
+      assert {:ok, {"*", "public", "test", filters}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=gt.0,id=lt.100"
+               })
+
+      assert [{"id", "gt", "0"}, {"id", "lt", "100"}] = Enum.sort(filters)
+    end
+
+    test "first valid then invalid filter returns an error" do
+      assert {:error, msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=gt.0,id=like.100"
+               })
+
+      assert msg =~ "Error parsing `filter` params"
+    end
+
+    test "empty string filter produces an empty filter list" do
+      assert {:ok, {"*", "public", "test", []}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ""
+               })
+    end
+
+    test "single filter still parses correctly (regression)" do
+      assert {:ok, {"*", "public", "test", [{"id", "eq", "5"}]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=eq.5"
+               })
+    end
+
+    test "in filter still works within a multi-filter expression" do
+      assert {:ok, {"*", "public", "test", filters}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=in.(1,2,3),details=eq.active"
+               })
+
+      assert [{"details", "eq", "active"}, {"id", "in", "{1,2,3}"}] = Enum.sort(filters)
+    end
+
+    # Fix 1: paren-depth splitter correctly handles multiple filters whose values
+    # contain bare `)` characters — the old regex would silently drop the third filter
+    test "filters with bare ) in values are split correctly" do
+      assert {:ok, {"*", "public", "test", filters}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "a=eq.x),b=eq.y),c=eq.z"
+               })
+
+      assert [{"a", "eq", "x)"}, {"b", "eq", "y)"}, {"c", "eq", "z"}] = filters
+    end
+
+    # Fix 2: empty segments produce a clear error, not the cryptic `[""]` inspect output
+    test "trailing comma returns a clear error" do
+      assert {:error, msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=gt.0,"
+               })
+
+      assert msg =~ "empty segments"
+    end
+
+    test "leading comma returns a clear error" do
+      assert {:error, msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ",id=gt.0"
+               })
+
+      assert msg =~ "empty segments"
+    end
+
+    test "consecutive commas return a clear error" do
+      assert {:error, msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "a=eq.1,,b=eq.2"
+               })
+
+      assert msg =~ "empty segments"
+    end
+
+    # Fix 3: whitespace-only filter is treated as no filter, same as ""
+    test "whitespace-only filter produces an empty filter list" do
+      assert {:ok, {"*", "public", "test", []}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "   "
+               })
+    end
+  end
+
   describe "create/5" do
     test "create all tables & all events", %{conn: conn} do
       {:ok, subscription_params} = Subscriptions.parse_subscription_params(%{"event" => "*", "schema" => "public"})
@@ -163,6 +273,25 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       {:error,
        "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: %{\"filter\" => ~c\"{\", \"schema\" => \"public\", \"table\" => \"images\"}"} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "images", "filter" => [123]})
+    end
+
+    test "create with two comma-separated filters stores a two-element filter array", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "id=gt.0,id=lt.100"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert %Postgrex.Result{rows: [[filters]]} =
+               Postgrex.query!(conn, "select filters from realtime.subscription", [])
+
+      assert [_, _] = filters
     end
   end
 

@@ -388,6 +388,73 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
     end
   end
 
+  describe "AND filter composition" do
+    test "receives row matching all filters, ignores row matching only one filter",
+         %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      # details=eq.match AND id=gt.0 — all rows have id > 0 (auto-increment from 1),
+      # so the second condition is always true, making details=eq.match the effective selector.
+      filter = "details=eq.match,id=gt.0"
+
+      config = %{
+        postgres_changes: [%{event: "INSERT", schema: "public", table: "test", filter: filter}]
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok"},
+                       topic: ^topic
+                     },
+                     200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      # Row matching both filters (details='match', id>0) — should be received
+      %{rows: [[matching_id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('match') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "record" => %{"id" => ^matching_id, "details" => "match"},
+                           "type" => "INSERT"
+                         }
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     500
+
+      # Row matching only the second filter (id>0) but not the first (details!='match') — should be ignored
+      Postgrex.query!(conn, "insert into test (details) values ('no-match') returning id", [])
+
+      refute_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"type" => "INSERT"}},
+                       topic: ^topic
+                     },
+                     500
+    end
+  end
+
   describe "error handling" do
     test "error subscribing", %{tenant: tenant, serializer: serializer} do
       {:ok, conn} = Database.connect(tenant, "realtime_test")
