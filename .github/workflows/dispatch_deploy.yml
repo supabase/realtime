@@ -1,0 +1,40 @@
+name: Dispatch Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy (no leading v). Leave blank to let the downstream pick the latest release. Example: 2.94.1'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to deploy (no leading v).'
+        required: true
+        type: string
+
+jobs:
+  dispatch:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.GH_APP_LIBS_PR_MANAGER_ID }}
+          private-key: ${{ secrets.GH_APP_LIBS_PR_MANAGER_PRIVATE_KEY }}
+          owner: supabase
+
+      - name: Dispatch version update
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_REPO: ${{ secrets.DEPLOY_TARGET_REPO }}
+          VERSION: ${{ inputs.version }}
+          SOURCE: ${{ github.event_name == 'workflow_dispatch' && 'manual-dispatch' || 'realtime-release' }}
+        run: |
+          gh api "repos/${TARGET_REPO}/dispatches" \
+            --method POST \
+            --field event_type=realtime-release \
+            --field "client_payload[version]=${VERSION}" \
+            --field "client_payload[source]=${SOURCE}"
