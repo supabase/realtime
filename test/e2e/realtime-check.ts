@@ -135,7 +135,7 @@ function patchFetch() {
 
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const randomTopic = () => randomTopic();
+const randomTopic = () => "topic:" + crypto.randomUUID();
 const fmtSqlResult = (result: any[]) => {
   const count = (result as any).count ?? result.length;
   return result.length > 0 ? `count=${count} rows=${JSON.stringify(result)}` : `count=${count}`;
