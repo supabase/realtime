@@ -78,6 +78,39 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       assert [{"details", "eq", "active"}, {"id", "in", "{1,2,3}"}] = Enum.sort(filters)
     end
 
+    test "in filter with string values combined with another filter (commas inside parens not treated as separators)" do
+      assert {:ok, {"*", "public", "test", filters}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "name=in.(red,blue),quantity=gt.0"
+               })
+
+      assert [{"name", "in", "{red,blue}"}, {"quantity", "gt", "0"}] = filters
+    end
+
+    test "in filter last with non-eq preceding filter" do
+      assert {:ok, {"*", "public", "test", filters}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "quantity=gt.0,name=in.(red,blue)"
+               })
+
+      assert [{"quantity", "gt", "0"}, {"name", "in", "{red,blue}"}] = filters
+    end
+
+    test "two in filters each with multiple comma-separated values" do
+      assert {:ok, {"*", "public", "test", filters}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "name=in.(red,blue,green),status=in.(active,inactive)"
+               })
+
+      assert [{"name", "in", "{red,blue,green}"}, {"status", "in", "{active,inactive}"}] = filters
+    end
+
     # Fix 1: paren-depth splitter correctly handles multiple filters whose values
     # contain bare `)` characters — the old regex would silently drop the third filter
     test "filters with bare ) in values are split correctly" do
