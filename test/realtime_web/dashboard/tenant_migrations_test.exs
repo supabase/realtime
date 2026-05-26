@@ -2,7 +2,9 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
   use RealtimeWeb.ConnCase, async: false
   import Phoenix.LiveViewTest
 
+  alias Realtime.Api
   alias Realtime.Database
+  alias Realtime.Tenants.Migrations
   alias RealtimeWeb.Dashboard.TenantMigrations
 
   setup do
@@ -67,6 +69,72 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     {:ok, view, _html} = live(conn, "/admin/dashboard/tenant_migrations?external_id=#{tenant.external_id}")
 
     assert has_element?(view, "h6", "pg-delta plan vs baseline")
+  end
+
+  describe "backfill_schema_migrations/1" do
+    test "inserts missing versions and updates tenants.migrations_ran", %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        db_conn,
+        "DELETE FROM realtime.schema_migrations WHERE version > 20211116213934",
+        []
+      )
+
+      {:ok, _} = Api.update_migrations_ran(tenant.external_id, 7)
+
+      assert :ok = TenantMigrations.backfill_schema_migrations(tenant)
+
+      %{rows: [[count]]} =
+        Postgrex.query!(db_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
+
+      total = length(Migrations.migrations())
+      assert count == total
+
+      updated = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
+      assert updated.migrations_ran == total
+    end
+
+    test "running twice keeps the row count and migrations_ran stable", %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      total = length(Migrations.migrations())
+
+      assert :ok = TenantMigrations.backfill_schema_migrations(tenant)
+      assert :ok = TenantMigrations.backfill_schema_migrations(tenant)
+
+      %{rows: [[count]]} =
+        Postgrex.query!(db_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
+
+      assert count == total
+
+      updated = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
+      assert updated.migrations_ran == total
+    end
+  end
+
+  describe "apply_pg_delta/2" do
+    test "runs the sql plan and backfills schema_migrations", %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        db_conn,
+        "DELETE FROM realtime.schema_migrations WHERE version > 20211116213934",
+        []
+      )
+
+      {:ok, _} = Api.update_migrations_ran(tenant.external_id, 7)
+
+      assert :ok = TenantMigrations.apply_pg_delta(tenant, "SELECT 1")
+
+      %{rows: [[count]]} =
+        Postgrex.query!(db_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
+
+      total = length(Migrations.migrations())
+      assert count == total
+
+      updated = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
+      assert updated.migrations_ran == total
+    end
   end
 
   describe "postgres_url/1" do
