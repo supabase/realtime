@@ -33,6 +33,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify committed OpenAPI snapshot exists
+        run: |
+          if ! git ls-files --error-unmatch priv/openapi.json > /dev/null 2>&1; then
+            echo "::error file=priv/openapi.json::OpenAPI snapshot is not yet committed to the repository."
+            echo ""
+            echo "Bootstrap one-time: run 'mix openapi.export' locally and commit"
+            echo "priv/openapi.json. Or download the 'openapi-spec' artifact from a"
+            echo "previous run on this PR and commit it."
+            exit 1
+          fi
+
       - uses: erlef/setup-beam@v1
         with:
           version-file: .tool-versions
