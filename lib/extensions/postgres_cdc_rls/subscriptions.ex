@@ -8,8 +8,11 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   @type conn() :: Postgrex.conn()
   @type filter :: {binary, binary, binary}
-  @type subscription_params :: {action_filter :: binary, schema :: binary, table :: binary, [filter]}
-  @type subscription_list :: [%{id: binary, claims: map, subscription_params: subscription_params}]
+  @type subscription_params ::
+          {action_filter :: binary, schema :: binary, table :: binary, [filter]}
+  @type subscription_list :: [
+          %{id: binary, claims: map, subscription_params: subscription_params}
+        ]
 
   @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
 
@@ -199,6 +202,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   We currently support the following filters: 'eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in'
 
+  Multiple filters can be combined with commas and are applied as AND conditions:
+  `"col1=eq.val,col2=gt.5"` means `col1 = val AND col2 > 5`.
+
   ## Examples
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=eq.hey"})
@@ -208,6 +214,19 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=in.(hidee,ho)"})
       {:ok, {"*", "public", "messages", [{"subject", "in", "{hidee,ho}"}]}}
+
+  AND composition — multiple filters separated by commas:
+
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "id=gt.0,id=lt.100"})
+      {:ok, {"*", "public", "messages", [{"id", "gt", "0"}, {"id", "lt", "100"}]}}
+
+  empty or whitespace-only filter string is treated as no filter:
+
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => ""})
+      {:ok, {"*", "public", "messages", []}}
+
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "   "})
+      {:ok, {"*", "public", "messages", []}}
 
   no filter:
 
@@ -248,17 +267,9 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter}
       when is_binary(schema) and is_binary(table) and is_binary(filter) ->
-        with [col, rest] <- String.split(filter, "=", parts: 2),
-             [filter_type, value] when filter_type in @filter_types <-
-               String.split(rest, ".", parts: 2),
-             {:ok, formatted_value} <- format_filter_value(filter_type, value) do
-          {:ok, {action_filter, schema, table, [{col, filter_type, formatted_value}]}}
-        else
-          {:error, msg} ->
-            {:error, "Error parsing `filter` params: #{msg}"}
-
-          e ->
-            {:error, "Error parsing `filter` params: #{inspect(e)}"}
+        case parse_filters(filter) do
+          {:ok, filters} -> {:ok, {action_filter, schema, table, filters}}
+          {:error, reason} -> {:error, "Error parsing `filter` params: #{reason}"}
         end
 
       %{"schema" => schema, "table" => table}
@@ -266,11 +277,13 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         {:ok, {action_filter, schema, table, []}}
 
       %{"schema" => schema}
-      when is_binary(schema) and not is_map_key(params, "table") and not is_map_key(params, "filter") ->
+      when is_binary(schema) and not is_map_key(params, "table") and
+             not is_map_key(params, "filter") ->
         {:ok, {action_filter, schema, "*", []}}
 
       %{"table" => table}
-      when is_binary(table) and not is_map_key(params, "schema") and not is_map_key(params, "filter") ->
+      when is_binary(table) and not is_map_key(params, "schema") and
+             not is_map_key(params, "filter") ->
         {:ok, {action_filter, "public", table, []}}
 
       map when is_map_key(map, "user_token") or is_map_key(map, "auth_token") ->
@@ -296,19 +309,68 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   defp action_filter(_), do: "*"
 
-  defp format_filter_value(filter, value) do
-    case filter do
-      "in" ->
-        case Regex.run(~r/^\((.*)\)$/, value) do
-          nil ->
-            {:error, "`in` filter value must be wrapped by parentheses"}
-
-          [_, new_value] ->
-            {:ok, "{#{new_value}}"}
-        end
-
-      _ ->
-        {:ok, value}
+  defp parse_filters(filter) when is_binary(filter) do
+    case String.trim(filter) do
+      "" -> {:ok, []}
+      trimmed -> scan(trimmed, trimmed, 0, 0, 0, [])
     end
   end
+
+  # Reached end of binary — parse the final segment
+  defp scan(<<>>, orig, start, len, _depth, acc) do
+    case parse_segment(binary_part(orig, start, len)) do
+      {:ok, parsed} -> {:ok, Enum.reverse([parsed | acc])}
+      {:error, _} = e -> e
+    end
+  end
+
+  defp scan(<<"(", rest::binary>>, orig, start, len, depth, acc) do
+    scan(rest, orig, start, len + 1, depth + 1, acc)
+  end
+
+  defp scan(<<")", rest::binary>>, orig, start, len, depth, acc) do
+    scan(rest, orig, start, len + 1, max(0, depth - 1), acc)
+  end
+
+  # Comma at depth 0 — segment boundary
+  defp scan(<<",", rest::binary>>, orig, start, len, 0, acc) do
+    case parse_segment(binary_part(orig, start, len)) do
+      {:ok, parsed} -> scan(rest, orig, start + len + 1, 0, 0, [parsed | acc])
+      {:error, _} = e -> e
+    end
+  end
+
+  defp scan(<<_::8, rest::binary>>, orig, start, len, depth, acc) do
+    scan(rest, orig, start, len + 1, depth, acc)
+  end
+
+  defp parse_segment(segment) do
+    case String.trim(segment) do
+      "" ->
+        {:error, "filter must not contain empty segments (check for extra commas)"}
+
+      trimmed ->
+        with [col, rest] <- String.split(trimmed, "=", parts: 2),
+             [filter_type, value] when filter_type in @filter_types <-
+               String.split(rest, ".", parts: 2),
+             {:ok, formatted_value} <- format_filter_value(filter_type, value) do
+          {:ok, {col, filter_type, formatted_value}}
+        else
+          {:error, msg} -> {:error, msg}
+          e -> {:error, inspect(e)}
+        end
+    end
+  end
+
+  defp format_filter_value("in", value) do
+    size = byte_size(value)
+
+    if size >= 2 and binary_part(value, 0, 1) == "(" and binary_part(value, size - 1, 1) == ")" do
+      {:ok, "{" <> binary_part(value, 1, size - 2) <> "}"}
+    else
+      {:error, "`in` filter value must be wrapped by parentheses"}
+    end
+  end
+
+  defp format_filter_value(_filter, value), do: {:ok, value}
 end

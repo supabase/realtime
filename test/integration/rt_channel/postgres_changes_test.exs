@@ -56,7 +56,9 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                      8000
 
       {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
-      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      %{rows: [[id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
 
       assert_receive %Message{
                        event: "postgres_changes",
@@ -84,7 +86,10 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
   end
 
   describe "bytea column" do
-    test "handle insert with bytea data without double-encoding", %{tenant: tenant, serializer: serializer} do
+    test "handle insert with bytea data without double-encoding", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
       {socket, _} = get_connection(tenant, serializer)
       topic = "realtime:any"
       config = %{postgres_changes: [%{event: "INSERT", schema: "public"}]}
@@ -117,7 +122,11 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
       binary_value = <<1, 2, 3, 4, 5>>
 
       %{rows: [[_id]]} =
-        Postgrex.query!(conn, "insert into test (details, binary_data) values ('test', $1) returning id", [binary_value])
+        Postgrex.query!(
+          conn,
+          "insert into test (details, binary_data) values ('test', $1) returning id",
+          [binary_value]
+        )
 
       assert_receive %Message{
                        event: "postgres_changes",
@@ -176,7 +185,9 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                      8000
 
       {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
-      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      %{rows: [[id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
 
       Postgrex.query!(conn, "update test set details = 'test' where id = #{id}", [])
 
@@ -244,7 +255,10 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                      8000
 
       {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
-      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      %{rows: [[id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
       Postgrex.query!(conn, "delete from test where id = #{id}", [])
 
       assert_receive %Message{
@@ -310,7 +324,9 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
                      8000
 
       {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
-      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
+
+      %{rows: [[id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('test') returning id", [])
 
       assert_receive %Message{
                        event: "postgres_changes",
@@ -388,6 +404,108 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
     end
   end
 
+  describe "AND filter composition" do
+    test "delivers row matching all filters", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      # details=eq.match AND id=gt.0 — all rows have id > 0 (auto-increment from 1),
+      # so the second condition is always true, making details=eq.match the effective selector.
+      filter = "details=eq.match,id=gt.0"
+
+      config = %{
+        postgres_changes: [%{event: "INSERT", schema: "public", table: "test", filter: filter}]
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok"},
+                       topic: ^topic
+                     },
+                     200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      %{rows: [[matching_id]]} =
+        Postgrex.query!(conn, "insert into test (details) values ('match') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{
+                         "data" => %{
+                           "record" => %{"id" => ^matching_id, "details" => "match"},
+                           "type" => "INSERT"
+                         }
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     500
+    end
+
+    test "ignores row matching only one filter", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+
+      # details=eq.match AND id=gt.0 — all rows have id > 0 (auto-increment from 1),
+      # so the second condition is always true, making details=eq.match the effective selector.
+      filter = "details=eq.match,id=gt.0"
+
+      config = %{
+        postgres_changes: [%{event: "INSERT", schema: "public", table: "test", filter: filter}]
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{
+                       event: "phx_reply",
+                       payload: %{"status" => "ok"},
+                       topic: ^topic
+                     },
+                     200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{
+                         "channel" => "any",
+                         "extension" => "postgres_changes",
+                         "message" => "Subscribed to PostgreSQL",
+                         "status" => "ok"
+                       },
+                       ref: nil,
+                       topic: ^topic
+                     },
+                     8000
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      # Row matching only the second filter (id>0) but not the first (details!='match') — should be ignored
+      Postgrex.query!(conn, "insert into test (details) values ('no-match') returning id", [])
+
+      refute_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"type" => "INSERT"}},
+                       topic: ^topic
+                     },
+                     500
+    end
+  end
+
   describe "error handling" do
     test "error subscribing", %{tenant: tenant, serializer: serializer} do
       {:ok, conn} = Database.connect(tenant, "realtime_test")
@@ -424,14 +542,18 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
       assert log =~ "Unable to subscribe to changes with given parameters"
     end
 
-    test "handle nil postgres changes params as empty param changes", %{tenant: tenant, serializer: serializer} do
+    test "handle nil postgres changes params as empty param changes", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
       {socket, _} = get_connection(tenant, serializer)
       topic = "realtime:any"
       config = %{postgres_changes: [nil]}
 
       WebsocketClient.join(socket, topic, %{config: config})
 
-      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic}, 200
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic},
+                     200
 
       refute_receive %Message{
                        event: "system",
