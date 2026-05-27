@@ -1,0 +1,74 @@
+name: OpenAPI
+
+on:
+  pull_request:
+    paths:
+      - "lib/realtime_web/**"
+      - "lib/mix/tasks/openapi.export.ex"
+      - "priv/openapi.json"
+      - "mix.exs"
+      - "mix.lock"
+      - ".github/workflows/openapi.yml"
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openapi-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift_check:
+    name: Spec drift check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    env:
+      MIX_ENV: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
+      - name: Install dependencies
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Regenerate OpenAPI spec
+        run: mix openapi.export
+
+      - name: Fail if committed spec is out of date
+        run: |
+          if ! git diff --exit-code -- priv/openapi.json; then
+            echo ""
+            echo "::error::The OpenAPI spec is out of date."
+            echo "Run 'mix openapi.export' locally and commit priv/openapi.json."
+            exit 1
+          fi
+
+      - name: Upload spec artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: priv/openapi.json
+          if-no-files-found: warn
