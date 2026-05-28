@@ -157,6 +157,31 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 2000
     end
 
+    test "handles unsupported equality operator error from check_equality_op and retries", %{args: args} do
+      tenant_id = args["id"]
+
+      error =
+        {:error,
+         %Postgrex.Error{
+           postgres: %{
+             code: :raise_exception,
+             message: "unsupported equality operator: future_op"
+           }
+         }}
+
+      expect(Replications, :list_changes, fn _, _, _, _, _ -> error end)
+
+      start_link_supervised!({Poller, args})
+
+      assert_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     1000
+    end
+
     test "handles no new changes", %{args: args, tenant: tenant} do
       tenant_id = args["id"]
       reject(&TenantBroadcaster.pubsub_direct_broadcast/6)

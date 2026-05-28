@@ -506,6 +506,266 @@ defmodule Realtime.Integration.RtChannel.PostgresChangesTest do
     end
   end
 
+  describe "new operators (like, ilike, is, not.*)" do
+    defp subscribe_and_wait(socket, topic, filter) do
+      config = %{
+        postgres_changes: [%{event: "INSERT", schema: "public", table: "test", filter: filter}]
+      }
+
+      WebsocketClient.join(socket, topic, %{config: config})
+
+      assert_receive %Message{event: "phx_reply", payload: %{"status" => "ok"}, topic: ^topic},
+                     200
+
+      assert_receive %Message{
+                       event: "system",
+                       payload: %{"message" => "Subscribed to PostgreSQL", "status" => "ok"}
+                     },
+                     8000
+    end
+
+    test "like: delivers matching row", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=like.%match%")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('it-match-es') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"record" => %{"id" => ^id}, "type" => "INSERT"}}
+                     },
+                     500
+    end
+
+    test "like: ignores non-matching row", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=like.%match%")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Postgrex.query!(conn, "insert into test (details) values ('no-such-thing') returning id", [])
+
+      refute_receive %Message{event: "postgres_changes", payload: %{"data" => %{"type" => "INSERT"}}, topic: ^topic},
+                     500
+    end
+
+    test "like: is case-sensitive and ignores row that only matches case-insensitively", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=like.%MATCH%")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Postgrex.query!(conn, "insert into test (details) values ('it-match-es') returning id", [])
+
+      refute_receive %Message{event: "postgres_changes", payload: %{"data" => %{"type" => "INSERT"}}, topic: ^topic},
+                     500
+    end
+
+    test "ilike: delivers row matching case-insensitively", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=ilike.%MATCH%")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('it-match-es') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"record" => %{"id" => ^id}, "type" => "INSERT"}}
+                     },
+                     500
+    end
+
+    test "ilike: ignores row that does not match even case-insensitively", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=ilike.%MATCH%")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Postgrex.query!(conn, "insert into test (details) values ('no-such-thing') returning id", [])
+
+      refute_receive %Message{event: "postgres_changes", payload: %{"data" => %{"type" => "INSERT"}}, topic: ^topic},
+                     500
+    end
+
+    test "is.null: delivers row with null details", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=is.null")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values (null) returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"record" => %{"id" => ^id}, "type" => "INSERT"}}
+                     },
+                     500
+    end
+
+    test "is.null: ignores row with non-null details", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=is.null")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Postgrex.query!(conn, "insert into test (details) values ('present') returning id", [])
+
+      refute_receive %Message{event: "postgres_changes", payload: %{"data" => %{"type" => "INSERT"}}, topic: ^topic},
+                     500
+    end
+
+    test "not.eq (neq): delivers non-matching row", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=not.eq.excluded")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('included') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"record" => %{"id" => ^id}, "type" => "INSERT"}}
+                     },
+                     500
+    end
+
+    test "not.in: delivers row whose value is outside the list", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=not.in.(foo,bar)")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('baz') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"record" => %{"id" => ^id}, "type" => "INSERT"}}
+                     },
+                     500
+    end
+
+    test "not.in: ignores row whose value is inside the list", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=not.in.(foo,bar)")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Postgrex.query!(conn, "insert into test (details) values ('foo') returning id", [])
+
+      refute_receive %Message{event: "postgres_changes", payload: %{"data" => %{"type" => "INSERT"}}, topic: ^topic},
+                     500
+    end
+
+    test "not.is.null: delivers row with non-null details", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=not.is.null")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('present') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"record" => %{"id" => ^id}, "type" => "INSERT"}}
+                     },
+                     500
+    end
+
+    test "not.is.null: ignores row with null details", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=not.is.null")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Postgrex.query!(conn, "insert into test (details) values (null) returning id", [])
+
+      refute_receive %Message{event: "postgres_changes", payload: %{"data" => %{"type" => "INSERT"}}, topic: ^topic},
+                     500
+    end
+
+    test "not.like: delivers row that does not match the pattern", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=not.like.%excluded%")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('included') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"record" => %{"id" => ^id}, "type" => "INSERT"}}
+                     },
+                     500
+    end
+
+    test "not.like: ignores row that matches the pattern", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=not.like.%excluded%")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Postgrex.query!(conn, "insert into test (details) values ('excluded-value') returning id", [])
+
+      refute_receive %Message{event: "postgres_changes", payload: %{"data" => %{"type" => "INSERT"}}, topic: ^topic},
+                     500
+    end
+
+    test "not.ilike: delivers row that does not match the pattern case-insensitively", %{
+      tenant: tenant,
+      serializer: serializer
+    } do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=not.ilike.%EXCLUDED%")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      %{rows: [[id]]} = Postgrex.query!(conn, "insert into test (details) values ('included') returning id", [])
+
+      assert_receive %Message{
+                       event: "postgres_changes",
+                       payload: %{"data" => %{"record" => %{"id" => ^id}, "type" => "INSERT"}}
+                     },
+                     500
+    end
+
+    test "not.ilike: ignores row that matches the pattern case-insensitively", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=not.ilike.%EXCLUDED%")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+      Postgrex.query!(conn, "insert into test (details) values ('excluded-value') returning id", [])
+
+      refute_receive %Message{event: "postgres_changes", payload: %{"data" => %{"type" => "INSERT"}}, topic: ^topic},
+                     500
+    end
+
+    test "not.in: ignores each value that appears in the exclusion list", %{tenant: tenant, serializer: serializer} do
+      {socket, _} = get_connection(tenant, serializer)
+      topic = "realtime:any"
+      subscribe_and_wait(socket, topic, "details=not.in.(alpha,beta,gamma)")
+
+      {:ok, _, conn} = PostgresCdcRls.get_manager_conn(tenant.external_id)
+
+      Enum.each(["alpha", "beta", "gamma"], fn val ->
+        Postgrex.query!(conn, "insert into test (details) values ('#{val}') returning id", [])
+
+        refute_receive %Message{
+                         event: "postgres_changes",
+                         payload: %{"data" => %{"type" => "INSERT"}},
+                         topic: ^topic
+                       },
+                       300
+      end)
+    end
+  end
+
   describe "error handling" do
     test "error subscribing", %{tenant: tenant, serializer: serializer} do
       {:ok, conn} = Database.connect(tenant, "realtime_test")

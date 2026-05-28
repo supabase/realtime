@@ -43,7 +43,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                Subscriptions.parse_subscription_params(%{
                  "schema" => "public",
                  "table" => "test",
-                 "filter" => "id=gt.0,id=like.100"
+                 "filter" => "id=gt.0,id=fts.100"
                })
 
       assert msg =~ "Error parsing `filter` params"
@@ -158,6 +158,28 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       assert msg =~ "empty segments"
     end
 
+    test "comma inside a plain eq value is treated as an AND separator and fails" do
+      assert {:error, msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "details=eq.hello,world"
+               })
+
+      assert msg =~ "Error parsing `filter` params"
+    end
+
+    test "postgrest-style quoted string with comma in eq value is treated as a literal" do
+      assert {:ok, {"*", "public", "test", filters}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s(details=eq."hello,world")
+               })
+
+      assert [{"details", "eq", "hello,world"}] = filters
+    end
+
     # Fix 3: whitespace-only filter is treated as no filter, same as ""
     test "whitespace-only filter produces an empty filter list" do
       assert {:ok, {"*", "public", "test", []}} =
@@ -166,6 +188,163 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  "table" => "test",
                  "filter" => "   "
                })
+    end
+
+    test "in filter with quoted string values containing commas is preserved" do
+      assert {:ok, {"*", "public", "test", filters}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => ~s[name=in.("hi,there","yes,you")]
+               })
+
+      assert [{"name", "in", ~s[{"hi,there","yes,you"}]}] = filters
+    end
+  end
+
+  describe "parse_subscription_params/1 with new operators and not. prefix" do
+    test "like operator parses correctly" do
+      assert {:ok, {"*", "public", "test", [{"name", "like", "%hello%"}]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "name=like.%hello%"
+               })
+    end
+
+    test "ilike operator parses correctly" do
+      assert {:ok, {"*", "public", "test", [{"name", "ilike", "%hello%"}]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "name=ilike.%hello%"
+               })
+    end
+
+    test "is operator parses correctly" do
+      assert {:ok, {"*", "public", "test", [{"deleted_at", "is", "null"}]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "deleted_at=is.null"
+               })
+    end
+
+    test "not.eq maps to neq" do
+      assert {:ok, {"*", "public", "test", [{"id", "neq", "5"}]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=not.eq.5"
+               })
+    end
+
+    test "not.lt maps to gte" do
+      assert {:ok, {"*", "public", "test", [{"id", "gte", "5"}]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=not.lt.5"
+               })
+    end
+
+    test "not.in maps to not_in and formats value as array" do
+      assert {:ok, {"*", "public", "test", [{"id", "not_in", "{1,2,3}"}]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=not.in.(1,2,3)"
+               })
+    end
+
+    test "not.like maps to not_like" do
+      assert {:ok, {"*", "public", "test", [{"name", "not_like", "%hello%"}]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "name=not.like.%hello%"
+               })
+    end
+
+    test "not.ilike maps to not_ilike" do
+      assert {:ok, {"*", "public", "test", [{"name", "not_ilike", "%hello%"}]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "name=not.ilike.%hello%"
+               })
+    end
+
+    test "not.is maps to not_is" do
+      assert {:ok, {"*", "public", "test", [{"deleted_at", "not_is", "null"}]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "deleted_at=not.is.null"
+               })
+    end
+
+    test "not. with unsupported operator returns error" do
+      assert {:error, msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=not.fts.hello"
+               })
+
+      assert msg =~ "Error parsing `filter` params"
+    end
+
+    test "not. with unsupported operator does not double-prefix the error message" do
+      assert {:error, msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=not.fts.hello"
+               })
+
+      refute msg =~ "Error parsing `filter` params: Error parsing"
+    end
+
+    test "not. with missing value (no dot-separated value) does not double-prefix the error message" do
+      assert {:error, msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=not.eq"
+               })
+
+      assert msg =~ "Error parsing `filter` params"
+      refute msg =~ "Error parsing `filter` params: Error parsing"
+    end
+
+    test "not_in used directly without not. prefix is rejected" do
+      assert {:error, _msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "id=not_in.(1,2,3)"
+               })
+    end
+
+    test "not_like used directly without not. prefix is rejected" do
+      assert {:error, _msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "name=not_like.%foo%"
+               })
+    end
+
+    test "not. operators combine correctly in AND filters" do
+      assert {:ok, {"*", "public", "test", filters}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "test",
+                 "filter" => "status=not.eq.banned,deleted_at=is.null"
+               })
+
+      assert [{"status", "neq", "banned"}, {"deleted_at", "is", "null"}] = filters
     end
   end
 
@@ -306,6 +485,126 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       {:error,
        "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: %{\"filter\" => ~c\"{\", \"schema\" => \"public\", \"table\" => \"images\"}"} =
         Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "images", "filter" => [123]})
+    end
+
+    test "like filter on text column is accepted", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=like.%hello%"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+    end
+
+    test "like filter on integer column is rejected due to type mismatch", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "id=like.%hello%"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:error, {:subscription_insert_failed, msg}} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert msg =~ "invalid input syntax for type integer"
+    end
+
+    test "ilike filter on text column is accepted", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=ilike.%hello%"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+    end
+
+    test "is.null filter is accepted", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=is.null"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+    end
+
+    test "is filter with invalid value is rejected", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=is.other"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:error, {:subscription_insert_failed, msg}} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert msg =~ "invalid value for is/not_is filter"
+    end
+
+    test "not.in filter on text column is accepted", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=not.in.(foo,bar)"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+    end
+
+    test "not.in filter exceeding 100 values is rejected", %{conn: conn} do
+      values = Enum.map_join(1..101, ",", &"val#{&1}")
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=not.in.(#{values})"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:error, {:subscription_insert_failed, msg}} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
+
+      assert msg =~ "too many values"
+    end
+
+    test "not.is.null filter is accepted", %{conn: conn} do
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{
+          "schema" => "public",
+          "table" => "test",
+          "filter" => "details=not.is.null"
+        })
+
+      params_list = [%{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}]
+
+      assert {:ok, [%Postgrex.Result{}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
     end
 
     test "create with two comma-separated filters stores a two-element filter array", %{conn: conn} do

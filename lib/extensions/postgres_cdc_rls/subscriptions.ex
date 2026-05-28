@@ -14,7 +14,31 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
           %{id: binary, claims: map, subscription_params: subscription_params}
         ]
 
-  @filter_types ["eq", "neq", "lt", "lte", "gt", "gte", "in"]
+  @filter_types [
+    "eq",
+    "neq",
+    "lt",
+    "lte",
+    "gt",
+    "gte",
+    "in",
+    "like",
+    "ilike",
+    "is"
+  ]
+
+  @not_op_map %{
+    "eq" => "neq",
+    "neq" => "eq",
+    "lt" => "gte",
+    "lte" => "gt",
+    "gt" => "lte",
+    "gte" => "lt",
+    "in" => "not_in",
+    "like" => "not_like",
+    "ilike" => "not_ilike",
+    "is" => "not_is"
+  }
 
   @spec create(conn(), String.t(), subscription_list, pid(), pid()) ::
           {:ok, Postgrex.Result.t()}
@@ -200,7 +224,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @doc """
   Parses subscription filter parameters into something we can pass into our `create_subscription` query.
 
-  We currently support the following filters: 'eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in'
+  We currently support the following filters: 'eq', 'neq', 'lt', 'lte', 'gt', 'gte', 'in', 'like', 'ilike', 'is'.
+  Negated variants are expressed with the `not.` prefix: `not.eq`, `not.lt`, `not.in`, `not.like`, `not.ilike`, `not.is`, etc.
 
   Multiple filters can be combined with commas and are applied as AND conditions:
   `"col1=eq.val,col2=gt.5"` means `col1 = val AND col2 > 5`.
@@ -245,8 +270,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
   An unsupported filter will respond with an error tuple:
 
-      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=like.hey"})
-      {:error, ~s(Error parsing `filter` params: ["like", "hey"])}
+      iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=fts.hey"})
+      {:error, ~s(Error parsing `filter` params: ["fts", "hey"])}
 
   Catch `undefined` filters:
 
@@ -312,36 +337,41 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   defp parse_filters(filter) when is_binary(filter) do
     case String.trim(filter) do
       "" -> {:ok, []}
-      trimmed -> scan(trimmed, trimmed, 0, 0, 0, [])
+      trimmed -> scan(trimmed, trimmed, 0, 0, 0, false, [])
     end
   end
 
   # Reached end of binary — parse the final segment
-  defp scan(<<>>, orig, start, len, _depth, acc) do
+  defp scan(<<>>, orig, start, len, _depth, _quoted, acc) do
     case parse_segment(binary_part(orig, start, len)) do
       {:ok, parsed} -> {:ok, Enum.reverse([parsed | acc])}
       {:error, _} = e -> e
     end
   end
 
-  defp scan(<<"(", rest::binary>>, orig, start, len, depth, acc) do
-    scan(rest, orig, start, len + 1, depth + 1, acc)
+  # Toggle quoted mode on double-quote; parens and commas have no special meaning while quoted
+  defp scan(<<"\"", rest::binary>>, orig, start, len, depth, quoted, acc) do
+    scan(rest, orig, start, len + 1, depth, not quoted, acc)
   end
 
-  defp scan(<<")", rest::binary>>, orig, start, len, depth, acc) do
-    scan(rest, orig, start, len + 1, max(0, depth - 1), acc)
+  defp scan(<<"(", rest::binary>>, orig, start, len, depth, false = quoted, acc) do
+    scan(rest, orig, start, len + 1, depth + 1, quoted, acc)
   end
 
-  # Comma at depth 0 — segment boundary
-  defp scan(<<",", rest::binary>>, orig, start, len, 0, acc) do
+  defp scan(<<")", rest::binary>>, orig, start, len, depth, false = quoted, acc) do
+    scan(rest, orig, start, len + 1, max(0, depth - 1), quoted, acc)
+  end
+
+  # Comma at depth 0 and not inside quotes — segment boundary
+  defp scan(<<",", rest::binary>>, orig, start, len, 0, false, acc) do
     case parse_segment(binary_part(orig, start, len)) do
-      {:ok, parsed} -> scan(rest, orig, start + len + 1, 0, 0, [parsed | acc])
+      {:ok, parsed} -> scan(rest, orig, start + len + 1, 0, 0, false, [parsed | acc])
       {:error, _} = e -> e
     end
   end
 
-  defp scan(<<_::8, rest::binary>>, orig, start, len, depth, acc) do
-    scan(rest, orig, start, len + 1, depth, acc)
+  defp scan(<<_::8, rest::binary>>, orig, start, len, depth, quoted, acc) do
+    scan(rest, orig, start, len + 1, depth, quoted, acc)
   end
 
   defp parse_segment(segment) do
@@ -351,8 +381,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
 
       trimmed ->
         with [col, rest] <- String.split(trimmed, "=", parts: 2),
-             [filter_type, value] when filter_type in @filter_types <-
-               String.split(rest, ".", parts: 2),
+             {:ok, filter_type, value} <- parse_filter_rest(rest),
              {:ok, formatted_value} <- format_filter_value(filter_type, value) do
           {:ok, {col, filter_type, formatted_value}}
         else
@@ -362,13 +391,43 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     end
   end
 
-  defp format_filter_value("in", value) do
+  defp parse_filter_rest("not." <> rest) do
+    case String.split(rest, ".", parts: 2) do
+      [raw_op, value] ->
+        case @not_op_map[raw_op] do
+          nil -> {:error, "not.#{raw_op} is not a supported operator"}
+          op -> {:ok, op, value}
+        end
+
+      _ ->
+        {:error, inspect("not." <> rest)}
+    end
+  end
+
+  defp parse_filter_rest(rest) do
+    case String.split(rest, ".", parts: 2) do
+      [filter_type, value] when filter_type in @filter_types -> {:ok, filter_type, value}
+      other -> {:error, inspect(other)}
+    end
+  end
+
+  defp format_filter_value(op, value) when op in ["in", "not_in"] do
     size = byte_size(value)
 
     if size >= 2 and binary_part(value, 0, 1) == "(" and binary_part(value, size - 1, 1) == ")" do
       {:ok, "{" <> binary_part(value, 1, size - 2) <> "}"}
     else
-      {:error, "`in` filter value must be wrapped by parentheses"}
+      {:error, "`#{op}` filter value must be wrapped by parentheses"}
+    end
+  end
+
+  defp format_filter_value(_filter, "\"" <> rest) do
+    size = byte_size(rest)
+
+    if size >= 1 and binary_part(rest, size - 1, 1) == "\"" do
+      {:ok, binary_part(rest, 0, size - 1)}
+    else
+      {:error, "unmatched double-quote in filter value"}
     end
   end
 
