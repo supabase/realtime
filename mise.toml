@@ -60,3 +60,17 @@ run = "docker compose -f compose.tests.yml stop"
 [tasks.test-rm]
 description = "Remove test services"
 run = "docker compose -f compose.tests.yml rm -sf"
+
+[tasks.e2e]
+description = "Run e2e tests locally. Starts supabase if needed. Pass --url http://127.0.0.1:4000 to test against the local dev server."
+dir = "test/e2e"
+run = """
+  npx supabase start
+  ANON_KEY=$(npx supabase status | grep 'Publishable' | awk '{print $NF}')
+  SERVICE_KEY=$(npx supabase status | grep 'Secret' | awk '{print $NF}')
+  bun run realtime-check.ts --env local \
+    --publishable-key "$ANON_KEY" \
+    --secret-key "$SERVICE_KEY" \
+    --db-url "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
+    "$@"
+"""
