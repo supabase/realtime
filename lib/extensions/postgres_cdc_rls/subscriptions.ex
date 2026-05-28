@@ -307,7 +307,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   end
 
   defp parse_select(%{"select" => str}) when is_binary(str) do
-    case str |> String.trim() |> String.split(",", trim: true) |> Enum.map(&String.trim/1) do
+    case str |> String.split(",") |> Enum.reject(&(&1 == "")) do
       [] -> nil
       cols -> cols
     end

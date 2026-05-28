@@ -609,7 +609,34 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                Subscriptions.parse_subscription_params(%{
                  "schema" => "public",
                  "table" => "messages",
+                 "select" => "id,details"
+               })
+    end
+
+    test "consecutive commas in the select string are treated as empty segments and ignored" do
+      assert {:ok, {"*", "public", "messages", [], ["id", "details"]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "messages",
+                 "select" => "id,,details"
+               })
+    end
+
+    test "column names with surrounding spaces are not trimmed and will be rejected by the database" do
+      assert {:ok, {"*", "public", "messages", [], ["id", " details"]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "messages",
                  "select" => "id, details"
+               })
+    end
+
+    test "non-binary entries in a select list are silently dropped" do
+      assert {:ok, {"*", "public", "messages", [], ["id", "details"]}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "messages",
+                 "select" => ["id", 123, "details", nil]
                })
     end
 
@@ -619,6 +646,15 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                  "schema" => "public",
                  "table" => "messages",
                  "select" => ""
+               })
+    end
+
+    test "passing a bare comma as the select string is treated as no column selection" do
+      assert {:ok, {"*", "public", "messages", [], nil}} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "messages",
+                 "select" => ","
                })
     end
 
