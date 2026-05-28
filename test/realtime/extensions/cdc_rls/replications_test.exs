@@ -2,6 +2,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationsTest do
   use Realtime.DataCase, async: true
 
   alias Extensions.PostgresCdcRls.Replications
+  alias Extensions.PostgresCdcRls.Subscriptions
   alias Realtime.Database
 
   setup do
@@ -75,6 +76,110 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationsTest do
       slot_name = "test_idempotent_slot_#{:rand.uniform(999_999)}"
       assert {:ok, _} = Replications.prepare_replication(conn, slot_name)
       assert {:ok, _} = Replications.prepare_replication(conn, slot_name)
+    end
+  end
+
+  describe "list_changes for schemas and tables with special characters" do
+    setup %{conn: conn} do
+      {:ok, _} = Integrations.setup_postgres_changes(conn)
+      :ok
+    end
+
+    defp run_list_changes(conn, schema, table) do
+      pub = "supabase_realtime_test"
+      slot = "lc_#{:rand.uniform(9_999_999)}"
+
+      # quote identifiers
+      %{rows: [[quoted_schema, qualified]]} =
+        Postgrex.query!(
+          conn,
+          "SELECT format('%I', $1::text), format('%I.%I', $1::text, $2::text)",
+          [schema, table]
+        )
+
+      Postgrex.query!(conn, "CREATE SCHEMA IF NOT EXISTS #{quoted_schema}", [])
+      Postgrex.query!(conn, "DROP TABLE IF EXISTS #{qualified}", [])
+      Postgrex.query!(conn, "CREATE TABLE #{qualified} (name text PRIMARY KEY)", [])
+      Postgrex.query!(conn, "GRANT ALL ON TABLE #{qualified} TO anon", [])
+      Postgrex.query!(conn, "GRANT ALL ON TABLE #{qualified} TO authenticated", [])
+
+      {:ok, _} = Replications.prepare_replication(conn, slot)
+
+      {:ok, sub_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => schema, "table" => table})
+
+      params_list = [
+        %{claims: %{"role" => "anon"}, id: Ecto.UUID.generate(), subscription_params: sub_params}
+      ]
+
+      assert {:ok, _} = Subscriptions.create(conn, pub, params_list, self(), self())
+
+      Postgrex.query!(conn, "INSERT INTO #{qualified} VALUES ('list_changes_test')", [])
+
+      try do
+        Replications.list_changes(conn, slot, pub, 100, 1_048_576)
+      after
+        Postgrex.query(conn, "SELECT pg_drop_replication_slot($1)", [slot])
+        Postgrex.query(conn, "DROP TABLE IF EXISTS #{qualified}", [])
+
+        if schema != "public",
+          do: Postgrex.query(conn, "DROP SCHEMA IF EXISTS #{quoted_schema} CASCADE", [])
+      end
+    end
+
+    defp insert_row_for({:ok, %Postgrex.Result{rows: rows}}, expected_table) do
+      Enum.find(rows, fn
+        ["INSERT", _schema, ^expected_table, _cols, record | _] ->
+          record == ~s|{"name": "list_changes_test"}|
+
+        _ ->
+          false
+      end)
+    end
+
+    test "space", %{conn: conn} do
+      result = run_list_changes(conn, "public", "my table")
+      assert insert_row_for(result, "my table")
+    end
+
+    test "comma", %{conn: conn} do
+      result = run_list_changes(conn, "public", "my,table")
+      assert insert_row_for(result, "my,table")
+    end
+
+    test "dot", %{conn: conn} do
+      result = run_list_changes(conn, "public", "my.table")
+      assert insert_row_for(result, "my.table")
+    end
+
+    test "tab", %{conn: conn} do
+      result = run_list_changes(conn, "public", "tab\there")
+      assert insert_row_for(result, "tab\there")
+    end
+
+    test "double-quote", %{conn: conn} do
+      result = run_list_changes(conn, "public", ~s|my"table|)
+      assert insert_row_for(result, ~s|my"table|)
+    end
+
+    test "backslash", %{conn: conn} do
+      result = run_list_changes(conn, "public", "my\\table")
+      assert insert_row_for(result, "my\\table")
+    end
+
+    test "emoji", %{conn: conn} do
+      result = run_list_changes(conn, "public", "[my_table] 🟠")
+      assert insert_row_for(result, "[my_table] 🟠")
+    end
+
+    test "schema and table with spaces", %{conn: conn} do
+      result = run_list_changes(conn, "my schema", "my table")
+      assert insert_row_for(result, "my table")
+    end
+
+    test "schema and table with special cases", %{conn: conn} do
+      result = run_list_changes(conn, ~s|test "schema|, ~s|test " with 'quotes'|)
+      assert insert_row_for(result, ~s|test " with 'quotes'|)
     end
   end
 end

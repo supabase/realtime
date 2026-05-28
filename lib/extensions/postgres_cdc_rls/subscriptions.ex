@@ -66,8 +66,8 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         ) rr
         where
         pub.pubname = $1
-        and pub.schemaname like (case $2 when '*' then '%' else $2 end)
-        and pub.tablename like (case $3 when '*' then '%' else $3 end)
+        and pub.schemaname like (case $2 when '*' then '%' else $2 end) escape ''
+        and pub.tablename like (case $3 when '*' then '%' else $3 end) escape ''
      )
      insert into realtime.subscription as x(
         subscription_id,
@@ -179,13 +179,6 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
     case query(conn, sql, [publication]) do
       {:ok, %{columns: ["schemaname", "tablename", "oid"], rows: rows}} ->
         Enum.reduce(rows, %{}, fn [schema, table, oid], acc ->
-          if String.contains?(table, " ") do
-            log_error(
-              "TableHasSpacesInName",
-              "Table name cannot have spaces: \"#{schema}\".\"#{table}\""
-            )
-          end
-
           Map.put(acc, {schema, table}, [oid])
           |> Map.update({schema}, [oid], &[oid | &1])
           |> Map.update({"*"}, [oid], &[oid | &1])

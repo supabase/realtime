@@ -203,6 +203,21 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       %Postgrex.Result{rows: [[1]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
     end
 
+    test "create works for a table whose name contains a backslash", %{conn: conn} do
+      Postgrex.query!(conn, ~s|CREATE TABLE "my\\table" (id int)|, [])
+      Postgrex.query!(conn, ~s|GRANT ALL ON "my\\table" TO anon|, [])
+
+      {:ok, subscription_params} =
+        Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "my\\table"})
+
+      subscription_list = [
+        %{claims: %{"role" => "anon"}, id: UUID.uuid1(), subscription_params: subscription_params}
+      ]
+
+      assert {:ok, [%Postgrex.Result{num_rows: 1}]} =
+               Subscriptions.create(conn, "supabase_realtime_test", subscription_list, self(), self())
+    end
+
     test "publication does not exist", %{conn: conn} do
       {:ok, subscription_params} = Subscriptions.parse_subscription_params(%{"schema" => "public", "table" => "test"})
 
