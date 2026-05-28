@@ -7,6 +7,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
   alias Extensions.PostgresCdcRls.MessageDispatcher
   alias Extensions.PostgresCdcRls.ReplicationPoller, as: Poller
   alias Extensions.PostgresCdcRls.Replications
+  alias Extensions.PostgresCdcRls.Subscriptions
 
   alias Realtime.Adapters.Changes.{
     DeletedRecord,
@@ -60,6 +61,10 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       # unless specified it will return empty results
       empty_results = {:ok, %Postgrex.Result{rows: [], num_rows: 0}}
       stub(Replications, :list_changes, fn _, _, _, _, _ -> empty_results end)
+
+      # Default to a publication with tables so the poller actually polls.
+      # Tests that need an empty publication override this stub explicitly.
+      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{{"public", "test"} => [1234]} end)
 
       %{args: args, tenant: tenant}
     end
@@ -434,6 +439,69 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       rate = Realtime.Tenants.db_events_per_second_rate(tenant)
       assert {:ok, %RateCounter{sum: sum}} = RateCounterHelper.tick!(rate)
       assert sum == 3
+    end
+
+    test "does not poll WAL when publication has no tables", %{args: args} do
+      tenant_id = args["id"]
+
+      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      reject(&Replications.list_changes/5)
+
+      start_link_supervised!({Poller, args})
+
+      refute_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 200
+    end
+
+    test "drops replication slot and stops polling when tables vanish", %{args: args} do
+      tenant_id = args["id"]
+
+      expect(Replications, :drop_replication_slot, fn _conn, _slot -> {:ok, :dropped} end)
+
+      pid = start_link_supervised!({Poller, args})
+
+      # First poll happens with the default non-empty stub.
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 500
+
+      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      reject(&Replications.list_changes/5)
+
+      send(pid, :check_oids)
+      # Force the GenServer to process :check_oids before we assert.
+      :sys.get_state(pid)
+
+      refute_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 200
+    end
+
+    test "resumes polling when tables appear via :check_oids", %{args: args} do
+      tenant_id = args["id"]
+
+      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+
+      pid = start_link_supervised!({Poller, args})
+
+      refute_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 200
+
+      # Tables are added to the publication. Next :check_oids should trigger
+      # prepare_replication + an initial poll.
+      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{{"public", "test"} => [1234]} end)
+      send(pid, :check_oids)
+
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 1000
+    end
+
+    test "shuts down when slot drop fails so the temp slot is released with the connection",
+         %{args: args} do
+      pid = start_supervised!({Poller, args}, restart: :temporary)
+
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, _}, 500
+
+      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      stub(Replications, :drop_replication_slot, fn _, _ -> {:error, :boom} end)
+
+      ref = Process.monitor(pid)
+      send(pid, :check_oids)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :drop_replication_slot_failed}}, 1000
     end
   end
 
