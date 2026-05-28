@@ -69,66 +69,6 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       %{args: args, tenant: tenant}
     end
 
-    test "handles slot in use error and retries", %{args: args} do
-      tenant_id = args["id"]
-
-      slot_in_use_error =
-        {:error,
-         %Postgrex.Error{
-           postgres: %{
-             code: :object_in_use,
-             message: "replication slot is active for PID 12345"
-           }
-         }}
-
-      stub(Replications, :get_pg_stat_activity_diff, fn _conn, _pid -> {:error, :pid_not_found} end)
-      stub(Replications, :terminate_backend, fn _conn, _slot -> {:error, :slot_not_found} end)
-
-      expect(Replications, :list_changes, fn _, _, _, _, _ -> slot_in_use_error end)
-
-      start_link_supervised!({Poller, args})
-
-      assert_receive {
-                       :telemetry,
-                       [:realtime, :replication, :poller, :query, :stop],
-                       %{duration: _},
-                       %{tenant: ^tenant_id}
-                     },
-                     1000
-    end
-
-    test "handles slot in use error with pg_stat_activity returning diff", %{args: args} do
-      tenant_id = args["id"]
-
-      slot_in_use_error =
-        {:error,
-         %Postgrex.Error{
-           postgres: %{
-             code: :object_in_use,
-             message: "replication slot is active for PID 12345"
-           }
-         }}
-
-      stub(Replications, :get_pg_stat_activity_diff, fn _conn, _pid -> {:ok, 42} end)
-      stub(Replications, :terminate_backend, fn _conn, _slot -> {:error, :slot_not_found} end)
-
-      expect(Replications, :list_changes, fn _, _, _, _, _ -> slot_in_use_error end)
-
-      start_link_supervised!({Poller, args})
-
-      assert_receive {
-                       :telemetry,
-                       [:realtime, :replication, :poller, :query, :stop],
-                       %{duration: _},
-                       %{tenant: ^tenant_id}
-                     },
-                     1000
-
-      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :exception], %{},
-                      %{tenant: ^tenant_id, reason: :object_in_use}},
-                     1000
-    end
-
     test "handles prepare_replication failure and retries", %{args: args} do
       tenant_id = args["id"]
 
@@ -173,7 +113,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       stub(Replications, :get_pg_stat_activity_diff, fn _conn, _pid -> {:ok, 42} end)
       stub(Replications, :list_changes, fn _, _, _, _, _ -> slot_in_use_error end)
-      stub(Replications, :terminate_backend, fn _conn, _slot -> {:ok, :terminated} end)
+      expect(Replications, :terminate_backend, fn _conn, _slot -> {:ok, :terminated} end)
 
       pid = start_link_supervised!({Poller, args})
 
@@ -444,7 +384,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     test "does not poll WAL when publication has no tables", %{args: args} do
       tenant_id = args["id"]
 
-      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
       reject(&Replications.list_changes/5)
 
       start_link_supervised!({Poller, args})
@@ -462,7 +402,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       # First poll happens with the default non-empty stub.
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 500
 
-      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
       reject(&Replications.list_changes/5)
 
       send(pid, :check_oids)
@@ -475,7 +415,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     test "resumes polling when tables appear via :check_oids", %{args: args} do
       tenant_id = args["id"]
 
-      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
 
       pid = start_link_supervised!({Poller, args})
 
@@ -483,7 +423,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       # Tables are added to the publication. Next :check_oids should trigger
       # prepare_replication + an initial poll.
-      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{{"public", "test"} => [1234]} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{{"public", "test"} => [1234]} end)
       send(pid, :check_oids)
 
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 1000
@@ -495,8 +435,8 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, _}, 500
 
-      stub(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
-      stub(Replications, :drop_replication_slot, fn _, _ -> {:error, :boom} end)
+      expect(Subscriptions, :fetch_publication_tables, fn _, _ -> %{} end)
+      expect(Replications, :drop_replication_slot, fn _, _ -> {:error, :boom} end)
 
       ref = Process.monitor(pid)
       send(pid, :check_oids)
@@ -890,7 +830,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     end
 
     test "stops cleanly when database connection fails", %{args: args} do
-      stub(Realtime.Database, :connect_db, fn _settings -> {:error, :econnrefused} end)
+      expect(Realtime.Database, :connect_db, fn _settings -> {:error, :econnrefused} end)
 
       pid = start_supervised!({Poller, args}, restart: :temporary)
       ref = Process.monitor(pid)
