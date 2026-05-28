@@ -157,7 +157,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 2000
     end
 
-    test "handles unsupported equality operator error from check_equality_op and retries", %{args: args} do
+    test "notifies subscribers and does not retry on raise_exception from check_equality_op", %{args: args} do
       tenant_id = args["id"]
 
       error =
@@ -171,6 +171,9 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
       expect(Replications, :list_changes, fn _, _, _, _, _ -> error end)
 
+      # Insert the test process as a subscriber so it receives the fatal error notification
+      :ets.insert(args["subscribers_pids_table"], {self(), "some-sub-id", make_ref(), node()})
+
       start_link_supervised!({Poller, args})
 
       assert_receive {
@@ -180,6 +183,17 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                        %{tenant: ^tenant_id}
                      },
                      1000
+
+      assert_receive {:subscription_fatal_error, "unsupported equality operator: future_op"}, 500
+
+      # No retry — the poller must not schedule another poll
+      refute_receive {
+                       :telemetry,
+                       [:realtime, :replication, :poller, :query, :stop],
+                       %{duration: _},
+                       %{tenant: ^tenant_id}
+                     },
+                     500
     end
 
     test "handles no new changes", %{args: args, tenant: tenant} do

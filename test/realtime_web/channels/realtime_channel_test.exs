@@ -1534,6 +1534,29 @@ defmodule RealtimeWeb.RealtimeChannelTest do
     end
   end
 
+  describe "subscription fatal errors" do
+    test "subscription_fatal_error pushes system error to client and stops the channel", %{tenant: tenant} do
+      jwt = Generators.generate_jwt_token(tenant)
+      {:ok, %Socket{} = socket} = connect(UserSocket, %{}, conn_opts(tenant, jwt))
+      assert %Socket{channel_pid: channel_pid} = subscribe_and_join!(socket, "realtime:test", %{})
+
+      send(channel_pid, {:subscription_fatal_error, "unsupported equality operator: bad_op"})
+
+      assert_receive %Socket.Message{
+        topic: "realtime:test",
+        event: "system",
+        payload: %{
+          message: "unsupported equality operator: bad_op",
+          status: "error",
+          extension: "system",
+          channel: "test"
+        }
+      }
+
+      assert_process_down(channel_pid)
+    end
+  end
+
   defp assert_process_down(pid) do
     ref = Process.monitor(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}

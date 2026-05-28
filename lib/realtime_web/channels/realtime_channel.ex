@@ -390,6 +390,11 @@ defmodule RealtimeWeb.RealtimeChannel do
   end
 
   def handle_info(:sync_presence, socket), do: {:noreply, socket}
+
+  def handle_info({:subscription_fatal_error, reason}, socket) do
+    shutdown_response(socket, reason)
+  end
+
   def handle_info(_, socket), do: {:noreply, socket}
 
   @impl true

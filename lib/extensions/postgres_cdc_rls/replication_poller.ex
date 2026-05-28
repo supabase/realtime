@@ -58,7 +58,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       slot_name: extension["slot_name"] <> slot_name_suffix(),
       tenant_id: tenant_id,
       rate_counter_args: rate_counter_args,
-      subscribers_nodes_table: args["subscribers_nodes_table"]
+      subscribers_nodes_table: args["subscribers_nodes_table"],
+      subscribers_pids_table: args["subscribers_pids_table"]
     }
 
     {:ok, _} = Registry.register(__MODULE__.Registry, tenant_id, %{})
@@ -97,6 +98,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           conn: conn,
           tenant_id: tenant_id,
           subscribers_nodes_table: subscribers_nodes_table,
+          subscribers_pids_table: subscribers_pids_table,
           rate_counter_args: rate_counter_args
         } = state
       ) do
@@ -152,6 +154,15 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         retry_ref = Process.send_after(self(), :retry, timeout)
 
         {:noreply, %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
+
+      {:error, %Postgrex.Error{postgres: %{code: :raise_exception, message: msg}}} ->
+        log_error("SubscriptionFatalError", msg)
+
+        for {pid, _id, _ref, _node} <- :ets.tab2list(subscribers_pids_table) do
+          send(pid, {:subscription_fatal_error, msg})
+        end
+
+        {:noreply, state}
 
       {:error, reason} ->
         log_error("PoolingReplicationError", reason)
