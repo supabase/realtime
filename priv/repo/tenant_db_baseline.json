@@ -410,6 +410,34 @@
         {
           "sort_order": 7,
           "label": "in"
+        },
+        {
+          "sort_order": 8,
+          "label": "like"
+        },
+        {
+          "sort_order": 9,
+          "label": "ilike"
+        },
+        {
+          "sort_order": 10,
+          "label": "is"
+        },
+        {
+          "sort_order": 11,
+          "label": "not_in"
+        },
+        {
+          "sort_order": 12,
+          "label": "not_like"
+        },
+        {
+          "sort_order": 13,
+          "label": "not_ilike"
+        },
+        {
+          "sort_order": 14,
+          "label": "not_is"
         }
       ],
       "comment": null,
@@ -1456,10 +1484,10 @@
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": null,
-      "source_code": "\n      /*\n      Casts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n      */\n      declare\n          op_symbol text = (\n              case\n                  when op = 'eq' then '='\n                  when op = 'neq' then '!='\n                  when op = 'lt' then '<'\n                  when op = 'lte' then '<='\n                  when op = 'gt' then '>'\n                  when op = 'gte' then '>='\n                  when op = 'in' then '= any'\n                  else 'UNKNOWN OP'\n              end\n          );\n          res boolean;\n      begin\n          execute format(\n              'select %L::'|| type_::text || ' ' || op_symbol\n              || ' ( %L::'\n              || (\n                  case\n                      when op = 'in' then type_::text || '[]'\n                      else type_::text end\n              )\n              || ')', val_1, val_2) into res;\n          return res;\n      end;\n      ",
+      "source_code": "\n      declare\n          op_symbol text;\n          res boolean;\n      begin\n          -- IS / IS NOT require keyword RHS, not a typed literal\n          if op = 'is' or op = 'not_is' then\n              if val_2 not in ('null', 'true', 'false', 'unknown') then\n                  raise exception 'invalid value for is/not_is filter: must be null, true, false, or unknown';\n              end if;\n              execute format(\n                  'select %L::%s %s %s',\n                  val_1,\n                  type_::text,\n                  case when op = 'is' then 'IS' else 'IS NOT' end,\n                  upper(val_2)\n              ) into res;\n              return res;\n          end if;\n\n          op_symbol = case\n              when op = 'eq'        then '='\n              when op = 'neq'       then '!='\n              when op = 'lt'        then '<'\n              when op = 'lte'       then '<='\n              when op = 'gt'        then '>'\n              when op = 'gte'       then '>='\n              when op = 'in'        then '= any'\n              when op = 'not_in'    then '!= all'\n              when op = 'like'      then 'LIKE'\n              when op = 'ilike'     then 'ILIKE'\n              when op = 'not_like'  then 'NOT LIKE'\n              when op = 'not_ilike' then 'NOT ILIKE'\n              else null\n          end;\n\n          if op_symbol is null then\n              raise exception 'unsupported equality operator: %', op::text;\n          end if;\n\n          execute format(\n              'select %L::'|| type_::text || ' ' || op_symbol\n              || ' ( %L::'\n              || (\n                  case\n                      when op in ('in', 'not_in') then type_::text || '[]'\n                      else type_::text\n                  end\n              )\n              || ')', val_1, val_2) into res;\n          return res;\n      end;\n      ",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\n      /*\n      Casts *val_1* and *val_2* as type *type_* and check the *op* condition for truthiness\n      */\n      declare\n          op_symbol text = (\n              case\n                  when op = 'eq' then '='\n                  when op = 'neq' then '!='\n                  when op = 'lt' then '<'\n                  when op = 'lte' then '<='\n                  when op = 'gt' then '>'\n                  when op = 'gte' then '>='\n                  when op = 'in' then '= any'\n                  else 'UNKNOWN OP'\n              end\n          );\n          res boolean;\n      begin\n          execute format(\n              'select %L::'|| type_::text || ' ' || op_symbol\n              || ' ( %L::'\n              || (\n                  case\n                      when op = 'in' then type_::text || '[]'\n                      else type_::text end\n              )\n              || ')', val_1, val_2) into res;\n          return res;\n      end;\n      $function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.check_equality_op(op realtime.equality_op, type_ regtype, val_1 text, val_2 text)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\n      declare\n          op_symbol text;\n          res boolean;\n      begin\n          -- IS / IS NOT require keyword RHS, not a typed literal\n          if op = 'is' or op = 'not_is' then\n              if val_2 not in ('null', 'true', 'false', 'unknown') then\n                  raise exception 'invalid value for is/not_is filter: must be null, true, false, or unknown';\n              end if;\n              execute format(\n                  'select %L::%s %s %s',\n                  val_1,\n                  type_::text,\n                  case when op = 'is' then 'IS' else 'IS NOT' end,\n                  upper(val_2)\n              ) into res;\n              return res;\n          end if;\n\n          op_symbol = case\n              when op = 'eq'        then '='\n              when op = 'neq'       then '!='\n              when op = 'lt'        then '<'\n              when op = 'lte'       then '<='\n              when op = 'gt'        then '>'\n              when op = 'gte'       then '>='\n              when op = 'in'        then '= any'\n              when op = 'not_in'    then '!= all'\n              when op = 'like'      then 'LIKE'\n              when op = 'ilike'     then 'ILIKE'\n              when op = 'not_like'  then 'NOT LIKE'\n              when op = 'not_ilike' then 'NOT ILIKE'\n              else null\n          end;\n\n          if op_symbol is null then\n              raise exception 'unsupported equality operator: %', op::text;\n          end if;\n\n          execute format(\n              'select %L::'|| type_::text || ' ' || op_symbol\n              || ' ( %L::'\n              || (\n                  case\n                      when op in ('in', 'not_in') then type_::text || '[]'\n                      else type_::text\n                  end\n              )\n              || ')', val_1, val_2) into res;\n          return res;\n      end;\n      $function$\n",
       "config": null,
       "owner": "supabase_admin",
       "comment": null,
@@ -1753,69 +1781,6 @@
       ],
       "security_labels": []
     },
-    "procedure:realtime.send(jsonb,text,text,boolean)": {
-      "schema": "realtime",
-      "name": "send",
-      "kind": "f",
-      "return_type": "void",
-      "return_type_schema": "pg_catalog",
-      "language": "plpgsql",
-      "security_definer": false,
-      "volatility": "v",
-      "parallel_safety": "u",
-      "execution_cost": 100,
-      "result_rows": 0,
-      "is_strict": false,
-      "leakproof": false,
-      "returns_set": false,
-      "argument_count": 4,
-      "argument_default_count": 1,
-      "argument_names": [
-        "payload",
-        "event",
-        "topic",
-        "private"
-      ],
-      "argument_types": [
-        "jsonb",
-        "text",
-        "text",
-        "boolean"
-      ],
-      "all_argument_types": [],
-      "argument_modes": null,
-      "argument_defaults": "true",
-      "source_code": "\nDECLARE\n  generated_id uuid;\n  final_payload jsonb;\nBEGIN\n  BEGIN\n    -- Generate a new UUID for the id\n    generated_id := gen_random_uuid();\n\n    -- Check if payload has an 'id' key, if not, add the generated UUID\n    IF payload ? 'id' THEN\n      final_payload := payload;\n    ELSE\n      final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));\n    END IF;\n\n    -- Set the topic configuration\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    -- Attempt to insert the message\n    INSERT INTO realtime.messages (id, payload, event, topic, private, extension)\n    VALUES (generated_id, final_payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      -- Capture and notify the error\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n",
-      "binary_path": null,
-      "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.send(payload jsonb, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\n  final_payload jsonb;\nBEGIN\n  BEGIN\n    -- Generate a new UUID for the id\n    generated_id := gen_random_uuid();\n\n    -- Check if payload has an 'id' key, if not, add the generated UUID\n    IF payload ? 'id' THEN\n      final_payload := payload;\n    ELSE\n      final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));\n    END IF;\n\n    -- Set the topic configuration\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    -- Attempt to insert the message\n    INSERT INTO realtime.messages (id, payload, event, topic, private, extension)\n    VALUES (generated_id, final_payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      -- Capture and notify the error\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
-      "config": null,
-      "owner": "supabase_admin",
-      "comment": null,
-      "privileges": [
-        {
-          "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "EXECUTE",
-          "grantable": false
-        }
-      ],
-      "security_labels": []
-    },
     "procedure:realtime.send(bytea,text,text,boolean)": {
       "schema": "realtime",
       "name": "send",
@@ -1879,6 +1844,69 @@
       ],
       "security_labels": []
     },
+    "procedure:realtime.send(jsonb,text,text,boolean)": {
+      "schema": "realtime",
+      "name": "send",
+      "kind": "f",
+      "return_type": "void",
+      "return_type_schema": "pg_catalog",
+      "language": "plpgsql",
+      "security_definer": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "execution_cost": 100,
+      "result_rows": 0,
+      "is_strict": false,
+      "leakproof": false,
+      "returns_set": false,
+      "argument_count": 4,
+      "argument_default_count": 1,
+      "argument_names": [
+        "payload",
+        "event",
+        "topic",
+        "private"
+      ],
+      "argument_types": [
+        "jsonb",
+        "text",
+        "text",
+        "boolean"
+      ],
+      "all_argument_types": [],
+      "argument_modes": null,
+      "argument_defaults": "true",
+      "source_code": "\nDECLARE\n  generated_id uuid;\n  final_payload jsonb;\nBEGIN\n  BEGIN\n    -- Generate a new UUID for the id\n    generated_id := gen_random_uuid();\n\n    -- Check if payload has an 'id' key, if not, add the generated UUID\n    IF payload ? 'id' THEN\n      final_payload := payload;\n    ELSE\n      final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));\n    END IF;\n\n    -- Set the topic configuration\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    -- Attempt to insert the message\n    INSERT INTO realtime.messages (id, payload, event, topic, private, extension)\n    VALUES (generated_id, final_payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      -- Capture and notify the error\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n",
+      "binary_path": null,
+      "sql_body": null,
+      "definition": "CREATE OR REPLACE FUNCTION realtime.send(payload jsonb, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\n  final_payload jsonb;\nBEGIN\n  BEGIN\n    -- Generate a new UUID for the id\n    generated_id := gen_random_uuid();\n\n    -- Check if payload has an 'id' key, if not, add the generated UUID\n    IF payload ? 'id' THEN\n      final_payload := payload;\n    ELSE\n      final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));\n    END IF;\n\n    -- Set the topic configuration\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    -- Attempt to insert the message\n    INSERT INTO realtime.messages (id, payload, event, topic, private, extension)\n    VALUES (generated_id, final_payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      -- Capture and notify the error\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
+      "config": null,
+      "owner": "supabase_admin",
+      "comment": null,
+      "privileges": [
+        {
+          "grantee": "PUBLIC",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ],
+      "security_labels": []
+    },
     "procedure:realtime.subscription_check_filters()": {
       "schema": "realtime",
       "name": "subscription_check_filters",
@@ -1901,10 +1929,10 @@
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": null,
-      "source_code": "\n    /*\n    Validates that the user defined filters for a subscription:\n    - refer to valid columns that the claimed role may access\n    - values are coercable to the correct column type\n    */\n    declare\n        col_names text[] = coalesce(\n                array_agg(c.column_name order by c.ordinal_position),\n                '{}'::text[]\n            )\n            from\n                information_schema.columns c\n            where\n                format('%I.%I', c.table_schema, c.table_name)::regclass = new.entity\n                and pg_catalog.has_column_privilege(\n                    (new.claims ->> 'role'),\n                    format('%I.%I', c.table_schema, c.table_name)::regclass,\n                    c.column_name,\n                    'SELECT'\n                );\n        filter realtime.user_defined_filter;\n        col_type regtype;\n\n        in_val jsonb;\n    begin\n        for filter in select * from unnest(new.filters) loop\n            -- Filtered column is valid\n            if not filter.column_name = any(col_names) then\n                raise exception 'invalid column for filter %', filter.column_name;\n            end if;\n\n            -- Type is sanitized and safe for string interpolation\n            col_type = (\n                select atttypid::regtype\n                from pg_catalog.pg_attribute\n                where attrelid = new.entity\n                      and attname = filter.column_name\n            );\n            if col_type is null then\n                raise exception 'failed to lookup type for column %', filter.column_name;\n            end if;\n\n            -- Set maximum number of entries for in filter\n            if filter.op = 'in'::realtime.equality_op then\n                in_val = realtime.cast(filter.value, (col_type::text || '[]')::regtype);\n                if coalesce(jsonb_array_length(in_val), 0) > 100 then\n                    raise exception 'too many values for `in` filter. Maximum 100';\n                end if;\n            else\n                -- raises an exception if value is not coercable to type\n                perform realtime.cast(filter.value, col_type);\n            end if;\n\n        end loop;\n\n        -- Apply consistent order to filters so the unique constraint on\n        -- (subscription_id, entity, filters) can't be tricked by a different filter order\n        new.filters = coalesce(\n            array_agg(f order by f.column_name, f.op, f.value),\n            '{}'\n        ) from unnest(new.filters) f;\n\n        return new;\n    end;\n    ",
+      "source_code": "\n      declare\n          col_names text[] = coalesce(\n                  array_agg(c.column_name order by c.ordinal_position),\n                  '{}'::text[]\n              )\n              from\n                  information_schema.columns c\n              where\n                  format('%I.%I', c.table_schema, c.table_name)::regclass = new.entity\n                  and pg_catalog.has_column_privilege(\n                      (new.claims ->> 'role'),\n                      format('%I.%I', c.table_schema, c.table_name)::regclass,\n                      c.column_name,\n                      'SELECT'\n                  );\n          filter realtime.user_defined_filter;\n          col_type regtype;\n          in_val jsonb;\n      begin\n          for filter in select * from unnest(new.filters) loop\n              if not filter.column_name = any(col_names) then\n                  raise exception 'invalid column for filter %', filter.column_name;\n              end if;\n\n              col_type = (\n                  select atttypid::regtype\n                  from pg_catalog.pg_attribute\n                  where attrelid = new.entity\n                        and attname = filter.column_name\n              );\n              if col_type is null then\n                  raise exception 'failed to lookup type for column %', filter.column_name;\n              end if;\n\n              if filter.op in ('in'::realtime.equality_op, 'not_in'::realtime.equality_op) then\n                  in_val = realtime.cast(filter.value, (col_type::text || '[]')::regtype);\n                  if coalesce(jsonb_array_length(in_val), 0) > 100 then\n                      raise exception 'too many values for `in`/`not_in` filter. Maximum 100';\n                  end if;\n              elsif filter.op in ('is'::realtime.equality_op, 'not_is'::realtime.equality_op) then\n                  if filter.value not in ('null', 'true', 'false', 'unknown') then\n                      raise exception 'invalid value for is/not_is filter: must be null, true, false, or unknown';\n                  end if;\n              else\n                  perform realtime.cast(filter.value, col_type);\n              end if;\n          end loop;\n\n          new.filters = coalesce(\n              array_agg(f order by f.column_name, f.op, f.value),\n              '{}'\n          ) from unnest(new.filters) f;\n\n          return new;\n      end;\n      ",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.subscription_check_filters()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\n    /*\n    Validates that the user defined filters for a subscription:\n    - refer to valid columns that the claimed role may access\n    - values are coercable to the correct column type\n    */\n    declare\n        col_names text[] = coalesce(\n                array_agg(c.column_name order by c.ordinal_position),\n                '{}'::text[]\n            )\n            from\n                information_schema.columns c\n            where\n                format('%I.%I', c.table_schema, c.table_name)::regclass = new.entity\n                and pg_catalog.has_column_privilege(\n                    (new.claims ->> 'role'),\n                    format('%I.%I', c.table_schema, c.table_name)::regclass,\n                    c.column_name,\n                    'SELECT'\n                );\n        filter realtime.user_defined_filter;\n        col_type regtype;\n\n        in_val jsonb;\n    begin\n        for filter in select * from unnest(new.filters) loop\n            -- Filtered column is valid\n            if not filter.column_name = any(col_names) then\n                raise exception 'invalid column for filter %', filter.column_name;\n            end if;\n\n            -- Type is sanitized and safe for string interpolation\n            col_type = (\n                select atttypid::regtype\n                from pg_catalog.pg_attribute\n                where attrelid = new.entity\n                      and attname = filter.column_name\n            );\n            if col_type is null then\n                raise exception 'failed to lookup type for column %', filter.column_name;\n            end if;\n\n            -- Set maximum number of entries for in filter\n            if filter.op = 'in'::realtime.equality_op then\n                in_val = realtime.cast(filter.value, (col_type::text || '[]')::regtype);\n                if coalesce(jsonb_array_length(in_val), 0) > 100 then\n                    raise exception 'too many values for `in` filter. Maximum 100';\n                end if;\n            else\n                -- raises an exception if value is not coercable to type\n                perform realtime.cast(filter.value, col_type);\n            end if;\n\n        end loop;\n\n        -- Apply consistent order to filters so the unique constraint on\n        -- (subscription_id, entity, filters) can't be tricked by a different filter order\n        new.filters = coalesce(\n            array_agg(f order by f.column_name, f.op, f.value),\n            '{}'\n        ) from unnest(new.filters) f;\n\n        return new;\n    end;\n    $function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.subscription_check_filters()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\n      declare\n          col_names text[] = coalesce(\n                  array_agg(c.column_name order by c.ordinal_position),\n                  '{}'::text[]\n              )\n              from\n                  information_schema.columns c\n              where\n                  format('%I.%I', c.table_schema, c.table_name)::regclass = new.entity\n                  and pg_catalog.has_column_privilege(\n                      (new.claims ->> 'role'),\n                      format('%I.%I', c.table_schema, c.table_name)::regclass,\n                      c.column_name,\n                      'SELECT'\n                  );\n          filter realtime.user_defined_filter;\n          col_type regtype;\n          in_val jsonb;\n      begin\n          for filter in select * from unnest(new.filters) loop\n              if not filter.column_name = any(col_names) then\n                  raise exception 'invalid column for filter %', filter.column_name;\n              end if;\n\n              col_type = (\n                  select atttypid::regtype\n                  from pg_catalog.pg_attribute\n                  where attrelid = new.entity\n                        and attname = filter.column_name\n              );\n              if col_type is null then\n                  raise exception 'failed to lookup type for column %', filter.column_name;\n              end if;\n\n              if filter.op in ('in'::realtime.equality_op, 'not_in'::realtime.equality_op) then\n                  in_val = realtime.cast(filter.value, (col_type::text || '[]')::regtype);\n                  if coalesce(jsonb_array_length(in_val), 0) > 100 then\n                      raise exception 'too many values for `in`/`not_in` filter. Maximum 100';\n                  end if;\n              elsif filter.op in ('is'::realtime.equality_op, 'not_is'::realtime.equality_op) then\n                  if filter.value not in ('null', 'true', 'false', 'unknown') then\n                      raise exception 'invalid value for is/not_is filter: must be null, true, false, or unknown';\n                  end if;\n              else\n                  perform realtime.cast(filter.value, col_type);\n              end if;\n          end loop;\n\n          new.filters = coalesce(\n              array_agg(f order by f.column_name, f.op, f.value),\n              '{}'\n          ) from unnest(new.filters) f;\n\n          return new;\n      end;\n      $function$\n",
       "config": null,
       "owner": "supabase_admin",
       "comment": null,
