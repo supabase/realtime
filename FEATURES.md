@@ -105,11 +105,15 @@ Multiple filters are separated by commas. All conditions must be true for a chan
 col1=operator.value,col2=operator.value
 ```
 
-Values that contain a comma or whitespace must be wrapped in double quotes:
+#### Reserved characters
+
+Values that contain reserved characters must be wrapped in double quotes:
 
 ```
-col="some value, with comma"
+col=eq."some value, with comma"
 ```
+
+Reserved characters: comma (`,`), and whitespace.
 
 #### Comparison operators
 
