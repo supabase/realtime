@@ -86,6 +86,7 @@ defmodule Realtime.Tenants.Migrations do
     FixByteaDoubleEncodingInCast,
     ListChangesWithSlotCount,
     AddBinaryPayloadToMessages,
+    AddSelectColumnsToSubscriptions,
     Wal2jsonEscapeSpecialChars
   }
 
@@ -160,6 +161,7 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_218_120_000, FixByteaDoubleEncodingInCast},
     {20_260_326_120_000, ListChangesWithSlotCount},
     {20_260_514_120_000, AddBinaryPayloadToMessages},
+    {20_260_527_120_000, AddSelectColumnsToSubscriptions},
     {20_260_528_120_000, Wal2jsonEscapeSpecialChars}
   ]
 

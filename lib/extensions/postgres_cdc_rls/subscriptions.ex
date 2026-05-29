@@ -9,7 +9,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @type conn() :: Postgrex.conn()
   @type filter :: {binary, binary, binary}
   @type subscription_params ::
-          {action_filter :: binary, schema :: binary, table :: binary, [filter]}
+          {action_filter :: binary, schema :: binary, table :: binary, [filter], selected_columns :: [binary] | nil}
   @type subscription_list :: [
           %{id: binary, claims: map, subscription_params: subscription_params}
         ]
@@ -74,29 +74,31 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
         entity,
         filters,
         claims,
-        action_filter
+        action_filter,
+        selected_columns
       )
       select
         $4::text::uuid,
         sub_tables.entity,
         $6,
         $5,
-        $7
+        $7,
+        $8
       from
         sub_tables
         on conflict
-        (subscription_id, entity, filters, action_filter)
+        (subscription_id, entity, filters, action_filter, coalesce(selected_columns, '{}'))
         do update set
         claims = excluded.claims,
         created_at = now()
       returning
          id"
-    {action_filter, schema, table, filters} = subscription_params
-    query(conn, sql, [publication, schema, table, id, claims, filters, action_filter])
+    {action_filter, schema, table, filters, selected_columns} = subscription_params
+    query(conn, sql, [publication, schema, table, id, claims, filters, action_filter, selected_columns])
   end
 
-  defp params_to_log({action_filter, schema, table, filters}) do
-    [event: action_filter, schema: schema, table: table, filters: filters]
+  defp params_to_log({action_filter, schema, table, filters, selected_columns}) do
+    [event: action_filter, schema: schema, table: table, filters: filters, select: selected_columns]
     |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{to_log(v)}" end)
   end
 
@@ -201,40 +203,40 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   ## Examples
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=eq.hey"})
-      {:ok, {"*", "public", "messages", [{"subject", "eq", "hey"}]}}
+      {:ok, {"*", "public", "messages", [{"subject", "eq", "hey"}], nil}}
 
   `in` filter:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "subject=in.(hidee,ho)"})
-      {:ok, {"*", "public", "messages", [{"subject", "in", "{hidee,ho}"}]}}
+      {:ok, {"*", "public", "messages", [{"subject", "in", "{hidee,ho}"}], nil}}
 
   AND composition — multiple filters separated by commas:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "id=gt.0,id=lt.100"})
-      {:ok, {"*", "public", "messages", [{"id", "gt", "0"}, {"id", "lt", "100"}]}}
+      {:ok, {"*", "public", "messages", [{"id", "gt", "0"}, {"id", "lt", "100"}], nil}}
 
   empty or whitespace-only filter string is treated as no filter:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => ""})
-      {:ok, {"*", "public", "messages", []}}
+      {:ok, {"*", "public", "messages", [], nil}}
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages", "filter" => "   "})
-      {:ok, {"*", "public", "messages", []}}
+      {:ok, {"*", "public", "messages", [], nil}}
 
   no filter:
 
       iex> parse_subscription_params(%{"schema" => "public", "table" => "messages"})
-      {:ok, {"*", "public", "messages", []}}
+      {:ok, {"*", "public", "messages", [], nil}}
 
   only schema:
 
       iex> parse_subscription_params(%{"schema" => "public"})
-      {:ok, {"*", "public", "*", []}}
+      {:ok, {"*", "public", "*", [], nil}}
 
   only table:
 
       iex> parse_subscription_params(%{"table" => "messages"})
-      {:ok, {"*", "public", "messages", []}}
+      {:ok, {"*", "public", "messages", [], nil}}
 
   An unsupported filter will respond with an error tuple:
 
@@ -256,28 +258,29 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @spec parse_subscription_params(map()) :: {:ok, subscription_params} | {:error, binary()}
   def parse_subscription_params(params) do
     action_filter = action_filter(params)
+    selected_columns = parse_select(params)
 
     case params do
       %{"schema" => schema, "table" => table, "filter" => filter}
       when is_binary(schema) and is_binary(table) and is_binary(filter) ->
         case parse_filters(filter) do
-          {:ok, filters} -> {:ok, {action_filter, schema, table, filters}}
+          {:ok, filters} -> {:ok, {action_filter, schema, table, filters, selected_columns}}
           {:error, reason} -> {:error, "Error parsing `filter` params: #{reason}"}
         end
 
       %{"schema" => schema, "table" => table}
       when is_binary(schema) and is_binary(table) and not is_map_key(params, "filter") ->
-        {:ok, {action_filter, schema, table, []}}
+        {:ok, {action_filter, schema, table, [], selected_columns}}
 
       %{"schema" => schema}
       when is_binary(schema) and not is_map_key(params, "table") and
              not is_map_key(params, "filter") ->
-        {:ok, {action_filter, schema, "*", []}}
+        {:ok, {action_filter, schema, "*", [], selected_columns}}
 
       %{"table" => table}
       when is_binary(table) and not is_map_key(params, "schema") and
              not is_map_key(params, "filter") ->
-        {:ok, {action_filter, "public", table, []}}
+        {:ok, {action_filter, "public", table, [], selected_columns}}
 
       map when is_map_key(map, "user_token") or is_map_key(map, "auth_token") ->
         {:error,
@@ -288,6 +291,22 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
          "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: #{inspect(error)}"}
     end
   end
+
+  defp parse_select(%{"select" => cols}) when is_list(cols) do
+    case Enum.filter(cols, &is_binary/1) do
+      [] -> nil
+      valid -> valid
+    end
+  end
+
+  defp parse_select(%{"select" => str}) when is_binary(str) do
+    case str |> String.split(",") |> Enum.reject(&(&1 == "")) do
+      [] -> nil
+      cols -> cols
+    end
+  end
+
+  defp parse_select(_), do: nil
 
   defp action_filter(%{"event" => "*"}), do: "*"
 
