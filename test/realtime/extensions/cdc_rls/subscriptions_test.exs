@@ -619,31 +619,15 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                })
     end
 
-    test "user can pass a comma-separated string of column names as an alternative syntax" do
-      assert {:ok, {"*", "public", "messages", [], ["id", "details"]}} =
+    test "passing a string to select is rejected with a clear error message" do
+      assert {:error, msg} =
                Subscriptions.parse_subscription_params(%{
                  "schema" => "public",
                  "table" => "messages",
                  "select" => "id,details"
                })
-    end
 
-    test "consecutive commas in the select string are treated as empty segments and ignored" do
-      assert {:ok, {"*", "public", "messages", [], ["id", "details"]}} =
-               Subscriptions.parse_subscription_params(%{
-                 "schema" => "public",
-                 "table" => "messages",
-                 "select" => "id,,details"
-               })
-    end
-
-    test "column names with surrounding spaces are not trimmed and will be rejected by the database" do
-      assert {:ok, {"*", "public", "messages", [], ["id", " details"]}} =
-               Subscriptions.parse_subscription_params(%{
-                 "schema" => "public",
-                 "table" => "messages",
-                 "select" => "id, details"
-               })
+      assert msg =~ "`select`"
     end
 
     test "non-binary entries in a select list are silently dropped" do
@@ -655,22 +639,15 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                })
     end
 
-    test "passing an empty select string is treated as no column selection" do
-      assert {:ok, {"*", "public", "messages", [], nil}} =
+    test "passing any string value to select is rejected" do
+      assert {:error, msg} =
                Subscriptions.parse_subscription_params(%{
                  "schema" => "public",
                  "table" => "messages",
                  "select" => ""
                })
-    end
 
-    test "passing a bare comma as the select string is treated as no column selection" do
-      assert {:ok, {"*", "public", "messages", [], nil}} =
-               Subscriptions.parse_subscription_params(%{
-                 "schema" => "public",
-                 "table" => "messages",
-                 "select" => ","
-               })
+      assert msg =~ "`select`"
     end
 
     test "user can combine column selection with a row filter" do
@@ -752,6 +729,27 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
                Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
 
       assert msg =~ "invalid column for select nonexistent_column"
+    end
+
+    test "user gets an error when using select with a schema-only (wildcard table) subscription" do
+      assert {:error, msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "select" => ["id"]
+               })
+
+      assert msg =~ "wildcard"
+    end
+
+    test "user gets an error when using select with an explicit wildcard table" do
+      assert {:error, msg} =
+               Subscriptions.parse_subscription_params(%{
+                 "schema" => "public",
+                 "table" => "*",
+                 "select" => ["id"]
+               })
+
+      assert msg =~ "wildcard"
     end
   end
 
