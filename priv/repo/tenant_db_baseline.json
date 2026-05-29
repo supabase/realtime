@@ -1643,10 +1643,10 @@
         "t"
       ],
       "argument_defaults": null,
-      "source_code": "\n  WITH pub AS (\n    SELECT\n      concat_ws(\n        ',',\n        CASE WHEN bool_or(pubinsert) THEN 'insert' ELSE NULL END,\n        CASE WHEN bool_or(pubupdate) THEN 'update' ELSE NULL END,\n        CASE WHEN bool_or(pubdelete) THEN 'delete' ELSE NULL END\n      ) AS w2j_actions,\n      coalesce(\n        string_agg(\n          realtime.quote_wal2json(format('%I.%I', schemaname, tablename)::regclass),\n          ','\n        ) filter (WHERE ppt.tablename IS NOT NULL AND ppt.tablename NOT LIKE '% %'),\n        ''\n      ) AS w2j_add_tables\n    FROM pg_publication pp\n    LEFT JOIN pg_publication_tables ppt ON pp.pubname = ppt.pubname\n    WHERE pp.pubname = publication\n    GROUP BY pp.pubname\n    LIMIT 1\n  ),\n  -- MATERIALIZED ensures pg_logical_slot_get_changes is called exactly once\n  w2j AS MATERIALIZED (\n    SELECT x.*, pub.w2j_add_tables\n    FROM pub,\n         pg_logical_slot_get_changes(\n           slot_name, null, max_changes,\n           'include-pk', 'true',\n           'include-transaction', 'false',\n           'include-timestamp', 'true',\n           'include-type-oids', 'true',\n           'format-version', '2',\n           'actions', pub.w2j_actions,\n           'add-tables', pub.w2j_add_tables\n         ) x\n  ),\n  -- Count raw slot entries before apply_rls/subscription filter\n  slot_count AS (\n    SELECT count(*)::bigint AS cnt\n    FROM w2j\n    WHERE w2j.w2j_add_tables <> ''\n  ),\n  -- Apply RLS and filter as before\n  rls_filtered AS (\n    SELECT xyz.wal, xyz.is_rls_enabled, xyz.subscription_ids, xyz.errors\n    FROM w2j,\n         realtime.apply_rls(\n           wal := w2j.data::jsonb,\n           max_record_bytes := max_record_bytes\n         ) xyz(wal, is_rls_enabled, subscription_ids, errors)\n    WHERE w2j.w2j_add_tables <> ''\n      AND xyz.subscription_ids[1] IS NOT NULL\n  )\n  -- Real rows with slot count attached\n  SELECT rf.wal, rf.is_rls_enabled, rf.subscription_ids, rf.errors, sc.cnt\n  FROM rls_filtered rf, slot_count sc\n\n  UNION ALL\n\n  -- Sentinel row: always returned when no real rows exist so Elixir can\n  -- always read slot_changes_count. Identified by wal IS NULL.\n  SELECT null, null, null, null, sc.cnt\n  FROM slot_count sc\n  WHERE NOT EXISTS (SELECT 1 FROM rls_filtered)\n",
+      "source_code": "\n  WITH pub AS (\n    SELECT\n      concat_ws(\n        ',',\n        CASE WHEN bool_or(pubinsert) THEN 'insert' ELSE NULL END,\n        CASE WHEN bool_or(pubupdate) THEN 'update' ELSE NULL END,\n        CASE WHEN bool_or(pubdelete) THEN 'delete' ELSE NULL END\n      ) AS w2j_actions,\n      coalesce(\n        string_agg(\n          realtime.quote_wal2json(format('%I.%I', schemaname, tablename)::regclass),\n          ','\n        ) filter (WHERE ppt.tablename IS NOT NULL),\n        ''\n      ) AS w2j_add_tables\n    FROM pg_publication pp\n    LEFT JOIN pg_publication_tables ppt ON pp.pubname = ppt.pubname\n    WHERE pp.pubname = publication\n    GROUP BY pp.pubname\n    LIMIT 1\n  ),\n  -- MATERIALIZED ensures pg_logical_slot_get_changes is called exactly once\n  w2j AS MATERIALIZED (\n    SELECT x.*, pub.w2j_add_tables\n    FROM pub,\n         pg_logical_slot_get_changes(\n           slot_name, null, max_changes,\n           'include-pk', 'true',\n           'include-transaction', 'false',\n           'include-timestamp', 'true',\n           'include-type-oids', 'true',\n           'format-version', '2',\n           'actions', pub.w2j_actions,\n           'add-tables', pub.w2j_add_tables\n         ) x\n  ),\n  slot_count AS (\n    SELECT count(*)::bigint AS cnt\n    FROM w2j\n    WHERE w2j.w2j_add_tables <> ''\n  ),\n  rls_filtered AS (\n    SELECT xyz.wal, xyz.is_rls_enabled, xyz.subscription_ids, xyz.errors\n    FROM w2j,\n         realtime.apply_rls(\n           wal := w2j.data::jsonb,\n           max_record_bytes := max_record_bytes\n         ) xyz(wal, is_rls_enabled, subscription_ids, errors)\n    WHERE w2j.w2j_add_tables <> ''\n      AND xyz.subscription_ids[1] IS NOT NULL\n  )\n  SELECT rf.wal, rf.is_rls_enabled, rf.subscription_ids, rf.errors, sc.cnt\n  FROM rls_filtered rf, slot_count sc\n\n  UNION ALL\n\n  SELECT null, null, null, null, sc.cnt\n  FROM slot_count sc\n  WHERE NOT EXISTS (SELECT 1 FROM rls_filtered)\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.list_changes(publication name, slot_name name, max_changes integer, max_record_bytes integer)\n RETURNS TABLE(wal jsonb, is_rls_enabled boolean, subscription_ids uuid[], errors text[], slot_changes_count bigint)\n LANGUAGE sql\n SET log_min_messages TO 'fatal'\nAS $function$\n  WITH pub AS (\n    SELECT\n      concat_ws(\n        ',',\n        CASE WHEN bool_or(pubinsert) THEN 'insert' ELSE NULL END,\n        CASE WHEN bool_or(pubupdate) THEN 'update' ELSE NULL END,\n        CASE WHEN bool_or(pubdelete) THEN 'delete' ELSE NULL END\n      ) AS w2j_actions,\n      coalesce(\n        string_agg(\n          realtime.quote_wal2json(format('%I.%I', schemaname, tablename)::regclass),\n          ','\n        ) filter (WHERE ppt.tablename IS NOT NULL AND ppt.tablename NOT LIKE '% %'),\n        ''\n      ) AS w2j_add_tables\n    FROM pg_publication pp\n    LEFT JOIN pg_publication_tables ppt ON pp.pubname = ppt.pubname\n    WHERE pp.pubname = publication\n    GROUP BY pp.pubname\n    LIMIT 1\n  ),\n  -- MATERIALIZED ensures pg_logical_slot_get_changes is called exactly once\n  w2j AS MATERIALIZED (\n    SELECT x.*, pub.w2j_add_tables\n    FROM pub,\n         pg_logical_slot_get_changes(\n           slot_name, null, max_changes,\n           'include-pk', 'true',\n           'include-transaction', 'false',\n           'include-timestamp', 'true',\n           'include-type-oids', 'true',\n           'format-version', '2',\n           'actions', pub.w2j_actions,\n           'add-tables', pub.w2j_add_tables\n         ) x\n  ),\n  -- Count raw slot entries before apply_rls/subscription filter\n  slot_count AS (\n    SELECT count(*)::bigint AS cnt\n    FROM w2j\n    WHERE w2j.w2j_add_tables <> ''\n  ),\n  -- Apply RLS and filter as before\n  rls_filtered AS (\n    SELECT xyz.wal, xyz.is_rls_enabled, xyz.subscription_ids, xyz.errors\n    FROM w2j,\n         realtime.apply_rls(\n           wal := w2j.data::jsonb,\n           max_record_bytes := max_record_bytes\n         ) xyz(wal, is_rls_enabled, subscription_ids, errors)\n    WHERE w2j.w2j_add_tables <> ''\n      AND xyz.subscription_ids[1] IS NOT NULL\n  )\n  -- Real rows with slot count attached\n  SELECT rf.wal, rf.is_rls_enabled, rf.subscription_ids, rf.errors, sc.cnt\n  FROM rls_filtered rf, slot_count sc\n\n  UNION ALL\n\n  -- Sentinel row: always returned when no real rows exist so Elixir can\n  -- always read slot_changes_count. Identified by wal IS NULL.\n  SELECT null, null, null, null, sc.cnt\n  FROM slot_count sc\n  WHERE NOT EXISTS (SELECT 1 FROM rls_filtered)\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.list_changes(publication name, slot_name name, max_changes integer, max_record_bytes integer)\n RETURNS TABLE(wal jsonb, is_rls_enabled boolean, subscription_ids uuid[], errors text[], slot_changes_count bigint)\n LANGUAGE sql\n SET log_min_messages TO 'fatal'\nAS $function$\n  WITH pub AS (\n    SELECT\n      concat_ws(\n        ',',\n        CASE WHEN bool_or(pubinsert) THEN 'insert' ELSE NULL END,\n        CASE WHEN bool_or(pubupdate) THEN 'update' ELSE NULL END,\n        CASE WHEN bool_or(pubdelete) THEN 'delete' ELSE NULL END\n      ) AS w2j_actions,\n      coalesce(\n        string_agg(\n          realtime.quote_wal2json(format('%I.%I', schemaname, tablename)::regclass),\n          ','\n        ) filter (WHERE ppt.tablename IS NOT NULL),\n        ''\n      ) AS w2j_add_tables\n    FROM pg_publication pp\n    LEFT JOIN pg_publication_tables ppt ON pp.pubname = ppt.pubname\n    WHERE pp.pubname = publication\n    GROUP BY pp.pubname\n    LIMIT 1\n  ),\n  -- MATERIALIZED ensures pg_logical_slot_get_changes is called exactly once\n  w2j AS MATERIALIZED (\n    SELECT x.*, pub.w2j_add_tables\n    FROM pub,\n         pg_logical_slot_get_changes(\n           slot_name, null, max_changes,\n           'include-pk', 'true',\n           'include-transaction', 'false',\n           'include-timestamp', 'true',\n           'include-type-oids', 'true',\n           'format-version', '2',\n           'actions', pub.w2j_actions,\n           'add-tables', pub.w2j_add_tables\n         ) x\n  ),\n  slot_count AS (\n    SELECT count(*)::bigint AS cnt\n    FROM w2j\n    WHERE w2j.w2j_add_tables <> ''\n  ),\n  rls_filtered AS (\n    SELECT xyz.wal, xyz.is_rls_enabled, xyz.subscription_ids, xyz.errors\n    FROM w2j,\n         realtime.apply_rls(\n           wal := w2j.data::jsonb,\n           max_record_bytes := max_record_bytes\n         ) xyz(wal, is_rls_enabled, subscription_ids, errors)\n    WHERE w2j.w2j_add_tables <> ''\n      AND xyz.subscription_ids[1] IS NOT NULL\n  )\n  SELECT rf.wal, rf.is_rls_enabled, rf.subscription_ids, rf.errors, sc.cnt\n  FROM rls_filtered rf, slot_count sc\n\n  UNION ALL\n\n  SELECT null, null, null, null, sc.cnt\n  FROM slot_count sc\n  WHERE NOT EXISTS (SELECT 1 FROM rls_filtered)\n$function$\n",
       "config": [
         "log_min_messages=fatal"
       ],
@@ -1702,10 +1702,10 @@
       "all_argument_types": [],
       "argument_modes": null,
       "argument_defaults": null,
-      "source_code": "\n      select\n        (\n          select string_agg('' || ch,'')\n          from unnest(string_to_array(nsp.nspname::text, null)) with ordinality x(ch, idx)\n          where\n            not (x.idx = 1 and x.ch = '\"')\n            and not (\n              x.idx = array_length(string_to_array(nsp.nspname::text, null), 1)\n              and x.ch = '\"'\n            )\n        )\n        || '.'\n        || (\n          select string_agg('' || ch,'')\n          from unnest(string_to_array(pc.relname::text, null)) with ordinality x(ch, idx)\n          where\n            not (x.idx = 1 and x.ch = '\"')\n            and not (\n              x.idx = array_length(string_to_array(nsp.nspname::text, null), 1)\n              and x.ch = '\"'\n            )\n          )\n      from\n        pg_class pc\n        join pg_namespace nsp\n          on pc.relnamespace = nsp.oid\n      where\n        pc.oid = entity\n    ",
+      "source_code": "\n  SELECT\n    realtime.wal2json_escape_identifier(nsp.nspname::text)\n    || '.'\n    || realtime.wal2json_escape_identifier(pc.relname::text)\n  FROM pg_class pc\n  JOIN pg_namespace nsp ON pc.relnamespace = nsp.oid\n  WHERE pc.oid = entity\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.quote_wal2json(entity regclass)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE STRICT\nAS $function$\n      select\n        (\n          select string_agg('' || ch,'')\n          from unnest(string_to_array(nsp.nspname::text, null)) with ordinality x(ch, idx)\n          where\n            not (x.idx = 1 and x.ch = '\"')\n            and not (\n              x.idx = array_length(string_to_array(nsp.nspname::text, null), 1)\n              and x.ch = '\"'\n            )\n        )\n        || '.'\n        || (\n          select string_agg('' || ch,'')\n          from unnest(string_to_array(pc.relname::text, null)) with ordinality x(ch, idx)\n          where\n            not (x.idx = 1 and x.ch = '\"')\n            and not (\n              x.idx = array_length(string_to_array(nsp.nspname::text, null), 1)\n              and x.ch = '\"'\n            )\n          )\n      from\n        pg_class pc\n        join pg_namespace nsp\n          on pc.relnamespace = nsp.oid\n      where\n        pc.oid = entity\n    $function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.quote_wal2json(entity regclass)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE STRICT\nAS $function$\n  SELECT\n    realtime.wal2json_escape_identifier(nsp.nspname::text)\n    || '.'\n    || realtime.wal2json_escape_identifier(pc.relname::text)\n  FROM pg_class pc\n  JOIN pg_namespace nsp ON pc.relnamespace = nsp.oid\n  WHERE pc.oid = entity\n$function$\n",
       "config": null,
       "owner": "supabase_admin",
       "comment": null,
@@ -1753,69 +1753,6 @@
       ],
       "security_labels": []
     },
-    "procedure:realtime.send(bytea,text,text,boolean)": {
-      "schema": "realtime",
-      "name": "send",
-      "kind": "f",
-      "return_type": "void",
-      "return_type_schema": "pg_catalog",
-      "language": "plpgsql",
-      "security_definer": false,
-      "volatility": "v",
-      "parallel_safety": "u",
-      "execution_cost": 100,
-      "result_rows": 0,
-      "is_strict": false,
-      "leakproof": false,
-      "returns_set": false,
-      "argument_count": 4,
-      "argument_default_count": 1,
-      "argument_names": [
-        "payload",
-        "event",
-        "topic",
-        "private"
-      ],
-      "argument_types": [
-        "bytea",
-        "text",
-        "text",
-        "boolean"
-      ],
-      "all_argument_types": [],
-      "argument_modes": null,
-      "argument_defaults": "true",
-      "source_code": "\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n",
-      "binary_path": null,
-      "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.send(payload bytea, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
-      "config": null,
-      "owner": "supabase_admin",
-      "comment": null,
-      "privileges": [
-        {
-          "grantee": "PUBLIC",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "supabase_admin",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "postgres",
-          "privilege": "EXECUTE",
-          "grantable": false
-        },
-        {
-          "grantee": "dashboard_user",
-          "privilege": "EXECUTE",
-          "grantable": false
-        }
-      ],
-      "security_labels": []
-    },
     "procedure:realtime.send(jsonb,text,text,boolean)": {
       "schema": "realtime",
       "name": "send",
@@ -1852,6 +1789,69 @@
       "binary_path": null,
       "sql_body": null,
       "definition": "CREATE OR REPLACE FUNCTION realtime.send(payload jsonb, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\n  final_payload jsonb;\nBEGIN\n  BEGIN\n    -- Generate a new UUID for the id\n    generated_id := gen_random_uuid();\n\n    -- Check if payload has an 'id' key, if not, add the generated UUID\n    IF payload ? 'id' THEN\n      final_payload := payload;\n    ELSE\n      final_payload := jsonb_set(payload, '{id}', to_jsonb(generated_id));\n    END IF;\n\n    -- Set the topic configuration\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    -- Attempt to insert the message\n    INSERT INTO realtime.messages (id, payload, event, topic, private, extension)\n    VALUES (generated_id, final_payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      -- Capture and notify the error\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
+      "config": null,
+      "owner": "supabase_admin",
+      "comment": null,
+      "privileges": [
+        {
+          "grantee": "PUBLIC",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ],
+      "security_labels": []
+    },
+    "procedure:realtime.send(bytea,text,text,boolean)": {
+      "schema": "realtime",
+      "name": "send",
+      "kind": "f",
+      "return_type": "void",
+      "return_type_schema": "pg_catalog",
+      "language": "plpgsql",
+      "security_definer": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "execution_cost": 100,
+      "result_rows": 0,
+      "is_strict": false,
+      "leakproof": false,
+      "returns_set": false,
+      "argument_count": 4,
+      "argument_default_count": 1,
+      "argument_names": [
+        "payload",
+        "event",
+        "topic",
+        "private"
+      ],
+      "argument_types": [
+        "bytea",
+        "text",
+        "text",
+        "boolean"
+      ],
+      "all_argument_types": [],
+      "argument_modes": null,
+      "argument_defaults": "true",
+      "source_code": "\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n",
+      "binary_path": null,
+      "sql_body": null,
+      "definition": "CREATE OR REPLACE FUNCTION realtime.send(payload bytea, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
       "config": null,
       "owner": "supabase_admin",
       "comment": null,
@@ -2076,6 +2076,63 @@
         },
         {
           "grantee": "supabase_realtime_admin",
+          "privilege": "EXECUTE",
+          "grantable": false
+        }
+      ],
+      "security_labels": []
+    },
+    "procedure:realtime.wal2json_escape_identifier(text)": {
+      "schema": "realtime",
+      "name": "wal2json_escape_identifier",
+      "kind": "f",
+      "return_type": "text",
+      "return_type_schema": "pg_catalog",
+      "language": "sql",
+      "security_definer": false,
+      "volatility": "i",
+      "parallel_safety": "u",
+      "execution_cost": 100,
+      "result_rows": 0,
+      "is_strict": true,
+      "leakproof": false,
+      "returns_set": false,
+      "argument_count": 1,
+      "argument_default_count": 0,
+      "argument_names": [
+        "name"
+      ],
+      "argument_types": [
+        "text"
+      ],
+      "all_argument_types": [],
+      "argument_modes": null,
+      "argument_defaults": null,
+      "source_code": "\n  -- Prefix `\\`, `,`, `.`, and any whitespace with `\\`\n  SELECT regexp_replace(name, '([\\\\,.[:space:]])', '\\\\\\1', 'g')\n",
+      "binary_path": null,
+      "sql_body": null,
+      "definition": "CREATE OR REPLACE FUNCTION realtime.wal2json_escape_identifier(name text)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE STRICT\nAS $function$\n  -- Prefix `\\`, `,`, `.`, and any whitespace with `\\`\n  SELECT regexp_replace(name, '([\\\\,.[:space:]])', '\\\\\\1', 'g')\n$function$\n",
+      "config": null,
+      "owner": "supabase_admin",
+      "comment": null,
+      "privileges": [
+        {
+          "grantee": "PUBLIC",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "EXECUTE",
+          "grantable": false
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "EXECUTE",
           "grantable": false
         }
@@ -11954,6 +12011,46 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:dashboard_user",
+      "referenced_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:dashboard_user",
+      "referenced_stable_id": "role:dashboard_user",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:postgres",
+      "referenced_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:postgres",
+      "referenced_stable_id": "role:postgres",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:PUBLIC",
+      "referenced_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:PUBLIC",
+      "referenced_stable_id": "role:PUBLIC",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:supabase_admin",
+      "referenced_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:procedure:realtime.wal2json_escape_identifier(text)::grantee:supabase_admin",
+      "referenced_stable_id": "role:supabase_admin",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "acl:schema:auth::grantee:anon",
       "referenced_stable_id": "role:anon",
       "deptype": "n"
@@ -13091,12 +13188,12 @@
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_pkey",
@@ -15765,6 +15862,16 @@
     },
     {
       "dependent_stable_id": "procedure:realtime.topic()",
+      "referenced_stable_id": "schema:realtime",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
+      "referenced_stable_id": "role:supabase_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "procedure:realtime.wal2json_escape_identifier(text)",
       "referenced_stable_id": "schema:realtime",
       "deptype": "n"
     },
