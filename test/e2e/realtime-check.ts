@@ -27,13 +27,14 @@ const program = new Command()
   .option("--otel <endpoint>", "OTLP HTTP endpoint for tracing (e.g. http://localhost:4318)")
   .option("--otel-token <token>", "Bearer token for authenticated OTLP endpoints")
   .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,broadcast-changes")
+  .option("--debug", "Enable Realtime client debug mode (sets log level to info and enables console logging)")
   .parse();
 
 const opts = program.opts();
 const ANON_KEY: string = opts.publishableKey;
 const SERVICE_KEY: string = opts.secretKey;
 const dbPassword: string = opts.dbPassword ?? "";
-const { project, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, otelToken: OTEL_API_TOKEN, url: URL_ARG, dbUrl: DB_URL_ARG } = opts;
+const { project, domain: EMAIL_DOMAIN, port, json: JSON_OUTPUT, test: TEST_FILTER, otel: OTEL_ARG, otelToken: OTEL_API_TOKEN, url: URL_ARG, dbUrl: DB_URL_ARG, debug: DEBUG } = opts;
 const env: string = opts.env === "production" ? "prod" : opts.env;
 
 const TEST_CATEGORIES = TEST_FILTER
@@ -64,8 +65,15 @@ const DB_URL = DB_URL_ARG ?? (() => {
 
 const DB_SSL = env !== "local" ? { rejectUnauthorized: false } : false;
 
-const REALTIME_OPTS = { heartbeatIntervalMs: 5000, timeout: 5000 };
-const REALTIME_OPTS_REPLAY = { heartbeatIntervalMs: 5000, timeout: 10000 };
+const realtimeLogger = DEBUG
+  ? (kind: string, msg: string, data?: any) => {
+      if (data !== undefined) console.error(`[realtime] ${kind}: ${msg}`, data);
+      else console.error(`[realtime] ${kind}: ${msg}`);
+    }
+  : undefined;
+
+const REALTIME_OPTS = { heartbeatIntervalMs: 5000, timeout: 5000, ...(DEBUG ? { logger: realtimeLogger, logLevel: "info" } : {}) };
+const REALTIME_OPTS_REPLAY = { heartbeatIntervalMs: 5000, timeout: 10000, ...(DEBUG ? { logger: realtimeLogger, logLevel: "info" } : {}) };
 const BROADCAST_CONFIG = { config: { broadcast: { self: true } } };
 const EVENT_TIMEOUT_MS = 8000;
 const RATE_LIMIT_PAUSE_MS = 2000;
