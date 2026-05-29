@@ -4,13 +4,13 @@ defmodule Realtime.Tenants.Migrations.AddLikeIlikeIsNotOpsToFilters do
   use Ecto.Migration
 
   def change do
-    execute("alter type realtime.equality_op add value 'like';")
-    execute("alter type realtime.equality_op add value 'ilike';")
-    execute("alter type realtime.equality_op add value 'is';")
-    execute("alter type realtime.equality_op add value 'not_in';")
-    execute("alter type realtime.equality_op add value 'not_like';")
-    execute("alter type realtime.equality_op add value 'not_ilike';")
-    execute("alter type realtime.equality_op add value 'not_is';")
+    execute("alter type realtime.equality_op add value if not exists 'like'")
+    execute("alter type realtime.equality_op add value if not exists 'ilike'")
+    execute("alter type realtime.equality_op add value if not exists 'is'")
+    execute("alter type realtime.equality_op add value if not exists 'not_in'")
+    execute("alter type realtime.equality_op add value if not exists 'not_like'")
+    execute("alter type realtime.equality_op add value if not exists 'not_ilike'")
+    execute("alter type realtime.equality_op add value if not exists 'not_is'")
 
     execute("
       create or replace function realtime.check_equality_op(
