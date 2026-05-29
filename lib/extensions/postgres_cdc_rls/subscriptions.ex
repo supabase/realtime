@@ -87,6 +87,7 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
       from
         sub_tables
         on conflict
+        -- coalesce needed: NULL != NULL in unique constraints; NULL selected_columns means all columns
         (subscription_id, entity, filters, action_filter, coalesce(selected_columns, '{}'))
         do update set
         claims = excluded.claims,
@@ -258,55 +259,77 @@ defmodule Extensions.PostgresCdcRls.Subscriptions do
   @spec parse_subscription_params(map()) :: {:ok, subscription_params} | {:error, binary()}
   def parse_subscription_params(params) do
     action_filter = action_filter(params)
-    selected_columns = parse_select(params)
 
-    case params do
-      %{"schema" => schema, "table" => table, "filter" => filter}
-      when is_binary(schema) and is_binary(table) and is_binary(filter) ->
-        case parse_filters(filter) do
-          {:ok, filters} -> {:ok, {action_filter, schema, table, filters, selected_columns}}
-          {:error, reason} -> {:error, "Error parsing `filter` params: #{reason}"}
-        end
+    with {:ok, selected_columns} <- parse_select(params) do
+      case params do
+        %{"schema" => schema, "table" => table, "filter" => filter}
+        when is_binary(schema) and is_binary(table) and is_binary(filter) ->
+          case parse_filters(filter) do
+            {:ok, filters} ->
+              case reject_select_on_wildcard(schema, table, selected_columns) do
+                :ok -> {:ok, {action_filter, schema, table, filters, selected_columns}}
+                error -> error
+              end
 
-      %{"schema" => schema, "table" => table}
-      when is_binary(schema) and is_binary(table) and not is_map_key(params, "filter") ->
-        {:ok, {action_filter, schema, table, [], selected_columns}}
+            {:error, reason} ->
+              {:error, "Error parsing `filter` params: #{reason}"}
+          end
 
-      %{"schema" => schema}
-      when is_binary(schema) and not is_map_key(params, "table") and
-             not is_map_key(params, "filter") ->
-        {:ok, {action_filter, schema, "*", [], selected_columns}}
+        %{"schema" => schema, "table" => table}
+        when is_binary(schema) and is_binary(table) and not is_map_key(params, "filter") ->
+          case reject_select_on_wildcard(schema, table, selected_columns) do
+            :ok -> {:ok, {action_filter, schema, table, [], selected_columns}}
+            error -> error
+          end
 
-      %{"table" => table}
-      when is_binary(table) and not is_map_key(params, "schema") and
-             not is_map_key(params, "filter") ->
-        {:ok, {action_filter, "public", table, [], selected_columns}}
+        %{"schema" => schema}
+        when is_binary(schema) and not is_map_key(params, "table") and
+               not is_map_key(params, "filter") ->
+          case reject_select_on_wildcard(schema, "*", selected_columns) do
+            :ok -> {:ok, {action_filter, schema, "*", [], selected_columns}}
+            error -> error
+          end
 
-      map when is_map_key(map, "user_token") or is_map_key(map, "auth_token") ->
-        {:error,
-         "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: <redacted>"}
+        %{"table" => table}
+        when is_binary(table) and not is_map_key(params, "schema") and
+               not is_map_key(params, "filter") ->
+          case reject_select_on_wildcard("public", table, selected_columns) do
+            :ok -> {:ok, {action_filter, "public", table, [], selected_columns}}
+            error -> error
+          end
 
-      error ->
-        {:error,
-         "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: #{inspect(error)}"}
+        map when is_map_key(map, "user_token") or is_map_key(map, "auth_token") ->
+          {:error,
+           "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: <redacted>"}
+
+        error ->
+          {:error,
+           "No subscription params provided. Please provide at least a `schema` or `table` to subscribe to: #{inspect(error)}"}
+      end
     end
   end
 
   defp parse_select(%{"select" => cols}) when is_list(cols) do
     case Enum.filter(cols, &is_binary/1) do
-      [] -> nil
-      valid -> valid
+      [] -> {:ok, nil}
+      valid -> {:ok, valid}
     end
   end
 
   defp parse_select(%{"select" => str}) when is_binary(str) do
-    case str |> String.split(",") |> Enum.reject(&(&1 == "")) do
-      [] -> nil
-      cols -> cols
-    end
+    {:error, "Error parsing `select` params: expected a list of column name strings, e.g. select: [\"col1\", \"col2\"]"}
   end
 
-  defp parse_select(_), do: nil
+  defp parse_select(_), do: {:ok, nil}
+
+  defp reject_select_on_wildcard(_schema, _table, nil), do: :ok
+
+  defp reject_select_on_wildcard(schema, table, _selected_columns)
+       when schema == "*" or table == "*" do
+    {:error, "Column selection is not supported for wildcard subscriptions. Provide an explicit schema and table name."}
+  end
+
+  defp reject_select_on_wildcard(_schema, _table, _selected_columns), do: :ok
 
   defp action_filter(%{"event" => "*"}), do: "*"
 
