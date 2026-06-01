@@ -47,6 +47,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
     RateCounter.new(rate_counter_args)
 
+    start_time = Realtime.Telemetry.start([:realtime, :replication, :poller], %{tenant: tenant_id})
+
     state = %{
       backoff: Backoff.new(backoff_min: 100, backoff_max: 5_000, backoff_type: :rand_exp),
       max_changes: extension["poll_max_changes"],
@@ -59,12 +61,26 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       slot_name: extension["slot_name"] <> slot_name_suffix(),
       tenant_id: tenant_id,
       rate_counter_args: rate_counter_args,
-      subscribers_nodes_table: args["subscribers_nodes_table"]
+      subscribers_nodes_table: args["subscribers_nodes_table"],
+      start_time: start_time
     }
 
     {:ok, _} = Registry.register(__MODULE__.Registry, tenant_id, %{})
     {:ok, state, {:continue, {:connect, tenant}}}
   end
+
+  @impl true
+  def terminate(reason, %{start_time: start_time, tenant_id: tenant_id}) do
+    if reason in [:normal, :shutdown] or match?({:shutdown, _}, reason) do
+      Realtime.Telemetry.stop([:realtime, :replication, :poller], start_time, %{tenant: tenant_id, reason: reason})
+    else
+      Realtime.Telemetry.exception([:realtime, :replication, :poller], start_time, :exit, reason, [], %{
+        tenant: tenant_id
+      })
+    end
+  end
+
+  def terminate(_reason, _state), do: :ok
 
   @impl true
   def handle_continue({:connect, tenant}, state) do
@@ -133,6 +149,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
         [_, db_pid] = Regex.run(~r/PID\s(\d*)$/, msg)
         db_pid = String.to_integer(db_pid)
 
+        Realtime.Telemetry.execute([:realtime, :replication, :poller, :query, :exception], %{}, %{
+          tenant: tenant_id,
+          reason: :object_in_use,
+          db_pid: db_pid
+        })
+
         case Replications.get_pg_stat_activity_diff(conn, db_pid) do
           {:ok, diff} ->
             Logger.warning("Database PID #{db_pid} found in pg_stat_activity with state_change diff of #{diff}")
@@ -153,6 +175,11 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
       {:error, reason} ->
         log_error("PoolingReplicationError", reason)
+
+        Realtime.Telemetry.execute([:realtime, :replication, :poller, :query, :exception], %{}, %{
+          tenant: tenant_id,
+          reason: reason
+        })
 
         retry_or_stop(state, reason)
     end
@@ -175,7 +202,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   defp convert_errors(_), do: nil
 
-  defp prepare_replication(%{conn: conn, slot_name: slot_name} = state) do
+  defp prepare_replication(%{conn: conn, slot_name: slot_name, tenant_id: tenant_id} = state) do
     case Replications.prepare_replication(conn, slot_name) do
       {:ok, _} ->
         send(self(), :poll)
@@ -183,6 +210,12 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
       {:error, error} ->
         log_error("PoolingReplicationPreparationError", error)
+
+        Realtime.Telemetry.execute([:realtime, :replication, :poller, :prepare, :exception], %{}, %{
+          tenant: tenant_id,
+          reason: error
+        })
+
         retry_or_stop(state, error)
     end
   end
@@ -237,6 +270,14 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
     case RateCounter.get(rate_counter_args) do
       {:ok, %{limit: %{triggered: true}}} ->
+        if real_rows != [] do
+          Realtime.Telemetry.execute(
+            [:realtime, :replication, :poller, :changes, :skip],
+            %{count: length(real_rows)},
+            %{tenant: tenant_id, reason: :rate_limited}
+          )
+        end
+
         :ok
 
       _ ->

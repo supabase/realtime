@@ -10,6 +10,7 @@
   - [WebSocket](#websocket)
     - [WebSocket URL](#websocket-url)
     - [WebSocket Connection Authorization](#websocket-connection-authorization)
+  - [Telemetry events](#telemetry-events)
 
 ## Client
 
@@ -161,3 +162,15 @@ Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
 > JWT expiration is checked automatically. `exp` and `role` (database role) keys are mandatory.
 
 **Authorizing Client Connection**: You can pass in the JWT by following the instructions under the Realtime client lib. For example, refer to the **Usage** section in the [@supabase/realtime-js](https://github.com/supabase/realtime-js) client library.
+
+### Telemetry events
+
+Realtime emits events through `:telemetry`. Event names follow a few rules so they map cleanly onto metrics and stay consistent:
+
+- Prefix every event with `:realtime` and group by concern, not by module. Tenant migrations use `[:realtime, :tenants, :migrations, ...]`, channels use `[:realtime, :channel, ...]`, and the Postgres CDC workers use `[:realtime, :replication, :poller, ...]` and `[:realtime, :subscriptions, :checker, ...]`.
+- Give anything with a lifetime a span: `:start`, then `:stop` or `:exception`. Put the duration in measurements and the cause in metadata. Tenant migrations emit `[:realtime, :tenants, :migrations, :start | :stop | :exception]`, and the replication poller does the same for its run and for its `:query` and `:prepare` operations.
+- When outcomes share a cause, emit one event and tell them apart with a `reason` in metadata instead of adding an event name per outcome. For example, skipped Postgres changes use `[:realtime, :replication, :poller, :changes, :skip]` with `reason: :rate_limited`.
+- Put `tenant` in metadata for per-tenant events; connections, authorization checks, and migrations all do. Extra context such as `reason` or `db_pid` also goes in metadata and stays out of metrics unless a metric opts into it as a tag.
+- A metric name is the event path joined with `_`, so pick segments that read well as one: `[:realtime, :tenants, :payload, :size]` becomes `realtime_tenants_payload_size`.
+
+The metrics built on these events are listed in [OBSERVABILITY_METRICS.md](./OBSERVABILITY_METRICS.md).

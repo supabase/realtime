@@ -137,9 +137,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
       case :ets.lookup(subscribers_pids_table, pid) do
         [] ->
           Telemetry.execute(
-            [:realtime, :subscriptions_checker, :pid_not_found],
+            [:realtime, :subscriptions, :checker, :dead_pid],
             %{quantity: 1},
-            %{tenant_id: tenant_id}
+            %{tenant: tenant_id, reason: :not_found}
           )
 
           acc
@@ -147,9 +147,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionsChecker do
         results ->
           for {^pid, postgres_id, _ref, _node} <- results do
             Telemetry.execute(
-              [:realtime, :subscriptions_checker, :phantom_pid_detected],
+              [:realtime, :subscriptions, :checker, :dead_pid],
               %{quantity: 1},
-              %{tenant_id: tenant_id}
+              %{tenant: tenant_id, reason: :phantom}
             )
 
             :ets.delete(subscribers_pids_table, pid)

@@ -218,8 +218,16 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   def handle_info(:check_no_users, %{subscribers_pids_table: tid, no_users_ts: ts} = state) do
     Helpers.cancel_timer(state.no_users_ref)
 
+    subscribers = :ets.info(tid, :size)
+
+    Realtime.Telemetry.execute(
+      [:realtime, :subscriptions, :manager, :subscribers],
+      %{count: subscribers},
+      %{tenant: state.id}
+    )
+
     ts_new =
-      case {:ets.info(tid, :size), ts != nil && ts + @stop_after < now()} do
+      case {subscribers, ts != nil && ts + @stop_after < now()} do
         {0, true} ->
           Logger.info("Stop tenant #{state.id} because of no connected users")
           Rls.handle_stop(state.id, 15_000)

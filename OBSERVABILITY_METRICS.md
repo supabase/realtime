@@ -9,6 +9,7 @@
 - [Payload & Traffic Metrics](#payload--traffic-metrics)
 - [Latency & Performance Metrics](#latency--performance-metrics)
 - [Authorization & Error Metrics](#authorization--error-metrics)
+- [Subscription Pooler Metrics](#subscription-pooler-metrics)
 - [Tenant Migration Metrics](#tenant-migration-metrics)
 - [BEAM/Erlang VM Metrics](#beamerlang-vm-metrics)
   - [Memory Metrics](#memory-metrics)
@@ -133,6 +134,21 @@ These metrics track security policy enforcement and error rates.
 | `realtime_channel_error`        | Counter | Unhandled channel errors per tenant. Any non-zero value warrants investigation.                                                                 | **Per-Tenant**   | `/tenant-metrics` |
 | `realtime_channel_global_error` | Counter | Global unhandled channel error count across all tenants, tagged by error code.                                                                  | Global Aggregate | `/metrics`        |
 | `phoenix_channel_joined_total`  | Counter | WebSocket channel join attempts tagged by `result` (`ok`/`error`) and `transport`. Use `result="error"` rate to detect client or policy issues. | Per-Node         | `/metrics`        |
+
+## Subscription Pooler Metrics
+
+These metrics cover the Postgres Changes subscription pooler per tenant: the workers that hold subscriptions, poll the replication slot, and broadcast row changes to clients.
+
+| Metric                                                | Type    | Description                                                                                  | Scope          | Endpoint          |
+| ----------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------- | -------------- | ----------------- |
+| `realtime_subscriptions_manager_subscribers`          | Gauge   | Subscribers tracked for the tenant across the cluster.                                       | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_replication_poller_stop_total`              | Counter | How many times the tenant's poller terminated, tagged by `reason`.                           | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_replication_poller_exception_total`         | Counter | How many times the tenant's poller crashed (terminated abnormally).                          | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_replication_poller_query_exception_total`   | Counter | How many of the tenant's polls failed reading changes from the slot, tagged by `reason`.     | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_replication_poller_prepare_exception_total` | Counter | How many of the tenant's attempts to prepare the replication slot for polling failed.        | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_replication_poller_changes_dispatch`        | Counter | Number of Postgres Changes rows the poller broadcast to subscribers.                         | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_replication_poller_changes_skip`            | Counter | Number of Postgres Changes rows skipped without broadcasting, tagged by `reason`.            | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_subscriptions_checker_dead_pid`             | Counter | Not-alive subscriber pids the checker handled, tagged by `reason`: `phantom` or `not_found`. | **Per-Tenant** | `/tenant-metrics` |
 
 ## Tenant Migration Metrics
 
