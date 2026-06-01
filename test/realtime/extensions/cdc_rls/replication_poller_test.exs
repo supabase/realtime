@@ -129,6 +129,19 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                      2000
     end
 
+    test "gives up and stops when prepare_replication keeps failing", %{args: args} do
+      stub(Replications, :prepare_replication, fn _, _ -> {:error, "prepare failed"} end)
+
+      pid = start_supervised!({Poller, args}, restart: :temporary)
+      ref = Process.monitor(pid)
+
+      # Drive the retry count to the limit, then trigger one more failing prepare
+      :sys.replace_state(pid, fn state -> %{state | retry_count: 6} end)
+      send(pid, :retry)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :max_retries_reached}}, 1000
+    end
+
     test "terminates replication slot when retry count exceeds threshold", %{args: args} do
       tenant_id = args["id"]
 
@@ -155,6 +168,20 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       send(pid, :poll)
 
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :stop], _, %{tenant: ^tenant_id}}, 2000
+    end
+
+    test "gives up and stops after max retries", %{args: args} do
+      error = {:error, %Postgrex.Error{message: "boom"}}
+      stub(Replications, :list_changes, fn _, _, _, _, _ -> error end)
+
+      pid = start_supervised!({Poller, args}, restart: :temporary)
+      ref = Process.monitor(pid)
+
+      # Drive the retry count to the limit, then trigger one more failing poll
+      :sys.replace_state(pid, fn state -> %{state | retry_count: 6} end)
+      send(pid, :poll)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :max_retries_reached}}, 1000
     end
 
     test "handles no new changes", %{args: args, tenant: tenant} do
