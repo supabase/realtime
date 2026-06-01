@@ -4,7 +4,6 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisorTest do
   alias Extensions.PostgresCdcRls.WorkerSupervisor
   alias Extensions.PostgresCdcRls.ReplicationPoller
   alias Extensions.PostgresCdcRls.SubscriptionManager
-  alias Extensions.PostgresCdcRls.SubscriptionsChecker
 
   setup do
     tenant = Containers.checkout_tenant(run_migrations: true)
@@ -29,7 +28,6 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisorTest do
 
       assert ReplicationPoller in child_ids
       assert SubscriptionManager in child_ids
-      assert SubscriptionsChecker in child_ids
     end
 
     test "creates ETS tables for subscribers", %{args: args} do

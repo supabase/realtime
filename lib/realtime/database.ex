@@ -296,7 +296,6 @@ defmodule Realtime.Database do
     case application_name do
       "realtime_subscription_manager" -> 1
       "realtime_subscription_manager_pub" -> settings["subs_pool_size"] || 1
-      "realtime_subscription_checker" -> 1
       "realtime_connect" -> settings["db_pool"] || 1
       "realtime_health_check" -> 1
       "realtime_janitor" -> 1
@@ -410,7 +409,6 @@ defmodule Realtime.Database do
     application_names = [
       "realtime_subscription_manager",
       "realtime_subscription_manager_pub",
-      "realtime_subscription_checker",
       "realtime_health_check",
       "realtime_janitor",
       "realtime_migrations",

@@ -1,9 +1,9 @@
-defmodule Realtime.Extensions.CdcRls.SubscriptionsCheckerDistributedTest do
+defmodule Realtime.Extensions.CdcRls.SubscriptionManagerDistributedTest do
   # Usage of Clustered
   use ExUnit.Case, async: false
   import ExUnit.CaptureLog
 
-  alias Extensions.PostgresCdcRls.SubscriptionsChecker, as: Checker
+  alias Extensions.PostgresCdcRls.SubscriptionManager
 
   setup do
     {:ok, peer, remote_node} = Clustered.start_disconnected()
@@ -13,14 +13,17 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionsCheckerDistributedTest do
 
   describe "not_alive_pids_dist/1" do
     test "returns empty list for all alive PIDs", %{remote_node: remote_node} do
-      assert Checker.not_alive_pids_dist(%{}) == []
+      assert SubscriptionManager.not_alive_pids_dist(%{}) == []
 
       pid1 = spawn(fn -> Process.sleep(5000) end)
       pid2 = spawn(fn -> Process.sleep(5000) end)
       pid3 = spawn(fn -> Process.sleep(5000) end)
       pid4 = Node.spawn(remote_node, Process, :sleep, [5000])
 
-      assert Checker.not_alive_pids_dist(%{node() => MapSet.new([pid1, pid2, pid3]), remote_node => MapSet.new([pid4])}) ==
+      assert SubscriptionManager.not_alive_pids_dist(%{
+               node() => MapSet.new([pid1, pid2, pid3]),
+               remote_node => MapSet.new([pid4])
+             }) ==
                []
     end
 
@@ -34,7 +37,7 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionsCheckerDistributedTest do
       Process.exit(pid2, :kill)
       Process.exit(pid5, :kill)
 
-      assert Checker.not_alive_pids_dist(%{
+      assert SubscriptionManager.not_alive_pids_dist(%{
                node() => MapSet.new([pid1, pid2, pid3]),
                remote_node => MapSet.new([pid4, pid5])
              }) == [pid2, pid5]
@@ -54,7 +57,7 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionsCheckerDistributedTest do
 
       log =
         capture_log(fn ->
-          assert Checker.not_alive_pids_dist(%{
+          assert SubscriptionManager.not_alive_pids_dist(%{
                    node() => MapSet.new([pid1, pid2, pid3]),
                    remote_node => MapSet.new([pid4, pid5])
                  }) == [pid2]

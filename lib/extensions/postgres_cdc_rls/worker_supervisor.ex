@@ -5,7 +5,6 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
   alias Extensions.PostgresCdcRls
   alias PostgresCdcRls.ReplicationPoller
   alias PostgresCdcRls.SubscriptionManager
-  alias PostgresCdcRls.SubscriptionsChecker
   alias Realtime.Tenants.Cache
   alias Realtime.PostgresCdc.Exception
 
@@ -37,11 +36,6 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
       %{
         id: SubscriptionManager,
         start: {SubscriptionManager, :start_link, [tid_args]},
-        restart: :transient
-      },
-      %{
-        id: SubscriptionsChecker,
-        start: {SubscriptionsChecker, :start_link, [tid_args]},
         restart: :transient
       }
     ]
