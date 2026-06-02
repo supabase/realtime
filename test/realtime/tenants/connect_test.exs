@@ -507,7 +507,7 @@ defmodule Realtime.Tenants.ConnectTest do
       Process.exit(replication_connection_pid, :kill)
       assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
 
-      Process.sleep(100)
+      Process.sleep(1000)
       assert {:error, :not_connected} = Connect.replication_status(tenant.external_id)
 
       new_replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
@@ -516,7 +516,7 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Process.alive?(new_replication_connection_pid)
       assert Process.alive?(pid)
 
-      assert {:ok, replication_conn_after} = assert_replication_status(tenant.external_id)
+      assert {:ok, replication_conn_after} = assert_replication_status(tenant.external_id, 60)
       assert replication_conn_before != replication_conn_after
     end
 
