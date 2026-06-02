@@ -27,9 +27,17 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
 
   describe "poll" do
     setup do
-      :telemetry.attach(
+      :telemetry.attach_many(
         __MODULE__,
-        [:realtime, :replication, :poller, :query, :stop],
+        [
+          [:realtime, :replication, :poller, :query, :stop],
+          [:realtime, :replication, :poller, :query, :exception],
+          [:realtime, :replication, :poller, :prepare, :exception],
+          [:realtime, :replication, :poller, :stop],
+          [:realtime, :replication, :poller, :exception],
+          [:realtime, :replication, :poller, :changes, :dispatch],
+          [:realtime, :replication, :poller, :changes, :skip]
+        ],
         &__MODULE__.handle_telemetry/4,
         pid: self()
       )
@@ -110,6 +118,10 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                        %{tenant: ^tenant_id}
                      },
                      1000
+
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :exception], %{},
+                      %{tenant: ^tenant_id, reason: :object_in_use}},
+                     1000
     end
 
     test "handles prepare_replication failure and retries", %{args: args} do
@@ -171,6 +183,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
     end
 
     test "gives up and stops after max retries", %{args: args} do
+      tenant_id = args["id"]
       error = {:error, %Postgrex.Error{message: "boom"}}
       stub(Replications, :list_changes, fn _, _, _, _, _ -> error end)
 
@@ -180,6 +193,10 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
       # Drive the retry count to the limit, then trigger one more failing poll
       :sys.replace_state(pid, fn state -> %{state | retry_count: 6} end)
       send(pid, :poll)
+
+      assert_receive {:telemetry, [:realtime, :replication, :poller, :stop], %{duration: _},
+                      %{tenant: ^tenant_id, reason: {:shutdown, :max_retries_reached}}},
+                     1000
 
       assert_receive {:DOWN, ^ref, :process, ^pid, {:shutdown, :max_retries_reached}}, 1000
     end

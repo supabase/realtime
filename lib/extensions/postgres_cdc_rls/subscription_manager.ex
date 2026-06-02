@@ -224,8 +224,16 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
   def handle_info(:check_no_users, %{subscribers_pids_table: tid, no_users_ts: ts} = state) do
     Helpers.cancel_timer(state.no_users_ref)
 
+    subscribers = :ets.info(tid, :size)
+
+    Realtime.Telemetry.execute(
+      [:realtime, :subscriptions, :manager, :subscribers],
+      %{count: subscribers},
+      %{tenant: state.id}
+    )
+
     ts_new =
-      case {:ets.info(tid, :size), ts != nil && ts + @stop_after < now()} do
+      case {subscribers, ts != nil && ts + @stop_after < now()} do
         {0, true} ->
           Logger.info("Stop tenant #{state.id} because of no connected users")
           Rls.handle_stop(state.id, 15_000)
@@ -299,9 +307,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
       case :ets.lookup(subscribers_pids_table, pid) do
         [] ->
           Telemetry.execute(
-            [:realtime, :subscription_manager, :pid_not_found],
+            [:realtime, :subscriptions, :manager, :dead_pid],
             %{quantity: 1},
-            %{tenant_id: tenant_id}
+            %{tenant: tenant_id, reason: :not_found}
           )
 
           acc
@@ -309,9 +317,9 @@ defmodule Extensions.PostgresCdcRls.SubscriptionManager do
         results ->
           for {^pid, postgres_id, _ref, _node} <- results do
             Telemetry.execute(
-              [:realtime, :subscription_manager, :phantom_pid_detected],
+              [:realtime, :subscriptions, :manager, :dead_pid],
               %{quantity: 1},
-              %{tenant_id: tenant_id}
+              %{tenant: tenant_id, reason: :phantom}
             )
 
             :ets.delete(subscribers_pids_table, pid)

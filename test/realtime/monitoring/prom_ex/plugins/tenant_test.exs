@@ -321,6 +321,97 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
     end
   end
 
+  describe "subscription pooler metrics" do
+    setup do
+      tenant = Containers.checkout_tenant()
+      on_exit(fn -> Peep.prune_tags(MetricsTest.__metrics_collector_name__(), [%{tenant: tenant.external_id}]) end)
+      %{tenant: tenant}
+    end
+
+    test "subscribers gauge reports the latest value", %{tenant: %{external_id: external_id}} do
+      Realtime.Telemetry.execute([:realtime, :subscriptions, :manager, :subscribers], %{count: 7}, %{
+        tenant: external_id
+      })
+
+      assert metric_value("realtime_subscriptions_manager_subscribers", tenant: external_id) == 7
+    end
+
+    test "poller stop counter increments tagged by reason", %{tenant: %{external_id: external_id}} do
+      Realtime.Telemetry.execute([:realtime, :replication, :poller, :stop], %{duration: 1}, %{
+        tenant: external_id,
+        reason: {:shutdown, :max_retries_reached}
+      })
+
+      assert metric_value(
+               "realtime_replication_poller_stop_total",
+               tenant: external_id,
+               reason: "max_retries_reached"
+             ) == 1
+    end
+
+    test "poller exception counter increments on crash", %{tenant: %{external_id: external_id}} do
+      Realtime.Telemetry.execute([:realtime, :replication, :poller, :exception], %{duration: 1}, %{tenant: external_id})
+
+      assert metric_value("realtime_replication_poller_exception_total", tenant: external_id) == 1
+    end
+
+    test "query exception counter increments tagged by reason", %{tenant: %{external_id: external_id}} do
+      Realtime.Telemetry.execute([:realtime, :replication, :poller, :query, :exception], %{}, %{
+        tenant: external_id,
+        reason: :object_in_use
+      })
+
+      assert metric_value("realtime_replication_poller_query_exception_total",
+               tenant: external_id,
+               reason: "object_in_use"
+             ) == 1
+    end
+
+    test "prepare exception counter increments", %{tenant: %{external_id: external_id}} do
+      Realtime.Telemetry.execute([:realtime, :replication, :poller, :prepare, :exception], %{}, %{
+        tenant: external_id,
+        reason: :some_error
+      })
+
+      assert metric_value("realtime_replication_poller_prepare_exception_total", tenant: external_id) == 1
+    end
+
+    test "changes dispatch sum increments by dispatched count", %{tenant: %{external_id: external_id}} do
+      Realtime.Telemetry.execute([:realtime, :replication, :poller, :changes, :dispatch], %{count: 5}, %{
+        tenant: external_id
+      })
+
+      assert metric_value("realtime_replication_poller_changes_dispatch", tenant: external_id) == 5
+    end
+
+    test "changes skip sum increments by skipped count tagged by reason", %{tenant: %{external_id: external_id}} do
+      Realtime.Telemetry.execute([:realtime, :replication, :poller, :changes, :skip], %{count: 3}, %{
+        tenant: external_id,
+        reason: :rate_limited
+      })
+
+      assert metric_value("realtime_replication_poller_changes_skip", tenant: external_id, reason: "rate_limited") == 3
+    end
+
+    test "dead pid sum increments tagged by phantom reason", %{tenant: %{external_id: external_id}} do
+      Realtime.Telemetry.execute([:realtime, :subscriptions, :manager, :dead_pid], %{quantity: 1}, %{
+        tenant: external_id,
+        reason: :phantom
+      })
+
+      assert metric_value("realtime_subscriptions_manager_dead_pid", tenant: external_id, reason: "phantom") == 1
+    end
+
+    test "dead pid sum increments tagged by not_found reason", %{tenant: %{external_id: external_id}} do
+      Realtime.Telemetry.execute([:realtime, :subscriptions, :manager, :dead_pid], %{quantity: 1}, %{
+        tenant: external_id,
+        reason: :not_found
+      })
+
+      assert metric_value("realtime_subscriptions_manager_dead_pid", tenant: external_id, reason: "not_found") == 1
+    end
+  end
+
   describe "execute_global_connection_metrics/0" do
     test "emits global connection counts without a tenant tag" do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
