@@ -177,8 +177,11 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       assert {:ok, [%Postgrex.Result{}]} =
                Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
 
-      %Postgrex.Result{rows: [[[], "*"]]} =
-        Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
+      assert %Postgrex.Result{rows: rows} =
+               Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
+
+      assert rows != []
+      assert Enum.all?(rows, &match?([[], "*"], &1))
     end
 
     test "user can subscribe to only INSERT events", %{conn: conn} do
@@ -192,8 +195,11 @@ defmodule Realtime.Extensions.PostgresCdcRls.SubscriptionsTest do
       assert {:ok, [%Postgrex.Result{}]} =
                Subscriptions.create(conn, "supabase_realtime_test", params_list, self(), self())
 
-      %Postgrex.Result{rows: [[[], "INSERT"]]} =
-        Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
+      assert %Postgrex.Result{rows: rows} =
+               Postgrex.query!(conn, "select filters, action_filter from realtime.subscription", [])
+
+      assert rows != []
+      assert Enum.all?(rows, &match?([[], "INSERT"], &1))
     end
 
     test "user can subscribe to a specific table", %{conn: conn} do

@@ -283,11 +283,11 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           tags: [:tenant]
         ),
         sum(
-          [:realtime, :subscriptions, :checker, :dead_pid],
-          event_name: [:realtime, :subscriptions, :checker, :dead_pid],
+          [:realtime, :subscriptions, :manager, :dead_pid],
+          event_name: [:realtime, :subscriptions, :manager, :dead_pid],
           measurement: :quantity,
           description:
-            "Number of not-alive subscriber pids the checker handled, tagged by reason. reason=phantom is a dead pid still holding a subscription that was reaped (subscription churn or leak); reason=not_found is a dead pid already gone from the pool (benign race).",
+            "Number of not-alive subscriber pids the manager handled, tagged by reason. reason=phantom is a dead pid still holding a subscription that was reaped (subscription churn or leak); reason=not_found is a dead pid already gone from the pool (benign race).",
           tags: [:tenant, :reason]
         )
       ]

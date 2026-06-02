@@ -167,7 +167,7 @@ Verify JWT claims by setting JWT_CLAIM_VALIDATORS:
 
 Realtime emits events through `:telemetry`. Event names follow a few rules so they map cleanly onto metrics and stay consistent:
 
-- Prefix every event with `:realtime` and group by concern, not by module. Tenant migrations use `[:realtime, :tenants, :migrations, ...]`, channels use `[:realtime, :channel, ...]`, and the Postgres CDC workers use `[:realtime, :replication, :poller, ...]` and `[:realtime, :subscriptions, :checker, ...]`.
+- Prefix every event with `:realtime` and group preferably by concern, otherwise by module. Tenant migrations use `[:realtime, :tenants, :migrations, ...]`, channels use `[:realtime, :channel, ...]`, and the Postgres CDC workers use `[:realtime, :replication, :poller, ...]` and `[:realtime, :subscriptions, :manager, ...]`.
 - Give anything with a lifetime a span: `:start`, then `:stop` or `:exception`. Put the duration in measurements and the cause in metadata. Tenant migrations emit `[:realtime, :tenants, :migrations, :start | :stop | :exception]`, and the replication poller does the same for its run and for its `:query` and `:prepare` operations.
 - When outcomes share a cause, emit one event and tell them apart with a `reason` in metadata instead of adding an event name per outcome. For example, skipped Postgres changes use `[:realtime, :replication, :poller, :changes, :skip]` with `reason: :rate_limited`.
 - Put `tenant` in metadata for per-tenant events; connections, authorization checks, and migrations all do. Extra context such as `reason` or `db_pid` also goes in metadata and stays out of metrics unless a metric opts into it as a tag.

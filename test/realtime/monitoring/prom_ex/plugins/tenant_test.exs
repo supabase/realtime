@@ -394,21 +394,21 @@ defmodule Realtime.PromEx.Plugins.TenantTest do
     end
 
     test "dead pid sum increments tagged by phantom reason", %{tenant: %{external_id: external_id}} do
-      Realtime.Telemetry.execute([:realtime, :subscriptions, :checker, :dead_pid], %{quantity: 1}, %{
+      Realtime.Telemetry.execute([:realtime, :subscriptions, :manager, :dead_pid], %{quantity: 1}, %{
         tenant: external_id,
         reason: :phantom
       })
 
-      assert metric_value("realtime_subscriptions_checker_dead_pid", tenant: external_id, reason: "phantom") == 1
+      assert metric_value("realtime_subscriptions_manager_dead_pid", tenant: external_id, reason: "phantom") == 1
     end
 
     test "dead pid sum increments tagged by not_found reason", %{tenant: %{external_id: external_id}} do
-      Realtime.Telemetry.execute([:realtime, :subscriptions, :checker, :dead_pid], %{quantity: 1}, %{
+      Realtime.Telemetry.execute([:realtime, :subscriptions, :manager, :dead_pid], %{quantity: 1}, %{
         tenant: external_id,
         reason: :not_found
       })
 
-      assert metric_value("realtime_subscriptions_checker_dead_pid", tenant: external_id, reason: "not_found") == 1
+      assert metric_value("realtime_subscriptions_manager_dead_pid", tenant: external_id, reason: "not_found") == 1
     end
   end
 

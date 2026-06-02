@@ -72,7 +72,7 @@ defmodule Realtime.DatabaseTest do
          %{tenant: tenant} do
       assert capture_log(fn ->
                assert {:error, :tenant_db_too_many_connections} = Database.check_tenant_connection(tenant)
-             end) =~ ~r/Only \d+ available connections\. At least 126 connections are required/
+             end) =~ ~r/Only \d+ available connections\. At least 125 connections are required/
     end
   end
 

@@ -26,7 +26,7 @@ const program = new Command()
   .option("--json", "Output results as JSON to stdout")
   .option("--otel <endpoint>", "OTLP HTTP endpoint for tracing (e.g. http://localhost:4318)")
   .option("--otel-token <token>", "Bearer token for authenticated OTLP endpoints")
-  .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,broadcast-changes")
+  .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,postgres-changes-filters,broadcast-changes")
   .option("--debug", "Enable Realtime client debug mode (sets log level to info and enables console logging)")
   .parse();
 
@@ -307,7 +307,7 @@ async function executeDelete(supabase: SupabaseClient, table: TableName, id: num
   if (error) throw new Error(`Error deleting from ${table}: ${error.message}`);
 }
 
-async function setup(): Promise<{ userId: string; testUser: { email: string; password: string } }> {
+async function setup(): Promise<{ userId: string; testUser: { email: string; password: string }; supabase: SupabaseClient }> {
   const start = performance.now();
   const email = `realtime-check-${crypto.randomUUID()}@${EMAIL_DOMAIN}`;
   const password = crypto.randomUUID();
@@ -342,6 +342,7 @@ async function setup(): Promise<{ userId: string; testUser: { email: string; pas
           )`),
     ]);
     await runSql("pg_changes details column", sql`ALTER TABLE public.pg_changes ADD COLUMN IF NOT EXISTS details text`);
+    await runSql("pg_changes nullable_value column", sql`ALTER TABLE public.pg_changes ADD COLUMN IF NOT EXISTS nullable_value text`);
     await runSql("pg_changes replica identity", sql`ALTER TABLE public.pg_changes REPLICA IDENTITY FULL`);
     log(kleur.dim(`setup: tables done (${(performance.now() - stepStart).toFixed(0)}ms)`));
 
@@ -454,7 +455,9 @@ async function setup(): Promise<{ userId: string; testUser: { email: string; pas
     await sql.close().catch(() => {});
   }
 
-  return { userId: userId!, testUser: { email, password } };
+  const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
+  await signInUser(supabase, email, password);
+  return { userId: userId!, testUser: { email, password }, supabase };
 }
 
 async function cleanup(userId: string) {
@@ -883,11 +886,10 @@ async function runBroadcastTests() {
   });
 }
 
-async function runPresenceTests(testUser: { email: string; password: string }) {
+async function runPresenceTests(_testUser: { email: string; password: string }, supabase: SupabaseClient) {
   suite("presence extension");
 
   await test("user is able to receive presence updates", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
       let joinEvent: any = null;
       const topic = randomTopic();
@@ -908,15 +910,13 @@ async function runPresenceTests(testUser: { email: string; password: string }) {
       assert.strictEqual(joinEvent.newPresences[0].message, message);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "track", value: trackMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("user is able to receive presence updates on private channels", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
 
       let joinEvent: any = null;
       const topic = randomTopic();
@@ -937,16 +937,15 @@ async function runPresenceTests(testUser: { email: string; password: string }) {
       assert.strictEqual(joinEvent.newPresences[0].message, message);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "track", value: trackMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 }
 
-async function runAuthorizationTests(testUser: { email: string; password: string }) {
+async function runAuthorizationTests(_testUser: { email: string; password: string }, supabase: SupabaseClient) {
   suite("authorization check");
 
   await test("user using private channel cannot connect without permissions", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
       const topic = randomTopic();
       const channel = supabase.channel(topic, { config: { private: true } }).subscribe();
@@ -959,32 +958,28 @@ async function runAuthorizationTests(testUser: { email: string; password: string
       assert.notStrictEqual(finalState, "joined", `Expected channel to be rejected but state is: ${finalState}`);
       return [{ label: "rejection", value: rejectMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("user using private channel can connect with enough permissions", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
       const channel = supabase.channel(randomTopic(), { config: { private: true } });
       const subscribeMs = await openChannel(channel);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 }
 
-async function runBroadcastChangesTests(testUser: { email: string; password: string }) {
+async function runBroadcastChangesTests(_testUser: { email: string; password: string }, supabase: SupabaseClient) {
   suite("broadcast changes");
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("authenticated user receives INSERT broadcast change", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
       const testTopic = randomTopic();
       const id = crypto.randomUUID();
       const value = crypto.randomUUID();
@@ -1006,15 +1001,13 @@ async function runBroadcastChangesTests(testUser: { email: string; password: str
       assert.strictEqual(result.payload.table, "broadcast_changes");
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("authenticated user receives UPDATE broadcast change", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
       const testTopic = randomTopic();
       const id = crypto.randomUUID();
       const originalValue = crypto.randomUUID();
@@ -1039,15 +1032,13 @@ async function runBroadcastChangesTests(testUser: { email: string; password: str
       assert.strictEqual(result.payload.table, "broadcast_changes");
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("authenticated user receives DELETE broadcast change", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
       const testTopic = randomTopic();
       const id = crypto.randomUUID();
       const value = crypto.randomUUID();
@@ -1070,19 +1061,17 @@ async function runBroadcastChangesTests(testUser: { email: string; password: str
       assert.strictEqual(result.payload.table, "broadcast_changes");
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 }
 
-async function runPostgresChangesTests(testUser: { email: string; password: string }) {
+async function runPostgresChangesTests(_testUser: { email: string; password: string }, supabase: SupabaseClient) {
   suite("postgres changes extension");
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("user receives INSERT events with filter", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
 
       let result: unknown = null;
       const uniqueValue = crypto.randomUUID();
@@ -1102,15 +1091,13 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
       assert.strictEqual(result.new.value, uniqueValue);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("user receives UPDATE events with filter", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
 
       let result: unknown = null;
       const mainId = await executeInsert(supabase, "pg_changes");
@@ -1135,15 +1122,13 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
       assert.strictEqual(result.new.id, mainId);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("user receives DELETE events with filter", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
 
       let result: unknown = null;
       const mainId = await executeInsert(supabase, "pg_changes");
@@ -1168,15 +1153,13 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
       assert.strictEqual(result.old.id, mainId);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("user receives INSERT, UPDATE and DELETE concurrently", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
       let insertResult: unknown = null, updateResult: unknown = null, deleteResult: unknown = null;
 
       const insertValue = crypto.randomUUID();
@@ -1213,16 +1196,13 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
         { label: "DELETE", value: deleteMs, unit: "ms" },
       ];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("select — INSERT payload contains only requested column (PK always included)", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
-
       let result: any = null;
       const details = crypto.randomUUID();
 
@@ -1242,16 +1222,13 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
       assert.strictEqual(result.new.value, undefined, "value must be absent when not in select");
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("select — UPDATE payload filters old and new records", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
-
       let result: any = null;
       const originalDetails = crypto.randomUUID();
       const { data } = await supabase.from("pg_changes").insert({ value: crypto.randomUUID(), details: originalDetails }).select("id");
@@ -1277,16 +1254,13 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
       assert.strictEqual(result.old.value, undefined, "value must be absent from old when not in select");
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("select — DELETE payload filters old record", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
-
       let result: any = null;
       const details = crypto.randomUUID();
       const { data } = await supabase.from("pg_changes").insert({ value: crypto.randomUUID(), details }).select("id");
@@ -1308,16 +1282,13 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
       assert.strictEqual(result.old.value, undefined, "value must be absent from old when not in select");
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("select — omitting select returns full payload (backward compatible)", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
-
       let result: any = null;
       const uniqueValue = crypto.randomUUID();
       const details = crypto.randomUUID();
@@ -1338,16 +1309,13 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
       assert.strictEqual(result.new.details, details, "details must be present when no select is used");
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await sleep(RATE_LIMIT_PAUSE_MS);
   await test("select combined with filter — only matching rows with filtered columns", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
-
       let selectResult: any = null;
       let fullResult: any = null;
       const matchValue = crypto.randomUUID();
@@ -1383,18 +1351,204 @@ async function runPostgresChangesTests(testUser: { email: string; password: stri
       assert.strictEqual(fullResult.new.details, otherDetails, "details must be present on subscription without select");
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: selectMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 }
 
-async function runBroadcastReplayTests(testUser: { email: string; password: string }) {
+async function runPostgresChangesFiltersTests(_testUser: { email: string; password: string }, supabase: SupabaseClient) {
+  suite("postgres-changes-filters");
+
+  await sleep(RATE_LIMIT_PAUSE_MS);
+  await test("like: delivers row matching pattern", async () => {
+    try {
+      const sentinel = crypto.randomUUID().replace(/-/g, "");
+      const value = `like-${sentinel}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=like.like-${sentinel}%` }, (p) => (result = p));
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "like event");
+
+      assert.strictEqual(result.eventType, "INSERT");
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await sleep(RATE_LIMIT_PAUSE_MS);
+  await test("ilike: delivers row matching pattern case-insensitively", async () => {
+    try {
+      const sentinel = crypto.randomUUID().replace(/-/g, "");
+      const value = `ilike-${sentinel}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=ilike.ILIKE-${sentinel.toUpperCase()}` }, (p) => (result = p));
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "ilike event");
+
+      assert.strictEqual(result.eventType, "INSERT");
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await sleep(RATE_LIMIT_PAUSE_MS);
+  await test("in: delivers row whose value is in the list", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const values = [`inA${tag}`, `inB${tag}`, `inC${tag}`];
+      const chosen = values[1];
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=in.(${values.join(",")})` }, (p) => { if (p.new.value === chosen) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", chosen);
+      await waitFor(() => result, "in event");
+
+      assert.strictEqual(result.eventType, "INSERT");
+      assert.strictEqual(result.new.value, chosen);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await sleep(RATE_LIMIT_PAUSE_MS);
+  await test("not_in: delivers row whose value is outside the list", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const excluded = [`excl1${tag}`, `excl2${tag}`];
+      const included = `incl${tag}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=not.in.(${excluded.join(",")})` }, (p) => { if (p.new.value === included) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", included);
+      await waitFor(() => result, "not_in event");
+
+      assert.strictEqual(result.eventType, "INSERT");
+      assert.strictEqual(result.new.value, included);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await sleep(RATE_LIMIT_PAUSE_MS);
+  await test("not_like: delivers row that does not match pattern", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `notlike-included-${tag}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=not.like.notlike-excluded-%` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "not_like event");
+
+      assert.strictEqual(result.eventType, "INSERT");
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await sleep(RATE_LIMIT_PAUSE_MS);
+  await test("not_ilike: delivers row that does not match pattern case-insensitively", async () => {
+    try {
+      const tag = crypto.randomUUID().replace(/-/g, "");
+      const value = `notilike-included-${tag}`;
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: `value=not.ilike.NOTILIKE-EXCLUDED-%` }, (p) => { if (p.new.value === value) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await executeInsert(supabase, "pg_changes", value);
+      await waitFor(() => result, "not_ilike event");
+
+      assert.strictEqual(result.eventType, "INSERT");
+      assert.strictEqual(result.new.value, value);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await sleep(RATE_LIMIT_PAUSE_MS);
+  await test("is.null: delivers row with null column value", async () => {
+    try {
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: "nullable_value=is.null" }, (p) => (result = p));
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      const { error } = await supabase.from("pg_changes").insert({ nullable_value: null });
+      if (error) throw new Error(`Insert failed: ${error.message}`);
+      await waitFor(() => result, "is.null event");
+
+      assert.strictEqual(result.eventType, "INSERT");
+      assert.strictEqual(result.new.nullable_value, null);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+
+  await sleep(RATE_LIMIT_PAUSE_MS);
+  await test("not_is.null: delivers row with non-null column value", async () => {
+    try {
+      const sentinel = crypto.randomUUID();
+      let result: any = null;
+
+      const channel = supabase
+        .channel(randomTopic(), BROADCAST_CONFIG)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "pg_changes", filter: "nullable_value=not.is.null" }, (p) => { if (p.new.nullable_value === sentinel) result = p; });
+
+      const { subscribeMs } = await openPostgresChannel(channel);
+      await supabase.from("pg_changes").insert({ nullable_value: sentinel });
+      await waitFor(() => result, "not_is.null event");
+
+      assert.strictEqual(result.eventType, "INSERT");
+      assert.ok(result.new.nullable_value !== null);
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }];
+    } finally {
+      await supabase.removeAllChannels();
+    }
+  });
+}
+
+async function runBroadcastReplayTests(_testUser: { email: string; password: string }, supabase: SupabaseClient) {
   suite("broadcast replay");
 
   await test("replayed messages are delivered on join", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS_REPLAY });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
       const event = crypto.randomUUID();
       const topic = randomTopic();
       const payload = { message: crypto.randomUUID() };
@@ -1415,14 +1569,12 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
       assert.strictEqual(result.message, payload.message);
       return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "replay", value: replayMs, unit: "ms" }];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await test("replayed messages carry meta.replayed flag", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS_REPLAY });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
       const event = crypto.randomUUID();
       const topic = randomTopic();
 
@@ -1442,14 +1594,12 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
       assert.strictEqual(receivedMeta?.replayed, true);
       return [];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 
   await test("messages before since are not replayed", async () => {
-    const supabase = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS_REPLAY });
     try {
-      await signInUser(supabase, testUser.email, testUser.password);
       const event = crypto.randomUUID();
       const topic = randomTopic();
 
@@ -1471,7 +1621,7 @@ async function runBroadcastReplayTests(testUser: { email: string; password: stri
       assert.strictEqual(result, null);
       return [];
     } finally {
-      await stopClient(supabase);
+      await supabase.removeAllChannels();
     }
   });
 }
@@ -1524,19 +1674,22 @@ function printSummary(totalMs: number) {
   }
 }
 
-const SUITES: Record<string, (testUser: { email: string; password: string }) => Promise<void>> = {
+type SuiteCtx = { testUser: { email: string; password: string }; supabase: SupabaseClient };
+
+const SUITES: Record<string, (ctx: SuiteCtx) => Promise<void>> = {
   "connection": () => runConnectionTest(),
-  "load-postgres-changes": (u) => runLoadPostgresChangesTests(u),
+  "load-postgres-changes": ({ testUser }) => runLoadPostgresChangesTests(testUser),
   "load-presence": () => runLoadPresenceTests(),
   "load-broadcast": () => runLoadBroadcastTests(),
-  "load-broadcast-from-db": (u) => runLoadBroadcastFromDbTests(u),
-  "load-broadcast-replay": (u) => runLoadBroadcastReplayTests(u),
+  "load-broadcast-from-db": ({ testUser }) => runLoadBroadcastFromDbTests(testUser),
+  "load-broadcast-replay": ({ testUser }) => runLoadBroadcastReplayTests(testUser),
   "broadcast": () => runBroadcastTests(),
-  "broadcast-replay": (u) => runBroadcastReplayTests(u),
-  "presence": (u) => runPresenceTests(u),
-  "authorization": (u) => runAuthorizationTests(u),
-  "postgres-changes": (u) => runPostgresChangesTests(u),
-  "broadcast-changes": (u) => runBroadcastChangesTests(u),
+  "broadcast-replay": ({ testUser, supabase }) => runBroadcastReplayTests(testUser, supabase),
+  "presence": ({ testUser, supabase }) => runPresenceTests(testUser, supabase),
+  "authorization": ({ testUser, supabase }) => runAuthorizationTests(testUser, supabase),
+  "postgres-changes": ({ testUser, supabase }) => runPostgresChangesTests(testUser, supabase),
+  "postgres-changes-filters": ({ testUser, supabase }) => runPostgresChangesFiltersTests(testUser, supabase),
+  "broadcast-changes": ({ testUser, supabase }) => runBroadcastChangesTests(testUser, supabase),
 };
 
 const LOAD_SUITES = Object.keys(SUITES).filter((k) => k.startsWith("load"));
@@ -1550,6 +1703,7 @@ const DB_REQUIRED_SUITES = new Set([
   "presence",
   "authorization",
   "postgres-changes",
+  "postgres-changes-filters",
   "broadcast-changes",
 ]);
 
@@ -1592,17 +1746,20 @@ async function main() {
 
   let userId: string | null = null;
   let testUser: { email: string; password: string } = { email: "", password: "" };
+  let supabase: SupabaseClient = createClient(PROJECT_URL, ANON_KEY, { realtime: REALTIME_OPTS });
 
   if (needsDb) {
     const setupResult = await setup();
     userId = setupResult.userId;
     testUser = setupResult.testUser;
+    supabase = setupResult.supabase;
   }
 
   const start = performance.now();
   try {
-    for (const [, fn] of suitesToRun) await fn(testUser);
+    for (const [, fn] of suitesToRun) await fn({ testUser, supabase });
   } finally {
+    await stopClient(supabase);
     if (userId) await cleanup(userId);
   }
 

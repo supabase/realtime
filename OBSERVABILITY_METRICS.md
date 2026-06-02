@@ -148,7 +148,7 @@ These metrics cover the Postgres Changes subscription pooler per tenant: the wor
 | `realtime_replication_poller_prepare_exception_total` | Counter | How many of the tenant's attempts to prepare the replication slot for polling failed.        | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_replication_poller_changes_dispatch`        | Counter | Number of Postgres Changes rows the poller broadcast to subscribers.                         | **Per-Tenant** | `/tenant-metrics` |
 | `realtime_replication_poller_changes_skip`            | Counter | Number of Postgres Changes rows skipped without broadcasting, tagged by `reason`.            | **Per-Tenant** | `/tenant-metrics` |
-| `realtime_subscriptions_checker_dead_pid`             | Counter | Not-alive subscriber pids the checker handled, tagged by `reason`: `phantom` or `not_found`. | **Per-Tenant** | `/tenant-metrics` |
+| `realtime_subscriptions_manager_dead_pid`             | Counter | Not-alive subscriber pids the manager handled, tagged by `reason`: `phantom` or `not_found`. | **Per-Tenant** | `/tenant-metrics` |
 
 ## Tenant Migration Metrics
 
