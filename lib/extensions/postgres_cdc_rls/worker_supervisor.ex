@@ -31,15 +31,22 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
       %{
         id: ReplicationPoller,
         start: {ReplicationPoller, :start_link, [tid_args]},
-        restart: :transient
+        restart: :transient,
+        significant: true
       },
       %{
         id: SubscriptionManager,
         start: {SubscriptionManager, :start_link, [tid_args]},
-        restart: :transient
+        restart: :transient,
+        significant: true
       }
     ]
 
-    Supervisor.init(children, strategy: :rest_for_one, max_restarts: 10, max_seconds: 60)
+    Supervisor.init(children,
+      strategy: :rest_for_one,
+      auto_shutdown: :any_significant,
+      max_restarts: 10,
+      max_seconds: 60
+    )
   end
 end

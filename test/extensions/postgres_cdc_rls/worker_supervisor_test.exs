@@ -70,4 +70,90 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisorTest do
       assert is_pid(pid)
     end
   end
+
+  describe "restart behaviour" do
+    test "abnormal exit of ReplicationPoller restarts both children", %{args: args} do
+      sup = start_link_supervised!({WorkerSupervisor, args})
+
+      poller = child_pid(sup, ReplicationPoller)
+      manager = child_pid(sup, SubscriptionManager)
+
+      Process.exit(poller, :kill)
+
+      # rest_for_one restarts the poller and everything after it (the manager)
+      new_poller = wait_for_restart(sup, ReplicationPoller, poller)
+      new_manager = wait_for_restart(sup, SubscriptionManager, manager)
+
+      assert new_poller != poller
+      assert new_manager != manager
+      assert Process.alive?(sup)
+    end
+
+    test "abnormal exit of SubscriptionManager restarts only itself", %{args: args} do
+      sup = start_link_supervised!({WorkerSupervisor, args})
+
+      poller = child_pid(sup, ReplicationPoller)
+      manager = child_pid(sup, SubscriptionManager)
+
+      Process.exit(manager, :kill)
+
+      # rest_for_one: the manager is last, so the poller is left untouched
+      new_manager = wait_for_restart(sup, SubscriptionManager, manager)
+
+      assert new_manager != manager
+      assert child_pid(sup, ReplicationPoller) == poller
+      assert Process.alive?(sup)
+    end
+  end
+
+  describe "shutdown behaviour" do
+    test "{:shutdown, _} from ReplicationPoller stops the supervisor", %{args: args} do
+      # start_supervised! (not the linking variant) so the supervisor's :shutdown
+      # exit does not propagate to the test process.
+      sup = start_supervised!({WorkerSupervisor, args})
+      ref = Process.monitor(sup)
+
+      poller = child_pid(sup, ReplicationPoller)
+      Process.exit(poller, {:shutdown, :max_retries_reached})
+
+      assert_receive {:DOWN, ^ref, :process, ^sup, :shutdown}, 2000
+    end
+
+    test "{:shutdown, _} from SubscriptionManager stops the supervisor", %{args: args} do
+      sup = start_supervised!({WorkerSupervisor, args})
+      ref = Process.monitor(sup)
+
+      manager = child_pid(sup, SubscriptionManager)
+      Process.exit(manager, {:shutdown, :test})
+
+      assert_receive {:DOWN, ^ref, :process, ^sup, :shutdown}, 2000
+    end
+  end
+
+  defp child_pid(sup, id) do
+    Enum.find_value(Supervisor.which_children(sup), fn
+      {^id, pid, _type, _modules} when is_pid(pid) -> pid
+      _ -> nil
+    end)
+  end
+
+  defp wait_for_restart(sup, id, old_pid, timeout \\ 2000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_for_restart(sup, id, old_pid, deadline)
+  end
+
+  defp do_wait_for_restart(sup, id, old_pid, deadline) do
+    case child_pid(sup, id) do
+      pid when is_pid(pid) and pid != old_pid ->
+        pid
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk("child #{inspect(id)} was not restarted within the timeout")
+        else
+          Process.sleep(20)
+          do_wait_for_restart(sup, id, old_pid, deadline)
+        end
+    end
+  end
 end
