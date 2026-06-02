@@ -120,7 +120,7 @@ defmodule Realtime.Extensions.PostgresCdcRls.ReplicationPollerTest do
                      1000
 
       assert_receive {:telemetry, [:realtime, :replication, :poller, :query, :exception], %{},
-                      %{tenant: ^tenant_id, reason: :object_in_use, db_pid: 12345}},
+                      %{tenant: ^tenant_id, reason: :object_in_use}},
                      1000
     end
 

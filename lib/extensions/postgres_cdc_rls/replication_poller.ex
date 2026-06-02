@@ -151,8 +151,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
         Realtime.Telemetry.execute([:realtime, :replication, :poller, :query, :exception], %{}, %{
           tenant: tenant_id,
-          reason: :object_in_use,
-          db_pid: db_pid
+          reason: :object_in_use
         })
 
         case Replications.get_pg_stat_activity_diff(conn, db_pid) do
