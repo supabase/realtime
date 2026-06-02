@@ -5,7 +5,6 @@ defmodule RealtimeWeb.AuthTenantTest do
 
   alias RealtimeWeb.AuthTenant
 
-  @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE1MTYyMzkwMjIsInJvbGUiOiJmb28iLCJleHAiOiJiYXIifQ.Ret2CevUozCsPhpgW2FMeFL7RooLgoOvfQzNpLBj5ak"
   describe "without tenant" do
     test "returns 401", %{conn: conn} do
       conn = AuthTenant.call(conn, %{})
@@ -16,13 +15,23 @@ defmodule RealtimeWeb.AuthTenantTest do
 
   describe "with tenant" do
     setup %{conn: conn} = context do
-      api_key = Map.get(context, :api_key)
+      tenant = tenant_fixture()
+      now = System.system_time(:second)
+      token = generate_jwt_token(tenant, %{role: "test", iat: now, exp: now + 100_000})
+
       header = Map.get(context, :header)
 
-      conn = if api_key, do: put_req_header(conn, header, api_key), else: conn
+      api_key =
+        cond do
+          literal = Map.get(context, :api_key) -> literal
+          header -> Map.get(context, :prefix, "Bearer ") <> token
+          true -> nil
+        end
 
-      conn = assign(conn, :tenant, tenant_fixture())
-      %{conn: conn}
+      conn = if header && api_key, do: put_req_header(conn, header, api_key), else: conn
+
+      conn = assign(conn, :tenant, tenant)
+      %{conn: conn, token: token}
     end
 
     test "returns 401 if token isn't present in header", %{conn: conn} do
@@ -38,7 +47,7 @@ defmodule RealtimeWeb.AuthTenantTest do
       assert conn.halted
     end
 
-    @tag api_key: "Bearer #{@token}", header: "authorization"
+    @tag header: "authorization"
     test "returns non halted and null status if token in authorization header is valid", %{
       conn: conn
     } do
@@ -47,7 +56,7 @@ defmodule RealtimeWeb.AuthTenantTest do
       refute conn.halted
     end
 
-    @tag api_key: "bearer #{@token}", header: "authorization"
+    @tag header: "authorization", prefix: "bearer "
     test "returns non halted and null status if token in authorization header is valid and case insensitive",
          %{
            conn: conn
@@ -57,7 +66,7 @@ defmodule RealtimeWeb.AuthTenantTest do
       refute conn.halted
     end
 
-    @tag api_key: "earer #{@token}", header: "authorization"
+    @tag api_key: "earer invalid", header: "authorization"
     test "returns halted and unauthorized if token is badly formatted", %{
       conn: conn
     } do
@@ -73,7 +82,7 @@ defmodule RealtimeWeb.AuthTenantTest do
       assert conn.halted
     end
 
-    @tag api_key: @token, header: "apikey"
+    @tag header: "apikey", prefix: ""
     test "returns non halted and null status if token in apikey header is valid", %{
       conn: conn
     } do
@@ -82,14 +91,13 @@ defmodule RealtimeWeb.AuthTenantTest do
       refute conn.halted
     end
 
-    @tag api_key: "Bearer #{@token}", header: "authorization"
-    test "assigns jwt information on success", %{
-      conn: conn
-    } do
+    @tag header: "authorization"
+    test "assigns jwt information on success", %{conn: conn, token: token} do
       conn = AuthTenant.call(conn, %{})
-      assert conn.assigns.jwt == @token
-      assert conn.assigns.claims == %{"exp" => "bar", "iat" => 1_516_239_022, "role" => "foo"}
-      assert conn.assigns.role == "foo"
+      assert conn.assigns.jwt == token
+      assert conn.assigns.role == "test"
+      assert %{"exp" => exp, "iat" => iat, "role" => "test"} = conn.assigns.claims
+      assert is_integer(exp) and is_integer(iat)
     end
   end
 end

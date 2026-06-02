@@ -12,9 +12,6 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
   alias RealtimeWeb.RealtimeChannel
   alias RealtimeWeb.Endpoint
 
-  @token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE1MTYyMzkwMjIsInJvbGUiOiJmb28iLCJleHAiOiJiYXIifQ.Ret2CevUozCsPhpgW2FMeFL7RooLgoOvfQzNpLBj5ak"
-  @expired_token "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MjEwNzMyOTAsImlhdCI6MTYyNzg4NjQ0MCwicm9sZSI6ImFub24ifQ.AHmuaydSU3XAxwoIFhd3gwGwjnBIKsjFil0JQEOLtRw"
-
   setup %{conn: conn} do
     tenant = Containers.checkout_tenant(run_migrations: true)
     # Warm cache to avoid Cachex and Ecto.Sandbox ownership issues
@@ -245,13 +242,15 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert rate_counter.avg == 0.0
     end
 
-    test "returns 401 when JWT is expired", %{conn: conn, tenant: _tenant} do
+    test "returns 401 when JWT is expired", %{conn: conn, tenant: tenant} do
       sub_topic = "room:123"
       event = "message"
+      now = System.system_time(:second)
+      expired_token = generate_jwt_token(tenant, %{role: "anon", iat: now - 200, exp: now - 100})
 
       conn =
         conn
-        |> put_req_header("authorization", "Bearer #{@expired_token}")
+        |> put_req_header("authorization", "Bearer #{expired_token}")
         |> put_req_header("content-type", "application/json")
         |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, event), %{"data" => "test"})
 
@@ -363,13 +362,15 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
       assert rate_counter.avg == 0.0
     end
 
-    test "returns 401 when JWT is expired for binary", %{conn: conn, tenant: _tenant} do
+    test "returns 401 when JWT is expired for binary", %{conn: conn, tenant: tenant} do
       sub_topic = "binary:room"
       event = "data"
+      now = System.system_time(:second)
+      expired_token = generate_jwt_token(tenant, %{role: "anon", iat: now - 200, exp: now - 100})
 
       conn =
         conn
-        |> put_req_header("authorization", "Bearer #{@expired_token}")
+        |> put_req_header("authorization", "Bearer #{expired_token}")
         |> put_req_header("content-type", "application/octet-stream")
         |> post(Routes.broadcast_single_path(conn, :broadcast, sub_topic, event), <<1, 2, 3>>)
 
@@ -631,9 +632,12 @@ defmodule RealtimeWeb.BroadcastSingleControllerTest do
   end
 
   defp generate_conn(conn, tenant) do
+    now = System.system_time(:second)
+    claims = %{role: "test", iat: now, exp: now + 100_000}
+
     conn
     |> put_req_header("accept", "application/json")
-    |> put_req_header("authorization", "Bearer #{@token}")
+    |> put_req_header("authorization", "Bearer #{generate_jwt_token(tenant, claims)}")
     |> then(&%{&1 | host: "#{tenant.external_id}.supabase.com"})
   end
 end

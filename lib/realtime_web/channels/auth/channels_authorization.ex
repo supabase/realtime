@@ -2,6 +2,7 @@ defmodule RealtimeWeb.ChannelsAuthorization do
   @moduledoc """
   Check connection is authorized to access channel
   """
+
   @doc """
   Authorize connection to access channel
   """
@@ -25,7 +26,8 @@ defmodule RealtimeWeb.ChannelsAuthorization do
           do: {:ok, claims},
           else: {:error, :missing_claims}
 
-      {:error, [message: validation_timer, claim: "exp", claim_val: claim_val]} when is_integer(validation_timer) ->
+      {:error, [message: validation_timer, claim: "exp", claim_val: claim_val]}
+      when is_integer(validation_timer) and is_integer(claim_val) ->
         msg = "Token has expired #{validation_timer - claim_val} seconds ago"
         {:error, :expired_token, msg}
 
