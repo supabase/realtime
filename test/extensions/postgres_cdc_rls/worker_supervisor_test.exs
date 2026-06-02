@@ -72,7 +72,7 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisorTest do
   end
 
   describe "restart behaviour" do
-    test "abnormal exit of ReplicationPoller restarts both children", %{args: args} do
+    test "abnormal exit of ReplicationPoller restarts only itself", %{args: args} do
       sup = start_link_supervised!({WorkerSupervisor, args})
 
       poller = child_pid(sup, ReplicationPoller)
@@ -82,10 +82,9 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisorTest do
 
       # rest_for_one restarts the poller and everything after it (the manager)
       new_poller = wait_for_restart(sup, ReplicationPoller, poller)
-      new_manager = wait_for_restart(sup, SubscriptionManager, manager)
 
       assert new_poller != poller
-      assert new_manager != manager
+      assert child_pid(sup, SubscriptionManager) == manager
       assert Process.alive?(sup)
     end
 

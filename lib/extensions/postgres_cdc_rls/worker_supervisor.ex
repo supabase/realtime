@@ -43,7 +43,7 @@ defmodule Extensions.PostgresCdcRls.WorkerSupervisor do
     ]
 
     Supervisor.init(children,
-      strategy: :rest_for_one,
+      strategy: :one_for_one,
       auto_shutdown: :any_significant,
       max_restarts: 10,
       max_seconds: 60
