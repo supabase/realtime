@@ -152,6 +152,152 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
     end
   end
 
+  describe "warm restart (re-adopt)" do
+    test "keeps DB rows and re-monitors surviving subscribers", %{pid: pid, args: args, publication: publication} do
+      {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
+      {uuid, bin_uuid, pg_change_params} = pg_change_params()
+
+      subscriber = spawn(fn -> receive do: (:stop -> :ok) end)
+
+      assert {:ok, _} = Subscriptions.create(conn, publication, [pg_change_params], pid, subscriber)
+      :sys.get_state(pid)
+
+      [{^subscriber, ^uuid, old_ref, _node}] = :ets.lookup(args["subscribers_pids_table"], subscriber)
+
+      # Warm restart: the ETS tables are owned by the test (acting as WorkerSupervisor), so they
+      # survive while only the manager restarts.
+      new_pid = restart_manager(pid, args)
+      {:ok, ^new_pid, conn2} = PostgresCdcRls.get_manager_conn(args["id"])
+
+      # DB rows are untouched
+      assert %{rows: [[count]]} =
+               Postgrex.query!(conn2, "select count(*) from realtime.subscription where subscription_id = $1::uuid", [
+                 bin_uuid
+               ])
+
+      assert count > 0
+
+      # The subscriber is re-adopted with a fresh monitor
+      assert [{^subscriber, ^uuid, new_ref, _node}] = :ets.lookup(args["subscribers_pids_table"], subscriber)
+      assert new_ref != old_ref
+
+      # The fresh monitor actually works: killing the subscriber cleans it up
+      send(subscriber, :stop)
+      Process.monitor(subscriber)
+      assert_receive {:DOWN, _, :process, ^subscriber, _}, 100
+      :sys.get_state(new_pid)
+
+      assert :ets.lookup(args["subscribers_pids_table"], subscriber) == []
+      assert :ets.lookup(args["subscribers_nodes_table"], bin_uuid) == []
+    end
+
+    test "does not touch the DB: orphan rows are left untouched", %{pid: pid, args: args, publication: publication} do
+      {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
+
+      # A live subscription (present in both ETS and the DB)
+      live = spawn_link(fn -> receive do: (:stop -> :ok) end)
+      {_uuid_a, bin_a, params_a} = pg_change_params()
+      assert {:ok, _} = Subscriptions.create(conn, publication, [params_a], pid, live)
+      :sys.get_state(pid)
+
+      # A DB orphan: a real row whose ETS entries we drop (mimics a {:subscribed} dropped during
+      # downtime). The warm path must leave it alone — orphan cleanup is not on the restart path.
+      orphan = spawn_link(fn -> receive do: (:stop -> :ok) end)
+      {_uuid_b, bin_b, params_b} = pg_change_params()
+      assert {:ok, _} = Subscriptions.create(conn, publication, [params_b], pid, orphan)
+      :sys.get_state(pid)
+      :ets.delete(args["subscribers_pids_table"], orphan)
+      :ets.delete(args["subscribers_nodes_table"], bin_b)
+
+      new_pid = restart_manager(pid, args)
+      {:ok, ^new_pid, conn2} = PostgresCdcRls.get_manager_conn(args["id"])
+
+      # Both the live subscription and the orphan rows still exist — no reconcile / wipe happened
+      assert %{rows: [[count_a]]} =
+               Postgrex.query!(conn2, "select count(*) from realtime.subscription where subscription_id = $1::uuid", [
+                 bin_a
+               ])
+
+      assert %{rows: [[count_b]]} =
+               Postgrex.query!(conn2, "select count(*) from realtime.subscription where subscription_id = $1::uuid", [
+                 bin_b
+               ])
+
+      assert count_a > 0
+      assert count_b > 0
+    end
+
+    test "the new manager monitors exactly the surviving subscribers", %{
+      pid: pid,
+      args: args,
+      publication: publication
+    } do
+      {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
+
+      sub1 = spawn(fn -> receive do: (:stop -> :ok) end)
+      sub2 = spawn_link(fn -> receive do: (:stop -> :ok) end)
+      {_u1, _b1, params1} = pg_change_params()
+      {_u2, _b2, params2} = pg_change_params()
+      assert {:ok, _} = Subscriptions.create(conn, publication, [params1], pid, sub1)
+      assert {:ok, _} = Subscriptions.create(conn, publication, [params2], pid, sub2)
+      :sys.get_state(pid)
+
+      # The original manager monitors both subscribers
+      assert MapSet.subset?(MapSet.new([sub1, sub2]), monitored_pids(pid))
+
+      new_pid = restart_manager(pid, args)
+
+      # After the warm restart the new manager monitors both surviving subscribers, and the old
+      # manager (now dead) no longer holds any monitors
+      assert MapSet.subset?(MapSet.new([sub1, sub2]), monitored_pids(new_pid))
+      refute Process.alive?(pid)
+
+      # The fresh monitors are wired to the new manager: when a subscriber dies, the new manager
+      # drops both its monitor and its ETS entry
+      send(sub1, :stop)
+      Process.monitor(sub1)
+      assert_receive {:DOWN, _, :process, ^sub1, _}, 100
+
+      :sys.get_state(new_pid)
+      monitored = monitored_pids(new_pid)
+      refute MapSet.member?(monitored, sub1)
+      assert MapSet.member?(monitored, sub2)
+      assert :ets.lookup(args["subscribers_pids_table"], sub1) == []
+    end
+  end
+
+  describe "cold start (empty ETS)" do
+    test "deletes all subscriptions from the DB", %{pid: pid, args: args, publication: publication} do
+      {:ok, ^pid, conn} = PostgresCdcRls.get_manager_conn(args["id"])
+
+      subscriber = spawn_link(fn -> receive do: (:stop -> :ok) end)
+      {_uuid, _bin, params} = pg_change_params()
+      assert {:ok, _} = Subscriptions.create(conn, publication, [params], pid, subscriber)
+      :sys.get_state(pid)
+
+      assert %{rows: [[seeded]]} = Postgrex.query!(conn, "select count(*) from realtime.subscription", [])
+      assert seeded > 0
+
+      # Simulate a cold start: a fresh WorkerSupervisor hands the manager brand new, empty ETS
+      # tables. The DB rows from the previous run must be wiped.
+      GenServer.stop(pid)
+      empty_pids = :ets.new(__MODULE__, [:public, :bag])
+      empty_nodes = :ets.new(__MODULE__, [:public, :set])
+
+      cold_args = %{
+        args
+        | "subscribers_pids_table" => empty_pids,
+          "subscribers_nodes_table" => empty_nodes
+      }
+
+      {:ok, new_pid} = SubscriptionManager.start_link(cold_args)
+      :sys.get_state(new_pid)
+
+      {:ok, ^new_pid, conn2} = PostgresCdcRls.get_manager_conn(args["id"])
+      assert %{rows: [[0]]} = Postgrex.query!(conn2, "select count(*) from realtime.subscription", [])
+    end
+  end
+
   describe "check no users" do
     test "exit is sent to manager", %{pid: pid} do
       :sys.replace_state(pid, fn state -> %{state | no_users_ts: 0} end)
@@ -450,6 +596,21 @@ defmodule Realtime.Extensions.CdcRls.SubscriptionManagerTest do
       result = SubscriptionManager.not_alive_pids_dist(%{node() => MapSet.new([dead_pid])})
       assert dead_pid in result
     end
+  end
+
+  # Simulates a SubscriptionManager-only restart: the ETS tables in `args` are owned by the test
+  # process (acting as the WorkerSupervisor) and survive, so the new manager re-adopts them.
+  defp restart_manager(pid, args) do
+    GenServer.stop(pid)
+    {:ok, new_pid} = SubscriptionManager.start_link(args)
+    :sys.get_state(new_pid)
+    new_pid
+  end
+
+  # The set of processes `pid` is currently monitoring.
+  defp monitored_pids(pid) do
+    {:monitors, monitors} = Process.info(pid, :monitors)
+    for {:process, monitored} <- monitors, into: MapSet.new(), do: monitored
   end
 
   defp pg_change_params do
