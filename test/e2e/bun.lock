@@ -11,7 +11,7 @@
         "@opentelemetry/resources": "^2.7.1",
         "@opentelemetry/sdk-trace-base": "^2.7.1",
         "@opentelemetry/semantic-conventions": "^1.41.1",
-        "@supabase/supabase-js": "2.106.2",
+        "@supabase/supabase-js": "2.107.0-canary.2",
         "commander": "^14.0.3",
         "kleur": "^4.1.5",
       },
@@ -42,19 +42,19 @@
 
     "@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.41.1", "", {}, "sha512-/UhIkaZgPutTFmQ7RnIJGgDXZmtEJ7Dvi86xNTFWcnRxVRNk/aotsqDJYeEvDP+FSMB2SdW+pQzNMcWP0rwuNA=="],
 
-    "@supabase/auth-js": ["@supabase/auth-js@2.106.2", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-VcAjUErkHkhC5Jaf+g/G1qbkQrFh8edaCdHa7pxJmHUjkWKjT7UnYCtPA89XV0N0GIYRkEqJZw5V62CtOxTmBQ=="],
+    "@supabase/auth-js": ["@supabase/auth-js@2.107.0-canary.2", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-6Exd3Avrl133WKEJs3E1KE3lvRM/u9z53oq80AASL/DIAhU7PBmrepoL1EfCLVh38Ba2trmeFgUuVSqQPfM5vg=="],
 
-    "@supabase/functions-js": ["@supabase/functions-js@2.106.2", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-oRnr0QrL8H+zTO1YyQ1QjiHZU/957jvubbxSJTUm2XLAgzoGGV9Tahfyd+uvLsBLRVmXLtpU3oyCjdQIvkGMOA=="],
+    "@supabase/functions-js": ["@supabase/functions-js@2.107.0-canary.2", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-dpMxIZZxllBWynp7fUTu8tmOntlpP2Rn9duZ4CxWY7bH8ku/Gz/UdWgIhW3cfvBh7BzNO2Wf4goir/YawjjjMA=="],
 
     "@supabase/phoenix": ["@supabase/phoenix@0.4.2", "", {}, "sha512-YSAGnmDAfuleFCVt3CeurQZAhxRfXWeZIIkwp7NhYzQ1UwW6ePSnzsFAiUm/mbCkfoCf70QQHKW/K6RKh52a4A=="],
 
-    "@supabase/postgrest-js": ["@supabase/postgrest-js@2.106.2", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-tDOzyPgp9pIRMR2x6C9+uDSJrnXSzxLtt3d7nC+Lrsy3jnJDHYfdQC/xcRyhJE/TOBJ0heSqRKR3UmejDjZxsw=="],
+    "@supabase/postgrest-js": ["@supabase/postgrest-js@2.107.0-canary.2", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-dmNYwqkE3a2ByvBaJZ3ceVOhyssfOatW+KqNiWBVHh5Ftl2LcRGoD8z0U1OJr9JaTC+ieo3cSQX10c0bCLbK3w=="],
 
-    "@supabase/realtime-js": ["@supabase/realtime-js@2.106.2", "", { "dependencies": { "@supabase/phoenix": "^0.4.2", "tslib": "2.8.1" } }, "sha512-LdRGT7DNhyZkPjubUv5bSdAZ0jSEX8wTHvx7htj7+K59TOZRvz4TuQK7tL2RWxyIZVeFMRluL04SzWS61rKnUA=="],
+    "@supabase/realtime-js": ["@supabase/realtime-js@2.107.0-canary.2", "", { "dependencies": { "@supabase/phoenix": "^0.4.2", "tslib": "2.8.1" } }, "sha512-WcKS2pVHx75ZpWqO2VhW2a+c6nr3eCJL4ctcbA1d3DW6hghJraRM1CnylCLZ8HOfgFZpRcXMPPvvSg7YFF9U4g=="],
 
-    "@supabase/storage-js": ["@supabase/storage-js@2.106.2", "", { "dependencies": { "iceberg-js": "^0.8.1", "tslib": "2.8.1" } }, "sha512-xgKCSYuev1YarV+iVqr+zlfgSyremnJtn8T0NCT8L4XmMv1CLtESc0Q6kNp8+mKWdX/8ND0nzm7OMKx08kwNAw=="],
+    "@supabase/storage-js": ["@supabase/storage-js@2.107.0-canary.2", "", { "dependencies": { "iceberg-js": "^0.8.1", "tslib": "2.8.1" } }, "sha512-eilUfN5W5uggNLwO+DeAMRFVbe4I9u4U+NPl9+cIBxfKu7ozwdWsYKmZtPp3e+DBmShLl1T6bFhWwEEBuQV/yg=="],
 
-    "@supabase/supabase-js": ["@supabase/supabase-js@2.106.2", "", { "dependencies": { "@supabase/auth-js": "2.106.2", "@supabase/functions-js": "2.106.2", "@supabase/postgrest-js": "2.106.2", "@supabase/realtime-js": "2.106.2", "@supabase/storage-js": "2.106.2" } }, "sha512-2/RZ/1fmJx/MRSEDG2Xk8+J4JVk5clM9V0uSI6kUTrcS32KA89DtqI5RUOC9r6mzY3WBC9qexLjssIHjbLyVJA=="],
+    "@supabase/supabase-js": ["@supabase/supabase-js@2.107.0-canary.2", "", { "dependencies": { "@supabase/auth-js": "2.107.0-canary.2", "@supabase/functions-js": "2.107.0-canary.2", "@supabase/postgrest-js": "2.107.0-canary.2", "@supabase/realtime-js": "2.107.0-canary.2", "@supabase/storage-js": "2.107.0-canary.2" } }, "sha512-4DRcix09PrwWRqotlvv3BRwYm6C1kVB9H6AN6CCKam9gfVjMPElevqOnnzw5ZeMESt//QKwQJyp0VsK/iiOkbA=="],
 
     "commander": ["commander@14.0.3", "", {}, "sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw=="],
 
