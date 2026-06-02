@@ -2,8 +2,9 @@ defmodule RealtimeWeb.JwtVerification do
   @moduledoc """
   Parse JWT and verify claims
   """
+
   # Matching error in Dialyzer when using Joken.peek_claims/1 but {:ok, []} is actually possible and covered by our testing
-  @dialyzer {:nowarn_function, check_claims_format: 1}
+  @dialyzer {:no_match, check_claims_format: 1}
 
   defmodule JwtAuthToken do
     @moduledoc false
@@ -16,11 +17,16 @@ defmodule RealtimeWeb.JwtVerification do
         add_claim_validator(claims, claim_key, expected_val)
       end)
       |> add_claim_validator("exp")
+      |> add_claim_validator("iat")
     end
 
     defp add_claim_validator(claims, "exp") do
       current_time = current_time()
-      add_claim(claims, "exp", nil, &(&1 > current_time), message: current_time)
+      add_claim(claims, "exp", nil, &(is_number(&1) and &1 > current_time), message: current_time)
+    end
+
+    defp add_claim_validator(claims, "iat") do
+      add_claim(claims, "iat", nil, &is_number/1)
     end
 
     defp add_claim_validator(claims, claim_key, expected_val) do
