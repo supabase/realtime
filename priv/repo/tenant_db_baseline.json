@@ -1816,9 +1816,9 @@
       ],
       "security_labels": []
     },
-    "procedure:realtime.send(bytea,text,text,boolean)": {
+    "procedure:realtime.send_binary(bytea,text,text,boolean)": {
       "schema": "realtime",
-      "name": "send",
+      "name": "send_binary",
       "kind": "f",
       "return_type": "void",
       "return_type_schema": "pg_catalog",
@@ -1851,7 +1851,7 @@
       "source_code": "\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n",
       "binary_path": null,
       "sql_body": null,
-      "definition": "CREATE OR REPLACE FUNCTION realtime.send(payload bytea, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION realtime.send_binary(payload bytea, event text, topic text, private boolean DEFAULT true)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  generated_id uuid;\nBEGIN\n  BEGIN\n    generated_id := gen_random_uuid();\n\n    EXECUTE format('SET LOCAL realtime.topic TO %L', topic);\n\n    INSERT INTO realtime.messages (id, binary_payload, event, topic, private, extension)\n    VALUES (generated_id, payload, event, topic, private, 'broadcast');\n  EXCEPTION\n    WHEN OTHERS THEN\n      RAISE WARNING 'ErrorSendingBroadcastMessage: %', SQLERRM;\n  END;\nEND;\n$function$\n",
       "config": null,
       "owner": "supabase_admin",
       "comment": null,
@@ -11731,42 +11731,42 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:dashboard_user",
-      "referenced_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:dashboard_user",
+      "referenced_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:dashboard_user",
+      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:dashboard_user",
       "referenced_stable_id": "role:dashboard_user",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:postgres",
-      "referenced_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:postgres",
+      "referenced_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:postgres",
+      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:postgres",
       "referenced_stable_id": "role:postgres",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:PUBLIC",
-      "referenced_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:PUBLIC",
+      "referenced_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:PUBLIC",
+      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:PUBLIC",
       "referenced_stable_id": "role:PUBLIC",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:supabase_admin",
-      "referenced_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:supabase_admin",
+      "referenced_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "acl:procedure:realtime.send(bytea,text,text,boolean)::grantee:supabase_admin",
+      "dependent_stable_id": "acl:procedure:realtime.send_binary(bytea,text,text,boolean)::grantee:supabase_admin",
       "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
     },
@@ -13188,12 +13188,12 @@
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_pkey",
@@ -15801,17 +15801,17 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "dependent_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
       "referenced_stable_id": "language:plpgsql",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "dependent_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
       "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "procedure:realtime.send(bytea,text,text,boolean)",
+      "dependent_stable_id": "procedure:realtime.send_binary(bytea,text,text,boolean)",
       "referenced_stable_id": "schema:realtime",
       "deptype": "n"
     },

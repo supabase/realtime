@@ -542,7 +542,7 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
 
       Postgrex.query!(
         db_conn,
-        "SELECT realtime.send($1::bytea, $2::text, $3::text, TRUE::bool);",
+        "SELECT realtime.send_binary($1::bytea, $2::text, $3::text, TRUE::bool);",
         [binary, event, topic]
       )
 
@@ -550,6 +550,64 @@ defmodule Realtime.Tenants.ReplicationConnectionTest do
                        user_event: ^event,
                        user_payload_encoding: :binary,
                        user_payload: ^binary,
+                       metadata: %{"id" => _id}
+                     },
+                     500
+    end
+
+    test "binary payload that exceeds payload size is not broadcast and logs error", %{tenant: tenant, db_conn: db_conn} do
+      logs =
+        capture_log(fn ->
+          start_supervised!(
+            {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+            restart: :transient
+          )
+
+          topic = random_string()
+          tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+          assert :ok = Endpoint.subscribe(tenant_topic)
+
+          Realtime.Tenants.Migrations.create_partitions(db_conn)
+
+          binary = :binary.copy(<<0>>, tenant.max_payload_size_in_kb * 1000 + 1000)
+          event = "INSERT"
+
+          Postgrex.query!(
+            db_conn,
+            "SELECT realtime.send_binary($1::bytea, $2::text, $3::text, TRUE::bool);",
+            [binary, event, topic]
+          )
+
+          refute_receive _any, 500
+        end)
+
+      assert logs =~ "UnableToBroadcastChanges: :payload_size_exceeded"
+    end
+
+    test "empty binary payload is replicated as UserBroadcast with binary encoding", %{tenant: tenant, db_conn: db_conn} do
+      start_link_supervised!(
+        {ReplicationConnection, %ReplicationConnection{tenant_id: tenant.external_id, monitored_pid: self()}},
+        restart: :transient
+      )
+
+      topic = random_string()
+      tenant_topic = Tenants.tenant_topic(tenant.external_id, topic, false)
+      assert :ok = Endpoint.subscribe(tenant_topic)
+
+      Realtime.Tenants.Migrations.create_partitions(db_conn)
+
+      event = "INSERT"
+
+      Postgrex.query!(
+        db_conn,
+        "SELECT realtime.send_binary($1::bytea, $2::text, $3::text, TRUE::bool);",
+        [<<>>, event, topic]
+      )
+
+      assert_receive %RealtimeWeb.Socket.UserBroadcast{
+                       user_event: ^event,
+                       user_payload_encoding: :binary,
+                       user_payload: <<>>,
                        metadata: %{"id" => _id}
                      },
                      500
