@@ -26,7 +26,7 @@ const program = new Command()
   .option("--json", "Output results as JSON to stdout")
   .option("--otel <endpoint>", "OTLP HTTP endpoint for tracing (e.g. http://localhost:4318)")
   .option("--otel-token <token>", "Bearer token for authenticated OTLP endpoints")
-  .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,postgres-changes-filters,broadcast-changes")
+  .option("--test <categories>", "Comma-separated list of test categories to run: functional,load,connection,load-postgres-changes,load-presence,load-broadcast,load-broadcast-from-db,load-broadcast-replay,broadcast,broadcast-replay,presence,authorization,postgres-changes,postgres-changes-filters,broadcast-changes,broadcast-binary")
   .option("--debug", "Enable Realtime client debug mode (sets log level to info and enables console logging)")
   .parse();
 
@@ -1626,6 +1626,40 @@ async function runBroadcastReplayTests(_testUser: { email: string; password: str
   });
 }
 
+async function runBroadcastBinaryTests(supabase: SupabaseClient) {
+  suite("broadcast binary");
+
+  await sleep(RATE_LIMIT_PAUSE_MS);
+  await test("send_binary delivers a binary broadcast", async () => {
+    const sql = new SQL(DB_URL, { tls: DB_SSL || undefined });
+    try {
+      const event = crypto.randomUUID();
+      const topic = randomTopic();
+      const binary = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff]);
+
+      let result: any = null;
+      const channel = supabase
+        .channel(topic, { config: { private: true } })
+        .on("broadcast", { event }, (msg) => (result = msg.payload));
+
+      const subscribeMs = await openChannel(channel);
+      await sleep(100);
+
+      await sql`SELECT realtime.send_binary(${binary}::bytea, ${event}::text, ${topic}::text, true)`;
+
+      const { latencyMs: eventMs } = await waitFor(() => result, "binary broadcast event");
+
+      const received = result instanceof Uint8Array ? result : new Uint8Array(result);
+      assert.strictEqual(received.length, binary.length, "binary payload length mismatch");
+      assert.ok(binary.every((b, i) => received[i] === b), "binary payload bytes mismatch");
+      return [{ label: "subscribe", value: subscribeMs, unit: "ms" }, { label: "event", value: eventMs, unit: "ms" }];
+    } finally {
+      await sql.close().catch(() => {});
+      await supabase.removeAllChannels();
+    }
+  });
+}
+
 function printSummary(totalMs: number) {
   const passed = results.filter((r) => r.passed);
   const failed = results.filter((r) => !r.passed);
@@ -1690,6 +1724,7 @@ const SUITES: Record<string, (ctx: SuiteCtx) => Promise<void>> = {
   "postgres-changes": ({ testUser, supabase }) => runPostgresChangesTests(testUser, supabase),
   "postgres-changes-filters": ({ testUser, supabase }) => runPostgresChangesFiltersTests(testUser, supabase),
   "broadcast-changes": ({ testUser, supabase }) => runBroadcastChangesTests(testUser, supabase),
+  "broadcast-binary": ({ supabase }) => runBroadcastBinaryTests(supabase),
 };
 
 const LOAD_SUITES = Object.keys(SUITES).filter((k) => k.startsWith("load"));
@@ -1705,6 +1740,7 @@ const DB_REQUIRED_SUITES = new Set([
   "postgres-changes",
   "postgres-changes-filters",
   "broadcast-changes",
+  "broadcast-binary",
 ]);
 
 async function main() {

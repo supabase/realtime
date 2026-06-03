@@ -87,7 +87,8 @@ defmodule Realtime.Tenants.Migrations do
     ListChangesWithSlotCount,
     AddBinaryPayloadToMessages,
     AddSelectColumnsToSubscriptions,
-    Wal2jsonEscapeSpecialChars
+    Wal2jsonEscapeSpecialChars,
+    AddSendBinaryFunction
   }
 
   @migrations [
@@ -162,7 +163,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_326_120_000, ListChangesWithSlotCount},
     {20_260_514_120_000, AddBinaryPayloadToMessages},
     {20_260_527_120_000, AddSelectColumnsToSubscriptions},
-    {20_260_528_120_000, Wal2jsonEscapeSpecialChars}
+    {20_260_528_120_000, Wal2jsonEscapeSpecialChars},
+    {20_260_603_120_000, AddSendBinaryFunction}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
