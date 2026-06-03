@@ -184,6 +184,9 @@ defmodule Realtime.Tenants.Authorization do
       {:error, %Postgrex.Error{postgres: %{code: :check_violation, table: "messages"}}} ->
         {:error, :missing_partition}
 
+      {:error, %Postgrex.Error{} = error} ->
+        {:error, :rls_policy_error, error}
+
       {:error, %ConnectionError{reason: :queue_timeout}} ->
         GenCounter.add(rate_counter.id)
         {:error, :increase_connection_pool}
@@ -251,15 +254,18 @@ defmodule Realtime.Tenants.Authorization do
             Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: ext})
           end)
 
-        {:ok, messages} = Repo.insert_all_entries(transaction_conn, changesets, Message)
-        messages_by_extension = Map.new(messages, &{&1.extension, &1.id})
+        with {:ok, messages} <- Repo.insert_all_entries(transaction_conn, changesets, Message) do
+          messages_by_extension = Map.new(messages, &{&1.extension, &1.id})
 
-        set_conn_config(transaction_conn, authorization_context)
+          set_conn_config(transaction_conn, authorization_context)
 
-        policies = check_read_policies(transaction_conn, authorization_context, messages_by_extension, policies)
+          policies = check_read_policies(transaction_conn, authorization_context, messages_by_extension, policies)
 
-        Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
-        policies
+          Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
+          policies
+        else
+          {:error, reason} -> DBConnection.rollback(transaction_conn, reason)
+        end
       end,
       opts,
       metadata
@@ -276,10 +282,13 @@ defmodule Realtime.Tenants.Authorization do
       conn,
       fn transaction_conn ->
         set_conn_config(transaction_conn, authorization_context)
-        policies = check_write_policies(transaction_conn, authorization_context, extensions, policies)
 
-        Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
-        policies
+        with {:ok, policies} <- check_write_policies(transaction_conn, authorization_context, extensions, policies) do
+          Postgrex.query!(transaction_conn, "ROLLBACK AND CHAIN", [])
+          policies
+        else
+          {:error, reason} -> DBConnection.rollback(transaction_conn, reason)
+        end
       end,
       opts,
       metadata
@@ -313,22 +322,22 @@ defmodule Realtime.Tenants.Authorization do
   end
 
   defp check_write_policies(conn, authorization_context, extensions, policies) do
-    Enum.reduce(@all_extensions, policies, fn extension, acc ->
+    Enum.reduce_while(@all_extensions, {:ok, policies}, fn extension, {:ok, acc} ->
       if extension in extensions do
         changeset = Message.changeset(%Message{}, %{topic: authorization_context.topic, extension: extension})
 
         case Repo.insert(conn, changeset, Message, mode: :savepoint) do
           {:ok, _} ->
-            Policies.update_policies(acc, extension, :write, true)
+            {:cont, {:ok, Policies.update_policies(acc, extension, :write, true)}}
 
           {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} ->
-            Policies.update_policies(acc, extension, :write, false)
+            {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
 
-          e ->
-            e
+          {:error, reason} ->
+            {:halt, {:error, reason}}
         end
       else
-        Policies.update_policies(acc, extension, :write, false)
+        {:cont, {:ok, Policies.update_policies(acc, extension, :write, false)}}
       end
     end)
   end
