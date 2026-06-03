@@ -314,8 +314,13 @@ defmodule Realtime.Tenants.Connect do
 
   def handle_continue(:start_replication, state) do
     case start_replication_connection(state) do
-      {:ok, state} -> {:noreply, state, {:continue, :setup_connected_user_events}}
-      {:error, _error} -> {:stop, :shutdown, state}
+      {:ok, state} ->
+        {:noreply, state, {:continue, :setup_connected_user_events}}
+
+      {:error, error} ->
+        log_error("StartReplicationFailed", error)
+        state = open_replication_recovery(state)
+        {:noreply, state, {:continue, :setup_connected_user_events}}
     end
   end
 
@@ -391,25 +396,10 @@ defmodule Realtime.Tenants.Connect do
   # Handle replication connection termination
   def handle_info(
         {:DOWN, replication_connection_reference, _, _, _},
-        %{replication_connection_reference: replication_connection_reference, tenant_id: tenant_id} = state
+        %{replication_connection_reference: replication_connection_reference} = state
       ) do
-    %{backoff: backoff} = state
     log_warning("ReplicationConnectionDown", "Replication connection has been terminated, recovery window opened")
-    update_syn_replication_conn(tenant_id, nil)
-    {timeout, backoff} = Backoff.backoff(backoff)
-    Process.send_after(self(), :recover_replication_connection, timeout)
-
-    recovery_started_at = state.replication_recovery_started_at || System.monotonic_time(:millisecond)
-
-    state = %{
-      state
-      | replication_connection_pid: nil,
-        replication_connection_reference: nil,
-        backoff: backoff,
-        replication_recovery_started_at: recovery_started_at
-    }
-
-    {:noreply, state}
+    {:noreply, open_replication_recovery(state)}
   end
 
   @replication_connection_query "SELECT 1 from pg_stat_activity where application_name='realtime_replication_connection'"
@@ -505,6 +495,20 @@ defmodule Realtime.Tenants.Connect do
   defp tenant_suspended?(_), do: :ok
 
   defp rebalance_check_interval_in_ms(), do: Application.fetch_env!(:realtime, :rebalance_check_interval_in_ms)
+
+  defp open_replication_recovery(%{tenant_id: tenant_id} = state) do
+    update_syn_replication_conn(tenant_id, nil)
+    recovery_started_at = state.replication_recovery_started_at || System.monotonic_time(:millisecond)
+
+    state = %{
+      state
+      | replication_connection_pid: nil,
+        replication_connection_reference: nil,
+        replication_recovery_started_at: recovery_started_at
+    }
+
+    schedule_replication_retry(state)
+  end
 
   defp schedule_replication_retry(%{backoff: backoff} = state) do
     {timeout, backoff} = Backoff.backoff(backoff)
