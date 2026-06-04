@@ -13720,12 +13720,12 @@
     {
       "dependent_stable_id": "constraint:realtime.messages_default.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages_default.binary_payload",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages_default.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages_default.binary_payload",
-      "deptype": "a"
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages_default.messages_payload_exclusive",
@@ -13740,22 +13740,22 @@
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "n"
+      "deptype": "a"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.binary_payload",
-      "deptype": "a"
-    },
-    {
-      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
-      "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
       "referenced_stable_id": "column:realtime.messages.payload",
       "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages.payload",
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_pkey",
@@ -16978,22 +16978,22 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16857",
+      "dependent_stable_id": "unknown:pg_class.16853",
       "referenced_stable_id": "column:realtime.messages.extension",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16857",
+      "dependent_stable_id": "unknown:pg_class.16853",
       "referenced_stable_id": "column:realtime.messages.inserted_at",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16857",
+      "dependent_stable_id": "unknown:pg_class.16853",
       "referenced_stable_id": "column:realtime.messages.private",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16857",
+      "dependent_stable_id": "unknown:pg_class.16853",
       "referenced_stable_id": "column:realtime.messages.topic",
       "deptype": "a"
     },
