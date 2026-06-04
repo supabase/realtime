@@ -572,7 +572,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert response(conn, 403) == ""
     end
 
-    test "runs migrations", %{conn: conn} do
+    test "runs migrations and creates partitions", %{conn: conn} do
       tenant = Containers.checkout_tenant(run_migrations: false)
 
       {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
@@ -583,6 +583,15 @@ defmodule RealtimeWeb.TenantControllerTest do
       Process.sleep(1000)
 
       assert {:ok, %{rows: []}} = Postgrex.query(db_conn, "SELECT * FROM realtime.messages", [])
+
+      assert {:ok, %{rows: [[partitions]]}} =
+               Postgrex.query(
+                 db_conn,
+                 "SELECT count(*) FROM pg_inherits WHERE inhparent = 'realtime.messages'::regclass",
+                 []
+               )
+
+      assert partitions > 0
 
       assert %{"healthy" => true, "db_connected" => false, "replication_connected" => false, "connected_cluster" => 0} =
                data

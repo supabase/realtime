@@ -90,7 +90,6 @@ defmodule Realtime.Database do
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
   """
-
   @spec check_tenant_connection(Tenant.t() | nil) :: {:error, atom()} | {:ok, pid(), non_neg_integer()}
   def check_tenant_connection(nil), do: {:error, :tenant_not_found}
 
