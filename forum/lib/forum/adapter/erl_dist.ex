@@ -27,4 +27,13 @@ defmodule Forum.Adapter.ErlDist do
   def send(scope, node, message) do
     :erlang.send({Forum.Supervisor.name(scope), node}, message, [:noconnect])
   end
+
+  @impl true
+  def call(_scope, node, module, function, args, timeout) do
+    :erpc.call(node, module, function, args, timeout)
+  catch
+    :error, {:erpc, reason} -> {:error, reason}
+    :exit, reason -> {:error, reason}
+    kind, reason -> {:error, {kind, reason}}
+  end
 end
