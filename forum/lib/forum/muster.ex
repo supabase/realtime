@@ -2,10 +2,11 @@ defmodule Forum.Muster do
   @moduledoc """
   Group-aware fan-out broadcast.
 
-  For every group, exactly one node in the cluster is the **designated** node
-  (chosen by `:erlang.phash2/2` over the sorted Muster cluster membership).
-  The designated node knows which nodes hold local members of that group and
-  acts as the fan-out hub for broadcasts.
+  For every group, exactly one node in the cluster is the **designated** node,
+  chosen by consistent hashing (via `ExHashRing`) over the sorted Muster
+  cluster membership. The designated node knows which nodes hold local members
+  of that group; callers route a broadcast to it (using their own transport)
+  via `designated/2`.
 
   Use a different scope name than any `Forum.Census` scope on the same node.
   """
