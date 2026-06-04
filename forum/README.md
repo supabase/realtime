@@ -3,7 +3,7 @@
 Forum is a scalable, distributed process-group library for Elixir/OTP. It ships two primitives that share the same supervision/partition machinery but solve different problems:
 
 * **`Forum.Census`** — eventually-consistent counting of group membership across the cluster. Use when you need to know "how many processes are in group X right now" without paying per-join/leave network traffic.
-* **`Forum.Muster`** — precisely-targeted fan-out broadcast. Use when you want to send a message to every process that has joined a group, anywhere in the cluster, without blindly broadcasting to nodes that don't care.
+* **`Forum.Muster`** — precise routing for fan-out broadcast. It tracks, for every group, which nodes hold local members, and tells you the single **designated** node to route through — so you can send a message to every process in a group, anywhere in the cluster, without blindly broadcasting to nodes that don't care. Muster owns the routing decision; you supply the transport.
 
 Both share the same per-node fundamentals:
 
@@ -60,14 +60,15 @@ Muster answers a different question: *given a group, which nodes have at least o
 
 For each group, exactly one node in the Muster cluster is the **designated** node, chosen by **consistent hashing** over the sorted member list (via [`ex_hash_ring`](https://hexdocs.pm/ex_hash_ring), 128 vnodes per node by default). Every node computes the same designated independently from the same ring (no consensus needed — the member list is the only input). Consistent hashing matters at rebalance time: when a node joins or leaves a cluster of size *N*, only ~1/*N* of the groups change their designated, instead of nearly all groups (as a naive `phash2(group, length(members))` would produce).
 
-The designated node owns the authoritative "which nodes hold this group" set. When the first local member of a group joins on node A, A sends a synchronous `:occupied` notification to the designated node. When the last local member leaves (after a cooldown — see below), A sends `:vacant`. The designated keeps a table keyed by `{group, node}` and uses it to forward broadcasts.
+The designated node owns the authoritative "which nodes hold this group" set. When the first local member of a group joins on node A, A sends a synchronous `:occupied` notification to the designated node. When the last local member leaves (after a cooldown — see below), A sends `:vacant`. The designated keeps a table keyed by `{group, node}` — the set of nodes a broadcast for that group must reach.
+
+To broadcast, a caller asks `designated/2` for the group's designated node and routes the message there over its own transport; the designated then fans out to the member nodes. While the cluster view is in flux, `designated/2` returns `{:rebalancing, members}` and the caller fans out to every member instead.
 
 ### Public API
 
 ```elixir
 Forum.Muster.join(scope, group, pid)        # :ok | {:error, :rpc_failed | :not_local | ...}
 Forum.Muster.leave(scope, group, pid)       # :ok
-Forum.Muster.broadcast(scope, group, msg)   # :ok — async fan-out
 Forum.Muster.designated(scope, group)       # {:ok, node} | {:rebalancing, [node]}
 Forum.Muster.members(scope)                 # [node]
 Forum.Muster.local_members(scope, group)    # [pid]
@@ -142,12 +143,13 @@ A rebalance starts on every node whenever its view of the cluster changes:
 
 1. Compute the new sorted member list. If unchanged, do nothing.
 2. Flip `:status` to `:rebalancing`. From this point, `Muster.designated/2` returns `{:rebalancing, members}` for all groups; broadcasters fan out to every member.
-3. **Cancel in-flight `:occupied_pending` claims.** Each waiting caller receives `{:error, :rebalance_in_progress}`. `Muster.join/3` retries this internally (up to 3 times, 20 ms apart), so callers don't see it unless the cluster is thrashing.
+3. **Normalize in-flight pending claims.** A `{:vacant_pending, []}` entry (a vacant RPC in flight with no waiters) is dropped — we no longer hold the group. A `{:vacant_pending, waiters}` entry (a claim arrived while a vacant RPC was in flight) is rewritten to `{:occupied_pending, waiters}` so the rebalance re-announces it and settles the waiters. `:occupied_pending` claims are kept and carried through; they are settled with `:ok` (step 7) once the new designated has been told (callers parked on `Muster.join/3` are **not** cancelled).
 4. Call `ExHashRing.Ring.set_nodes/2` with the new member list. The ring atomically swaps to a new generation; the prior generation is retained for one cycle.
-5. **Compute the delta**: for each `:occupied` or `:cooldown` group, ask the ring for both the new designation (`find_node/2`) and the previous designation (`find_historical_node/3` with `back: 1`). Only groups whose designation actually changed are in the announce-set. With consistent hashing this is typically ~1/N of the candidate groups instead of ~all of them.
-6. For each `{new_designated, groups}` pair, send **one** `:receive_node_state` RPC bundling all groups for that destination. The receiver clears its prior entries for our node and inserts the fresh list.
-7. Walk our own occupancy table and drop entries for groups we are no longer designated for (those entries will be re-announced to us by the original source nodes during their own rebalances).
-8. Flip `:status` back to `:stable`.
+5. **Compute the delta**: for each `:occupied`, `:cooldown`, or `:occupied_pending` group, ask the ring for both the new designation (`find_node/2`) and the previous designation (`find_historical_node/3` with `back: 1`). Only groups whose designation actually changed are in the announce-set. With consistent hashing this is typically ~1/N of the candidate groups instead of ~all of them.
+6. For each `{new_designated, groups}` pair, send **one** `:receive_node_state` RPC bundling all groups for that destination (groups whose new designated is this node are written to the local occupancy table directly). The receiver clears its prior entries for our node and inserts the fresh list.
+7. Settle the `:occupied_pending` claims whose designation changed: reply `:ok` to their parked waiters and move them to `:occupied`. The new designated has just been told via `:receive_node_state`, so the claim is satisfied.
+8. Walk our own occupancy table and drop entries for groups we are no longer designated for (those entries will be re-announced to us by the original source nodes during their own rebalances).
+9. Flip `:status` back to `:stable`.
 
 ### What callers see during the rebalance window
 
@@ -173,7 +175,7 @@ The synchronous `:occupied` call from the source node to the designated can fail
 
 ### Vacant-time RPC failure
 
-`:vacant` RPCs to the designated are best-effort. A failure is logged and the state machine transitions back to `:none`. The designated retains a stale `{group, source_node}` entry until either:
+`:vacant` RPCs to the designated are best-effort. A failure is logged and the group's state-machine entry is deleted (the group is no longer tracked locally). The designated retains a stale `{group, source_node}` entry until either:
 
 * The source node leaves the cluster (the designated's `:DOWN` handler clears all entries keyed by that node), or
 * The next rebalance touches that group and `drop_stale_designated_entries` removes it.
@@ -182,13 +184,13 @@ This tolerance is deliberate — we don't want a transient leave-time RPC failur
 
 ### Rebalance RPC failure
 
-If any `:receive_node_state` call raises or returns `{:error, _}`, `rebalance/2` re-raises. **Scope crashes.** The supervisor restarts it. Scope's `init/1`:
+If any `:receive_node_state` call raises or returns `{:error, _}`, `do_rebalance/2` re-raises. **Scope crashes.** The supervisor restarts it. Scope's `init/1`:
 
-* Resets `:membership` to `{:stable, {node()}}` (forgetting the cluster view).
+* Resets the member list to `[node()]` and the `:status` persistent_term to `:stable` (forgetting the cluster view).
 * Walks the Partition entries (which survive Scope's death because they live in `:public, :named_table` ETS owned by the Supervisor) and rebuilds `group_states` by marking every locally-held group as `:occupied`.
 * Re-broadcasts the discovery message; peers respond; `recompute_members` runs again.
 
-The supervisor restart strategy ensures the cluster eventually re-converges. During the restart window, `Muster.designated/2` returns `{:rebalancing, members}` (because the pre-crash flag was left `true` until init resets it), so callers correctly fan out.
+The supervisor restart strategy ensures the cluster eventually re-converges. During the restart window — between the crash and `init/1` running — the `:status` persistent_term is left at `:rebalancing`, so `Muster.designated/2` returns `{:rebalancing, members}` and callers correctly fan out.
 
 ### Scope crash for other reasons
 
