@@ -27,6 +27,7 @@ defmodule Forum.MixProject do
   defp deps do
     [
       {:telemetry, "~> 1.3"},
+      {:ex_hash_ring, "~> 6.0"},
       {:mix_test_watch, "~> 1.0", only: [:dev, :test], runtime: false}
     ]
   end
