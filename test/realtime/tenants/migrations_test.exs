@@ -4,7 +4,31 @@ defmodule Realtime.Tenants.MigrationsTest do
   use Realtime.DataCase, async: false
   use Mimic
 
+  import ExUnit.CaptureLog
+
+  alias Realtime.Database
   alias Realtime.Tenants.Migrations
+
+  describe "create_partitions/1" do
+    test "does not fail when a daily partition overlaps rows already in the default partition" do
+      tenant = Containers.checkout_tenant(run_migrations: true)
+      {:ok, conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      # force today's row into the default partition
+      today = Date.utc_today() |> Date.to_iso8601() |> String.replace("-", "_")
+      Postgrex.query!(conn, "DROP TABLE IF EXISTS realtime.messages_#{today}", [])
+      assert {:ok, _} = create_message(%{"topic" => random_string(), "extension" => "broadcast"}, conn)
+
+      log =
+        capture_log(fn ->
+          assert :ok = Migrations.create_partitions(conn)
+        end)
+
+      refute log =~ "PartitionCreationFailed"
+
+      assert %{rows: [[1]]} = Postgrex.query!(conn, "SELECT count(*) FROM realtime.messages_default", [])
+    end
+  end
 
   describe "run_migrations/1" do
     test "migrations for a given tenant only run once" do

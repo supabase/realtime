@@ -257,5 +257,59 @@ defmodule Realtime.MessagesTest do
     end
   end
 
+  describe "default partition" do
+    test "messages with no matching daily partition land in messages_default", %{conn: conn} do
+      no_partition_at = NaiveDateTime.new!(Date.add(Date.utc_today(), -15), ~T[00:00:00])
+
+      assert {:ok, message} =
+               create_message(
+                 %{
+                   "topic" => random_string(),
+                   "extension" => "broadcast",
+                   "private" => true,
+                   "inserted_at" => no_partition_at
+                 },
+                 conn
+               )
+
+      assert %{rows: [[1]]} = Postgrex.query!(conn, "SELECT count(*) FROM realtime.messages_default", [])
+
+      {:ok, [stored]} = Repo.all(conn, from(m in Message), Message)
+      assert stored.id == message.id
+    end
+
+    test "realtime.send does not drop the message when no daily partition exists", %{conn: conn} do
+      today = Date.utc_today() |> Date.to_iso8601() |> String.replace("-", "_")
+      Postgrex.query!(conn, "DROP TABLE IF EXISTS realtime.messages_#{today}", [])
+
+      assert {:ok, _} =
+               Postgrex.query(
+                 conn,
+                 "SELECT realtime.send(json_build_object('value', $1::text)::jsonb, $2::text, $3::text, TRUE::bool)",
+                 ["hello", "INSERT", random_string()]
+               )
+
+      assert %{rows: [[1]]} = Postgrex.query!(conn, "SELECT count(*) FROM realtime.messages_default", [])
+    end
+
+    test "delete_old_messages sweeps old rows from the default partition", %{conn: conn} do
+      old_at = NaiveDateTime.new!(Date.add(Date.utc_today(), -15), ~T[00:00:00])
+      recent_at = NaiveDateTime.new!(Date.add(Date.utc_today(), 10), ~T[00:00:00])
+
+      {:ok, _old} =
+        create_message(%{"topic" => random_string(), "extension" => "broadcast", "inserted_at" => old_at}, conn)
+
+      {:ok, recent} =
+        create_message(%{"topic" => random_string(), "extension" => "broadcast", "inserted_at" => recent_at}, conn)
+
+      assert %{rows: [[2]]} = Postgrex.query!(conn, "SELECT count(*) FROM realtime.messages_default", [])
+
+      assert :ok = Messages.delete_old_messages(conn)
+
+      {:ok, remaining} = Repo.all(conn, from(m in Message), Message)
+      assert Enum.map(remaining, & &1.id) == [recent.id]
+    end
+  end
+
   def handle_telemetry(event, measures, metadata, pid: pid), do: send(pid, {:telemetry, event, measures, metadata})
 end

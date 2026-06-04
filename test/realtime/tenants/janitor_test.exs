@@ -184,7 +184,9 @@ defmodule Realtime.Tenants.JanitorTest do
     partitions = MapSet.new(rows, fn [name] -> name end)
 
     expected_names =
-      MapSet.new(dates, fn date -> "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}" end)
+      dates
+      |> MapSet.new(fn date -> "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}" end)
+      |> MapSet.put("messages_default")
 
     assert MapSet.equal?(partitions, expected_names)
   end

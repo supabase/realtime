@@ -88,7 +88,8 @@ defmodule Realtime.Tenants.Migrations do
     AddBinaryPayloadToMessages,
     AddSelectColumnsToSubscriptions,
     Wal2jsonEscapeSpecialChars,
-    AddSendBinaryFunction
+    AddSendBinaryFunction,
+    AddMessagesDefaultPartition
   }
 
   @migrations [
@@ -164,7 +165,8 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_514_120_000, AddBinaryPayloadToMessages},
     {20_260_527_120_000, AddSelectColumnsToSubscriptions},
     {20_260_528_120_000, Wal2jsonEscapeSpecialChars},
-    {20_260_603_120_000, AddSendBinaryFunction}
+    {20_260_603_120_000, AddSendBinaryFunction},
+    {20_260_604_120_000, AddMessagesDefaultPartition}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
@@ -303,7 +305,6 @@ defmodule Realtime.Tenants.Migrations do
 
   @spec create_partitions(pid()) :: :ok
   def create_partitions(db_conn_pid) do
-    Logger.info("Creating partitions for realtime.messages")
     today = Date.utc_today()
     yesterday = Date.add(today, -1)
     future = Date.add(today, 3)
@@ -312,6 +313,7 @@ defmodule Realtime.Tenants.Migrations do
 
     Enum.each(dates, fn date ->
       partition_name = "messages_#{date |> Date.to_iso8601() |> String.replace("-", "_")}"
+      Logger.info("Creating partition #{partition_name} for realtime.messages")
       start_timestamp = Date.to_string(date)
       end_timestamp = Date.to_string(Date.add(date, 1))
 
@@ -325,6 +327,7 @@ defmodule Realtime.Tenants.Migrations do
         case Postgrex.query(conn, query, []) do
           {:ok, _} -> Logger.debug("Partition #{partition_name} created")
           {:error, %Postgrex.Error{postgres: %{code: :duplicate_table}}} -> :ok
+          {:error, %Postgrex.Error{postgres: %{code: :check_violation}}} -> :ok
           {:error, error} -> log_error("PartitionCreationFailed", error)
         end
       end)

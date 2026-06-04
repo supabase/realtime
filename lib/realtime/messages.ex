@@ -74,7 +74,6 @@ defmodule Realtime.Messages do
     limit =
       NaiveDateTime.utc_now()
       |> NaiveDateTime.add(-72, :hour)
-      |> NaiveDateTime.to_date()
 
     %{rows: rows} =
       Postgrex.query!(
@@ -93,10 +92,21 @@ defmodule Realtime.Messages do
       )
 
     rows
-    |> Enum.filter(fn ["messages_" <> date] ->
-      date |> String.replace("_", "-") |> Date.from_iso8601!() |> Date.compare(limit) == :lt
+    |> Enum.filter(fn
+      ["messages_default"] ->
+        false
+
+      ["messages_" <> date] ->
+        date |> String.replace("_", "-") |> Date.from_iso8601!() |> Date.compare(limit) == :lt
+
+      _ ->
+        false
     end)
     |> Enum.each(&Postgrex.query!(conn, "DROP TABLE IF EXISTS realtime.#{&1}", []))
+
+    if ["messages_default"] in rows do
+      Postgrex.query!(conn, "DELETE FROM realtime.messages_default WHERE inserted_at < $1", [limit])
+    end
 
     :ok
   end
