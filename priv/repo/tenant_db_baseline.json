@@ -2671,51 +2671,6 @@
       "comment": null,
       "owner": "supabase_admin"
     },
-    "index:realtime.messages.messages_pkey": {
-      "schema": "realtime",
-      "table_name": "messages",
-      "name": "messages_pkey",
-      "storage_params": [],
-      "statistics_target": [
-        -1,
-        -1
-      ],
-      "index_type": "btree",
-      "tablespace": null,
-      "is_unique": true,
-      "is_primary": true,
-      "is_exclusion": false,
-      "nulls_not_distinct": false,
-      "immediate": true,
-      "is_clustered": false,
-      "is_replica_identity": false,
-      "key_columns": [
-        10,
-        9
-      ],
-      "column_collations": [
-        null,
-        null
-      ],
-      "operator_classes": [
-        "default",
-        "default"
-      ],
-      "column_options": [
-        0,
-        0
-      ],
-      "index_expressions": null,
-      "partial_predicate": null,
-      "table_relkind": "p",
-      "is_owned_by_constraint": true,
-      "is_partitioned_index": true,
-      "is_index_partition": false,
-      "parent_index_name": null,
-      "definition": "CREATE UNIQUE INDEX messages_pkey ON ONLY realtime.messages USING btree (id, inserted_at)",
-      "comment": null,
-      "owner": "supabase_realtime_admin"
-    },
     "index:realtime.messages.messages_inserted_at_topic_index": {
       "schema": "realtime",
       "table_name": "messages",
@@ -2761,6 +2716,141 @@
       "comment": null,
       "owner": "supabase_realtime_admin"
     },
+    "index:realtime.messages.messages_pkey": {
+      "schema": "realtime",
+      "table_name": "messages",
+      "name": "messages_pkey",
+      "storage_params": [],
+      "statistics_target": [
+        -1,
+        -1
+      ],
+      "index_type": "btree",
+      "tablespace": null,
+      "is_unique": true,
+      "is_primary": true,
+      "is_exclusion": false,
+      "nulls_not_distinct": false,
+      "immediate": true,
+      "is_clustered": false,
+      "is_replica_identity": false,
+      "key_columns": [
+        10,
+        9
+      ],
+      "column_collations": [
+        null,
+        null
+      ],
+      "operator_classes": [
+        "default",
+        "default"
+      ],
+      "column_options": [
+        0,
+        0
+      ],
+      "index_expressions": null,
+      "partial_predicate": null,
+      "table_relkind": "p",
+      "is_owned_by_constraint": true,
+      "is_partitioned_index": true,
+      "is_index_partition": false,
+      "parent_index_name": null,
+      "definition": "CREATE UNIQUE INDEX messages_pkey ON ONLY realtime.messages USING btree (id, inserted_at)",
+      "comment": null,
+      "owner": "supabase_realtime_admin"
+    },
+    "index:realtime.messages_default.messages_default_pkey": {
+      "schema": "realtime",
+      "table_name": "messages_default",
+      "name": "messages_default_pkey",
+      "storage_params": [],
+      "statistics_target": [
+        -1,
+        -1
+      ],
+      "index_type": "btree",
+      "tablespace": null,
+      "is_unique": true,
+      "is_primary": true,
+      "is_exclusion": false,
+      "nulls_not_distinct": false,
+      "immediate": true,
+      "is_clustered": false,
+      "is_replica_identity": false,
+      "key_columns": [
+        8,
+        7
+      ],
+      "column_collations": [
+        null,
+        null
+      ],
+      "operator_classes": [
+        "default",
+        "default"
+      ],
+      "column_options": [
+        0,
+        0
+      ],
+      "index_expressions": null,
+      "partial_predicate": null,
+      "table_relkind": "r",
+      "is_owned_by_constraint": true,
+      "is_partitioned_index": false,
+      "is_index_partition": true,
+      "parent_index_name": "realtime.messages_pkey",
+      "definition": "CREATE UNIQUE INDEX messages_default_pkey ON realtime.messages_default USING btree (id, inserted_at)",
+      "comment": null,
+      "owner": "supabase_admin"
+    },
+    "index:realtime.messages_default.messages_default_inserted_at_topic_idx": {
+      "schema": "realtime",
+      "table_name": "messages_default",
+      "name": "messages_default_inserted_at_topic_idx",
+      "storage_params": [],
+      "statistics_target": [
+        -1,
+        -1
+      ],
+      "index_type": "btree",
+      "tablespace": null,
+      "is_unique": false,
+      "is_primary": false,
+      "is_exclusion": false,
+      "nulls_not_distinct": false,
+      "immediate": true,
+      "is_clustered": false,
+      "is_replica_identity": false,
+      "key_columns": [
+        7,
+        1
+      ],
+      "column_collations": [
+        null,
+        null
+      ],
+      "operator_classes": [
+        "default",
+        "default"
+      ],
+      "column_options": [
+        3,
+        0
+      ],
+      "index_expressions": null,
+      "partial_predicate": "((extension = 'broadcast'::text) AND (private IS TRUE))",
+      "table_relkind": "r",
+      "is_owned_by_constraint": false,
+      "is_partitioned_index": false,
+      "is_index_partition": true,
+      "parent_index_name": "realtime.messages_inserted_at_topic_index",
+      "definition": "CREATE INDEX messages_default_inserted_at_topic_idx ON realtime.messages_default USING btree (inserted_at DESC, topic) WHERE extension = 'broadcast'::text AND private IS TRUE",
+      "comment": null,
+      "owner": "supabase_admin"
+    },
     "index:realtime.schema_migrations.schema_migrations_pkey": {
       "schema": "realtime",
       "table_name": "schema_migrations",
@@ -2798,46 +2888,6 @@
       "is_index_partition": false,
       "parent_index_name": null,
       "definition": "CREATE UNIQUE INDEX schema_migrations_pkey ON realtime.schema_migrations USING btree (version)",
-      "comment": null,
-      "owner": "supabase_admin"
-    },
-    "index:realtime.subscription.pk_subscription": {
-      "schema": "realtime",
-      "table_name": "subscription",
-      "name": "pk_subscription",
-      "storage_params": [],
-      "statistics_target": [
-        -1
-      ],
-      "index_type": "btree",
-      "tablespace": null,
-      "is_unique": true,
-      "is_primary": true,
-      "is_exclusion": false,
-      "nulls_not_distinct": false,
-      "immediate": true,
-      "is_clustered": false,
-      "is_replica_identity": false,
-      "key_columns": [
-        1
-      ],
-      "column_collations": [
-        null
-      ],
-      "operator_classes": [
-        "default"
-      ],
-      "column_options": [
-        0
-      ],
-      "index_expressions": null,
-      "partial_predicate": null,
-      "table_relkind": "r",
-      "is_owned_by_constraint": true,
-      "is_partitioned_index": false,
-      "is_index_partition": false,
-      "parent_index_name": null,
-      "definition": "CREATE UNIQUE INDEX pk_subscription ON realtime.subscription USING btree (id)",
       "comment": null,
       "owner": "supabase_admin"
     },
@@ -2938,6 +2988,46 @@
       "is_index_partition": false,
       "parent_index_name": null,
       "definition": "CREATE UNIQUE INDEX subscription_subscription_id_entity_filters_action_filter_selec ON realtime.subscription USING btree (subscription_id, entity, filters, action_filter, COALESCE(selected_columns, '{}'::text[]))",
+      "comment": null,
+      "owner": "supabase_admin"
+    },
+    "index:realtime.subscription.pk_subscription": {
+      "schema": "realtime",
+      "table_name": "subscription",
+      "name": "pk_subscription",
+      "storage_params": [],
+      "statistics_target": [
+        -1
+      ],
+      "index_type": "btree",
+      "tablespace": null,
+      "is_unique": true,
+      "is_primary": true,
+      "is_exclusion": false,
+      "nulls_not_distinct": false,
+      "immediate": true,
+      "is_clustered": false,
+      "is_replica_identity": false,
+      "key_columns": [
+        1
+      ],
+      "column_collations": [
+        null
+      ],
+      "operator_classes": [
+        "default"
+      ],
+      "column_options": [
+        0
+      ],
+      "index_expressions": null,
+      "partial_predicate": null,
+      "table_relkind": "r",
+      "is_owned_by_constraint": true,
+      "is_partitioned_index": false,
+      "is_index_partition": false,
+      "parent_index_name": null,
+      "definition": "CREATE UNIQUE INDEX pk_subscription ON realtime.subscription USING btree (id)",
       "comment": null,
       "owner": "supabase_admin"
     }
@@ -9463,7 +9553,7 @@
       "has_indexes": true,
       "has_rules": false,
       "has_triggers": false,
-      "has_subclasses": false,
+      "has_subclasses": true,
       "is_populated": true,
       "replica_identity": "d",
       "replica_identity_index": null,
@@ -9913,6 +10003,418 @@
         },
         {
           "grantee": "supabase_realtime_admin",
+          "privilege": "UPDATE",
+          "grantable": false,
+          "columns": null
+        }
+      ],
+      "security_labels": []
+    },
+    "table:realtime.messages_default": {
+      "schema": "realtime",
+      "name": "messages_default",
+      "persistence": "p",
+      "row_security": false,
+      "force_row_security": false,
+      "has_indexes": true,
+      "has_rules": false,
+      "has_triggers": false,
+      "has_subclasses": false,
+      "is_populated": true,
+      "replica_identity": "d",
+      "replica_identity_index": null,
+      "is_partition": true,
+      "options": null,
+      "partition_bound": "DEFAULT",
+      "partition_by": null,
+      "owner": "supabase_admin",
+      "comment": null,
+      "parent_schema": "realtime",
+      "parent_name": "messages",
+      "columns": [
+        {
+          "name": "topic",
+          "position": 1,
+          "data_type": "text",
+          "data_type_str": "text",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": true,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": null,
+          "comment": null,
+          "security_labels": []
+        },
+        {
+          "name": "extension",
+          "position": 2,
+          "data_type": "text",
+          "data_type_str": "text",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": true,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": null,
+          "comment": null,
+          "security_labels": []
+        },
+        {
+          "name": "payload",
+          "position": 3,
+          "data_type": "jsonb",
+          "data_type_str": "jsonb",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": false,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": null,
+          "comment": null,
+          "security_labels": []
+        },
+        {
+          "name": "event",
+          "position": 4,
+          "data_type": "text",
+          "data_type_str": "text",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": false,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": null,
+          "comment": null,
+          "security_labels": []
+        },
+        {
+          "name": "private",
+          "position": 5,
+          "data_type": "boolean",
+          "data_type_str": "boolean",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": false,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": "false",
+          "comment": null,
+          "security_labels": []
+        },
+        {
+          "name": "updated_at",
+          "position": 6,
+          "data_type": "timestamp without time zone",
+          "data_type_str": "timestamp without time zone",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": true,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": "now()",
+          "comment": null,
+          "security_labels": []
+        },
+        {
+          "name": "inserted_at",
+          "position": 7,
+          "data_type": "timestamp without time zone",
+          "data_type_str": "timestamp without time zone",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": true,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": "now()",
+          "comment": null,
+          "security_labels": []
+        },
+        {
+          "name": "id",
+          "position": 8,
+          "data_type": "uuid",
+          "data_type_str": "uuid",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": true,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": "gen_random_uuid()",
+          "comment": null,
+          "security_labels": []
+        },
+        {
+          "name": "binary_payload",
+          "position": 9,
+          "data_type": "bytea",
+          "data_type_str": "bytea",
+          "is_custom_type": false,
+          "custom_type_type": null,
+          "custom_type_category": null,
+          "custom_type_schema": null,
+          "custom_type_name": null,
+          "not_null": false,
+          "is_identity": false,
+          "is_identity_always": false,
+          "is_generated": false,
+          "collation": null,
+          "default": null,
+          "comment": null,
+          "security_labels": []
+        }
+      ],
+      "constraints": [
+        {
+          "name": "messages_default_pkey",
+          "constraint_type": "p",
+          "deferrable": false,
+          "initially_deferred": false,
+          "validated": true,
+          "is_local": false,
+          "no_inherit": false,
+          "is_temporal": false,
+          "is_partition_clone": true,
+          "parent_constraint_schema": "realtime",
+          "parent_constraint_name": "messages_pkey",
+          "parent_table_schema": "realtime",
+          "parent_table_name": "messages",
+          "key_columns": [
+            "id",
+            "inserted_at"
+          ],
+          "foreign_key_columns": null,
+          "foreign_key_table": null,
+          "foreign_key_schema": null,
+          "foreign_key_table_is_partition": null,
+          "foreign_key_parent_schema": null,
+          "foreign_key_parent_table": null,
+          "foreign_key_effective_schema": null,
+          "foreign_key_effective_table": null,
+          "on_update": null,
+          "on_delete": null,
+          "match_type": null,
+          "check_expression": null,
+          "owner": "supabase_admin",
+          "definition": "PRIMARY KEY (id, inserted_at)",
+          "comment": null
+        },
+        {
+          "name": "messages_payload_exclusive",
+          "constraint_type": "c",
+          "deferrable": false,
+          "initially_deferred": false,
+          "validated": true,
+          "is_local": false,
+          "no_inherit": false,
+          "is_temporal": false,
+          "is_partition_clone": false,
+          "parent_constraint_schema": null,
+          "parent_constraint_name": null,
+          "parent_table_schema": null,
+          "parent_table_name": null,
+          "key_columns": [
+            "payload",
+            "binary_payload"
+          ],
+          "foreign_key_columns": null,
+          "foreign_key_table": null,
+          "foreign_key_schema": null,
+          "foreign_key_table_is_partition": null,
+          "foreign_key_parent_schema": null,
+          "foreign_key_parent_table": null,
+          "foreign_key_effective_schema": null,
+          "foreign_key_effective_table": null,
+          "on_update": null,
+          "on_delete": null,
+          "match_type": null,
+          "check_expression": "((payload IS NULL) OR (binary_payload IS NULL))",
+          "owner": "supabase_admin",
+          "definition": "CHECK (payload IS NULL OR binary_payload IS NULL)",
+          "comment": null
+        }
+      ],
+      "privileges": [
+        {
+          "grantee": "supabase_admin",
+          "privilege": "DELETE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "INSERT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "MAINTAIN",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "REFERENCES",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "SELECT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "TRIGGER",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "TRUNCATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "supabase_admin",
+          "privilege": "UPDATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "DELETE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "INSERT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "MAINTAIN",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "REFERENCES",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "SELECT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "TRIGGER",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "TRUNCATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "postgres",
+          "privilege": "UPDATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "DELETE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "INSERT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "MAINTAIN",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "REFERENCES",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "SELECT",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "TRIGGER",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
+          "privilege": "TRUNCATE",
+          "grantable": false,
+          "columns": null
+        },
+        {
+          "grantee": "dashboard_user",
           "privilege": "UPDATE",
           "grantable": false,
           "columns": null
@@ -12821,6 +13323,36 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "acl:table:realtime.messages_default::grantee:dashboard_user",
+      "referenced_stable_id": "role:dashboard_user",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:table:realtime.messages_default::grantee:dashboard_user",
+      "referenced_stable_id": "table:realtime.messages_default",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:table:realtime.messages_default::grantee:postgres",
+      "referenced_stable_id": "role:postgres",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:table:realtime.messages_default::grantee:postgres",
+      "referenced_stable_id": "table:realtime.messages_default",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:table:realtime.messages_default::grantee:supabase_admin",
+      "referenced_stable_id": "role:supabase_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "acl:table:realtime.messages_default::grantee:supabase_admin",
+      "referenced_stable_id": "table:realtime.messages_default",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "acl:table:realtime.messages::grantee:anon",
       "referenced_stable_id": "role:anon",
       "deptype": "n"
@@ -13174,6 +13706,36 @@
       "dependent_stable_id": "constraint:public.test_tenant.test_tenant_pkey",
       "referenced_stable_id": "column:public.test_tenant.id",
       "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages_default.messages_default_pkey",
+      "referenced_stable_id": "column:realtime.messages_default.id",
+      "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages_default.messages_default_pkey",
+      "referenced_stable_id": "column:realtime.messages_default.inserted_at",
+      "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages_default.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages_default.binary_payload",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages_default.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages_default.binary_payload",
+      "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages_default.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages_default.payload",
+      "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "constraint:realtime.messages_default.messages_payload_exclusive",
+      "referenced_stable_id": "column:realtime.messages_default.payload",
+      "deptype": "n"
     },
     {
       "dependent_stable_id": "constraint:realtime.messages.messages_payload_exclusive",
@@ -14701,6 +15263,46 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "index:realtime.messages_default.messages_default_inserted_at_topic_idx",
+      "referenced_stable_id": "column:realtime.messages_default.extension",
+      "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "index:realtime.messages_default.messages_default_inserted_at_topic_idx",
+      "referenced_stable_id": "column:realtime.messages_default.inserted_at",
+      "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "index:realtime.messages_default.messages_default_inserted_at_topic_idx",
+      "referenced_stable_id": "column:realtime.messages_default.private",
+      "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "index:realtime.messages_default.messages_default_inserted_at_topic_idx",
+      "referenced_stable_id": "column:realtime.messages_default.topic",
+      "deptype": "a"
+    },
+    {
+      "dependent_stable_id": "index:realtime.messages_default.messages_default_inserted_at_topic_idx",
+      "referenced_stable_id": "schema:realtime",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "index:realtime.messages_default.messages_default_inserted_at_topic_idx",
+      "referenced_stable_id": "table:realtime.messages_default",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "index:realtime.messages_default.messages_default_pkey",
+      "referenced_stable_id": "schema:realtime",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "index:realtime.messages_default.messages_default_pkey",
+      "referenced_stable_id": "table:realtime.messages_default",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "index:realtime.schema_migrations.schema_migrations_pkey",
       "referenced_stable_id": "schema:realtime",
       "deptype": "n"
@@ -16166,6 +16768,21 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "table:realtime.messages_default",
+      "referenced_stable_id": "role:supabase_admin",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "table:realtime.messages_default",
+      "referenced_stable_id": "schema:realtime",
+      "deptype": "n"
+    },
+    {
+      "dependent_stable_id": "table:realtime.messages_default",
+      "referenced_stable_id": "table:realtime.messages",
+      "deptype": "a"
+    },
+    {
       "dependent_stable_id": "table:realtime.schema_migrations",
       "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
@@ -16266,6 +16883,11 @@
       "deptype": "n"
     },
     {
+      "dependent_stable_id": "type:realtime._messages_default",
+      "referenced_stable_id": "role:supabase_admin",
+      "deptype": "n"
+    },
+    {
       "dependent_stable_id": "type:realtime._schema_migrations",
       "referenced_stable_id": "role:supabase_admin",
       "deptype": "n"
@@ -16356,22 +16978,22 @@
       "deptype": "n"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16857",
       "referenced_stable_id": "column:realtime.messages.extension",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16857",
       "referenced_stable_id": "column:realtime.messages.inserted_at",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16857",
       "referenced_stable_id": "column:realtime.messages.private",
       "deptype": "a"
     },
     {
-      "dependent_stable_id": "unknown:pg_class.16853",
+      "dependent_stable_id": "unknown:pg_class.16857",
       "referenced_stable_id": "column:realtime.messages.topic",
       "deptype": "a"
     },
