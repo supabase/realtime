@@ -19,6 +19,9 @@ defmodule Forum.MusterTest do
     base_opts = [
       partitions: 2,
       vacancy_cooldown_ms: Map.get(ctx, :cooldown_ms, 50),
+      # Long by default so the periodic flush never fires mid-test; tests that
+      # exercise the flush drive it deterministically via trigger_flush/1.
+      vacant_flush_interval_ms: Map.get(ctx, :flush_ms, 60_000),
       rpc_timeout_ms: Map.get(ctx, :rpc_timeout, 500),
       message_module: RecordingAdapter
     ]
@@ -70,6 +73,63 @@ defmodule Forum.MusterTest do
     end
   end
 
+  defp trigger_flush(scope) do
+    Kernel.send(Forum.Supervisor.name(scope), :flush_vacant)
+  end
+
+  defp group_states(scope) do
+    GenServer.call(Forum.Supervisor.name(scope), :status).group_states
+  end
+
+  # Poll the Scope's group_states until `group` reaches `expected`. `expected`
+  # may be a value or a predicate fun.
+  defp wait_for_group_state(scope, group, expected, timeout \\ 1_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_for_group_state(scope, group, expected, deadline)
+  end
+
+  defp do_wait_for_group_state(scope, group, expected, deadline) do
+    actual = Map.get(group_states(scope), group)
+
+    cond do
+      match_state?(expected, actual) ->
+        actual
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk(
+          "group #{inspect(group)} state #{inspect(actual)} did not match #{inspect(expected)} in time"
+        )
+
+      true ->
+        Process.sleep(5)
+        do_wait_for_group_state(scope, group, expected, deadline)
+    end
+  end
+
+  defp match_state?(pred, actual) when is_function(pred, 1), do: pred.(actual)
+  defp match_state?(expected, actual), do: expected == actual
+
+  defp announce_for_group?(events, group) do
+    Enum.any?(events, fn
+      {:adapter_event,
+       {:call, _, _, Forum.Muster.Scope, :receive_node_state, [_scope, _src, groups]}} ->
+        group in groups
+
+      _ ->
+        false
+    end)
+  end
+
+  # Find `count` distinct groups whose current designated is `target_node`.
+  defp groups_for_designated(scope, target_node, count) do
+    Stream.iterate(0, &(&1 + 1))
+    |> Stream.map(&:"g#{&1}")
+    |> Stream.filter(fn group ->
+      match?({:ok, ^target_node}, Muster.designated(scope, group))
+    end)
+    |> Enum.take(count)
+  end
+
   describe "start_link/2" do
     test "starts with custom partition count", %{scope: scope, base_opts: opts} do
       pid = start_supervised!(spec(scope, opts))
@@ -86,6 +146,12 @@ defmodule Forum.MusterTest do
     test "raises on invalid vacancy_cooldown_ms", %{scope: scope} do
       assert_raise ArgumentError, ~r/expected :vacancy_cooldown_ms/, fn ->
         Muster.start_link(scope, vacancy_cooldown_ms: -1)
+      end
+    end
+
+    test "raises on invalid vacant_flush_interval_ms", %{scope: scope} do
+      assert_raise ArgumentError, ~r/expected :vacant_flush_interval_ms/, fn ->
+        Muster.start_link(scope, vacant_flush_interval_ms: 0)
       end
     end
 
@@ -131,38 +197,49 @@ defmodule Forum.MusterTest do
     end
 
     test "occupied/3 inserts a {group, source_node} row", %{scope: scope} do
-      assert :ok = Scope.occupied(scope, :rg1, :"src@nowhere")
-      assert :"src@nowhere" in Scope.occupancy(scope, :rg1)
+      assert :ok = Scope.occupied(scope, :rg1, :src@nowhere)
+      assert :src@nowhere in Scope.occupancy(scope, :rg1)
     end
 
-    test "vacant/3 deletes a {group, source_node} row", %{scope: scope} do
-      :ok = Scope.occupied(scope, :rg2, :"src@nowhere")
-      assert :"src@nowhere" in Scope.occupancy(scope, :rg2)
+    test "vacant_batch/3 deletes multiple {group, source_node} rows", %{scope: scope} do
+      :ok = Scope.occupied(scope, :rg2a, :src@nowhere)
+      :ok = Scope.occupied(scope, :rg2b, :src@nowhere)
+      assert :src@nowhere in Scope.occupancy(scope, :rg2a)
+      assert :src@nowhere in Scope.occupancy(scope, :rg2b)
 
-      assert :ok = Scope.vacant(scope, :rg2, :"src@nowhere")
-      refute :"src@nowhere" in Scope.occupancy(scope, :rg2)
+      assert :ok = Scope.vacant_batch(scope, [:rg2a, :rg2b], :src@nowhere)
+      refute :src@nowhere in Scope.occupancy(scope, :rg2a)
+      refute :src@nowhere in Scope.occupancy(scope, :rg2b)
+    end
+
+    test "vacant_batch/3 only deletes rows for the given source", %{scope: scope} do
+      :ok = Scope.occupied(scope, :rg3, :src_a@nowhere)
+      :ok = Scope.occupied(scope, :rg3, :src_b@nowhere)
+
+      assert :ok = Scope.vacant_batch(scope, [:rg3], :src_a@nowhere)
+      assert Scope.occupancy(scope, :rg3) == [:src_b@nowhere]
     end
 
     test "receive_node_state/3 replaces all rows for a source", %{scope: scope} do
       # Seed something the snapshot should clear.
-      :ok = Scope.occupied(scope, :stale_g, :"src@nowhere")
+      :ok = Scope.occupied(scope, :stale_g, :src@nowhere)
 
-      assert :ok = Scope.receive_node_state(scope, :"src@nowhere", [:fresh_a, :fresh_b])
+      assert :ok = Scope.receive_node_state(scope, :src@nowhere, [:fresh_a, :fresh_b])
 
-      refute :"src@nowhere" in Scope.occupancy(scope, :stale_g)
-      assert :"src@nowhere" in Scope.occupancy(scope, :fresh_a)
-      assert :"src@nowhere" in Scope.occupancy(scope, :fresh_b)
+      refute :src@nowhere in Scope.occupancy(scope, :stale_g)
+      assert :src@nowhere in Scope.occupancy(scope, :fresh_a)
+      assert :src@nowhere in Scope.occupancy(scope, :fresh_b)
     end
 
     test "writes from different sources don't interfere", %{scope: scope} do
-      :ok = Scope.occupied(scope, :shared, :"src_a@nowhere")
-      :ok = Scope.occupied(scope, :shared, :"src_b@nowhere")
+      :ok = Scope.occupied(scope, :shared, :src_a@nowhere)
+      :ok = Scope.occupied(scope, :shared, :src_b@nowhere)
 
       assert Enum.sort(Scope.occupancy(scope, :shared)) ==
-               [:"src_a@nowhere", :"src_b@nowhere"]
+               [:src_a@nowhere, :src_b@nowhere]
 
-      :ok = Scope.vacant(scope, :shared, :"src_a@nowhere")
-      assert Scope.occupancy(scope, :shared) == [:"src_b@nowhere"]
+      :ok = Scope.vacant_batch(scope, [:shared], :src_a@nowhere)
+      assert Scope.occupancy(scope, :shared) == [:src_b@nowhere]
     end
 
     test "Scope mailbox is unaffected by remote-entry writes", %{scope: scope} do
@@ -171,7 +248,7 @@ defmodule Forum.MusterTest do
       # :status responds promptly.
       tasks =
         for i <- 1..200 do
-          Task.async(fn -> Scope.occupied(scope, :"hot_#{i}", :"src@nowhere") end)
+          Task.async(fn -> Scope.occupied(scope, :"hot_#{i}", :src@nowhere) end)
         end
 
       Task.await_many(tasks, 5_000)
@@ -305,8 +382,7 @@ defmodule Forum.MusterTest do
 
       call_count =
         Enum.count(events, fn
-          {:adapter_event,
-           {:call, _, _, Forum.Muster.Scope, :occupied, [_scope, ^g, _]}} ->
+          {:adapter_event, {:call, _, _, Forum.Muster.Scope, :occupied, [_scope, ^g, _]}} ->
             true
 
           _ ->
@@ -406,7 +482,7 @@ defmodule Forum.MusterTest do
       refute Enum.any?(events, &match?({:adapter_event, {:call, _, _, _, _, _}}, &1))
     end
 
-    test "leave then wait past cooldown fires vacant RPC",
+    test "leave then wait past cooldown queues a vacancy, flushed as a batch RPC",
          %{scope: scope, remote_group: g} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
@@ -414,10 +490,88 @@ defmodule Forum.MusterTest do
       _ = drain_adapter_events()
       assert :ok = Muster.leave(scope, g, pid)
 
-      # Cooldown is 100ms; wait past it.
+      # After cooldown the group is queued — no RPC has been sent yet.
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
+
+      # The flush sends one batched vacant RPC to the designated.
+      trigger_flush(scope)
+
       assert_receive {:adapter_event,
-                      {:call, ^scope, @fake_node, Forum.Muster.Scope, :vacant, [^scope, ^g, _]}},
+                      {:call, ^scope, @fake_node, Forum.Muster.Scope, :vacant_batch,
+                       [^scope, groups, src]}},
                      1_000
+
+      assert g in groups
+      assert src == node()
+    end
+
+    test "a failed vacant batch re-queues the group for the next flush",
+         %{scope: scope, remote_group: g} do
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+      assert :ok = Muster.leave(scope, g, pid)
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
+
+      # Fail the batch: the group must return to :vacant_queued (the retry).
+      RecordingAdapter.configure(scope, call_response: {:error, :noconnection})
+      _ = drain_adapter_events()
+      trigger_flush(scope)
+
+      assert_receive {:adapter_event,
+                      {:call, ^scope, @fake_node, Forum.Muster.Scope, :vacant_batch,
+                       [^scope, _, _]}},
+                     1_000
+
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
+
+      # Now let it succeed: the group is dropped from the state machine.
+      RecordingAdapter.configure(scope, call_response: :ok)
+      _ = drain_adapter_events()
+      trigger_flush(scope)
+
+      assert_receive {:adapter_event,
+                      {:call, ^scope, @fake_node, Forum.Muster.Scope, :vacant_batch,
+                       [^scope, _, _]}},
+                     1_000
+
+      assert nil == wait_for_group_state(scope, g, &is_nil/1)
+    end
+
+    test "vacancies to the same designated flush as a single batch", %{scope: scope} do
+      [g1, g2] = groups_for_designated(scope, @fake_node, 2)
+
+      p1 = spawn_link(fn -> Process.sleep(:infinity) end)
+      p2 = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g1, p1)
+      assert :ok = Muster.join(scope, g2, p2)
+      assert :ok = Muster.leave(scope, g1, p1)
+      assert :ok = Muster.leave(scope, g2, p2)
+
+      assert :vacant_queued = wait_for_group_state(scope, g1, :vacant_queued)
+      assert :vacant_queued = wait_for_group_state(scope, g2, :vacant_queued)
+
+      _ = drain_adapter_events()
+      trigger_flush(scope)
+
+      assert_receive {:adapter_event,
+                      {:call, ^scope, @fake_node, Forum.Muster.Scope, :vacant_batch,
+                       [^scope, groups, _]}},
+                     1_000
+
+      assert g1 in groups
+      assert g2 in groups
+
+      # The single assert_receive above consumed the one batch call; no others.
+      remaining =
+        Enum.count(
+          drain_adapter_events(),
+          &match?(
+            {:adapter_event, {:call, _, @fake_node, Forum.Muster.Scope, :vacant_batch, _}},
+            &1
+          )
+        )
+
+      assert remaining == 0
     end
   end
 
@@ -493,8 +647,7 @@ defmodule Forum.MusterTest do
       assert g in groups
     end
 
-    test ":vacant_pending groups are NOT announced on rebalance", %{scope: scope} do
-      # Force a group into :vacant_pending by holding the vacant RPC.
+    test ":vacant_queued groups are NOT announced on rebalance", %{scope: scope} do
       inject_fake_remote(scope)
       g = group_for_designated(scope, @fake_node)
 
@@ -502,7 +655,31 @@ defmodule Forum.MusterTest do
       assert :ok = Muster.join(scope, g, pid)
       assert :ok = Muster.leave(scope, g, pid)
 
-      # Hold the vacant RPC so the state stays :vacant_pending.
+      # After cooldown the group sits in :vacant_queued (the flush interval is
+      # long; we never flush it here). We don't hold the group, so it must not
+      # be announced via :receive_node_state.
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
+      _ = drain_adapter_events()
+
+      trigger_rebalance(scope, [node(), :fake2@nowhere])
+
+      Process.sleep(100)
+      refute announce_for_group?(drain_adapter_events(), g)
+    end
+
+    test ":vacant_flushing groups are NOT announced on rebalance", %{scope: scope} do
+      inject_fake_remote(scope)
+      g = group_for_designated(scope, @fake_node)
+
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      assert :ok = Muster.join(scope, g, pid)
+      assert :ok = Muster.leave(scope, g, pid)
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
+
+      # Hold the batch RPC so the group stays :vacant_flushing across the
+      # rebalance. (g is the only group and is excluded from the announce-set,
+      # so the rebalance itself issues no :receive_node_state calls — the held
+      # response only stalls the vacant batch worker.)
       RecordingAdapter.configure(scope,
         call_response:
           {:fn,
@@ -512,30 +689,20 @@ defmodule Forum.MusterTest do
            end}
       )
 
-      # Wait past cooldown so vacancy_expired transitions to :vacant_pending.
-      Process.sleep(80)
+      trigger_flush(scope)
+
+      assert {:vacant_flushing, _} =
+               wait_for_group_state(scope, g, &match?({:vacant_flushing, _}, &1))
+
       _ = drain_adapter_events()
 
-      # Trigger rebalance: in this case we keep the same member list but with
-      # a different fake remote name, forcing a re-run.
       trigger_rebalance(scope, [node(), :fake2@nowhere])
 
-      # Drain any events for ~100ms. We should NOT see a :receive_node_state
-      # for g (because :vacant_pending was excluded).
       Process.sleep(100)
-      events = drain_adapter_events()
+      refute announce_for_group?(drain_adapter_events(), g)
 
-      announce_for_g =
-        Enum.any?(events, fn
-          {:adapter_event,
-           {:call, _, _, Forum.Muster.Scope, :receive_node_state, [_scope, _src, groups]}} ->
-            g in groups
-
-          _ ->
-            false
-        end)
-
-      refute announce_for_g
+      # The in-flight batch was normalized back to :vacant_queued for a later flush.
+      assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
     end
 
     # rpc_timeout sets the inner Task.await bound during parallel rebalance
@@ -577,7 +744,9 @@ defmodule Forum.MusterTest do
       )
 
       task =
-        Task.async(fn -> Muster.join(scope, g, spawn_link(fn -> Process.sleep(:infinity) end)) end)
+        Task.async(fn ->
+          Muster.join(scope, g, spawn_link(fn -> Process.sleep(:infinity) end))
+        end)
 
       assert_receive {:rpc_held, ^ref}, 1_000
 
@@ -593,7 +762,8 @@ defmodule Forum.MusterTest do
       received_announce =
         receive_announce_for(:third@nowhere, g, 1_000)
 
-      assert received_announce, "expected :receive_node_state to :third@nowhere with #{inspect(g)}"
+      assert received_announce,
+             "expected :receive_node_state to :third@nowhere with #{inspect(g)}"
     end
 
     defp find_group_flipping_designation(members_old, old_dest, members_new, new_dest) do

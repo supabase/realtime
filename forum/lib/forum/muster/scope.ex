@@ -10,12 +10,17 @@ defmodule Forum.Muster.Scope do
   #   * Designated-role occupancy table — when this node is designated
   #     for a group, the set of source nodes that hold it.
   #   * Cooldown bookkeeping for the "recently vacant" suppression.
+  #   * A queue of vacated groups (group_state :vacant_queued) flushed
+  #     periodically in per-designated batches. A failed batch re-queues its
+  #     groups, so the flush doubles as a self-draining retry that keeps the
+  #     designated's occupancy table from accumulating stale entries.
   use GenServer
   require Logger
 
   alias ExHashRing.Ring
 
   @default_vacancy_cooldown_ms 30_000
+  @default_vacant_flush_interval_ms 5_000
   @default_rpc_timeout_ms 5_000
   @default_ring_replicas 128
   @ring_depth 2
@@ -25,13 +30,15 @@ defmodule Forum.Muster.Scope do
     @type group_state ::
             :occupied
             | :cooldown
+            | :vacant_queued
             | {:occupied_pending, [GenServer.from()]}
-            | {:vacant_pending, [GenServer.from()]}
+            | {:vacant_flushing, [GenServer.from()]}
 
     @type t :: %__MODULE__{
             scope: atom,
             message_module: module,
             vacancy_cooldown_ms: non_neg_integer,
+            vacant_flush_interval_ms: pos_integer,
             rpc_timeout_ms: timeout,
             recently_vacant_table: atom,
             occupancy_table: atom,
@@ -45,6 +52,7 @@ defmodule Forum.Muster.Scope do
       :scope,
       :message_module,
       :vacancy_cooldown_ms,
+      :vacant_flush_interval_ms,
       :rpc_timeout_ms,
       :recently_vacant_table,
       :occupancy_table,
@@ -75,7 +83,7 @@ defmodule Forum.Muster.Scope do
   # concurrent updates from many source nodes in parallel. Correctness is
   # preserved because each occupancy key is {group, source_node}: different
   # sources own disjoint keys, and the source's own Scope serializes
-  # :occupied/:vacant per group.
+  # :occupied vs. :vacant_batch per group.
 
   @doc "Remote: source_node tells us it now holds local members of `group`."
   @spec occupied(atom, Forum.group(), node) :: :ok
@@ -84,10 +92,11 @@ defmodule Forum.Muster.Scope do
     :ok
   end
 
-  @doc "Remote: source_node tells us its last local member of `group` left."
-  @spec vacant(atom, Forum.group(), node) :: :ok
-  def vacant(scope, group, source_node) do
-    :ets.delete(occupancy_table_name(scope), {group, source_node})
+  @doc "Remote: source_node tells us its last local members of `groups` left."
+  @spec vacant_batch(atom, [Forum.group()], node) :: :ok
+  def vacant_batch(scope, groups, source_node) do
+    table = occupancy_table_name(scope)
+    Enum.each(groups, fn group -> :ets.delete(table, {group, source_node}) end)
     :ok
   end
 
@@ -113,12 +122,21 @@ defmodule Forum.Muster.Scope do
   @impl true
   def init([scope, opts]) do
     vacancy_cooldown_ms = Keyword.get(opts, :vacancy_cooldown_ms, @default_vacancy_cooldown_ms)
+
+    vacant_flush_interval_ms =
+      Keyword.get(opts, :vacant_flush_interval_ms, @default_vacant_flush_interval_ms)
+
     rpc_timeout_ms = Keyword.get(opts, :rpc_timeout_ms, @default_rpc_timeout_ms)
     message_module = Keyword.get(opts, :message_module, Forum.Adapter.ErlDist)
 
     if not (is_integer(vacancy_cooldown_ms) and vacancy_cooldown_ms >= 0) do
       raise ArgumentError,
             "expected :vacancy_cooldown_ms to be a non-negative integer, got: #{inspect(vacancy_cooldown_ms)}"
+    end
+
+    if not (is_integer(vacant_flush_interval_ms) and vacant_flush_interval_ms > 0) do
+      raise ArgumentError,
+            "expected :vacant_flush_interval_ms to be a positive integer, got: #{inspect(vacant_flush_interval_ms)}"
     end
 
     :ok = :net_kernel.monitor_nodes(true)
@@ -132,7 +150,7 @@ defmodule Forum.Muster.Scope do
       ])
 
     # :public so :erpc workers running our remote entry points
-    # (occupied/3, vacant/3, receive_node_state/3) can write directly,
+    # (occupied/3, vacant_batch/3, receive_node_state/3) can write directly,
     # bypassing Scope's mailbox. write_concurrency: true makes those
     # concurrent writes scale across schedulers.
     occupancy_table =
@@ -174,6 +192,7 @@ defmodule Forum.Muster.Scope do
       scope: scope,
       message_module: message_module,
       vacancy_cooldown_ms: vacancy_cooldown_ms,
+      vacant_flush_interval_ms: vacant_flush_interval_ms,
       rpc_timeout_ms: rpc_timeout_ms,
       recently_vacant_table: recently_vacant_table,
       occupancy_table: occupancy_table,
@@ -189,6 +208,7 @@ defmodule Forum.Muster.Scope do
   @impl true
   def handle_continue(:discover, state) do
     state.message_module.broadcast(state.scope, {:muster_discover, self()})
+    schedule_vacant_flush(state)
     {:noreply, state}
   end
 
@@ -204,10 +224,10 @@ defmodule Forum.Muster.Scope do
   ## handle_call
 
   # Local source — Muster.join asking us to claim this group on the designated.
-  # Remote occupancy updates (:occupied, :vacant, :receive_node_state) write
-  # directly to the :public occupancy_table from their :erpc worker — they no
-  # longer bounce through this mailbox. See the "Remote entry points" section
-  # above.
+  # Remote occupancy updates (:occupied, :vacant_batch, :receive_node_state)
+  # write directly to the :public occupancy_table from their :erpc worker —
+  # they no longer bounce through this mailbox. See the "Remote entry points"
+  # section above.
   @impl true
   def handle_call({:claim, group}, from, state) do
     handle_claim(group, from, state)
@@ -276,23 +296,27 @@ defmodule Forum.Muster.Scope do
     handle_vacancy_expired(group, state)
   end
 
-  # Worker reported back the result of a claim/vacant RPC.
+  # Worker reported back the result of a claim (:occupied) RPC.
   #
   # The worker process is spawned via `spawn_opt(fn -> exit({:rpc_result, r}) end,
-  # [{:monitor, [{:tag, {:rpc_done, op, group}}]}])`. Whatever termination path the
+  # [{:monitor, [{:tag, {:occupied_done, group}}]}])`. Whatever termination path the
   # worker takes — normal exit with the result, raise, hard kill, OOM — we get
   # exactly one tagged DOWN with the exit reason.
-  def handle_info({{:rpc_done, op, group}, _ref, :process, _pid, exit_reason}, state) do
-    result =
-      case exit_reason do
-        {:rpc_result, r} -> r
-        :noproc -> {:error, :worker_noproc}
-        other -> {:error, {:worker_exit, other}}
-      end
-
-    handle_rpc_done(op, group, result, state)
+  def handle_info({{:occupied_done, group}, _ref, :process, _pid, exit_reason}, state) do
+    handle_occupied_done(group, worker_result(exit_reason), state)
   end
 
+  # Worker reported back the result of a batched :vacant flush to one designated.
+  def handle_info({{:vacant_batch_done, groups}, _ref, :process, _pid, exit_reason}, state) do
+    {:noreply, handle_vacant_batch_done(groups, worker_result(exit_reason), state)}
+  end
+
+  # Periodic flush of queued vacancies.
+  def handle_info(:flush_vacant, state) do
+    state = flush_vacant(state)
+    schedule_vacant_flush(state)
+    {:noreply, state}
+  end
 
   # Test-only — drives the rebalance path with a synthetic members list.
   # Locally-spawned pids can't masquerade as remote peers (`node/1` returns
@@ -339,8 +363,23 @@ defmodule Forum.Muster.Scope do
       {:occupied_pending, waiters} ->
         {:noreply, put_group_state(state, group, {:occupied_pending, [from | waiters]})}
 
-      {:vacant_pending, waiters} ->
-        {:noreply, put_group_state(state, group, {:vacant_pending, [from | waiters]})}
+      :vacant_queued ->
+        # Queued for a vacant flush but nothing is in flight yet. Reclaim now,
+        # with no risk of racing a vacant RPC against this :occupied.
+        designated_node = designated_from_state(state, group)
+
+        if designated_node == node() do
+          :ets.insert(state.occupancy_table, {{group, node()}})
+          {:reply, :ok, put_group_state(state, group, :occupied)}
+        else
+          dispatch_rpc(:occupied, group, designated_node, state)
+          {:noreply, put_group_state(state, group, {:occupied_pending, [from]})}
+        end
+
+      {:vacant_flushing, waiters} ->
+        # A batch vacant RPC covering this group is in flight. Park the caller;
+        # handle_vacant_batch_done re-claims the group once the batch settles.
+        {:noreply, put_group_state(state, group, {:vacant_flushing, [from | waiters]})}
     end
   end
 
@@ -380,15 +419,10 @@ defmodule Forum.Muster.Scope do
           # Defensive — a claim should have moved us out of :cooldown already.
           {:noreply, put_group_state(state, group, :occupied)}
         else
-          designated_node = designated_from_state(state, group)
-
-          if designated_node == node() do
-            :ets.delete(state.occupancy_table, {group, node()})
-            {:noreply, delete_group_state(state, group)}
-          else
-            dispatch_rpc(:vacant, group, designated_node, state)
-            {:noreply, put_group_state(state, group, {:vacant_pending, []})}
-          end
+          # Cooldown elapsed and still empty. Queue the vacancy; the periodic
+          # flush groups all queued vacancies by current designated, sends one
+          # batched RPC per designated, and re-queues any that fail.
+          {:noreply, put_group_state(state, group, :vacant_queued)}
         end
 
       _ ->
@@ -396,7 +430,7 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  defp handle_rpc_done(:occupied, group, result, state) do
+  defp handle_occupied_done(group, result, state) do
     case Map.get(state.group_states, group) do
       {:occupied_pending, waiters} ->
         case result do
@@ -415,78 +449,131 @@ defmodule Forum.Muster.Scope do
     end
   end
 
-  defp handle_rpc_done(:vacant, group, result, state) do
-    case Map.get(state.group_states, group) do
-      {:vacant_pending, []} ->
-        if match?({:error, _}, result) do
-          Logger.warning(
-            "Muster[#{node()}|#{state.scope}] vacant RPC failed for group=#{inspect(group)}: #{inspect(result)}"
-          )
-        end
+  # Result of one batched :vacant flush. For each group still in
+  # :vacant_flushing: on success drop it; on failure re-queue it so the next
+  # flush retries (this is what drains stale designated entries). If claims
+  # arrived during the batch (waiters present), re-claim the group regardless
+  # of the vacant result — we hold local members again.
+  defp handle_vacant_batch_done(groups, result, state) do
+    success? = not match?({:error, _}, result)
 
-        {:noreply, delete_group_state(state, group)}
+    if not success? do
+      Logger.warning(
+        "Muster[#{node()}|#{state.scope}] vacant batch RPC failed for #{length(groups)} group(s): #{inspect(result)} — re-queuing"
+      )
+    end
 
-      {:vacant_pending, waiters} ->
-        # Claims arrived during the vacant RPC. Whether vacant succeeded or
-        # failed, we now need to re-claim the group on the designated.
-        designated_node = designated_from_state(state, group)
+    Enum.reduce(groups, state, fn group, st ->
+      case Map.get(st.group_states, group) do
+        {:vacant_flushing, []} ->
+          if success?,
+            do: delete_group_state(st, group),
+            else: put_group_state(st, group, :vacant_queued)
 
-        if designated_node == node() do
-          :ets.insert(state.occupancy_table, {{group, node()}})
-          Enum.each(waiters, fn from -> GenServer.reply(from, :ok) end)
-          {:noreply, put_group_state(state, group, :occupied)}
-        else
-          dispatch_rpc(:occupied, group, designated_node, state)
-          {:noreply, put_group_state(state, group, {:occupied_pending, waiters})}
-        end
+        {:vacant_flushing, waiters} ->
+          designated_node = designated_from_state(st, group)
+
+          if designated_node == node() do
+            :ets.insert(st.occupancy_table, {{group, node()}})
+            Enum.each(waiters, fn from -> GenServer.reply(from, :ok) end)
+            put_group_state(st, group, :occupied)
+          else
+            dispatch_rpc(:occupied, group, designated_node, st)
+            put_group_state(st, group, {:occupied_pending, waiters})
+          end
+
+        _ ->
+          # Out-of-band (rebalance moved this group out of :vacant_flushing). Drop.
+          st
+      end
+    end)
+  end
+
+  # Collect every :vacant_queued group, bucket by current designated, and send
+  # one batched RPC per remote designated (self-designated groups are pruned
+  # locally). The queued groups stay in :vacant_queued only until a flush moves
+  # them to :vacant_flushing; a failed batch returns them to :vacant_queued.
+  defp flush_vacant(state) do
+    queued = for {group, :vacant_queued} <- state.group_states, do: group
+
+    case queued do
+      [] ->
+        state
 
       _ ->
-        {:noreply, state}
+        queued
+        |> Enum.group_by(&designated_from_state(state, &1))
+        |> Enum.reduce(state, fn {designated_node, groups}, st ->
+          if designated_node == node() do
+            Enum.each(groups, fn g -> :ets.delete(st.occupancy_table, {g, node()}) end)
+            Enum.reduce(groups, st, fn g, s -> delete_group_state(s, g) end)
+          else
+            dispatch_vacant_batch(groups, designated_node, st)
+            Enum.reduce(groups, st, fn g, s -> put_group_state(s, g, {:vacant_flushing, []}) end)
+          end
+        end)
     end
   end
 
-  defp dispatch_rpc(op, group, designated_node, state) do
+  defp dispatch_rpc(:occupied, group, designated_node, state) do
+    spawn_rpc_worker(
+      state,
+      designated_node,
+      :occupied,
+      [state.scope, group, node()],
+      {:occupied_done, group}
+    )
+  end
+
+  defp dispatch_vacant_batch(groups, designated_node, state) do
+    spawn_rpc_worker(
+      state,
+      designated_node,
+      :vacant_batch,
+      [state.scope, groups, node()],
+      {:vacant_batch_done, groups}
+    )
+  end
+
+  # spawn_opt with monitor + tag gives us:
+  #   (a) atomic spawn+monitor — no race where a fast worker exits before
+  #       we install the monitor (a plain Process.monitor/2 after spawn
+  #       would see :noproc and lose the real exit reason).
+  #   (b) the worker uses its exit reason as the result channel, so any
+  #       termination — clean return, raise, hard kill, OOM — surfaces
+  #       as a single tagged DOWN message Scope is guaranteed to receive.
+  #
+  # This mirrors gen_rpc's async_call pattern.
+  defp spawn_rpc_worker(state, designated_node, function, args, tag) do
     message_module = state.message_module
     scope = state.scope
     rpc_timeout = state.rpc_timeout_ms
 
-    function =
-      case op do
-        :occupied -> :occupied
-        :vacant -> :vacant
-      end
-
-    # spawn_opt with monitor + tag gives us:
-    #   (a) atomic spawn+monitor — no race where a fast worker exits before
-    #       we install the monitor (a plain Process.monitor/2 after spawn
-    #       would see :noproc and lose the real exit reason).
-    #   (b) the worker uses its exit reason as the result channel, so any
-    #       termination — clean return, raise, hard kill, OOM — surfaces
-    #       as a single tagged DOWN message Scope is guaranteed to receive.
-    #
-    # This mirrors gen_rpc's async_call pattern.
     {_pid, _ref} =
       :erlang.spawn_opt(
         fn ->
           result =
             try do
-              message_module.call(
-                scope,
-                designated_node,
-                __MODULE__,
-                function,
-                [scope, group, node()],
-                rpc_timeout
-              )
+              message_module.call(scope, designated_node, __MODULE__, function, args, rpc_timeout)
             catch
               kind, reason -> {:error, {kind, reason}}
             end
 
           exit({:rpc_result, result})
         end,
-        [{:monitor, [{:tag, {:rpc_done, op, group}}]}]
+        [{:monitor, [{:tag, tag}]}]
       )
 
+    :ok
+  end
+
+  # Decode a worker's monitor DOWN exit reason into an RPC result.
+  defp worker_result({:rpc_result, r}), do: r
+  defp worker_result(:noproc), do: {:error, :worker_noproc}
+  defp worker_result(other), do: {:error, {:worker_exit, other}}
+
+  defp schedule_vacant_flush(state) do
+    Process.send_after(self(), :flush_vacant, state.vacant_flush_interval_ms)
     :ok
   end
 
@@ -553,10 +640,10 @@ defmodule Forum.Muster.Scope do
     #    member set is safe.
     :persistent_term.put({Forum.Muster, state.scope, :status}, :rebalancing)
 
-    # 2) Normalize in-flight pending states. :vacant_pending [] is dropped
-    #    (we don't hold the group; no need to announce it). :vacant_pending
-    #    with waiters is rewritten to :occupied_pending so the rebalance
-    #    re-announces it to the new designated and settles the waiters.
+    # 2) Normalize in-flight pending states (see normalize_pending_for_rebalance):
+    #    in-flight vacant batches fall back to :vacant_queued (or :occupied_pending
+    #    if claims arrived); plain :vacant_queued is left alone and re-routed by
+    #    the next flush.
     state = normalize_pending_for_rebalance(state)
 
     # 3) Atomically replace the node set; this bumps the ring's generation.
@@ -644,8 +731,8 @@ defmodule Forum.Muster.Scope do
     #    rebalance just informed the new designated via :receive_node_state,
     #    so the parked callers can be unblocked with :ok. Their original
     #    workers (targeting the old designated) may still complete later;
-    #    the resulting :rpc_done lands in handle_rpc_done's _other clause
-    #    and is dropped because group_states[group] will be :occupied by
+    #    the resulting :occupied_done lands in handle_occupied_done's _other
+    #    clause and is dropped because group_states[group] will be :occupied by
     #    then.
     state = settle_pending_after_rebalance(state, MapSet.new(groups_to_reannounce))
 
@@ -679,18 +766,28 @@ defmodule Forum.Muster.Scope do
     |> Enum.flat_map(&Forum.Partition.groups/1)
   end
 
-  # Run at the start of rebalance. :vacant_pending [] entries are dropped
-  # outright — we don't hold the group anymore and the new designated does
-  # not need to know about it. :vacant_pending with waiters means a claim
-  # arrived while a vacant RPC was in flight; we rewrite to :occupied_pending
-  # so the rebalance handles announcing + settling like any other pending
-  # claim.
+  # Run at the start of rebalance.
+  #
+  # :vacant_queued entries are kept as-is (handled by the catch-all): we don't
+  # hold the group, so it is not announced via :receive_node_state, but the
+  # next flush after the ring updates will send the vacant to the group's
+  # *current* designated — which drains any stale entry the old designated
+  # still holds.
+  #
+  # {:vacant_flushing, []} (a batch RPC in flight, no waiters) is rewritten to
+  # :vacant_queued so the next flush re-sends to the post-rebalance designated;
+  # the in-flight worker's result lands in handle_vacant_batch_done's catch-all
+  # and is dropped.
+  #
+  # {:vacant_flushing, waiters} (a claim arrived while the batch was in flight)
+  # is rewritten to :occupied_pending so the rebalance announces + settles it
+  # like any other pending claim — we hold local members again.
   defp normalize_pending_for_rebalance(state) do
     Enum.reduce(state.group_states, state, fn
-      {group, {:vacant_pending, []}}, st ->
-        delete_group_state(st, group)
+      {group, {:vacant_flushing, []}}, st ->
+        put_group_state(st, group, :vacant_queued)
 
-      {group, {:vacant_pending, waiters}}, st ->
+      {group, {:vacant_flushing, waiters}}, st ->
         put_group_state(st, group, {:occupied_pending, waiters})
 
       _, st ->
