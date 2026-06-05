@@ -8,6 +8,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   use Realtime.Logs
 
   @idle_multiplier 5
+  @max_retries 6
 
   # Column order returned by realtime.list_changes/4 (see Replications.list_changes/5
   # and the SQL function in
@@ -46,6 +47,8 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
     RateCounter.new(rate_counter_args)
 
+    start_time = Realtime.Telemetry.start([:realtime, :replication, :poller], %{tenant: tenant_id})
+
     state = %{
       backoff: Backoff.new(backoff_min: 100, backoff_max: 5_000, backoff_type: :rand_exp),
       max_changes: extension["poll_max_changes"],
@@ -58,12 +61,26 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
       slot_name: extension["slot_name"] <> slot_name_suffix(),
       tenant_id: tenant_id,
       rate_counter_args: rate_counter_args,
-      subscribers_nodes_table: args["subscribers_nodes_table"]
+      subscribers_nodes_table: args["subscribers_nodes_table"],
+      start_time: start_time
     }
 
     {:ok, _} = Registry.register(__MODULE__.Registry, tenant_id, %{})
     {:ok, state, {:continue, {:connect, tenant}}}
   end
+
+  @impl true
+  def terminate(reason, %{start_time: start_time, tenant_id: tenant_id}) do
+    if reason in [:normal, :shutdown] or match?({:shutdown, _}, reason) do
+      Realtime.Telemetry.stop([:realtime, :replication, :poller], start_time, %{tenant: tenant_id, reason: reason})
+    else
+      Realtime.Telemetry.exception([:realtime, :replication, :poller], start_time, :exit, reason, [], %{
+        tenant: tenant_id
+      })
+    end
+  end
+
+  def terminate(_reason, _state), do: :ok
 
   @impl true
   def handle_continue({:connect, tenant}, state) do
@@ -78,7 +95,7 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
   end
 
   def handle_continue(:prepare, state) do
-    {:noreply, prepare_replication(state)}
+    prepare_replication(state)
   end
 
   @impl true
@@ -125,12 +142,17 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
               Process.send_after(self(), :poll, poll_interval_ms * @idle_multiplier)
           end
 
-        {:noreply, %{state | backoff: backoff, poll_ref: pool_ref}}
+        {:noreply, %{state | backoff: backoff, poll_ref: pool_ref, retry_count: 0}}
 
-      {:error, %Postgrex.Error{postgres: %{code: :object_in_use, message: msg}}} ->
+      {:error, %Postgrex.Error{postgres: %{code: :object_in_use, message: msg}} = slot_error} ->
         log_error("ReplicationSlotBeingUsed", msg)
         [_, db_pid] = Regex.run(~r/PID\s(\d*)$/, msg)
         db_pid = String.to_integer(db_pid)
+
+        Realtime.Telemetry.execute([:realtime, :replication, :poller, :query, :exception], %{}, %{
+          tenant: tenant_id,
+          reason: :object_in_use
+        })
 
         case Replications.get_pg_stat_activity_diff(conn, db_pid) do
           {:ok, diff} ->
@@ -148,25 +170,24 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
           end
         end
 
-        {timeout, backoff} = Backoff.backoff(backoff)
-        retry_ref = Process.send_after(self(), :retry, timeout)
-
-        {:noreply, %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
+        retry_or_stop(state, slot_error)
 
       {:error, reason} ->
         log_error("PoolingReplicationError", reason)
 
-        {timeout, backoff} = Backoff.backoff(backoff)
-        retry_ref = Process.send_after(self(), :retry, timeout)
+        Realtime.Telemetry.execute([:realtime, :replication, :poller, :query, :exception], %{}, %{
+          tenant: tenant_id,
+          reason: reason
+        })
 
-        {:noreply, %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
+        retry_or_stop(state, reason)
     end
   end
 
   @impl true
   def handle_info(:retry, %{retry_ref: retry_ref} = state) do
     cancel_timer(retry_ref)
-    {:noreply, prepare_replication(state)}
+    prepare_replication(state)
   end
 
   def slot_name_suffix do
@@ -180,19 +201,37 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
   defp convert_errors(_), do: nil
 
-  defp prepare_replication(%{backoff: backoff, conn: conn, slot_name: slot_name, retry_count: retry_count} = state) do
+  defp prepare_replication(%{conn: conn, slot_name: slot_name, tenant_id: tenant_id} = state) do
     case Replications.prepare_replication(conn, slot_name) do
       {:ok, _} ->
         send(self(), :poll)
-        state
+        {:noreply, state}
 
       {:error, error} ->
         log_error("PoolingReplicationPreparationError", error)
 
-        {timeout, backoff} = Backoff.backoff(backoff)
-        retry_ref = Process.send_after(self(), :retry, timeout)
-        %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}
+        Realtime.Telemetry.execute([:realtime, :replication, :poller, :prepare, :exception], %{}, %{
+          tenant: tenant_id,
+          reason: error
+        })
+
+        retry_or_stop(state, error)
     end
+  end
+
+  # Schedules another :retry with exponential backoff, or stops the poller once
+  # @max_retries consecutive failures have been reached. Stopping with a
+  # :shutdown reason means the :transient child is NOT restarted (same as the
+  # DB-connection-failure path), so the tenant's CDC workers wind down cleanly.
+  defp retry_or_stop(%{retry_count: retry_count} = state, reason) when retry_count >= @max_retries do
+    log_error("ReplicationPollerMaxRetriesReached", reason)
+    {:stop, {:shutdown, :max_retries_reached}, state}
+  end
+
+  defp retry_or_stop(%{backoff: backoff, retry_count: retry_count} = state, _reason) do
+    {timeout, backoff} = Backoff.backoff(backoff)
+    retry_ref = Process.send_after(self(), :retry, timeout)
+    {:noreply, %{state | backoff: backoff, retry_ref: retry_ref, retry_count: retry_count + 1}}
   end
 
   defp record_list_changes_telemetry(time, tenant_id) do
@@ -230,6 +269,14 @@ defmodule Extensions.PostgresCdcRls.ReplicationPoller do
 
     case RateCounter.get(rate_counter_args) do
       {:ok, %{limit: %{triggered: true}}} ->
+        if real_rows != [] do
+          Realtime.Telemetry.execute(
+            [:realtime, :replication, :poller, :changes, :skip],
+            %{count: length(real_rows)},
+            %{tenant: tenant_id, reason: :rate_limited}
+          )
+        end
+
         :ok
 
       _ ->

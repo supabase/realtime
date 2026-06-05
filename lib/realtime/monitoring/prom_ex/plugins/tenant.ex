@@ -17,11 +17,11 @@ defmodule Realtime.PromEx.Plugins.Tenant do
 
   @impl true
   def event_metrics(_opts) do
-    # Event metrics definitions
     [
       channel_events(),
+      payload_size_metrics(),
       replication_metrics(),
-      payload_size_metrics()
+      subscription_metrics()
     ]
   end
 
@@ -112,6 +112,49 @@ defmodule Realtime.PromEx.Plugins.Tenant do
           tags: [:tenant],
           unit: {:microsecond, :millisecond},
           reporter_options: [peep_bucket_calculator: Replication.Buckets]
+        ),
+        counter(
+          [:realtime, :replication, :poller, :stop, :total],
+          event_name: [:realtime, :replication, :poller, :stop],
+          description:
+            "How many times the tenant's Postgres Changes poller terminated, split by reason. reason=max_retries_reached is the give-up: it is not restarted, so the tenant's subscriptions stop broadcasting until it reconnects.",
+          tags: [:tenant, :reason],
+          tag_values: &poller_stop_tags/1
+        ),
+        counter(
+          [:realtime, :replication, :poller, :exception, :total],
+          event_name: [:realtime, :replication, :poller, :exception],
+          description: "How many times the tenant's Postgres Changes poller crashed (terminated abnormally).",
+          tags: [:tenant]
+        ),
+        counter(
+          [:realtime, :replication, :poller, :query, :exception, :total],
+          event_name: [:realtime, :replication, :poller, :query, :exception],
+          description:
+            "How many of the tenant's polls failed reading changes from the replication slot, split by reason. reason=object_in_use means another backend held the slot. Sustained values come before its poller gives up.",
+          tags: [:tenant, :reason],
+          tag_values: &poller_query_exception_tags/1
+        ),
+        counter(
+          [:realtime, :replication, :poller, :prepare, :exception, :total],
+          event_name: [:realtime, :replication, :poller, :prepare, :exception],
+          description: "How many of the tenant's attempts to prepare the replication slot for polling failed.",
+          tags: [:tenant]
+        ),
+        sum(
+          [:realtime, :replication, :poller, :changes, :dispatch],
+          event_name: [:realtime, :replication, :poller, :changes, :dispatch],
+          measurement: :count,
+          description: "Number of Postgres Changes rows the poller broadcast to subscribers.",
+          tags: [:tenant]
+        ),
+        sum(
+          [:realtime, :replication, :poller, :changes, :skip],
+          event_name: [:realtime, :replication, :poller, :changes, :skip],
+          measurement: :count,
+          description:
+            "Number of Postgres Changes rows skipped without broadcasting, tagged by reason. reason=rate_limited means the tenant's db events-per-second limit was triggered.",
+          tags: [:tenant, :reason]
         )
       ]
     )
@@ -225,5 +268,53 @@ defmodule Realtime.PromEx.Plugins.Tenant do
         )
       ]
     )
+  end
+
+  defp subscription_metrics do
+    Event.build(
+      :realtime_tenant_subscription_event_metrics,
+      [
+        last_value(
+          [:realtime, :subscriptions, :manager, :subscribers],
+          event_name: [:realtime, :subscriptions, :manager, :subscribers],
+          measurement: :count,
+          description:
+            "Number of Postgres Changes subscribers tracked for the tenant across the cluster. A drop to zero while clients are connected points at a pool that lost its subscriptions.",
+          tags: [:tenant]
+        ),
+        sum(
+          [:realtime, :subscriptions, :manager, :dead_pid],
+          event_name: [:realtime, :subscriptions, :manager, :dead_pid],
+          measurement: :quantity,
+          description:
+            "Number of not-alive subscriber pids the manager handled, tagged by reason. reason=phantom is a dead pid still holding a subscription that was reaped (subscription churn or leak); reason=not_found is a dead pid already gone from the pool (benign race).",
+          tags: [:tenant, :reason]
+        )
+      ]
+    )
+  end
+
+  defp poller_stop_tags(metadata) do
+    reason =
+      case metadata.reason do
+        {:shutdown, :max_retries_reached} -> :max_retries_reached
+        {:shutdown, _} -> :shutdown
+        :shutdown -> :shutdown
+        :normal -> :normal
+        _ -> :other
+      end
+
+    %{tenant: metadata.tenant, reason: reason}
+  end
+
+  defp poller_query_exception_tags(metadata) do
+    reason =
+      case metadata.reason do
+        :object_in_use -> :object_in_use
+        %Postgrex.Error{postgres: %{code: code}} -> code
+        _ -> :other
+      end
+
+    %{tenant: metadata.tenant, reason: reason}
   end
 end

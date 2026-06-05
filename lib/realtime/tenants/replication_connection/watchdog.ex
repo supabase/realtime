@@ -12,7 +12,6 @@ defmodule Realtime.Tenants.ReplicationConnection.Watchdog do
   use GenServer
   use Realtime.Logs
   alias Realtime.Database
-  alias Realtime.FeatureFlags
   alias Realtime.Tenants.Connect
   alias Realtime.Tenants.ReplicationConnection
 
@@ -94,13 +93,9 @@ defmodule Realtime.Tenants.ReplicationConnection.Watchdog do
   defp check_slot_lag(%{replication_slot_name: nil}), do: :ok
 
   defp check_slot_lag(%{tenant_id: tenant_id, replication_slot_name: slot_name}) do
-    if FeatureFlags.enabled?("replication_slot_lag_check", tenant_id) do
-      case Connect.get_status(tenant_id) do
-        {:ok, conn} -> Database.check_replication_slot_lag(conn, slot_name)
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      :ok
+    case Connect.get_status(tenant_id) do
+      {:ok, conn} -> Database.check_replication_slot_lag(conn, slot_name)
+      {:error, reason} -> {:error, reason}
     end
   end
 end

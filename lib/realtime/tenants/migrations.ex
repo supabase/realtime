@@ -88,6 +88,9 @@ defmodule Realtime.Tenants.Migrations do
     ListChangesWithSlotCount,
     SubscriptionCheckFiltersUsePgAttribute,
     AddBinaryPayloadToMessages,
+    AddSelectColumnsToSubscriptions,
+    Wal2jsonEscapeSpecialChars,
+    AddSendBinaryFunction,
     SetupSupabaseRealtimeAdmin
   }
 
@@ -163,7 +166,10 @@ defmodule Realtime.Tenants.Migrations do
     {20_260_326_120_000, ListChangesWithSlotCount},
     {20_260_506_120_000, SubscriptionCheckFiltersUsePgAttribute},
     {20_260_514_120_000, AddBinaryPayloadToMessages},
-    {20_260_515_120_000, SetupSupabaseRealtimeAdmin}
+    {20_260_527_120_000, AddSelectColumnsToSubscriptions},
+    {20_260_528_120_000, Wal2jsonEscapeSpecialChars},
+    {20_260_603_120_000, AddSendBinaryFunction},
+    {20_260_604_120_000, SetupSupabaseRealtimeAdmin}
   ]
 
   defstruct [:tenant_external_id, :settings, migrations_ran: 0]
@@ -282,8 +288,24 @@ defmodule Realtime.Tenants.Migrations do
   defp error_code(_), do: :other
 
   @doc """
-  Create partitions against tenant db connection
+  Create partitions for `realtime.messages` on tenant database.
+
+  Accepts either an existing tenant database connection or a `Tenant`.
   """
+  @spec create_partitions(Tenant.t()) :: :ok | {:error, term()}
+  def create_partitions(%Tenant{} = tenant) do
+    case Database.connect(tenant, "realtime_health_check") do
+      {:ok, conn} ->
+        result = create_partitions(conn)
+        GenServer.stop(conn)
+        result
+
+      {:error, error} ->
+        log_error("PartitionCreationFailed", error)
+        {:error, error}
+    end
+  end
+
   @spec create_partitions(pid()) :: :ok
   def create_partitions(db_conn_pid) do
     Logger.info("Creating partitions for realtime.messages")

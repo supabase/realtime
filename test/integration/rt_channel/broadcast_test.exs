@@ -421,7 +421,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
     end
 
     @tag policies: [:authenticated_read_broadcast_and_presence, :authenticated_write_broadcast_and_presence]
-    test "broadcast event when function 'send' is called with a binary payload", %{
+    test "broadcast event when function 'send_binary' is called", %{
       tenant: tenant,
       topic: topic,
       db_conn: db_conn,
@@ -440,7 +440,7 @@ defmodule Realtime.Integration.RtChannel.BroadcastTest do
 
       Postgrex.query!(
         db_conn,
-        "SELECT realtime.send ($1::bytea, $2::text, $3::text, TRUE::bool);",
+        "SELECT realtime.send_binary($1::bytea, $2::text, $3::text, TRUE::bool);",
         [binary, event, topic]
       )
 

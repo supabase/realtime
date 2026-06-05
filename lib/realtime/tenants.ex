@@ -79,9 +79,10 @@ defmodule Realtime.Tenants do
       nil ->
         {:error, :tenant_not_found}
 
-      {:ok, _health_conn} ->
+      {:ok, health_conn} ->
         connected_cluster = UsersCounter.tenant_users(external_id)
         replication_connected = replication_connected?(external_id)
+        Migrations.create_partitions(health_conn)
 
         {:ok,
          %{
@@ -95,17 +96,22 @@ defmodule Realtime.Tenants do
 
       connected_cluster when is_integer(connected_cluster) ->
         tenant = Cache.get_tenant_by_external_id(external_id)
-        result? = Migrations.run_migrations(tenant)
 
         {:ok,
          %{
-           healthy: result? == :ok || result? == :noop,
+           healthy: provision_tenant(tenant) == :ok,
            db_connected: false,
            replication_connected: false,
            connected_cluster: connected_cluster,
            region: region,
            node: node
          }}
+    end
+  end
+
+  defp provision_tenant(tenant) do
+    with res when res in [:ok, :noop] <- Migrations.run_migrations(tenant) do
+      Migrations.create_partitions(tenant)
     end
   end
 

@@ -2,7 +2,9 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
   use RealtimeWeb.ConnCase, async: false
   import Phoenix.LiveViewTest
 
+  alias Realtime.Api
   alias Realtime.Database
+  alias Realtime.Tenants.Migrations
   alias RealtimeWeb.Dashboard.TenantMigrations
 
   setup do
@@ -69,49 +71,108 @@ defmodule RealtimeWeb.Dashboard.TenantMigrationsTest do
     assert has_element?(view, "h6", "pg-delta plan vs baseline")
   end
 
+  describe "backfill_schema_migrations/1" do
+    test "inserts missing versions and updates tenants.migrations_ran", %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        db_conn,
+        "DELETE FROM realtime.schema_migrations WHERE version > 20211116213934",
+        []
+      )
+
+      {:ok, _} = Api.update_migrations_ran(tenant.external_id, 7)
+
+      assert :ok = TenantMigrations.backfill_schema_migrations(tenant)
+
+      %{rows: [[count]]} =
+        Postgrex.query!(db_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
+
+      total = length(Migrations.migrations())
+      assert count == total
+
+      updated = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
+      assert updated.migrations_ran == total
+    end
+
+    test "running twice keeps the row count and migrations_ran stable", %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      total = length(Migrations.migrations())
+
+      assert :ok = TenantMigrations.backfill_schema_migrations(tenant)
+      assert :ok = TenantMigrations.backfill_schema_migrations(tenant)
+
+      %{rows: [[count]]} =
+        Postgrex.query!(db_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
+
+      assert count == total
+
+      updated = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
+      assert updated.migrations_ran == total
+    end
+  end
+
+  describe "apply_pg_delta/2" do
+    test "runs the sql plan and backfills schema_migrations", %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+
+      Postgrex.query!(
+        db_conn,
+        "DELETE FROM realtime.schema_migrations WHERE version > 20211116213934",
+        []
+      )
+
+      {:ok, _} = Api.update_migrations_ran(tenant.external_id, 7)
+
+      assert :ok = TenantMigrations.apply_pg_delta(tenant, "SELECT 1")
+
+      %{rows: [[count]]} =
+        Postgrex.query!(db_conn, "SELECT count(*)::int FROM realtime.schema_migrations", [])
+
+      total = length(Migrations.migrations())
+      assert count == total
+
+      updated = Api.get_tenant_by_external_id(tenant.external_id, use_replica?: false)
+      assert updated.migrations_ran == total
+    end
+  end
+
   describe "postgres_url/1" do
     test "builds a valid URL for IPv4 hosts" do
-      url =
-        TenantMigrations.postgres_url(%Database{
-          hostname: "db.example.com",
-          port: 5432,
-          database: "postgres",
-          username: "supabase_admin",
-          password: "s3cr3t",
-          socket_options: [:inet],
-          ssl: true
-        })
-
-      assert %URI{
-               scheme: "postgresql",
-               host: "db.example.com",
+      assert TenantMigrations.postgres_url(%Database{
+               hostname: "db.example.com",
                port: 5432,
-               path: "/postgres",
-               userinfo: "supabase_admin:s3cr3t",
-               query: "sslmode=require"
-             } = URI.parse(url)
+               database: "postgres",
+               username: "supabase_admin",
+               password: "s3cr3t",
+               socket_options: [:inet],
+               ssl: true
+             }) == "postgresql://supabase_admin:s3cr3t@db.example.com:5432/postgres?sslmode=require"
     end
 
     test "builds a valid URL for IPv6 hosts" do
-      url =
-        TenantMigrations.postgres_url(%Database{
-          hostname: "2600:1f14:359d:9302:205d:38ca:a017:c7e3",
-          port: 5432,
-          database: "postgres",
-          username: "supabase_admin",
-          password: "s3cr3t",
-          socket_options: [:inet6],
-          ssl: true
-        })
-
-      assert url =~ "@[2600:1f14:359d:9302:205d:38ca:a017:c7e3]:5432/"
-
-      assert %URI{
-               scheme: "postgresql",
-               host: "2600:1f14:359d:9302:205d:38ca:a017:c7e3",
+      assert TenantMigrations.postgres_url(%Database{
+               hostname: "2600:1f14:359d:9302:205d:38ca:a017:c7e3",
                port: 5432,
-               path: "/postgres"
-             } = URI.parse(url)
+               database: "postgres",
+               username: "supabase_admin",
+               password: "s3cr3t",
+               socket_options: [:inet6],
+               ssl: true
+             }) ==
+               "postgresql://supabase_admin:s3cr3t@[2600:1f14:359d:9302:205d:38ca:a017:c7e3]:5432/postgres?sslmode=require"
+    end
+
+    test "builds a valid URL for DNS hostnames resolved over IPv6" do
+      assert TenantMigrations.postgres_url(%Database{
+               hostname: "db.example.com",
+               port: 5432,
+               database: "postgres",
+               username: "supabase_admin",
+               password: "s3cr3t",
+               socket_options: [:inet6],
+               ssl: true
+             }) == "postgresql://supabase_admin:s3cr3t@db.example.com:5432/postgres?sslmode=require"
     end
   end
 

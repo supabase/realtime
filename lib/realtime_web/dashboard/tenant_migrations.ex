@@ -12,6 +12,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   alias Realtime.Api
   alias Realtime.Api.Tenant
   alias Realtime.Database
+  alias Realtime.Tenants.Migrations
 
   @pg_delta_filter ~s"""
   {
@@ -84,18 +85,23 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   end
 
   @impl true
-  def handle_event(
-        "apply_plan",
-        _params,
-        %{
-          assigns: %{
-            tenant: %Tenant{} = tenant,
-            external_id: ref,
-            pg_delta: {:ok, %{status: :changes, sql: sql}}
-          }
-        } = socket
-      ) do
+  def handle_event("apply_plan", _params, socket) do
+    %{tenant: %Tenant{} = tenant, external_id: ref, pg_delta: {:ok, %{status: :changes, sql: sql}}} = socket.assigns
+
     case apply_pg_delta(tenant, sql) do
+      :ok ->
+        {:noreply, push_patch(socket, to: "/admin/dashboard/tenant_migrations?external_id=#{URI.encode(ref)}")}
+
+      {:error, msg} ->
+        {:noreply, assign(socket, error: msg)}
+    end
+  end
+
+  @impl true
+  def handle_event("backfill_migrations", _params, socket) do
+    %{tenant: %Tenant{} = tenant, external_id: ref, pg_delta: {:ok, %{status: :no_changes}}} = socket.assigns
+
+    case backfill_schema_migrations(tenant) do
       :ok ->
         {:noreply, push_patch(socket, to: "/admin/dashboard/tenant_migrations?external_id=#{URI.encode(ref)}")}
 
@@ -136,6 +142,8 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
 
         <h6 class="mt-4">pg-delta plan vs baseline</h6>
         <%= pg_delta_plan(@pg_delta) %>
+
+        <%= backfill_section(@pg_delta, @schema_migrations) %>
       <% end %>
     </div>
     """
@@ -256,6 +264,76 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     """
   end
 
+  defp backfill_section(pg_delta, schema_migrations) do
+    total = length(Migrations.migrations())
+
+    {show, applied} =
+      case {pg_delta, schema_migrations} do
+        {{:ok, %{status: :no_changes}}, {:ok, rows}} ->
+          applied = length(rows)
+          {applied < total, applied}
+
+        _ ->
+          {false, nil}
+      end
+
+    assigns = %{show: show, applied: applied, total: total}
+
+    ~H"""
+    <div :if={@show}>
+      <h6 class="mt-4">Backfill schema_migrations</h6>
+      <div class="alert alert-warning">
+        realtime.schema_migrations has <%= @applied %> of <%= @total %> versions applied and pg-delta reports no drift.
+        Backfill inserts the missing rows and sets tenants.migrations_ran to <%= @total %>.
+      </div>
+      <div class="d-flex justify-content-end mt-3">
+        <button
+          type="button"
+          class="btn btn-primary"
+          phx-click="backfill_migrations"
+          phx-disable-with="Backfilling..."
+          data-confirm={"Insert missing version(s) into realtime.schema_migrations and set tenants.migrations_ran to #{@total}?"}
+        >
+          Backfill schema_migrations
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  @doc false
+  def backfill_schema_migrations(%Tenant{external_id: external_id} = tenant) do
+    versions = Enum.map(Migrations.migrations(), fn {v, _mod} -> v end)
+    total = length(versions)
+
+    with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
+         {:ok, db_conn} <- Database.connect_db(settings),
+         :ok <- insert_versions(db_conn, versions),
+         {:ok, _} <- Api.update_migrations_ran(external_id, total) do
+      :ok
+    else
+      {:error, %{postgres: %{message: message}}} ->
+        log_warning("TenantMigrationsBackfillFailed", message)
+        {:error, "Backfill failed: #{message}"}
+
+      {:error, reason} ->
+        log_warning("TenantMigrationsBackfillFailed", reason)
+        {:error, "Backfill failed: #{inspect(reason)}"}
+    end
+  end
+
+  defp insert_versions(db_conn, versions) do
+    backfill_insert =
+      "INSERT INTO realtime.schema_migrations (version, inserted_at) VALUES ($1, NOW()) ON CONFLICT (version) DO NOTHING"
+
+    Enum.reduce_while(versions, :ok, fn version, _acc ->
+      case Postgrex.query(db_conn, backfill_insert, [version], timeout: @query_timeout) do
+        {:ok, _} -> {:cont, :ok}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
   defp assign_error(socket, ref, msg) do
     assign(socket,
       external_id: ref,
@@ -288,7 +366,12 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
   @doc false
   def postgres_url(%Database{} = db) do
     sslmode = if db.ssl, do: "require", else: "disable"
-    host = if :inet6 in db.socket_options, do: "[#{db.hostname}]", else: db.hostname
+
+    hostname =
+      case :inet.parse_ipv6strict_address(String.to_charlist(db.hostname)) do
+        {:ok, _} -> "[#{db.hostname}]"
+        _ -> db.hostname
+      end
 
     IO.iodata_to_binary([
       "postgresql://",
@@ -296,7 +379,7 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
       ":",
       URI.encode_www_form(db.password),
       "@",
-      host,
+      hostname,
       ":",
       Integer.to_string(db.port),
       "/",
@@ -345,12 +428,17 @@ defmodule RealtimeWeb.Dashboard.TenantMigrations do
     end
   end
 
-  defp apply_pg_delta(%Tenant{} = tenant, sql) do
+  @doc false
+  def apply_pg_delta(%Tenant{external_id: external_id} = tenant, sql) do
     opts = [query_type: :text, timeout: @query_timeout]
+    versions = Enum.map(Migrations.migrations(), fn {v, _mod} -> v end)
+    total = length(versions)
 
     with {:ok, settings} <- Database.from_tenant(tenant, @application_name, :stop),
          {:ok, db_conn} <- Database.connect_db(settings),
-         {:ok, _} <- Postgrex.query(db_conn, sql, [], opts) do
+         {:ok, _} <- Postgrex.query(db_conn, sql, [], opts),
+         :ok <- insert_versions(db_conn, versions),
+         {:ok, _} <- Api.update_migrations_ran(external_id, total) do
       :ok
     else
       {:error, %{postgres: %{message: message}}} ->

@@ -148,6 +148,99 @@ defmodule RealtimeWeb.JwtVerificationTest do
       assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, nil)
     end
 
+    test "rejects token with expired exp encoded as a string" do
+      signer = Joken.Signer.create(@alg, @jwt_secret)
+
+      Mock.freeze()
+      current_time = Mock.current_time()
+      claim_val = to_string(current_time - 60)
+
+      token =
+        Joken.generate_and_sign!(
+          %{"exp" => %Joken.Claim{generate: fn -> claim_val end}},
+          %{},
+          signer
+        )
+
+      assert {:error, [message: ^current_time, claim: "exp", claim_val: ^claim_val]} =
+               JwtVerification.verify(token, @jwt_secret, nil)
+    end
+
+    test "rejects token with future exp encoded as a string" do
+      signer = Joken.Signer.create(@alg, @jwt_secret)
+
+      Mock.freeze()
+      current_time = Mock.current_time()
+      claim_val = to_string(current_time + 1000)
+
+      token =
+        Joken.generate_and_sign!(
+          %{"exp" => %Joken.Claim{generate: fn -> claim_val end}},
+          %{},
+          signer
+        )
+
+      assert {:error, [message: ^current_time, claim: "exp", claim_val: ^claim_val]} =
+               JwtVerification.verify(token, @jwt_secret, nil)
+    end
+
+    test "rejects token with iat encoded as a string" do
+      signer = Joken.Signer.create(@alg, @jwt_secret)
+
+      Mock.freeze()
+      current_time = Mock.current_time()
+      claim_val = to_string(current_time)
+
+      token =
+        Joken.generate_and_sign!(
+          %{
+            "exp" => %Joken.Claim{generate: fn -> current_time + 1000 end},
+            "iat" => %Joken.Claim{generate: fn -> claim_val end}
+          },
+          %{},
+          signer
+        )
+
+      assert {:error, [message: "Invalid token", claim: "iat", claim_val: ^claim_val]} =
+               JwtVerification.verify(token, @jwt_secret, nil)
+    end
+
+    test "accepts token with numeric exp and iat" do
+      signer = Joken.Signer.create(@alg, @jwt_secret)
+
+      Mock.freeze()
+      current_time = Mock.current_time()
+
+      token =
+        Joken.generate_and_sign!(
+          %{
+            "exp" => %Joken.Claim{generate: fn -> current_time + 1000 end},
+            "iat" => %Joken.Claim{generate: fn -> current_time end}
+          },
+          %{},
+          signer
+        )
+
+      assert {:ok, _claims} = JwtVerification.verify(token, @jwt_secret, nil)
+    end
+
+    test "accepts token with exp but without iat" do
+      signer = Joken.Signer.create(@alg, @jwt_secret)
+
+      Mock.freeze()
+      current_time = Mock.current_time()
+
+      token =
+        Joken.generate_and_sign!(
+          %{"exp" => %Joken.Claim{generate: fn -> current_time + 1000 end}},
+          %{},
+          signer
+        )
+
+      assert {:ok, claims} = JwtVerification.verify(token, @jwt_secret, nil)
+      refute Map.has_key?(claims, "iat")
+    end
+
     test "when token claims match expected claims from :jwt_claim_validators config" do
       Application.put_env(:realtime, :jwt_claim_validators, %{
         "iss" => "Tester",

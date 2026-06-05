@@ -507,7 +507,7 @@ defmodule Realtime.Tenants.ConnectTest do
       Process.exit(replication_connection_pid, :kill)
       assert_receive {:DOWN, _, :process, ^replication_connection_pid, _}
 
-      Process.sleep(100)
+      Process.sleep(1000)
       assert {:error, :not_connected} = Connect.replication_status(tenant.external_id)
 
       new_replication_connection_pid = assert_pid(fn -> ReplicationConnection.whereis(tenant.external_id) end)
@@ -516,11 +516,11 @@ defmodule Realtime.Tenants.ConnectTest do
       assert Process.alive?(new_replication_connection_pid)
       assert Process.alive?(pid)
 
-      assert {:ok, replication_conn_after} = assert_replication_status(tenant.external_id)
+      assert {:ok, replication_conn_after} = assert_replication_status(tenant.external_id, 60)
       assert replication_conn_before != replication_conn_after
     end
 
-    test "handles replication connection timeout by logging and shutting down", %{tenant: tenant} do
+    test "defers and keeps the tenant alive when replication connection times out", %{tenant: tenant} do
       expect(ReplicationConnection, :start, fn _tenant, _pid ->
         {:error, :replication_connection_timeout}
       end)
@@ -528,7 +528,9 @@ defmodule Realtime.Tenants.ConnectTest do
       log =
         capture_log(fn ->
           assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-          assert_process_down(db_conn)
+          pid = Connect.whereis(tenant.external_id)
+          assert wait_until(fn -> :sys.get_state(pid).replication_recovery_started_at != nil end)
+          refute_process_down(db_conn)
         end)
 
       assert log =~ "ReplicationConnectionTimeout"
@@ -573,7 +575,9 @@ defmodule Realtime.Tenants.ConnectTest do
       log =
         capture_log(fn ->
           assert {:ok, db_conn} = Connect.lookup_or_start_connection(tenant.external_id)
-          assert_process_down(db_conn)
+          pid = Connect.whereis(tenant.external_id)
+          assert wait_until(fn -> :sys.get_state(pid).replication_recovery_started_at != nil end)
+          refute_process_down(db_conn)
         end)
 
       assert log =~ "ReplicationMaxWalSendersReached"
@@ -798,6 +802,41 @@ defmodule Realtime.Tenants.ConnectTest do
 
       Connect.shutdown(tenant.external_id)
     end
+
+    test "defers and recovers instead of terminating when slot is in use at startup", %{tenant: tenant} do
+      {:ok, db_conn} = Database.connect(tenant, "realtime_test", :stop)
+      slot_name = ReplicationConnection.replication_slot_name("realtime", "messages")
+
+      # Simulate a previous replication session still holding the slot during a
+      # restart/rebalance race so the initial replication start fails.
+      Postgrex.query!(db_conn, "SELECT pg_create_logical_replication_slot($1, 'test_decoding')", [slot_name])
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _} = Connect.lookup_or_start_connection(tenant.external_id)
+          pid = Connect.whereis(tenant.external_id)
+          assert wait_until(fn -> :sys.get_state(pid).replication_recovery_started_at != nil end)
+        end)
+
+      pid = Connect.whereis(tenant.external_id)
+      assert is_pid(pid)
+      assert log =~ "StartReplicationFailed"
+
+      # Connect stays alive with the recovery window open instead of shutting down.
+      refute_process_down(pid)
+      state = :sys.get_state(pid)
+      assert state.replication_connection_pid == nil
+      assert state.replication_recovery_started_at != nil
+
+      # Free the slot; the scheduled retry should reconnect on its own and clear
+      # the recovery window.
+      Postgrex.query!(db_conn, "SELECT pg_drop_replication_slot($1)", [slot_name])
+
+      assert {:ok, _} = assert_replication_status(tenant.external_id)
+      assert :sys.get_state(pid).replication_recovery_started_at == nil
+
+      Connect.shutdown(tenant.external_id)
+    end
   end
 
   describe "get_status/1 degraded state" do
@@ -877,6 +916,18 @@ defmodule Realtime.Tenants.ConnectTest do
       _ ->
         Process.sleep(500)
         assert_pid(call, attempts - 1)
+    end
+  end
+
+  defp wait_until(fun, attempts \\ 50)
+  defp wait_until(_fun, 0), do: false
+
+  defp wait_until(fun, attempts) do
+    if fun.() do
+      true
+    else
+      Process.sleep(50)
+      wait_until(fun, attempts - 1)
     end
   end
 

@@ -30,7 +30,7 @@
           installPhase = "cp -r node_modules $out";
           outputHashMode = "recursive";
           outputHashAlgo = "sha256";
-          outputHash = "sha256-J7wDvqGoiOAQTt8x1b2hnpxxmxg0zkMrJJ6lKRzbBAw=";
+          outputHash = "sha256-2X65kFAi8oUKfoV29IfSVJ/Bt3J5VdHxkQBoxw4issc=";
         };
       in {
         packages.default = pkgs.stdenv.mkDerivation {

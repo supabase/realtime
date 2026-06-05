@@ -90,7 +90,6 @@ defmodule Realtime.Database do
   @doc """
   Checks if the Tenant CDC extension information is properly configured and that we're able to query against the tenant database.
   """
-
   @spec check_tenant_connection(Tenant.t() | nil) :: {:error, atom()} | {:ok, pid(), non_neg_integer()}
   def check_tenant_connection(nil), do: {:error, :tenant_not_found}
 
@@ -296,7 +295,6 @@ defmodule Realtime.Database do
     case application_name do
       "realtime_subscription_manager" -> 1
       "realtime_subscription_manager_pub" -> settings["subs_pool_size"] || 1
-      "realtime_subscription_checker" -> 1
       "realtime_connect" -> settings["db_pool"] || 1
       "realtime_health_check" -> 1
       "realtime_janitor" -> 1
@@ -410,7 +408,6 @@ defmodule Realtime.Database do
     application_names = [
       "realtime_subscription_manager",
       "realtime_subscription_manager_pub",
-      "realtime_subscription_checker",
       "realtime_health_check",
       "realtime_janitor",
       "realtime_migrations",

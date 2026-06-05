@@ -224,7 +224,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert_push "system",
                   %{
                     message:
-                      "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [event: *, schema: public, table: doesnotexist, filters: []]",
+                      "Unable to subscribe to changes with given parameters. Please check Realtime is enabled for the given connect parameters: [event: *, schema: public, table: doesnotexist, filters: [], select: nil]",
                     status: "error",
                     extension: "postgres_changes",
                     channel: "test"
@@ -254,7 +254,7 @@ defmodule RealtimeWeb.RealtimeChannelTest do
       assert_push "system",
                   %{
                     message:
-                      "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"notacolumn\", \"eq\", \"123\"}]]. Exception: ERROR P0001 (raise_exception) invalid column for filter notacolumn",
+                      "Unable to subscribe to changes with given parameters. An exception happened so please check your connect parameters: [event: *, schema: public, table: test, filters: [{\"notacolumn\", \"eq\", \"123\"}], select: nil]. Exception: ERROR P0001 (raise_exception) invalid column for filter notacolumn",
                     status: "error",
                     extension: "postgres_changes",
                     channel: "test"
