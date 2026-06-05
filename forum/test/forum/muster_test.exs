@@ -53,12 +53,12 @@ defmodule Forum.MusterTest do
     :persistent_term.put({Forum.Muster, scope, :status}, status)
   end
 
-  # Finds a group whose current designated lookup routes to `target_node`.
-  defp group_for_designated(scope, target_node) do
+  # Finds a group whose current router lookup routes to `target_node`.
+  defp group_for_router(scope, target_node) do
     Stream.iterate(0, &(&1 + 1))
     |> Stream.map(&:"g#{&1}")
     |> Enum.find(fn group ->
-      case Muster.designated(scope, group) do
+      case Muster.router(scope, group) do
         {:ok, ^target_node} -> true
         _ -> false
       end
@@ -120,12 +120,12 @@ defmodule Forum.MusterTest do
     end)
   end
 
-  # Find `count` distinct groups whose current designated is `target_node`.
-  defp groups_for_designated(scope, target_node, count) do
+  # Find `count` distinct groups whose current router is `target_node`.
+  defp groups_for_router(scope, target_node, count) do
     Stream.iterate(0, &(&1 + 1))
     |> Stream.map(&:"g#{&1}")
     |> Stream.filter(fn group ->
-      match?({:ok, ^target_node}, Muster.designated(scope, group))
+      match?({:ok, ^target_node}, Muster.router(scope, group))
     end)
     |> Enum.take(count)
   end
@@ -155,21 +155,21 @@ defmodule Forum.MusterTest do
       end
     end
 
-    test "exposes designated lookup", %{scope: scope, base_opts: opts} do
+    test "exposes router lookup", %{scope: scope, base_opts: opts} do
       start_supervised!(spec(scope, opts))
-      assert {:ok, n} = Muster.designated(scope, :anything)
+      assert {:ok, n} = Muster.router(scope, :anything)
       assert n == node()
     end
   end
 
-  describe "designated/2 and members/1" do
+  describe "router/2 and members/1" do
     setup %{scope: scope, base_opts: opts} do
       start_supervised!(spec(scope, opts))
       :ok
     end
 
     test "returns {:ok, node()} on a single-node cluster", %{scope: scope} do
-      assert {:ok, n} = Muster.designated(scope, :any_group)
+      assert {:ok, n} = Muster.router(scope, :any_group)
       assert n == node()
     end
 
@@ -182,11 +182,11 @@ defmodule Forum.MusterTest do
       {:ok, _} = ExHashRing.Ring.set_nodes(ring_name(scope), members)
       set_rebalancing(scope, true)
 
-      assert {:rebalancing, ^members} = Muster.designated(scope, :any_group)
+      assert {:rebalancing, ^members} = Muster.router(scope, :any_group)
       assert Muster.members(scope) == members
 
       set_rebalancing(scope, false)
-      assert {:ok, _node} = Muster.designated(scope, :any_group)
+      assert {:ok, _node} = Muster.router(scope, :any_group)
     end
   end
 
@@ -263,7 +263,7 @@ defmodule Forum.MusterTest do
     end
   end
 
-  describe "single-node join/leave (designated == self)" do
+  describe "single-node join/leave (router == self)" do
     setup %{scope: scope, base_opts: opts} do
       start_supervised!(spec(scope, opts))
       :ok
@@ -277,7 +277,7 @@ defmodule Forum.MusterTest do
       assert node() in Scope.occupancy(scope, :g1)
     end
 
-    test "join does not fire RPC when designated is self", %{scope: scope} do
+    test "join does not fire RPC when router is self", %{scope: scope} do
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       _ = drain_adapter_events()
       assert :ok = Muster.join(scope, :g1, pid)
@@ -313,14 +313,14 @@ defmodule Forum.MusterTest do
     end
   end
 
-  describe "designated == remote (fake node injection)" do
+  describe "router == remote (fake node injection)" do
     setup %{scope: scope, base_opts: opts} do
       start_supervised!(spec(scope, opts))
       inject_fake_remote(scope)
 
       %{
-        remote_group: group_for_designated(scope, @fake_node),
-        self_group: group_for_designated(scope, node())
+        remote_group: group_for_router(scope, @fake_node),
+        self_group: group_for_router(scope, node())
       }
     end
 
@@ -462,7 +462,7 @@ defmodule Forum.MusterTest do
       start_supervised!(spec(scope, opts))
       inject_fake_remote(scope)
 
-      %{remote_group: group_for_designated(scope, @fake_node)}
+      %{remote_group: group_for_router(scope, @fake_node)}
     end
 
     test "leave + re-join within cooldown does not fire RPC",
@@ -493,7 +493,7 @@ defmodule Forum.MusterTest do
       # After cooldown the group is queued — no RPC has been sent yet.
       assert :vacant_queued = wait_for_group_state(scope, g, :vacant_queued)
 
-      # The flush sends one batched vacant RPC to the designated.
+      # The flush sends one batched vacant RPC to the router.
       trigger_flush(scope)
 
       assert_receive {:adapter_event,
@@ -537,8 +537,8 @@ defmodule Forum.MusterTest do
       assert nil == wait_for_group_state(scope, g, &is_nil/1)
     end
 
-    test "vacancies to the same designated flush as a single batch", %{scope: scope} do
-      [g1, g2] = groups_for_designated(scope, @fake_node, 2)
+    test "vacancies to the same router flush as a single batch", %{scope: scope} do
+      [g1, g2] = groups_for_router(scope, @fake_node, 2)
 
       p1 = spawn_link(fn -> Process.sleep(:infinity) end)
       p2 = spawn_link(fn -> Process.sleep(:infinity) end)
@@ -585,11 +585,11 @@ defmodule Forum.MusterTest do
       Kernel.send(Forum.Supervisor.name(scope), {:__rebalance_for_test, new_members})
     end
 
-    # Probe a probe-ring built from `members` to find a group whose designation
+    # Probe a probe-ring built from `members` to find a group whose router
     # would land on `target_node`. We can't query Muster's own ring here yet
     # because the rebalance has not run — we need a group that will move *to*
     # the fake node once it does.
-    defp group_for_designated_under(members, target_node) do
+    defp group_for_router_under(members, target_node) do
       probe = :"_probe_#{System.unique_integer([:positive])}_muster_ring"
       {:ok, _} = ExHashRing.Ring.start_link(name: probe, replicas: 128)
       {:ok, _} = ExHashRing.Ring.set_nodes(probe, members)
@@ -606,9 +606,9 @@ defmodule Forum.MusterTest do
       group
     end
 
-    test "rebalance announces :occupied groups to the new designated", %{scope: scope} do
+    test "rebalance announces :occupied groups to the new router", %{scope: scope} do
       # Pick a group that will land on @fake_node once it joins the cluster.
-      g = group_for_designated_under([node(), @fake_node], @fake_node)
+      g = group_for_router_under([node(), @fake_node], @fake_node)
 
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
@@ -626,8 +626,8 @@ defmodule Forum.MusterTest do
       assert g in groups
     end
 
-    test "rebalance announces :cooldown groups to the new designated", %{scope: scope} do
-      g = group_for_designated_under([node(), @fake_node], @fake_node)
+    test "rebalance announces :cooldown groups to the new router", %{scope: scope} do
+      g = group_for_router_under([node(), @fake_node], @fake_node)
 
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
@@ -649,7 +649,7 @@ defmodule Forum.MusterTest do
 
     test ":vacant_queued groups are NOT announced on rebalance", %{scope: scope} do
       inject_fake_remote(scope)
-      g = group_for_designated(scope, @fake_node)
+      g = group_for_router(scope, @fake_node)
 
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
@@ -669,7 +669,7 @@ defmodule Forum.MusterTest do
 
     test ":vacant_flushing groups are NOT announced on rebalance", %{scope: scope} do
       inject_fake_remote(scope)
-      g = group_for_designated(scope, @fake_node)
+      g = group_for_router(scope, @fake_node)
 
       pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert :ok = Muster.join(scope, g, pid)
@@ -713,14 +713,14 @@ defmodule Forum.MusterTest do
          %{scope: scope} do
       inject_fake_remote(scope)
 
-      # Pick a group whose designated under the 2-node ring is @fake_node
+      # Pick a group whose router under the 2-node ring is @fake_node
       # (so the initial :occupied RPC dispatches to @fake_node) AND whose
-      # designated under the 3-node ring is :third@nowhere (so the rebalance
-      # announces it to the new designated and settles the parked waiter).
+      # router under the 3-node ring is :third@nowhere (so the rebalance
+      # announces it to the new router and settles the parked waiter).
       members_3 = [node(), @fake_node, :third@nowhere]
 
       g =
-        find_group_flipping_designation(
+        find_group_flipping_router(
           [node(), @fake_node],
           @fake_node,
           members_3,
@@ -750,7 +750,7 @@ defmodule Forum.MusterTest do
 
       assert_receive {:rpc_held, ^ref}, 1_000
 
-      # Rebalance: switch to a 3-node ring. The designation of `g` flips to
+      # Rebalance: switch to a 3-node ring. The router of `g` flips to
       # :third@nowhere; rebalance announces `g` via :receive_node_state and
       # settles the pending waiter with :ok.
       trigger_rebalance(scope, members_3)
@@ -758,7 +758,7 @@ defmodule Forum.MusterTest do
       # Waiter gets :ok from the settle step (not :rebalance_in_progress).
       assert :ok = Task.await(task, 5_000)
 
-      # The new designated must have received :receive_node_state with g.
+      # The new router must have received :receive_node_state with g.
       received_announce =
         receive_announce_for(:third@nowhere, g, 1_000)
 
@@ -766,7 +766,7 @@ defmodule Forum.MusterTest do
              "expected :receive_node_state to :third@nowhere with #{inspect(g)}"
     end
 
-    defp find_group_flipping_designation(members_old, old_dest, members_new, new_dest) do
+    defp find_group_flipping_router(members_old, old_dest, members_new, new_dest) do
       uid = System.unique_integer([:positive])
       old_probe = :"_probe_old_#{uid}_muster_ring"
       new_probe = :"_probe_new_#{uid}_muster_ring"

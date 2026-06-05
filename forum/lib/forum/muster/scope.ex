@@ -4,16 +4,16 @@ defmodule Forum.Muster.Scope do
   #
   # Owns:
   #   * Cluster view (sorted node list) via persistent_term.
-  #   * Per-group state machine for the "have I told the designated about
+  #   * Per-group state machine for the "have I told the router about
   #     this group?" question. RPCs are dispatched to short-lived worker
   #     processes so the Scope mailbox stays responsive.
-  #   * Designated-role occupancy table — when this node is designated
+  #   * Router-role occupancy table — when this node is the router
   #     for a group, the set of source nodes that hold it.
   #   * Cooldown bookkeeping for the "recently vacant" suppression.
   #   * A queue of vacated groups (group_state :vacant_queued) flushed
-  #     periodically in per-designated batches. A failed batch re-queues its
+  #     periodically in per-router batches. A failed batch re-queues its
   #     groups, so the flush doubles as a self-draining retry that keeps the
-  #     designated's occupancy table from accumulating stale entries.
+  #     router's occupancy table from accumulating stale entries.
   use GenServer
   require Logger
 
@@ -66,7 +66,7 @@ defmodule Forum.Muster.Scope do
 
   ## Public helpers (read paths used by Forum.Muster from the caller's process)
 
-  @doc "Returns the list of nodes (as known by the local designated state) holding `group`."
+  @doc "Returns the list of nodes (as known by the local router state) holding `group`."
   @spec occupancy(atom, Forum.group()) :: [node]
   def occupancy(scope, group) do
     :ets.select(occupancy_table_name(scope), [{{{group, :"$1"}}, [], [:"$1"]}])
@@ -74,12 +74,12 @@ defmodule Forum.Muster.Scope do
 
   ## Remote entry points
   #
-  # These are invoked on the *designated* / receiver node by remote nodes
+  # These are invoked on the *router* / receiver node by remote nodes
   # via the configured Forum.Adapter (default: :erpc.call). They run inside
   # whatever process the adapter spawns to handle the RPC — typically an
   # :erpc worker — and write directly to the :public occupancy_table.
   #
-  # Bypassing Scope's mailbox here means a busy designated can absorb many
+  # Bypassing Scope's mailbox here means a busy router can absorb many
   # concurrent updates from many source nodes in parallel. Correctness is
   # preserved because each occupancy key is {group, source_node}: different
   # sources own disjoint keys, and the source's own Scope serializes
@@ -223,7 +223,7 @@ defmodule Forum.Muster.Scope do
 
   ## handle_call
 
-  # Local source — Muster.join asking us to claim this group on the designated.
+  # Local source — Muster.join asking us to claim this group on the router.
   # Remote occupancy updates (:occupied, :vacant_batch, :receive_node_state)
   # write directly to the :public occupancy_table from their :erpc worker —
   # they no longer bounce through this mailbox. See the "Remote entry points"
@@ -306,7 +306,7 @@ defmodule Forum.Muster.Scope do
     handle_occupied_done(group, worker_result(exit_reason), state)
   end
 
-  # Worker reported back the result of a batched :vacant flush to one designated.
+  # Worker reported back the result of a batched :vacant flush to one router.
   def handle_info({{:vacant_batch_done, groups}, _ref, :process, _pid, exit_reason}, state) do
     {:noreply, handle_vacant_batch_done(groups, worker_result(exit_reason), state)}
   end
@@ -343,13 +343,13 @@ defmodule Forum.Muster.Scope do
   defp handle_claim(group, from, state) do
     case Map.get(state.group_states, group) do
       nil ->
-        designated_node = designated_from_state(state, group)
+        router_node = router_from_state(state, group)
 
-        if designated_node == node() do
+        if router_node == node() do
           :ets.insert(state.occupancy_table, {{group, node()}})
           {:reply, :ok, put_group_state(state, group, :occupied)}
         else
-          dispatch_rpc(:occupied, group, designated_node, state)
+          dispatch_rpc(:occupied, group, router_node, state)
           {:noreply, put_group_state(state, group, {:occupied_pending, [from]})}
         end
 
@@ -366,13 +366,13 @@ defmodule Forum.Muster.Scope do
       :vacant_queued ->
         # Queued for a vacant flush but nothing is in flight yet. Reclaim now,
         # with no risk of racing a vacant RPC against this :occupied.
-        designated_node = designated_from_state(state, group)
+        router_node = router_from_state(state, group)
 
-        if designated_node == node() do
+        if router_node == node() do
           :ets.insert(state.occupancy_table, {{group, node()}})
           {:reply, :ok, put_group_state(state, group, :occupied)}
         else
-          dispatch_rpc(:occupied, group, designated_node, state)
+          dispatch_rpc(:occupied, group, router_node, state)
           {:noreply, put_group_state(state, group, {:occupied_pending, [from]})}
         end
 
@@ -420,8 +420,8 @@ defmodule Forum.Muster.Scope do
           {:noreply, put_group_state(state, group, :occupied)}
         else
           # Cooldown elapsed and still empty. Queue the vacancy; the periodic
-          # flush groups all queued vacancies by current designated, sends one
-          # batched RPC per designated, and re-queues any that fail.
+          # flush groups all queued vacancies by current router, sends one
+          # batched RPC per router, and re-queues any that fail.
           {:noreply, put_group_state(state, group, :vacant_queued)}
         end
 
@@ -451,7 +451,7 @@ defmodule Forum.Muster.Scope do
 
   # Result of one batched :vacant flush. For each group still in
   # :vacant_flushing: on success drop it; on failure re-queue it so the next
-  # flush retries (this is what drains stale designated entries). If claims
+  # flush retries (this is what drains stale router entries). If claims
   # arrived during the batch (waiters present), re-claim the group regardless
   # of the vacant result — we hold local members again.
   defp handle_vacant_batch_done(groups, result, state) do
@@ -471,14 +471,14 @@ defmodule Forum.Muster.Scope do
             else: put_group_state(st, group, :vacant_queued)
 
         {:vacant_flushing, waiters} ->
-          designated_node = designated_from_state(st, group)
+          router_node = router_from_state(st, group)
 
-          if designated_node == node() do
+          if router_node == node() do
             :ets.insert(st.occupancy_table, {{group, node()}})
             Enum.each(waiters, fn from -> GenServer.reply(from, :ok) end)
             put_group_state(st, group, :occupied)
           else
-            dispatch_rpc(:occupied, group, designated_node, st)
+            dispatch_rpc(:occupied, group, router_node, st)
             put_group_state(st, group, {:occupied_pending, waiters})
           end
 
@@ -489,8 +489,8 @@ defmodule Forum.Muster.Scope do
     end)
   end
 
-  # Collect every :vacant_queued group, bucket by current designated, and send
-  # one batched RPC per remote designated (self-designated groups are pruned
+  # Collect every :vacant_queued group, bucket by current router, and send
+  # one batched RPC per remote router (self-routed groups are pruned
   # locally). The queued groups stay in :vacant_queued only until a flush moves
   # them to :vacant_flushing; a failed batch returns them to :vacant_queued.
   defp flush_vacant(state) do
@@ -502,33 +502,33 @@ defmodule Forum.Muster.Scope do
 
       _ ->
         queued
-        |> Enum.group_by(&designated_from_state(state, &1))
-        |> Enum.reduce(state, fn {designated_node, groups}, st ->
-          if designated_node == node() do
+        |> Enum.group_by(&router_from_state(state, &1))
+        |> Enum.reduce(state, fn {router_node, groups}, st ->
+          if router_node == node() do
             Enum.each(groups, fn g -> :ets.delete(st.occupancy_table, {g, node()}) end)
             Enum.reduce(groups, st, fn g, s -> delete_group_state(s, g) end)
           else
-            dispatch_vacant_batch(groups, designated_node, st)
+            dispatch_vacant_batch(groups, router_node, st)
             Enum.reduce(groups, st, fn g, s -> put_group_state(s, g, {:vacant_flushing, []}) end)
           end
         end)
     end
   end
 
-  defp dispatch_rpc(:occupied, group, designated_node, state) do
+  defp dispatch_rpc(:occupied, group, router_node, state) do
     spawn_rpc_worker(
       state,
-      designated_node,
+      router_node,
       :occupied,
       [state.scope, group, node()],
       {:occupied_done, group}
     )
   end
 
-  defp dispatch_vacant_batch(groups, designated_node, state) do
+  defp dispatch_vacant_batch(groups, router_node, state) do
     spawn_rpc_worker(
       state,
-      designated_node,
+      router_node,
       :vacant_batch,
       [state.scope, groups, node()],
       {:vacant_batch_done, groups}
@@ -544,7 +544,7 @@ defmodule Forum.Muster.Scope do
   #       as a single tagged DOWN message Scope is guaranteed to receive.
   #
   # This mirrors gen_rpc's async_call pattern.
-  defp spawn_rpc_worker(state, designated_node, function, args, tag) do
+  defp spawn_rpc_worker(state, router_node, function, args, tag) do
     message_module = state.message_module
     scope = state.scope
     rpc_timeout = state.rpc_timeout_ms
@@ -554,7 +554,7 @@ defmodule Forum.Muster.Scope do
         fn ->
           result =
             try do
-              message_module.call(scope, designated_node, __MODULE__, function, args, rpc_timeout)
+              message_module.call(scope, router_node, __MODULE__, function, args, rpc_timeout)
             catch
               kind, reason -> {:error, {kind, reason}}
             end
@@ -592,7 +592,7 @@ defmodule Forum.Muster.Scope do
     %{state | group_states: Map.delete(state.group_states, group)}
   end
 
-  defp designated_from_state(state, group) do
+  defp router_from_state(state, group) do
     {:ok, n} = Ring.find_node(ring_name(state.scope), group)
     n
   end
@@ -634,7 +634,7 @@ defmodule Forum.Muster.Scope do
     ring = ring_name(state.scope)
 
     # 1) Flip status to :rebalancing BEFORE updating the ring. Callers reading
-    #    designated/2 see :rebalancing and fan out to all members. During the
+    #    router/2 see :rebalancing and fan out to all members. During the
     #    window, get_nodes/1 returns the current ring (still old generation
     #    until set_nodes returns), which is also fine — fan-out to either
     #    member set is safe.
@@ -647,17 +647,17 @@ defmodule Forum.Muster.Scope do
     state = normalize_pending_for_rebalance(state)
 
     # 3) Atomically replace the node set; this bumps the ring's generation.
-    #    After this call: find_node = NEW designations; find_historical_node
-    #    (back: 1) = OLD designations.
+    #    After this call: find_node = NEW routers; find_historical_node
+    #    (back: 1) = OLD routers.
     {:ok, _} = Ring.set_nodes(ring, new_members)
 
     # 4) Delta announce-set: groups in :occupied, :cooldown, or
-    #    :occupied_pending whose designated actually changed. :cooldown
+    #    :occupied_pending whose router actually changed. :cooldown
     #    groups must be included even though the Partition count is 0,
-    #    because the old designated still believes we hold them and the new
-    #    designated needs to know to expect a future :vacant.
+    #    because the old router still believes we hold them and the new
+    #    router needs to know to expect a future :vacant.
     #    :occupied_pending must be included so callers parked on Scope's
-    #    GenServer.call get :ok once the new designated has been told —
+    #    GenServer.call get :ok once the new router has been told —
     #    instead of being cancelled with :rebalance_in_progress.
     candidates =
       for {group, gs} <- state.group_states,
@@ -671,7 +671,7 @@ defmodule Forum.Muster.Scope do
         new_dest != old_dest
       end)
 
-    by_designated =
+    by_router =
       Enum.group_by(groups_to_reannounce, fn group ->
         {:ok, n} = Ring.find_node(ring, group)
         n
@@ -683,7 +683,7 @@ defmodule Forum.Muster.Scope do
     # Scope, so an uncaught raise inside any closure crashes Scope just like
     # a sequential raise would have.
     {local_groups, remote_targets} =
-      Enum.split_with(by_designated, fn {dest, _} -> dest == node() end)
+      Enum.split_with(by_router, fn {dest, _} -> dest == node() end)
 
     Enum.each(local_groups, fn {_, groups} ->
       Enum.each(groups, fn group ->
@@ -696,12 +696,12 @@ defmodule Forum.Muster.Scope do
     rpc_timeout = state.rpc_timeout_ms
 
     tasks =
-      Enum.map(remote_targets, fn {designated_node, groups} ->
+      Enum.map(remote_targets, fn {router_node, groups} ->
         task =
           Task.async(fn ->
             message_module.call(
               scope,
-              designated_node,
+              router_node,
               __MODULE__,
               :receive_node_state,
               [scope, node(), groups],
@@ -709,7 +709,7 @@ defmodule Forum.Muster.Scope do
             )
           end)
 
-        {designated_node, task}
+        {router_node, task}
       end)
 
     # Each remote call is already bounded by `rpc_timeout` inside the
@@ -717,26 +717,26 @@ defmodule Forum.Muster.Scope do
     # rather than hanging Scope indefinitely.
     await_timeout = rpc_timeout + 1_000
 
-    Enum.each(tasks, fn {designated_node, task} ->
+    Enum.each(tasks, fn {router_node, task} ->
       case Task.await(task, await_timeout) do
         :ok ->
           :ok
 
         other ->
-          raise "Muster rebalance failed: target=#{inspect(designated_node)} result=#{inspect(other)}"
+          raise "Muster rebalance failed: target=#{inspect(router_node)} result=#{inspect(other)}"
       end
     end)
 
-    # 5) Settle :occupied_pending claims whose designation changed. The
-    #    rebalance just informed the new designated via :receive_node_state,
+    # 5) Settle :occupied_pending claims whose router changed. The
+    #    rebalance just informed the new router via :receive_node_state,
     #    so the parked callers can be unblocked with :ok. Their original
-    #    workers (targeting the old designated) may still complete later;
+    #    workers (targeting the old router) may still complete later;
     #    the resulting :occupied_done lands in handle_occupied_done's _other
     #    clause and is dropped because group_states[group] will be :occupied by
     #    then.
     state = settle_pending_after_rebalance(state, MapSet.new(groups_to_reannounce))
 
-    drop_stale_designated_entries(state)
+    drop_stale_router_entries(state)
 
     # 6) Flip back to :stable. If rebalance raised above, we skip this and
     #    supervisor restart re-initializes :status to :stable. Until restart,
@@ -746,7 +746,7 @@ defmodule Forum.Muster.Scope do
     %{state | members: new_members}
   end
 
-  defp drop_stale_designated_entries(state) do
+  defp drop_stale_router_entries(state) do
     ring = ring_name(state.scope)
 
     state.occupancy_table
@@ -771,11 +771,11 @@ defmodule Forum.Muster.Scope do
   # :vacant_queued entries are kept as-is (handled by the catch-all): we don't
   # hold the group, so it is not announced via :receive_node_state, but the
   # next flush after the ring updates will send the vacant to the group's
-  # *current* designated — which drains any stale entry the old designated
+  # *current* router — which drains any stale entry the old router
   # still holds.
   #
   # {:vacant_flushing, []} (a batch RPC in flight, no waiters) is rewritten to
-  # :vacant_queued so the next flush re-sends to the post-rebalance designated;
+  # :vacant_queued so the next flush re-sends to the post-rebalance router;
   # the in-flight worker's result lands in handle_vacant_batch_done's catch-all
   # and is dropped.
   #
@@ -796,11 +796,11 @@ defmodule Forum.Muster.Scope do
   end
 
   # Run at the end of rebalance, once :receive_node_state RPCs have informed
-  # the new designated about every group whose designation changed. For each
+  # the new router about every group whose router changed. For each
   # :occupied_pending entry in that settled set, reply :ok to the waiters
   # and transition to :occupied. Entries not in the settled set are left
-  # alone — their designation did not change, so the original in-flight
-  # worker is still talking to the correct designated.
+  # alone — their router did not change, so the original in-flight
+  # worker is still talking to the correct router.
   defp settle_pending_after_rebalance(state, settled_groups) do
     Enum.reduce(state.group_states, state, fn
       {group, {:occupied_pending, waiters}}, st ->
@@ -817,7 +817,7 @@ defmodule Forum.Muster.Scope do
   end
 
   defp reannounce_local_groups_at_init(state) do
-    # At init, members is just [node()], so the designated for every group is
+    # At init, members is just [node()], so the router for every group is
     # ourselves. Walk the partitions (which may have entries left over from a
     # previous incarnation of Scope) and mark them :occupied locally.
     Enum.reduce(local_groups(state), state, fn group, st ->
