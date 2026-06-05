@@ -17,6 +17,7 @@ defmodule Forum.Muster do
   @type start_option ::
           {:partitions, pos_integer()}
           | {:vacancy_cooldown_ms, non_neg_integer()}
+          | {:vacant_flush_interval_ms, pos_integer()}
           | {:rpc_timeout_ms, timeout()}
           | {:message_module, module()}
 
@@ -46,7 +47,10 @@ defmodule Forum.Muster do
 
   * `:partitions` — number of local partitions (default: schedulers online).
   * `:vacancy_cooldown_ms` — how long to wait after a group goes vacant locally
-    before notifying the designated node (default: 30_000).
+    before queuing it for a vacant flush (default: 30_000).
+  * `:vacant_flush_interval_ms` — how often the queued vacancies are flushed to
+    their designated nodes in per-designated batches (default: 5_000). A failed
+    batch re-queues its groups, so this also bounds the retry cadence.
   * `:rpc_timeout_ms` — timeout for designated-node RPCs (default: 5_000).
   * `:message_module` — module implementing `Forum.Adapter` (default:
     `Forum.Adapter.ErlDist`).
@@ -67,16 +71,26 @@ defmodule Forum.Muster do
             "expected :vacancy_cooldown_ms to be a non-negative integer, got: #{inspect(cooldown)}"
     end
 
+    flush_interval = Keyword.get(opts, :vacant_flush_interval_ms)
+
+    if flush_interval != nil and not (is_integer(flush_interval) and flush_interval > 0) do
+      raise ArgumentError,
+            "expected :vacant_flush_interval_ms to be a positive integer, got: #{inspect(flush_interval)}"
+    end
+
     Forum.Supervisor.start_link(Forum.Muster.Scope, scope, partitions, opts)
   end
 
   @doc """
   Join `pid` to `group` in `scope`.
 
-  If this is the first local member of `group` and the group has not been
-  recently vacant, the designated node is notified via a synchronous RPC.
-  If that RPC fails, the join fails and the pid is not registered locally.
-  The next call to `join/3` will retry the RPC.
+  If this is the first local member of `group`, the designated node is notified
+  via a synchronous `:occupied` RPC. If that RPC fails, the join fails and the
+  pid is not registered locally; the next call to `join/3` will retry the RPC.
+
+  If the group was recently vacant (in cooldown, or queued/in-flight for a
+  vacant flush), the join reclaims it without re-notifying the designated where
+  it can — a quick leave/join cycle costs no RPC.
   """
   @spec join(atom, group, pid) :: :ok | {:error, :not_local | :rpc_failed | term}
   def join(_scope, _group, pid) when is_pid(pid) and node(pid) != node(),

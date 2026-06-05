@@ -60,7 +60,7 @@ Muster answers a different question: *given a group, which nodes have at least o
 
 For each group, exactly one node in the Muster cluster is the **designated** node, chosen by **consistent hashing** over the sorted member list (via [`ex_hash_ring`](https://hexdocs.pm/ex_hash_ring), 128 vnodes per node by default). Every node computes the same designated independently from the same ring (no consensus needed — the member list is the only input). Consistent hashing matters at rebalance time: when a node joins or leaves a cluster of size *N*, only ~1/*N* of the groups change their designated, instead of nearly all groups (as a naive `phash2(group, length(members))` would produce).
 
-The designated node owns the authoritative "which nodes hold this group" set. When the first local member of a group joins on node A, A sends a synchronous `:occupied` notification to the designated node. When the last local member leaves (after a cooldown — see below), A sends `:vacant`. The designated keeps a table keyed by `{group, node}` — the set of nodes a broadcast for that group must reach.
+The designated node owns the authoritative "which nodes hold this group" set. When the first local member of a group joins on node A, A sends a synchronous `:occupied` notification to the designated node. When the last local member leaves (after a cooldown — see below), A queues the group and a periodic flush sends a batched `:vacant_batch` to the designated. The designated keeps a table keyed by `{group, node}` — the set of nodes a broadcast for that group must reach.
 
 To broadcast, a caller asks `designated/2` for the group's designated node and routes the message there over its own transport; the designated then fans out to the member nodes. While the cluster view is in flux, `designated/2` returns `{:rebalancing, members}` and the caller fans out to every member instead.
 
@@ -80,7 +80,8 @@ Start it under supervision with a scope name (use a different scope from any Cen
 
 ```elixir
 children = [
-  {Forum.Muster, [:topics, partitions: 8, vacancy_cooldown_ms: 30_000]}
+  {Forum.Muster,
+   [:topics, partitions: 8, vacancy_cooldown_ms: 30_000, vacant_flush_interval_ms: 5_000]}
 ]
 ```
 
@@ -110,13 +111,15 @@ Key invariants:
 * Concurrent `join/3` calls for the same fresh group dedup into **one** RPC; the rest of the callers piggyback on the in-flight `:occupied_pending` state.
 * The Scope GenServer never blocks on an RPC — it dispatches the call to a short-lived worker process and parks the waiters in `{:occupied_pending, [from | …]}`. The worker reports back with `{:rpc_done, …}`.
 
-### How leave works (and the cooldown)
+### How leave works (the cooldown, and the batched vacant flush)
 
 `leave/3` just does `Forum.Partition.leave`. When the local count for the group goes 1 → 0, Partition emits a `[:forum, scope, :group, :vacant]` telemetry event. Scope picks this up and enters the **cooldown** state for the group (default 30 s, configurable via `:vacancy_cooldown_ms`). During cooldown:
 
 * The designated still believes we hold the group — no RPC has been sent.
 * If a new `join/3` arrives, Scope cancels the cooldown timer and goes back to `:occupied` — no network traffic. This is the whole reason cooldown exists: a quick join/leave/join cycle costs zero RPCs.
-* If the cooldown expires with the group still empty, Scope sends a `:vacant` RPC to the current designated. Failure here is logged and tolerated — the designated will clean stale entries on its next rebalance anyway.
+* If the cooldown expires with the group still empty, the group moves to `:vacant_queued`.
+
+A periodic **vacant flush** (every `:vacant_flush_interval_ms`, default 5 s) then drains the queue: it buckets all `:vacant_queued` groups by their *current* designated and sends **one** `:vacant_batch` RPC per designated (groups designated to self are pruned locally). On success the groups are forgotten; **on failure they go back to `:vacant_queued`** and the next flush retries them. The flush is therefore self-draining: a transient RPC failure — or a designated that was briefly overloaded — no longer leaves a permanently stale `{group, node}` entry, because the group keeps being re-sent until the designated acknowledges it. Because the designated computed at flush time is always the current one, a rebalance that moved a queued group's designation simply routes the next flush to the right node.
 
 ---
 
@@ -143,7 +146,7 @@ A rebalance starts on every node whenever its view of the cluster changes:
 
 1. Compute the new sorted member list. If unchanged, do nothing.
 2. Flip `:status` to `:rebalancing`. From this point, `Muster.designated/2` returns `{:rebalancing, members}` for all groups; broadcasters fan out to every member.
-3. **Normalize in-flight pending claims.** A `{:vacant_pending, []}` entry (a vacant RPC in flight with no waiters) is dropped — we no longer hold the group. A `{:vacant_pending, waiters}` entry (a claim arrived while a vacant RPC was in flight) is rewritten to `{:occupied_pending, waiters}` so the rebalance re-announces it and settles the waiters. `:occupied_pending` claims are kept and carried through; they are settled with `:ok` (step 7) once the new designated has been told (callers parked on `Muster.join/3` are **not** cancelled).
+3. **Normalize in-flight pending states.** A `:vacant_queued` entry is left untouched — we don't hold the group (so it isn't announced), but the next flush after the ring update re-routes it to the group's *current* designated, which drains any stale entry the old designated still holds. A `{:vacant_flushing, []}` entry (a batch RPC in flight, no waiters) is rewritten back to `:vacant_queued` so the next flush re-sends to the post-rebalance designated; the in-flight worker's late result is dropped. A `{:vacant_flushing, waiters}` entry (a claim arrived while the batch was in flight) is rewritten to `{:occupied_pending, waiters}` so the rebalance re-announces it and settles the waiters. `:occupied_pending` claims are kept and carried through; they are settled with `:ok` (step 7) once the new designated has been told (callers parked on `Muster.join/3` are **not** cancelled).
 4. Call `ExHashRing.Ring.set_nodes/2` with the new member list. The ring atomically swaps to a new generation; the prior generation is retained for one cycle.
 5. **Compute the delta**: for each `:occupied`, `:cooldown`, or `:occupied_pending` group, ask the ring for both the new designation (`find_node/2`) and the previous designation (`find_historical_node/3` with `back: 1`). Only groups whose designation actually changed are in the announce-set. With consistent hashing this is typically ~1/N of the candidate groups instead of ~all of them.
 6. For each `{new_designated, groups}` pair, send **one** `:receive_node_state` RPC bundling all groups for that destination (groups whose new designated is this node are written to the local occupancy table directly). The receiver clears its prior entries for our node and inserts the fresh list.
@@ -175,12 +178,12 @@ The synchronous `:occupied` call from the source node to the designated can fail
 
 ### Vacant-time RPC failure
 
-`:vacant` RPCs to the designated are best-effort. A failure is logged and the group's state-machine entry is deleted (the group is no longer tracked locally). The designated retains a stale `{group, source_node}` entry until either:
+`:vacant_batch` RPCs to the designated are best-effort but **retried**. A failed batch is logged and its groups are returned to `:vacant_queued`, so the next flush re-sends them. The group keeps being re-sent until the designated acknowledges it, which means the designated cannot accumulate a permanently stale `{group, source_node}` entry from a transient failure — the flush is a self-draining retry loop. (A failure never crashes the local Scope or fails a `leave/3` call; `leave/3` only touches the Partition.)
 
-* The source node leaves the cluster (the designated's `:DOWN` handler clears all entries keyed by that node), or
-* The next rebalance touches that group and `drop_stale_designated_entries` removes it.
+In addition to the retry, two event-driven cleanups still apply:
 
-This tolerance is deliberate — we don't want a transient leave-time RPC failure to crash the local Scope or fail a `leave/3` call.
+* If the source node leaves the cluster, the designated's `:DOWN` handler clears all entries keyed by that node.
+* A rebalance that moves a group's designation away from the old designated triggers `drop_stale_designated_entries` there.
 
 ### Rebalance RPC failure
 
@@ -198,10 +201,11 @@ Same recovery path: Partition data is preserved (ETS is owned by the Supervisor,
 
 ### Stale designated entries
 
-Whenever cluster membership changes and a group's designated shifts from B to C, B briefly holds a stale `{group, source}` entry. Two things clean it up:
+Whenever cluster membership changes and a group's designated shifts from B to C, B briefly holds a stale `{group, source}` entry. Three things clean it up:
 
 * B's own rebalance does `drop_stale_designated_entries`, removing any entry whose group is no longer designated to B.
 * If B is removed from the cluster (the cause of the rebalance), the entries die with B's Scope process.
+* The source node's periodic vacant flush re-sends queued vacancies to the *current* designated, so a vacancy that was never delivered (or was delivered to a node that has since stopped being designated) is eventually applied where it matters.
 
 Stale entries do not cause incorrect broadcasts because broadcasters always route via the *current* designated.
 
