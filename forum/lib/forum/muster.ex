@@ -2,11 +2,11 @@ defmodule Forum.Muster do
   @moduledoc """
   Group-aware fan-out broadcast.
 
-  For every group, exactly one node in the cluster is the **designated** node,
+  For every group, exactly one node in the cluster is the **router** node,
   chosen by consistent hashing (via `ExHashRing`) over the sorted Muster
-  cluster membership. The designated node knows which nodes hold local members
+  cluster membership. The router node knows which nodes hold local members
   of that group; callers route a broadcast to it (using their own transport)
-  via `designated/2`.
+  via `router/2`.
 
   Use a different scope name than any `Forum.Census` scope on the same node.
   """
@@ -49,9 +49,9 @@ defmodule Forum.Muster do
   * `:vacancy_cooldown_ms` — how long to wait after a group goes vacant locally
     before queuing it for a vacant flush (default: 30_000).
   * `:vacant_flush_interval_ms` — how often the queued vacancies are flushed to
-    their designated nodes in per-designated batches (default: 5_000). A failed
+    their router nodes in per-router batches (default: 5_000). A failed
     batch re-queues its groups, so this also bounds the retry cadence.
-  * `:rpc_timeout_ms` — timeout for designated-node RPCs (default: 5_000).
+  * `:rpc_timeout_ms` — timeout for router-node RPCs (default: 5_000).
   * `:message_module` — module implementing `Forum.Adapter` (default:
     `Forum.Adapter.ErlDist`).
   """
@@ -84,12 +84,12 @@ defmodule Forum.Muster do
   @doc """
   Join `pid` to `group` in `scope`.
 
-  If this is the first local member of `group`, the designated node is notified
+  If this is the first local member of `group`, the router node is notified
   via a synchronous `:occupied` RPC. If that RPC fails, the join fails and the
   pid is not registered locally; the next call to `join/3` will retry the RPC.
 
   If the group was recently vacant (in cooldown, or queued/in-flight for a
-  vacant flush), the join reclaims it without re-notifying the designated where
+  vacant flush), the join reclaims it without re-notifying the router where
   it can — a quick leave/join cycle costs no RPC.
   """
   @spec join(atom, group, pid) :: :ok | {:error, :not_local | :rpc_failed | term}
@@ -119,16 +119,16 @@ defmodule Forum.Muster do
   end
 
   @doc """
-  Returns the designated node for `group` in `scope`.
+  Returns the router node for `group` in `scope`.
 
   * `{:ok, node}` — cluster view is stable; route to `node`.
   * `{:rebalancing, [node]}` — the local Scope is settling a membership
-    change. The designated mapping is in flux; callers using their own
+    change. The router mapping is in flux; callers using their own
     transport should fan out to every node in the list rather than
-    targeting a single designated.
+    targeting a single router.
   """
-  @spec designated(atom, group) :: {:ok, node} | {:rebalancing, [node]}
-  def designated(scope, group) when is_atom(scope) do
+  @spec router(atom, group) :: {:ok, node} | {:rebalancing, [node]}
+  def router(scope, group) when is_atom(scope) do
     case :persistent_term.get({Forum.Muster, scope, :status}) do
       :stable ->
         # ExHashRing.Ring.find_node already returns {:ok, node}.
